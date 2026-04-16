@@ -1,0 +1,171 @@
+import React from 'react';
+import { Button } from '../ui/Button';
+import type { StudentQuestionDescriptor } from '@services/examAdapterService';
+import type { StudentAnswer } from './providers/StudentRuntimeProvider';
+
+interface StudentFooterProps {
+  questions: StudentQuestionDescriptor[];
+  currentQuestionId: string | null;
+  onNavigate: (id: string) => void;
+  answers: Record<string, StudentAnswer | undefined>;
+  flags?: Record<string, boolean>;
+  onToggleFlag?: (id: string) => void;
+  onSubmit: () => void;
+}
+
+export function StudentFooter({
+  questions,
+  currentQuestionId,
+  onNavigate,
+  answers,
+  flags = {},
+  onSubmit,
+}: StudentFooterProps) {
+  const groupedQuestions = questions.reduce<Record<string, StudentQuestionDescriptor[]>>(
+    (groups, question) => {
+      const existingGroup = groups[question.groupId];
+      if (existingGroup) {
+        existingGroup.push(question);
+      } else {
+        groups[question.groupId] = [question];
+      }
+      return groups;
+    },
+    {},
+  );
+
+  const passageGroups = Object.entries(groupedQuestions).map(([groupId, groupQuestions], index) => ({
+    groupId,
+    groupQuestions,
+    index,
+  }));
+
+  const totalQuestions = questions.reduce(
+    (count, question) => count + (question.isMulti ? question.correctCount : 1),
+    0,
+  );
+  const answeredCount = questions.reduce((count, question) => {
+    const answer = answers[question.id];
+
+    if (question.isMulti) {
+      return count + (Array.isArray(answer) ? answer.length : 0);
+    }
+
+    return count + (answer !== undefined && answer !== '' ? 1 : 0);
+  }, 0);
+
+  return (
+    <footer
+      className="border-t border-gray-200 bg-white flex flex-col flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.03)] max-h-32 md:max-h-28 lg:max-h-24"
+      role="contentinfo"
+      aria-label="Question navigation and progress"
+    >
+      <div className="flex items-center justify-between px-2 md:px-3 lg:px-4 py-1.5 md:py-2">
+        <div className="flex items-center gap-2 md:gap-3 flex-1 overflow-x-auto">
+          <div className="flex items-center gap-1 md:gap-1.5 px-1.5 md:px-2 py-0.5 bg-gray-50 rounded-sm flex-shrink-0">
+            <span className="text-[9px] md:text-[10px] lg:text-[11px] font-black text-gray-900">
+              {answeredCount}/{totalQuestions}
+            </span>
+          </div>
+          {answeredCount === totalQuestions ? (
+            <Button
+              variant="primary"
+              size="sm"
+              className="min-w-[60px] md:min-w-[80px] shadow-md flex-shrink-0"
+              onClick={onSubmit}
+            >
+              Finish
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 md:gap-3 px-2 md:px-3 lg:px-4 pb-1.5 md:pb-2 overflow-x-auto">
+        {passageGroups.map(({ groupId, groupQuestions, index }) => {
+          const isActiveGroup = groupQuestions.some(
+            (question) => question.id === currentQuestionId,
+          );
+
+          return (
+            <div
+              key={groupId}
+              className="flex items-center gap-1 md:gap-1.5 lg:gap-2 whitespace-nowrap flex-shrink-0"
+            >
+              {isActiveGroup ? (
+                <div className="flex items-center gap-0.5 md:gap-1">
+                  {groupQuestions.map((question) => {
+                    const globalIndex =
+                      questions.findIndex((candidate) => candidate.id === question.id) + 1;
+                    const isCurrent = question.id === currentQuestionId;
+                    const answer = answers[question.id];
+                    const isAnswered = question.isMulti
+                      ? Array.isArray(answer) && answer.length > 0
+                      : answer !== undefined && answer !== '';
+                    const isFlagged = flags[question.id];
+
+                    return (
+                      <button
+                        key={question.id}
+                        onClick={() => onNavigate(question.id)}
+                        className={`relative text-[8px] md:text-[9px] lg:text-[10px] flex items-center justify-center min-w-[20px] md:min-w-[24px] lg:min-w-[28px] h-5 md:h-6 lg:h-7 px-0.5 md:px-1 rounded-sm font-bold border ${
+                          isCurrent
+                            ? 'bg-blue-800 border-blue-800 text-white'
+                            : isFlagged
+                              ? 'bg-amber-100 border-amber-700 text-amber-900'
+                              : isAnswered
+                                ? 'bg-blue-200 border-blue-500 text-blue-800'
+                                : 'bg-white border-gray-100 text-gray-700'
+                        }`}
+                      >
+                        {question.isMulti
+                          ? `${globalIndex}-${globalIndex + question.correctCount - 1}`
+                          : globalIndex}
+                        {isFlagged && !isCurrent ? (
+                          <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-amber-700 rounded-full border border-white"></div>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 md:gap-1.5">
+                  <div className="w-8 md:w-10 lg:w-12 h-1 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
+                    <div
+                      className="h-full bg-blue-800"
+                      style={{
+                        width: `${
+                          (groupQuestions.filter((question) => {
+                            const answer = answers[question.id];
+                            return question.isMulti
+                              ? Array.isArray(answer) && answer.length > 0
+                              : answer !== undefined && answer !== '';
+                          }).length /
+                            groupQuestions.length) *
+                          100
+                        }%`,
+                      }}
+                    ></div>
+                  </div>
+                  <span className="text-[7px] md:text-[8px] lg:text-[9px] font-bold text-gray-500">
+                    {
+                      groupQuestions.filter((question) => {
+                        const answer = answers[question.id];
+                        return question.isMulti
+                          ? Array.isArray(answer) && answer.length > 0
+                          : answer !== undefined && answer !== '';
+                      }).length
+                    }
+                    /{groupQuestions.length}
+                  </span>
+                </div>
+              )}
+              {index < passageGroups.length - 1 ? (
+                <div className="w-px h-3 md:h-4 lg:h-5 bg-gray-200 mx-0.5"></div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </footer>
+  );
+}

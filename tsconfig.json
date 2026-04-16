@@ -1,0 +1,80 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "target": "ES2022",
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "module": "ESNext",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": ["vite/client"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "@admin/*": [
+        "./src/features/admin/*"
+      ],
+      "@builder/*": [
+        "./src/features/builder/*"
+      ],
+      "@proctor/*": [
+        "./src/features/proctor/*"
+      ],
+      "@student/*": [
+        "./src/features/student/*"
+      ],
+      "@shared/*": [
+        "./src/shared/*"
+      ],
+      "@app/*": [
+        "./src/app/*"
+      ],
+      "@services/*": [
+        "./src/services/*"
+      ],
+      "@components/*": [
+        "./src/components/*"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "skipDefaultLibCheck": true,
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo"
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/stories",
+    "e2e",
+    "**/__tests__",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
+}

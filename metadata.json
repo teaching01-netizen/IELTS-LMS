@@ -1,0 +1,9 @@
+{
+  "name": "Remix: IELTS Proctoring System",
+  "description": "A comprehensive online examination platform for IELTS with real-time proctoring, violation detection, and administrative oversight.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": []
+}

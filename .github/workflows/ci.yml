@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  quality-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint --max-warnings=0
+
+      - name: Format Check
+        run: npx prettier --check "src/**/*.{ts,tsx}" --config .prettierrc
+
+      - name: Test with Coverage
+        run: npm run test:coverage
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/coverage-final.json
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: Check Coverage Threshold
+        run: |
+          COVERAGE=$(cat coverage/coverage-summary.json | jq -r '.total.lines.pct')
+          THRESHOLD=75
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "Coverage $COVERAGE% is below threshold $THRESHOLD%"
+            exit 1
+          fi
+          echo "Coverage $COVERAGE% meets threshold $THRESHOLD%"
+
+      - name: Build
+        run: npm run build
+
+      - name: Analyze Bundle Size
+        run: |
+          BUNDLE_SIZE=$(du -sh dist | cut -f1)
+          echo "Bundle size: $BUNDLE_SIZE"
+          # Alert if bundle exceeds 500KB
+          BUNDLE_SIZE_BYTES=$(du -b dist | cut -f1)
+          if [ $BUNDLE_SIZE_BYTES -gt 524288 ]; then
+            echo "Warning: Bundle size exceeds 500KB"
+            exit 1
+          fi
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps
+
+      - name: Build
+        run: npm run build
+
+      - name: Run E2E Tests
+        run: npx playwright test
+
+      - name: Upload E2E Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+  performance-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Performance Tests
+        run: npm run test:performance || echo "Performance tests not configured yet"
+
+      - name: Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          uploadArtifacts: true
+          temporaryPublicStorage: true

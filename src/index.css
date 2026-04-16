@@ -1,0 +1,212 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Typography Scale - Consistent visual hierarchy */
+  --font-size-xs: 0.75rem;   /* 12px - Captions, labels */
+  --font-size-sm: 0.875rem;  /* 14px - Body text, secondary */
+  --font-size-base: 1rem;    /* 16px - Default body */
+  --font-size-lg: 1.125rem;  /* 18px - Subheadings */
+  --font-size-xl: 1.25rem;   /* 20px - Headings */
+  --font-size-2xl: 1.5rem;   /* 24px - Section titles */
+  --font-size-3xl: 1.875rem; /* 30px - Page titles */
+  
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  --letter-spacing-tight: -0.025em;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.025em;
+
+  /* Spacing Tokens - Consistent spacing scale */
+  --spacing-1: 0.25rem;  /* 4px */
+  --spacing-2: 0.5rem;   /* 8px */
+  --spacing-3: 0.75rem;  /* 12px */
+  --spacing-4: 1rem;     /* 16px */
+  --spacing-5: 1.25rem;  /* 20px */
+  --spacing-6: 1.5rem;   /* 24px */
+  --spacing-8: 2rem;     /* 32px */
+  --spacing-10: 2.5rem;  /* 40px */
+  --spacing-12: 3rem;    /* 48px */
+
+  /* Atlassian Design System Color Palette */
+  /* Blue */
+  --color-blue-900: #0747A6; /* B500 */
+  --color-blue-800: #0052CC; /* B400 */
+  --color-blue-700: #0065FF; /* B300 */
+  --color-blue-600: #2684FF; /* B200 */
+  --color-blue-500: #4C9AFF; /* B100 */
+  --color-blue-400: #7AB2FF;
+  --color-blue-300: #B3D4FF; /* B75 */
+  --color-blue-200: #DEEBFF; /* B50 */
+  --color-blue-100: #E6EFFC;
+  --color-blue-50: #F0F5FF;
+
+  /* Neutral */
+  --color-gray-900: #172B4D; /* N800 - Text */
+  --color-gray-800: #253858; /* N700 */
+  --color-gray-700: #42526E; /* N600 */
+  --color-gray-600: #5E6C84; /* N500 - Secondary Text */
+  --color-gray-500: #7A869A; /* N400 */
+  --color-gray-400: #97A0AF; /* N300 */
+  --color-gray-300: #A5ADBA; /* N200 */
+  --color-gray-200: #C1C7D0; /* N100 */
+  --color-gray-100: #DFE1E6; /* N40 - Borders */
+  --color-gray-50: #F4F5F7;  /* N20 - Backgrounds */
+
+  /* Success (Green) */
+  --color-green-900: #006644;
+  --color-green-800: #00875A;
+  --color-green-700: #36B37E; /* G400 */
+  --color-green-600: #57D9A3;
+  --color-green-500: #79F2C0;
+  --color-green-100: #E3FCEF;
+
+  /* Danger (Red) */
+  --color-red-900: #BF2600;
+  --color-red-800: #DE350B;
+  --color-red-700: #FF5630; /* R400 */
+  --color-red-600: #FF7452;
+  --color-red-500: #FF8F73;
+  --color-red-100: #FFEBE6;
+
+  /* Warning (Yellow) */
+  --color-amber-900: #FF8B00;
+  --color-amber-800: #FF991F;
+  --color-amber-700: #FFAB00; /* Y400 */
+  --color-amber-600: #FFC400;
+  --color-amber-500: #FFE380;
+  --color-amber-100: #FFFAE6;
+
+  /* Semantic Aliases */
+  --color-primary: var(--color-blue-800);
+  --color-success: var(--color-green-800);
+  --color-warning: var(--color-amber-800);
+  --color-danger: var(--color-red-800);
+  --color-info: var(--color-blue-700);
+  
+  /* Hierarchy Colors - Visual hierarchy through color */
+  --color-hierarchy-primary: var(--color-blue-800);      /* Primary actions, main headings */
+  --color-hierarchy-secondary: var(--color-gray-700);     /* Secondary text, labels */
+  --color-hierarchy-tertiary: var(--color-gray-500);     /* Captions, hints */
+  --color-hierarchy-disabled: var(--color-gray-300);      /* Disabled states */
+  --color-hierarchy-border: var(--color-gray-200);       /* Borders, dividers */
+  --color-hierarchy-background: var(--color-gray-50);    /* Section backgrounds */
+
+  /* Atlassian Styling */
+  --radius-sm: 3px;
+  --radius-md: 3px;
+  --radius-lg: 3px;
+  --radius-xl: 3px;
+}
+
+@layer base {
+  body {
+    @apply font-sans bg-white text-gray-900 antialiased;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-blue-800 text-white hover:bg-blue-700 transition-colors px-4 py-2 rounded-sm font-medium;
+  }
+  
+  .card-base {
+    @apply bg-white border border-gray-100 rounded-sm shadow-sm overflow-hidden;
+  }
+
+  @keyframes pulse-subtle {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(0, 82, 204, 0);
+    }
+    50% {
+      box-shadow: 0 0 0 4px rgba(0, 82, 204, 0.1);
+    }
+  }
+
+  .animate-pulse-subtle {
+    animation: pulse-subtle 2s ease-in-out infinite;
+  }
+
+  /* Accessibility: Focus-visible styles */
+  @layer base {
+    *:focus-visible {
+      outline: 2px solid var(--color-blue-600);
+      outline-offset: 2px;
+    }
+
+    *:focus:not(:focus-visible) {
+      outline: none;
+    }
+  }
+
+  /* Accessibility: Skip link for keyboard users */
+  .skip-link {
+    @apply absolute -top-full left-0 bg-blue-800 text-white px-4 py-2 z-[9999] transition-all;
+  }
+
+  .skip-link:focus {
+    @apply top-0;
+  }
+
+  /* Accessibility: Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* Accessibility: High contrast mode support */
+  @media (prefers-contrast: more) {
+    .high-contrast {
+      --color-gray-900: #000000;
+      --color-gray-50: #FFFFFF;
+      --color-blue-800: #0000FF;
+      --color-blue-700: #0000FF;
+    }
+  }
+
+  /* Accessibility: no-scrollbar with justification */
+  /* Used in scrollable containers where scrollbars are visually distracting
+     but keyboard navigation and touch scrolling remain fully functional.
+     Scroll functionality is preserved, only the scrollbar visual is hidden. */
+  .no-scrollbar {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+  }
+
+  /* Accessibility: Live region announcements */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Accessibility: Focus trap for modals */
+  .focus-trap-boundary {
+    outline: none;
+  }
+}
