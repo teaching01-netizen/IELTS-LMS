@@ -19,10 +19,18 @@ The backend must preserve the domain concepts already present in [src/types/doma
 
 - Replace localStorage-backed repositories with backend APIs.
 - Keep published exam versions immutable.
-- Support 1000+ concurrent students and 10-50 proctors.
+- Support 200-300 concurrent active users overall, including 10-50 proctors during live sessions.
 - Support real-time proctoring and student session updates over WebSockets.
 - Keep builder, delivery, proctoring, grading, and scheduling logic in one deployable backend.
 - Use transactional writes and optimistic concurrency for state changes.
+
+## Capacity Constraints
+
+- Primary PostgreSQL storage budget: 1 GB for operational data.
+- The 1 GB budget excludes backups and local development data, but includes the live application tables.
+- The data model should favor compact snapshots, summary counters, and bounded retention over unbounded raw history.
+- Heartbeat events, mutation logs, and outbox rows should be pruned, compacted, or partitioned according to retention policy after they are no longer operationally needed.
+- Large binary artifacts should not be stored in the operational database.
 
 ## Non-Goals
 
@@ -1008,10 +1016,11 @@ Rules:
 
 ### Load Tests
 
-- 1000+ concurrent student heartbeats
+- 200-300 concurrent active users across student, proctor, grading, and admin flows
 - Burst answer submission traffic
 - Live violation alert fan-out
 - Schedule start and runtime update throughput
+- PostgreSQL footprint validation under the 1 GB storage budget
 
 ## Performance Targets
 
@@ -1022,6 +1031,7 @@ Rules:
 - Schedule fetch: p95 under 50 ms.
 - Grading draft save: p95 under 200 ms.
 - WebSocket broadcast: p95 under 200 ms to connected clients on the same region.
+- PostgreSQL operational footprint: stay within the 1 GB storage budget under normal retention settings.
 
 ## Rollout Plan
 
