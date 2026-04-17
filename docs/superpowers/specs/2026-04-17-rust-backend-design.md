@@ -2,7 +2,7 @@
 
 Status: Draft
 
-This spec defines a lean Rust backend for the current IELTS proctoring frontend. It keeps the domain model already present in the repo and replaces local persistence with a modular monolith built around PostgreSQL, Redis, and WebSockets.
+This spec defines a lean Rust backend for the current IELTS proctoring frontend. It keeps the domain model already present in the repo and replaces local persistence with a modular monolith built around PostgreSQL and WebSockets.
 
 ## Scope
 
@@ -39,7 +39,6 @@ The backend must preserve the domain concepts already present in [src/types/doma
 flowchart LR
   UI[Frontend routes] --> API[Axum API]
   API --> DB[(PostgreSQL)]
-  API --> Redis[(Redis)]
   API --> WS[WebSocket hub]
   API --> OUTBOX[(outbox table)]
   WORKER[Background worker] --> OUTBOX
@@ -54,7 +53,7 @@ flowchart LR
 - `sqlx` is the only database client in the first version.
 - `tokio` is the async runtime.
 - `moka` is the per-instance hot cache for version snapshots and validation results.
-- Redis is the shared cache and ephemeral state store for session presence, idempotency lookups, and fan-out coordination.
+- PostgreSQL is the shared source of truth for idempotency, presence, outbox coordination, and other durable shared state.
 - A background worker drains the outbox table and publishes events to the WebSocket hub.
 
 ### Module Boundaries
@@ -903,7 +902,7 @@ Rules:
 - Use `SELECT ... FOR UPDATE` only when pointer updates must be serialized, such as publish, schedule start, and final submission.
 - Keep version rows immutable after creation.
 - Never update published version snapshots in place.
-- Treat Redis as ephemeral state only.
+- Use PostgreSQL tables and row locks for shared state and coordination.
 - Treat the database as the source of truth for every durable state change.
 
 ## Caching
@@ -916,13 +915,15 @@ Rules:
   - schedule read models
   - grading queue summaries
 
-### L2 Cache
+### Postgres Coordination
 
-- Redis holds:
+- PostgreSQL tables hold shared state:
   - active proctor presence
-  - session connection metadata
-  - idempotency metadata when appropriate
-  - fan-out coordination across API nodes
+  - idempotency keys and cached responses
+  - outbox rows for event fan-out
+  - runtime and attempt state that must be shared across nodes
+- Background workers claim outbox rows with `FOR UPDATE SKIP LOCKED`.
+- Optional `LISTEN/NOTIFY` can be used as a wake-up signal, but not as the source of truth.
 
 ### Invalidation Rules
 
@@ -963,7 +964,7 @@ Rules:
 - Answer submission must be idempotent.
 - Publish must be atomic.
 - Proctor alert delivery may be retried, but the violation event itself must not be lost.
-- If Redis is unavailable, durable DB writes still succeed; live fan-out can degrade to polling or delayed delivery.
+- If the WebSocket worker is unavailable, durable DB writes still succeed; live fan-out can degrade to polling or delayed delivery.
 
 ## Observability
 
