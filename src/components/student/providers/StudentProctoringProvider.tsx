@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import { saveStudentAuditEvent } from '@services/studentAuditService';
 import { ExamConfig, ViolationSeverity } from '../../../types';
+import { useStudentAttempt } from './StudentAttemptProvider';
 import { useStudentRuntime } from './StudentRuntimeProvider';
 
 interface ProctoringContextValue {
@@ -36,6 +37,7 @@ export function ProctoringProvider({
   scheduleId,
 }: ProctoringProviderProps) {
   const { state: runtimeState, actions: runtimeActions } = useStudentRuntime();
+  const { state: attemptState } = useStudentAttempt();
   const cooldownByTypeRef = useRef<Record<string, number>>({});
   const fullscreenReentryAttempts = useRef(0);
   const violationCooldownMs = 5_000;
@@ -54,11 +56,17 @@ export function ProctoringProvider({
 
     cooldownByTypeRef.current[type] = now;
     runtimeActions.addViolation(type, severity, message);
-    void saveStudentAuditEvent(scheduleId, type, {
-      severity,
-      message,
-    });
-  }, [runtimeActions, scheduleId]);
+    void saveStudentAuditEvent(
+      scheduleId,
+      'VIOLATION_DETECTED',
+      {
+        severity,
+        message,
+        violationType: type,
+      },
+      attemptState.attemptId ?? undefined,
+    );
+  }, [attemptState.attemptId, runtimeActions, scheduleId]);
 
   const requestFullscreen = useCallback(async (): Promise<boolean> => {
     try {

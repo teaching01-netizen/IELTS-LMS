@@ -2,8 +2,10 @@ import React from 'react';
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProctoringProvider, useProctoring } from '../StudentProctoringProvider';
+import { StudentAttemptProvider } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
 import type { ExamConfig, ExamState } from '../../../types';
+import type { StudentAttempt } from '../../../../types/studentAttempt';
 
 const mockConfig: ExamConfig = {
   general: {
@@ -126,9 +128,61 @@ const mockExamState: ExamState = {
 };
 
 function renderHarness(config: ExamConfig = mockConfig) {
+  const attemptSnapshot: StudentAttempt = {
+    id: 'attempt-1',
+    scheduleId: 'sched-1',
+    studentKey: 'student-sched-1-alice',
+    examId: 'exam-1',
+    examTitle: 'Test Exam',
+    candidateId: 'alice',
+    candidateName: 'Alice Roe',
+    candidateEmail: 'alice@example.com',
+    phase: 'exam',
+    currentModule: 'listening',
+    currentQuestionId: null,
+    answers: {},
+    writingAnswers: {},
+    flags: {},
+    violations: [],
+    proctorStatus: 'active',
+    proctorNote: null,
+    proctorUpdatedAt: null,
+    proctorUpdatedBy: null,
+    lastWarningId: null,
+    lastAcknowledgedWarningId: null,
+    integrity: {
+      preCheck: null,
+      deviceFingerprintHash: null,
+      lastDisconnectAt: null,
+      lastReconnectAt: null,
+      lastHeartbeatAt: null,
+      lastHeartbeatStatus: 'idle',
+    },
+    recovery: {
+      lastRecoveredAt: null,
+      lastLocalMutationAt: null,
+      lastPersistedAt: null,
+      pendingMutationCount: 0,
+      syncState: 'saved',
+    },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
   const wrapper = ({ children }: { children: React.ReactNode }) => (
-    <StudentRuntimeProvider state={mockExamState} onExit={vi.fn()}>
-      <ProctoringProvider config={config}>{children}</ProctoringProvider>
+    <StudentRuntimeProvider
+      state={mockExamState}
+      onExit={vi.fn()}
+      attemptSnapshot={attemptSnapshot}
+    >
+      <StudentAttemptProvider
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+      >
+        <ProctoringProvider config={config} scheduleId={attemptSnapshot.scheduleId}>
+          {children}
+        </ProctoringProvider>
+      </StudentAttemptProvider>
     </StudentRuntimeProvider>
   );
 

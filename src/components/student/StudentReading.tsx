@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ExamState, QuestionAnswer } from '../../types';
 import { QuestionRenderer } from './QuestionRenderer';
 import { ArrowLeft, ArrowRight, ArrowLeftRight, Flag } from 'lucide-react';
-import { flattenReadingQuestions, getBlockQuestionCount } from '../../utils/examUtils';
+import { getBlockQuestionCount } from '../../utils/examUtils';
+import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -17,6 +18,28 @@ interface StudentReadingProps {
 export function StudentReading({ state, answers, onAnswerChange, currentQuestionId, onNavigate, flags = {}, onToggleFlag }: StudentReadingProps) {
   const [leftWidth, setLeftWidth] = useState(50);
   const questionContainerRef = useRef<HTMLDivElement>(null);
+  const allQuestions = useMemo(() => getStudentQuestionsForModule(state, 'reading'), [state]);
+  const currentQ = allQuestions.find((question) => question.id === currentQuestionId) || allQuestions[0];
+  const activePassageId = currentQ?.groupId || state.reading.passages[0]?.id;
+  const activePassage =
+    state.reading.passages.find((passage) => passage.id === activePassageId) || state.reading.passages[0];
+  const passageHasHtml = useMemo(
+    () => /<\/?[a-z][\s\S]*>/i.test(activePassage?.content ?? ''),
+    [activePassage?.content],
+  );
+  const currentIndex = allQuestions.findIndex((question) => question.id === currentQuestionId);
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex >= 0 && currentIndex < allQuestions.length - 1;
+  const previousQuestion = hasPrev ? allQuestions[currentIndex - 1] : undefined;
+  const nextQuestion = hasNext ? allQuestions[currentIndex + 1] : undefined;
+  const splitPaneStyle = useMemo(
+    () =>
+      ({
+        ['--reading-pane-width' as string]: `${leftWidth}%`,
+        ['--question-pane-width' as string]: `calc(${100 - leftWidth}% - 16px)`,
+      }) as React.CSSProperties,
+    [leftWidth],
+  );
   
   // Auto-scroll to current question when it changes
   useEffect(() => {
@@ -49,33 +72,9 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
     };
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('touchmove', handleMouseMove);
-    document.addEventListener('touchend', handleMouseUp);
-  };
-
-  const allQuestions = flattenReadingQuestions(state.reading.passages);
-  const currentQ = allQuestions.find(q => 
-    q.block.type === 'MULTI_MCQ' ? q.block.id === currentQuestionId : q.question?.id === currentQuestionId
-  ) || allQuestions[0];
-  const activePassageId = currentQ?.passageId || state.reading.passages[0]?.id;
-  
-  const activePassage = state.reading.passages.find(p => p.id === activePassageId) || state.reading.passages[0];
-  const passageHasHtml = useMemo(() => /<\/?[a-z][\s\S]*>/i.test(activePassage?.content ?? ''), [activePassage?.content]);
-
-  const currentIndex = allQuestions.findIndex(q => 
-    q.block.type === 'MULTI_MCQ' ? q.block.id === currentQuestionId : q.question?.id === currentQuestionId
-  );
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < allQuestions.length - 1;
-  const previousQuestion = hasPrev ? allQuestions[currentIndex - 1] : undefined;
-  const nextQuestion = hasNext ? allQuestions[currentIndex + 1] : undefined;
-
-  const getQuestionId = (item: (typeof allQuestions)[number] | undefined): string => {
-    if (!item) {
-      return '';
-    }
-    return item.block.type === 'MULTI_MCQ' ? item.block.id : (item.question?.id || '');
-  };
+      document.addEventListener('touchmove', handleMouseMove);
+      document.addEventListener('touchend', handleMouseUp);
+    };
 
   if (!activePassage) {
     return null;
@@ -83,8 +82,8 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
 
   return (
     <div className="flex flex-col h-full w-full bg-white">
-      <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative border-t border-gray-300">
-        <div style={{ width: `${leftWidth}%` }} className="h-full overflow-y-auto p-4 md:p-6 lg:p-8 pr-4 md:pr-6 lg:pr-12 font-sans text-sm md:text-base leading-relaxed text-gray-900 min-w-[260px] md:min-w-[280px] lg:min-w-[300px]">
+      <div className="relative flex flex-1 flex-col overflow-hidden border-t border-gray-300 md:flex-row" style={splitPaneStyle}>
+        <div className="h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12">
           <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePassage.title}</h2>
           <div className="leading-relaxed text-gray-900 space-y-4 [&_h1]:text-2xl [&_h1]:font-black [&_h2]:text-xl [&_h2]:font-bold [&_h3]:text-lg [&_h3]:font-bold [&_img]:max-w-full [&_img]:rounded-2xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6">
             {passageHasHtml ? (
@@ -94,7 +93,7 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
             )}
             {(activePassage.images ?? []).map((image) => (
               <div key={image.id} className="relative rounded-2xl overflow-hidden border border-gray-200 bg-gray-50">
-                <img src={image.src} alt={image.alt} className="w-full object-contain" />
+                <img src={image.src} alt={image.alt} className="w-full object-contain" loading="lazy" />
                 {image.annotations.map((annotation) => (
                   <span
                     key={annotation.id}
@@ -122,12 +121,6 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                 ))}
               </div>
             ))}
-            {/* Line highlighting placeholder - would need metadata mapping questions to passage lines */}
-            {currentQuestionId && (
-              <div className="mt-4 p-2 bg-blue-50 rounded text-xs text-blue-600">
-                Line highlighting for question {currentQuestionId} - requires question-to-line metadata
-              </div>
-            )}
           </div>
         </div>
 
@@ -141,9 +134,11 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
           </div>
         </div>
 
-        <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
+        <div className="relative flex h-full w-full min-w-0 flex-col md:min-w-[320px] lg:w-[var(--question-pane-width)]">
           <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10" ref={questionContainerRef}>
             {activePassage.blocks.map((block) => {
+              const blockQuestions = allQuestions.filter((question) => question.blockId === block.id);
+              const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
               let blockStartQ = 1;
               for (const p of state.reading.passages) {
                 for (const b of p.blocks) {
@@ -166,55 +161,78 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                   <div className="space-y-8 md:space-y-10">
                     {('questions' in block) ? (
                       block.questions.map((q, qIdx) => {
-                        const flattened = allQuestions.find(item =>
-                          item.block.id === block.id && item.question?.id === q.id
-                        );
-                        const globalIdx = flattened ? flattened.index + 1 : blockStartQ + qIdx;
-                        const isActive = q.id === currentQuestionId;
+                        const questionEntries = blockQuestions.filter((entry) => entry.question?.id === q.id);
+                        const firstEntry = questionEntries[0];
+                        const globalIdx =
+                          (firstEntry ? getQuestionStartNumber(allQuestions, firstEntry.id) : null) ??
+                          blockStartQ + qIdx;
+                        const isActive = questionEntries.some((entry) => entry.id === currentQuestionId);
+                        const inlineFlags = block.type === 'SENTENCE_COMPLETION' || block.type === 'NOTE_COMPLETION';
+                        const flagId = firstEntry?.id;
+                        const answerKey = firstEntry?.answerKey ?? q.id;
 
                         return (
-                          <div key={q.id} id={`question-${q.id}`} className="relative">
-                            {onToggleFlag && (
+                          <div
+                            key={q.id}
+                            id={!inlineFlags && flagId ? `question-${flagId}` : undefined}
+                            className="relative"
+                          >
+                            {onToggleFlag && flagId && !inlineFlags ? (
                               <button
-                                onClick={(e) => { e.stopPropagation(); onToggleFlag(q.id); }}
+                                onClick={(e) => { e.stopPropagation(); onToggleFlag(flagId); }}
                                 className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
-                                  flags[q.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                                  flags[flagId] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
                                 }`}
-                                title={flags[q.id] ? 'Unflag question' : 'Flag question'}
+                                title={flags[flagId] ? 'Unflag question' : 'Flag question'}
                               >
-                                <Flag size={14} className={flags[q.id] ? 'fill-current' : ''} />
+                                <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
                               </button>
-                            )}
+                            ) : null}
                             <QuestionRenderer
                               question={q}
                               block={block}
                               number={globalIdx}
-                              answer={answers[q.id]}
-                              onChange={(val) => onAnswerChange(q.id, val)}
+                              answer={answers[answerKey]}
+                              onChange={(val) => onAnswerChange(answerKey, val)}
+                              isFlagged={flagId ? Boolean(flags[flagId]) : false}
                               isActive={isActive}
+                              slotIds={questionEntries.map((entry) => entry.id)}
+                              currentQuestionId={currentQuestionId}
+                              flags={flags}
+                              onToggleFlag={onToggleFlag}
                             />
                           </div>
                         );
                       })
                     ) : (
-                      <div key={block.id} id={`question-${block.id}`} className="relative">
-                        {onToggleFlag && (
+                      <div
+                        key={block.id}
+                        id={singleBlockQuestion ? `question-${singleBlockQuestion.id}` : undefined}
+                        className="relative"
+                      >
+                        {onToggleFlag && singleBlockQuestion ? (
                           <button
-                            onClick={(e) => { e.stopPropagation(); onToggleFlag(block.id); }}
+                            onClick={(e) => { e.stopPropagation(); onToggleFlag(singleBlockQuestion.id); }}
                             className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
-                              flags[block.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                              flags[singleBlockQuestion.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
                             }`}
-                            title={flags[block.id] ? 'Unflag question' : 'Flag question'}
+                            title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
                           >
-                            <Flag size={14} className={flags[block.id] ? 'fill-current' : ''} />
+                            <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
                           </button>
-                        )}
+                        ) : null}
                         <QuestionRenderer
                           question={null}
                           block={block}
-                          number={blockStartQ}
-                          answer={answers[block.id]}
-                          onChange={(val) => onAnswerChange(block.id, val)}
+                          number={(singleBlockQuestion ? getQuestionStartNumber(allQuestions, singleBlockQuestion.id) : null) ?? blockStartQ}
+                          answer={answers[singleBlockQuestion?.answerKey ?? block.id]}
+                          onChange={(val) => onAnswerChange(singleBlockQuestion?.answerKey ?? block.id, val)}
+                          isFlagged={singleBlockQuestion ? Boolean(flags[singleBlockQuestion.id]) : false}
+                          isActive={blockQuestions.some((entry) => entry.id === currentQuestionId)}
+                          slotIds={blockQuestions.map((entry) => entry.id)}
+                          currentQuestionId={currentQuestionId}
+                          flags={flags}
+                          onToggleFlag={onToggleFlag}
                         />
                       </div>
                     )}
@@ -226,13 +244,13 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
 
           <div className="absolute bottom-16 md:bottom-20 right-4 md:right-6 flex shadow-md z-20">
             <button 
-              onClick={() => previousQuestion && onNavigate(getQuestionId(previousQuestion))}
+              onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
               className={`w-9 h-9 md:w-10 md:h-10 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
             >
               <ArrowLeft size={16} strokeWidth={3} />
             </button>
             <button 
-              onClick={() => nextQuestion && onNavigate(getQuestionId(nextQuestion))}
+              onClick={() => nextQuestion && onNavigate(nextQuestion.id)}
               className={`w-9 h-9 md:w-10 md:h-10 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
             >
               <ArrowRight size={16} strokeWidth={3} />

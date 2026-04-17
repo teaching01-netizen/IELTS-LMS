@@ -13,8 +13,8 @@ export function BasicInfoTab({ config, onChange }: BasicInfoTabProps) {
       ...config,
       [section]: {
         ...config[section],
-        ...value
-      }
+        ...value,
+      },
     });
   };
 
@@ -28,16 +28,16 @@ export function BasicInfoTab({ config, onChange }: BasicInfoTabProps) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Preset</label>
-              <input 
-                type="text" 
-                value={config.general.preset} 
+              <input
+                type="text"
+                value={config.general.preset}
                 readOnly
                 className="w-full px-3 py-2 bg-gray-100 border border-gray-200 rounded text-sm text-gray-500 cursor-not-allowed"
               />
             </div>
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Standard Type</label>
-              <select 
+              <select
                 value={config.general.type}
                 onChange={(e) => updateConfig('general', { type: e.target.value as 'Academic' | 'General Training' })}
                 className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
@@ -49,8 +49,8 @@ export function BasicInfoTab({ config, onChange }: BasicInfoTabProps) {
           </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Exam Title</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={config.general.title}
               onChange={(e) => updateConfig('general', { title: e.target.value })}
               className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium"
@@ -59,7 +59,7 @@ export function BasicInfoTab({ config, onChange }: BasicInfoTabProps) {
           </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Exam Summary</label>
-            <textarea 
+            <textarea
               value={config.general.summary}
               onChange={(e) => updateConfig('general', { summary: e.target.value })}
               className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
@@ -68,7 +68,7 @@ export function BasicInfoTab({ config, onChange }: BasicInfoTabProps) {
           </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Candidate Instructions</label>
-            <textarea 
+            <textarea
               value={config.general.instructions}
               onChange={(e) => updateConfig('general', { instructions: e.target.value })}
               className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none h-40"

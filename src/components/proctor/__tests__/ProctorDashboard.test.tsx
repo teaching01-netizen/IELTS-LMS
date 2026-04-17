@@ -112,4 +112,125 @@ describe('ProctorDashboard runtime controls', () => {
     fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
     expect(screen.getByText(/running past the scheduled window/i)).toBeTruthy();
   });
+
+  it('opens student detail in a full-page split view with roster rail', () => {
+    render(
+      <ProctorDashboard
+        schedules={[{ ...baseSchedule, status: 'live', startTime: '2026-01-01T00:00:00.000Z' }]}
+        runtimeSnapshots={[liveRuntime]}
+        sessions={[
+          {
+            id: 'student-1',
+            studentId: 'STU-001',
+            name: 'Jane Roe',
+            email: 'jane@example.com',
+            scheduleId: 'sched-1',
+            status: 'active',
+            currentSection: 'reading',
+            timeRemaining: 1200,
+            runtimeStatus: 'live',
+            runtimeCurrentSection: 'reading',
+            runtimeTimeRemainingSeconds: 1200,
+            runtimeWaiting: false,
+            violations: [],
+            warnings: 0,
+            lastActivity: '2026-01-01T00:12:00.000Z',
+            examId: 'exam-1',
+            examName: 'Mock Exam',
+          },
+        ]}
+        alerts={[]}
+        notes={[]}
+        auditLogs={[]}
+        onUpdateSessions={vi.fn()}
+        onUpdateAlerts={vi.fn()}
+        onUpdateNotes={vi.fn()}
+        onStartScheduledSession={vi.fn()}
+        onPauseCohort={vi.fn()}
+        onResumeCohort={vi.fn()}
+        onEndSectionNow={vi.fn()}
+        onExtendCurrentSection={vi.fn()}
+        onCompleteExam={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
+    expect(screen.getByText(/1 students/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /open jane roe session details/i }));
+    expect(screen.getByText(/activity system scoped to cohort a/i)).toBeTruthy();
+    expect(screen.getByText(/cohort roster/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /back to list/i })).toBeTruthy();
+    expect(screen.getAllByText(/jane@example.com/i).length).toBeGreaterThan(0);
+  });
+
+  it('reacts to rail selection changes by opening the matching student activity tab', () => {
+    const baseProps = {
+      schedules: [{ ...baseSchedule, status: 'live' as const, startTime: '2026-01-01T00:00:00.000Z' }],
+      runtimeSnapshots: [liveRuntime],
+      sessions: [
+        {
+          id: 'student-1',
+          studentId: 'STU-001',
+          name: 'Jane Roe',
+          email: 'jane@example.com',
+          scheduleId: 'sched-1',
+          status: 'active' as const,
+          currentSection: 'reading' as const,
+          timeRemaining: 1200,
+          runtimeStatus: 'live' as const,
+          runtimeCurrentSection: 'reading' as const,
+          runtimeTimeRemainingSeconds: 1200,
+          runtimeWaiting: false,
+          violations: [],
+          warnings: 0,
+          lastActivity: '2026-01-01T00:12:00.000Z',
+          examId: 'exam-1',
+          examName: 'Mock Exam',
+        },
+      ],
+      alerts: [],
+      notes: [
+        {
+          id: 'note-1',
+          scheduleId: 'sched-1',
+          author: 'Sarah K.',
+          timestamp: '2026-01-01T00:12:00.000Z',
+          content: 'Jane Roe incident note',
+          category: 'incident' as const,
+          isResolved: false,
+        },
+      ],
+      auditLogs: [
+        {
+          id: 'audit-1',
+          timestamp: '2026-01-01T00:12:00.000Z',
+          actor: 'Proctor',
+          actionType: 'STUDENT_WARN' as const,
+          targetStudentId: 'student-1',
+          sessionId: 'sched-1',
+          payload: {},
+        },
+      ],
+      onUpdateSessions: vi.fn(),
+      onUpdateAlerts: vi.fn(),
+      onUpdateNotes: vi.fn(),
+      onStartScheduledSession: vi.fn(),
+      onPauseCohort: vi.fn(),
+      onResumeCohort: vi.fn(),
+      onEndSectionNow: vi.fn(),
+      onExtendCurrentSection: vi.fn(),
+      onCompleteExam: vi.fn(),
+    };
+
+    const { rerender } = render(<ProctorDashboard {...baseProps} railSelection="dashboard" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
+
+    rerender(<ProctorDashboard {...baseProps} railSelection="notes" />);
+    expect(screen.getByText(/jane roe incident note/i)).toBeTruthy();
+
+    rerender(<ProctorDashboard {...baseProps} railSelection="audit" />);
+    expect(screen.getByText(/student_warn/i)).toBeTruthy();
+  });
 });

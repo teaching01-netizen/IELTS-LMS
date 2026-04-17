@@ -93,9 +93,12 @@ describe('Student Provider Runtime Integration', () => {
     attemptSnapshot = {
       id: 'attempt-1',
       scheduleId: 'sched-1',
-      studentKey: 'student-sched-1',
+      studentKey: 'student-sched-1-alice',
       examId: 'exam-1',
       examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
       phase: 'exam',
       currentModule: 'writing',
       currentQuestionId: 'task-2',
@@ -103,6 +106,12 @@ describe('Student Provider Runtime Integration', () => {
       writingAnswers: { 'task-2': '<p>Essay</p>' },
       flags: { q1: true },
       violations: [],
+      proctorStatus: 'active',
+      proctorNote: null,
+      proctorUpdatedAt: null,
+      proctorUpdatedBy: null,
+      lastWarningId: null,
+      lastAcknowledgedWarningId: null,
       integrity: {
         preCheck: {
           completedAt: '2026-01-01T00:00:00.000Z',

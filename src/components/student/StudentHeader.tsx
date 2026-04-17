@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Wifi, Bell, Menu, Clock, CheckCircle, Loader2, Contrast } from 'lucide-react';
+import { Wifi, Bell, Menu, Clock, CheckCircle, Loader2, Contrast, LayoutGrid } from 'lucide-react';
 
 interface StudentHeaderProps {
   onExit: () => void;
@@ -8,10 +8,20 @@ interface StudentHeaderProps {
   totalSectionTime?: number | undefined;
   autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | null | undefined;
   onOpenAccessibility?: (() => void) | undefined;
+  onOpenNavigator?: (() => void) | undefined;
   isExamActive?: boolean | undefined;
 }
 
-export function StudentHeader({ onExit, timeRemaining, elapsedTime = 0, totalSectionTime = 0, autoSaveStatus, onOpenAccessibility, isExamActive = false }: StudentHeaderProps) {
+export function StudentHeader({
+  onExit,
+  timeRemaining,
+  elapsedTime = 0,
+  totalSectionTime = 0,
+  autoSaveStatus,
+  onOpenAccessibility,
+  onOpenNavigator,
+  isExamActive = false,
+}: StudentHeaderProps) {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   
   const formatTime = (seconds: number) => {
@@ -95,6 +105,16 @@ export function StudentHeader({ onExit, timeRemaining, elapsedTime = 0, totalSec
             aria-label="Open accessibility settings"
           >
             <Contrast size={16} strokeWidth={2} />
+          </button>
+        )}
+        {onOpenNavigator && (
+          <button
+            onClick={onOpenNavigator}
+            className="flex items-center gap-1 md:gap-1.5 px-2 md:px-2.5 py-1 md:py-1.5 rounded-sm bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs"
+            aria-label="Open question navigator"
+          >
+            <LayoutGrid size={16} strokeWidth={2} />
+            <span className="hidden sm:inline">Questions</span>
           </button>
         )}
         {!isExamActive && (

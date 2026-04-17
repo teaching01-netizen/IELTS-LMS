@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAsyncPolling } from '@app/hooks/useAsyncPolling';
 import { examDeliveryService } from '@services/examDeliveryService';
 import { getExamStateFromEntity } from '@services/examAdapterService';
@@ -8,8 +8,36 @@ import type { ExamState } from '../../../types';
 import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 
-function getStudentKey(scheduleId: string) {
-  return `student-${scheduleId}`;
+function getStableCandidateId(scheduleId?: string, studentId?: string) {
+  if (studentId) {
+    return studentId;
+  }
+
+  if (!scheduleId || typeof window === 'undefined') {
+    return `anon-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  const storageKey = `ielts-student-candidate:${scheduleId}`;
+  const storedCandidateId = window.sessionStorage.getItem(storageKey);
+  if (storedCandidateId) {
+    return storedCandidateId;
+  }
+
+  const generatedCandidateId = `anon-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  window.sessionStorage.setItem(storageKey, generatedCandidateId);
+  return generatedCandidateId;
+}
+
+function buildStudentKey(scheduleId: string, candidateId: string) {
+  return `student-${scheduleId}-${candidateId}`;
+}
+
+function createCandidateProfile(candidateId: string) {
+  return {
+    candidateId,
+    candidateName: `Candidate ${candidateId}`,
+    candidateEmail: `${candidateId}@example.com`,
+  };
 }
 
 interface StudentSessionRouteData {
@@ -25,6 +53,7 @@ interface StudentSessionRouteData {
 
 export function useStudentSessionRouteData(
   scheduleId?: string,
+  studentId?: string,
 ): StudentSessionRouteData {
   const [attemptSnapshot, setAttemptSnapshot] = useState<StudentAttempt | null>(null);
   const [schedule, setSchedule] = useState<ExamSchedule | null>(null);
@@ -32,6 +61,11 @@ export function useStudentSessionRouteData(
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<ExamSessionRuntime | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const candidateId = useMemo(() => getStableCandidateId(scheduleId, studentId), [scheduleId, studentId]);
+  const studentKey = useMemo(
+    () => (scheduleId ? buildStudentKey(scheduleId, candidateId) : null),
+    [candidateId, scheduleId],
+  );
 
   const refreshRuntimeSnapshot = useCallback(async () => {
     if (!scheduleId) {
@@ -46,6 +80,17 @@ export function useStudentSessionRouteData(
     }
   }, [scheduleId]);
 
+  const refreshAttemptSnapshot = useCallback(async () => {
+    if (!scheduleId || !studentKey) {
+      return;
+    }
+
+    const nextAttempt = await studentAttemptRepository.getAttemptByScheduleId(scheduleId, studentKey);
+    if (nextAttempt) {
+      setAttemptSnapshot(nextAttempt);
+    }
+  }, [scheduleId, studentKey]);
+
   const loadStudentData = useCallback(async () => {
     if (!scheduleId) {
       setError('Schedule ID not found');
@@ -57,6 +102,10 @@ export function useStudentSessionRouteData(
     setError(null);
 
     try {
+      if (!studentKey) {
+        throw new Error('Student identity not found');
+      }
+
       const schedules = await examRepository.getAllSchedules();
       const scheduleEntity = schedules.find((candidate) => candidate.id === scheduleId);
 
@@ -75,11 +124,7 @@ export function useStudentSessionRouteData(
       const snapshot = await examDeliveryService.getRuntimeSnapshot(scheduleId);
       setRuntimeSnapshot(snapshot);
 
-      const studentKey = getStudentKey(scheduleId);
-      const existingAttempt = await studentAttemptRepository.getAttemptByScheduleId(
-        scheduleId,
-        studentKey,
-      );
+      const existingAttempt = await studentAttemptRepository.getAttemptByScheduleId(scheduleId, studentKey);
 
       if (existingAttempt) {
         setAttemptSnapshot(existingAttempt);
@@ -93,6 +138,7 @@ export function useStudentSessionRouteData(
           studentKey,
           examId: scheduleEntity.examId,
           examTitle: scheduleEntity.examTitle,
+          ...createCandidateProfile(candidateId),
           currentModule: snapshot?.currentSectionKey ?? firstEnabledModule,
         });
         setAttemptSnapshot(createdAttempt);
@@ -102,13 +148,15 @@ export function useStudentSessionRouteData(
     } finally {
       setIsLoading(false);
     }
-  }, [scheduleId]);
+  }, [candidateId, scheduleId, studentKey]);
 
   useEffect(() => {
     void loadStudentData();
   }, [loadStudentData]);
 
-  useAsyncPolling(refreshRuntimeSnapshot, {
+  useAsyncPolling(async () => {
+    await Promise.all([refreshRuntimeSnapshot(), refreshAttemptSnapshot()]);
+  }, {
     enabled: Boolean(scheduleId && state && !error),
     intervalMs: 1_000,
     maxIntervalMs: 4_000,

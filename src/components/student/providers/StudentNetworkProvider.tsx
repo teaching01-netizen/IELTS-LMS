@@ -83,8 +83,8 @@ export function StudentNetworkProvider({
     });
     await saveStudentAuditEvent(scheduleId, 'NETWORK_DISCONNECTED', {
       timestamp,
-    });
-  }, [attemptActions, policy.pauseOnOffline, runtimeActions, scheduleId]);
+    }, attemptState.attemptId ?? undefined);
+  }, [attemptActions, attemptState.attemptId, policy.pauseOnOffline, runtimeActions, scheduleId]);
 
   const verifyDeviceContinuity = useCallback(async () => {
     const attempt = attemptState.attempt;
@@ -110,12 +110,12 @@ export function StudentNetworkProvider({
       await saveStudentAuditEvent(scheduleId, 'DEVICE_CONTINUITY_FAILED', {
         previousHash,
         nextHash: fingerprint.hash,
-      });
+      }, attemptState.attemptId ?? undefined);
       return false;
     }
 
     return true;
-  }, [attemptActions, attemptState.attempt, runtimeActions, scheduleId]);
+  }, [attemptActions, attemptState.attempt, attemptState.attemptId, runtimeActions, scheduleId]);
 
   const handleOnline = useCallback(async () => {
     const timestamp = new Date().toISOString();
@@ -130,7 +130,7 @@ export function StudentNetworkProvider({
     });
     await saveStudentAuditEvent(scheduleId, 'NETWORK_RECONNECTED', {
       timestamp,
-    });
+    }, attemptState.attemptId ?? undefined);
 
     try {
       if (onRefreshRuntime) {
@@ -157,6 +157,7 @@ export function StudentNetworkProvider({
     }
   }, [
     attemptActions,
+    attemptState.attemptId,
     onRefreshRuntime,
     policy.requireDeviceContinuityOnReconnect,
     runtimeActions,
@@ -215,7 +216,7 @@ export function StudentNetworkProvider({
           previousHash,
           nextHash: fingerprint.hash,
           phase: 'initial_load',
-        });
+        }, attemptState.attemptId ?? undefined);
       }
     })();
 
@@ -272,7 +273,7 @@ export function StudentNetworkProvider({
           });
           void saveStudentAuditEvent(scheduleId, 'HEARTBEAT_LOST', {
             reason: 'visibility_timeout',
-          });
+          }, attemptState.attemptId ?? undefined);
         }, getHeartbeatLossTimeoutMs(policy));
         return;
       }
@@ -298,7 +299,7 @@ export function StudentNetworkProvider({
         window.clearTimeout(heartbeatLossTimer);
       }
     };
-  }, [attemptActions, isOnline, policy, runtimeActions, runtimeState.phase, scheduleId]);
+  }, [attemptActions, attemptState.attemptId, isOnline, policy, runtimeActions, runtimeState.phase, scheduleId]);
 
   const value = useMemo<StudentNetworkContextValue>(() => ({
     state: {

@@ -136,6 +136,24 @@ function ExamSettingsDrawerComponent({
 
     return errors;
   }, [config]);
+  const blockingPublishErrors = publishReadiness?.errors.filter((error) => error.severity === 'error') ?? [];
+  const canScheduleRelease = Boolean(onSchedulePublish && exam?.status !== 'published' && exam?.status !== 'archived');
+  const canShowReleaseActions = exam?.status === 'draft' || exam?.status === 'in_review' || exam?.status === 'approved' || exam?.status === 'rejected';
+  const releaseDecisionTitle = exam?.status === 'published'
+    ? 'Manage live release'
+    : publishReadiness?.canPublish
+      ? 'Ready to release'
+      : 'Resolve publish blockers';
+  const releaseDecisionSummary = exam?.status === 'published'
+    ? 'This exam is live. You can unpublish it, keep an audit note, or archive it when it is no longer needed.'
+    : publishReadiness?.canPublish
+      ? 'Everything required for release is in place. Publish now or schedule a release for later.'
+      : `Fix ${blockingPublishErrors.length} blocking issue${blockingPublishErrors.length === 1 ? '' : 's'} before publishing.`;
+  const releasePrimaryLabel = exam?.status === 'published'
+    ? 'Currently Published'
+    : showSchedule && scheduledTime
+      ? `Scheduled for ${new Date(scheduledTime).toLocaleDateString()}`
+      : 'Publish Now';
 
   if (!isOpen) return null;
 
@@ -1351,220 +1369,274 @@ function ExamSettingsDrawerComponent({
 
           {activeTab === 'publish' && (
             <div className="space-y-6">
-              {/* Exam Metadata */}
-              {exam && (
-                <section className="space-y-4">
-                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                    <FileText size={16} className="text-blue-500" /> Exam Metadata
-                  </h3>
-                  <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-500">Status</span>
-                      <span className={`text-sm font-bold capitalize ${
-                        exam.status === 'published' ? 'text-green-600' :
-                        exam.status === 'draft' ? 'text-blue-600' :
-                        exam.status === 'archived' ? 'text-gray-500' :
-                        'text-orange-600'
-                      }`}>{exam.status.replace('_', ' ')}</span>
+              {/* Release Status */}
+              <section className="space-y-4">
+                <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest flex items-center gap-2">
+                  <Upload size={16} className="text-green-500" /> Release Status
+                </h3>
+                <div className={`rounded-xl border p-4 shadow-sm space-y-4 ${
+                  exam?.status === 'published'
+                    ? 'bg-orange-50 border-orange-100'
+                    : publishReadiness?.canPublish
+                      ? 'bg-green-50 border-green-100'
+                      : 'bg-white border-orange-200'
+                }`}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <p className="text-lg font-bold text-gray-900">{releaseDecisionTitle}</p>
+                      <p className="text-sm text-gray-600">{releaseDecisionSummary}</p>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-500">Visibility</span>
-                      <span className="text-sm font-bold text-gray-900 capitalize">{exam.visibility}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-500">Owner</span>
-                      <span className="text-sm font-bold text-gray-900">{exam.owner}</span>
-                    </div>
-                    {exam.publishedAt && (
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-500">Last Published</span>
-                        <span className="text-sm font-bold text-gray-900">{new Date(exam.publishedAt).toLocaleDateString()} at {new Date(exam.publishedAt).toLocaleTimeString()}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-500">Created</span>
-                      <span className="text-sm font-bold text-gray-900">{new Date(exam.createdAt).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                </section>
-              )}
-
-              {/* Permissions Summary */}
-              {exam && (
-                <section className="space-y-4">
-                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                    <Lock size={16} className="text-blue-500" /> Permissions
-                  </h3>
-                  <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {exam.canEdit ? <Unlock size={14} className="text-green-600" /> : <Lock size={14} className="text-gray-400" />}
-                        <span className="text-sm text-gray-700">Can Edit</span>
-                      </div>
-                      <span className={`text-xs font-bold px-2 py-1 rounded ${exam.canEdit ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {exam.canEdit ? 'Yes' : 'No'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {exam.canPublish ? <Unlock size={14} className="text-green-600" /> : <Lock size={14} className="text-gray-400" />}
-                        <span className="text-sm text-gray-700">Can Publish</span>
-                      </div>
-                      <span className={`text-xs font-bold px-2 py-1 rounded ${exam.canPublish ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {exam.canPublish ? 'Yes' : 'No'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {exam.canDelete ? <Unlock size={14} className="text-green-600" /> : <Lock size={14} className="text-gray-400" />}
-                        <span className="text-sm text-gray-700">Can Delete</span>
-                      </div>
-                      <span className={`text-xs font-bold px-2 py-1 rounded ${exam.canDelete ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {exam.canDelete ? 'Yes' : 'No'}
-                      </span>
-                    </div>
-                  </div>
-                </section>
-              )}
-
-              {/* Publish Checklist */}
-              {publishReadiness && (
-                <section className="space-y-4">
-                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                    <CheckCircle2 size={16} className={publishReadiness.canPublish ? "text-green-500" : "text-orange-500"} /> Publish Readiness
-                  </h3>
-                  <div className={`bg-white border rounded-xl p-4 shadow-sm ${
-                    publishReadiness.canPublish ? 'border-green-200' : 'border-orange-200'
-                  }`}>
-                    {/* Status Banner */}
-                    <div className={`flex items-center gap-3 p-3 rounded-lg mb-4 ${
-                      publishReadiness.canPublish ? 'bg-green-50' : 'bg-orange-50'
+                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-bold ${
+                      exam?.status === 'published'
+                        ? 'bg-orange-100 text-orange-700'
+                        : publishReadiness?.canPublish
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-orange-100 text-orange-700'
                     }`}>
-                      {publishReadiness.canPublish ? (
-                        <CheckCircle2 size={20} className="text-green-600" />
-                      ) : (
-                        <AlertCircle size={20} className="text-orange-600" />
+                      {releasePrimaryLabel}
+                    </span>
+                  </div>
+
+                  {publishReadiness && (
+                    <>
+                      {publishReadiness.errors.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-bold text-red-700 uppercase tracking-wider">What needs attention</p>
+                          {publishReadiness.errors.map((error, idx) => (
+                            <div key={idx} className="flex items-start gap-2 rounded border border-red-100 bg-red-50 p-2">
+                              <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-red-600" />
+                              <div>
+                                <p className="text-xs font-medium text-red-900">{error.message}</p>
+                                <p className="text-[10px] capitalize text-red-600">Field: {error.field}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       )}
-                      <div>
-                        <p className={`text-sm font-bold ${
-                          publishReadiness.canPublish ? 'text-green-900' : 'text-orange-900'
-                        }`}>
-                          {publishReadiness.canPublish ? 'Ready to Publish' : 'Cannot Publish Yet'}
-                        </p>
-                        <p className="text-xs text-gray-600">
-                          {publishReadiness.canPublish 
-                            ? 'All validation checks passed. You can publish this exam.'
-                            : `${publishReadiness.errors.filter(e => e.severity === 'error').length} error(s) must be fixed before publishing.`
-                          }
-                        </p>
-                      </div>
-                    </div>
 
-                    {/* Errors */}
-                    {publishReadiness.errors.length > 0 && (
-                      <div className="space-y-2 mb-4">
-                        <p className="text-xs font-bold text-red-700 uppercase tracking-wider">Errors</p>
-                        {publishReadiness.errors.map((error, idx) => (
-                          <div key={idx} className="flex items-start gap-2 p-2 bg-red-50 rounded border border-red-100">
-                            <AlertCircle size={14} className="text-red-600 mt-0.5 flex-shrink-0" />
-                            <div>
-                              <p className="text-xs font-medium text-red-900">{error.message}</p>
-                              <p className="text-[10px] text-red-600 capitalize">Field: {error.field}</p>
+                      {publishReadiness.warnings.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-bold text-orange-700 uppercase tracking-wider">Review before release</p>
+                          {publishReadiness.warnings.map((warning, idx) => (
+                            <div key={idx} className="flex items-start gap-2 rounded border border-orange-100 bg-orange-50 p-2">
+                              <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-orange-600" />
+                              <div>
+                                <p className="text-xs font-medium text-orange-900">{warning.message}</p>
+                                <p className="text-[10px] capitalize text-orange-600">Field: {warning.field}</p>
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Warnings */}
-                    {publishReadiness.warnings.length > 0 && (
-                      <div className="space-y-2 mb-4">
-                        <p className="text-xs font-bold text-orange-700 uppercase tracking-wider">Warnings</p>
-                        {publishReadiness.warnings.map((warning, idx) => (
-                          <div key={idx} className="flex items-start gap-2 p-2 bg-orange-50 rounded border border-orange-100">
-                            <AlertCircle size={14} className="text-orange-600 mt-0.5 flex-shrink-0" />
-                            <div>
-                              <p className="text-xs font-medium text-orange-900">{warning.message}</p>
-                              <p className="text-[10px] text-orange-600 capitalize">Field: {warning.field}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Question Counts */}
-                    <div className="pt-3 border-t border-gray-100">
-                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Content Summary</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="text-center p-2 bg-gray-50 rounded">
-                          <p className="text-lg font-bold text-gray-900">{publishReadiness.questionCounts.reading}</p>
-                          <p className="text-[10px] text-gray-500 uppercase">Reading</p>
+                          ))}
                         </div>
-                        <div className="text-center p-2 bg-gray-50 rounded">
-                          <p className="text-lg font-bold text-gray-900">{publishReadiness.questionCounts.listening}</p>
-                          <p className="text-[10px] text-gray-500 uppercase">Listening</p>
-                        </div>
-                        <div className="text-center p-2 bg-gray-50 rounded">
-                          <p className="text-lg font-bold text-gray-900">{publishReadiness.questionCounts.total}</p>
-                          <p className="text-[10px] text-gray-500 uppercase">Total</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              )}
+                      )}
 
-              {/* Schedule Controls */}
-              {onSchedulePublish && exam?.status !== 'published' && exam?.status !== 'archived' && (
-                <section className="space-y-4">
-                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                    <Calendar size={16} className="text-blue-500" /> Schedule Publish
-                  </h3>
-                  <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showSchedule}
-                        onChange={(e) => setShowSchedule(e.target.checked)}
-                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm font-medium text-gray-700">Schedule for later</span>
-                    </label>
-                    {showSchedule && (
-                      <div className="mt-4 space-y-3">
+                      <div className={`flex items-center gap-3 rounded-lg p-3 ${
+                        publishReadiness.canPublish ? 'bg-green-100/70' : 'bg-orange-50'
+                      }`}>
+                        {publishReadiness.canPublish ? (
+                          <CheckCircle2 size={20} className="text-green-600" />
+                        ) : (
+                          <AlertCircle size={20} className="text-orange-600" />
+                        )}
                         <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
-                            Scheduled Date & Time
-                          </label>
-                          <input
-                            type="datetime-local"
-                            value={scheduledTime}
-                            onChange={(e) => setScheduledTime(e.target.value)}
-                            min={new Date().toISOString().slice(0, 16)}
-                            className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                          />
+                          <p className={`text-sm font-bold ${
+                            publishReadiness.canPublish ? 'text-green-900' : 'text-orange-900'
+                          }`}>
+                            {publishReadiness.canPublish ? 'Ready to publish' : 'Needs fixes before publish'}
+                          </p>
+                          <p className="text-xs text-gray-600">
+                            {publishReadiness.canPublish
+                              ? 'All required validation checks passed.'
+                              : `${blockingPublishErrors.length} blocking issue${blockingPublishErrors.length === 1 ? '' : 's'} still need attention.`}
+                          </p>
                         </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 border-t border-gray-100 pt-3">
+                        <div className="rounded-lg bg-white/80 p-3 text-center">
+                          <p className="text-lg font-bold text-gray-900">{publishReadiness.questionCounts.reading}</p>
+                          <p className="text-[10px] uppercase tracking-wider text-gray-500">Reading</p>
+                        </div>
+                        <div className="rounded-lg bg-white/80 p-3 text-center">
+                          <p className="text-lg font-bold text-gray-900">{publishReadiness.questionCounts.listening}</p>
+                          <p className="text-[10px] uppercase tracking-wider text-gray-500">Listening</p>
+                        </div>
+                        <div className="rounded-lg bg-white/80 p-3 text-center">
+                          <p className="text-lg font-bold text-gray-900">{publishReadiness.questionCounts.total}</p>
+                          <p className="text-[10px] uppercase tracking-wider text-gray-500">Total</p>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {canShowReleaseActions && onPublish && (
+                    <button
+                      onClick={() => onPublish(publishNotes)}
+                      disabled={publishReadiness ? !publishReadiness.canPublish : false}
+                      className={`w-full px-4 py-3 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+                        publishReadiness?.canPublish
+                          ? 'bg-green-600 text-white hover:bg-green-700'
+                          : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      }`}
+                    >
+                      <Upload size={16} />
+                      Publish Now
+                    </button>
+                  )}
+
+                  {exam?.status === 'published' && onUnpublish && (
+                    <button
+                      onClick={() => {
+                        const reason = prompt('Reason for unpublishing (optional):');
+                        if (reason !== null) {
+                          onUnpublish(reason || undefined);
+                        }
+                      }}
+                      className="w-full px-4 py-3 bg-orange-600 text-white rounded-lg text-sm font-bold hover:bg-orange-700 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Upload size={16} />
+                      Unpublish
+                    </button>
+                  )}
+                </div>
+              </section>
+
+              {/* Schedule Controls & Publish Notes */}
+              {((canScheduleRelease || onPublish || onSchedulePublish)) && (
+                <section className="space-y-4">
+                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest flex items-center gap-2">
+                    <Calendar size={16} className="text-blue-500" /> Schedule & Notes
+                  </h3>
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+                    {canScheduleRelease && (
+                      <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={showSchedule}
+                            onChange={(e) => setShowSchedule(e.target.checked)}
+                            className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm font-medium text-gray-700">Schedule for later</span>
+                        </label>
+                        {showSchedule && (
+                          <div className="mt-4 space-y-3">
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
+                                Scheduled Date & Time
+                              </label>
+                              <input
+                                type="datetime-local"
+                                value={scheduledTime}
+                                onChange={(e) => setScheduledTime(e.target.value)}
+                                min={new Date().toISOString().slice(0, 16)}
+                                className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                              />
+                            </div>
+                            {onSchedulePublish && scheduledTime && (
+                              <button
+                                onClick={() => {
+                                  onSchedulePublish(scheduledTime, publishNotes);
+                                  setShowSchedule(false);
+                                  setScheduledTime('');
+                                }}
+                                disabled={publishReadiness ? !publishReadiness.canPublish : false}
+                                className={`w-full px-4 py-3 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+                                  publishReadiness?.canPublish
+                                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                }`}
+                              >
+                                <Calendar size={16} />
+                                Schedule Release
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {(onPublish || onSchedulePublish) && (
+                      <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                        <textarea
+                          value={publishNotes}
+                          onChange={(e) => setPublishNotes(e.target.value)}
+                          placeholder="Add notes about this publish (e.g., 'Fixed reading passage 2', 'Updated band table')..."
+                          className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                          rows={canScheduleRelease ? 5 : 3}
+                        />
+                        <p className="text-[10px] text-gray-400 mt-2">Optional: Notes will be saved with the published version for audit trail.</p>
                       </div>
                     )}
                   </div>
                 </section>
               )}
 
-              {/* Publish Notes */}
-              {(onPublish || onSchedulePublish) && (
+              {/* Reference Details */}
+              {exam && (
                 <section className="space-y-4">
                   <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                    <FileText size={16} className="text-blue-500" /> Publish Notes
+                    <FileText size={16} className="text-blue-500" /> Reference Details
                   </h3>
-                  <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                    <textarea
-                      value={publishNotes}
-                      onChange={(e) => setPublishNotes(e.target.value)}
-                      placeholder="Add notes about this publish (e.g., 'Fixed reading passage 2', 'Updated band table')..."
-                      className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                      rows={3}
-                    />
-                    <p className="text-[10px] text-gray-400 mt-2">Optional: Notes will be saved with the published version for audit trail</p>
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-3">
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-500">Status</span>
+                        <span className={`text-sm font-bold capitalize ${
+                          exam.status === 'published' ? 'text-green-600' :
+                          exam.status === 'draft' ? 'text-blue-600' :
+                          exam.status === 'archived' ? 'text-gray-500' :
+                          'text-orange-600'
+                        }`}>{exam.status.replace('_', ' ')}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-500">Visibility</span>
+                        <span className="text-sm font-bold text-gray-900 capitalize">{exam.visibility}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-500">Owner</span>
+                        <span className="text-sm font-bold text-gray-900">{exam.owner}</span>
+                      </div>
+                      {exam.publishedAt && (
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-500">Last Published</span>
+                          <span className="text-sm font-bold text-gray-900">{new Date(exam.publishedAt).toLocaleDateString()} at {new Date(exam.publishedAt).toLocaleTimeString()}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-500">Created</span>
+                        <span className="text-sm font-bold text-gray-900">{new Date(exam.createdAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {exam.canEdit ? <Unlock size={14} className="text-green-600" /> : <Lock size={14} className="text-gray-400" />}
+                          <span className="text-sm text-gray-700">Can Edit</span>
+                        </div>
+                        <span className={`text-xs font-bold px-2 py-1 rounded ${exam.canEdit ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                          {exam.canEdit ? 'Yes' : 'No'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {exam.canPublish ? <Unlock size={14} className="text-green-600" /> : <Lock size={14} className="text-gray-400" />}
+                          <span className="text-sm text-gray-700">Can Publish</span>
+                        </div>
+                        <span className={`text-xs font-bold px-2 py-1 rounded ${exam.canPublish ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                          {exam.canPublish ? 'Yes' : 'No'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {exam.canDelete ? <Unlock size={14} className="text-green-600" /> : <Lock size={14} className="text-gray-400" />}
+                          <span className="text-sm text-gray-700">Can Delete</span>
+                        </div>
+                        <span className={`text-xs font-bold px-2 py-1 rounded ${exam.canDelete ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                          {exam.canDelete ? 'Yes' : 'No'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </section>
               )}
@@ -1646,73 +1718,13 @@ function ExamSettingsDrawerComponent({
                 </div>
               </section>
 
-              {/* Release Actions - Publish/Unpublish/Archive */}
+              {/* Maintenance Actions */}
               <section className="space-y-4">
                 <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                  <Upload size={16} className="text-green-500" /> Release Actions
+                  <Clock size={16} className="text-gray-500" /> Maintenance Actions
                 </h3>
-                <div className="bg-green-50 border border-green-100 rounded-xl p-4 space-y-3">
-                  <p className="text-xs text-green-800 mb-3">Control the publication state of this exam. Published versions are immutable.</p>
-                  
-                  {exam?.status === 'draft' || exam?.status === 'in_review' || exam?.status === 'approved' || exam?.status === 'rejected' ? (
-                    <>
-                      {/* Publish Now */}
-                      {onPublish && (
-                        <button
-                          onClick={() => onPublish(publishNotes)}
-                          disabled={publishReadiness ? !publishReadiness.canPublish : false}
-                          className={`w-full px-4 py-3 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                            publishReadiness?.canPublish
-                              ? 'bg-green-600 text-white hover:bg-green-700'
-                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          }`}
-                        >
-                          <Upload size={16} />
-                          Publish Now
-                        </button>
-                      )}
-
-                      {/* Schedule Publish */}
-                      {onSchedulePublish && showSchedule && scheduledTime && (
-                        <button
-                          onClick={() => {
-                            onSchedulePublish(scheduledTime, publishNotes);
-                            setShowSchedule(false);
-                            setScheduledTime('');
-                          }}
-                          disabled={publishReadiness ? !publishReadiness.canPublish : false}
-                          className={`w-full px-4 py-3 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                            publishReadiness?.canPublish
-                              ? 'bg-blue-600 text-white hover:bg-blue-700'
-                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          }`}
-                        >
-                          <Calendar size={16} />
-                          Schedule for {new Date(scheduledTime).toLocaleDateString()}
-                        </button>
-                      )}
-                    </>
-                  ) : exam?.status === 'published' ? (
-                    <>
-                      {/* Unpublish */}
-                      {onUnpublish && (
-                        <button
-                          onClick={() => {
-                            const reason = prompt('Reason for unpublishing (optional):');
-                            if (reason !== null) {
-                              onUnpublish(reason || undefined);
-                            }
-                          }}
-                          className="w-full px-4 py-3 bg-orange-600 text-white rounded-lg text-sm font-bold hover:bg-orange-700 transition-all flex items-center justify-center gap-2"
-                        >
-                          <Upload size={16} />
-                          Unpublish
-                        </button>
-                      )}
-                    </>
-                  ) : null}
-
-                  {/* Archive - available for most statuses except scheduled/live */}
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-3">
+                  <p className="text-xs text-gray-600">Use these lower-frequency actions after the release decision is handled.</p>
                   {onArchive && exam?.status !== 'scheduled' && (
                     <button
                       onClick={() => {

@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useConfigRouteController } from '../hooks/useConfigRouteController';
-import { ExamConfigTabs } from '../components/ExamConfigTabs';
 import { BasicInfoTab } from '../components/BasicInfoTab';
+import { ExamConfigTabs } from '../components/ExamConfigTabs';
 import { ModulesTab } from '../components/ModulesTab';
+import { SecurityTab } from '../components/SecurityTab';
 import { StandardsTab } from '../components/StandardsTab';
 import { TimingTab } from '../components/TimingTab';
-import { SecurityTab } from '../components/SecurityTab';
 import type { ConfigTab } from '../components/ExamConfigTabs';
+import { useConfigRouteController } from '../hooks/useConfigRouteController';
 
 export function ExamConfigRoute() {
   const { examId } = useParams<{ examId: string }>();
@@ -38,20 +38,20 @@ export function ExamConfigRoute() {
     );
   }
 
-  const renderTab = () => {
-    if (!controller.config) return null;
+  const config = controller.config;
 
+  const renderTab = () => {
     switch (activeTab) {
       case 'basic':
-        return <BasicInfoTab config={controller.config} onChange={controller.handleUpdateConfig} />;
+        return <BasicInfoTab config={config} onChange={controller.handleUpdateConfig} />;
       case 'modules':
-        return <ModulesTab config={controller.config} onChange={controller.handleUpdateConfig} />;
+        return <ModulesTab config={config} onChange={controller.handleUpdateConfig} />;
       case 'standards':
-        return <StandardsTab config={controller.config} onChange={controller.handleUpdateConfig} />;
+        return <StandardsTab config={config} onChange={controller.handleUpdateConfig} />;
       case 'timing':
-        return <TimingTab config={controller.config} onChange={controller.handleUpdateConfig} />;
+        return <TimingTab config={config} onChange={controller.handleUpdateConfig} />;
       case 'security':
-        return <SecurityTab config={controller.config} onChange={controller.handleUpdateConfig} />;
+        return <SecurityTab config={config} onChange={controller.handleUpdateConfig} />;
       default:
         return null;
     }
@@ -79,9 +79,7 @@ export function ExamConfigRoute() {
 
         <div className="p-8">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm ring-1 ring-slate-900/5">
-            <div className="p-8">
-              {renderTab()}
-            </div>
+            <div className="p-8">{renderTab()}</div>
           </div>
         </div>
 

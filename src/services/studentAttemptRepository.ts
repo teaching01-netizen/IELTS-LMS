@@ -14,17 +14,72 @@ interface PendingAttemptMutationRecord {
   mutations: StudentAttemptMutation[];
 }
 
+const WARNING_VIOLATION_TYPES = new Set(['PROCTOR_WARNING', 'AUTO_WARNING']);
+
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function deriveCandidateId(attempt: Pick<StudentAttempt, 'candidateId' | 'scheduleId' | 'studentKey' | 'id'>): string {
+  if (attempt.candidateId) {
+    return attempt.candidateId;
+  }
+
+  const prefix = `student-${attempt.scheduleId}-`;
+  if (attempt.studentKey.startsWith(prefix)) {
+    return attempt.studentKey.slice(prefix.length) || attempt.id;
+  }
+
+  return attempt.studentKey.split('-').pop() || attempt.id;
+}
+
+function deriveProctorStatus(attempt: StudentAttempt): StudentAttempt['proctorStatus'] {
+  if (attempt.proctorStatus) {
+    return attempt.proctorStatus;
+  }
+
+  if (attempt.phase === 'post-exam') {
+    return 'terminated';
+  }
+
+  const latestWarningId =
+    attempt.lastWarningId ??
+    [...(attempt.violations ?? [])]
+      .reverse()
+      .find((violation) => WARNING_VIOLATION_TYPES.has(violation.type))?.id ??
+    null;
+
+  if (latestWarningId && latestWarningId !== attempt.lastAcknowledgedWarningId) {
+    return 'warned';
+  }
+
+  return 'active';
+}
+
 function normalizeAttempt(attempt: StudentAttempt): StudentAttempt {
+  const candidateId = deriveCandidateId(attempt);
+  const lastWarningId =
+    attempt.lastWarningId ??
+    [...(attempt.violations ?? [])]
+      .reverse()
+      .find((violation) => WARNING_VIOLATION_TYPES.has(violation.type))?.id ??
+    null;
+
   return {
     ...attempt,
+    candidateId,
+    candidateName: attempt.candidateName ?? `Candidate ${candidateId}`,
+    candidateEmail: attempt.candidateEmail ?? `${candidateId}@example.com`,
     answers: attempt.answers ?? {},
     writingAnswers: attempt.writingAnswers ?? {},
     flags: attempt.flags ?? {},
     violations: attempt.violations ?? [],
+    proctorStatus: deriveProctorStatus(attempt),
+    proctorNote: attempt.proctorNote ?? null,
+    proctorUpdatedAt: attempt.proctorUpdatedAt ?? null,
+    proctorUpdatedBy: attempt.proctorUpdatedBy ?? null,
+    lastWarningId,
+    lastAcknowledgedWarningId: attempt.lastAcknowledgedWarningId ?? null,
     integrity: {
       preCheck: attempt.integrity?.preCheck ?? null,
       deviceFingerprintHash: attempt.integrity?.deviceFingerprintHash ?? null,
@@ -45,6 +100,8 @@ function normalizeAttempt(attempt: StudentAttempt): StudentAttempt {
 
 export interface IStudentAttemptRepository {
   getAttemptByScheduleId(scheduleId: string, studentKey: string): Promise<StudentAttempt | null>;
+  getAllAttempts(): Promise<StudentAttempt[]>;
+  getAttemptsByScheduleId(scheduleId: string): Promise<StudentAttempt[]>;
   saveAttempt(attempt: StudentAttempt): Promise<void>;
   createAttempt(seed: StudentAttemptSeed): Promise<StudentAttempt>;
   savePendingMutations(attemptId: string, mutations: StudentAttemptMutation[]): Promise<void>;
@@ -66,7 +123,33 @@ export class LocalStorageStudentAttemptRepository implements IStudentAttemptRepo
 
   async getAttemptByScheduleId(scheduleId: string, studentKey: string): Promise<StudentAttempt | null> {
     const attempts = this.getItem<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeAttempt);
-    return attempts.find((attempt) => attempt.scheduleId === scheduleId && attempt.studentKey === studentKey) ?? null;
+    const exactMatch =
+      attempts.find((attempt) => attempt.scheduleId === scheduleId && attempt.studentKey === studentKey) ??
+      null;
+
+    if (exactMatch) {
+      return exactMatch;
+    }
+
+    const prefix = `student-${scheduleId}-`;
+    const candidateId = studentKey.startsWith(prefix)
+      ? studentKey.slice(prefix.length)
+      : studentKey.split('-').pop() || studentKey;
+
+    return (
+      attempts.find(
+        (attempt) => attempt.scheduleId === scheduleId && attempt.candidateId === candidateId,
+      ) ?? null
+    );
+  }
+
+  async getAllAttempts(): Promise<StudentAttempt[]> {
+    return this.getItem<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeAttempt);
+  }
+
+  async getAttemptsByScheduleId(scheduleId: string): Promise<StudentAttempt[]> {
+    const attempts = this.getItem<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeAttempt);
+    return attempts.filter((attempt) => attempt.scheduleId === scheduleId);
   }
 
   async saveAttempt(attempt: StudentAttempt): Promise<void> {
@@ -94,6 +177,9 @@ export class LocalStorageStudentAttemptRepository implements IStudentAttemptRepo
       studentKey: seed.studentKey,
       examId: seed.examId,
       examTitle: seed.examTitle,
+      candidateId: seed.candidateId,
+      candidateName: seed.candidateName,
+      candidateEmail: seed.candidateEmail,
       phase: seed.phase ?? 'pre-check',
       currentModule: seed.currentModule ?? 'listening',
       currentQuestionId: seed.currentQuestionId ?? null,
@@ -101,6 +187,12 @@ export class LocalStorageStudentAttemptRepository implements IStudentAttemptRepo
       writingAnswers: {},
       flags: {},
       violations: [],
+      proctorStatus: 'active',
+      proctorNote: null,
+      proctorUpdatedAt: null,
+      proctorUpdatedBy: null,
+      lastWarningId: null,
+      lastAcknowledgedWarningId: null,
       integrity: {
         preCheck: null,
         deviceFingerprintHash: null,

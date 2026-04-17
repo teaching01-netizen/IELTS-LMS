@@ -697,6 +697,7 @@ export type AuditActionType =
   | 'SESSION_END'
   | 'SECTION_START'
   | 'SECTION_END'
+  | 'VIOLATION_DETECTED'
   | 'STUDENT_WARN'
   | 'STUDENT_PAUSE'
   | 'STUDENT_RESUME'

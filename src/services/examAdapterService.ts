@@ -1,5 +1,26 @@
 import { createDefaultConfig, normalizeExamConfig } from '../constants/examDefaults';
-import type { Exam, ExamConfig, ExamState, ModuleType } from '../types';
+import type {
+  ClassificationBlock,
+  ClozeQuestion,
+  DiagramLabelingBlock,
+  Exam,
+  ExamConfig,
+  ExamState,
+  FlowChartBlock,
+  MapQuestion,
+  MatchingBlock,
+  MatchingFeaturesBlock,
+  MatchingQuestion,
+  ModuleType,
+  MultiMCQBlock,
+  NoteCompletionQuestion,
+  QuestionAnswer,
+  QuestionBlock,
+  SentenceCompletionQuestion,
+  ShortAnswerQuestion,
+  SingleMCQBlock,
+  TFNGQuestion,
+} from '../types';
 import type { ExamEntity, ExamStatus } from '../types/domain';
 import type { IExamRepository } from './examRepository';
 import {
@@ -30,6 +51,18 @@ export interface StudentQuestionDescriptor {
   groupLabel: string;
   isMulti: boolean;
   correctCount: number;
+  answerKey: string;
+  answerIndex?: number;
+  block: QuestionBlock;
+  question:
+    | TFNGQuestion
+    | ClozeQuestion
+    | MapQuestion
+    | MatchingQuestion
+    | ShortAnswerQuestion
+    | SentenceCompletionQuestion
+    | NoteCompletionQuestion
+    | null;
 }
 
 export function getEnabledModules(config: ExamConfig): ModuleType[] {
@@ -272,28 +305,7 @@ export function getStudentQuestionsForModule(
 
     state.reading.passages.forEach((passage) => {
       passage.blocks.forEach((block) => {
-        if (!('questions' in block)) {
-          questions.push({
-            id: block.id,
-            blockId: block.id,
-            groupId: passage.id,
-            groupLabel: passage.title,
-            isMulti: block.type === 'MULTI_MCQ',
-            correctCount: block.type === 'MULTI_MCQ' ? block.requiredSelections : 1,
-          });
-          return;
-        }
-
-        block.questions.forEach((question) => {
-          questions.push({
-            id: question.id,
-            blockId: block.id,
-            groupId: passage.id,
-            groupLabel: passage.title,
-            isMulti: false,
-            correctCount: 1,
-          });
-        });
+        questions.push(...buildStudentQuestionDescriptors(block, passage.id, passage.title));
       });
     });
 
@@ -305,28 +317,7 @@ export function getStudentQuestionsForModule(
 
     state.listening.parts.forEach((part) => {
       part.blocks.forEach((block) => {
-        if (!('questions' in block)) {
-          questions.push({
-            id: block.id,
-            blockId: block.id,
-            groupId: part.id,
-            groupLabel: part.title,
-            isMulti: block.type === 'MULTI_MCQ',
-            correctCount: block.type === 'MULTI_MCQ' ? block.requiredSelections : 1,
-          });
-          return;
-        }
-
-        block.questions.forEach((question) => {
-          questions.push({
-            id: question.id,
-            blockId: block.id,
-            groupId: part.id,
-            groupLabel: part.title,
-            isMulti: false,
-            correctCount: 1,
-          });
-        });
+        questions.push(...buildStudentQuestionDescriptors(block, part.id, part.title));
       });
     });
 
@@ -348,13 +339,7 @@ export function countAnsweredQuestions(
   answers: Record<string, unknown>,
 ): number {
   return questions.reduce((count, question) => {
-    const answer = answers[question.id];
-
-    if (question.isMulti) {
-      return count + (Array.isArray(answer) ? answer.length : 0);
-    }
-
-    return count + (answer !== undefined && answer !== '' ? 1 : 0);
+    return count + getAnsweredSlotCount(question, answers);
   }, 0);
 }
 
@@ -363,4 +348,274 @@ export function countQuestionSlots(questions: StudentQuestionDescriptor[]): numb
     (count, question) => count + (question.isMulti ? question.correctCount : 1),
     0,
   );
+}
+
+export function getQuestionStartNumber(
+  questions: StudentQuestionDescriptor[],
+  questionId: string,
+): number | null {
+  let current = 1;
+
+  for (const question of questions) {
+    if (question.id === questionId) {
+      return current;
+    }
+    current += question.isMulti ? question.correctCount : 1;
+  }
+
+  return null;
+}
+
+export function getQuestionNumberLabel(
+  questions: StudentQuestionDescriptor[],
+  questionId: string,
+): string {
+  const start = getQuestionStartNumber(questions, questionId);
+  if (start === null) {
+    return '';
+  }
+
+  const question = questions.find((candidate) => candidate.id === questionId);
+  if (!question) {
+    return '';
+  }
+
+  if (question.isMulti) {
+    return `${start}-${start + question.correctCount - 1}`;
+  }
+
+  return `${start}`;
+}
+
+export function getQuestionAnswer(
+  question: StudentQuestionDescriptor,
+  answers: Record<string, unknown>,
+): unknown {
+  const answer = answers[question.answerKey];
+
+  if (question.answerIndex === undefined) {
+    return answer;
+  }
+
+  if (!Array.isArray(answer)) {
+    return undefined;
+  }
+
+  return answer[question.answerIndex];
+}
+
+export function getAnsweredSlotCount(
+  question: StudentQuestionDescriptor,
+  answers: Record<string, unknown>,
+): number {
+  const answer = getQuestionAnswer(question, answers);
+
+  if (question.answerIndex !== undefined) {
+    return hasAnsweredValue(answer) ? 1 : 0;
+  }
+
+  if (question.isMulti) {
+    return Array.isArray(answer) ? answer.filter(hasAnsweredValue).length : 0;
+  }
+
+  return hasAnsweredValue(answer) ? 1 : 0;
+}
+
+export function isQuestionAnswered(
+  question: StudentQuestionDescriptor,
+  answers: Record<string, unknown>,
+): boolean {
+  return getAnsweredSlotCount(question, answers) > 0;
+}
+
+export function isQuestionFullyAnswered(
+  question: StudentQuestionDescriptor,
+  answers: Record<string, unknown>,
+): boolean {
+  if (question.isMulti) {
+    return getAnsweredSlotCount(question, answers) >= question.correctCount;
+  }
+
+  return isQuestionAnswered(question, answers);
+}
+
+function buildStudentQuestionDescriptors(
+  block: QuestionBlock,
+  groupId: string,
+  groupLabel: string,
+): StudentQuestionDescriptor[] {
+  switch (block.type) {
+    case 'TFNG':
+    case 'CLOZE':
+    case 'MATCHING':
+    case 'MAP':
+    case 'SHORT_ANSWER':
+      return block.questions.map((question) => ({
+        id: question.id,
+        blockId: block.id,
+        groupId,
+        groupLabel,
+        isMulti: false,
+        correctCount: 1,
+        answerKey: question.id,
+        block,
+        question,
+      }));
+
+    case 'SENTENCE_COMPLETION':
+      return block.questions.flatMap((question) =>
+        question.blanks.map((blank, blankIndex) => ({
+          id: `${question.id}:${blank.id}`,
+          blockId: block.id,
+          groupId,
+          groupLabel,
+          isMulti: false,
+          correctCount: 1,
+          answerKey: question.id,
+          answerIndex: blankIndex,
+          block,
+          question,
+        })),
+      );
+
+    case 'NOTE_COMPLETION':
+      return block.questions.flatMap((question) =>
+        question.blanks.map((blank, blankIndex) => ({
+          id: `${question.id}:${blank.id}`,
+          blockId: block.id,
+          groupId,
+          groupLabel,
+          isMulti: false,
+          correctCount: 1,
+          answerKey: question.id,
+          answerIndex: blankIndex,
+          block,
+          question,
+        })),
+      );
+
+    case 'MULTI_MCQ':
+      return [buildMultiQuestionDescriptor(block, groupId, groupLabel)];
+
+    case 'SINGLE_MCQ':
+      return [buildSingleQuestionDescriptor(block, groupId, groupLabel)];
+
+    case 'DIAGRAM_LABELING':
+      return block.labels.map((label, labelIndex) => ({
+        id: `${block.id}:${label.id}`,
+        blockId: block.id,
+        groupId,
+        groupLabel,
+        isMulti: false,
+        correctCount: 1,
+        answerKey: block.id,
+        answerIndex: labelIndex,
+        block,
+        question: null,
+      }));
+
+    case 'FLOW_CHART':
+      return block.steps.map((step, stepIndex) => ({
+        id: `${block.id}:${step.id}`,
+        blockId: block.id,
+        groupId,
+        groupLabel,
+        isMulti: false,
+        correctCount: 1,
+        answerKey: block.id,
+        answerIndex: stepIndex,
+        block,
+        question: null,
+      }));
+
+    case 'TABLE_COMPLETION':
+      return block.cells.map((cell, cellIndex) => ({
+        id: `${block.id}:${cell.id}`,
+        blockId: block.id,
+        groupId,
+        groupLabel,
+        isMulti: false,
+        correctCount: 1,
+        answerKey: block.id,
+        answerIndex: cellIndex,
+        block,
+        question: null,
+      }));
+
+    case 'CLASSIFICATION':
+      return block.items.map((item, itemIndex) => ({
+        id: `${block.id}:${item.id}`,
+        blockId: block.id,
+        groupId,
+        groupLabel,
+        isMulti: false,
+        correctCount: 1,
+        answerKey: block.id,
+        answerIndex: itemIndex,
+        block,
+        question: null,
+      }));
+
+    case 'MATCHING_FEATURES':
+      return block.features.map((feature, featureIndex) => ({
+        id: `${block.id}:${feature.id}`,
+        blockId: block.id,
+        groupId,
+        groupLabel,
+        isMulti: false,
+        correctCount: 1,
+        answerKey: block.id,
+        answerIndex: featureIndex,
+        block,
+        question: null,
+      }));
+  }
+}
+
+function buildMultiQuestionDescriptor(
+  block: MultiMCQBlock,
+  groupId: string,
+  groupLabel: string,
+): StudentQuestionDescriptor {
+  return {
+    id: block.id,
+    blockId: block.id,
+    groupId,
+    groupLabel,
+    isMulti: true,
+    correctCount: block.requiredSelections,
+    answerKey: block.id,
+    block,
+    question: null,
+  };
+}
+
+function buildSingleQuestionDescriptor(
+  block: SingleMCQBlock,
+  groupId: string,
+  groupLabel: string,
+): StudentQuestionDescriptor {
+  return {
+    id: block.id,
+    blockId: block.id,
+    groupId,
+    groupLabel,
+    isMulti: false,
+    correctCount: 1,
+    answerKey: block.id,
+    block,
+    question: null,
+  };
+}
+
+function hasAnsweredValue(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim() !== '';
+  }
+
+  if (Array.isArray(value)) {
+    return value.some(hasAnsweredValue);
+  }
+
+  return value !== null && value !== undefined;
 }

@@ -1,9 +1,9 @@
 import React from 'react';
 import { useParams } from 'react-router-dom';
-import { useReviewRouteController } from '../hooks/useReviewRouteController';
-import { ValidationSummary } from '../components/ValidationSummary';
-import { PublishActions } from '../components/PublishActions';
 import { ExamVersionHistory } from '../../../components/admin/ExamVersionHistory';
+import { PublishActions } from '../components/PublishActions';
+import { ValidationSummary } from '../components/ValidationSummary';
+import { useReviewRouteController } from '../hooks/useReviewRouteController';
 
 export function ExamReviewRoute() {
   const { examId } = useParams<{ examId: string }>();
@@ -70,7 +70,7 @@ export function ExamReviewRoute() {
                 events={[]}
                 onRestoreVersion={controller.handleRestoreVersion}
                 onRepublishVersion={controller.handleRepublishVersion}
-                onCompareVersions={async (a, b) => null}
+                onCompareVersions={async () => null}
               />
             )}
           </div>

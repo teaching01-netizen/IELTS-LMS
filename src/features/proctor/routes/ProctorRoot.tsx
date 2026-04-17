@@ -14,8 +14,10 @@ export function ProctorRoot() {
   const navigate = useNavigate();
   const {
     alerts,
+    auditLogs,
     error,
     isLoading,
+    notes,
     runtimeSnapshots,
     schedules,
     sessions,
@@ -27,6 +29,7 @@ export function ProctorRoot() {
     handleStartScheduledSession,
     reload,
     setAlerts,
+    setNotes,
     setSessions,
   } = useProctorRouteController();
 
@@ -53,9 +56,12 @@ export function ProctorRoot() {
       runtimeSnapshots={runtimeSnapshots}
       sessions={sessions}
       alerts={alerts}
+      auditLogs={auditLogs}
+      notes={notes}
       onExit={() => navigate('/admin')}
       onUpdateSessions={setSessions}
       onUpdateAlerts={setAlerts}
+      onUpdateNotes={setNotes}
       onStartScheduledSession={handleStartScheduledSession}
       onPauseCohort={handlePauseCohort}
       onResumeCohort={handleResumeCohort}

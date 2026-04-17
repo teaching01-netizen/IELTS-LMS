@@ -40,8 +40,8 @@ describe('ValidationSummary', () => {
       />
     );
 
-    expect(screen.getByText(/checked:/i)).toBeTruthy();
-    expect(screen.getByText(/not checked:/i)).toBeTruthy();
+    expect(screen.getByText(/^checked:$/i)).toBeTruthy();
+    expect(screen.getByText(/^not checked:$/i)).toBeTruthy();
   });
 
   it('displays correct color states for passed validation', () => {
@@ -165,7 +165,28 @@ describe('ValidationSummary', () => {
       />
     );
 
-    expect(screen.getByText('40')).toBeTruthy(); // reading
+    expect(screen.getAllByText('40')).toHaveLength(2); // reading + listening
     expect(screen.getByText('80')).toBeTruthy(); // total
+  });
+
+  it('shows errors before the checked and not checked sections', () => {
+    render(
+      <ValidationSummary
+        publishReadiness={{
+          ...mockPublishReadiness,
+          canPublish: false,
+          errors: [{ field: 'title', message: 'Title is required', severity: 'error' }],
+          warnings: [{ field: 'review', message: 'Review recommended before publish' }],
+        }}
+        validationScope={mockValidationScope}
+      />
+    );
+
+    const errorsHeading = screen.getByText(/errors/i);
+    const checkedHeading = screen.getByText(/^checked:$/i);
+
+    expect(
+      errorsHeading.compareDocumentPosition(checkedHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 });

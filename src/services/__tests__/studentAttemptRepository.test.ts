@@ -13,13 +13,16 @@ describe('LocalStorageStudentAttemptRepository', () => {
   it('creates and loads attempts by schedule id and student key', async () => {
     const attempt = await repository.createAttempt({
       scheduleId: 'sched-1',
-      studentKey: 'student-sched-1',
+      studentKey: 'student-sched-1-alice',
       examId: 'exam-1',
       examTitle: 'Mock IELTS',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
       currentModule: 'writing',
     });
 
-    const loaded = await repository.getAttemptByScheduleId('sched-1', 'student-sched-1');
+    const loaded = await repository.getAttemptByScheduleId('sched-1', 'student-sched-1-alice');
     expect(loaded).toMatchObject({
       ...attempt,
       updatedAt: expect.any(String),
@@ -29,9 +32,12 @@ describe('LocalStorageStudentAttemptRepository', () => {
   it('persists pending mutations and heartbeat events', async () => {
     const attempt = await repository.createAttempt({
       scheduleId: 'sched-1',
-      studentKey: 'student-sched-1',
+      studentKey: 'student-sched-1-alice',
       examId: 'exam-1',
       examTitle: 'Mock IELTS',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
     });
 
     const mutations: StudentAttemptMutation[] = [

@@ -1,4 +1,4 @@
-import type { ModuleType, Violation } from '../types';
+import type { ModuleType, StudentStatus, Violation } from '../types';
 
 export type StudentAnswerValue = 
   | string // For text answers, single MCQ selection, matching
@@ -53,6 +53,9 @@ export interface StudentAttempt {
   studentKey: string;
   examId: string;
   examTitle: string;
+  candidateId: string;
+  candidateName: string;
+  candidateEmail: string;
   phase: 'pre-check' | 'lobby' | 'exam' | 'post-exam';
   currentModule: ModuleType;
   currentQuestionId: string | null;
@@ -60,6 +63,12 @@ export interface StudentAttempt {
   writingAnswers: Record<string, string>;
   flags: Record<string, boolean>;
   violations: Violation[];
+  proctorStatus: StudentStatus;
+  proctorNote: string | null;
+  proctorUpdatedAt: string | null;
+  proctorUpdatedBy: string | null;
+  lastWarningId: string | null;
+  lastAcknowledgedWarningId: string | null;
   integrity: {
     preCheck: StudentPreCheckResult | null;
     deviceFingerprintHash: string | null;
@@ -84,6 +93,9 @@ export interface StudentAttemptSeed {
   studentKey: string;
   examId: string;
   examTitle: string;
+  candidateId: string;
+  candidateName: string;
+  candidateEmail: string;
   currentModule?: ModuleType | undefined;
   currentQuestionId?: string | null | undefined;
   phase?: StudentAttempt['phase'] | undefined;

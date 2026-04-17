@@ -47,6 +47,7 @@ interface StudentAttemptActions {
     type: HeartbeatEventType,
     payload?: Record<string, unknown>,
   ) => Promise<void>;
+  acknowledgeProctorWarning: (warningId: string) => Promise<void>;
   setDeviceFingerprintHash: (hash: string) => Promise<void>;
   flushPending: () => Promise<boolean>;
 }
@@ -284,6 +285,13 @@ export function StudentAttemptProvider({
       setAttempt(null);
       setPendingMutationCount(0);
       pendingMutationsRef.current = [];
+      return;
+    }
+
+    if (
+      attemptRef.current?.id === attemptSnapshot.id &&
+      pendingMutationsRef.current.length > 0
+    ) {
       return;
     }
 
@@ -569,6 +577,32 @@ export function StudentAttemptProvider({
     );
   }, [applyPatch]);
 
+  const acknowledgeProctorWarning = useCallback(async (warningId: string) => {
+    const currentAttempt = attemptRef.current;
+    if (!currentAttempt || currentAttempt.lastAcknowledgedWarningId === warningId) {
+      return;
+    }
+
+    const nextAttempt = mergeAttempt(currentAttempt, {
+      lastAcknowledgedWarningId: warningId,
+      proctorStatus:
+        currentAttempt.proctorStatus === 'warned' ? 'active' : currentAttempt.proctorStatus,
+      proctorUpdatedAt: new Date().toISOString(),
+      proctorUpdatedBy: 'Candidate',
+    });
+
+    await studentAttemptRepository.saveAttempt(nextAttempt);
+    syncAttemptState(nextAttempt);
+    await saveStudentAuditEvent(
+      scheduleId,
+      'ALERT_ACKNOWLEDGED',
+      {
+        warningId,
+      },
+      currentAttempt.id,
+    );
+  }, [scheduleId, syncAttemptState]);
+
   const setDeviceFingerprintHash = useCallback(async (hash: string) => {
     await applyPatch(
       {
@@ -601,10 +635,12 @@ export function StudentAttemptProvider({
       recordPreCheckResult,
       recordNetworkStatus,
       recordHeartbeat,
+      acknowledgeProctorWarning,
       setDeviceFingerprintHash,
       flushPending,
     },
   }), [
+    acknowledgeProctorWarning,
     attempt,
     flushPending,
     pendingMutationCount,

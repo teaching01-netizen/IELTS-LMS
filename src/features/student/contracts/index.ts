@@ -19,6 +19,8 @@ export type StudentExamPhase = 'pre-check' | 'lobby' | 'exam' | 'post-exam';
 export interface StudentSessionRouteProps {
   // Schedule ID from route params
   scheduleId: string;
+  // Student ID from route params (optional for backward compatibility)
+  studentId?: string;
 }
 
 /**

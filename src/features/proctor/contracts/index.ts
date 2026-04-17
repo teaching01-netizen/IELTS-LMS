@@ -5,7 +5,7 @@
  * These define the stable interfaces at proctor product boundaries.
  */
 
-import { StudentSession, ProctorAlert } from '../../../types';
+import { ProctorAlert, SessionAuditLog, SessionNote, StudentSession } from '../../../types';
 import { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
 
 /**
@@ -28,6 +28,10 @@ export interface ProctorData {
   
   // Proctor alerts
   alerts: ProctorAlert[];
+
+  // Durable monitoring evidence
+  auditLogs: SessionAuditLog[];
+  notes: SessionNote[];
 }
 
 /**
@@ -42,6 +46,9 @@ export interface ProctorOperationCallbacks {
   
   // Update alerts
   onUpdateAlerts: (alerts: ProctorAlert[]) => void;
+
+  // Update notes
+  onUpdateNotes: (notes: SessionNote[]) => void;
   
   // Navigate to other surfaces
   onNavigate?: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
@@ -67,11 +74,14 @@ export interface ProctorProps {
   runtimeSnapshots: ExamSessionRuntime[];
   sessions: StudentSession[];
   alerts: ProctorAlert[];
+  auditLogs: SessionAuditLog[];
+  notes: SessionNote[];
   
   // From ProctorOperationCallbacks
   onExit: () => void;
   onUpdateSessions: (sessions: StudentSession[]) => void;
   onUpdateAlerts: (alerts: ProctorAlert[]) => void;
+  onUpdateNotes: (notes: SessionNote[]) => void;
   onNavigate?: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
   onStartScheduledSession: (scheduleId: string) => Promise<void>;
   onPauseCohort: (scheduleId: string) => Promise<void>;

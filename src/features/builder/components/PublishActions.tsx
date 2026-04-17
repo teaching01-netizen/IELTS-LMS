@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, Calendar, Lock, Unlock, Archive, CheckCircle2, Circle, ArrowRight, Edit } from 'lucide-react';
+import { Archive, ArrowRight, Calendar, CheckCircle2, Circle, Edit, Unlock } from 'lucide-react';
 import type { PublishReadiness } from '../../../types/domain';
 import { PublishConfirmationModal } from './PublishConfirmationModal';
 
@@ -26,19 +26,19 @@ interface PublishActionsProps {
   };
 }
 
-export function PublishActions({ 
-  canPublish, 
+export function PublishActions({
+  canPublish,
   publishReadiness,
-  onPublish, 
-  onSchedulePublish, 
-  onUnpublish, 
+  onPublish,
+  onSchedulePublish,
+  onUnpublish,
   onArchive,
   onNavigateToConfig,
   onNavigateToBuilder,
   onViewPublished,
   onSetSchedule,
   publishSuccess,
-  exam
+  exam,
 }: PublishActionsProps) {
   const [publishNotes, setPublishNotes] = useState('');
   const [scheduledTime, setScheduledTime] = useState('');
@@ -46,7 +46,7 @@ export function PublishActions({
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   const isValidationPassed = publishReadiness?.canPublish ?? false;
-  const isContentReviewed = true; // This would be tracked by the system
+  const isContentReviewed = true;
   const isScheduled = scheduledTime.length > 0;
 
   const missingPrerequisites = [];
@@ -54,11 +54,11 @@ export function PublishActions({
   if (!isContentReviewed) missingPrerequisites.push('Content review');
   if (!isScheduled) missingPrerequisites.push('Exam scheduling');
 
-  const tooltipText = missingPrerequisites.length > 0 
-    ? `Complete ${missingPrerequisites.join(', ')} first` 
-    : 'Creates an immutable published version. Students take this version, not your draft.';
+  const tooltipText =
+    missingPrerequisites.length > 0
+      ? `Complete ${missingPrerequisites.join(', ')} first`
+      : 'Creates an immutable published version. Students take this version, not your draft.';
 
-  // Show success state if publish was successful
   if (publishSuccess) {
     return (
       <div className="space-y-4" role="alert" aria-live="assertive">
@@ -69,9 +69,7 @@ export function PublishActions({
             <p className="text-xs text-emerald-700 mt-1">
               Created: Published v{publishSuccess.publishedVersion} (from Draft {publishSuccess.draftVersion})
             </p>
-            <p className="text-xs text-emerald-700">
-              Status: Published
-            </p>
+            <p className="text-xs text-emerald-700">Status: Published</p>
             {publishSuccess.scheduledDate && (
               <p className="text-xs text-emerald-700">
                 Students can access: Starting {publishSuccess.scheduledDate}
@@ -81,9 +79,7 @@ export function PublishActions({
         </div>
 
         <div className="p-3 bg-sky-50 rounded-lg border border-sky-100">
-          <p className="text-xs text-sky-900">
-            Draft remains editable. Create new published version when ready.
-          </p>
+          <p className="text-xs text-sky-900">Draft remains editable. Create new published version when ready.</p>
         </div>
 
         <div className="flex gap-3">
@@ -98,7 +94,6 @@ export function PublishActions({
           )}
           <button
             onClick={() => {
-              // Reset success state and continue editing
               setPublishNotes('');
               setShowSchedule(false);
             }}
@@ -115,11 +110,10 @@ export function PublishActions({
   return (
     <div className="space-y-6">
       <div className="space-y-4">
-        {/* Publish Readiness Checklist */}
         <div className="p-4 bg-slate-50 rounded-xl border border-slate-200" title="All items must be completed before publishing">
           <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider mb-3">Publish Readiness</p>
           <div className="space-y-2">
-            <div 
+            <div
               className={`flex items-center gap-2 text-xs ${isValidationPassed ? 'text-slate-600' : 'text-slate-400'}`}
               onClick={!isValidationPassed ? onNavigateToBuilder : undefined}
               role={!isValidationPassed ? 'button' : undefined}
@@ -133,7 +127,7 @@ export function PublishActions({
               )}
               <span>Technical validation passed</span>
             </div>
-            <div 
+            <div
               className={`flex items-center gap-2 text-xs ${isContentReviewed ? 'text-slate-600' : 'text-slate-400'}`}
               onClick={!isContentReviewed ? onNavigateToBuilder : undefined}
               role={!isContentReviewed ? 'button' : undefined}
@@ -147,7 +141,7 @@ export function PublishActions({
               )}
               <span>Content approved {isContentReviewed ? '' : '(awaiting your review)'}</span>
             </div>
-            <div 
+            <div
               className={`flex items-center gap-2 text-xs ${isScheduled ? 'text-slate-600' : 'text-slate-400'}`}
               onClick={!isScheduled ? () => setShowSchedule(true) : undefined}
               role={!isScheduled ? 'button' : undefined}
@@ -182,7 +176,7 @@ export function PublishActions({
             disabled={!canPublish}
             className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none"
             title={tooltipText}
-            aria-label={canPublish ? 'Publish and schedule exam' : tooltipText}
+            aria-label={canPublish ? 'Publish & schedule exam' : tooltipText}
           >
             Publish & Schedule
           </button>
@@ -238,7 +232,6 @@ export function PublishActions({
         )}
       </div>
 
-      {/* Publish Confirmation Modal */}
       <PublishConfirmationModal
         isOpen={showConfirmModal}
         onClose={() => setShowConfirmModal(false)}
@@ -254,7 +247,7 @@ export function PublishActions({
         prerequisites={{
           validationPassed: isValidationPassed,
           contentReviewed: isContentReviewed,
-          isScheduled: isScheduled
+          isScheduled,
         }}
         exam={exam || { title: 'Untitled Exam' }}
       />

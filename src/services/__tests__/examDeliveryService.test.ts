@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ExamDeliveryService } from '../examDeliveryService';
 import { LocalStorageExamRepository } from '../examRepository';
+import { studentAttemptRepository } from '../studentAttemptRepository';
 import { ExamConfig, ExamState } from '../../types';
 import { createDefaultConfig } from '../../constants/examDefaults';
 import { ExamEntity, ExamSchedule, ExamVersion, SCHEMA_VERSION } from '../../types/domain';
@@ -278,5 +279,78 @@ describe('ExamDeliveryService', () => {
 
     expect(extended.success).toBe(true);
     expect(extended.runtime?.isOverrun).toBe(true);
+  });
+
+  it('persists individual proctor interventions onto the student attempt and audit trail', async () => {
+    const { schedule } = await seedSchedule(createRuntimeConfig());
+    const attempt = await studentAttemptRepository.createAttempt({
+      scheduleId: schedule.id,
+      studentKey: 'student-sched-1-alice',
+      examId: schedule.examId,
+      examTitle: schedule.examTitle,
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      currentModule: 'reading',
+      phase: 'exam',
+    });
+
+    expect((await service.warnStudent(attempt.id, 'Focus on the active tab.', 'Proctor')).success).toBe(
+      true,
+    );
+
+    let updatedAttempt = (await studentAttemptRepository.getAllAttempts()).find(
+      (candidate) => candidate.id === attempt.id,
+    );
+    expect(updatedAttempt).toMatchObject({
+      id: attempt.id,
+      proctorStatus: 'warned',
+      lastAcknowledgedWarningId: null,
+      candidateId: 'alice',
+    });
+    expect(updatedAttempt?.lastWarningId).not.toBeNull();
+    expect(updatedAttempt?.violations.at(-1)).toMatchObject({
+      type: 'PROCTOR_WARNING',
+      description: 'Focus on the active tab.',
+    });
+
+    expect((await service.pauseStudentAttempt(attempt.id, 'Proctor')).success).toBe(true);
+    updatedAttempt = (await studentAttemptRepository.getAllAttempts()).find(
+      (candidate) => candidate.id === attempt.id,
+    );
+    expect(updatedAttempt).toMatchObject({
+      id: attempt.id,
+      phase: 'exam',
+      proctorStatus: 'paused',
+    });
+
+    expect((await service.resumeStudentAttempt(attempt.id, 'Proctor')).success).toBe(true);
+    updatedAttempt = (await studentAttemptRepository.getAllAttempts()).find(
+      (candidate) => candidate.id === attempt.id,
+    );
+    expect(updatedAttempt).toMatchObject({
+      id: attempt.id,
+      proctorStatus: 'warned',
+    });
+
+    expect((await service.terminateStudentAttempt(attempt.id, 'Proctor')).success).toBe(true);
+    updatedAttempt = (await studentAttemptRepository.getAllAttempts()).find(
+      (candidate) => candidate.id === attempt.id,
+    );
+    expect(updatedAttempt).toMatchObject({
+      id: attempt.id,
+      phase: 'post-exam',
+      proctorStatus: 'terminated',
+    });
+
+    const auditLogs = await repository.getAuditLogsByScheduleId(schedule.id);
+    expect(auditLogs.map((log) => log.actionType)).toEqual(
+      expect.arrayContaining([
+        'STUDENT_WARN',
+        'STUDENT_PAUSE',
+        'STUDENT_RESUME',
+        'STUDENT_TERMINATE',
+      ]),
+    );
   });
 });

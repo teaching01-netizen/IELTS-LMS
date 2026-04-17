@@ -433,6 +433,171 @@ export class ExamDeliveryService {
     await this.repository.saveRuntime(updatedRuntime);
   }
 
+  async warnStudent(attemptId: string, message: string, actor: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { studentAttemptRepository } = await import('./studentAttemptRepository');
+      const allAttempts = await studentAttemptRepository.getAllAttempts();
+      const attempt = allAttempts.find(a => a.id === attemptId);
+      if (!attempt) {
+        return { success: false, error: 'Attempt not found' };
+      }
+
+      const timestamp = new Date().toISOString();
+      const warningId = generateId('violation');
+      const updatedAttempt = {
+        ...attempt,
+        violations: [
+          ...attempt.violations,
+          {
+            id: warningId,
+            type: 'PROCTOR_WARNING',
+            severity: 'medium' as const,
+            timestamp,
+            description: message,
+          }
+        ],
+        proctorStatus: 'warned' as const,
+        proctorNote: message,
+        proctorUpdatedAt: timestamp,
+        proctorUpdatedBy: actor,
+        lastWarningId: warningId,
+        updatedAt: timestamp,
+      };
+
+      await studentAttemptRepository.saveAttempt(updatedAttempt);
+      await this.repository.saveAuditLog({
+        id: generateId('audit'),
+        timestamp,
+        actor,
+        actionType: 'STUDENT_WARN',
+        targetStudentId: attempt.id,
+        sessionId: attempt.scheduleId,
+        payload: {
+          candidateId: attempt.candidateId,
+          message,
+          warningId,
+        },
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to warn student' };
+    }
+  }
+
+  async pauseStudentAttempt(attemptId: string, actor: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { studentAttemptRepository } = await import('./studentAttemptRepository');
+      const allAttempts = await studentAttemptRepository.getAllAttempts();
+      const attempt = allAttempts.find(a => a.id === attemptId);
+      if (!attempt) {
+        return { success: false, error: 'Attempt not found' };
+      }
+
+      const timestamp = new Date().toISOString();
+      const updatedAttempt = {
+        ...attempt,
+        proctorStatus: 'paused' as const,
+        proctorUpdatedAt: timestamp,
+        proctorUpdatedBy: actor,
+        updatedAt: timestamp,
+      };
+
+      await studentAttemptRepository.saveAttempt(updatedAttempt);
+      await this.repository.saveAuditLog({
+        id: generateId('audit'),
+        timestamp,
+        actor,
+        actionType: 'STUDENT_PAUSE',
+        targetStudentId: attempt.id,
+        sessionId: attempt.scheduleId,
+        payload: {
+          candidateId: attempt.candidateId,
+          previousPhase: attempt.phase,
+        },
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to pause student' };
+    }
+  }
+
+  async resumeStudentAttempt(attemptId: string, actor: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { studentAttemptRepository } = await import('./studentAttemptRepository');
+      const allAttempts = await studentAttemptRepository.getAllAttempts();
+      const attempt = allAttempts.find(a => a.id === attemptId);
+      if (!attempt) {
+        return { success: false, error: 'Attempt not found' };
+      }
+
+      const timestamp = new Date().toISOString();
+      const updatedAttempt = {
+        ...attempt,
+        proctorStatus:
+          attempt.lastWarningId && attempt.lastWarningId !== attempt.lastAcknowledgedWarningId
+            ? ('warned' as const)
+            : ('active' as const),
+        proctorUpdatedAt: timestamp,
+        proctorUpdatedBy: actor,
+        updatedAt: timestamp,
+      };
+
+      await studentAttemptRepository.saveAttempt(updatedAttempt);
+      await this.repository.saveAuditLog({
+        id: generateId('audit'),
+        timestamp,
+        actor,
+        actionType: 'STUDENT_RESUME',
+        targetStudentId: attempt.id,
+        sessionId: attempt.scheduleId,
+        payload: {
+          candidateId: attempt.candidateId,
+          nextStatus: updatedAttempt.proctorStatus,
+        },
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to resume student' };
+    }
+  }
+
+  async terminateStudentAttempt(attemptId: string, actor: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { studentAttemptRepository } = await import('./studentAttemptRepository');
+      const allAttempts = await studentAttemptRepository.getAllAttempts();
+      const attempt = allAttempts.find(a => a.id === attemptId);
+      if (!attempt) {
+        return { success: false, error: 'Attempt not found' };
+      }
+
+      const timestamp = new Date().toISOString();
+      const updatedAttempt = {
+        ...attempt,
+        phase: 'post-exam' as const,
+        proctorStatus: 'terminated' as const,
+        proctorUpdatedAt: timestamp,
+        proctorUpdatedBy: actor,
+        updatedAt: timestamp,
+      };
+
+      await studentAttemptRepository.saveAttempt(updatedAttempt);
+      await this.repository.saveAuditLog({
+        id: generateId('audit'),
+        timestamp,
+        actor,
+        actionType: 'STUDENT_TERMINATE',
+        targetStudentId: attempt.id,
+        sessionId: attempt.scheduleId,
+        payload: {
+          candidateId: attempt.candidateId,
+        },
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to terminate student' };
+    }
+  }
+
   async pauseRuntime(
     scheduleId: string,
     actor: string,

@@ -141,7 +141,7 @@ const ExamListItem = memo(function ExamListItem({
       </div>
       <div className="px-6 py-4 flex-1 font-medium text-gray-900">{exam.title}</div>
       <div className="px-6 py-4 w-24 text-gray-500">{exam.type}</div>
-      <div className="px-6 py-4 w-24">{getStatusBadge(exam.status)}</div>
+      <div className="px-6 py-4 w-36">{getStatusBadge(exam.status)}</div>
       <div className="px-6 py-4 w-20 text-gray-500">{stats.totalQuestions}</div>
       <div className="px-6 py-4 w-32 text-gray-500">{exam.author}</div>
       <div className="px-6 py-4 w-32 text-gray-500">{new Date(exam.lastModified).toLocaleDateString()}</div>
@@ -693,7 +693,7 @@ export function AdminExams({
                 </th>
                 <th className="px-6 py-3 font-medium">Title</th>
                 <th className="px-6 py-3 font-medium">Type</th>
-                <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3 font-medium w-36">Status</th>
                 <th className="px-6 py-3 font-medium">Questions</th>
                 <th className="px-6 py-3 font-medium">Creator</th>
                 <th className="px-6 py-3 font-medium">Modified</th>

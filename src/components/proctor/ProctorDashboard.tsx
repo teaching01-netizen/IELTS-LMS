@@ -1,37 +1,14 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Virtuoso } from 'react-virtuoso';
-import {
-  Users,
-  AlertTriangle,
-  PauseCircle,
-  XCircle,
-  CheckCircle2,
-  ArrowUpDown,
-  ChevronLeft,
-  LayoutGrid,
-  List,
-  Play,
-  Pause,
-  Timer,
-  FastForward,
-  StopCircle,
-  CheckSquare,
-  Square,
-  X,
-  Filter,
-  XCircle as XIcon,
-  Bookmark,
-  BookmarkCheck
-} from 'lucide-react';
-import { StudentSession, ProctorAlert, ExamGroup, SessionAuditLog, AuditActionType, ModuleType, StudentStatus } from '../../types';
-import { ExamSchedule, ExamSessionRuntime } from '../../types/domain';
-import { VIRTUAL_LIST_HEIGHTS } from '../../constants/uiConstants';
-import { StudentCard } from './StudentCard';
-import { StudentDetailPanel } from './StudentDetailPanel';
-import { ExamGroupCard } from './ExamGroupCard';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckSquare, ChevronLeft, FastForward, Filter, LayoutGrid, List, Pause, Play, Square, StopCircle, Timer, X } from 'lucide-react';
+import type { AuditActionType, ExamGroup, ModuleType, ProctorAlert, SessionAuditLog, SessionNote, StudentSession, StudentStatus } from '../../types';
+import type { ExamSchedule, ExamSessionRuntime } from '../../types/domain';
 import { PresenceIndicator } from './PresenceIndicator';
+import { StudentCard } from './StudentCard';
+import { StudentDetailPanel, type StudentDrawerTab } from './StudentDetailPanel';
+import { ExamGroupCard } from './ExamGroupCard';
 import { isScheduleReadyToStart } from '../../utils/scheduleUtils';
 import { examRepository } from '../../services/examRepository';
+import { examDeliveryService } from '../../services/examDeliveryService';
 import { useStudentFilters } from './hooks/useStudentFilters';
 
 interface ProctorDashboardProps {
@@ -40,8 +17,12 @@ interface ProctorDashboardProps {
   sessions: StudentSession[];
   alerts: ProctorAlert[];
   searchQuery?: string;
+  railSelection?: 'dashboard' | 'alerts' | 'audit' | 'notes';
+  auditLogs?: SessionAuditLog[];
+  notes?: SessionNote[];
   onUpdateSessions: (sessions: StudentSession[]) => void;
   onUpdateAlerts: (alerts: ProctorAlert[]) => void;
+  onUpdateNotes?: (notes: SessionNote[]) => void;
   onStartScheduledSession: (scheduleId: string) => Promise<void> | void;
   onPauseCohort: (scheduleId: string) => Promise<void> | void;
   onResumeCohort: (scheduleId: string) => Promise<void> | void;
@@ -50,40 +31,25 @@ interface ProctorDashboardProps {
   onCompleteExam: (scheduleId: string) => Promise<void> | void;
 }
 
-const formatTime = (seconds: number) => {
-  const safe = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(safe / 3600);
-  const minutes = Math.floor((safe % 3600) / 60);
-  const remainingSeconds = safe % 60;
-  return `${hours > 0 ? `${hours}:` : ''}${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-};
-
-const formatDateTime = (value: string | null | undefined) => {
-  if (!value) return '—';
-  return new Date(value).toLocaleString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    day: '2-digit',
-    month: 'short'
-  });
-};
-
 export const ProctorDashboard = React.memo(function ProctorDashboard({
   schedules,
   runtimeSnapshots,
   sessions,
   alerts,
   searchQuery = '',
+  railSelection = 'dashboard',
+  auditLogs = [],
+  notes = [],
   onUpdateSessions,
   onUpdateAlerts,
+  onUpdateNotes,
   onStartScheduledSession,
   onPauseCohort,
   onResumeCohort,
   onEndSectionNow,
   onExtendCurrentSection,
-  onCompleteExam
+  onCompleteExam,
 }: ProctorDashboardProps) {
-  void alerts;
   void onUpdateAlerts;
 
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
@@ -93,42 +59,29 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [sortBy, setSortBy] = useState<'name' | 'violations' | 'status'>('violations');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [listDensity, setListDensity] = useState<'compact' | 'comfortable'>('compact');
+  const [drawerTab, setDrawerTab] = useState<StudentDrawerTab>('timeline');
 
-  const handleSelectSchedule = useCallback((scheduleId: string | null) => {
-    setSelectedScheduleId(scheduleId);
-    setSelectedStudentId(null);
-  }, []);
-
-  const handleSelectStudent = useCallback((studentId: string | null) => {
-    setSelectedStudentId(studentId);
-  }, []);
-
-  const handleToggleStudentSelection = useCallback((studentId: string) => {
-    setSelectedStudentIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(studentId)) {
-        newSet.delete(studentId);
-      } else {
-        newSet.add(studentId);
-      }
-      setIsSelectionMode(newSet.size > 0);
-      return newSet;
-    });
-  }, []);
-
-  const enrichedSessions = useMemo(() => {
-    return sessions.map(session => {
-      const runtime = runtimeSnapshots.find(item => item.scheduleId === session.scheduleId);
-      return {
-        ...session,
-        runtimeStatus: runtime?.status ?? session.runtimeStatus,
-        runtimeCurrentSection: runtime?.currentSectionKey ?? session.runtimeCurrentSection ?? null,
-        runtimeTimeRemainingSeconds: runtime?.currentSectionRemainingSeconds ?? session.runtimeTimeRemainingSeconds ?? session.timeRemaining,
-        runtimeSectionStatus: runtime?.sections.find(item => item.sectionKey === runtime.currentSectionKey)?.status ?? session.runtimeSectionStatus,
-        runtimeWaiting: runtime?.waitingForNextSection ?? session.runtimeWaiting ?? false
-      };
-    });
-  }, [runtimeSnapshots, sessions]);
+  const enrichedSessions = useMemo(
+    () =>
+      sessions.map((session) => {
+        const runtime = runtimeSnapshots.find((item) => item.scheduleId === session.scheduleId);
+        return {
+          ...session,
+          runtimeStatus: runtime?.status ?? session.runtimeStatus,
+          runtimeCurrentSection: runtime?.currentSectionKey ?? session.runtimeCurrentSection ?? null,
+          runtimeTimeRemainingSeconds:
+            runtime?.currentSectionRemainingSeconds ??
+            session.runtimeTimeRemainingSeconds ??
+            session.timeRemaining,
+          runtimeSectionStatus:
+            runtime?.sections.find((item) => item.sectionKey === runtime.currentSectionKey)?.status ??
+            session.runtimeSectionStatus,
+          runtimeWaiting: runtime?.waitingForNextSection ?? session.runtimeWaiting ?? false,
+        };
+      }),
+    [runtimeSnapshots, sessions],
+  );
 
   const {
     filterCriteria,
@@ -139,31 +92,27 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     applySavedFilter,
     clearFilters,
     removeFilter,
-    hasActiveFilters
+    hasActiveFilters,
   } = useStudentFilters(enrichedSessions);
 
   const filteredSessions = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase();
     const scheduleScopedSessions = selectedScheduleId
-      ? hookFilteredSessions.filter(session => session.scheduleId === selectedScheduleId)
+      ? hookFilteredSessions.filter((session) => session.scheduleId === selectedScheduleId)
       : hookFilteredSessions;
-
     const searchFilteredSessions = normalizedSearch
-      ? scheduleScopedSessions.filter(session =>
-          session.name.toLowerCase().includes(normalizedSearch) ||
-          session.studentId.toLowerCase().includes(normalizedSearch),
+      ? scheduleScopedSessions.filter(
+          (session) =>
+            session.name.toLowerCase().includes(normalizedSearch) ||
+            session.studentId.toLowerCase().includes(normalizedSearch),
         )
       : scheduleScopedSessions;
 
     return [...searchFilteredSessions].sort((a, b) => {
       let comparison = 0;
-      if (sortBy === 'name') {
-        comparison = a.name.localeCompare(b.name);
-      } else if (sortBy === 'violations') {
-        comparison = a.violations.length - b.violations.length;
-      } else {
-        comparison = a.status.localeCompare(b.status);
-      }
+      if (sortBy === 'name') comparison = a.name.localeCompare(b.name);
+      else if (sortBy === 'violations') comparison = a.violations.length - b.violations.length;
+      else comparison = a.status.localeCompare(b.status);
       return sortOrder === 'asc' ? comparison : -comparison;
     });
   }, [hookFilteredSessions, searchQuery, selectedScheduleId, sortBy, sortOrder]);
@@ -171,13 +120,9 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const scheduleGroups: ExamGroup[] = useMemo(() => {
     const now = new Date();
     return schedules
-      .map(schedule => {
-        const runtime = runtimeSnapshots.find(item => item.scheduleId === schedule.id);
-        const roster = enrichedSessions.filter(session => session.scheduleId === schedule.id);
-        const activeCount = roster.filter(session => session.status === 'active' || session.status === 'warned').length;
-        const violationCount = roster.reduce((count, session) => count + session.violations.length, 0);
-        const isReadyToStart = isScheduleReadyToStart(schedule, runtime, now);
-
+      .map((schedule) => {
+        const runtime = runtimeSnapshots.find((item) => item.scheduleId === schedule.id);
+        const roster = enrichedSessions.filter((session) => session.scheduleId === schedule.id);
         return {
           id: schedule.id,
           scheduleId: schedule.id,
@@ -185,60 +130,103 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
           examTitle: schedule.examTitle,
           cohortName: schedule.cohortName,
           scheduledStartTime: schedule.startTime,
-          runtimeStatus: runtime?.status ?? (schedule.status === 'live' ? 'live' : schedule.status === 'completed' ? 'completed' : schedule.status === 'cancelled' ? 'cancelled' : 'not_started'),
-          isReadyToStart,
+          runtimeStatus:
+            runtime?.status ??
+            (schedule.status === 'live'
+              ? 'live'
+              : schedule.status === 'completed'
+                ? 'completed'
+                : schedule.status === 'cancelled'
+                  ? 'cancelled'
+                  : 'not_started'),
+          isReadyToStart: isScheduleReadyToStart(schedule, runtime, now),
           currentLiveSection: runtime?.currentSectionKey ?? null,
           studentCount: roster.length,
-          activeCount,
-          violationCount,
-          status: schedule.status === 'cancelled' ? 'cancelled' : schedule.status === 'completed' ? 'completed' : schedule.status === 'live' ? 'live' : 'scheduled',
-          plannedDurationMinutes: schedule.plannedDurationMinutes
+          activeCount: roster.filter((session) => session.status === 'active' || session.status === 'warned').length,
+          violationCount: roster.reduce((count, session) => count + session.violations.length, 0),
+          status:
+            schedule.status === 'cancelled'
+              ? 'cancelled'
+              : schedule.status === 'completed'
+                ? 'completed'
+                : schedule.status === 'live'
+                  ? 'live'
+                  : 'scheduled',
+          plannedDurationMinutes: schedule.plannedDurationMinutes,
         } satisfies ExamGroup;
       })
       .sort((a, b) => new Date(a.scheduledStartTime).getTime() - new Date(b.scheduledStartTime).getTime());
   }, [enrichedSessions, runtimeSnapshots, schedules]);
 
-  const selectedGroup = selectedScheduleId ? scheduleGroups.find(group => group.scheduleId === selectedScheduleId) : undefined;
-  const selectedRuntime = selectedScheduleId ? runtimeSnapshots.find(runtime => runtime.scheduleId === selectedScheduleId) : undefined;
+  const selectedGroup = selectedScheduleId ? scheduleGroups.find((group) => group.scheduleId === selectedScheduleId) : undefined;
+  const selectedRuntime = selectedScheduleId ? runtimeSnapshots.find((runtime) => runtime.scheduleId === selectedScheduleId) : undefined;
+  const selectedStudent = enrichedSessions.find((session) => session.id === selectedStudentId);
+  const selectedScheduleAlerts = alerts.filter((alert) =>
+    selectedScheduleId ? enrichedSessions.some((session) => session.scheduleId === selectedScheduleId && session.studentId === alert.studentId) : true,
+  );
+  const scopedAuditLogs = auditLogs.filter((log) => !selectedScheduleId || log.sessionId === selectedScheduleId);
+  const scopedNotes = notes.filter((note) => !selectedScheduleId || note.scheduleId === selectedScheduleId);
 
-  const stats = [
-    { label: 'Active', value: enrichedSessions.filter(session => session.status === 'active').length, icon: CheckCircle2, color: 'text-green-800', bg: 'bg-green-100', border: 'border-t-green-800' },
-    { label: 'Warned', value: enrichedSessions.filter(session => session.status === 'warned').length, icon: AlertTriangle, color: 'text-amber-800', bg: 'bg-amber-100', border: 'border-t-amber-800' },
-    { label: 'Paused', value: enrichedSessions.filter(session => session.status === 'paused').length, icon: PauseCircle, color: 'text-blue-800', bg: 'bg-blue-100', border: 'border-t-blue-800' },
-    { label: 'Terminated', value: enrichedSessions.filter(session => session.status === 'terminated').length, icon: XCircle, color: 'text-red-800', bg: 'bg-red-100', border: 'border-t-red-800' }
-  ];
+  useEffect(() => {
+    if (railSelection === 'dashboard') return;
 
-  const selectedStudent = enrichedSessions.find(session => session.id === selectedStudentId);
+    const targetTab: StudentDrawerTab =
+      railSelection === 'alerts' ? 'violations' : railSelection === 'audit' ? 'audit' : 'notes';
+
+    setDrawerTab(targetTab);
+
+    if (!selectedStudentId && selectedScheduleId && filteredSessions.length > 0) {
+      setSelectedStudentId(filteredSessions[0]?.id ?? null);
+    }
+  }, [filteredSessions, railSelection, selectedScheduleId, selectedStudentId]);
+
+  const handleSelectSchedule = useCallback((scheduleId: string | null) => {
+    setSelectedScheduleId(scheduleId);
+    setSelectedStudentId(null);
+    setSelectedStudentIds(new Set());
+    setIsSelectionMode(false);
+  }, []);
+
+  const handleSelectStudent = useCallback(
+    (studentId: string | null) => {
+      setSelectedStudentId(studentId);
+      if (railSelection === 'alerts') setDrawerTab('violations');
+      if (railSelection === 'audit') setDrawerTab('audit');
+      if (railSelection === 'notes') setDrawerTab('notes');
+    },
+    [railSelection],
+  );
+
+  const handleToggleStudentSelection = useCallback((studentId: string) => {
+    setSelectedStudentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) next.delete(studentId);
+      else next.add(studentId);
+      setIsSelectionMode(next.size > 0);
+      return next;
+    });
+  }, []);
 
   const toggleSort = (newSortBy: 'name' | 'violations' | 'status') => {
     if (sortBy === newSortBy) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
       return;
     }
-
     setSortBy(newSortBy);
     setSortOrder('desc');
   };
 
-  const createAuditLog = (
-    actionType: AuditActionType,
-    targetStudentId?: string,
-    payload?: Record<string, unknown>
-  ): SessionAuditLog => ({
+  const createAuditLog = (actionType: AuditActionType, targetStudentId?: string, payload?: Record<string, unknown>): SessionAuditLog => ({
     id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
     timestamp: new Date().toISOString(),
     actor: 'Proctor',
     actionType,
     targetStudentId,
     sessionId: selectedScheduleId || '',
-    payload
+    payload,
   });
 
-  const applyStudentAction = (
-    session: StudentSession,
-    action: 'warn' | 'pause' | 'resume' | 'terminate',
-    payload?: unknown
-  ): StudentSession => {
+  const applyStudentAction = (session: StudentSession, action: 'warn' | 'pause' | 'resume' | 'terminate', payload?: unknown): StudentSession => {
     if (action === 'warn') {
       return {
         ...session,
@@ -251,144 +239,93 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
             type: 'PROCTOR_WARNING',
             severity: 'medium',
             timestamp: new Date().toISOString(),
-            description: typeof payload === 'string' ? payload : 'Warning issued by proctor'
-          }
-        ]
+            description: typeof payload === 'string' ? payload : 'Warning issued by proctor',
+          },
+        ],
       };
     }
-
-    if (action === 'pause') {
-      return { ...session, status: 'paused' };
-    }
-
-    if (action === 'resume') {
-      return { ...session, status: 'active' };
-    }
-
+    if (action === 'pause') return { ...session, status: 'paused' };
+    if (action === 'resume') return { ...session, status: 'active' };
     return { ...session, status: 'terminated' };
   };
 
-  const handleDisciplineAction = async (
-    studentId: string,
-    action: 'warn' | 'pause' | 'resume' | 'terminate',
-    payload?: unknown
-  ) => {
+  const handleDisciplineAction = async (studentId: string, action: 'warn' | 'pause' | 'resume' | 'terminate', payload?: unknown) => {
+    if (action === 'pause' && !window.confirm('Pause this student session?')) return;
+    if (action === 'terminate' && !window.confirm('Terminate this student session?')) return;
+
     const updatedSessions = [...sessions];
-    const index = updatedSessions.findIndex(session => session.id === studentId);
+    const index = updatedSessions.findIndex((session) => session.id === studentId);
     if (index < 0) return;
     const currentSession = updatedSessions[index];
     if (!currentSession) return;
 
-    const actionTypeMap: Record<typeof action, AuditActionType> = {
-      warn: 'STUDENT_WARN',
-      pause: 'STUDENT_PAUSE',
-      resume: 'STUDENT_RESUME',
-      terminate: 'STUDENT_TERMINATE'
-    };
+    let deliveryResult: { success: boolean; error?: string } = { success: true };
+    if (action === 'warn') {
+      deliveryResult = await examDeliveryService.warnStudent(studentId, typeof payload === 'string' ? payload : 'Warning issued by proctor', 'Proctor');
+    } else if (action === 'pause') {
+      deliveryResult = await examDeliveryService.pauseStudentAttempt(studentId, 'Proctor');
+    } else if (action === 'resume') {
+      deliveryResult = await examDeliveryService.resumeStudentAttempt(studentId, 'Proctor');
+    } else if (action === 'terminate') {
+      deliveryResult = await examDeliveryService.terminateStudentAttempt(studentId, 'Proctor');
+    }
+
+    if (!deliveryResult.success) {
+      console.error('Failed to execute student action:', deliveryResult.error);
+      return;
+    }
 
     const nextSession = applyStudentAction(currentSession, action, payload);
     updatedSessions[index] = nextSession;
-
     onUpdateSessions(updatedSessions);
-
-    // Log the action
-    if (selectedScheduleId) {
-      const auditLog = createAuditLog(actionTypeMap[action], studentId, {
-        message: typeof payload === 'string' ? payload : `${action} action performed on student`,
-        previousStatus: currentSession.status,
-        newStatus: nextSession.status
-      });
-      await examRepository.saveAuditLog(auditLog);
-    }
   };
 
-  const handleBulkAction = async (
-    action: 'warn' | 'pause' | 'resume' | 'terminate',
-    payload?: unknown
-  ) => {
+  const handleBulkAction = async (action: 'warn' | 'pause' | 'resume' | 'terminate') => {
+    if ((action === 'pause' || action === 'terminate') && !window.confirm(`Confirm bulk ${action} for selected students?`)) return;
+
     const updatedSessions = [...sessions];
-    const results: { studentId: string; success: boolean; error?: string }[] = [];
-
-    const actionTypeMap: Record<typeof action, AuditActionType> = {
-      warn: 'STUDENT_WARN',
-      pause: 'STUDENT_PAUSE',
-      resume: 'STUDENT_RESUME',
-      terminate: 'STUDENT_TERMINATE'
-    };
-
-    selectedStudentIds.forEach(studentId => {
-      const index = updatedSessions.findIndex(session => session.id === studentId);
-      if (index < 0) {
-        results.push({ studentId, success: false, error: 'Student not found' });
-        return;
-      }
+    for (const studentId of selectedStudentIds) {
+      const index = updatedSessions.findIndex((session) => session.id === studentId);
+      if (index < 0) continue;
       const currentSession = updatedSessions[index];
-      if (!currentSession) {
-        results.push({ studentId, success: false, error: 'Student not found' });
-        return;
+      if (!currentSession) continue;
+
+      let deliveryResult: { success: boolean; error?: string } = { success: true };
+      if (action === 'warn') {
+        deliveryResult = await examDeliveryService.warnStudent(studentId, 'Bulk warning issued by proctor', 'Proctor');
+      } else if (action === 'pause') {
+        deliveryResult = await examDeliveryService.pauseStudentAttempt(studentId, 'Proctor');
+      } else if (action === 'resume') {
+        deliveryResult = await examDeliveryService.resumeStudentAttempt(studentId, 'Proctor');
+      } else if (action === 'terminate') {
+        deliveryResult = await examDeliveryService.terminateStudentAttempt(studentId, 'Proctor');
       }
 
-      try {
-        updatedSessions[index] = applyStudentAction(
-          currentSession,
-          action,
-          typeof payload === 'string' ? payload : 'Warning issued by proctor (bulk action)'
-        );
-        results.push({ studentId, success: true });
-      } catch (error) {
-        results.push({ studentId, success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+      if (deliveryResult.success) {
+        updatedSessions[index] = applyStudentAction(currentSession, action);
       }
-    });
+    }
 
     onUpdateSessions(updatedSessions);
-
-    // Log the bulk action
-    if (selectedScheduleId) {
-      const auditLog = createAuditLog(actionTypeMap[action], undefined, {
-        message: `Bulk ${action} action performed on ${selectedStudentIds.size} students`,
-        studentIds: Array.from(selectedStudentIds),
-        results
-      });
-      await examRepository.saveAuditLog(auditLog);
-    }
-    
-    // Clear selection after successful bulk action
     setSelectedStudentIds(new Set());
     setIsSelectionMode(false);
   };
 
-  const selectAllFiltered = () => {
-    const allFilteredIds = new Set(filteredSessions.map(session => session.id));
-    setSelectedStudentIds(allFilteredIds);
-    setIsSelectionMode(true);
-  };
-
-  const clearSelection = () => {
-    setSelectedStudentIds(new Set());
-    setIsSelectionMode(false);
-  };
-
-  const updateFilterCriterion = <K extends keyof typeof filterCriteria>(
-    key: K,
-    value: (typeof filterCriteria)[K]
-  ) => {
+  const updateFilterCriterion = <K extends keyof typeof filterCriteria>(key: K, value: (typeof filterCriteria)[K]) => {
     setFilterCriteria((previous) => {
       if (value === undefined) {
-        const nextCriteria = { ...previous };
-        delete nextCriteria[key];
-        return nextCriteria;
+        const next = { ...previous };
+        delete next[key];
+        return next;
       }
-
-      return {
-        ...previous,
-        [key]: value,
-      };
+      return { ...previous, [key]: value };
     });
   };
 
   const controlDisabled = !selectedScheduleId;
   const selectedRuntimeStatus = selectedGroup?.runtimeStatus ?? 'not_started';
-  const startDisabled = controlDisabled ||
+  const startDisabled =
+    controlDisabled ||
     !selectedGroup?.isReadyToStart ||
     selectedRuntimeStatus === 'live' ||
     selectedRuntimeStatus === 'paused' ||
@@ -396,507 +333,274 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     selectedRuntimeStatus === 'cancelled';
 
   return (
-    <div className="flex h-full w-full overflow-hidden relative">
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="p-6 bg-white border-b border-gray-100 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Live Session Control Bar</p>
-              <h2 className="text-xl font-bold text-gray-900 mt-1">
-                {selectedGroup ? `${selectedGroup.examTitle} · ${selectedGroup.cohortName}` : 'Select a session to control runtime'}
-              </h2>
-              <div className="flex items-center gap-4 mt-1">
-                <p className="text-sm text-gray-500">
-                  Runtime status: <span className="font-semibold text-gray-900 capitalize">{selectedRuntimeStatus}</span>
-                  {selectedGroup?.currentLiveSection ? (
-                    <>
-                      {' '}
-                      · Live section: <span className="font-semibold text-gray-900 capitalize">{selectedGroup.currentLiveSection}</span>
-                    </>
-                  ) : null}
-                </p>
-                {selectedRuntime && selectedRuntime.proctorPresence && selectedRuntime.proctorPresence.length > 0 && (
-                  <PresenceIndicator
-                    proctorPresence={selectedRuntime.proctorPresence}
-                    currentProctorId="proctor-1"
-                    currentProctorName="Current Proctor"
-                  />
-                )}
-              </div>
+    <div className="grid h-full min-h-0 grid-rows-[auto_1fr] bg-slate-50">
+      <section className="border-b border-slate-200 bg-white px-6 py-4">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {selectedScheduleId ? (
+                <button type="button" onClick={() => handleSelectSchedule(null)} className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-900">
+                  <ChevronLeft size={16} />
+                  All cohorts
+                </button>
+              ) : null}
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Monitoring workspace</p>
             </div>
+            <div>
+              <h2 className="text-2xl font-semibold text-slate-950">
+                {selectedGroup ? `${selectedGroup.examTitle} · ${selectedGroup.cohortName}` : 'Cohorts and students'}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {selectedGroup
+                  ? `${filteredSessions.length} visible students, ${selectedGroup.violationCount} recorded violations`
+                  : 'Select a cohort to open the roster and student activity drawer.'}
+              </p>
+            </div>
+            {selectedRuntime?.proctorPresence?.length ? (
+              <PresenceIndicator
+                proctorPresence={selectedRuntime.proctorPresence}
+                currentProctorId="proctor-1"
+                currentProctorName="Current Proctor"
+              />
+            ) : null}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <button onClick={() => selectedScheduleId && void onStartScheduledSession(selectedScheduleId)} disabled={startDisabled} className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
+              <Play size={14} /> Start Exam
+            </button>
+            <button onClick={() => selectedScheduleId && void onPauseCohort(selectedScheduleId)} disabled={controlDisabled || selectedRuntimeStatus !== 'live'} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400">
+              <Pause size={14} /> Pause Cohort
+            </button>
+            <button onClick={() => selectedScheduleId && void onResumeCohort(selectedScheduleId)} disabled={controlDisabled || selectedRuntimeStatus !== 'paused'} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400">
+              <Play size={14} /> Resume Cohort
+            </button>
+            <button onClick={() => selectedScheduleId && void onEndSectionNow(selectedScheduleId)} disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused')} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400">
+              <FastForward size={14} /> End Section
+            </button>
+            <button onClick={() => selectedScheduleId && void onExtendCurrentSection(selectedScheduleId, 5)} disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused')} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400">
+              <Timer size={14} /> Extend +5
+            </button>
+            <button onClick={() => selectedScheduleId && void onExtendCurrentSection(selectedScheduleId, 10)} disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused')} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400">
+              <Timer size={14} /> Extend +10
+            </button>
+            <button onClick={() => selectedScheduleId && void onCompleteExam(selectedScheduleId)} disabled={controlDisabled || selectedRuntimeStatus === 'completed'} className="inline-flex items-center justify-center gap-2 rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
+              <StopCircle size={14} /> Complete
+            </button>
+          </div>
+        </div>
+        {selectedRuntime?.isOverrun ? (
+          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="flex items-center gap-2 font-medium">
+              <AlertTriangle size={16} />
+              Runtime overrun
+            </div>
+            <p className="mt-1">Running past the scheduled window. Review extensions, current section timing, and cohort status.</p>
+          </div>
+        ) : null}
+      </section>
 
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => selectedScheduleId && void onStartScheduledSession(selectedScheduleId)}
-                disabled={startDisabled}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 text-white text-sm font-medium disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
-              >
-                <Play size={14} /> Start Exam
-              </button>
-              <button
-                onClick={() => selectedScheduleId && void onPauseCohort(selectedScheduleId)}
-                disabled={controlDisabled || selectedRuntimeStatus !== 'live'}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-gray-800 transition-colors"
-              >
-                <Pause size={14} /> Pause Cohort
-              </button>
-              <button
-                onClick={() => selectedScheduleId && void onResumeCohort(selectedScheduleId)}
-                disabled={controlDisabled || selectedRuntimeStatus !== 'paused'}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-emerald-700 transition-colors"
-              >
-                <Play size={14} /> Resume Cohort
-              </button>
-              <button
-                onClick={() => selectedScheduleId && void onEndSectionNow(selectedScheduleId)}
-                disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused')}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-amber-600 text-white text-sm font-medium disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-amber-700 transition-colors"
-              >
-                <FastForward size={14} /> End Section Now
-              </button>
-              <button
-                onClick={() => selectedScheduleId && void onExtendCurrentSection(selectedScheduleId, 5)}
-                disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused')}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-white border border-gray-200 text-sm font-medium text-gray-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
-              >
-                <Timer size={14} /> Extend +5
-              </button>
-              <button
-                onClick={() => selectedScheduleId && void onExtendCurrentSection(selectedScheduleId, 10)}
-                disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused')}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-white border border-gray-200 text-sm font-medium text-gray-700 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
-              >
-                <Timer size={14} /> Extend +10
-              </button>
-              <button
-                onClick={() => selectedScheduleId && void onCompleteExam(selectedScheduleId)}
-                disabled={controlDisabled || selectedRuntimeStatus === 'completed'}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-red-600 text-white text-sm font-medium disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-red-700 transition-colors"
-              >
-		                <StopCircle size={14} /> Complete Exam
-		              </button>
-		            </div>
-		          </div>
-
-		            {/* Advanced Filter Panel */}
-		            {showAdvancedFilters && selectedScheduleId && (
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <div className="flex items-center justify-between mb-4">
+      <section className="min-h-0 overflow-auto px-6 py-5">
+        {!selectedScheduleId ? (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {scheduleGroups.map((group) => (
+              <ExamGroupCard key={group.id} group={group} onClick={() => handleSelectSchedule(group.scheduleId)} />
+            ))}
+          </div>
+        ) : selectedStudent ? (
+          <div className="grid h-full min-h-[560px] gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+            <aside className="grid min-h-0 grid-rows-[auto_1fr] overflow-hidden border border-black/10 bg-[#fcfbf8]">
+              <div className="border-b border-black/10 px-4 py-4">
+                <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-bold text-gray-900">Advanced Filters</p>
-                    <p className="text-xs text-gray-500">Use saved filters or create custom criteria</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Cohort roster</p>
+                    <h3 className="mt-1 text-base font-semibold text-slate-950">{selectedGroup?.cohortName}</h3>
                   </div>
-                  {hasActiveFilters && (
-                    <button
-                      onClick={clearFilters}
-                      className="text-xs font-bold text-red-600 hover:text-red-800 transition-colors"
-                    >
-                      Clear All
-                    </button>
-                  )}
-                </div>
-
-                {/* Saved Filters */}
-                <div className="mb-4">
-                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Saved Filters</p>
-                  <div className="flex flex-wrap gap-2">
-                    {savedFilters.map(filter => (
-                      <button
-                        key={filter.id}
-                        onClick={() => applySavedFilter(filter.id)}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                          activeFilterId === filter.id
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        {activeFilterId === filter.id ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
-                        {filter.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Custom Filters */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Status</label>
-                    <select
-	                      value={filterCriteria.status || 'all'}
-	                      onChange={(e) => updateFilterCriterion('status', e.target.value === 'all' ? undefined : e.target.value as StudentStatus)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="all">All Status</option>
-                      <option value="active">Active</option>
-                      <option value="warned">Warned</option>
-                      <option value="paused">Paused</option>
-                      <option value="terminated">Terminated</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Section</label>
-                    <select
-	                      value={filterCriteria.section || 'all'}
-	                      onChange={(e) => updateFilterCriterion('section', e.target.value === 'all' ? undefined : e.target.value as ModuleType)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="all">All Sections</option>
-                      <option value="listening">Listening</option>
-                      <option value="reading">Reading</option>
-                      <option value="writing">Writing</option>
-                      <option value="speaking">Speaking</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Min Violations</label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={filterCriteria.minViolations || ''}
-                      onChange={(e) => updateFilterCriterion('minViolations', e.target.value ? parseInt(e.target.value) : undefined)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Max Time (min)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={filterCriteria.maxTimeRemaining ? Math.floor(filterCriteria.maxTimeRemaining / 60) : ''}
-                      onChange={(e) => updateFilterCriterion('maxTimeRemaining', e.target.value ? parseInt(e.target.value) * 60 : undefined)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="∞"
-                    />
-                  </div>
-                </div>
-
-                {/* Active Filter Chips */}
-                {hasActiveFilters && (
-                  <div className="mt-4 pt-4 border-t border-gray-100">
-                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Active Filters</p>
-                    <div className="flex flex-wrap gap-2">
-                      {filterCriteria.status && (
-                        <div className="flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-md text-xs">
-                          <span>Status: {filterCriteria.status}</span>
-                          <button
-                            onClick={() => removeFilter('status')}
-                            className="hover:text-blue-600"
-                          >
-                            <XIcon size={12} />
-                          </button>
-                        </div>
-                      )}
-                      {filterCriteria.section && (
-                        <div className="flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-md text-xs">
-                          <span>Section: {filterCriteria.section}</span>
-                          <button
-                            onClick={() => removeFilter('section')}
-                            className="hover:text-purple-600"
-                          >
-                            <XIcon size={12} />
-                          </button>
-                        </div>
-                      )}
-                      {filterCriteria.minViolations !== undefined && (
-                        <div className="flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-800 rounded-md text-xs">
-                          <span>Violations ≥ {filterCriteria.minViolations}</span>
-                          <button
-                            onClick={() => removeFilter('minViolations')}
-                            className="hover:text-amber-600"
-                          >
-                            <XIcon size={12} />
-                          </button>
-                        </div>
-                      )}
-                      {filterCriteria.maxTimeRemaining !== undefined && (
-                        <div className="flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded-md text-xs">
-                          <span>Time ≤ {Math.floor(filterCriteria.maxTimeRemaining / 60)}m</span>
-                          <button
-                            onClick={() => removeFilter('maxTimeRemaining')}
-                            className="hover:text-green-600"
-                          >
-                            <XIcon size={12} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {selectedRuntime?.isOverrun && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                <p className="text-sm font-semibold text-amber-900">This cohort is running past the scheduled window.</p>
-                <p className="text-xs text-amber-800 mt-1">Continue monitoring the session and complete it manually when appropriate.</p>
-              </div>
-            )}
-
-            {selectedRuntime && (
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Section Timeline</p>
-                  <p className="text-sm text-gray-500">Each row shows the planned timing plus the actual runtime state.</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Current Remaining</p>
-                  <p className="text-lg font-bold text-gray-900 font-mono">{formatTime(selectedRuntime.currentSectionRemainingSeconds)}</p>
+                  <button onClick={() => setSelectedStudentId(null)} className="text-xs font-medium text-slate-500 hover:text-slate-900">
+                    Back to list
+                  </button>
                 </div>
               </div>
-
-              <div className="space-y-2">
-                {selectedRuntime.sections.map(section => (
-                  <div key={section.sectionKey} className="grid grid-cols-1 lg:grid-cols-6 gap-3 items-center bg-white border border-gray-100 rounded-lg p-3">
-                    <div className="lg:col-span-1">
-                      <p className="font-semibold text-gray-900 capitalize">{section.label}</p>
-                      <p className="text-[10px] uppercase tracking-widest text-gray-400">Order {section.order}</p>
+              <div className="min-h-0 overflow-auto">
+                {filteredSessions.map((session) => (
+                  <button
+                    key={session.id}
+                    type="button"
+                    onClick={() => handleSelectStudent(session.id)}
+                    className={`grid w-full gap-1 border-b border-black/5 px-4 py-3 text-left transition ${selectedStudentId === session.id ? 'bg-slate-950 text-white' : 'bg-transparent text-slate-900 hover:bg-black/[0.025]'}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="truncate text-sm font-medium">{session.name}</span>
+                      <span className={`text-[11px] ${selectedStudentId === session.id ? 'text-slate-300' : 'text-slate-400'}`}>
+                        {session.violations.length} v
+                      </span>
                     </div>
-                    <div className="lg:col-span-1 text-sm text-gray-600">
-                      Planned {section.plannedDurationMinutes} min
+                    <div className={`truncate text-xs ${selectedStudentId === session.id ? 'text-slate-300' : 'text-slate-500'}`}>
+                      {session.studentId} · {session.runtimeCurrentSection ?? session.currentSection ?? 'waiting'}
                     </div>
-                    <div className="lg:col-span-1 text-sm text-gray-600">
-                      Start {formatDateTime(section.actualStartAt)}
-                    </div>
-                    <div className="lg:col-span-1 text-sm text-gray-600">
-                      End {formatDateTime(section.actualEndAt)}
-                    </div>
-                    <div className="lg:col-span-1 text-sm text-gray-600 capitalize">
-                      Status {section.status}
-                    </div>
-                    <div className="lg:col-span-1 text-sm text-gray-600">
-                      Extension +{section.extensionMinutes} min
-                    </div>
-                  </div>
+                  </button>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
+            </aside>
 
-        <div className="p-6 grid grid-cols-4 gap-4 bg-white border-b border-gray-100">
-          {stats.map(stat => (
-            <div key={stat.label} className={`p-4 rounded-sm border border-gray-100 border-t-4 shadow-sm ${stat.bg} ${stat.border} flex items-center gap-4`}>
-              <div className={`p-2 rounded-sm bg-white shadow-sm ${stat.color}`}>
-                <stat.icon size={20} />
+            <StudentDetailPanel
+              student={selectedStudent}
+              cohort={selectedGroup}
+              alerts={selectedScheduleAlerts}
+              auditLogs={scopedAuditLogs}
+              notes={scopedNotes}
+              activeTab={drawerTab}
+              onTabChange={setDrawerTab}
+              onClose={() => setSelectedStudentId(null)}
+              onAction={(action, payload) => selectedStudent && void handleDisciplineAction(selectedStudent.id, action, payload)}
+              onSaveNote={async (content, category) => {
+                if (!selectedScheduleId || !onUpdateNotes) return;
+                const newNote = {
+                  id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+                  scheduleId: selectedScheduleId,
+                  author: 'Sarah K.',
+                  timestamp: new Date().toISOString(),
+                  content,
+                  category,
+                  isResolved: false,
+                };
+                await examRepository.saveSessionNote(newNote);
+                await examRepository.saveAuditLog(
+                  createAuditLog('NOTE_CREATED', selectedStudent?.id, {
+                    noteId: newNote.id,
+                    category,
+                  }),
+                );
+                onUpdateNotes([...notes, newNote]);
+              }}
+              onToggleNote={async (noteId) => {
+                if (!onUpdateNotes) return;
+                const note = notes.find((n) => n.id === noteId);
+                if (!note) return;
+                const updatedNote = { ...note, isResolved: !note.isResolved };
+                await examRepository.saveSessionNote(updatedNote);
+                onUpdateNotes(notes.map((n) => (n.id === noteId ? updatedNote : n)));
+              }}
+            />
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            <div className="grid gap-3 rounded-md border border-slate-200 bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {savedFilters.map((filter) => (
+                    <button key={filter.id} onClick={() => applySavedFilter(filter.id)} className={`rounded-full px-3 py-1 text-xs font-medium ${activeFilterId === filter.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                      {filter.name}
+                    </button>
+                  ))}
+                  {hasActiveFilters ? (
+                    <button onClick={clearFilters} className="text-xs font-medium text-slate-500 hover:text-slate-900">
+                      Clear filters
+                    </button>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setShowAdvancedFilters((value) => !value)} className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${showAdvancedFilters ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>
+                    <Filter size={14} />
+                    Filters
+                  </button>
+                  <button onClick={() => setListDensity((value) => (value === 'compact' ? 'comfortable' : 'compact'))} className="inline-flex items-center gap-2 rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200">
+                    {listDensity === 'compact' ? <LayoutGrid size={14} /> : <List size={14} />}
+                    {listDensity === 'compact' ? 'Comfortable' : 'Compact'}
+                  </button>
+                </div>
               </div>
-              <div>
-                <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{stat.label}</p>
-              </div>
-            </div>
-          ))}
-        </div>
 
-        <div className="px-6 py-4 flex items-center justify-between bg-gray-50 border-b border-gray-100">
-          <div className="flex items-center gap-4">
-	            {selectedScheduleId ? (
-	              <button
-	                onClick={() => {
-	                  handleSelectSchedule(null);
-	                  handleSelectStudent(null);
-	                }}
-                className="flex items-center gap-2 text-sm font-bold text-blue-800 hover:text-blue-900 transition-colors"
-              >
-                <ChevronLeft size={18} />
-                Back to Sessions
-              </button>
+              {showAdvancedFilters ? (
+                <div className="grid gap-3 border-t border-slate-100 pt-3 md:grid-cols-4">
+                  <select value={filterCriteria.status || 'all'} onChange={(e) => updateFilterCriterion('status', e.target.value === 'all' ? undefined : (e.target.value as StudentStatus))} className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none">
+                    <option value="all">All status</option>
+                    <option value="active">Active</option>
+                    <option value="warned">Warned</option>
+                    <option value="paused">Paused</option>
+                    <option value="terminated">Terminated</option>
+                  </select>
+                  <select value={filterCriteria.section || 'all'} onChange={(e) => updateFilterCriterion('section', e.target.value === 'all' ? undefined : (e.target.value as ModuleType))} className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none">
+                    <option value="all">All sections</option>
+                    <option value="listening">Listening</option>
+                    <option value="reading">Reading</option>
+                    <option value="writing">Writing</option>
+                    <option value="speaking">Speaking</option>
+                  </select>
+                  <input type="number" min="0" value={filterCriteria.minViolations ?? ''} onChange={(e) => updateFilterCriterion('minViolations', e.target.value ? Number.parseInt(e.target.value, 10) : undefined)} placeholder="Min violations" className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none" />
+                  <input type="number" min="0" value={filterCriteria.maxTimeRemaining ? Math.floor(filterCriteria.maxTimeRemaining / 60) : ''} onChange={(e) => updateFilterCriterion('maxTimeRemaining', e.target.value ? Number.parseInt(e.target.value, 10) * 60 : undefined)} placeholder="Max time (min)" className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none" />
+                </div>
+              ) : null}
+
+              {hasActiveFilters ? (
+                <div className="flex flex-wrap gap-2">
+                  {filterCriteria.status ? <button onClick={() => removeFilter('status')} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">Status: {filterCriteria.status}<X size={12} /></button> : null}
+                  {filterCriteria.section ? <button onClick={() => removeFilter('section')} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">Section: {filterCriteria.section}<X size={12} /></button> : null}
+                  {filterCriteria.minViolations !== undefined ? <button onClick={() => removeFilter('minViolations')} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">Violations ≥ {filterCriteria.minViolations}<X size={12} /></button> : null}
+                  {filterCriteria.maxTimeRemaining !== undefined ? <button onClick={() => removeFilter('maxTimeRemaining')} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">Time ≤ {Math.floor(filterCriteria.maxTimeRemaining / 60)}m<X size={12} /></button> : null}
+                </div>
+              ) : null}
+            </div>
+
+            {isSelectionMode ? (
+              <div className="grid gap-3 rounded-md border border-slate-200 bg-white px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                <div className="text-sm text-slate-700">{selectedStudentIds.size} students selected for bulk action.</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button onClick={() => { setSelectedStudentIds(new Set(filteredSessions.map((session) => session.id))); setIsSelectionMode(true); }} className="inline-flex items-center gap-2 rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200">
+                    <CheckSquare size={14} />
+                    Select all visible
+                  </button>
+                  <button onClick={() => void handleBulkAction('warn')} className="rounded-md bg-amber-100 px-3 py-2 text-sm font-medium text-amber-800">Warn</button>
+                  <button onClick={() => void handleBulkAction('pause')} className="rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700">Pause</button>
+                  <button onClick={() => void handleBulkAction('resume')} className="rounded-md bg-emerald-100 px-3 py-2 text-sm font-medium text-emerald-800">Resume</button>
+                  <button onClick={() => void handleBulkAction('terminate')} className="rounded-md bg-red-100 px-3 py-2 text-sm font-medium text-red-800">Terminate</button>
+                  <button onClick={() => { setSelectedStudentIds(new Set()); setIsSelectionMode(false); }} className="rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white">Clear</button>
+                </div>
+              </div>
             ) : (
-              <div className="flex items-center gap-2">
-                <LayoutGrid size={18} className="text-gray-400" />
-                <span className="text-sm font-bold text-gray-900">Scheduled Cohorts</span>
-              </div>
-            )}
-
-            {selectedGroup && (
-              <div className="flex items-center gap-2 pl-4 border-l border-gray-100">
-                <span className="text-sm font-medium text-gray-500">Session:</span>
-                <span className="text-sm font-bold text-gray-900">{selectedGroup.examTitle}</span>
-                <span className="text-sm text-gray-500">· {selectedGroup.cohortName}</span>
-                <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm font-bold rounded-full" aria-live="polite">
-                  {filteredSessions.length} students
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-4">
-            {selectedScheduleId && (
-              <>
-                {isSelectionMode ? (
-                  <>
-                    <button
-                      onClick={clearSelection}
-                      className="flex items-center gap-2 text-sm font-bold text-gray-600 hover:text-gray-900 transition-colors"
-                    >
-                      <X size={16} />
-                      Cancel Selection ({selectedStudentIds.size})
-                    </button>
-                    <div className="h-4 w-px bg-gray-100" />
-                    <button
-                      onClick={selectAllFiltered}
-                      className="flex items-center gap-2 text-sm font-bold text-blue-800 hover:text-blue-900 transition-colors"
-                    >
-                      <CheckSquare size={16} />
-                      Select All Filtered
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => setIsSelectionMode(true)}
-                      className="flex items-center gap-2 text-sm font-bold text-gray-600 hover:text-gray-900 transition-colors"
-                    >
-                      <Square size={16} />
-                      Select Students
-                    </button>
-                    <div className="h-4 w-px bg-gray-100" />
-                    <button
-                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                      className={`flex items-center gap-2 text-sm font-bold transition-colors ${
-                        showAdvancedFilters || hasActiveFilters ? 'text-blue-800' : 'text-gray-600 hover:text-gray-900'
-                      }`}
-                    >
-                      <Filter size={16} />
-                      Filters
-                      {hasActiveFilters && (
-                        <span className="px-1.5 py-0.5 bg-blue-600 text-white text-xs font-bold rounded-full">
-                          {Object.keys(filterCriteria).length}
-                        </span>
-                      )}
-                    </button>
-                    <div className="h-4 w-px bg-gray-100" />
-                    <button
-                      onClick={() => toggleSort('violations')}
-                      className={`flex items-center gap-2 text-sm font-bold transition-colors ${sortBy === 'violations' ? 'text-blue-800' : 'text-gray-600 hover:text-gray-900'}`}
-                    >
-                      <ArrowUpDown size={16} className={sortBy === 'violations' ? (sortOrder === 'asc' ? 'rotate-180' : '') : ''} />
-                      Sort
-                    </button>
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6">
-          {!selectedScheduleId ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-	              {scheduleGroups.map(group => (
-	                <ExamGroupCard
-	                  key={group.id}
-	                  group={group}
-	                  onClick={() => handleSelectSchedule(group.scheduleId)}
-	                  hasNotes={false}
-	                />
-              ))}
-              {scheduleGroups.length === 0 && (
-                <div className="col-span-full flex flex-col items-center justify-center h-64 text-gray-400">
-                  <List size={48} className="mb-4 opacity-20" />
-                  <p className="text-lg font-medium">No scheduled sessions</p>
-                  <p className="text-sm">Create a schedule to start monitoring cohorts.</p>
+              <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-4 py-3">
+                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                  <span>{filteredSessions.length} students</span>
+                  <span>{selectedScheduleAlerts.filter((alert) => !alert.isAcknowledged).length} open alerts</span>
+                  <span>{scopedNotes.length} notes</span>
                 </div>
-              )}
+                <button onClick={() => setIsSelectionMode(true)} className="inline-flex items-center gap-2 rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200">
+                  <Square size={14} />
+                  Bulk select
+                </button>
+              </div>
+            )}
+
+            <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+              <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_120px_120px_120px] gap-3 border-b border-slate-200 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                <button onClick={() => toggleSort('name')} className="text-left">Student</button>
+                <div>Section</div>
+                <button onClick={() => toggleSort('status')} className="text-left">Status</button>
+                <button onClick={() => toggleSort('violations')} className="text-left">Violations</button>
+                <div>Last active</div>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {filteredSessions.map((session) => (
+                  <StudentCard
+                    key={session.id}
+                    session={session}
+                    isSelected={selectedStudentId === session.id}
+                    isSelectionEnabled={isSelectionMode}
+                    isMultiSelected={selectedStudentIds.has(session.id)}
+                    compact={listDensity === 'compact'}
+                    onClick={() => handleSelectStudent(session.id)}
+                    onAction={(action) => void handleDisciplineAction(session.id, action)}
+                    onToggleSelection={(event) => {
+                      event.stopPropagation();
+                      handleToggleStudentSelection(session.id);
+                    }}
+                  />
+                ))}
+                {filteredSessions.length === 0 ? <div className="px-4 py-10 text-center text-sm text-slate-500">No students match the current cohort filters.</div> : null}
+              </div>
             </div>
-          ) : (
-            <>
-              {filteredSessions.length > 0 ? (
-                <Virtuoso
-                  style={{ height: VIRTUAL_LIST_HEIGHTS.PROCTOR_STUDENT_LIST }}
-                  data={filteredSessions}
-                  itemContent={(index, session) => (
-                    <div className="p-3">
-                      <StudentCard
-                        key={session.id}
-                        session={session}
-                        isSelected={selectedStudentId === session.id}
-                        isSelectionEnabled={isSelectionMode}
-                        isMultiSelected={selectedStudentIds.has(session.id)}
-                        onClick={() => handleSelectStudent(session.id)}
-                        onAction={(action) => handleDisciplineAction(session.id, action)}
-                        onToggleSelection={(e) => {
-                          e.stopPropagation();
-                          handleToggleStudentSelection(session.id);
-                        }}
-                      />
-                    </div>
-                  )}
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-                  <Users size={48} className="mb-4 opacity-20" />
-                  <p className="text-lg font-medium">No students found</p>
-                  <p className="text-sm">Try adjusting your filters or search query</p>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Floating Bulk Action Bar */}
-      {isSelectionMode && selectedStudentIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white rounded-lg shadow-2xl px-6 py-4 flex items-center gap-4 z-50">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold">{selectedStudentIds.size}</span>
-            <span className="text-sm text-gray-300">selected</span>
           </div>
-          <div className="h-6 w-px bg-gray-700" />
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleBulkAction('warn')}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 rounded-md text-sm font-medium transition-colors"
-              title="Warn selected students"
-            >
-              <AlertTriangle size={16} />
-              Warn
-            </button>
-            <button
-              onClick={() => handleBulkAction('pause')}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md text-sm font-medium transition-colors"
-              title="Pause selected students"
-            >
-              <Pause size={16} />
-              Pause
-            </button>
-            <button
-              onClick={() => handleBulkAction('resume')}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-md text-sm font-medium transition-colors"
-              title="Resume selected students"
-            >
-              <Play size={16} />
-              Resume
-            </button>
-            <button
-              onClick={() => handleBulkAction('terminate')}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-md text-sm font-medium transition-colors"
-              title="Terminate selected students"
-            >
-              <XCircle size={16} />
-              Terminate
-            </button>
-          </div>
-          <div className="h-6 w-px bg-gray-700" />
-          <button
-            onClick={clearSelection}
-            className="text-gray-400 hover:text-white transition-colors"
-            title="Clear selection"
-          >
-            <X size={20} />
-          </button>
-        </div>
-      )}
-
-	      <StudentDetailPanel
-	        student={selectedStudent}
-	        onClose={() => handleSelectStudent(null)}
-	        onAction={(action, payload) => {
-	          if (!selectedStudent) return;
-	          void handleDisciplineAction(selectedStudent.id, action, payload);
-	        }}
-	      />
-	    </div>
-	  );
+        )}
+      </section>
+    </div>
+  );
 });

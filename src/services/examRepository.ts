@@ -71,10 +71,12 @@ export interface IExamRepository {
 
   // Audit log operations
   getAuditLogsByScheduleId(scheduleId: string): Promise<SessionAuditLog[]>;
+  getAllAuditLogs(): Promise<SessionAuditLog[]>;
   saveAuditLog(log: SessionAuditLog): Promise<void>;
 
   // Session note operations
   getSessionNotesByScheduleId(scheduleId: string): Promise<SessionNote[]>;
+  getAllSessionNotes(): Promise<SessionNote[]>;
   saveSessionNote(note: SessionNote): Promise<void>;
   deleteSessionNote(noteId: string): Promise<void>;
 
@@ -326,6 +328,11 @@ export class LocalStorageExamRepository implements IExamRepository {
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }
 
+  async getAllAuditLogs(): Promise<SessionAuditLog[]> {
+    return this.getItem<SessionAuditLog>(STORAGE_KEY_AUDIT_LOGS)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }
+
   async saveAuditLog(log: SessionAuditLog): Promise<void> {
     const logs = this.getItem<SessionAuditLog>(STORAGE_KEY_AUDIT_LOGS);
     logs.push(log);
@@ -337,6 +344,11 @@ export class LocalStorageExamRepository implements IExamRepository {
     const notes = this.getItem<SessionNote>(STORAGE_KEY_SESSION_NOTES);
     return notes
       .filter(note => note.scheduleId === scheduleId)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }
+
+  async getAllSessionNotes(): Promise<SessionNote[]> {
+    return this.getItem<SessionNote>(STORAGE_KEY_SESSION_NOTES)
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }
 

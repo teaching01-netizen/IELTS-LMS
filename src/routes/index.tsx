@@ -219,7 +219,7 @@ export const appRoutes = [
         ),
       },
       {
-        path: 'student/:scheduleId',
+        path: 'student/:scheduleId/:studentId?',
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>
             <StudentSessionRoute />

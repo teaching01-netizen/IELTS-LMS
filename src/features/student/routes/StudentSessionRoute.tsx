@@ -11,7 +11,7 @@ import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRout
  * as internal runtime phases inside a single route module.
  */
 export function StudentSessionRoute() {
-  const { scheduleId } = useParams<{ scheduleId: string }>();
+  const { scheduleId, studentId } = useParams<{ scheduleId: string; studentId?: string }>();
   const navigate = useNavigate();
   const {
     attemptSnapshot,
@@ -22,7 +22,7 @@ export function StudentSessionRoute() {
     state,
     refreshRuntime,
   } =
-    useStudentSessionRouteData(scheduleId);
+    useStudentSessionRouteData(scheduleId, studentId);
 
   if (isLoading) {
     return <LoadingSurface label="Loading Exam..." />;

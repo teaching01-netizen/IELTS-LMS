@@ -1,6 +1,12 @@
 import React from 'react';
 import { Button } from '../ui/Button';
-import type { StudentQuestionDescriptor } from '@services/examAdapterService';
+import {
+  countQuestionSlots,
+  getAnsweredSlotCount,
+  getQuestionNumberLabel,
+  isQuestionAnswered,
+  type StudentQuestionDescriptor,
+} from '@services/examAdapterService';
 import type { StudentAnswer } from './providers/StudentRuntimeProvider';
 
 interface StudentFooterProps {
@@ -40,19 +46,11 @@ export function StudentFooter({
     index,
   }));
 
-  const totalQuestions = questions.reduce(
-    (count, question) => count + (question.isMulti ? question.correctCount : 1),
+  const totalQuestions = countQuestionSlots(questions);
+  const answeredCount = questions.reduce(
+    (count, question) => count + getAnsweredSlotCount(question, answers),
     0,
   );
-  const answeredCount = questions.reduce((count, question) => {
-    const answer = answers[question.id];
-
-    if (question.isMulti) {
-      return count + (Array.isArray(answer) ? answer.length : 0);
-    }
-
-    return count + (answer !== undefined && answer !== '' ? 1 : 0);
-  }, 0);
 
   return (
     <footer
@@ -94,14 +92,9 @@ export function StudentFooter({
               {isActiveGroup ? (
                 <div className="flex items-center gap-0.5 md:gap-1">
                   {groupQuestions.map((question) => {
-                    const globalIndex =
-                      questions.findIndex((candidate) => candidate.id === question.id) + 1;
                     const isCurrent = question.id === currentQuestionId;
-                    const answer = answers[question.id];
-                    const isAnswered = question.isMulti
-                      ? Array.isArray(answer) && answer.length > 0
-                      : answer !== undefined && answer !== '';
                     const isFlagged = flags[question.id];
+                    const isAnswered = isQuestionAnswered(question, answers);
 
                     return (
                       <button
@@ -117,9 +110,7 @@ export function StudentFooter({
                                 : 'bg-white border-gray-100 text-gray-700'
                         }`}
                       >
-                        {question.isMulti
-                          ? `${globalIndex}-${globalIndex + question.correctCount - 1}`
-                          : globalIndex}
+                        {getQuestionNumberLabel(questions, question.id)}
                         {isFlagged && !isCurrent ? (
                           <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-amber-700 rounded-full border border-white"></div>
                         ) : null}
@@ -134,28 +125,30 @@ export function StudentFooter({
                       className="h-full bg-blue-800"
                       style={{
                         width: `${
-                          (groupQuestions.filter((question) => {
-                            const answer = answers[question.id];
-                            return question.isMulti
-                              ? Array.isArray(answer) && answer.length > 0
-                              : answer !== undefined && answer !== '';
-                          }).length /
-                            groupQuestions.length) *
+                          (groupQuestions.reduce(
+                            (count, question) => count + getAnsweredSlotCount(question, answers),
+                            0,
+                          ) /
+                            groupQuestions.reduce(
+                              (count, question) =>
+                                count + (question.isMulti ? question.correctCount : 1),
+                              0,
+                            )) *
                           100
                         }%`,
                       }}
                     ></div>
                   </div>
                   <span className="text-[7px] md:text-[8px] lg:text-[9px] font-bold text-gray-500">
-                    {
-                      groupQuestions.filter((question) => {
-                        const answer = answers[question.id];
-                        return question.isMulti
-                          ? Array.isArray(answer) && answer.length > 0
-                          : answer !== undefined && answer !== '';
-                      }).length
-                    }
-                    /{groupQuestions.length}
+                    {groupQuestions.reduce(
+                      (count, question) => count + getAnsweredSlotCount(question, answers),
+                      0,
+                    )}
+                    /
+                    {groupQuestions.reduce(
+                      (count, question) => count + (question.isMulti ? question.correctCount : 1),
+                      0,
+                    )}
                   </span>
                 </div>
               )}

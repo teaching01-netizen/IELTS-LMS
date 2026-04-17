@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ExamState, QuestionAnswer } from '../../types';
 import { QuestionRenderer } from './QuestionRenderer';
 import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight, ArrowLeft, ArrowRight, Flag } from 'lucide-react';
-import { flattenListeningQuestions, getBlockQuestionCount } from '../../utils/examUtils';
+import { getBlockQuestionCount } from '../../utils/examUtils';
+import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -19,7 +20,96 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(70);
   const [leftWidth, setLeftWidth] = useState(50);
+  const questionContainerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const allQuestions = useMemo(() => getStudentQuestionsForModule(state, 'listening'), [state]);
+  const currentQ = allQuestions.find((question) => question.id === currentQuestionId) || allQuestions[0];
+  const activePartId = currentQ?.groupId || state.listening.parts[0]?.id;
+  const activePart = state.listening.parts.find((part) => part.id === activePartId) || state.listening.parts[0];
+  const currentIndex = allQuestions.findIndex((question) => question.id === currentQuestionId);
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex >= 0 && currentIndex < allQuestions.length - 1;
+  const previousQuestion = hasPrev ? allQuestions[currentIndex - 1] : undefined;
+  const nextQuestion = hasNext ? allQuestions[currentIndex + 1] : undefined;
+  const splitPaneStyle = useMemo(
+    () =>
+      ({
+        ['--listening-pane-width' as string]: `${leftWidth}%`,
+        ['--question-pane-width' as string]: `calc(${100 - leftWidth}% - 16px)`,
+      }) as React.CSSProperties,
+    [leftWidth],
+  );
+  const hasAudio = Boolean(activePart?.audioUrl);
+
+  useEffect(() => {
+    if (currentQuestionId && questionContainerRef.current) {
+      const element = document.getElementById(`question-${currentQuestionId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  }, [currentQuestionId]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    audio.volume = volume / 100;
+  }, [volume]);
+
+  useEffect(() => {
+    setIsPlaying(false);
+    setProgress(0);
+  }, [activePart?.audioUrl]);
+
+  const syncProgressFromAudio = () => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+      setProgress(0);
+      return;
+    }
+
+    setProgress((audio.currentTime / audio.duration) * 100);
+  };
+
+  const seekToPercent = (percent: number) => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+      return;
+    }
+
+    const bounded = Math.min(100, Math.max(0, percent));
+    audio.currentTime = (bounded / 100) * audio.duration;
+    setProgress(bounded);
+  };
+
+  const adjustCurrentTime = (deltaSeconds: number) => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+      return;
+    }
+
+    audio.currentTime = Math.min(audio.duration, Math.max(0, audio.currentTime + deltaSeconds));
+    syncProgressFromAudio();
+  };
+
+  const togglePlayback = async () => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    if (!isPlaying) {
+      await audio.play();
+      setIsPlaying(true);
+      return;
+    }
+
+    audio.pause();
+    setIsPlaying(false);
+  };
   
   const handleDrag = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
@@ -46,54 +136,17 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
     document.addEventListener('touchend', handleMouseUp);
   };
 
-  const allQuestions = flattenListeningQuestions(state.listening.parts);
-  const currentQ = allQuestions.find(q => 
-    q.block.type === 'MULTI_MCQ' ? q.block.id === currentQuestionId : q.question?.id === currentQuestionId
-  ) || allQuestions[0];
-  const activePartId = currentQ?.partId || state.listening.parts[0]?.id;
-  
-  const activePart = state.listening.parts.find(p => p.id === activePartId) || state.listening.parts[0];
-
-  const currentIndex = allQuestions.findIndex(q => 
-    q.block.type === 'MULTI_MCQ' ? q.block.id === currentQuestionId : q.question?.id === currentQuestionId
-  );
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < allQuestions.length - 1;
-  const previousQuestion = hasPrev ? allQuestions[currentIndex - 1] : undefined;
-  const nextQuestion = hasNext ? allQuestions[currentIndex + 1] : undefined;
-
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | undefined;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setProgress(p => {
-          if (p >= 100) {
-            setIsPlaying(false);
-            return 100;
-          }
-          return p + 0.1;
-        });
-      }, 100);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isPlaying]);
-
-  const formatTime = (percent: number) => {
-    const totalSeconds = 5 * 60 + 43;
-    const currentSeconds = Math.floor((percent / 100) * totalSeconds);
-    const m = Math.floor(currentSeconds / 60);
-    const s = currentSeconds % 60;
+  const formatTime = (seconds: number) => {
+    const bounded = Math.max(0, Math.floor(seconds));
+    const m = Math.floor(bounded / 60);
+    const s = bounded % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
-
-  const getQuestionId = (item: (typeof allQuestions)[number] | undefined): string => {
-    if (!item) {
-      return '';
-    }
-    return item.block.type === 'MULTI_MCQ' ? item.block.id : (item.question?.id || '');
-  };
+  const totalSeconds =
+    audioRef.current && Number.isFinite(audioRef.current.duration) && audioRef.current.duration > 0
+      ? audioRef.current.duration
+      : 0;
+  const currentSeconds = totalSeconds > 0 ? (progress / 100) * totalSeconds : 0;
 
   if (!activePart) {
     return null;
@@ -101,12 +154,20 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
 
   return (
     <div className="flex flex-col h-full w-full bg-white">
-      <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative border-t border-gray-300">
-        <div style={{ width: `${leftWidth}%` }} className="h-full overflow-y-auto p-4 md:p-6 lg:p-8 pr-4 md:pr-6 lg:pr-12 font-sans text-sm md:text-base leading-relaxed text-gray-900 min-w-[260px] md:min-w-[280px] lg:min-w-[300px]">
+      <div className="relative flex flex-1 flex-col overflow-hidden border-t border-gray-300 md:flex-row" style={splitPaneStyle}>
+        <div className="h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12">
           <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePart.title}</h2>
           
           {activePart.audioUrl && (
-            <audio ref={audioRef} src={activePart.audioUrl} />
+            <audio
+              ref={audioRef}
+              src={activePart.audioUrl}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onEnded={() => setIsPlaying(false)}
+              onTimeUpdate={syncProgressFromAudio}
+              onLoadedMetadata={syncProgressFromAudio}
+            />
           )}
           
           <div className="w-full bg-gray-50 rounded-xl p-4 md:p-6 border border-gray-200">
@@ -114,36 +175,67 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
             
             <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
               <button 
-                onClick={() => setIsPlaying(!isPlaying)}
+                type="button"
+                onClick={() => void togglePlayback()}
+                disabled={!hasAudio}
                 className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 shadow-md flex-shrink-0"
+                aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
               >
                 {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-1" />}
               </button>
               
               <div className="flex-1">
-                <div className="h-2 bg-gray-200 rounded-full overflow-hidden relative cursor-pointer" onClick={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const x = e.clientX - rect.left;
-                  setProgress((x / rect.width) * 100);
-                }}>
+                <div
+                  className="h-2 bg-gray-200 rounded-full overflow-hidden relative cursor-pointer"
+                  data-testid="listening-progress-track"
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    seekToPercent((x / rect.width) * 100);
+                  }}
+                >
                   <div className="h-full bg-blue-500" style={{ width: `${progress}%` }}></div>
                 </div>
                 <div className="flex justify-between mt-2 text-[10px] md:text-xs font-medium text-gray-500 font-mono">
-                  <span>{formatTime(progress)}</span>
-                  <span>05:43</span>
+                  <span>{formatTime(currentSeconds)}</span>
+                  <span>{formatTime(totalSeconds)}</span>
                 </div>
               </div>
             </div>
             
             <div className="flex items-center gap-3 md:gap-4 lg:gap-6 text-gray-600 flex-wrap">
               <div className="flex items-center gap-2">
-                <button onClick={() => setProgress(Math.max(0, progress - 5))} className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full" title="Rewind 10s"><SkipBack size={14} /></button>
-                <button onClick={() => setProgress(Math.min(100, progress + 5))} className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full" title="Forward 10s"><SkipForward size={14} /></button>
+                <button
+                  type="button"
+                  onClick={() => adjustCurrentTime(-10)}
+                  className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
+                  title="Rewind 10s"
+                  disabled={!hasAudio}
+                >
+                  <SkipBack size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => adjustCurrentTime(10)}
+                  className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
+                  title="Forward 10s"
+                  disabled={!hasAudio}
+                >
+                  <SkipForward size={14} />
+                </button>
               </div>
               <div className="h-3 md:h-4 w-px bg-gray-300 hidden sm:block"></div>
               <div className="flex items-center gap-2 flex-1 max-w-[200px] md:max-w-xs">
                 <Volume2 size={14} />
-                <input type="range" min="0" max="100" value={volume} onChange={(e) => setVolume(parseInt(e.target.value))} className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={volume}
+                  onChange={(e) => setVolume(Number.parseInt(e.target.value, 10))}
+                  className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                  aria-label="Audio volume"
+                />
               </div>
             </div>
           </div>
@@ -173,9 +265,11 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
           </div>
         </div>
 
-        <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10">
+        <div className="relative flex h-full w-full min-w-0 flex-col md:min-w-[320px] lg:w-[var(--question-pane-width)]">
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10" ref={questionContainerRef}>
             {activePart.blocks.map((block) => {
+              const blockQuestions = allQuestions.filter((question) => question.blockId === block.id);
+              const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
               let blockStartQ = 1;
               for (const p of state.listening.parts) {
                 for (const b of p.blocks) {
@@ -198,53 +292,76 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
                   <div className="space-y-8">
                     {('questions' in block) ? (
                       block.questions.map((q, qIdx) => {
-                        const flattened = allQuestions.find(item =>
-                          item.block.id === block.id && item.question?.id === q.id
-                        );
-                        const globalIdx = flattened ? flattened.index + 1 : blockStartQ + qIdx;
+                        const questionEntries = blockQuestions.filter((entry) => entry.question?.id === q.id);
+                        const firstEntry = questionEntries[0];
+                        const globalIdx =
+                          (firstEntry ? getQuestionStartNumber(allQuestions, firstEntry.id) : null) ??
+                          blockStartQ + qIdx;
+                        const inlineFlags = block.type === 'SENTENCE_COMPLETION' || block.type === 'NOTE_COMPLETION';
+                        const flagId = firstEntry?.id;
 
                         return (
-                          <div key={q.id} id={`question-${q.id}`} className="relative">
-                            {onToggleFlag && (
+                          <div
+                            key={q.id}
+                            id={!inlineFlags && flagId ? `question-${flagId}` : undefined}
+                            className="relative"
+                          >
+                            {onToggleFlag && flagId && !inlineFlags ? (
                               <button
-                                onClick={(e) => { e.stopPropagation(); onToggleFlag(q.id); }}
+                                onClick={(e) => { e.stopPropagation(); onToggleFlag(flagId); }}
                                 className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
-                                  flags[q.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                                  flags[flagId] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
                                 }`}
-                                title={flags[q.id] ? 'Unflag question' : 'Flag question'}
+                                title={flags[flagId] ? 'Unflag question' : 'Flag question'}
                               >
-                                <Flag size={14} className={flags[q.id] ? 'fill-current' : ''} />
+                                <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
                               </button>
-                            )}
+                            ) : null}
                             <QuestionRenderer
                               question={q}
                               block={block}
                               number={globalIdx}
-                              answer={answers[q.id]}
-                              onChange={(val) => onAnswerChange(q.id, val)}
+                              answer={answers[firstEntry?.answerKey ?? q.id]}
+                              onChange={(val) => onAnswerChange(firstEntry?.answerKey ?? q.id, val)}
+                              isFlagged={flagId ? Boolean(flags[flagId]) : false}
+                              isActive={questionEntries.some((entry) => entry.id === currentQuestionId)}
+                              slotIds={questionEntries.map((entry) => entry.id)}
+                              currentQuestionId={currentQuestionId}
+                              flags={flags}
+                              onToggleFlag={onToggleFlag}
                             />
                           </div>
                         );
                       })
                     ) : (
-                      <div key={block.id} id={`question-${block.id}`} className="relative">
-                        {onToggleFlag && (
+                      <div
+                        key={block.id}
+                        id={singleBlockQuestion ? `question-${singleBlockQuestion.id}` : undefined}
+                        className="relative"
+                      >
+                        {onToggleFlag && singleBlockQuestion ? (
                           <button
-                            onClick={(e) => { e.stopPropagation(); onToggleFlag(block.id); }}
+                            onClick={(e) => { e.stopPropagation(); onToggleFlag(singleBlockQuestion.id); }}
                             className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
-                              flags[block.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                              flags[singleBlockQuestion.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
                             }`}
-                            title={flags[block.id] ? 'Unflag question' : 'Flag question'}
+                            title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
                           >
-                            <Flag size={14} className={flags[block.id] ? 'fill-current' : ''} />
+                            <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
                           </button>
-                        )}
+                        ) : null}
                         <QuestionRenderer
                           question={null}
                           block={block}
-                          number={blockStartQ}
-                          answer={answers[block.id]}
-                          onChange={(val) => onAnswerChange(block.id, val)}
+                          number={(singleBlockQuestion ? getQuestionStartNumber(allQuestions, singleBlockQuestion.id) : null) ?? blockStartQ}
+                          answer={answers[singleBlockQuestion?.answerKey ?? block.id]}
+                          onChange={(val) => onAnswerChange(singleBlockQuestion?.answerKey ?? block.id, val)}
+                          isFlagged={singleBlockQuestion ? Boolean(flags[singleBlockQuestion.id]) : false}
+                          isActive={blockQuestions.some((entry) => entry.id === currentQuestionId)}
+                          slotIds={blockQuestions.map((entry) => entry.id)}
+                          currentQuestionId={currentQuestionId}
+                          flags={flags}
+                          onToggleFlag={onToggleFlag}
                         />
                       </div>
                     )}
@@ -256,13 +373,13 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
 
           <div className="absolute bottom-16 md:bottom-20 right-4 md:right-6 flex shadow-md z-20">
             <button 
-              onClick={() => previousQuestion && onNavigate(getQuestionId(previousQuestion))}
+              onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
               className={`w-9 h-9 md:w-10 md:h-10 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
             >
               <ArrowLeft size={16} strokeWidth={3} />
             </button>
             <button 
-              onClick={() => nextQuestion && onNavigate(getQuestionId(nextQuestion))}
+              onClick={() => nextQuestion && onNavigate(nextQuestion.id)}
               className={`w-9 h-9 md:w-10 md:h-10 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
             >
               <ArrowRight size={16} strokeWidth={3} />

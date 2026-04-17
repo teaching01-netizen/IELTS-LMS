@@ -25,6 +25,7 @@ export type ExamPhase = 'pre-check' | 'lobby' | 'exam' | 'post-exam';
 export type StudentAnswer = QuestionAnswer;
 export type BlockingReason =
   | 'cohort_paused'
+  | 'proctor_paused'
   | 'not_started'
   | 'waiting_for_runtime'
   | 'waiting_for_advance'
@@ -46,9 +47,11 @@ interface RuntimeReducerState {
   waitingForCohortAdvance: boolean;
   violations: Violation[];
   fullscreenViolationCount: number;
+  proctorStatus: StudentAttempt['proctorStatus'];
+  proctorNote: string | null;
   blockingReasonOverride: Exclude<
     BlockingReason,
-    'cohort_paused' | 'not_started' | 'waiting_for_runtime' | 'waiting_for_advance' | null
+    'cohort_paused' | 'proctor_paused' | 'not_started' | 'waiting_for_runtime' | 'waiting_for_advance' | null
   > | null;
   attemptSyncState: AttemptSyncState;
 }
@@ -148,6 +151,7 @@ function deriveBlockingState(
   runtimeBacked: boolean,
   runtimeSnapshot: ExamSessionRuntime | null,
   waitingForCohortAdvance: boolean,
+  proctorStatus: StudentAttempt['proctorStatus'],
   blockingReasonOverride: RuntimeReducerState['blockingReasonOverride'],
   fallbackTimeRemaining: number,
 ): RuntimeBlockingState {
@@ -158,6 +162,15 @@ function deriveBlockingState(
     return {
       active: true,
       reason: blockingReasonOverride,
+      runtimeStatus,
+      timeRemaining,
+    };
+  }
+
+  if (proctorStatus === 'paused') {
+    return {
+      active: true,
+      reason: 'proctor_paused',
       runtimeStatus,
       timeRemaining,
     };
@@ -227,6 +240,10 @@ function getInitialPhase(
   runtimeSnapshot: ExamSessionRuntime | null,
   attemptSnapshot: StudentAttempt | null,
 ): ExamPhase {
+  if (attemptSnapshot?.proctorStatus === 'terminated') {
+    return 'post-exam';
+  }
+
   if (runtimeSnapshot?.status === 'completed') {
     return 'post-exam';
   }
@@ -269,6 +286,8 @@ function createInitialRuntimeState(
     waitingForCohortAdvance: false,
     violations: attemptSnapshot?.violations ?? [],
     fullscreenViolationCount: countFullscreenViolations(attemptSnapshot?.violations ?? []),
+    proctorStatus: attemptSnapshot?.proctorStatus ?? 'active',
+    proctorNote: attemptSnapshot?.proctorNote ?? null,
     blockingReasonOverride: null,
     attemptSyncState: attemptSnapshot?.recovery.syncState ?? 'idle',
   };
@@ -283,7 +302,7 @@ function runtimeReducer(
       const runtimeStatus = action.snapshot?.status ?? 'not_started';
       const moduleChanged = action.nextModule !== state.currentModule;
       const nextPhase =
-        runtimeStatus === 'completed'
+        state.proctorStatus === 'terminated' || runtimeStatus === 'completed'
           ? 'post-exam'
           : state.phase === 'pre-check'
             ? 'pre-check'
@@ -313,14 +332,21 @@ function runtimeReducer(
       };
     }
     case 'hydrate_attempt': {
+      const nextPhase =
+        action.snapshot.proctorStatus === 'terminated'
+          ? 'post-exam'
+          : action.snapshot.phase;
+
       if (
-        state.phase === action.snapshot.phase &&
+        state.phase === nextPhase &&
         state.currentModule === action.snapshot.currentModule &&
         state.currentQuestionId === action.snapshot.currentQuestionId &&
         JSON.stringify(state.answers) === JSON.stringify(action.snapshot.answers) &&
         JSON.stringify(state.writingAnswers) === JSON.stringify(action.snapshot.writingAnswers) &&
         JSON.stringify(state.flags) === JSON.stringify(action.snapshot.flags) &&
         JSON.stringify(state.violations) === JSON.stringify(action.snapshot.violations) &&
+        state.proctorStatus === action.snapshot.proctorStatus &&
+        state.proctorNote === action.snapshot.proctorNote &&
         state.attemptSyncState === action.snapshot.recovery.syncState
       ) {
         return state;
@@ -328,7 +354,7 @@ function runtimeReducer(
 
       return {
         ...state,
-        phase: action.snapshot.phase,
+        phase: nextPhase,
         currentModule: action.snapshot.currentModule,
         currentQuestionId: action.snapshot.currentQuestionId,
         answers: action.snapshot.answers,
@@ -336,6 +362,8 @@ function runtimeReducer(
         flags: action.snapshot.flags,
         violations: action.snapshot.violations,
         fullscreenViolationCount: countFullscreenViolations(action.snapshot.violations),
+        proctorStatus: action.snapshot.proctorStatus,
+        proctorNote: action.snapshot.proctorNote,
         attemptSyncState: action.snapshot.recovery.syncState,
       };
     }
@@ -502,11 +530,18 @@ export function StudentRuntimeProvider({
       return;
     }
 
+    if (
+      runtimeState.attemptSyncState !== 'idle' &&
+      runtimeState.attemptSyncState !== 'saved'
+    ) {
+      return;
+    }
+
     dispatch({
       type: 'hydrate_attempt',
       snapshot: attemptSnapshot,
     });
-  }, [attemptSnapshot]);
+  }, [attemptSnapshot, runtimeState.attemptSyncState]);
 
   useEffect(() => {
     if (!runtimeBacked) {
@@ -557,11 +592,13 @@ export function StudentRuntimeProvider({
         runtimeBacked,
         runtimeSnapshot,
         runtimeState.waitingForCohortAdvance,
+        runtimeState.proctorStatus,
         runtimeState.blockingReasonOverride,
         runtimeState.timeRemaining,
       ),
     [
       runtimeBacked,
+      runtimeState.proctorStatus,
       runtimeSnapshot,
       runtimeState.blockingReasonOverride,
       runtimeState.timeRemaining,

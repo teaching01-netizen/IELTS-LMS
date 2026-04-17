@@ -1,273 +1,702 @@
 import React from 'react';
 import {
-  QuestionBlock, TFNGBlock, ClozeBlock, MatchingBlock, MapBlock, MultiMCQBlock,
-  SingleMCQBlock, ShortAnswerBlock, SentenceCompletionBlock, DiagramLabelingBlock,
-  FlowChartBlock, TableCompletionBlock, NoteCompletionBlock, ClassificationBlock,
-  MatchingFeaturesBlock, QuestionAnswer,
-  TFNGQuestion, ClozeQuestion, MapQuestion, MatchingQuestion,
-  ShortAnswerQuestion, SentenceCompletionQuestion, NoteCompletionQuestion
+  ClassificationBlock,
+  ClozeBlock,
+  ClozeQuestion,
+  DiagramLabelingBlock,
+  FlowChartBlock,
+  MapBlock,
+  MapQuestion,
+  MatchingBlock,
+  MatchingFeaturesBlock,
+  MatchingQuestion,
+  MultiMCQBlock,
+  NoteCompletionQuestion,
+  QuestionAnswer,
+  QuestionBlock,
+  SentenceCompletionBlock,
+  SentenceCompletionQuestion,
+  ShortAnswerBlock,
+  ShortAnswerQuestion,
+  SingleMCQBlock,
+  TableCompletionBlock,
+  TFNGBlock,
+  TFNGQuestion,
 } from '../../types';
 
 interface QuestionRendererProps {
-  question: TFNGQuestion | ClozeQuestion | MapQuestion | MatchingQuestion | ShortAnswerQuestion | SentenceCompletionQuestion | NoteCompletionQuestion | null;
+  question:
+    | TFNGQuestion
+    | ClozeQuestion
+    | MapQuestion
+    | MatchingQuestion
+    | ShortAnswerQuestion
+    | SentenceCompletionQuestion
+    | NoteCompletionQuestion
+    | null;
   block: QuestionBlock;
   number: number;
   answer: QuestionAnswer;
   onChange: (val: QuestionAnswer) => void;
-  isFlagged?: boolean;
-  isActive?: boolean;
+  isFlagged?: boolean | undefined;
+  isActive?: boolean | undefined;
+  slotIds?: string[] | undefined;
+  currentQuestionId?: string | null | undefined;
+  flags?: Record<string, boolean> | undefined;
+  onToggleFlag?: ((id: string) => void) | undefined;
 }
 
-export function QuestionRenderer({ question, block, number, answer, onChange, isFlagged, isActive = false }: QuestionRendererProps) {
-  const renderTFNG = (tfngBlock: TFNGBlock, q: TFNGQuestion) => {
-    const options = tfngBlock.mode === 'TFNG' 
-      ? ['T', 'F', 'NG'] as const
-      : ['Y', 'N', 'NG'] as const;
-    const labels = tfngBlock.mode === 'TFNG'
-      ? { 'T': 'TRUE', 'F': 'FALSE', 'NG': 'NOT GIVEN' }
-      : { 'Y': 'YES', 'N': 'NO', 'NG': 'NOT GIVEN' };
-    
+export function QuestionRenderer({
+  question,
+  block,
+  number,
+  answer,
+  onChange,
+  isFlagged,
+  isActive = false,
+  slotIds = [],
+  currentQuestionId = null,
+  flags = {},
+  onToggleFlag,
+}: QuestionRendererProps) {
+  const stringArrayAnswer = Array.isArray(answer) ? answer : [];
+
+  const getSlotId = (index: number, fallback: string) => slotIds[index] ?? fallback;
+  const getSlotClassName = (slotId: string) => {
+    const activeClass = currentQuestionId === slotId ? 'ring-2 ring-blue-500 ring-offset-2' : '';
+    const flaggedClass = flags[slotId] ? 'border-amber-300 bg-amber-50' : 'border-transparent';
+    return `rounded-lg border p-2 transition-colors ${activeClass} ${flaggedClass}`;
+  };
+
+  const renderFlagButton = (slotId: string) => {
+    if (!onToggleFlag) {
+      return null;
+    }
+
     return (
-      <div className="flex flex-col gap-4">
-        <div className="flex gap-3 items-start">
-          <div className="min-w-[24px] h-[24px] border-2 border-blue-500 text-blue-600 flex items-center justify-center font-bold text-sm mt-0.5">
+      <button
+        type="button"
+        onClick={() => onToggleFlag(slotId)}
+        className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
+          flags[slotId]
+            ? 'border-amber-700 bg-amber-700 text-white'
+            : 'border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700'
+        }`}
+        aria-label={flags[slotId] ? 'Unflag question' : 'Flag question'}
+        title={flags[slotId] ? 'Unflag question' : 'Flag question'}
+      >
+        <span aria-hidden="true" className="text-sm">
+          ⚑
+        </span>
+      </button>
+    );
+  };
+
+  const updateIndexedAnswer = (index: number, value: string, total: number) => {
+    const next = Array.from({ length: total }, (_, candidateIndex) =>
+      candidateIndex === index ? value : (stringArrayAnswer[candidateIndex] ?? ''),
+    );
+    onChange(next);
+  };
+
+  const renderTextField = (
+    slotId: string,
+    slotNumber: number,
+    value: string,
+    changeValue: (nextValue: string) => void,
+    extraCopy?: string,
+  ) => (
+    <div id={`question-${slotId}`} className={getSlotClassName(slotId)}>
+      <div className="flex items-center gap-3">
+        <span className="min-w-[32px] font-bold text-gray-900">{slotNumber}.</span>
+        <input
+          type="text"
+          name={slotId}
+          value={value}
+          onChange={(event) => changeValue(event.target.value)}
+          className="w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          placeholder="Enter answer..."
+          autoComplete="off"
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          aria-label={`Answer for question ${slotNumber}`}
+        />
+        {renderFlagButton(slotId)}
+      </div>
+      {extraCopy ? <p className="mt-2 pl-11 text-sm text-gray-600">{extraCopy}</p> : null}
+    </div>
+  );
+
+  const renderTFNG = (tfngBlock: TFNGBlock, q: TFNGQuestion) => {
+    const options = tfngBlock.mode === 'TFNG' ? (['T', 'F', 'NG'] as const) : (['Y', 'N', 'NG'] as const);
+    const labels =
+      tfngBlock.mode === 'TFNG'
+        ? { T: 'TRUE', F: 'FALSE', NG: 'NOT GIVEN' }
+        : { Y: 'YES', N: 'NO', NG: 'NOT GIVEN' };
+
+    return (
+      <fieldset className="flex flex-col gap-4">
+        <legend className="flex gap-3 items-start">
+          <div className="mt-0.5 flex h-[24px] min-w-[24px] items-center justify-center border-2 border-blue-500 text-sm font-bold text-blue-600">
             {number}
           </div>
-          <span className="text-gray-900 leading-relaxed">{q.statement}</span>
-        </div>
-        <div className="flex flex-col gap-3 ml-9">
-          {options.map(opt => (
-            <label key={opt} className="flex items-center gap-3 cursor-pointer group">
-              <input 
-                type="radio" 
-                name={`q-${q.id}`} 
-                checked={answer === opt} 
-                onChange={() => onChange(opt)} 
-                className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+          <span className="leading-relaxed text-gray-900">{q.statement}</span>
+        </legend>
+        <div className="ml-9 flex flex-col gap-3">
+          {options.map((option) => (
+            <label key={option} className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="radio"
+                name={`q-${q.id}`}
+                checked={answer === option}
+                onChange={() => onChange(option)}
+                className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              <span className="text-sm text-gray-900 uppercase">{labels[opt as keyof typeof labels]}</span>
+              <span className="text-sm uppercase text-gray-900">{labels[option as keyof typeof labels]}</span>
             </label>
           ))}
         </div>
-      </div>
+      </fieldset>
     );
   };
 
   const renderCloze = (clozeBlock: ClozeBlock, q: ClozeQuestion) => {
+    void clozeBlock;
     return (
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <span className="font-bold text-gray-900 min-w-[24px]">{number}.</span>
+          <span className="min-w-[24px] font-bold text-gray-900">{number}.</span>
           <span className="text-gray-800">{q.prompt}</span>
         </div>
         <div className="ml-9 mt-2">
           <input
             type="text"
-            value={answer || ''}
-            onChange={(e) => onChange(e.target.value)}
-            className={`w-full max-w-md border-2 rounded-md px-4 py-2 text-base transition-colors focus:outline-none focus:border-blue-500 focus:ring-3 focus:ring-blue-100 ${answer ? 'border-green-500 bg-green-50' : 'border-gray-300'}`}
-            placeholder={`(${number})`}
+            name={q.id}
+            value={typeof answer === 'string' ? answer : ''}
+            onChange={(event) => onChange(event.target.value)}
+            className="w-full max-w-md rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            placeholder="Enter answer..."
             autoComplete="off"
-            spellCheck="false"
+            spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
+            aria-label={`Answer for question ${number}`}
           />
         </div>
       </div>
     );
   };
 
-  const renderMatching = (matchingBlock: MatchingBlock, q: MatchingQuestion) => {
-    return (
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-4">
-          <span className="font-bold text-gray-900 min-w-[24px]">{number}.</span>
-          <span className="text-gray-800 font-medium">Paragraph {q.paragraphLabel}</span>
-          
-          <select
-            value={answer || ''}
-            onChange={(e) => onChange(e.target.value)}
-            className={`flex-1 max-w-xs border-2 rounded-md px-3 py-2 text-base transition-colors focus:outline-none focus:border-blue-500 ${answer ? 'border-green-500 bg-green-50' : 'border-gray-300'}`}
-          >
-            <option value="" disabled>Choose heading...</option>
-            {matchingBlock.headings?.map((h, i) => {
-              const roman = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'][i];
-              return (
-                <option key={h.id} value={roman}>{roman}. {h.text}</option>
-              );
-            })}
-          </select>
-        </div>
+  const renderMatching = (matchingBlock: MatchingBlock, q: MatchingQuestion) => (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-4">
+        <span className="min-w-[24px] font-bold text-gray-900">{number}.</span>
+        <span className="font-medium text-gray-800">Paragraph {q.paragraphLabel}</span>
+
+        <select
+          value={typeof answer === 'string' ? answer : ''}
+          onChange={(event) => onChange(event.target.value)}
+          className="max-w-xs flex-1 rounded-md border-2 border-gray-300 px-3 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          aria-label={`Heading selection for question ${number}`}
+        >
+          <option value="">Choose heading…</option>
+          {matchingBlock.headings?.map((heading, index) => {
+            const roman = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'][index];
+            return (
+              <option key={heading.id} value={roman}>
+                {roman}. {heading.text}
+              </option>
+            );
+          })}
+        </select>
       </div>
-    );
-  };
+    </div>
+  );
 
   const renderMultiMCQ = (mcqBlock: MultiMCQBlock, blockNum: number) => {
     const selectedOptions = Array.isArray(answer) ? answer : [];
-    
-    const toggleOption = (optId: string) => {
-      if (selectedOptions.includes(optId)) {
-        onChange(selectedOptions.filter(id => id !== optId));
-      } else {
-        if (selectedOptions.length < mcqBlock.requiredSelections) {
-          onChange([...selectedOptions, optId]);
-        }
+
+    const toggleOption = (optionId: string) => {
+      if (selectedOptions.includes(optionId)) {
+        onChange(selectedOptions.filter((candidate) => candidate !== optionId));
+        return;
+      }
+
+      if (selectedOptions.length < mcqBlock.requiredSelections) {
+        onChange([...selectedOptions, optionId]);
       }
     };
 
     return (
-      <div className="flex flex-col gap-4">
-        <div className="flex gap-3">
-          <span className="font-bold text-gray-900 min-w-[24px]">{blockNum}.</span>
+      <fieldset className="flex flex-col gap-4">
+        <legend className="flex gap-3">
+          <span className="min-w-[24px] font-bold text-gray-900">{blockNum}.</span>
           <span className="text-gray-800">{mcqBlock.stem || 'Select the correct options:'}</span>
-        </div>
+        </legend>
         <div className="ml-9 space-y-3">
-          {mcqBlock.options?.map((opt, i) => {
-            const letter = String.fromCharCode(65 + i);
-            const isSelected = selectedOptions.includes(opt.id);
+          {mcqBlock.options?.map((option, index) => {
+            const letter = String.fromCharCode(65 + index);
+            const isSelected = selectedOptions.includes(option.id);
             const isDisabled = !isSelected && selectedOptions.length >= mcqBlock.requiredSelections;
-            
+
             return (
-              <label 
-                key={opt.id} 
-                className={`flex items-start gap-3 p-3 rounded-md border-2 transition-colors ${isSelected ? 'border-blue-500 bg-blue-50' : isDisabled ? 'border-gray-200 opacity-50 cursor-not-allowed' : 'border-gray-200 hover:border-blue-300 cursor-pointer'}`}
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (!isDisabled || isSelected) {
-                    toggleOption(opt.id);
-                  }
-                }}
+              <label
+                key={option.id}
+                className={`flex cursor-pointer items-start gap-3 rounded-md border-2 p-3 transition-colors ${
+                  isSelected
+                    ? 'border-blue-500 bg-blue-50'
+                    : isDisabled
+                      ? 'cursor-not-allowed border-gray-200 opacity-50'
+                      : 'border-gray-200 hover:border-blue-300'
+                }`}
               >
-                <div className={`mt-0.5 w-5 h-5 rounded flex-shrink-0 border flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-400'}`}>
-                  {isSelected && <div className="w-3 h-3 bg-white" style={{ clipPath: 'polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%)' }}></div>}
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  disabled={isDisabled}
+                  onChange={() => toggleOption(option.id)}
+                  className="peer sr-only"
+                  aria-label={`Option ${letter}. ${option.text}`}
+                />
+                <div
+                  className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border ${
+                    isSelected ? 'border-blue-600 bg-blue-600' : 'border-gray-400 bg-white'
+                  }`}
+                >
+                  {isSelected ? <div className="h-3 w-3 bg-white" style={{ clipPath: 'polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%)' }}></div> : null}
                 </div>
                 <div className="flex gap-2">
                   <span className="font-bold text-gray-700">{letter}.</span>
-                  <span className="text-gray-800">{opt.text}</span>
+                  <span className="text-gray-800">{option.text}</span>
                 </div>
               </label>
             );
           })}
         </div>
-        <div className="ml-9 text-sm text-gray-500 font-medium">
+        <div className="ml-9 text-sm font-medium text-gray-500">
           Selections: {selectedOptions.length}/{mcqBlock.requiredSelections} required
         </div>
-      </div>
+      </fieldset>
     );
   };
 
-  const renderMap = (mapBlock: MapBlock, q: MapQuestion, num: number) => {
-    return (
+  const renderMap = (mapBlock: MapBlock, q: MapQuestion, num: number) => (
+    <div className="flex flex-col gap-4">
+      {mapBlock.assetUrl ? (
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
+          <img
+            src={mapBlock.assetUrl}
+            alt="Map reference"
+            className="h-auto w-full object-contain"
+          />
+        </div>
+      ) : null}
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <span className="font-bold text-gray-900 min-w-[24px]">{num}.</span>
+          <span className="min-w-[24px] font-bold text-gray-900">{num}.</span>
           <span className="text-gray-800">Label {q.label}</span>
         </div>
         <div className="ml-9 mt-2">
           <input
             type="text"
-            value={answer || ''}
-            onChange={(e) => onChange(e.target.value)}
-            className={`w-full max-w-md border-2 rounded-md px-4 py-2 text-base transition-colors focus:outline-none focus:border-blue-500 focus:ring-3 focus:ring-blue-100 ${answer ? 'border-green-500 bg-green-50' : 'border-gray-300'}`}
-            placeholder={`(${num})`}
+            name={q.id}
+            value={typeof answer === 'string' ? answer : ''}
+            onChange={(event) => onChange(event.target.value)}
+            className="w-full max-w-md rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            placeholder="Enter label..."
             autoComplete="off"
-            spellCheck="false"
+            spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
+            aria-label={`Answer for question ${num}`}
           />
         </div>
       </div>
-    );
-  };
+    </div>
+  );
 
-  const renderSingleMCQ = (mcqBlock: SingleMCQBlock, blockNum: number) => {
-    return (
-      <div className="flex flex-col gap-4">
-        <div className="flex gap-3">
-          <span className="font-bold text-gray-900 min-w-[24px]">{blockNum}.</span>
-          <span className="text-gray-800">{mcqBlock.stem || 'Select the correct option:'}</span>
-        </div>
-        <div className="ml-9 space-y-3">
-          {mcqBlock.options?.map((opt, i) => {
-            const letter = String.fromCharCode(65 + i);
-            return (
-              <label key={opt.id} className="flex items-start gap-3 cursor-pointer group">
-                <input
-                  type="radio"
-                  name={`q-${mcqBlock.id}`}
-                  checked={answer === opt.id}
-                  onChange={() => onChange(opt.id)}
-                  className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 mt-1"
-                />
-                <div className="flex gap-2">
-                  <span className="font-bold text-gray-700">{letter}.</span>
-                  <span className="text-gray-800">{opt.text}</span>
-                </div>
-              </label>
-            );
-          })}
-        </div>
+  const renderSingleMCQ = (mcqBlock: SingleMCQBlock, blockNum: number) => (
+    <fieldset className="flex flex-col gap-4">
+      <legend className="flex gap-3">
+        <span className="min-w-[24px] font-bold text-gray-900">{blockNum}.</span>
+        <span className="text-gray-800">{mcqBlock.stem || 'Select the correct option:'}</span>
+      </legend>
+      <div className="ml-9 space-y-3">
+        {mcqBlock.options?.map((option, index) => {
+          const letter = String.fromCharCode(65 + index);
+          return (
+            <label key={option.id} className="flex cursor-pointer items-start gap-3">
+              <input
+                type="radio"
+                name={`q-${mcqBlock.id}`}
+                checked={answer === option.id}
+                onChange={() => onChange(option.id)}
+                className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <div className="flex gap-2">
+                <span className="font-bold text-gray-700">{letter}.</span>
+                <span className="text-gray-800">{option.text}</span>
+              </div>
+            </label>
+          );
+        })}
       </div>
-    );
-  };
+    </fieldset>
+  );
 
   const renderShortAnswer = (shortBlock: ShortAnswerBlock, q: ShortAnswerQuestion, num: number) => {
+    void shortBlock;
     return (
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <span className="font-bold text-gray-900 min-w-[24px]">{num}.</span>
+          <span className="min-w-[24px] font-bold text-gray-900">{num}.</span>
           <span className="text-gray-800">{q.prompt}</span>
         </div>
         <div className="ml-9 mt-2">
           <input
             type="text"
-            value={answer || ''}
-            onChange={(e) => onChange(e.target.value)}
-            className={`w-full max-w-md border-2 rounded-md px-4 py-2 text-base transition-colors focus:outline-none focus:border-blue-500 focus:ring-3 focus:ring-blue-100 ${answer ? 'border-green-500 bg-green-50' : 'border-gray-300'}`}
-            placeholder={`(${num}) - ${q.answerRule.replace('_', ' ')}`}
+            name={q.id}
+            value={typeof answer === 'string' ? answer : ''}
+            onChange={(event) => onChange(event.target.value)}
+            className="w-full max-w-md rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            placeholder="Enter answer..."
             autoComplete="off"
-            spellCheck="false"
+            spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
+            aria-label={`Answer for question ${num}`}
           />
         </div>
       </div>
     );
   };
 
-  const renderNotImplemented = (blockType: string, blockNum: number) => {
+  const renderSentenceCompletion = (sentenceBlock: SentenceCompletionBlock, q: SentenceCompletionQuestion) => {
+    void sentenceBlock;
+    const parts = q.sentence.split(/_{2,}/);
+    const blanks = q.blanks.length;
+
     return (
-      <div className="flex flex-col gap-3 p-4 bg-amber-50 border border-amber-200 rounded-md">
-        <div className="flex gap-3">
-          <span className="font-bold text-gray-900 min-w-[24px]">{blockNum}.</span>
-          <span className="text-amber-800 font-medium">Question type "{blockType}" not yet implemented in student view</span>
+      <div className="flex flex-col gap-4">
+        <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
+          {parts.map((part, index) => (
+            <React.Fragment key={`${q.id}-${index}`}>
+              <span>{part}</span>
+              {index < blanks ? (
+                <span
+                  id={`question-${getSlotId(index, `${q.id}:${index}`)}`}
+                  className={`mx-1 inline-flex items-center gap-2 rounded-lg border px-2 py-1 align-middle ${getSlotClassName(
+                    getSlotId(index, `${q.id}:${index}`),
+                  )}`}
+                >
+                  <span className="min-w-[24px] text-sm font-bold text-blue-700">{number + index}</span>
+                  <input
+                    type="text"
+                    name={getSlotId(index, `${q.id}:${index}`)}
+                    value={stringArrayAnswer[index] ?? ''}
+                    onChange={(event) => updateIndexedAnswer(index, event.target.value, blanks)}
+                    className="w-28 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    placeholder="Answer..."
+                    autoComplete="off"
+                    spellCheck={false}
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    aria-label={`Answer for question ${number + index}`}
+                  />
+                  {renderFlagButton(getSlotId(index, `${q.id}:${index}`))}
+                </span>
+              ) : null}
+            </React.Fragment>
+          ))}
         </div>
+        <p className="pl-1 text-sm text-gray-500">
+          Limit: {q.answerRule.replaceAll('_', ' ').toLowerCase()}
+        </p>
       </div>
     );
   };
 
+  const renderNoteCompletion = (noteQuestion: NoteCompletionQuestion) => {
+    const parts = noteQuestion.noteText.split(/_{2,}/);
+    const blanks = noteQuestion.blanks.length;
+
+    return (
+      <div className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
+          {parts.map((part, index) => (
+            <React.Fragment key={`${noteQuestion.id}-${index}`}>
+              <span>{part}</span>
+              {index < blanks ? (
+                <span
+                  id={`question-${getSlotId(index, `${noteQuestion.id}:${index}`)}`}
+                  className={`mx-1 inline-flex items-center gap-2 rounded-lg border px-2 py-1 align-middle ${getSlotClassName(
+                    getSlotId(index, `${noteQuestion.id}:${index}`),
+                  )}`}
+                >
+                  <span className="min-w-[24px] text-sm font-bold text-blue-700">{number + index}</span>
+                  <input
+                    type="text"
+                    name={getSlotId(index, `${noteQuestion.id}:${index}`)}
+                    value={stringArrayAnswer[index] ?? ''}
+                    onChange={(event) => updateIndexedAnswer(index, event.target.value, blanks)}
+                    className="w-28 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    placeholder="Answer..."
+                    autoComplete="off"
+                    spellCheck={false}
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    aria-label={`Answer for question ${number + index}`}
+                  />
+                  {renderFlagButton(getSlotId(index, `${noteQuestion.id}:${index}`))}
+                </span>
+              ) : null}
+            </React.Fragment>
+          ))}
+        </div>
+        <p className="pl-1 text-sm text-gray-500">
+          Limit: {noteQuestion.answerRule.replaceAll('_', ' ').toLowerCase()}
+        </p>
+      </div>
+    );
+  };
+
+  const renderDiagramLabeling = (diagramBlock: DiagramLabelingBlock) => (
+    <div className="flex flex-col gap-4">
+      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
+        {diagramBlock.imageUrl ? (
+          <div className="relative">
+            <img src={diagramBlock.imageUrl} alt="Diagram reference" className="h-auto w-full object-contain" />
+            {diagramBlock.labels.map((label, index) => (
+              <span
+                key={label.id}
+                className="absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-blue-600 bg-white text-sm font-bold text-blue-700"
+                style={{ left: `${label.x}%`, top: `${label.y}%` }}
+              >
+                {number + index}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div className="p-6 text-center text-sm text-gray-500">Add a diagram to support this question.</div>
+        )}
+      </div>
+      <div className="space-y-3">
+        {diagramBlock.labels.map((label, index) =>
+          renderTextField(
+            getSlotId(index, `${diagramBlock.id}:${label.id}`),
+            number + index,
+            stringArrayAnswer[index] ?? '',
+            (nextValue) => updateIndexedAnswer(index, nextValue, diagramBlock.labels.length),
+            `Label ${index + 1}`,
+          ),
+        )}
+      </div>
+    </div>
+  );
+
+  const renderFlowChart = (flowChartBlock: FlowChartBlock) => (
+    <div className="space-y-3">
+      {flowChartBlock.steps.map((step, index) =>
+        renderTextField(
+          getSlotId(index, `${flowChartBlock.id}:${step.id}`),
+          number + index,
+          stringArrayAnswer[index] ?? '',
+          (nextValue) => updateIndexedAnswer(index, nextValue, flowChartBlock.steps.length),
+          step.label,
+        ),
+      )}
+    </div>
+  );
+
+  const renderTableCompletion = (tableBlock: TableCompletionBlock) => {
+    type TableSlot = {
+      cell: TableCompletionBlock['cells'][number];
+      index: number;
+      slotId: string;
+    };
+
+    const cellMap = new Map<string, TableSlot>(
+      tableBlock.cells.map((cell, index): [string, TableSlot] => [
+        `${cell.row}:${cell.col}`,
+        { cell, index, slotId: getSlotId(index, `${tableBlock.id}:${cell.id}`) },
+      ]),
+    );
+
+    return (
+      <div className="overflow-x-auto rounded-2xl border border-gray-200">
+        <table className="w-full min-w-[480px] border-collapse text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              {tableBlock.headers.map((header, index) => (
+                <th key={`${header}-${index}`} className="border border-gray-200 px-3 py-2 text-left font-semibold text-gray-900">
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tableBlock.rows.map((row, rowIndex) => (
+              <tr key={`row-${rowIndex}`}>
+                {row.map((cellValue, cellIndex) => {
+                  const slot = cellMap.get(`${rowIndex}:${cellIndex}`);
+
+                  if (!slot) {
+                    return (
+                      <td key={`cell-${rowIndex}-${cellIndex}`} className="border border-gray-200 px-3 py-2 text-gray-800">
+                        {cellValue}
+                      </td>
+                    );
+                  }
+
+                  return (
+                    <td
+                      key={slot.cell.id}
+                      id={`question-${slot.slotId}`}
+                      className={`border border-gray-200 px-3 py-2 align-top ${getSlotClassName(slot.slotId)}`}
+                    >
+                      <div className="mb-2 text-sm font-bold text-blue-700">{number + slot.index}</div>
+                      <input
+                        type="text"
+                        name={slot.slotId}
+                        value={stringArrayAnswer[slot.index] ?? ''}
+                        onChange={(event) => updateIndexedAnswer(slot.index, event.target.value, tableBlock.cells.length)}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                        placeholder="Enter answer..."
+                        autoComplete="off"
+                        spellCheck={false}
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        aria-label={`Answer for question ${number + slot.index}`}
+                      />
+                      <div className="mt-2 flex justify-end">{renderFlagButton(slot.slotId)}</div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  const renderClassification = (classificationBlock: ClassificationBlock) => (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {classificationBlock.categories.map((category) => (
+          <span key={category} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+            {category}
+          </span>
+        ))}
+      </div>
+      <div className="space-y-3">
+        {classificationBlock.items.map((item, index) => {
+          const slotId = getSlotId(index, `${classificationBlock.id}:${item.id}`);
+          return (
+            <div key={item.id} id={`question-${slotId}`} className={getSlotClassName(slotId)}>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                <div className="flex items-start gap-3 md:flex-1">
+                  <span className="min-w-[32px] font-bold text-gray-900">{number + index}.</span>
+                  <span className="text-gray-800">{item.text}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={typeof stringArrayAnswer[index] === 'string' ? stringArrayAnswer[index] : ''}
+                    onChange={(event) => updateIndexedAnswer(index, event.target.value, classificationBlock.items.length)}
+                    className="min-w-[180px] rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    aria-label={`Category selection for question ${number + index}`}
+                  >
+                    <option value="">Choose category…</option>
+                    {classificationBlock.categories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                  {renderFlagButton(slotId)}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderMatchingFeatures = (matchingFeaturesBlock: MatchingFeaturesBlock) => (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {matchingFeaturesBlock.options.map((option) => (
+          <span key={option} className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
+            {option}
+          </span>
+        ))}
+      </div>
+      <div className="space-y-3">
+        {matchingFeaturesBlock.features.map((feature, index) => {
+          const slotId = getSlotId(index, `${matchingFeaturesBlock.id}:${feature.id}`);
+          return (
+            <div key={feature.id} id={`question-${slotId}`} className={getSlotClassName(slotId)}>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                <div className="flex items-start gap-3 md:flex-1">
+                  <span className="min-w-[32px] font-bold text-gray-900">{number + index}.</span>
+                  <span className="text-gray-800">{feature.text}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={typeof stringArrayAnswer[index] === 'string' ? stringArrayAnswer[index] : ''}
+                    onChange={(event) => updateIndexedAnswer(index, event.target.value, matchingFeaturesBlock.features.length)}
+                    className="min-w-[180px] rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    aria-label={`Matching selection for question ${number + index}`}
+                  >
+                    <option value="">Choose match…</option>
+                    {matchingFeaturesBlock.options.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                  {renderFlagButton(slotId)}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
     <div className={`relative ${isActive ? 'animate-pulse-subtle' : ''}`}>
-      {isFlagged && (
-        <div className="absolute -left-2 -top-2 w-6 h-6 bg-amber-100 rounded-full flex items-center justify-center shadow-sm border border-amber-200">
-          <span className="text-amber-500 text-xs">🚩</span>
+      {isFlagged ? (
+        <div className="absolute -left-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border border-amber-200 bg-amber-100 shadow-sm">
+          <span className="text-xs text-amber-600" aria-hidden="true">
+            ⚑
+          </span>
         </div>
-      )}
+      ) : null}
 
-      {block.type === 'TFNG' && question && renderTFNG(block as TFNGBlock, question as TFNGQuestion)}
-      {block.type === 'CLOZE' && question && renderCloze(block as ClozeBlock, question as ClozeQuestion)}
-      {block.type === 'MATCHING' && question && renderMatching(block as MatchingBlock, question as MatchingQuestion)}
-      {block.type === 'MULTI_MCQ' && renderMultiMCQ(block as MultiMCQBlock, number)}
-      {block.type === 'MAP' && question && renderMap(block as MapBlock, question as MapQuestion, number)}
-      {block.type === 'SINGLE_MCQ' && renderSingleMCQ(block as SingleMCQBlock, number)}
-      {block.type === 'SHORT_ANSWER' && question && renderShortAnswer(block as ShortAnswerBlock, question as ShortAnswerQuestion, number)}
-      {block.type === 'SENTENCE_COMPLETION' && renderNotImplemented('Sentence Completion', number)}
-      {block.type === 'DIAGRAM_LABELING' && renderNotImplemented('Diagram Labeling', number)}
-      {block.type === 'FLOW_CHART' && renderNotImplemented('Flow Chart', number)}
-      {block.type === 'TABLE_COMPLETION' && renderNotImplemented('Table Completion', number)}
-      {block.type === 'NOTE_COMPLETION' && renderNotImplemented('Note Completion', number)}
-      {block.type === 'CLASSIFICATION' && renderNotImplemented('Classification', number)}
-      {block.type === 'MATCHING_FEATURES' && renderNotImplemented('Matching Features', number)}
+      {block.type === 'TFNG' && question ? renderTFNG(block as TFNGBlock, question as TFNGQuestion) : null}
+      {block.type === 'CLOZE' && question ? renderCloze(block as ClozeBlock, question as ClozeQuestion) : null}
+      {block.type === 'MATCHING' && question ? renderMatching(block as MatchingBlock, question as MatchingQuestion) : null}
+      {block.type === 'MULTI_MCQ' ? renderMultiMCQ(block as MultiMCQBlock, number) : null}
+      {block.type === 'MAP' && question ? renderMap(block as MapBlock, question as MapQuestion, number) : null}
+      {block.type === 'SINGLE_MCQ' ? renderSingleMCQ(block as SingleMCQBlock, number) : null}
+      {block.type === 'SHORT_ANSWER' && question
+        ? renderShortAnswer(block as ShortAnswerBlock, question as ShortAnswerQuestion, number)
+        : null}
+      {block.type === 'SENTENCE_COMPLETION' && question
+        ? renderSentenceCompletion(block as SentenceCompletionBlock, question as SentenceCompletionQuestion)
+        : null}
+      {block.type === 'DIAGRAM_LABELING' ? renderDiagramLabeling(block as DiagramLabelingBlock) : null}
+      {block.type === 'FLOW_CHART' ? renderFlowChart(block as FlowChartBlock) : null}
+      {block.type === 'TABLE_COMPLETION' ? renderTableCompletion(block as TableCompletionBlock) : null}
+      {block.type === 'NOTE_COMPLETION' && question
+        ? renderNoteCompletion(question as NoteCompletionQuestion)
+        : null}
+      {block.type === 'CLASSIFICATION' ? renderClassification(block as ClassificationBlock) : null}
+      {block.type === 'MATCHING_FEATURES' ? renderMatchingFeatures(block as MatchingFeaturesBlock) : null}
     </div>
   );
 }

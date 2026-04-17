@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { QuestionBankItem, QuestionBankQuery, QuestionBlock, QuestionType } from '../../types';
 import { questionBankService } from '../../services/questionBankService';
-import { Search, Filter, Grid, List, BookOpen, Clock, TrendingUp } from 'lucide-react';
+import { Search, Filter, Grid, List, BookOpen, Clock, TrendingUp, X } from 'lucide-react';
 
 interface QuestionBankLibraryProps {
   onSelectQuestion: (item: QuestionBankItem) => void;
@@ -80,6 +80,13 @@ export function QuestionBankLibrary({ onSelectQuestion, onClose }: QuestionBankL
               title="List view"
             >
               <List size={18} />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+              title="Close"
+            >
+              <X size={18} />
             </button>
           </div>
         </div>
