@@ -87,9 +87,9 @@ EOF
 
 RUN chmod +x /app/start.sh
 
-EXPOSE 4000
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:4000/healthz || exit 1
+  CMD curl -f "http://localhost:${API_PORT:-${PORT:-4000}}/healthz" || exit 1
 
 CMD ["/app/start.sh"]
