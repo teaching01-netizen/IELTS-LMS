@@ -6,6 +6,7 @@ import { formatTimestamp, getRelativeTime, getVersionStatusColor, getVersionStat
 import { ExamVersionHistoryProps } from '../../features/admin/contracts';
 import { normalizeWritingTaskContents } from '../../utils/writingTaskUtils';
 import { useVersionHistory } from './hooks/useVersionHistory';
+import { hydrateExamState } from '../../services/examAdapterService';
 
 export function ExamVersionHistory({
   exam,
@@ -210,6 +211,7 @@ export function ExamVersionHistory({
 
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
           {sortedVersions.map((version, index) => {
+            const hydratedContent = hydrateExamState(version.contentSnapshot);
             const isCurrentDraft = version.id === exam.currentDraftVersionId;
             const isCurrentPublished = version.id === exam.currentPublishedVersionId;
             const isSelected = selectedVersionId === version.id;
@@ -386,24 +388,24 @@ export function ExamVersionHistory({
                         <div className="grid grid-cols-2 gap-2 text-xs">
                           <div className="flex justify-between">
                             <span className="text-gray-500">Reading Passages:</span>
-                            <span className="text-gray-900 font-medium">{version.contentSnapshot.reading.passages.length}</span>
+                            <span className="text-gray-900 font-medium">{hydratedContent.reading.passages.length}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-500">Listening Parts:</span>
-                            <span className="text-gray-900 font-medium">{version.contentSnapshot.listening.parts.length}</span>
+                            <span className="text-gray-900 font-medium">{hydratedContent.listening.parts.length}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-500">Writing Prompts:</span>
                             <span className="text-gray-900 font-medium">
                               {normalizeWritingTaskContents(
-                                version.contentSnapshot.writing,
-                                version.contentSnapshot.config.sections.writing.tasks,
+                                hydratedContent.writing,
+                                hydratedContent.config.sections.writing.tasks,
                               ).filter((task) => task.prompt.trim().length > 0).length}
                             </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-500">Speaking Topics:</span>
-                            <span className="text-gray-900 font-medium">{version.contentSnapshot.speaking.part1Topics.length}</span>
+                            <span className="text-gray-900 font-medium">{hydratedContent.speaking.part1Topics.length}</span>
                           </div>
                         </div>
                       </div>

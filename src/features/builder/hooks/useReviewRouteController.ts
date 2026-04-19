@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { hydrateExamState } from '@services/examAdapterService';
 import { examLifecycleService } from '@services/examLifecycleService';
 import { examRepository } from '@services/examRepository';
 import type { ExamState } from '../../../types';
@@ -61,7 +62,7 @@ export function useReviewRouteController(
       ]);
 
       setExam(entity);
-      setState(examState);
+      setState(examState ? hydrateExamState(examState) : null);
       setVersions(allVersions);
       setPublishReadiness(readiness);
     } catch (loadError) {

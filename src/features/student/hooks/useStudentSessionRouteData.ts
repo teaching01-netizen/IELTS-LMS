@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAsyncPolling } from '@app/hooks/useAsyncPolling';
 import { useAuthSession } from '../../auth/authSession';
 import { examDeliveryService } from '@services/examDeliveryService';
-import { getExamStateFromEntity } from '@services/examAdapterService';
+import { getExamStateFromEntity, hydrateExamState } from '@services/examAdapterService';
 import {
   backendGet,
   isBackendDeliveryEnabled,
@@ -162,10 +162,10 @@ export function useStudentSessionRouteData(
         }>(buildBackendSessionEndpoint(scheduleId, candidateId));
         const scheduleEntity = mapBackendSchedule(session.schedule);
         const version = mapBackendExamVersion(session.version);
-        const examState = {
+        const examState = hydrateExamState({
           ...version.contentSnapshot,
           config: version.configSnapshot,
-        } satisfies ExamState;
+        } satisfies ExamState);
 
         setSchedule(scheduleEntity);
         setState(examState);

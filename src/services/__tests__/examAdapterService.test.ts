@@ -15,4 +15,28 @@ describe('hydrateExamState', () => {
     expect(hydrated.writing.customPromptTemplates).toEqual([]);
     expect(hydrated.speaking.part1Topics.length).toBeGreaterThan(0);
   });
+
+  it('fills missing reading and listening containers when partial content omits them', () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+
+    const hydrated = hydrateExamState({
+      config,
+      title: 'Recovered Exam',
+      type: 'Academic',
+      writing: {
+        task1Prompt: '',
+        task2Prompt: '',
+      },
+      speaking: {
+        part1Topics: [],
+        cueCard: '',
+        part3Discussion: [],
+      },
+    } as any);
+
+    expect(Array.isArray(hydrated.reading.passages)).toBe(true);
+    expect(Array.isArray(hydrated.listening.parts)).toBe(true);
+    expect(hydrated.reading.passages).toHaveLength(config.sections.reading.passageCount);
+    expect(hydrated.listening.parts).toHaveLength(config.sections.listening.partCount);
+  });
 });

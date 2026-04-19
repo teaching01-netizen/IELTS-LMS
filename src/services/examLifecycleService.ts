@@ -33,6 +33,7 @@ import {
   getReadingTotalQuestions,
   getListeningTotalQuestions
 } from '../utils/examUtils';
+import { hydrateExamState } from './examAdapterService';
 import { getWritingTaskContent } from '../utils/writingTaskUtils';
 import {
   backendDelete,
@@ -883,7 +884,7 @@ export class ExamLifecycleService {
     const errors: Array<{ field: string; message: string; severity: 'error' | 'warning' }> = [];
     const warnings: Array<{ field: string; message: string }> = [];
     const missingFields: string[] = [];
-    const content = version.contentSnapshot;
+    const content = hydrateExamState(version.contentSnapshot);
     const config = content.config;
 
     // 1. Title validation
@@ -1109,8 +1110,8 @@ export class ExamLifecycleService {
     };
 
     // Content counts diff
-    const contentA = versionA.contentSnapshot;
-    const contentB = versionB.contentSnapshot;
+    const contentA = hydrateExamState(versionA.contentSnapshot);
+    const contentB = hydrateExamState(versionB.contentSnapshot);
 
     const readingPassagesA = contentA.reading.passages.length;
     const readingPassagesB = contentB.reading.passages.length;

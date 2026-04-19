@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ExamLifecycleService } from '../examLifecycleService';
 import { IExamRepository } from '../examRepository';
-import { ExamEntity, ExamVersion, ExamEvent, ExamStatus } from '../../types/domain';
+import { ExamEntity, ExamVersion, ExamEvent, ExamStatus, SCHEMA_VERSION } from '../../types/domain';
 import { ExamState } from '../../types';
 import { createDefaultConfig } from '../../constants/examDefaults';
 
@@ -610,6 +610,66 @@ describe('ExamLifecycleService - Phase 3: Versioning', () => {
       
       expect(publishEvent?.fromState).toBe('draft');
       expect(publishEvent?.toState).toBe('published');
+    });
+  });
+
+  describe('getPublishReadiness', () => {
+    it('does not crash when the stored draft content is missing module containers', async () => {
+      const config = createDefaultConfig('Academic', 'Academic');
+      const exam: ExamEntity = {
+        id: 'exam-corrupt',
+        slug: 'corrupt-exam',
+        title: 'Corrupt Exam',
+        type: 'Academic',
+        status: 'draft',
+        visibility: 'organization',
+        owner: 'TestUser',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        currentDraftVersionId: 'ver-corrupt',
+        currentPublishedVersionId: null,
+        canEdit: true,
+        canPublish: true,
+        canDelete: true,
+        schemaVersion: SCHEMA_VERSION,
+      };
+
+      const version: ExamVersion = {
+        id: 'ver-corrupt',
+        examId: 'exam-corrupt',
+        versionNumber: 1,
+        parentVersionId: null,
+        contentSnapshot: { config } as any,
+        configSnapshot: config,
+        validationSnapshot: {
+          isValid: false,
+          errorCount: 0,
+          warningCount: 0,
+          lastValidatedAt: '2026-01-01T00:00:00.000Z',
+        },
+        createdBy: 'TestUser',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        isDraft: true,
+        isPublished: false,
+      };
+
+      await mockRepo.saveExam(exam);
+      await mockRepo.saveVersion(version);
+
+      const readiness = await service.getPublishReadiness('exam-corrupt');
+
+      expect(readiness.canPublish).toBe(false);
+      expect(readiness.questionCounts).toEqual({
+        reading: 0,
+        listening: 0,
+        total: 0,
+      });
+      expect(
+        readiness.errors.some((error) => error.field === 'reading.questions'),
+      ).toBe(true);
+      expect(
+        readiness.errors.some((error) => error.field === 'listening.questions'),
+      ).toBe(true);
     });
   });
 });
