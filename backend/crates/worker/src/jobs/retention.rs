@@ -39,7 +39,7 @@ pub async fn run_once(pool: MySqlPool) -> Result<RetentionRunReport, sqlx::Error
             FROM shared_cache_entries
             WHERE (invalidated_at IS NOT NULL AND invalidated_at < NOW() - INTERVAL 24 HOUR)
                OR (expires_at IS NOT NULL AND expires_at < NOW() - INTERVAL 24 HOUR)
-            ORDER BY COALESCE(invalidated_at, expires_at) ASC NULLS LAST
+            ORDER BY COALESCE(invalidated_at, expires_at) ASC
             LIMIT ?
         )
         "#,
