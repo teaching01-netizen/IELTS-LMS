@@ -319,6 +319,7 @@ export function hydrateExamState(state: ExamState): ExamState {
         timeAllocation: '1 minute preparation + up to 2 minutes speaking',
         evaluatorNotes: mergedState.speaking.evaluatorNotes ?? '',
       },
+      part3Discussion: Array.isArray(mergedState.speaking.part3Discussion) ? mergedState.speaking.part3Discussion : [],
       evaluatorNotes: mergedState.speaking.evaluatorNotes ?? '',
       rubric: buildSpeakingRubric(config, structuredClone(mergedState.speaking.rubric ?? OFFICIAL_SPEAKING_RUBRIC)),
       gradeHistory: mergedState.speaking.gradeHistory ?? [],
