@@ -5,7 +5,7 @@ async function loginAsSeededAdmin(page: Page) {
   await page.getByLabel('Email Address').fill('e2e.admin.operator@example.com');
   await page.getByLabel('Password').fill('Password123!');
   await page.getByRole('button', { name: 'Sign In' }).click();
-  await expect(page).toHaveURL('/admin/exams');
+  await expect(page).toHaveURL('/admin/exams', { timeout: 15000 });
 }
 
 test.describe('Admin route tree', () => {

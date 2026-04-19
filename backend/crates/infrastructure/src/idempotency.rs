@@ -150,18 +150,12 @@ impl IdempotencyRepository {
     }
 
     pub async fn purge_expired(&self, limit: i64) -> Result<u64, sqlx::Error> {
-        // Note: ctid is PostgreSQL-specific
-        // MySQL equivalent: Use subquery with LIMIT
         let result = sqlx::query(
             r#"
             DELETE FROM idempotency_keys
-            WHERE id IN (
-                SELECT id
-                FROM idempotency_keys
-                WHERE expires_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)
-                ORDER BY expires_at ASC
-                LIMIT ?
-            )
+            WHERE expires_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)
+            ORDER BY expires_at ASC
+            LIMIT ?
             "#,
         )
         .bind(limit)

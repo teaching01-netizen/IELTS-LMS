@@ -112,13 +112,18 @@ impl OutboxRepository {
         }
 
         let ids: Vec<Hyphenated> = events.iter().map(|event| event.id).collect();
-        let id_strs: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
-        sqlx::query(
-            "UPDATE outbox_events SET claimed_at = NOW(), publish_attempts = publish_attempts + 1 WHERE id IN (SELECT * FROM (SELECT ? FROM (SELECT ?) AS temp) AS temp)",
-        )
-        .bind(id_strs.join(","))
-        .execute(&mut *tx)
-        .await?;
+        let placeholders = std::iter::repeat("?")
+            .take(ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "UPDATE outbox_events SET claimed_at = NOW(), publish_attempts = publish_attempts + 1 WHERE id IN ({placeholders})"
+        );
+        let mut query = sqlx::query(&sql);
+        for id in &ids {
+            query = query.bind(*id);
+        }
+        query.execute(&mut *tx).await?;
         tx.commit().await?;
 
         self.fetch_many(&ids).await
@@ -129,13 +134,18 @@ impl OutboxRepository {
             return Ok(0);
         }
 
-        let id_strs: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
-        let result = sqlx::query(
-            "UPDATE outbox_events SET published_at = NOW(), last_error = NULL WHERE id IN (?)",
-        )
-        .bind(id_strs.join(","))
-        .execute(&self.pool)
-        .await?;
+        let placeholders = std::iter::repeat("?")
+            .take(ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "UPDATE outbox_events SET published_at = NOW(), last_error = NULL WHERE id IN ({placeholders})"
+        );
+        let mut query = sqlx::query(&sql);
+        for id in ids {
+            query = query.bind(*id);
+        }
+        let result = query.execute(&self.pool).await?;
 
         Ok(result.rows_affected())
     }
@@ -165,18 +175,12 @@ impl OutboxRepository {
     }
 
     pub async fn purge_published(&self, limit: i64) -> Result<u64, sqlx::Error> {
-        // Note: ctid is PostgreSQL-specific
-        // MySQL equivalent: Use subquery with LIMIT
         let result = sqlx::query(
             r#"
             DELETE FROM outbox_events
-            WHERE id IN (
-                SELECT id
-                FROM outbox_events
-                WHERE published_at < DATE_SUB(NOW(), INTERVAL 72 HOUR)
-                ORDER BY published_at ASC
-                LIMIT ?
-            )
+            WHERE published_at < DATE_SUB(NOW(), INTERVAL 72 HOUR)
+            ORDER BY published_at ASC
+            LIMIT ?
             "#,
         )
         .bind(limit)
@@ -191,13 +195,18 @@ impl OutboxRepository {
             return Ok(Vec::new());
         }
 
-        let id_strs: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
-        sqlx::query_as::<_, OutboxEvent>(
-            "SELECT * FROM outbox_events WHERE id IN (?) ORDER BY created_at ASC",
-        )
-        .bind(id_strs.join(","))
-        .fetch_all(&self.pool)
-        .await
+        let placeholders = std::iter::repeat("?")
+            .take(ids.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT * FROM outbox_events WHERE id IN ({placeholders}) ORDER BY created_at ASC"
+        );
+        let mut query = sqlx::query_as::<_, OutboxEvent>(&sql);
+        for id in ids {
+            query = query.bind(*id);
+        }
+        query.fetch_all(&self.pool).await
     }
 
     async fn fetch_one(&self, id: Hyphenated) -> Result<OutboxEvent, sqlx::Error> {

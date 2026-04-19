@@ -518,3 +518,17 @@ pub fn validate_email(email: &str) -> Result<(), String> {
         Err("Invalid email format".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_wcode_accepts_expected_format() {
+        assert!(validate_wcode("W123456").is_ok());
+        assert!(validate_wcode("w123456").is_err());
+        assert!(validate_wcode("W12345").is_err());
+        assert!(validate_wcode("W1234567").is_err());
+        assert!(validate_wcode("X123456").is_err());
+    }
+}

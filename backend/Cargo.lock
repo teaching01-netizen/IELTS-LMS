@@ -1081,6 +1081,7 @@ name = "ielts-backend-worker"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "ielts-backend-domain",
  "ielts-backend-infrastructure",
  "sqlx",
  "tokio",

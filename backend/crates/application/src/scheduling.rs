@@ -1028,3 +1028,50 @@ fn validate_schedule_window(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use serde_json::json;
+
+    #[test]
+    fn build_section_plan_respects_order_and_gap_offsets() {
+        let config = json!({
+            "sections": {
+                "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5},
+                "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0},
+                "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 10},
+                "speaking": {"enabled": true, "label": "Speaking", "order": 4, "duration": 15, "gapAfterMinutes": 0}
+            }
+        });
+
+        let plan = build_section_plan(&config).expect("build plan");
+        assert_eq!(plan.len(), 4);
+        assert_eq!(plan[0].section_key, "listening");
+        assert_eq!(plan[0].start_offset_minutes, 0);
+        assert_eq!(plan[0].end_offset_minutes, 30);
+        assert_eq!(plan[1].section_key, "reading");
+        assert_eq!(plan[1].start_offset_minutes, 35);
+        assert_eq!(plan[1].end_offset_minutes, 95);
+        assert_eq!(plan[2].section_key, "writing");
+        assert_eq!(plan[2].start_offset_minutes, 95);
+        assert_eq!(plan[2].end_offset_minutes, 155);
+        assert_eq!(plan[3].section_key, "speaking");
+        assert_eq!(plan[3].start_offset_minutes, 165);
+        assert_eq!(plan[3].end_offset_minutes, 180);
+    }
+
+    #[test]
+    fn validate_schedule_window_requires_sufficient_duration() {
+        let start = Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap();
+        validate_schedule_window(start, end, 180).expect("window matches duration");
+
+        let too_short_end = Utc.with_ymd_and_hms(2026, 1, 10, 11, 0, 0).unwrap();
+        assert!(validate_schedule_window(start, too_short_end, 180).is_err());
+
+        let invalid_end = Utc.with_ymd_and_hms(2026, 1, 10, 8, 59, 0).unwrap();
+        assert!(validate_schedule_window(start, invalid_end, 10).is_err());
+    }
+}

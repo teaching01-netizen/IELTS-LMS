@@ -15,44 +15,45 @@ use uuid::Uuid;
 pub struct TestDatabase {
     db_name: String,
     pool: MySqlPool,
+    drop_on_shutdown: bool,
 }
 
 impl TestDatabase {
     pub async fn new(migrations: &[&str]) -> Self {
-        let (db_name, pool) = if let Ok(database_url) = env::var("TEST_DATABASE_URL") {
-            eprintln!("TEST_DATABASE_URL found: {}", database_url);
-            // When TEST_DATABASE_URL is set, we're using TiDB Cloud
-            // Extract database name and create it if it doesn't exist
-            let db_name = database_url
-                .strip_prefix("mysql://")
-                .and_then(|s| s.split('/').last())
-                .unwrap_or("test")
-                .to_string();
-            
-            // Connect without specifying database first to create it
-            let url_no_db = database_url.split('/').take(3).collect::<Vec<_>>().join("/");
+        let (db_name, pool, drop_on_shutdown) = if let Ok(database_url) = env::var("TEST_DATABASE_URL") {
+            eprintln!("TEST_DATABASE_URL found (redacted)");
+
+            let base_db = database_name_from_url(&database_url).unwrap_or_else(|| "test".to_owned());
+            let db_name = format!("{base_db}_codex_test_{}", Uuid::new_v4().simple());
+            let server_url = server_url_from_database_url(&database_url);
+
+            let admin_pool = MySqlPoolOptions::new()
+                .max_connections(1)
+                .connect(&server_url)
+                .await
+                .expect("connect to TiDB/MySQL server");
+
+            let created = sqlx::query(&format!("CREATE DATABASE {}", db_name))
+                .execute(&admin_pool)
+                .await
+                .is_ok();
+
+            let effective_db = if created { db_name.clone() } else { base_db };
+            let effective_url = if created {
+                format!("{}/{}", server_url, effective_db)
+            } else {
+                database_url.clone()
+            };
+
+            drop(admin_pool);
             let pool = MySqlPoolOptions::new()
                 .max_connections(1)
-                .connect(&url_no_db)
+                .connect(&effective_url)
                 .await
-                .expect("connect to TiDB Cloud");
-            
-            // Create database if it doesn't exist
-            sqlx::query(&format!("CREATE DATABASE IF NOT EXISTS {}", db_name))
-                .execute(&pool)
-                .await
-                .expect("create database");
-            
-            // Now reconnect to the specific database
-            drop(pool);
-            let pool = MySqlPoolOptions::new()
-                .max_connections(1)
-                .connect(&database_url)
-                .await
-                .expect("connect to TiDB Cloud database");
-            
-            eprintln!("Connected to database: {}", db_name);
-            (db_name, pool)
+                .expect("connect to test database");
+
+            eprintln!("Connected to database: {}", effective_db);
+            (effective_db, pool, created)
         } else {
             eprintln!("TEST_DATABASE_URL not found, using local MySQL");
             // Local testing - create a new database
@@ -76,24 +77,21 @@ impl TestDatabase {
                 .await
                 .expect("connect to test database");
             
-            (db_name, pool)
+            (db_name, pool, true)
         };
 
         for migration in migrations {
             let sql = fs::read_to_string(migration_path(migration)).expect("read migration");
-            // Apply migrations for local testing
-            // For TiDB Cloud, skip if tables already exist
-            if env::var("TEST_DATABASE_URL").is_ok() {
-                // Check if exam_entities table exists (as a proxy for migrations being applied)
+            // When using an existing remote database (no permission to create a new one),
+            // avoid re-applying migrations if tables already exist.
+            if env::var("TEST_DATABASE_URL").is_ok() && !drop_on_shutdown {
                 let table_exists: bool = sqlx::query_scalar::<_, bool>(
-                    "SELECT COUNT(*) > 0 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'exam_entities'"
+                    "SELECT COUNT(*) > 0 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'exam_entities'",
                 )
                 .fetch_one(&pool)
                 .await
                 .unwrap_or(false);
-                
                 if table_exists {
-                    eprintln!("Tables already exist, skipping migrations");
                     continue;
                 }
             }
@@ -103,6 +101,7 @@ impl TestDatabase {
         Self {
             db_name,
             pool,
+            drop_on_shutdown,
         }
     }
 
@@ -119,6 +118,24 @@ impl TestDatabase {
     }
 
     pub async fn shutdown(self) {
+        if !self.drop_on_shutdown {
+            return;
+        }
+
+        if let Ok(database_url) = env::var("TEST_DATABASE_URL") {
+            let server_url = server_url_from_database_url(&database_url);
+            let admin_pool = MySqlPoolOptions::new()
+                .max_connections(1)
+                .connect(&server_url)
+                .await
+                .expect("reconnect to TiDB/MySQL server");
+            admin_pool
+                .execute(format!("DROP DATABASE IF EXISTS {}", self.db_name).as_str())
+                .await
+                .expect("drop test database");
+            return;
+        }
+
         let admin_options = connect_options("root", "ielts");
         let admin_pool = MySqlPoolOptions::new()
             .max_connections(1)
@@ -403,6 +420,20 @@ fn connect_options(user: &str, database: &str) -> MySqlConnectOptions {
         .username(user)
         .password("root")
         .database(database)
+}
+
+fn server_url_from_database_url(database_url: &str) -> String {
+    database_url
+        .rsplit_once('/')
+        .map(|(server, _)| server.to_owned())
+        .unwrap_or_else(|| database_url.to_owned())
+}
+
+fn database_name_from_url(database_url: &str) -> Option<String> {
+    database_url
+        .rsplit_once('/')
+        .map(|(_, db)| db.split('?').next().unwrap_or(db).to_owned())
+        .filter(|db| !db.is_empty())
 }
 
 fn migration_path(name: &str) -> PathBuf {

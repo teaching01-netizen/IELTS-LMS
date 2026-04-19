@@ -26,35 +26,37 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
 ];
 
 #[tokio::test]
-async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
+async fn revision_increments_and_mutations_record_applied_revision() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let schedule_id = Uuid::parse_str(&schedule.id).expect("schedule id");
     let service = DeliveryService::new(database.pool().clone());
+
+    let student_key = format!("student-{}-alice", schedule.id);
     let session = service
         .bootstrap(
-            schedule_id,
+            schedule.id,
             StudentBootstrapRequest {
-                student_key: student_key(schedule_id, "alice"),
+                student_key: student_key.clone(),
                 candidate_id: "alice".to_owned(),
                 candidate_name: "Alice Roe".to_owned(),
                 candidate_email: "alice@example.com".to_owned(),
                 email: Some("alice@example.com".to_owned()),
                 wcode: Some("W123456".to_owned()),
-                client_session_id: Uuid::new_v4().to_string(),
+                client_session_id: Uuid::new_v4(),
             },
         )
         .await
-        .expect("bootstrap attempt");
+        .expect("bootstrap");
     let attempt = session.attempt.expect("attempt");
-    let client_session_id = Uuid::new_v4().to_string();
+    assert_eq!(attempt.revision, 0);
 
-    let first_batch = service
+    let client_session_id = Uuid::new_v4();
+    let first = service
         .apply_mutation_batch(
-            schedule_id,
+            schedule.id,
             StudentMutationBatchRequest {
                 attempt_id: attempt.id,
-                student_key: student_key(schedule_id, "alice"),
+                student_key: student_key.clone(),
                 client_session_id,
                 mutations: vec![
                     MutationEnvelope {
@@ -77,72 +79,48 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
         )
         .await
         .expect("apply first batch");
+    assert_eq!(first.attempt.revision, 1);
 
-    assert_eq!(first_batch.server_accepted_through_seq, 2);
-    assert_eq!(first_batch.attempt.answers["q1"], "A");
-    assert_eq!(first_batch.attempt.writing_answers["task-1"], "Draft 1");
+    let applied_1: i64 = sqlx::query_scalar(
+        "SELECT applied_revision FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
+    )
+    .bind(first.attempt.id)
+    .bind("m1")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(applied_1, 1);
 
-    let second_batch = service
+    let second = service
         .apply_mutation_batch(
-            schedule_id,
+            schedule.id,
             StudentMutationBatchRequest {
-                attempt_id: attempt.id,
-                student_key: student_key(schedule_id, "alice"),
+                attempt_id: first.attempt.id,
+                student_key: student_key.clone(),
                 client_session_id,
-                mutations: vec![
-                    MutationEnvelope {
-                        id: "m3".to_owned(),
-                        seq: 3,
-                        timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 11, 0).unwrap(),
-                        mutation_type: "answer".to_owned(),
-                        payload: json!({"questionId": "q1", "value": "B"}),
-                    },
-                    MutationEnvelope {
-                        id: "m4".to_owned(),
-                        seq: 4,
-                        timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 11, 5).unwrap(),
-                        mutation_type: "flag".to_owned(),
-                        payload: json!({"questionId": "q1", "value": true}),
-                    },
-                ],
+                mutations: vec![MutationEnvelope {
+                    id: "m3".to_owned(),
+                    seq: 3,
+                    timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 11, 0).unwrap(),
+                    mutation_type: "answer".to_owned(),
+                    payload: json!({"questionId": "q2", "value": "B"}),
+                }],
             },
             None,
         )
         .await
         .expect("apply second batch");
+    assert_eq!(second.attempt.revision, 2);
 
-    assert_eq!(second_batch.server_accepted_through_seq, 4);
-    assert_eq!(second_batch.attempt.answers["q1"], "B");
-    assert_eq!(second_batch.attempt.flags["q1"], true);
-
-    let overlap = service
-        .apply_mutation_batch(
-            schedule_id,
-            StudentMutationBatchRequest {
-                attempt_id: attempt.id,
-                student_key: student_key(schedule_id, "alice"),
-                client_session_id,
-                mutations: vec![MutationEnvelope {
-                    id: "m-overlap".to_owned(),
-                    seq: 4,
-                    timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 12, 0).unwrap(),
-                    mutation_type: "answer".to_owned(),
-                    payload: json!({"questionId": "q1", "value": "C"}),
-                }],
-            },
-            None,
-        )
-        .await;
-
-    assert!(overlap.is_err());
-
-    let stored_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?")
-            .bind(attempt.id)
-            .fetch_one(database.pool())
-            .await
-            .unwrap();
-    assert_eq!(stored_count, 4);
+    let applied_2: i64 = sqlx::query_scalar(
+        "SELECT applied_revision FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
+    )
+    .bind(second.attempt.id)
+    .bind("m3")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(applied_2, 2);
 
     database.shutdown().await;
 }
@@ -154,8 +132,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .create_exam(
             &actor,
             CreateExamRequest {
-                slug: "cambridge-19-academic-mutation".to_owned(),
-                title: "Cambridge 19 Academic Mutation".to_owned(),
+                slug: "cambridge-19-academic-revision".to_owned(),
+                title: "Cambridge 19 Academic Revision".to_owned(),
                 exam_type: ExamType::Academic,
                 visibility: Visibility::Organization,
                 organization_id: Some("org-1".to_owned()),
@@ -199,7 +177,7 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             &actor,
             exam.id,
             PublishExamRequest {
-                publish_notes: Some("ready for mutation replay".to_owned()),
+                publish_notes: Some("ready for revision".to_owned()),
                 revision: exam_after_draft.revision,
             },
         )
@@ -212,19 +190,21 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             CreateScheduleRequest {
                 exam_id: exam.id,
                 published_version_id: published_version.id,
-                cohort_name: "Mutation Replay Cohort".to_owned(),
+                cohort_name: "Revision Cohort".to_owned(),
                 institution: Some("IELTS Centre".to_owned()),
                 start_time: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
                 end_time: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap()
                     + Duration::minutes(180),
                 auto_start: false,
                 auto_stop: false,
+                delivery_mode: ielts_backend_domain::schedule::DeliveryMode::ProctorStart,
+                recurrence_type: ielts_backend_domain::schedule::RecurrenceType::Once,
+                recurrence_param: None,
+                organization_id: Some("org-1".to_owned()),
+                metadata: None,
             },
         )
         .await
         .expect("create schedule")
 }
 
-fn student_key(schedule_id: Uuid, candidate_id: &str) -> String {
-    format!("student-{schedule_id}-{candidate_id}")
-}

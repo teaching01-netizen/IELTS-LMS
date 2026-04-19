@@ -164,6 +164,52 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
     .await;
     assert_eq!(warn["data"]["status"], "warned");
 
+    let (proctor_status, proctor_note, last_warning_id, violations_snapshot): (
+        String,
+        Option<String>,
+        Option<String>,
+        serde_json::Value,
+    ) = sqlx::query_as(
+        "SELECT proctor_status, proctor_note, last_warning_id, violations_snapshot FROM student_attempts WHERE id = ?",
+    )
+    .bind(attempt_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(proctor_status, "warned");
+    assert_eq!(proctor_note.as_deref(), Some("Look at the camera"));
+    let warning_id = last_warning_id.expect("warning id");
+    let contains_warning = violations_snapshot
+        .as_array()
+        .map(|violations| {
+            violations.iter().any(|entry| {
+                entry.get("type").and_then(serde_json::Value::as_str) == Some("PROCTOR_WARNING")
+                    && entry.get("id").and_then(serde_json::Value::as_str)
+                        == Some(warning_id.as_str())
+            })
+        })
+        .unwrap_or(false);
+    assert!(contains_warning, "violations snapshot should contain the proctor warning");
+
+    let violation_events: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM student_violation_events WHERE attempt_id = ? AND violation_type = 'PROCTOR_WARNING'",
+    )
+    .bind(attempt_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(violation_events, 1);
+
+    let audit_logs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND attempt_id = ? AND action_type = 'STUDENT_WARN'",
+    )
+    .bind(schedule.id.to_string())
+    .bind(attempt_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audit_logs, 1);
+
     let pause = issue_attempt_command(
         &app,
         &auth,

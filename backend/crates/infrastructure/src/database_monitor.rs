@@ -101,7 +101,7 @@ pub async fn inspect_storage_budget(
     // MySQL equivalent: SELECT SUM(data_length + index_length) FROM information_schema.tables WHERE table_schema = DATABASE()
     let total_bytes = sqlx::query_scalar::<_, i64>(
         r#"
-        SELECT COALESCE(SUM(data_length + index_length), 0)
+        SELECT CAST(COALESCE(SUM(COALESCE(data_length, 0) + COALESCE(index_length, 0)), 0) AS SIGNED)
         FROM information_schema.tables
         WHERE table_schema = DATABASE()
         "#,
@@ -116,7 +116,7 @@ pub async fn inspect_storage_budget(
         r#"
         SELECT
             table_name AS relation_name,
-            (data_length + index_length) AS total_bytes
+            CAST((COALESCE(data_length, 0) + COALESCE(index_length, 0)) AS SIGNED) AS total_bytes
         FROM information_schema.tables
         WHERE table_schema = DATABASE()
         ORDER BY (data_length + index_length) DESC

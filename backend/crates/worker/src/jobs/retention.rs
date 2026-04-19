@@ -55,16 +55,14 @@ pub async fn run_once(pool: MySqlPool) -> Result<RetentionRunReport, sqlx::Error
     let heartbeat_rows = sqlx::query(
         r#"
         DELETE FROM student_heartbeat_events
-        WHERE id IN (
-            SELECT heartbeat.id
-            FROM student_heartbeat_events AS heartbeat
-            INNER JOIN exam_schedules AS schedule
-                ON schedule.id = heartbeat.schedule_id
-            WHERE heartbeat.server_received_at < NOW() - INTERVAL 7 DAY
-              AND schedule.status <> 'live'
-            ORDER BY heartbeat.server_received_at ASC
-            LIMIT ?
-        )
+        WHERE server_received_at < NOW() - INTERVAL 7 DAY
+          AND schedule_id IN (
+              SELECT id
+              FROM exam_schedules
+              WHERE status <> 'live'
+          )
+        ORDER BY server_received_at ASC
+        LIMIT ?
         "#,
     )
     .bind(CLEANUP_BATCH_LIMIT)
@@ -74,21 +72,21 @@ pub async fn run_once(pool: MySqlPool) -> Result<RetentionRunReport, sqlx::Error
     let mutation_rows = sqlx::query(
         r#"
         DELETE FROM student_attempt_mutations
-        WHERE id IN (
-            SELECT mutation.id
-            FROM student_attempt_mutations AS mutation
-            INNER JOIN student_attempts AS attempt
-                ON attempt.id = mutation.attempt_id
-            INNER JOIN exam_schedules AS schedule
-                ON schedule.id = mutation.schedule_id
-            WHERE COALESCE(mutation.applied_at, mutation.server_received_at) < NOW() - INTERVAL 30 DAY
-              AND (
-                  attempt.submitted_at IS NOT NULL
-                  OR schedule.status IN ('completed', 'cancelled')
+        WHERE COALESCE(applied_at, server_received_at) < NOW() - INTERVAL 30 DAY
+          AND (
+              attempt_id IN (
+                  SELECT id
+                  FROM student_attempts
+                  WHERE submitted_at IS NOT NULL
               )
-            ORDER BY COALESCE(mutation.applied_at, mutation.server_received_at) ASC
-            LIMIT ?
-        )
+              OR schedule_id IN (
+                  SELECT id
+                  FROM exam_schedules
+                  WHERE status IN ('completed', 'cancelled')
+              )
+          )
+        ORDER BY COALESCE(applied_at, server_received_at) ASC
+        LIMIT ?
         "#,
     )
     .bind(CLEANUP_BATCH_LIMIT)

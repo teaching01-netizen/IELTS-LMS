@@ -43,7 +43,8 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
 async fn get_student_session_returns_schedule_and_version_before_bootstrap() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let (auth, _student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, _student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -53,7 +54,7 @@ async fn get_student_session_returns_schedule_and_version_before_bootstrap() {
         .oneshot(
             auth.with_auth(Request::builder().uri(format!(
                 "/api/v1/student/sessions/{}?candidateId=alice",
-                schedule.id
+                schedule_id
             )))
                 .body(Body::empty())
                 .unwrap(),
@@ -80,7 +81,8 @@ async fn get_student_session_returns_schedule_and_version_before_bootstrap() {
 async fn precheck_persists_integrity_on_the_attempt() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -90,7 +92,7 @@ async fn precheck_persists_integrity_on_the_attempt() {
         .oneshot(
             auth.with_csrf(Request::builder())
                 .method("POST")
-                .uri(format!("/api/v1/student/sessions/{}/precheck", schedule.id))
+                .uri(format!("/api/v1/student/sessions/{}/precheck", schedule_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&StudentPrecheckRequest {
@@ -100,7 +102,7 @@ async fn precheck_persists_integrity_on_the_attempt() {
                         candidate_email: "alice@example.com".to_owned(),
                         email: Some("alice@example.com".to_owned()),
                         wcode: Some("W123456".to_owned()),
-                        client_session_id: Uuid::new_v4(),
+                        client_session_id: Uuid::new_v4().to_string(),
                         pre_check: json!({
                             "completedAt": "2026-01-10T08:50:00Z",
                             "browserFamily": "chrome",
@@ -139,7 +141,8 @@ async fn precheck_persists_integrity_on_the_attempt() {
 async fn bootstrap_creates_or_hydrates_the_attempt_context() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -151,7 +154,7 @@ async fn bootstrap_creates_or_hydrates_the_attempt_context() {
                 .method("POST")
                 .uri(format!(
                     "/api/v1/student/sessions/{}/bootstrap",
-                    schedule.id
+                    schedule_id
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -162,7 +165,7 @@ async fn bootstrap_creates_or_hydrates_the_attempt_context() {
                         candidate_email: "alice@example.com".to_owned(),
                         email: Some("alice@example.com".to_owned()),
                         wcode: Some("W123456".to_owned()),
-                        client_session_id: Uuid::new_v4(),
+                        client_session_id: Uuid::new_v4().to_string(),
                     })
                     .unwrap(),
                 ))
@@ -189,13 +192,15 @@ async fn bootstrap_creates_or_hydrates_the_attempt_context() {
 async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, client_session_id) = bootstrap_attempt(&app, &auth, schedule.id, "alice", &student_key).await;
-    let attempt_id = Uuid::parse_str(bootstrap["data"]["attempt"]["id"].as_str().unwrap()).unwrap();
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
     let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
         .as_str()
         .unwrap()
@@ -207,7 +212,7 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
                 .method("POST")
                 .uri(format!(
                     "/api/v1/student/sessions/{}/mutations:batch",
-                    schedule.id
+                    schedule_id
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -255,13 +260,15 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
 async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, client_session_id) = bootstrap_attempt(&app, &auth, schedule.id, "alice", &student_key).await;
-    let attempt_id = Uuid::parse_str(bootstrap["data"]["attempt"]["id"].as_str().unwrap()).unwrap();
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
     let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
         .as_str()
         .unwrap()
@@ -295,7 +302,7 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
                 .method("POST")
                 .uri(format!(
                     "/api/v1/student/sessions/{}/mutations:batch",
-                    schedule.id
+                    schedule_id
                 ))
                 .header("content-type", "application/json")
                 .header("idempotency-key", "mutation-replay-1")
@@ -315,7 +322,7 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
                 .method("POST")
                 .uri(format!(
                     "/api/v1/student/sessions/{}/mutations:batch",
-                    schedule.id
+                    schedule_id
                 ))
                 .header("content-type", "application/json")
                 .header("idempotency-key", "mutation-replay-1")
@@ -335,7 +342,7 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
                 .method("POST")
                 .uri(format!(
                     "/api/v1/student/sessions/{}/mutations:batch",
-                    schedule.id
+                    schedule_id
                 ))
                 .header("content-type", "application/json")
                 .header("idempotency-key", "mutation-replay-1")
@@ -370,13 +377,15 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
 async fn heartbeat_records_disconnect_transitions() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, client_session_id) = bootstrap_attempt(&app, &auth, schedule.id, "alice", &student_key).await;
-    let attempt_id = Uuid::parse_str(bootstrap["data"]["attempt"]["id"].as_str().unwrap()).unwrap();
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
     let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
         .as_str()
         .unwrap()
@@ -388,12 +397,12 @@ async fn heartbeat_records_disconnect_transitions() {
                 .method("POST")
                 .uri(format!(
                     "/api/v1/student/sessions/{}/heartbeat",
-                    schedule.id
+                    schedule_id
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&StudentHeartbeatRequest {
-                        attempt_id: Some(attempt_id),
+                        attempt_id: Some(attempt_id.clone()),
                         student_key: student_key.clone(),
                         client_session_id,
                         event_type: "disconnect".to_owned(),
@@ -431,13 +440,14 @@ async fn heartbeat_records_disconnect_transitions() {
 async fn submit_finalizes_the_attempt_idempotently() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = bootstrap_attempt(&app, &auth, schedule.id, "alice", &student_key).await;
-    let attempt_id = Uuid::parse_str(bootstrap["data"]["attempt"]["id"].as_str().unwrap()).unwrap();
+    let (bootstrap, _) = bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
     let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
         .as_str()
         .unwrap()
@@ -448,11 +458,11 @@ async fn submit_finalizes_the_attempt_idempotently() {
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
                 .method("POST")
-                .uri(format!("/api/v1/student/sessions/{}/submit", schedule.id))
+                .uri(format!("/api/v1/student/sessions/{}/submit", schedule_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&StudentSubmitRequest {
-                        attempt_id,
+                        attempt_id: attempt_id.clone(),
                         student_key: student_key.clone(),
                     })
                     .unwrap(),
@@ -476,7 +486,7 @@ async fn submit_finalizes_the_attempt_idempotently() {
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
                 .method("POST")
-                .uri(format!("/api/v1/student/sessions/{}/submit", schedule.id))
+                .uri(format!("/api/v1/student/sessions/{}/submit", schedule_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&StudentSubmitRequest {
@@ -501,13 +511,14 @@ async fn submit_finalizes_the_attempt_idempotently() {
 async fn submit_replays_cached_response_for_the_same_idempotency_key() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = bootstrap_attempt(&app, &auth, schedule.id, "alice", &student_key).await;
-    let attempt_id = Uuid::parse_str(bootstrap["data"]["attempt"]["id"].as_str().unwrap()).unwrap();
+    let (bootstrap, _) = bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
     let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
         .as_str()
         .unwrap()
@@ -518,12 +529,12 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
                 .method("POST")
-                .uri(format!("/api/v1/student/sessions/{}/submit", schedule.id))
+                .uri(format!("/api/v1/student/sessions/{}/submit", schedule_id))
                 .header("content-type", "application/json")
                 .header("idempotency-key", "submit-replay-1")
                 .body(Body::from(
                     serde_json::to_vec(&StudentSubmitRequest {
-                        attempt_id,
+                        attempt_id: attempt_id.clone(),
                         student_key: student_key.clone(),
                     })
                     .unwrap(),
@@ -558,7 +569,7 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
         "writingAnswers": {},
         "flags": {}
     }))
-    .bind(attempt_id)
+    .bind(attempt_id.clone())
     .execute(database.pool())
     .await
     .unwrap();
@@ -567,7 +578,7 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
                 .method("POST")
-                .uri(format!("/api/v1/student/sessions/{}/submit", schedule.id))
+                .uri(format!("/api/v1/student/sessions/{}/submit", schedule_id))
                 .header("content-type", "application/json")
                 .header("idempotency-key", "submit-replay-1")
                 .body(Body::from(
@@ -599,13 +610,190 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
     .bind(student_key)
     .bind(format!(
         "POST:/api/v1/student/sessions/{}/submit",
-        schedule.id
+        schedule_id
     ))
     .bind("submit-replay-1")
     .fetch_one(database.pool())
     .await
     .unwrap();
     assert_eq!(idempotency_count, 1);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn bootstrap_hydrates_existing_attempt_after_crash_reconnect() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let mutation = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id: attempt_id.clone(),
+                        student_key: student_key.clone(),
+                        client_session_id,
+                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
+                            id: "mutation-1".to_owned(),
+                            seq: 1,
+                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
+                            mutation_type: "answer".to_owned(),
+                            payload: json!({"questionId": "q1", "value": "A"}),
+                        }],
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(mutation.status(), StatusCode::OK);
+
+    let (rebootstrap, _) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    assert_eq!(
+        rebootstrap["data"]["attempt"]["id"],
+        attempt_id
+    );
+    assert_eq!(rebootstrap["data"]["attempt"]["answers"]["q1"], "A");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn mutation_batch_persists_writing_answers_separately_and_tracks_current_question_id() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule.id, "alice", &student_key).await;
+    let attempt_id = Uuid::parse_str(bootstrap["data"]["attempt"]["id"].as_str().unwrap()).unwrap();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule.id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id,
+                        student_key: student_key.clone(),
+                        client_session_id,
+                        mutations: vec![
+                            ielts_backend_domain::attempt::MutationEnvelope {
+                                id: "mutation-1".to_owned(),
+                                seq: 1,
+                                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
+                                mutation_type: "writing_answer".to_owned(),
+                                payload: json!({"taskId": "task-1", "value": "Draft 1"}),
+                            },
+                            ielts_backend_domain::attempt::MutationEnvelope {
+                                id: "mutation-2".to_owned(),
+                                seq: 2,
+                                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 5).unwrap(),
+                                mutation_type: "answer".to_owned(),
+                                payload: json!({"questionId": "q1", "value": "A"}),
+                            },
+                        ],
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task-1"], "Draft 1");
+    assert_eq!(json["data"]["attempt"]["answers"]["q1"], "A");
+    assert_eq!(json["data"]["attempt"]["currentQuestionId"], "q1");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn attempt_token_rejects_schedule_mismatch() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule_a = seed_schedule_with_slug(database.pool(), "cambridge-19-academic-a").await;
+    let schedule_b = seed_schedule_with_slug(database.pool(), "cambridge-19-academic-b").await;
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_a.id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_a.id, "alice", &student_key).await;
+    let attempt_id = Uuid::parse_str(bootstrap["data"]["attempt"]["id"].as_str().unwrap()).unwrap();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_b.id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id,
+                        student_key: student_key.clone(),
+                        client_session_id,
+                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
+                            id: "mutation-1".to_owned(),
+                            seq: 1,
+                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
+                            mutation_type: "answer".to_owned(),
+                            payload: json!({"questionId": "q1", "value": "A"}),
+                        }],
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
     database.shutdown().await;
 }
@@ -711,14 +899,21 @@ fn with_attempt_token(
 }
 
 async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
+    seed_schedule_with_slug(pool, "cambridge-19-academic-delivery").await
+}
+
+async fn seed_schedule_with_slug(
+    pool: &sqlx::MySqlPool,
+    slug: &str,
+) -> ielts_backend_domain::schedule::ExamSchedule {
     let actor = contract_actor();
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service
         .create_exam(
             &actor,
             CreateExamRequest {
-                slug: "cambridge-19-academic-delivery".to_owned(),
-                title: "Cambridge 19 Academic Delivery".to_owned(),
+                slug: slug.to_owned(),
+                title: format!("Cambridge 19 Academic Delivery ({slug})"),
                 exam_type: ExamType::Academic,
                 visibility: Visibility::Organization,
                 organization_id: Some("org-1".to_owned()),

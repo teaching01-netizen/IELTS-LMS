@@ -24,14 +24,10 @@ pub async fn run_once(pool: MySqlPool) -> Result<MediaRunReport, sqlx::Error> {
         r#"
         UPDATE media_assets
         SET upload_status = 'orphaned', updated_at = NOW()
-        WHERE id IN (
-            SELECT id
-            FROM media_assets
-            WHERE upload_status = 'pending'
-              AND created_at < NOW() - INTERVAL 24 HOUR
-            ORDER BY created_at ASC
-            LIMIT ?
-        )
+        WHERE upload_status = 'pending'
+          AND created_at < NOW() - INTERVAL 24 HOUR
+        ORDER BY created_at ASC
+        LIMIT ?
         "#,
     )
     .bind(CLEANUP_BATCH_LIMIT)
@@ -40,14 +36,10 @@ pub async fn run_once(pool: MySqlPool) -> Result<MediaRunReport, sqlx::Error> {
     let deleted_rows = sqlx::query(
         r#"
         DELETE FROM media_assets
-        WHERE id IN (
-            SELECT id
-            FROM media_assets
-            WHERE delete_after_at IS NOT NULL
-              AND delete_after_at < NOW()
-            ORDER BY delete_after_at ASC
-            LIMIT ?
-        )
+        WHERE delete_after_at IS NOT NULL
+          AND delete_after_at < NOW()
+        ORDER BY delete_after_at ASC
+        LIMIT ?
         "#,
     )
     .bind(CLEANUP_BATCH_LIMIT)

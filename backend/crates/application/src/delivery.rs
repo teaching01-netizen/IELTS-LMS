@@ -1167,3 +1167,115 @@ fn set_value(mut object: Map<String, Value>, key: String, value: Value) -> Map<S
     object.insert(key, value);
     object
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use ielts_backend_domain::schedule::RuntimeStatus;
+    use serde_json::json;
+
+    fn runtime_with_status(status: RuntimeStatus) -> ExamSessionRuntime {
+        let now = Utc::now();
+        ExamSessionRuntime {
+            id: "runtime-1".to_owned(),
+            schedule_id: "schedule-1".to_owned(),
+            exam_id: "exam-1".to_owned(),
+            status,
+            plan_snapshot: Vec::new(),
+            actual_start_at: None,
+            actual_end_at: None,
+            active_section_key: None,
+            current_section_key: None,
+            current_section_remaining_seconds: 0,
+            waiting_for_next_section: false,
+            is_overrun: false,
+            total_paused_seconds: 0,
+            created_at: now,
+            updated_at: now,
+            revision: 0,
+            sections: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn determine_phase_follows_lifecycle_progression() {
+        assert_eq!(determine_phase(None, false, false), "pre-check");
+        assert_eq!(determine_phase(None, true, false), "lobby");
+
+        let live = runtime_with_status(RuntimeStatus::Live);
+        assert_eq!(determine_phase(Some(&live), false, false), "exam");
+
+        let paused = runtime_with_status(RuntimeStatus::Paused);
+        assert_eq!(determine_phase(Some(&paused), true, false), "exam");
+
+        let completed = runtime_with_status(RuntimeStatus::Completed);
+        assert_eq!(determine_phase(Some(&completed), true, false), "post-exam");
+
+        assert_eq!(determine_phase(None, true, true), "post-exam");
+    }
+
+    #[test]
+    fn apply_mutation_tracks_current_question_and_separates_writing_answers() {
+        let mut answers = json!({});
+        let mut writing_answers = json!({});
+        let mut flags = json!({});
+        let mut current_question_id = None;
+
+        apply_mutation(
+            &MutationEnvelope {
+                id: "m1".to_owned(),
+                seq: 1,
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+                mutation_type: "answer".to_owned(),
+                payload: json!({"questionId": "q1", "value": "A"}),
+            },
+            &mut answers,
+            &mut writing_answers,
+            &mut flags,
+            &mut current_question_id,
+        )
+        .expect("apply answer");
+
+        assert_eq!(answers["q1"], "A");
+        assert_eq!(writing_answers, json!({}));
+        assert_eq!(current_question_id.as_deref(), Some("q1"));
+
+        apply_mutation(
+            &MutationEnvelope {
+                id: "m2".to_owned(),
+                seq: 2,
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 5).unwrap(),
+                mutation_type: "writing_answer".to_owned(),
+                payload: json!({"taskId": "task-1", "value": "Draft 1"}),
+            },
+            &mut answers,
+            &mut writing_answers,
+            &mut flags,
+            &mut current_question_id,
+        )
+        .expect("apply writing answer");
+
+        assert_eq!(answers["q1"], "A");
+        assert_eq!(writing_answers["task-1"], "Draft 1");
+        assert_eq!(current_question_id.as_deref(), Some("task-1"));
+
+        apply_mutation(
+            &MutationEnvelope {
+                id: "m3".to_owned(),
+                seq: 3,
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 10).unwrap(),
+                mutation_type: "flag".to_owned(),
+                payload: json!({"questionId": "q1", "value": true}),
+            },
+            &mut answers,
+            &mut writing_answers,
+            &mut flags,
+            &mut current_question_id,
+        )
+        .expect("apply flag");
+
+        assert_eq!(flags["q1"], true);
+        assert_eq!(current_question_id.as_deref(), Some("task-1"));
+    }
+}
