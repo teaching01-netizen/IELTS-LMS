@@ -1,15 +1,15 @@
 use chrono::{Duration, Utc};
 use ielts_backend_domain::schedule::DegradedLiveState;
-use sqlx::PgPool;
+use sqlx::MySqlPool;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct LiveModeService {
-    pool: PgPool,
+    pool: MySqlPool,
 }
 
 impl LiveModeService {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
 
@@ -32,9 +32,9 @@ impl LiveModeService {
                 SELECT COUNT(*)
                 FROM outbox_events
                 WHERE aggregate_kind = 'schedule_runtime'
-                  AND aggregate_id = $1::text
+                  AND aggregate_id = ?
                   AND published_at IS NULL
-                  AND created_at < $2
+                  AND created_at < ?
                 "#,
             )
             .bind(schedule_id.to_string())
@@ -43,7 +43,7 @@ impl LiveModeService {
             .await?
         } else {
             sqlx::query_scalar(
-                "SELECT COUNT(*) FROM outbox_events WHERE published_at IS NULL AND created_at < $1",
+                "SELECT COUNT(*) FROM outbox_events WHERE published_at IS NULL AND created_at < ?",
             )
             .bind(threshold)
             .fetch_one(&self.pool)

@@ -64,7 +64,7 @@ pub async fn websocket_live(
     });
 
     // Check per-user connection cap
-    if !state.live_updates.can_user_connect(session.user.id) {
+    if !state.live_updates.can_user_connect(&session.user.id) {
         return ApiError::new(
             StatusCode::FORBIDDEN,
             "CONNECTION_LIMIT",
@@ -88,7 +88,7 @@ pub async fn websocket_live(
 
 fn extract_ws_session_token(headers: &axum::http::HeaderMap, cookie_name: &str) -> Option<String> {
     let cookie_header = headers.get(COOKIE)?;
-    let cookie_str = cookie_header.to_str().ok()?;
+    let _cookie_str = cookie_header.to_str().ok()?;
     parse_cookie(Some(cookie_header), cookie_name).map(|s| s.to_owned())
 }
 
@@ -96,9 +96,9 @@ async fn handle_socket(
     mut socket: WebSocket,
     state: AppState,
     schedule_id: Option<String>,
-    user_id: uuid::Uuid,
+    user_id: String,
 ) {
-    let current_connections = state.live_updates.connection_opened(user_id);
+    let current_connections = state.live_updates.connection_opened(&user_id);
     state
         .telemetry
         .set_websocket_connections(current_connections);
@@ -117,11 +117,11 @@ async fn handle_socket(
                     .to_string(),
                 ))
                 .await;
-            let remaining = state.live_updates.connection_closed(user_id);
+            let remaining = state.live_updates.connection_closed(&user_id);
             state.telemetry.set_websocket_connections(remaining);
             return;
         }
-        state.live_updates.subscribe_to_schedule(sid, user_id);
+        state.live_updates.subscribe_to_schedule(sid, &user_id);
     }
 
     let connected_message = json!({
@@ -133,9 +133,9 @@ async fn handle_socket(
         .await
         .is_err()
     {
-        let remaining = state.live_updates.connection_closed(user_id);
+        let remaining = state.live_updates.connection_closed(&user_id);
         if let Some(ref sid) = schedule_id {
-            state.live_updates.unsubscribe_from_schedule(sid, user_id);
+            state.live_updates.unsubscribe_from_schedule(sid, &user_id);
         }
         state.telemetry.set_websocket_connections(remaining);
         return;
@@ -179,9 +179,9 @@ async fn handle_socket(
         }
     }
 
-    let remaining = state.live_updates.connection_closed(user_id);
+    let remaining = state.live_updates.connection_closed(&user_id);
     if let Some(ref sid) = schedule_id {
-        state.live_updates.unsubscribe_from_schedule(sid, user_id);
+        state.live_updates.unsubscribe_from_schedule(sid, &user_id);
     }
     state.telemetry.set_websocket_connections(remaining);
 }

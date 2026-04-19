@@ -21,7 +21,7 @@ use ielts_backend_infrastructure::{
 };
 use serde::Serialize;
 use serde_json::{json, Value};
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
 use uuid::Uuid;
 
 const BUILDER_EMAIL: &str = "e2e.builder@example.com";
@@ -84,9 +84,9 @@ struct AdminLifecycleFixtureManifest {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BuilderFixtureManifest {
-    exam_id: Uuid,
+    exam_id: String,
     exam_slug: String,
-    draft_version_id: Uuid,
+    draft_version_id: String,
     initial_revision: i32,
     initial_version_count: usize,
     storage_state_path: String,
@@ -95,10 +95,10 @@ struct BuilderFixtureManifest {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StudentFixtureManifest {
-    exam_id: Uuid,
+    exam_id: String,
     exam_slug: String,
-    published_version_id: Uuid,
-    schedule_id: Uuid,
+    published_version_id: String,
+    schedule_id: String,
     candidate_id: String,
     question_id: String,
     expected_answer: String,
@@ -156,17 +156,17 @@ struct AuthFixture {
 
 #[derive(Debug)]
 struct BuilderFixture {
-    exam_id: Uuid,
-    draft_version_id: Uuid,
+    exam_id: String,
+    draft_version_id: String,
     initial_revision: i32,
     initial_version_count: usize,
 }
 
 #[derive(Debug)]
 struct StudentFixture {
-    exam_id: Uuid,
-    published_version_id: Uuid,
-    schedule_id: Uuid,
+    exam_id: String,
+    published_version_id: String,
+    schedule_id: String,
 }
 
 #[derive(Debug)]
@@ -190,8 +190,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .database_url
         .clone()
         .ok_or("DATABASE_URL must be set to seed backend E2E fixtures.")?;
-    let pool = PgPoolOptions::new()
+    let pool = MySqlPoolOptions::new()
         .max_connections(5)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .idle_timeout(std::time::Duration::from_secs(600))
+        .max_lifetime(std::time::Duration::from_secs(1800))
+        .test_before_acquire(true)
         .connect(&database_url)
         .await?;
 
@@ -353,62 +357,84 @@ fn parse_args(args: Vec<String>) -> Result<SeedArgs, Box<dyn std::error::Error>>
     })
 }
 
-async fn cleanup_existing_fixtures(pool: &PgPool) -> Result<(), sqlx::Error> {
-    sqlx::query(
+async fn cleanup_existing_fixtures(pool: &MySqlPool) -> Result<(), sqlx::Error> {
+    eprintln!("Starting cleanup of existing fixtures...");
+    
+    eprintln!("Deleting exam_entities...");
+    let result = sqlx::query(
         r#"
         DELETE FROM exam_entities
-        WHERE slug = ANY($1)
+        WHERE slug IN (?, ?)
         "#,
     )
-    .bind(vec![
-        BUILDER_EXAM_SLUG.to_owned(),
-        STUDENT_EXAM_SLUG.to_owned(),
-    ])
+    .bind(BUILDER_EXAM_SLUG.to_owned())
+    .bind(STUDENT_EXAM_SLUG.to_owned())
     .execute(pool)
-    .await?;
+    .await;
+    
+    match result {
+        Ok(_) => eprintln!("✓ Deleted exam_entities"),
+        Err(e) => {
+            eprintln!("✗ Failed to delete exam_entities: {}", e);
+            return Err(e);
+        }
+    }
 
-    sqlx::query(
+    eprintln!("Deleting users...");
+    let result = sqlx::query(
         r#"
         DELETE FROM users
-        WHERE email = ANY($1)
+        WHERE email IN (?, ?, ?, ?, ?)
         "#,
     )
-    .bind(vec![
-        BUILDER_EMAIL.to_owned(),
-        STUDENT_EMAIL.to_owned(),
-        UNREGISTERED_STUDENT_EMAIL.to_owned(),
-        ADMIN_OPERATOR_EMAIL.to_owned(),
-        ADMIN_EMAIL.to_owned(),
-    ])
+    .bind(BUILDER_EMAIL.to_owned())
+    .bind(STUDENT_EMAIL.to_owned())
+    .bind(UNREGISTERED_STUDENT_EMAIL.to_owned())
+    .bind(ADMIN_OPERATOR_EMAIL.to_owned())
+    .bind(ADMIN_EMAIL.to_owned())
     .execute(pool)
-    .await?;
+    .await;
+    
+    match result {
+        Ok(_) => eprintln!("✓ Deleted users"),
+        Err(e) => {
+            eprintln!("✗ Failed to delete users: {}", e);
+            return Err(e);
+        }
+    }
 
+    eprintln!("✓ Cleanup completed successfully");
     Ok(())
 }
 
 async fn seed_builder_fixture(
-    pool: &PgPool,
+    pool: &MySqlPool,
     builder_user_id: Uuid,
 ) -> Result<BuilderFixture, Box<dyn std::error::Error>> {
-    let actor = ActorContext::new(builder_user_id, ActorRole::Builder);
+    eprintln!("Seeding builder fixture...");
+    let actor = ActorContext::new(builder_user_id.to_string(), ActorRole::Builder);
     let service = BuilderService::new(pool.clone());
+    
+    eprintln!("Creating exam via BuilderService...");
     let exam = service
         .create_exam(
             &actor,
             CreateExamRequest {
                 slug: BUILDER_EXAM_SLUG.to_owned(),
                 title: "Builder Backend E2E Draft".to_owned(),
-                exam_type: ExamType::Academic,
-                visibility: Visibility::Organization,
+                exam_type: "Academic".to_string(),
+                visibility: "organization".to_string(),
                 organization_id: Some("e2e-org".to_owned()),
             },
         )
         .await?;
 
+    eprintln!("Saving draft via BuilderService...");
+    let exam_id = exam.id.clone();
     let draft_version = service
         .save_draft(
             &actor,
-            exam.id,
+            exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: minimal_exam_state(
                     "Builder Backend E2E Draft",
@@ -423,11 +449,12 @@ async fn seed_builder_fixture(
         )
         .await?;
 
-    let exam_after_draft = service.get_exam(&actor, exam.id).await?;
-    let versions = service.list_versions(&actor, exam.id).await?;
+    let exam_after_draft = service.get_exam(&actor, exam_id.clone()).await?;
+    let versions = service.list_versions(&actor, exam_id.clone()).await?;
 
+    eprintln!("✓ Builder fixture seeded successfully");
     Ok(BuilderFixture {
-        exam_id: exam.id,
+        exam_id,
         draft_version_id: draft_version.id,
         initial_revision: exam_after_draft.revision,
         initial_version_count: versions.len(),
@@ -435,11 +462,11 @@ async fn seed_builder_fixture(
 }
 
 async fn seed_student_fixture(
-    pool: &PgPool,
+    pool: &MySqlPool,
     builder_user_id: Uuid,
     student_user_id: Uuid,
 ) -> Result<StudentFixture, Box<dyn std::error::Error>> {
-    let builder_actor = ActorContext::new(builder_user_id, ActorRole::Builder);
+    let builder_actor = ActorContext::new(builder_user_id.to_string(), ActorRole::Builder);
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service
         .create_exam(
@@ -447,17 +474,18 @@ async fn seed_student_fixture(
             CreateExamRequest {
                 slug: STUDENT_EXAM_SLUG.to_owned(),
                 title: "Student Backend E2E Delivery".to_owned(),
-                exam_type: ExamType::Academic,
-                visibility: Visibility::Organization,
+                exam_type: "Academic".to_string(),
+                visibility: "organization".to_string(),
                 organization_id: Some("e2e-org".to_owned()),
             },
         )
         .await?;
 
+    let exam_id = exam.id.clone();
     builder_service
         .save_draft(
             &builder_actor,
-            exam.id,
+            exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: minimal_exam_state(
                     "Student Backend E2E Delivery",
@@ -472,11 +500,11 @@ async fn seed_student_fixture(
         )
         .await?;
 
-    let exam_after_draft = builder_service.get_exam(&builder_actor, exam.id).await?;
+    let exam_after_draft = builder_service.get_exam(&builder_actor, exam_id.clone()).await?;
     let published_version = builder_service
         .publish_exam(
             &builder_actor,
-            exam.id,
+            exam_id.clone(),
             PublishExamRequest {
                 publish_notes: Some("published for backend-backed student E2E".to_owned()),
                 revision: exam_after_draft.revision,
@@ -487,12 +515,13 @@ async fn seed_student_fixture(
     let scheduling_service = SchedulingService::new(pool.clone());
     let start_time = Utc::now() - Duration::minutes(5);
     let end_time = start_time + Duration::minutes(90);
+    let published_version_id = published_version.id.clone();
     let schedule = scheduling_service
         .create_schedule(
             &builder_actor,
             CreateScheduleRequest {
-                exam_id: exam.id,
-                published_version_id: published_version.id,
+                exam_id: exam_id.clone(),
+                published_version_id,
                 cohort_name: "Backend E2E Cohort".to_owned(),
                 institution: Some("Codex IELTS Lab".to_owned()),
                 start_time,
@@ -503,9 +532,11 @@ async fn seed_student_fixture(
         )
         .await?;
 
+    let schedule_id = Uuid::parse_str(&schedule.id)?;
+    let schedule_id_str = schedule.id.clone();
     create_student_registration(
         pool,
-        schedule.id,
+        schedule_id,
         student_user_id,
         STUDENT_CANDIDATE_ID,
         STUDENT_NAME,
@@ -516,7 +547,7 @@ async fn seed_student_fixture(
     scheduling_service
         .apply_runtime_command(
             &builder_actor,
-            schedule.id,
+            schedule_id,
             RuntimeCommandRequest {
                 action: RuntimeCommandAction::StartRuntime,
                 reason: Some("seed backend-backed student workflow".to_owned()),
@@ -527,18 +558,20 @@ async fn seed_student_fixture(
     Ok(StudentFixture {
         exam_id: exam.id,
         published_version_id: published_version.id,
-        schedule_id: schedule.id,
+        schedule_id: schedule_id_str,
     })
 }
 
 async fn create_authenticated_user(
-    pool: &PgPool,
+    pool: &MySqlPool,
     config: &AppConfig,
     role: UserRole,
     email: &str,
     display_name: &str,
     student_id: Option<&str>,
 ) -> Result<AuthFixture, Box<dyn std::error::Error>> {
+    eprintln!("Creating authenticated user: {} ({})", email, role_sql(&role));
+    
     let user_id = Uuid::new_v4();
     let session_token = random_token(32);
     let csrf_token = random_token(24);
@@ -547,89 +580,139 @@ async fn create_authenticated_user(
     let now = Utc::now();
     let (expires_at, idle_timeout_at) = session_expiry(&role, config);
 
-    sqlx::query(
+    eprintln!("Inserting user record...");
+    let result = sqlx::query(
         r#"
         INSERT INTO users (
             id, email, display_name, role, state, failed_login_count, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, 0, $6, $6)
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?)
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(email)
     .bind(display_name)
     .bind(role_sql(&role))
     .bind(state_sql(&UserState::Active))
     .bind(now)
+    .bind(now)
     .execute(pool)
-    .await?;
+    .await;
+    
+    match result {
+        Ok(_) => eprintln!("✓ Inserted user record"),
+        Err(e) => {
+            eprintln!("✗ Failed to insert user record: {}", e);
+            return Err(e.into());
+        }
+    }
 
-    sqlx::query(
+    eprintln!("Inserting password credentials...");
+    let result = sqlx::query(
         r#"
         INSERT INTO user_password_credentials (user_id, password_hash, updated_at)
-        VALUES ($1, $2, $3)
+        VALUES (?, ?, ?)
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(password_hash)
     .bind(now)
     .execute(pool)
-    .await?;
+    .await;
+    
+    match result {
+        Ok(_) => eprintln!("✓ Inserted password credentials"),
+        Err(e) => {
+            eprintln!("✗ Failed to insert password credentials: {}", e);
+            return Err(e.into());
+        }
+    }
 
     match role {
         UserRole::Student => {
-            sqlx::query(
+            eprintln!("Inserting student profile...");
+            let result = sqlx::query(
                 r#"
                 INSERT INTO student_profiles (
                     user_id, student_id, full_name, email, created_at, updated_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $5)
+                VALUES (?, ?, ?, ?, ?, ?)
                 "#,
             )
-            .bind(user_id)
+            .bind(user_id.to_string())
             .bind(student_id.unwrap_or(STUDENT_CANDIDATE_ID))
             .bind(display_name)
             .bind(email)
             .bind(now)
+            .bind(now)
             .execute(pool)
-            .await?;
+            .await;
+            
+            match result {
+                Ok(_) => eprintln!("✓ Inserted student profile"),
+                Err(e) => {
+                    eprintln!("✗ Failed to insert student profile: {}", e);
+                    return Err(e.into());
+                }
+            }
         }
         _ => {
-            sqlx::query(
+            eprintln!("Inserting staff profile...");
+            let result = sqlx::query(
                 r#"
                 INSERT INTO staff_profiles (user_id, full_name, email, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $4)
+                VALUES (?, ?, ?, ?, ?)
                 "#,
             )
-            .bind(user_id)
+            .bind(user_id.to_string())
             .bind(display_name)
             .bind(email)
             .bind(now)
+            .bind(now)
             .execute(pool)
-            .await?;
+            .await;
+            
+            match result {
+                Ok(_) => eprintln!("✓ Inserted staff profile"),
+                Err(e) => {
+                    eprintln!("✗ Failed to insert staff profile: {}", e);
+                    return Err(e.into());
+                }
+            }
         }
     }
 
-    sqlx::query(
+    eprintln!("Inserting user session...");
+    let result = sqlx::query(
         r#"
         INSERT INTO user_sessions (
             id, user_id, session_token_hash, csrf_token, role_snapshot,
             issued_at, last_seen_at, expires_at, idle_timeout_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(user_id)
+    .bind(Uuid::new_v4().to_string())
+    .bind(user_id.to_string())
     .bind(sha256_hex(&session_token))
     .bind(&csrf_token)
     .bind(role_sql(&role))
     .bind(now)
+    .bind(now)
     .bind(expires_at)
     .bind(idle_timeout_at)
     .execute(pool)
-    .await?;
+    .await;
+    
+    match result {
+        Ok(_) => eprintln!("✓ Inserted user session"),
+        Err(e) => {
+            eprintln!("✗ Failed to insert user session: {}", e);
+            return Err(e.into());
+        }
+    }
 
+    eprintln!("✓ User creation completed successfully");
     Ok(AuthFixture {
         user_id,
         session_token,
@@ -638,52 +721,83 @@ async fn create_authenticated_user(
 }
 
 async fn create_admin_lifecycle_user(
-    pool: &PgPool,
+    pool: &MySqlPool,
 ) -> Result<AdminLifecycleFixture, Box<dyn std::error::Error>> {
+    eprintln!("Creating admin lifecycle user...");
+    
     let user_id = Uuid::new_v4();
     let now = Utc::now();
     let password_hash = hash_password(ADMIN_ACTIVATION_PASSWORD)
         .map_err(|error| format!("failed to hash admin lifecycle password: {error}"))?;
 
-    sqlx::query(
+    eprintln!("Inserting admin user...");
+    let result = sqlx::query(
         r#"
         INSERT INTO users (
             id, email, display_name, role, state, failed_login_count, created_at, updated_at
         )
-        VALUES ($1, $2, $3, 'admin', 'pending_activation', 0, $4, $4)
+        VALUES (?, ?, ?, 'admin', 'pending_activation', 0, ?, ?)
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(ADMIN_EMAIL)
     .bind(ADMIN_NAME)
     .bind(now)
+    .bind(now)
     .execute(pool)
-    .await?;
+    .await;
+    
+    match result {
+        Ok(_) => eprintln!("✓ Inserted admin user"),
+        Err(e) => {
+            eprintln!("✗ Failed to insert admin user: {}", e);
+            return Err(e.into());
+        }
+    }
 
-    sqlx::query(
+    eprintln!("Inserting admin password credentials...");
+    let result = sqlx::query(
         r#"
         INSERT INTO user_password_credentials (user_id, password_hash, updated_at)
-        VALUES ($1, $2, $3)
+        VALUES (?, ?, ?)
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(password_hash)
     .bind(now)
     .execute(pool)
-    .await?;
+    .await;
+    
+    match result {
+        Ok(_) => eprintln!("✓ Inserted admin password credentials"),
+        Err(e) => {
+            eprintln!("✗ Failed to insert admin password credentials: {}", e);
+            return Err(e.into());
+        }
+    }
 
-    sqlx::query(
+    eprintln!("Inserting admin staff profile...");
+    let result = sqlx::query(
         r#"
         INSERT INTO staff_profiles (user_id, full_name, email, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $4)
+        VALUES (?, ?, ?, ?, ?)
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(ADMIN_NAME)
     .bind(ADMIN_EMAIL)
     .bind(now)
+    .bind(now)
     .execute(pool)
-    .await?;
+    .await;
+    
+    match result {
+        Ok(_) => eprintln!("✓ Inserted admin staff profile"),
+        Err(e) => {
+            eprintln!("✗ Failed to insert admin staff profile: {}", e);
+            return Err(e.into());
+        }
+    }
 
     let activation_token = insert_token(
         pool,
@@ -700,6 +814,7 @@ async fn create_admin_lifecycle_user(
     )
     .await?;
 
+    eprintln!("✓ Admin lifecycle user created successfully");
     Ok(AdminLifecycleFixture {
         email: ADMIN_EMAIL.to_owned(),
         activation_token,
@@ -708,34 +823,44 @@ async fn create_admin_lifecycle_user(
 }
 
 async fn insert_token(
-    pool: &PgPool,
+    pool: &MySqlPool,
     table: &str,
     user_id: Uuid,
     lifetime: Duration,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    eprintln!("Inserting token into table: {}", table);
+    
     let token = random_token(32);
     let expires_at = Utc::now() + lifetime;
     let id = Uuid::new_v4();
     let query = format!(
         r#"
         INSERT INTO {table} (id, user_id, token_hash, expires_at, created_at)
-        VALUES ($1, $2, $3, $4, now())
+        VALUES (?, ?, ?, ?, NOW())
         "#
     );
 
-    sqlx::query(&query)
-        .bind(id)
-        .bind(user_id)
+    let result = sqlx::query(&query)
+        .bind(id.to_string())
+        .bind(user_id.to_string())
         .bind(sha256_hex(&token))
         .bind(expires_at)
         .execute(pool)
-        .await?;
+        .await;
+    
+    match result {
+        Ok(_) => eprintln!("✓ Inserted token into {}", table),
+        Err(e) => {
+            eprintln!("✗ Failed to insert token into {}: {}", table, e);
+            return Err(e.into());
+        }
+    }
 
     Ok(token)
 }
 
 async fn create_student_registration(
-    pool: &PgPool,
+    pool: &MySqlPool,
     schedule_id: Uuid,
     user_id: Uuid,
     student_id: &str,
@@ -749,12 +874,13 @@ async fn create_student_registration(
             id, schedule_id, user_id, actor_id, student_key, student_id, student_name, student_email,
             access_state, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $3::text, $4, $5, $6, $7, 'checked_in', now(), now())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', NOW(), NOW())
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(schedule_id)
-    .bind(user_id)
+    .bind(Uuid::new_v4().to_string())
+    .bind(schedule_id.to_string())
+    .bind(user_id.to_string())
+    .bind(user_id.to_string())
     .bind(student_key)
     .bind(student_id)
     .bind(student_name)
@@ -1076,7 +1202,8 @@ fn write_storage_state(
     config: &AppConfig,
     auth: &AuthFixture,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (domain, secure) = parse_frontend_origin(frontend_origin)?;
+    let domain = parse_frontend_origin(frontend_origin)?;
+    let secure = config.auth_cookie_secure;
     let expires = (Utc::now() + Duration::hours(config.session_absolute_lifetime_hours)).timestamp()
         as f64;
 
@@ -1118,8 +1245,7 @@ fn ensure_parent_directory(path: &Path) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-fn parse_frontend_origin(origin: &str) -> Result<(String, bool), Box<dyn std::error::Error>> {
-    let secure = origin.starts_with("https://") || origin.starts_with("http://localhost");
+fn parse_frontend_origin(origin: &str) -> Result<String, Box<dyn std::error::Error>> {
     let without_scheme = origin
         .split("://")
         .nth(1)
@@ -1137,7 +1263,7 @@ fn parse_frontend_origin(origin: &str) -> Result<(String, bool), Box<dyn std::er
         return Err("frontend origin host cannot be empty".into());
     }
 
-    Ok((domain.to_owned(), secure))
+    Ok(domain.to_owned())
 }
 
 fn role_sql(role: &UserRole) -> &'static str {

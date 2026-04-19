@@ -16,9 +16,9 @@ pub enum RateLimitKey {
     /// Limit by IP address (for unauthenticated or login routes)
     Ip(IpAddr),
     /// Limit by user ID (for authenticated routes)
-    User(Uuid),
+    User(String),
     /// Limit by attempt ID (for student exam hot paths)
-    Attempt(Uuid),
+    Attempt(String),
     /// Custom key for specialized limiting
     Custom(String),
 }
@@ -269,7 +269,7 @@ mod tests {
     #[tokio::test]
     async fn user_keys_work_correctly() {
         let limiter = RateLimiter::new(RateLimitConfig::new(3, 60));
-        let user_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4().to_string();
         let key = RateLimitKey::User(user_id);
 
         for i in 0..3 {
@@ -287,7 +287,7 @@ mod tests {
     #[tokio::test]
     async fn attempt_keys_for_student_hot_paths() {
         let limiter = RateLimiter::new(RateLimitConfig::new(100, 60).with_burst(50));
-        let attempt_id = Uuid::new_v4();
+        let attempt_id = Uuid::new_v4().to_string();
         let key = RateLimitKey::Attempt(attempt_id);
 
         // Simulate many heartbeats/mutations

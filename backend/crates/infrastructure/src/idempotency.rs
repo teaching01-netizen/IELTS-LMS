@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
-use sqlx::{Executor, PgPool, Postgres};
+use sqlx::{Executor, MySql, MySqlPool};
 
 #[derive(Debug, Clone)]
 pub struct IdempotencyRecord {
@@ -23,11 +23,11 @@ pub enum IdempotencyLookupStatus {
 
 #[derive(Clone)]
 pub struct IdempotencyRepository {
-    pool: PgPool,
+    pool: MySqlPool,
 }
 
 impl IdempotencyRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
 
@@ -38,17 +38,17 @@ impl IdempotencyRepository {
         idempotency_key: &str,
     ) -> Result<Option<IdempotencyRecord>, sqlx::Error>
     where
-        E: Executor<'e, Database = Postgres>,
+        E: Executor<'e, Database = MySql>,
     {
         let row = sqlx::query_as::<_, IdempotencyRow>(
             r#"
             SELECT actor_id, route_key, idempotency_key, request_hash, response_status,
                    response_body, created_at, expires_at
             FROM idempotency_keys
-            WHERE actor_id = $1
-              AND route_key = $2
-              AND idempotency_key = $3
-              AND expires_at > now()
+            WHERE actor_id = ?
+              AND route_key = ?
+              AND idempotency_key = ?
+              AND expires_at > NOW()
             "#,
         )
         .bind(actor_id)
@@ -80,17 +80,16 @@ impl IdempotencyRepository {
         response_body: &Value,
     ) -> Result<IdempotencyRecord, sqlx::Error>
     where
-        E: Executor<'e, Database = Postgres>,
+        E: Executor<'e, Database = MySql>,
     {
-        let row = sqlx::query_as::<_, IdempotencyRow>(
+        let expires_at = Self::default_expiry();
+        sqlx::query(
             r#"
             INSERT INTO idempotency_keys (
                 actor_id, route_key, idempotency_key, request_hash, response_status,
                 response_body, created_at, expires_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, now(), now() + interval '72 hours')
-            RETURNING actor_id, route_key, idempotency_key, request_hash, response_status,
-                      response_body, created_at, expires_at
+            VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)
             "#,
         )
         .bind(actor_id)
@@ -99,10 +98,21 @@ impl IdempotencyRepository {
         .bind(request_hash)
         .bind(response_status)
         .bind(response_body)
-        .fetch_one(executor)
+        .bind(expires_at)
+        .execute(executor)
         .await?;
 
-        Ok(row.into())
+        // Return the record by reconstructing it from the input
+        Ok(IdempotencyRecord {
+            actor_id: actor_id.to_string(),
+            route_key: route_key.to_string(),
+            idempotency_key: idempotency_key.to_string(),
+            request_hash: request_hash.to_string(),
+            response_status,
+            response_body: response_body.clone(),
+            created_at: Utc::now(),
+            expires_at,
+        })
     }
 
     pub async fn store_or_replay(
@@ -112,7 +122,7 @@ impl IdempotencyRepository {
         idempotency_key: &str,
         request_hash: &str,
         response_status: i32,
-        response_body: &Value,
+        response_body: Value,
     ) -> Result<(IdempotencyLookupStatus, IdempotencyRecord), sqlx::Error> {
         if let Some(existing) =
             Self::lookup_with_executor(&self.pool, actor_id, route_key, idempotency_key).await?
@@ -132,7 +142,7 @@ impl IdempotencyRepository {
                 idempotency_key,
                 request_hash,
                 response_status,
-                response_body,
+                &response_body,
             )
             .await?;
 
@@ -140,15 +150,17 @@ impl IdempotencyRepository {
     }
 
     pub async fn purge_expired(&self, limit: i64) -> Result<u64, sqlx::Error> {
+        // Note: ctid is PostgreSQL-specific
+        // MySQL equivalent: Use subquery with LIMIT
         let result = sqlx::query(
             r#"
             DELETE FROM idempotency_keys
-            WHERE ctid IN (
-                SELECT ctid
+            WHERE id IN (
+                SELECT id
                 FROM idempotency_keys
-                WHERE expires_at < now() - interval '24 hours'
+                WHERE expires_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)
                 ORDER BY expires_at ASC
-                LIMIT $1
+                LIMIT ?
             )
             "#,
         )

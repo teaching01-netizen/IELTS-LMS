@@ -7,13 +7,14 @@ use ielts_backend_domain::schedule::{
 };
 use ielts_backend_infrastructure::{
     actor_context::{ActorContext, ActorRole},
+    authorization::AuthorizationService,
     live_mode::LiveModeService,
     outbox::OutboxRepository,
 };
 use serde_json::{json, Value};
-use sqlx::{FromRow, PgPool};
+use sqlx::{FromRow, MySql, MySqlPool};
 use thiserror::Error;
-use uuid::Uuid;
+use uuid::{fmt::Hyphenated, Uuid};
 
 use crate::scheduling::{SchedulingError, SchedulingService};
 
@@ -30,11 +31,11 @@ pub enum ProctoringError {
 }
 
 pub struct ProctoringService {
-    pool: PgPool,
+    pool: MySqlPool,
 }
 
 impl ProctoringService {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
 
@@ -52,32 +53,33 @@ impl ProctoringService {
         let mut items = Vec::with_capacity(schedules.len());
 
         for schedule in schedules {
+            let schedule_id_uuid = Uuid::parse_str(&schedule.id).map_err(|_| ProctoringError::Validation("Invalid schedule ID".to_string()))?;
             let runtime = scheduling
-                .get_runtime(&actor, schedule.id)
+                .get_runtime(&actor, schedule_id_uuid)
                 .await
                 .map_err(map_scheduling_error)?;
             let student_count: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM student_attempts WHERE schedule_id = $1")
-                    .bind(schedule.id)
+                sqlx::query_scalar("SELECT COUNT(*) FROM student_attempts WHERE schedule_id = ?")
+                    .bind(&schedule.id)
                     .fetch_one(&self.pool)
                     .await?;
             let active_count: i64 = sqlx::query_scalar(
                 r#"
                 SELECT COUNT(*)
                 FROM student_attempts
-                WHERE schedule_id = $1
+                WHERE schedule_id = ?
                   AND COALESCE(proctor_status, 'active') NOT IN ('terminated', 'paused')
                   AND phase = 'exam'
                 "#,
             )
-            .bind(schedule.id)
+            .bind(&schedule.id)
             .fetch_one(&self.pool)
             .await?;
             let alert_count: i64 = sqlx::query_scalar(
                 r#"
                 SELECT COUNT(*)
                 FROM session_audit_logs
-                WHERE schedule_id = $1
+                WHERE schedule_id = ?
                   AND acknowledged_at IS NULL
                   AND action_type IN (
                     'HEARTBEAT_LOST',
@@ -90,11 +92,11 @@ impl ProctoringService {
                   )
                 "#,
             )
-            .bind(schedule.id)
+            .bind(&schedule.id)
             .fetch_one(&self.pool)
             .await?;
             let degraded = live_mode
-                .snapshot(live_mode_enabled, Some(schedule.id))
+                .snapshot(live_mode_enabled, Some(schedule_id_uuid))
                 .await?;
 
             items.push(ProctorSessionSummary {
@@ -133,21 +135,21 @@ impl ProctoringService {
         let audit_logs = self.load_audit_logs(schedule_id).await?;
         let alerts = build_alerts(&audit_logs, &sessions);
         let notes = sqlx::query_as::<_, SessionNote>(
-            "SELECT * FROM session_notes WHERE schedule_id = $1 ORDER BY created_at DESC",
+            "SELECT * FROM session_notes WHERE schedule_id = ? ORDER BY created_at DESC",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_all(&self.pool)
         .await?;
         let presence = sqlx::query_as::<_, ProctorPresence>(
-            "SELECT * FROM proctor_presence WHERE schedule_id = $1 AND left_at IS NULL ORDER BY last_heartbeat_at DESC",
+            "SELECT * FROM proctor_presence WHERE schedule_id = ? AND left_at IS NULL ORDER BY last_heartbeat_at DESC",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_all(&self.pool)
         .await?;
         let violation_rules = sqlx::query_as::<_, ViolationRule>(
-            "SELECT * FROM violation_rules WHERE schedule_id = $1 ORDER BY created_at DESC",
+            "SELECT * FROM violation_rules WHERE schedule_id = ? ORDER BY created_at DESC",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_all(&self.pool)
         .await?;
 
@@ -177,11 +179,25 @@ impl ProctoringService {
 
     pub async fn record_presence(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
-        proctor_id: Uuid,
+        proctor_id: &str,
         proctor_name: &str,
         req: ProctorPresenceRequest,
     ) -> Result<Vec<ProctorPresence>, ProctoringError> {
+        let scheduling = SchedulingService::new(self.pool.clone());
+        let schedule = scheduling
+            .get_schedule(ctx, schedule_id)
+            .await
+            .map_err(map_scheduling_error)?;
+
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_proctor_schedule(ctx, schedule_id.to_string(), org_id.to_string()) {
+                return Err(ProctoringError::NotFound);
+            }
+        }
+
         let now = Utc::now();
         match req.action {
             PresenceAction::Join | PresenceAction::Heartbeat => {
@@ -191,20 +207,18 @@ impl ProctoringService {
                         id, schedule_id, proctor_id, proctor_name, status,
                         joined_at, last_heartbeat_at, left_at
                     )
-                    VALUES ($1, $2, $3, $4, 'active', $5, $5, NULL)
-                    ON CONFLICT (schedule_id, proctor_id) WHERE left_at IS NULL
-                    DO UPDATE SET
-                        proctor_name = EXCLUDED.proctor_name,
+                    VALUES (?, ?, ?, ?, 'active', NOW(), NOW(), NULL)
+                    ON DUPLICATE KEY UPDATE
+                        proctor_name = VALUES(proctor_name),
                         status = 'active',
-                        last_heartbeat_at = EXCLUDED.last_heartbeat_at,
+                        last_heartbeat_at = VALUES(last_heartbeat_at),
                         left_at = NULL
                     "#,
                 )
-                .bind(Uuid::new_v4())
-                .bind(schedule_id)
+                .bind(Uuid::new_v4().to_string())
+                .bind(schedule_id.to_string())
                 .bind(proctor_id)
                 .bind(proctor_name)
-                .bind(now)
                 .execute(&self.pool)
                 .await?;
             }
@@ -212,22 +226,21 @@ impl ProctoringService {
                 sqlx::query(
                     r#"
                     UPDATE proctor_presence
-                    SET status = 'left', left_at = $3, last_heartbeat_at = $3
-                    WHERE schedule_id = $1 AND proctor_id = $2 AND left_at IS NULL
+                    SET status = 'left', left_at = NOW(), last_heartbeat_at = NOW()
+                    WHERE schedule_id = ? AND proctor_id = ? AND left_at IS NULL
                     "#,
                 )
-                .bind(schedule_id)
+                .bind(schedule_id.to_string())
                 .bind(proctor_id)
-                .bind(now)
                 .execute(&self.pool)
                 .await?;
             }
         }
 
         sqlx::query_as::<_, ProctorPresence>(
-            "SELECT * FROM proctor_presence WHERE schedule_id = $1 AND left_at IS NULL ORDER BY last_heartbeat_at DESC",
+            "SELECT * FROM proctor_presence WHERE schedule_id = ? AND left_at IS NULL ORDER BY last_heartbeat_at DESC",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_all(&self.pool)
         .await
         .map_err(ProctoringError::from)
@@ -235,10 +248,23 @@ impl ProctoringService {
 
     pub async fn end_section_now(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
-        actor_id: Uuid,
         req: AttemptCommandRequest,
     ) -> Result<ExamSessionRuntime, ProctoringError> {
+        let scheduling = SchedulingService::new(self.pool.clone());
+        let schedule = scheduling
+            .get_schedule(ctx, schedule_id)
+            .await
+            .map_err(map_scheduling_error)?;
+
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_proctor_schedule(ctx, schedule_id.to_string(), org_id.to_string()) {
+                return Err(ProctoringError::NotFound);
+            }
+        }
+
         let runtime = self.load_runtime_row(schedule_id).await?;
         if runtime.status != RuntimeStatus::Live {
             return Err(ProctoringError::Conflict(
@@ -249,7 +275,9 @@ impl ProctoringService {
         let active_section_key = runtime.active_section_key.clone().ok_or_else(|| {
             ProctoringError::Conflict("No active section is available.".to_owned())
         })?;
-        let sections = self.load_runtime_section_rows(runtime.id).await?;
+        let sections = self
+            .load_runtime_section_rows(runtime.id.into_uuid())
+            .await?;
         let active_index = sections
             .iter()
             .position(|section| section.section_key == active_section_key)
@@ -267,16 +295,15 @@ impl ProctoringService {
             r#"
             UPDATE exam_session_runtime_sections
             SET
-                status = $2,
-                actual_end_at = $3,
+                status = ?,
+                actual_end_at = NOW(),
                 completion_reason = 'proctor_end',
                 paused_at = NULL
-            WHERE runtime_id = $1 AND section_key = $4
+            WHERE runtime_id = ? AND section_key = ?
             "#,
         )
-        .bind(runtime.id)
         .bind(SectionRuntimeStatus::Completed)
-        .bind(now)
+        .bind(runtime.id)
         .bind(&active_section_key)
         .execute(&mut *tx)
         .await?;
@@ -287,15 +314,14 @@ impl ProctoringService {
                 r#"
                 UPDATE exam_session_runtime_sections
                 SET
-                    status = $2,
-                    available_at = COALESCE(available_at, $3),
-                    actual_start_at = COALESCE(actual_start_at, $3)
-                WHERE runtime_id = $1 AND section_key = $4
+                    status = ?,
+                    available_at = COALESCE(available_at, NOW()),
+                    actual_start_at = COALESCE(actual_start_at, NOW())
+                WHERE runtime_id = ? AND section_key = ?
                 "#,
             )
-            .bind(runtime.id)
             .bind(SectionRuntimeStatus::Live)
-            .bind(now)
+            .bind(runtime.id)
             .bind(&section.section_key)
             .execute(&mut *tx)
             .await?;
@@ -304,18 +330,18 @@ impl ProctoringService {
                 r#"
                 UPDATE exam_session_runtimes
                 SET
-                    active_section_key = $2,
-                    current_section_key = $2,
-                    current_section_remaining_seconds = $3,
-                    updated_at = $4,
+                    active_section_key = ?,
+                    current_section_key = ?,
+                    current_section_remaining_seconds = ?,
+                    updated_at = NOW(),
                     revision = revision + 1
-                WHERE id = $1
+                WHERE id = ?
                 "#,
             )
-            .bind(runtime.id)
+            .bind(&section.section_key)
             .bind(&section.section_key)
             .bind((section.planned_duration_minutes + section.extension_minutes) * 60)
-            .bind(now)
+            .bind(runtime.id)
             .execute(&mut *tx)
             .await?;
         } else {
@@ -323,39 +349,36 @@ impl ProctoringService {
                 r#"
                 UPDATE exam_session_runtimes
                 SET
-                    status = $2,
-                    actual_end_at = $3,
+                    status = ?,
+                    actual_end_at = NOW(),
                     active_section_key = NULL,
                     current_section_key = NULL,
                     current_section_remaining_seconds = 0,
                     waiting_for_next_section = false,
-                    updated_at = $4,
+                    updated_at = NOW(),
                     revision = revision + 1
-                WHERE id = $1
+                WHERE id = ?
                 "#,
             )
-            .bind(runtime.id)
             .bind(RuntimeStatus::Completed)
-            .bind(now)
-            .bind(now)
+            .bind(runtime.id)
             .execute(&mut *tx)
             .await?;
 
             sqlx::query(
-                "UPDATE exam_schedules SET status = 'completed', updated_at = $2, revision = revision + 1 WHERE id = $1",
+                "UPDATE exam_schedules SET status = 'completed', updated_at = NOW(), revision = revision + 1 WHERE id = ?",
             )
-            .bind(schedule_id)
-            .bind(now)
+            .bind(schedule_id.to_string())
             .execute(&mut *tx)
             .await?;
         }
 
         insert_control_event(
             &mut tx,
-            runtime.id,
+            runtime.id.into_uuid(),
             schedule_id,
-            runtime.exam_id,
-            &actor_id.to_string(),
+            runtime.exam_id.into_uuid(),
+            &ctx.actor_id.to_string(),
             "end_section_now",
             Some(&active_section_key),
             None,
@@ -365,7 +388,7 @@ impl ProctoringService {
         insert_audit_log(
             &mut tx,
             schedule_id,
-            &actor_id.to_string(),
+            &ctx.actor_id.to_string(),
             "SECTION_END",
             None,
             Some(json!({ "sectionKey": active_section_key, "reason": req.reason })),
@@ -375,7 +398,7 @@ impl ProctoringService {
             insert_audit_log(
                 &mut tx,
                 schedule_id,
-                &actor_id.to_string(),
+                &ctx.actor_id.to_string(),
                 "SECTION_START",
                 None,
                 Some(json!({ "sectionKey": next_key })),
@@ -401,10 +424,23 @@ impl ProctoringService {
 
     pub async fn extend_section(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
-        actor_id: Uuid,
         req: ExtendSectionRequest,
     ) -> Result<ExamSessionRuntime, ProctoringError> {
+        let scheduling = SchedulingService::new(self.pool.clone());
+        let schedule = scheduling
+            .get_schedule(ctx, schedule_id)
+            .await
+            .map_err(map_scheduling_error)?;
+
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_proctor_schedule(ctx, schedule_id.to_string(), org_id.to_string()) {
+                return Err(ProctoringError::NotFound);
+            }
+        }
+
         if req.minutes <= 0 {
             return Err(ProctoringError::Validation(
                 "Extension minutes must be greater than zero.".to_owned(),
@@ -422,14 +458,14 @@ impl ProctoringService {
             r#"
             UPDATE exam_session_runtime_sections
             SET
-                extension_minutes = extension_minutes + $3,
-                projected_end_at = COALESCE(projected_end_at, $2) + ($3 * interval '1 minute')
-            WHERE runtime_id = $1 AND section_key = $4
+                extension_minutes = extension_minutes + ?,
+                projected_end_at = COALESCE(projected_end_at, NOW()) + INTERVAL (? MINUTE)
+            WHERE runtime_id = ? AND section_key = ?
             "#,
         )
-        .bind(runtime.id)
-        .bind(now)
         .bind(req.minutes)
+        .bind(req.minutes)
+        .bind(runtime.id)
         .bind(&active_section_key)
         .execute(&mut *tx)
         .await?;
@@ -438,24 +474,23 @@ impl ProctoringService {
             r#"
             UPDATE exam_session_runtimes
             SET
-                current_section_remaining_seconds = current_section_remaining_seconds + ($2 * 60),
-                updated_at = $3,
+                current_section_remaining_seconds = current_section_remaining_seconds + (? * 60),
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1
+            WHERE id = ?
             "#,
         )
-        .bind(runtime.id)
         .bind(req.minutes)
-        .bind(now)
+        .bind(runtime.id)
         .execute(&mut *tx)
         .await?;
 
         insert_control_event(
             &mut tx,
-            runtime.id,
+            runtime.id.into_uuid(),
             schedule_id,
-            runtime.exam_id,
-            &actor_id.to_string(),
+            runtime.exam_id.into_uuid(),
+            &ctx.actor_id.to_string(),
             "extend_section",
             Some(&active_section_key),
             Some(req.minutes),
@@ -465,7 +500,7 @@ impl ProctoringService {
         insert_audit_log(
             &mut tx,
             schedule_id,
-            &actor_id.to_string(),
+            &ctx.actor_id.to_string(),
             "EXTENSION_GRANTED",
             None,
             Some(json!({ "sectionKey": active_section_key, "minutes": req.minutes, "reason": req.reason })),
@@ -490,10 +525,23 @@ impl ProctoringService {
 
     pub async fn complete_exam(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
-        actor_id: Uuid,
         req: CompleteExamRequest,
     ) -> Result<ExamSessionRuntime, ProctoringError> {
+        let scheduling = SchedulingService::new(self.pool.clone());
+        let schedule = scheduling
+            .get_schedule(ctx, schedule_id)
+            .await
+            .map_err(map_scheduling_error)?;
+
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_proctor_schedule(ctx, schedule_id.to_string(), org_id.to_string()) {
+                return Err(ProctoringError::NotFound);
+            }
+        }
+
         let runtime = self.load_runtime_row(schedule_id).await?;
         if matches!(
             runtime.status,
@@ -512,52 +560,48 @@ impl ProctoringService {
             r#"
             UPDATE exam_session_runtimes
             SET
-                status = $2,
-                actual_end_at = $3,
+                status = ?,
+                actual_end_at = NOW(),
                 active_section_key = NULL,
                 current_section_key = NULL,
                 current_section_remaining_seconds = 0,
                 waiting_for_next_section = false,
-                updated_at = $4,
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1
+            WHERE id = ?
             "#,
         )
-        .bind(runtime.id)
         .bind(RuntimeStatus::Completed)
-        .bind(now)
-        .bind(now)
+        .bind(runtime.id)
         .execute(&mut *tx)
         .await?;
         sqlx::query(
             r#"
             UPDATE exam_session_runtime_sections
             SET
-                status = $2,
-                actual_end_at = COALESCE(actual_end_at, $3),
+                status = ?,
+                actual_end_at = COALESCE(actual_end_at, NOW()),
                 completion_reason = COALESCE(completion_reason, 'proctor_complete'),
                 paused_at = NULL
-            WHERE runtime_id = $1
+            WHERE runtime_id = ?
             "#,
         )
-        .bind(runtime.id)
         .bind(SectionRuntimeStatus::Completed)
-        .bind(now)
+        .bind(runtime.id)
         .execute(&mut *tx)
         .await?;
         sqlx::query(
-            "UPDATE exam_schedules SET status = 'completed', updated_at = $2, revision = revision + 1 WHERE id = $1",
+            "UPDATE exam_schedules SET status = 'completed', updated_at = NOW(), revision = revision + 1 WHERE id = ?",
         )
-        .bind(schedule_id)
-        .bind(now)
+        .bind(schedule_id.to_string())
         .execute(&mut *tx)
         .await?;
         insert_control_event(
             &mut tx,
-            runtime.id,
+            runtime.id.into_uuid(),
             schedule_id,
-            runtime.exam_id,
-            &actor_id.to_string(),
+            runtime.exam_id.into_uuid(),
+            &ctx.actor_id.to_string(),
             "complete_runtime",
             None,
             None,
@@ -567,7 +611,7 @@ impl ProctoringService {
         insert_audit_log(
             &mut tx,
             schedule_id,
-            &actor_id.to_string(),
+            &ctx.actor_id.to_string(),
             "SESSION_END",
             None,
             Some(json!({ "reason": req.reason })),
@@ -592,11 +636,24 @@ impl ProctoringService {
 
     pub async fn warn_attempt(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
         attempt_id: Uuid,
-        actor_id: Uuid,
         req: AttemptCommandRequest,
     ) -> Result<StudentSessionSummary, ProctoringError> {
+        let scheduling = SchedulingService::new(self.pool.clone());
+        let schedule = scheduling
+            .get_schedule(ctx, schedule_id)
+            .await
+            .map_err(map_scheduling_error)?;
+
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_access_student_data(ctx, schedule_id.to_string(), "", org_id.to_string()) {
+                return Err(ProctoringError::NotFound);
+            }
+        }
+
         let description = req
             .message
             .clone()
@@ -617,15 +674,14 @@ impl ProctoringService {
             INSERT INTO student_violation_events (
                 id, schedule_id, attempt_id, violation_type, severity, description, payload, created_at
             )
-            VALUES ($1, $2, $3, 'PROCTOR_WARNING', 'medium', $4, $5, $6)
+            VALUES (?, ?, ?, 'PROCTOR_WARNING', 'medium', ?, ?, NOW())
             "#,
         )
         .bind(warning_id)
-        .bind(schedule_id)
-        .bind(attempt_id)
+        .bind(schedule_id.to_string())
+        .bind(attempt_id.to_string())
         .bind(&description)
         .bind(json!({ "message": description }))
-        .bind(now)
         .execute(&mut *tx)
         .await?;
 
@@ -634,30 +690,29 @@ impl ProctoringService {
             UPDATE student_attempts
             SET
                 proctor_status = 'warned',
-                proctor_note = $3,
-                proctor_updated_at = $4,
-                proctor_updated_by = $5,
-                last_warning_id = $6,
-                violations_snapshot = COALESCE(violations_snapshot, '[]'::jsonb) || $7::jsonb,
-                updated_at = $4,
+                proctor_note = ?,
+                proctor_updated_at = NOW(),
+                proctor_updated_by = ?,
+                last_warning_id = ?,
+                violations_snapshot = JSON_MERGE_PRESERVE(COALESCE(violations_snapshot, JSON_ARRAY()), ?),
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1 AND schedule_id = $2
+            WHERE id = ? AND schedule_id = ?
             "#,
         )
-        .bind(attempt_id)
-        .bind(schedule_id)
         .bind(&description)
-        .bind(now)
-        .bind(&actor_id.to_string())
+        .bind(&ctx.actor_id.to_string())
         .bind(warning_id.to_string())
-        .bind(&warning_json)
+        .bind(warning_json)
+        .bind(attempt_id.to_string())
+        .bind(schedule_id.to_string())
         .execute(&mut *tx)
         .await?;
 
         insert_audit_log(
             &mut tx,
             schedule_id,
-            &actor_id.to_string(),
+            &ctx.actor_id.to_string(),
             "STUDENT_WARN",
             Some(attempt_id),
             Some(json!({ "message": req.message, "warningId": warning_id, "severity": "medium" })),
@@ -679,15 +734,28 @@ impl ProctoringService {
 
     pub async fn pause_attempt(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
         attempt_id: Uuid,
-        actor_id: Uuid,
         req: AttemptCommandRequest,
     ) -> Result<StudentSessionSummary, ProctoringError> {
+        let scheduling = SchedulingService::new(self.pool.clone());
+        let schedule = scheduling
+            .get_schedule(ctx, schedule_id)
+            .await
+            .map_err(map_scheduling_error)?;
+
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_access_student_data(ctx, schedule_id.to_string(), "", org_id.to_string()) {
+                return Err(ProctoringError::NotFound);
+            }
+        }
+
         self.update_attempt_status(
             schedule_id,
             attempt_id,
-            actor_id,
+            &ctx.actor_id,
             "paused",
             None,
             "STUDENT_PAUSE",
@@ -698,15 +766,28 @@ impl ProctoringService {
 
     pub async fn resume_attempt(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
         attempt_id: Uuid,
-        actor_id: Uuid,
         req: AttemptCommandRequest,
     ) -> Result<StudentSessionSummary, ProctoringError> {
+        let scheduling = SchedulingService::new(self.pool.clone());
+        let schedule = scheduling
+            .get_schedule(ctx, schedule_id)
+            .await
+            .map_err(map_scheduling_error)?;
+
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_access_student_data(ctx, schedule_id.to_string(), "", org_id.to_string()) {
+                return Err(ProctoringError::NotFound);
+            }
+        }
+
         self.update_attempt_status(
             schedule_id,
             attempt_id,
-            actor_id,
+            &ctx.actor_id,
             "active",
             None,
             "STUDENT_RESUME",
@@ -717,15 +798,28 @@ impl ProctoringService {
 
     pub async fn terminate_attempt(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
         attempt_id: Uuid,
-        actor_id: Uuid,
         req: AttemptCommandRequest,
     ) -> Result<StudentSessionSummary, ProctoringError> {
+        let scheduling = SchedulingService::new(self.pool.clone());
+        let schedule = scheduling
+            .get_schedule(ctx, schedule_id)
+            .await
+            .map_err(map_scheduling_error)?;
+
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_access_student_data(ctx, schedule_id.to_string(), "", org_id.to_string()) {
+                return Err(ProctoringError::NotFound);
+            }
+        }
+
         self.update_attempt_status(
             schedule_id,
             attempt_id,
-            actor_id,
+            &ctx.actor_id,
             "terminated",
             Some("post-exam"),
             "STUDENT_TERMINATE",
@@ -734,33 +828,60 @@ impl ProctoringService {
         .await
     }
 
-    #[tracing::instrument(skip(self), fields(alert_id = %alert_id, actor_id = %actor_id))]
+    #[tracing::instrument(skip(self), fields(alert_id = %alert_id, actor_id = %ctx.actor_id))]
     pub async fn acknowledge_alert(
         &self,
+        ctx: &ActorContext,
         alert_id: Uuid,
-        actor_id: Uuid,
         _req: AlertAckRequest,
     ) -> Result<SessionAuditLog, ProctoringError> {
-        sqlx::query_as::<_, SessionAuditLog>(
-            r#"
-            UPDATE session_audit_logs
-            SET acknowledged_at = now(), acknowledged_by = $2
-            WHERE id = $1
-            RETURNING *
-            "#,
+        // Get the alert to check which schedule it belongs to
+        let alert: SessionAuditLog = sqlx::query_as(
+            "SELECT * FROM session_audit_logs WHERE id = ?"
         )
         .bind(alert_id)
-        .bind(&actor_id.to_string())
         .fetch_optional(&self.pool)
         .await?
-        .ok_or(ProctoringError::NotFound)
+        .ok_or(ProctoringError::NotFound)?;
+
+        let scheduling = SchedulingService::new(self.pool.clone());
+        let schedule_id_uuid = Uuid::parse_str(&alert.schedule_id).map_err(|_| ProctoringError::Validation("Invalid schedule ID".to_string()))?;
+        let schedule = scheduling
+            .get_schedule(ctx, schedule_id_uuid)
+            .await
+            .map_err(map_scheduling_error)?;
+
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_access_student_data(ctx, schedule_id_uuid.to_string(), "", org_id.to_string()) {
+                return Err(ProctoringError::NotFound);
+            }
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE session_audit_logs
+            SET acknowledged_at = NOW(), acknowledged_by = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&ctx.actor_id.to_string())
+        .bind(alert_id)
+        .execute(&self.pool)
+            .await?;
+
+        sqlx::query_as::<_, SessionAuditLog>("SELECT * FROM session_audit_logs WHERE id = ?")
+            .bind(alert_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(ProctoringError::NotFound)
     }
 
     async fn update_attempt_status(
         &self,
         schedule_id: Uuid,
         attempt_id: Uuid,
-        actor_id: Uuid,
+        actor_id: &str,
         proctor_status: &str,
         phase: Option<&str>,
         action_type: &str,
@@ -773,30 +894,29 @@ impl ProctoringService {
             r#"
             UPDATE student_attempts
             SET
-                proctor_status = $3,
-                phase = COALESCE($4, phase),
-                proctor_note = COALESCE($5, proctor_note),
-                proctor_updated_at = $6,
-                proctor_updated_by = $7,
-                updated_at = $6,
+                proctor_status = ?,
+                phase = COALESCE(?, phase),
+                proctor_note = COALESCE(?, proctor_note),
+                proctor_updated_at = NOW(),
+                proctor_updated_by = ?,
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1 AND schedule_id = $2
+            WHERE id = ? AND schedule_id = ?
             "#,
         )
-        .bind(attempt_id)
-        .bind(schedule_id)
         .bind(proctor_status)
         .bind(phase)
         .bind(req.reason.clone().or(req.message.clone()))
-        .bind(now)
-        .bind(&actor_id.to_string())
+        .bind(actor_id)
+        .bind(attempt_id.to_string())
+        .bind(schedule_id.to_string())
         .execute(&mut *tx)
         .await?;
 
         insert_audit_log(
             &mut tx,
             schedule_id,
-            &actor_id.to_string(),
+            actor_id,
             action_type,
             Some(attempt_id),
             Some(json!({ "message": req.message, "reason": req.reason })),
@@ -839,11 +959,11 @@ impl ProctoringService {
                 COALESCE(proctor_status, 'active') AS proctor_status,
                 last_warning_id
             FROM student_attempts
-            WHERE schedule_id = $1
+            WHERE schedule_id = ?
             ORDER BY updated_at DESC
             "#,
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_all(&self.pool)
         .await?;
 
@@ -880,11 +1000,11 @@ impl ProctoringService {
                 COALESCE(proctor_status, 'active') AS proctor_status,
                 last_warning_id
             FROM student_attempts
-            WHERE id = $1 AND schedule_id = $2
+            WHERE id = ? AND schedule_id = ?
             "#,
         )
-        .bind(attempt_id)
-        .bind(schedule_id)
+        .bind(attempt_id.to_string())
+        .bind(schedule_id.to_string())
         .fetch_optional(&self.pool)
         .await?
         .ok_or(ProctoringError::NotFound)?;
@@ -894,9 +1014,9 @@ impl ProctoringService {
 
     async fn load_runtime_row(&self, schedule_id: Uuid) -> Result<RuntimeRow, ProctoringError> {
         sqlx::query_as::<_, RuntimeRow>(
-            "SELECT * FROM exam_session_runtimes WHERE schedule_id = $1",
+            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_optional(&self.pool)
         .await?
         .ok_or(ProctoringError::NotFound)
@@ -907,9 +1027,9 @@ impl ProctoringService {
         runtime_id: Uuid,
     ) -> Result<Vec<RuntimeSectionRow>, ProctoringError> {
         sqlx::query_as::<_, RuntimeSectionRow>(
-            "SELECT * FROM exam_session_runtime_sections WHERE runtime_id = $1 ORDER BY section_order ASC",
+            "SELECT * FROM exam_session_runtime_sections WHERE runtime_id = ? ORDER BY section_order ASC",
         )
-        .bind(runtime_id)
+        .bind(runtime_id.hyphenated())
         .fetch_all(&self.pool)
         .await
         .map_err(ProctoringError::from)
@@ -920,9 +1040,9 @@ impl ProctoringService {
         schedule_id: Uuid,
     ) -> Result<Vec<SessionAuditLog>, ProctoringError> {
         sqlx::query_as::<_, SessionAuditLog>(
-            "SELECT * FROM session_audit_logs WHERE schedule_id = $1 ORDER BY created_at DESC",
+            "SELECT * FROM session_audit_logs WHERE schedule_id = ? ORDER BY created_at DESC",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_all(&self.pool)
         .await
         .map_err(ProctoringError::from)
@@ -931,16 +1051,16 @@ impl ProctoringService {
 
 #[derive(FromRow)]
 struct AttemptProjectionRow {
-    id: Uuid,
+    id: Hyphenated,
     candidate_id: String,
     candidate_name: String,
     candidate_email: String,
-    schedule_id: Uuid,
+    schedule_id: Hyphenated,
     current_module: String,
     phase: String,
     integrity: Value,
     violations_snapshot: Value,
-    exam_id: Uuid,
+    exam_id: Hyphenated,
     exam_title: String,
     updated_at: DateTime<Utc>,
     proctor_status: String,
@@ -949,8 +1069,8 @@ struct AttemptProjectionRow {
 
 #[derive(FromRow)]
 struct RuntimeRow {
-    id: Uuid,
-    exam_id: Uuid,
+    id: Hyphenated,
+    exam_id: Hyphenated,
     status: RuntimeStatus,
     active_section_key: Option<String>,
     revision: i32,
@@ -965,7 +1085,7 @@ struct RuntimeSectionRow {
 }
 
 fn system_actor() -> ActorContext {
-    ActorContext::new(Uuid::nil(), ActorRole::Admin)
+    ActorContext::new(Uuid::nil().to_string(), ActorRole::Admin)
 }
 
 fn map_scheduling_error(error: SchedulingError) -> ProctoringError {
@@ -1028,11 +1148,11 @@ fn attempt_row_to_session(
         .unwrap_or_else(|| i32::from(row.last_warning_id.is_some()));
 
     StudentSessionSummary {
-        attempt_id: row.id,
+        attempt_id: row.id.to_string(),
         student_id: row.candidate_id,
         student_name: row.candidate_name,
         student_email: row.candidate_email,
-        schedule_id: row.schedule_id,
+        schedule_id: row.schedule_id.to_string(),
         status,
         current_section: row.current_module,
         time_remaining: runtime.current_section_remaining_seconds,
@@ -1044,7 +1164,7 @@ fn attempt_row_to_session(
         violations: row.violations_snapshot,
         warnings,
         last_activity,
-        exam_id: row.exam_id,
+        exam_id: row.exam_id.into_uuid(),
         exam_name: row.exam_title,
     }
 }
@@ -1070,7 +1190,8 @@ fn build_alerts(
         .map(|log| {
             let session = log
                 .target_student_id
-                .and_then(|target| sessions.iter().find(|session| session.attempt_id == target));
+                .as_ref()
+                .and_then(|target| sessions.iter().find(|session| session.attempt_id == *target));
             let severity = log
                 .payload
                 .as_ref()
@@ -1092,7 +1213,7 @@ fn build_alerts(
                 .to_owned();
 
             ProctorAlert {
-                id: log.id,
+                id: Uuid::parse_str(&log.id).unwrap_or(Uuid::nil()),
                 severity,
                 alert_type: log.action_type.clone(),
                 student_name: session
@@ -1133,7 +1254,7 @@ fn section_status_name(status: &SectionRuntimeStatus) -> String {
 
 #[allow(clippy::too_many_arguments)]
 async fn insert_control_event(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
     runtime_id: Uuid,
     schedule_id: Uuid,
     exam_id: Uuid,
@@ -1148,48 +1269,49 @@ async fn insert_control_event(
         INSERT INTO cohort_control_events (
             id, schedule_id, runtime_id, exam_id, actor_id, action, section_key, minutes, reason, payload, created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(schedule_id)
-    .bind(runtime_id)
-    .bind(exam_id)
+    .bind(Uuid::new_v4().to_string())
+    .bind(schedule_id.to_string())
+    .bind(runtime_id.to_string())
+    .bind(exam_id.to_string())
     .bind(actor_id)
     .bind(action)
     .bind(section_key)
     .bind(minutes)
     .bind(reason)
-    .bind(json!({}))
-    .execute(&mut **tx)
+    .bind(json!(null))
+    .execute(tx.as_mut())
     .await?;
 
     Ok(())
 }
 
 async fn insert_audit_log(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
     schedule_id: Uuid,
     actor: &str,
     action_type: &str,
-    target_student_id: Option<Uuid>,
-    payload: Option<Value>,
+    target_attempt_id: Option<Uuid>,
+    metadata: Option<Value>,
 ) -> Result<(), sqlx::Error> {
+    let target_attempt_id = target_attempt_id.map(|value| value.to_string());
     sqlx::query(
         r#"
         INSERT INTO session_audit_logs (
-            id, schedule_id, actor, action_type, target_student_id, payload, created_at
+            id, schedule_id, actor, action_type, target_attempt_id, metadata, created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, now())
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(schedule_id)
+    .bind(Uuid::new_v4().to_string())
+    .bind(schedule_id.to_string())
     .bind(actor)
     .bind(action_type)
-    .bind(target_student_id)
-    .bind(payload)
-    .execute(&mut **tx)
+    .bind(target_attempt_id)
+    .bind(metadata)
+    .execute(tx.as_mut())
     .await?;
 
     Ok(())

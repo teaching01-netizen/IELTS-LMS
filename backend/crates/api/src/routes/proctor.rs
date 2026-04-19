@@ -12,6 +12,7 @@ use ielts_backend_domain::schedule::{
     ProctorPresence, ProctorPresenceRequest, ProctorSessionDetail, ProctorSessionSummary,
     SessionAuditLog,
 };
+use ielts_backend_infrastructure::actor_context::ActorContext;
 use sqlx::query_scalar;
 use uuid::Uuid;
 
@@ -42,7 +43,7 @@ pub async fn list_sessions(
     let sessions = if principal.user.role == UserRole::Admin {
         sessions
     } else {
-        let allowed = assigned_schedule_ids(&state, principal.user.id, "proctor").await?;
+        let allowed = assigned_schedule_ids(&state, &principal.user.id, "proctor").await?;
         sessions
             .into_iter()
             .filter(|session| allowed.contains(&session.schedule.id))
@@ -90,12 +91,15 @@ pub async fn refresh_presence(
     Json(req): Json<ProctorPresenceRequest>,
 ) -> Result<ApiResponse<Vec<ProctorPresence>>, ApiError> {
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let presence = service
         .record_presence(
+            &ctx,
             schedule_id,
-            principal.user.id,
+            &principal.user.id,
             &principal.display_name(),
             req,
         )
@@ -115,10 +119,12 @@ pub async fn end_section_now(
     Json(req): Json<AttemptCommandRequest>,
 ) -> Result<ApiResponse<ielts_backend_domain::schedule::ExamSessionRuntime>, ApiError> {
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let runtime = service
-        .end_section_now(schedule_id, principal.user.id, req)
+        .end_section_now(&ctx, schedule_id, req)
         .await?;
     state
         .telemetry
@@ -135,10 +141,12 @@ pub async fn extend_section(
     Json(req): Json<ExtendSectionRequest>,
 ) -> Result<ApiResponse<ielts_backend_domain::schedule::ExamSessionRuntime>, ApiError> {
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let runtime = service
-        .extend_section(schedule_id, principal.user.id, req)
+        .extend_section(&ctx, schedule_id, req)
         .await?;
     state
         .telemetry
@@ -155,10 +163,12 @@ pub async fn complete_exam(
     Json(req): Json<CompleteExamRequest>,
 ) -> Result<ApiResponse<ielts_backend_domain::schedule::ExamSessionRuntime>, ApiError> {
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let runtime = service
-        .complete_exam(schedule_id, principal.user.id, req)
+        .complete_exam(&ctx, schedule_id, req)
         .await?;
     state
         .telemetry
@@ -175,10 +185,12 @@ pub async fn warn_attempt(
     Json(req): Json<AttemptCommandRequest>,
 ) -> Result<ApiResponse<ielts_backend_domain::schedule::StudentSessionSummary>, ApiError> {
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let session = service
-        .warn_attempt(schedule_id, attempt_id, principal.user.id, req)
+        .warn_attempt(&ctx, schedule_id, attempt_id, req)
         .await?;
     state
         .telemetry
@@ -195,10 +207,12 @@ pub async fn pause_attempt(
     Json(req): Json<AttemptCommandRequest>,
 ) -> Result<ApiResponse<ielts_backend_domain::schedule::StudentSessionSummary>, ApiError> {
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let session = service
-        .pause_attempt(schedule_id, attempt_id, principal.user.id, req)
+        .pause_attempt(&ctx, schedule_id, attempt_id, req)
         .await?;
     state
         .telemetry
@@ -215,10 +229,12 @@ pub async fn resume_attempt(
     Json(req): Json<AttemptCommandRequest>,
 ) -> Result<ApiResponse<ielts_backend_domain::schedule::StudentSessionSummary>, ApiError> {
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let session = service
-        .resume_attempt(schedule_id, attempt_id, principal.user.id, req)
+        .resume_attempt(&ctx, schedule_id, attempt_id, req)
         .await?;
     state
         .telemetry
@@ -235,10 +251,12 @@ pub async fn terminate_attempt(
     Json(req): Json<AttemptCommandRequest>,
 ) -> Result<ApiResponse<ielts_backend_domain::schedule::StudentSessionSummary>, ApiError> {
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let session = service
-        .terminate_attempt(schedule_id, attempt_id, principal.user.id, req)
+        .terminate_attempt(&ctx, schedule_id, attempt_id, req)
         .await?;
     state
         .telemetry
@@ -254,10 +272,21 @@ pub async fn acknowledge_alert(
     Path(alert_id): Path<Uuid>,
     Json(req): Json<AlertAckRequest>,
 ) -> Result<ApiResponse<SessionAuditLog>, ApiError> {
+    let schedule_id: Uuid = sqlx::query_scalar(
+        "SELECT schedule_id FROM session_audit_logs WHERE id = ?",
+    )
+    .bind(alert_id)
+    .fetch_optional(&state.db_pool())
+    .await
+    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
+    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let alert = service
-        .acknowledge_alert(alert_id, principal.user.id, req)
+        .acknowledge_alert(&ctx, alert_id, req)
         .await?;
     state
         .telemetry
@@ -298,7 +327,7 @@ async fn authorize_schedule(
                 user: principal.user.clone(),
                 session: principal.session.clone(),
             },
-            schedule_id,
+            schedule_id.to_string(),
             UserRole::Proctor,
         )
         .await
@@ -314,10 +343,10 @@ async fn authorize_schedule(
 
 async fn assigned_schedule_ids(
     state: &AppState,
-    user_id: Uuid,
+    user_id: &str,
     role: &str,
-) -> Result<std::collections::HashSet<Uuid>, ApiError> {
-    let rows = query_scalar::<_, Uuid>(
+) -> Result<std::collections::HashSet<String>, ApiError> {
+    let rows = query_scalar::<_, String>(
         r#"
         SELECT schedule_id
         FROM schedule_staff_assignments

@@ -10,13 +10,13 @@ use sqlx::FromRow;
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct StudentAttempt {
-    pub id: Uuid,
-    pub schedule_id: Uuid,
-    pub registration_id: Option<Uuid>,
+    pub id: String,
+    pub schedule_id: String,
+    pub registration_id: Option<String>,
     pub student_key: String,
     pub organization_id: Option<String>,
-    pub exam_id: Uuid,
-    pub published_version_id: Uuid,
+    pub exam_id: String,
+    pub published_version_id: String,
     pub exam_title: String,
     pub candidate_id: String,
     pub candidate_name: String,
@@ -41,10 +41,10 @@ pub struct StudentAttempt {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct StudentAttemptMutation {
-    pub id: Uuid,
-    pub attempt_id: Uuid,
-    pub schedule_id: Uuid,
-    pub client_session_id: Uuid,
+    pub id: String,
+    pub attempt_id: String,
+    pub schedule_id: String,
+    pub client_session_id: String,
     pub mutation_type: String,
     pub client_mutation_id: String,
     pub mutation_seq: i64,
@@ -59,9 +59,9 @@ pub struct StudentAttemptMutation {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct StudentHeartbeatEvent {
-    pub id: Uuid,
-    pub attempt_id: Uuid,
-    pub schedule_id: Uuid,
+    pub id: String,
+    pub attempt_id: String,
+    pub schedule_id: String,
     pub event_type: String,
     pub payload: Option<Value>,
     pub client_timestamp: DateTime<Utc>,
@@ -84,7 +84,7 @@ pub struct StudentPrecheckRequest {
     pub candidate_id: String,
     pub candidate_name: String,
     pub candidate_email: String,
-    pub client_session_id: Uuid,
+    pub client_session_id: String,
     pub pre_check: Value,
     pub device_fingerprint_hash: Option<String>,
 }
@@ -98,7 +98,7 @@ pub struct StudentBootstrapRequest {
     pub candidate_id: String,
     pub candidate_name: String,
     pub candidate_email: String,
-    pub client_session_id: Uuid,
+    pub client_session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,18 +114,18 @@ pub struct MutationEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudentMutationBatchRequest {
-    pub attempt_id: Uuid,
+    pub attempt_id: String,
     pub student_key: String,
-    pub client_session_id: Uuid,
+    pub client_session_id: String,
     pub mutations: Vec<MutationEnvelope>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudentHeartbeatRequest {
-    pub attempt_id: Option<Uuid>,
+    pub attempt_id: Option<String>,
     pub student_key: String,
-    pub client_session_id: Uuid,
+    pub client_session_id: String,
     pub event_type: String,
     pub payload: Option<Value>,
     pub client_timestamp: DateTime<Utc>,
@@ -134,7 +134,7 @@ pub struct StudentHeartbeatRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudentSubmitRequest {
-    pub attempt_id: Uuid,
+    pub attempt_id: String,
     pub student_key: String,
 }
 
@@ -185,7 +185,7 @@ pub struct StudentRegistrationRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudentRegistrationResponse {
-    pub registration_id: Uuid,
+    pub registration_id: String,
     pub wcode: String,
     pub email: String,
     pub student_name: String,

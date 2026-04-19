@@ -1,5 +1,5 @@
-#[path = "../support/postgres.rs"]
-mod postgres;
+#[path = "../support/mysql.rs"]
+mod mysql;
 
 use axum::{
     body::{to_bytes, Body},
@@ -37,9 +37,9 @@ const SCHEDULING_MIGRATIONS: &[&str] = &[
 
 #[tokio::test]
 async fn list_schedules_returns_seeded_rows() {
-    let database = postgres::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let auth = postgres::create_authenticated_user(
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Admin,
         "admin@example.com",
@@ -76,9 +76,9 @@ async fn list_schedules_returns_seeded_rows() {
 
 #[tokio::test]
 async fn get_schedule_returns_detail_by_id() {
-    let database = postgres::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let auth = postgres::create_authenticated_user(
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Admin,
         "admin@example.com",
@@ -114,9 +114,9 @@ async fn get_schedule_returns_detail_by_id() {
 
 #[tokio::test]
 async fn get_runtime_returns_a_not_started_projection_before_commands_run() {
-    let database = postgres::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let auth = postgres::create_authenticated_user(
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Admin,
         "admin@example.com",
@@ -154,9 +154,9 @@ async fn get_runtime_returns_a_not_started_projection_before_commands_run() {
 
 #[tokio::test]
 async fn runtime_commands_transition_the_runtime_state_machine() {
-    let database = postgres::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let auth = postgres::create_authenticated_user(
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Admin,
         "admin@example.com",
@@ -208,9 +208,9 @@ async fn runtime_commands_transition_the_runtime_state_machine() {
 
 #[tokio::test]
 async fn delete_schedule_removes_the_schedule_and_runtime() {
-    let database = postgres::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let auth = postgres::create_authenticated_user(
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Admin,
         "admin@example.com",
@@ -251,7 +251,7 @@ async fn delete_schedule_removes_the_schedule_and_runtime() {
     assert_eq!(get_schedule.status(), StatusCode::NOT_FOUND);
 
     let runtime = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM exam_session_runtimes WHERE schedule_id = $1",
+        "SELECT id FROM exam_session_runtimes WHERE schedule_id = ?",
     )
     .bind(schedule.id)
     .fetch_optional(database.pool())
@@ -262,7 +262,7 @@ async fn delete_schedule_removes_the_schedule_and_runtime() {
     database.shutdown().await;
 }
 
-async fn seed_schedule(pool: &sqlx::PgPool) -> ielts_backend_domain::schedule::ExamSchedule {
+async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
     let actor = contract_actor();
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service
@@ -373,7 +373,7 @@ fn sample_schedule_config() -> serde_json::Value {
 
 async fn command_request(
     app: &axum::Router,
-    auth: &postgres::TestAuthContext,
+    auth: &mysql::TestAuthContext,
     schedule_id: Uuid,
     payload: serde_json::Value,
 ) -> axum::response::Response {

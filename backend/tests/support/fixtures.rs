@@ -1,10 +1,10 @@
 use chrono::Utc;
-use sqlx::PgPool;
+use sqlx::MySqlPool;
 use uuid::Uuid;
 
 /// Create a test exam entity with basic defaults.
 pub async fn create_test_exam(
-    pool: &PgPool,
+    pool: &MySqlPool,
     owner_id: &str,
     title: &str,
 ) -> Result<Uuid, sqlx::Error> {
@@ -17,7 +17,7 @@ pub async fn create_test_exam(
             current_draft_version_id, current_published_version_id,
             created_at, updated_at
         )
-        VALUES ($1, $2, $3, 'draft', 'private', NULL, NULL, NULL, now(), now())
+        VALUES (?, ?, ?, 'draft', 'private', NULL, NULL, NULL, NOW(), NOW())
         "#,
     )
     .bind(exam_id)
@@ -31,7 +31,7 @@ pub async fn create_test_exam(
 
 /// Create a test exam version.
 pub async fn create_test_version(
-    pool: &PgPool,
+    pool: &MySqlPool,
     exam_id: Uuid,
     version_number: i32,
     payload: serde_json::Value,
@@ -43,7 +43,7 @@ pub async fn create_test_version(
         INSERT INTO exam_versions (
             id, exam_id, version_number, payload, created_at
         )
-        VALUES ($1, $2, $3, $4, now())
+        VALUES (?, ?, ?, ?, NOW())
         "#,
     )
     .bind(version_id)
@@ -58,7 +58,7 @@ pub async fn create_test_version(
 
 /// Create a test exam schedule.
 pub async fn create_test_schedule(
-    pool: &PgPool,
+    pool: &MySqlPool,
     exam_id: Uuid,
     pinned_version_id: Option<Uuid>,
     created_by: &str,
@@ -71,7 +71,7 @@ pub async fn create_test_schedule(
             id, exam_id, pinned_version_id, status,
             timezone, starts_at, ends_at, created_by, created_at, updated_at
         )
-        VALUES ($1, $2, $3, 'draft', 'UTC', now(), now() + interval '1 day', $4, now(), now())
+        VALUES (?, ?, ?, 'draft', 'UTC', NOW(), NOW() + INTERVAL 1 DAY, ?, NOW(), NOW())
         "#,
     )
     .bind(schedule_id)
@@ -86,7 +86,7 @@ pub async fn create_test_schedule(
 
 /// Create a test schedule registration.
 pub async fn create_test_registration(
-    pool: &PgPool,
+    pool: &MySqlPool,
     schedule_id: Uuid,
     actor_id: &str,
     student_key: &str,
@@ -99,7 +99,7 @@ pub async fn create_test_registration(
             id, schedule_id, actor_id, student_key, display_name,
             precheck_payload, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, 'Test Student', '{}'::jsonb, now(), now())
+        VALUES (?, ?, ?, ?, 'Test Student', '{}', NOW(), NOW())
         "#,
     )
     .bind(registration_id)
@@ -114,7 +114,7 @@ pub async fn create_test_registration(
 
 /// Create a test student attempt.
 pub async fn create_test_attempt(
-    pool: &PgPool,
+    pool: &MySqlPool,
     schedule_id: Uuid,
     student_key: &str,
     exam_version_id: Uuid,
@@ -128,7 +128,7 @@ pub async fn create_test_attempt(
             started_at, last_mutation_sequence, status,
             created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, now(), 0, 'active', now(), now())
+        VALUES (?, ?, ?, ?, NOW(), 0, 'active', NOW(), NOW())
         "#,
     )
     .bind(attempt_id)
@@ -143,7 +143,7 @@ pub async fn create_test_attempt(
 
 /// Create a test passage library item.
 pub async fn create_test_passage(
-    pool: &PgPool,
+    pool: &MySqlPool,
     organization_id: Option<&str>,
     title: &str,
     content: &str,
@@ -155,7 +155,7 @@ pub async fn create_test_passage(
         INSERT INTO passage_library_items (
             id, organization_id, title, content, usage_count, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, 0, now(), now())
+        VALUES (?, ?, ?, ?, 0, NOW(), NOW())
         "#,
     )
     .bind(passage_id)
@@ -170,7 +170,7 @@ pub async fn create_test_passage(
 
 /// Create a test idempotency key.
 pub async fn create_test_idempotency_key(
-    pool: &PgPool,
+    pool: &MySqlPool,
     actor_id: &str,
     route_key: &str,
     idempotency_key: &str,
@@ -181,7 +181,7 @@ pub async fn create_test_idempotency_key(
             actor_id, route_key, idempotency_key, request_hash,
             response_status, response_body, created_at, expires_at
         )
-        VALUES ($1, $2, $3, 'hash123', 200, '{}'::jsonb, now(), now() + interval '72 hours')
+        VALUES (?, ?, ?, 'hash123', 200, '{}', NOW(), NOW() + INTERVAL 72 HOUR)
         "#,
     )
     .bind(actor_id)
@@ -195,7 +195,7 @@ pub async fn create_test_idempotency_key(
 
 /// Create a test outbox event.
 pub async fn create_test_outbox_event(
-    pool: &PgPool,
+    pool: &MySqlPool,
     aggregate_kind: &str,
     aggregate_id: &str,
     revision: i64,
@@ -210,7 +210,7 @@ pub async fn create_test_outbox_event(
             id, aggregate_kind, aggregate_id, revision, event_family, payload,
             created_at, publish_attempts
         )
-        VALUES ($1, $2, $3, $4, $5, $6, now(), 0)
+        VALUES (?, ?, ?, ?, ?, ?, NOW(), 0)
         "#,
     )
     .bind(event_id)

@@ -45,6 +45,10 @@ export default async function globalSetup(config: FullConfig) {
   loadEnvFile(path.resolve(backendRoot, '.env'));
   loadEnvFile(path.resolve(workspaceRoot, '.env.example'));
 
+  process.env.AUTH_COOKIE_SECURE ??= 'false';
+  process.env.AUTH_SESSION_COOKIE_NAME ??= 'session';
+  process.env.AUTH_CSRF_COOKIE_NAME ??= 'csrf';
+
   await fs.mkdir(GENERATED_DIR, { recursive: true });
 
   const cargoArgs = [

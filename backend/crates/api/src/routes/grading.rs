@@ -11,6 +11,7 @@ use ielts_backend_domain::grading::{
     ReviewDraft, SaveReviewDraftRequest, ScheduleReleaseRequest, StartReviewRequest, StudentResult,
     SubmissionReviewBundle,
 };
+use ielts_backend_infrastructure::actor_context::ActorContext;
 use sqlx::query_scalar;
 use std::time::Instant;
 use uuid::Uuid;
@@ -30,13 +31,14 @@ pub async fn list_sessions(
     principal: AuthenticatedUser,
 ) -> Result<ApiResponse<Vec<GradingSession>>, ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Grader])?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal);
     let service = GradingService::new(state.db_pool());
     let started = Instant::now();
-    let sessions = service.list_sessions().await?;
+    let sessions = service.list_sessions(&ctx).await?;
     let sessions = if principal.user.role == UserRole::Admin {
         sessions
     } else {
-        let allowed = assigned_schedule_ids(&state, principal.user.id).await?;
+        let allowed = assigned_schedule_ids(&state, &principal.user.id).await?;
         sessions
             .into_iter()
             .filter(|session| allowed.contains(&session.schedule_id))
@@ -55,9 +57,11 @@ pub async fn get_session(
     Path(session_id): Path<Uuid>,
 ) -> Result<ApiResponse<GradingSessionDetail>, ApiError> {
     authorize_schedule(&state, &principal, session_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(session_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = Instant::now();
-    let detail = service.get_session_detail(session_id).await?;
+    let detail = service.get_session_detail(&ctx, session_id).await?;
     state
         .telemetry
         .observe_db_operation("grading.get_session_detail", started.elapsed());
@@ -70,16 +74,18 @@ pub async fn get_submission(
     principal: AuthenticatedUser,
     Path(submission_id): Path<Uuid>,
 ) -> Result<ApiResponse<SubmissionReviewBundle>, ApiError> {
-    let schedule_id: Uuid = query_scalar("SELECT schedule_id FROM student_submissions WHERE id = $1")
+    let schedule_id: Uuid = query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
         .bind(submission_id)
         .fetch_optional(&state.db_pool())
         .await
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = Instant::now();
-    let bundle = service.get_submission_bundle(submission_id).await?;
+    let bundle = service.get_submission_bundle(&ctx, submission_id).await?;
     state
         .telemetry
         .observe_db_operation("grading.get_submission_bundle", started.elapsed());
@@ -101,10 +107,12 @@ pub async fn start_review(
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = Instant::now();
     let draft = service
-        .start_review(submission_id, principal.user.id, &principal.display_name(), req)
+        .start_review(&ctx, submission_id, req)
         .await?;
     state
         .telemetry
@@ -153,10 +161,12 @@ pub async fn save_review_draft(
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
     .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = Instant::now();
     let draft = service
-        .save_review_draft(submission_id, principal.user.id, req)
+        .save_review_draft(&ctx, submission_id, req)
         .await?;
     state
         .telemetry
@@ -181,10 +191,12 @@ pub async fn mark_grading_complete(
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
     .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = Instant::now();
     let draft = service
-        .mark_grading_complete(submission_id, principal.user.id, &principal.display_name(), req)
+        .mark_grading_complete(&ctx, submission_id, req)
         .await?;
     state
         .telemetry
@@ -209,10 +221,12 @@ pub async fn mark_ready_to_release(
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
     .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = Instant::now();
     let draft = service
-        .mark_ready_to_release(submission_id, principal.user.id, &principal.display_name(), req)
+        .mark_ready_to_release(&ctx, submission_id, req)
         .await?;
     state
         .telemetry
@@ -237,10 +251,12 @@ pub async fn release_now(
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
     .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = std::time::Instant::now();
     let result = service
-        .release_now(submission_id, principal.user.id, req)
+        .release_now(&ctx, submission_id, req)
         .await?;
     state
         .telemetry
@@ -265,10 +281,12 @@ pub async fn schedule_release(
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
     .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = std::time::Instant::now();
     let draft = service
-        .schedule_release(submission_id, principal.user.id, &principal.display_name(), req)
+        .schedule_release(&ctx, submission_id, req)
         .await?;
     state
         .telemetry
@@ -285,7 +303,7 @@ pub async fn reopen_review(
     Json(req): Json<ActorActionRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
     let schedule_id: Uuid = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = $1",
+        "SELECT schedule_id FROM student_submissions WHERE id = ?",
     )
     .bind(submission_id)
     .fetch_optional(&state.db_pool())
@@ -293,10 +311,12 @@ pub async fn reopen_review(
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
     .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
     authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = std::time::Instant::now();
     let draft = service
-        .reopen_review(submission_id, principal.user.id, &principal.display_name(), req)
+        .reopen_review(&ctx, submission_id, req)
         .await?;
     state
         .telemetry
@@ -349,7 +369,7 @@ async fn authorize_schedule(
                 user: principal.user.clone(),
                 session: principal.session.clone(),
             },
-            schedule_id,
+            schedule_id.to_string(),
             UserRole::Grader,
         )
         .await
@@ -365,9 +385,9 @@ async fn authorize_schedule(
 
 async fn assigned_schedule_ids(
     state: &AppState,
-    user_id: Uuid,
-) -> Result<std::collections::HashSet<Uuid>, ApiError> {
-    let rows = query_scalar::<_, Uuid>(
+    user_id: &str,
+) -> Result<std::collections::HashSet<String>, ApiError> {
+    let rows = query_scalar::<_, String>(
         r#"
         SELECT schedule_id
         FROM schedule_staff_assignments

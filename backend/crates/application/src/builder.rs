@@ -3,8 +3,11 @@ use ielts_backend_domain::exam::{
     CreateExamRequest, ExamEntity, ExamEvent, ExamEventAction, ExamStatus, ExamValidationSummary,
     ExamVersion, PublishExamRequest, SaveDraftRequest, UpdateExamRequest, ValidationIssue,
 };
-use ielts_backend_infrastructure::actor_context::ActorContext;
-use sqlx::PgPool;
+use ielts_backend_infrastructure::{
+    actor_context::ActorContext,
+    authorization::AuthorizationService,
+};
+use sqlx::MySqlPool;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -21,11 +24,11 @@ pub enum BuilderError {
 }
 
 pub struct BuilderService {
-    pool: PgPool,
+    pool: MySqlPool,
 }
 
 impl BuilderService {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
 
@@ -34,34 +37,38 @@ impl BuilderService {
         ctx: &ActorContext,
         req: CreateExamRequest,
     ) -> Result<ExamEntity, BuilderError> {
-        let id = Uuid::new_v4();
+        let id = Uuid::new_v4().to_string();
         let now = Utc::now();
 
-        let exam = sqlx::query_as::<_, ExamEntity>(
+        sqlx::query(
             r#"
             INSERT INTO exam_entities (
-                id, slug, title, exam_type, status, visibility, 
-                organization_id, owner_id, created_at, updated_at, 
+                id, slug, title, exam_type, status, visibility,
+                organization_id, owner_id, created_at, updated_at,
                 schema_version, revision
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            RETURNING *
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?, ?)
             "#,
         )
-        .bind(id)
+        .bind(id.to_string())
         .bind(&req.slug)
         .bind(&req.title)
         .bind(req.exam_type)
-        .bind(ExamStatus::Draft)
+        .bind("draft")
         .bind(req.visibility)
         .bind(&req.organization_id)
         .bind(ctx.actor_id.to_string())
-        .bind(now)
-        .bind(now)
         .bind(1)
         .bind(0)
-        .fetch_one(&self.pool)
+        .execute(&self.pool)
         .await?;
+
+        let exam = sqlx::query_as::<_, ExamEntity>(
+            "SELECT id, slug, title, exam_type, status, visibility, CAST(organization_id AS CHAR) as organization_id, CAST(owner_id AS CHAR) as owner_id, created_at, updated_at, published_at, archived_at, CAST(current_draft_version_id AS CHAR) as current_draft_version_id, CAST(current_published_version_id AS CHAR) as current_published_version_id, total_questions, total_reading_questions, total_listening_questions, schema_version, revision FROM exam_entities WHERE id = ?"
+        )
+            .bind(&id)
+            .fetch_one(&self.pool)
+            .await?;
 
         // Record creation event
         self.record_event(
@@ -70,7 +77,7 @@ impl BuilderService {
             ctx,
             ExamEventAction::Created,
             None,
-            Some(ExamStatus::Draft.to_string()),
+            Some("draft".to_string()),
             None,
         )
         .await?;
@@ -78,34 +85,65 @@ impl BuilderService {
         Ok(exam)
     }
 
-    pub async fn list_exams(&self, _ctx: &ActorContext) -> Result<Vec<ExamEntity>, BuilderError> {
-        sqlx::query_as::<_, ExamEntity>(
-            "SELECT * FROM exam_entities ORDER BY updated_at DESC, created_at DESC",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(BuilderError::from)
+    pub async fn list_exams(&self, ctx: &ActorContext) -> Result<Vec<ExamEntity>, BuilderError> {
+        // Admins and AdminObservers can see all exams
+        // Other roles can only see exams from their organization
+        let query = if matches!(
+            ctx.role,
+            ielts_backend_infrastructure::actor_context::ActorRole::Admin
+                | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+        ) {
+            "SELECT * FROM exam_entities ORDER BY updated_at DESC, created_at DESC"
+        } else if let Some(ref org_id) = ctx.organization_id {
+            "SELECT * FROM exam_entities WHERE organization_id = ? ORDER BY updated_at DESC, created_at DESC"
+        } else {
+            "SELECT * FROM exam_entities WHERE 1=0 ORDER BY updated_at DESC, created_at DESC" // No access
+        };
+
+        let exams = if let Some(org_id) = ctx.organization_id.clone() {
+            sqlx::query_as::<_, ExamEntity>(query)
+                .bind(org_id.to_string())
+                .fetch_all(&self.pool)
+                .await?
+        } else {
+            sqlx::query_as::<_, ExamEntity>(query)
+                .fetch_all(&self.pool)
+                .await?
+        };
+
+        Ok(exams)
     }
 
     pub async fn get_exam(
         &self,
-        _ctx: &ActorContext,
-        id: Uuid,
+        ctx: &ActorContext,
+        id: String,
     ) -> Result<ExamEntity, BuilderError> {
-        sqlx::query_as::<_, ExamEntity>("SELECT * FROM exam_entities WHERE id = $1")
-            .bind(id)
+        let exam = sqlx::query_as::<_, ExamEntity>("SELECT * FROM exam_entities WHERE id = ?")
+            .bind(&id)
             .fetch_optional(&self.pool)
             .await?
-            .ok_or(BuilderError::NotFound)
+            .ok_or(BuilderError::NotFound)?;
+
+        // Check authorization: user must have access to this exam
+        if let Some(org_id_str) = &exam.organization_id {
+            if let Ok(org_id) = Uuid::parse_str(org_id_str) {
+                if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
+                    return Err(BuilderError::NotFound);
+                }
+            }
+        }
+
+        Ok(exam)
     }
 
     pub async fn update_exam(
         &self,
         ctx: &ActorContext,
-        id: Uuid,
+        id: String,
         req: UpdateExamRequest,
     ) -> Result<ExamEntity, BuilderError> {
-        let existing = self.get_exam(ctx, id).await?;
+        let existing = self.get_exam(ctx, id.clone()).await?;
 
         if existing.revision != req.revision {
             return Err(BuilderError::Conflict(
@@ -113,30 +151,35 @@ impl BuilderService {
             ));
         }
 
-        let updated_at = Utc::now();
+        let _updated_at = Utc::now();
 
-        let exam = sqlx::query_as::<_, ExamEntity>(
+        sqlx::query(
             r#"
             UPDATE exam_entities
             SET 
-                title = COALESCE($2, title),
-                status = COALESCE($3, status),
-                visibility = COALESCE($4, visibility),
-                organization_id = COALESCE($5, organization_id),
-                updated_at = $6,
+                title = COALESCE(?, title),
+                status = COALESCE(?, status),
+                visibility = COALESCE(?, visibility),
+                organization_id = COALESCE(?, organization_id),
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1
-            RETURNING *
+            WHERE id = ?
             "#,
         )
-        .bind(id)
         .bind(&req.title)
         .bind(req.status)
         .bind(req.visibility)
         .bind(&req.organization_id)
-        .bind(updated_at)
-        .fetch_one(&self.pool)
+        .bind(&id)
+        .execute(&self.pool)
         .await?;
+
+        let exam = sqlx::query_as::<_, ExamEntity>(
+            "SELECT id, slug, title, exam_type, status, visibility, CAST(organization_id AS CHAR) as organization_id, CAST(owner_id AS CHAR) as owner_id, created_at, updated_at, published_at, archived_at, CAST(current_draft_version_id AS CHAR) as current_draft_version_id, CAST(current_published_version_id AS CHAR) as current_published_version_id, total_questions, total_reading_questions, total_listening_questions, schema_version, revision FROM exam_entities WHERE id = ?"
+        )
+            .bind(&id)
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(exam)
     }
@@ -144,18 +187,27 @@ impl BuilderService {
     pub async fn save_draft(
         &self,
         ctx: &ActorContext,
-        exam_id: Uuid,
+        exam_id: String,
         req: SaveDraftRequest,
     ) -> Result<ExamVersion, BuilderError> {
         let mut tx = self.pool.begin().await?;
 
         // Verify exam exists and check revision
         let exam: ExamEntity =
-            sqlx::query_as("SELECT * FROM exam_entities WHERE id = $1 FOR UPDATE")
-                .bind(exam_id)
+            sqlx::query_as("SELECT * FROM exam_entities WHERE id = ? FOR UPDATE")
+                .bind(&exam_id)
                 .fetch_optional(&mut *tx)
                 .await?
                 .ok_or(BuilderError::NotFound)?;
+
+        // Check authorization: user must have access to this exam
+        if let Some(org_id_str) = &exam.organization_id {
+            if let Ok(org_id) = Uuid::parse_str(org_id_str) {
+                if !AuthorizationService::can_modify_exam_content(ctx, org_id.to_string()) {
+                    return Err(BuilderError::NotFound);
+                }
+            }
+        }
 
         if exam.revision != req.revision {
             return Err(BuilderError::Conflict(
@@ -163,53 +215,56 @@ impl BuilderService {
             ));
         }
 
-        // Get next version number
-        let version_number: i32 = sqlx::query_scalar("SELECT get_next_exam_version_number($1)")
-            .bind(exam_id)
-            .fetch_one(&mut *tx)
-            .await?;
+        // Get next version number - MySQL equivalent: use subquery with MAX
+        let version_number: i32 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(version_number), 0) + 1 FROM exam_versions WHERE exam_id = ?"
+        )
+        .bind(&exam_id)
+        .fetch_one(&mut *tx)
+        .await?;
 
         // Create new draft version
-        let version_id = Uuid::new_v4();
-        let now = Utc::now();
+        let version_id = Uuid::new_v4().to_string();
 
-        let version = sqlx::query_as::<_, ExamVersion>(
+        sqlx::query(
             r#"
             INSERT INTO exam_versions (
                 id, exam_id, version_number, content_snapshot, config_snapshot,
                 created_by, created_at, is_draft, is_published, revision
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            RETURNING *
+            VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?)
             "#,
         )
-        .bind(version_id)
-        .bind(exam_id)
+        .bind(&version_id)
+        .bind(&exam_id)
         .bind(version_number)
         .bind(&req.content_snapshot)
         .bind(&req.config_snapshot)
         .bind(ctx.actor_id.to_string())
-        .bind(now)
         .bind(true)
         .bind(false)
         .bind(0)
-        .fetch_one(&mut *tx)
+        .execute(&mut *tx)
         .await?;
+
+        let version = sqlx::query_as::<_, ExamVersion>("SELECT * FROM exam_versions WHERE id = ?")
+            .bind(&version_id)
+            .fetch_one(&mut *tx)
+            .await?;
 
         // Update exam's current draft version pointer and increment revision
         sqlx::query(
             r#"
             UPDATE exam_entities
-            SET 
-                current_draft_version_id = $1,
-                updated_at = $2,
+            SET
+                current_draft_version_id = ?,
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $3
+            WHERE id = ?
             "#,
         )
-        .bind(version_id)
-        .bind(now)
-        .bind(exam_id)
+        .bind(&version_id)
+        .bind(&exam_id)
         .execute(&mut *tx)
         .await?;
 
@@ -217,15 +272,14 @@ impl BuilderService {
         sqlx::query(
             r#"
             INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES (?, ?, ?, ?, ?, NOW())
             "#,
         )
-        .bind(Uuid::new_v4())
-        .bind(exam_id)
-        .bind(version_id)
+        .bind(Uuid::new_v4().to_string())
+        .bind(&exam_id)
+        .bind(&version_id)
         .bind(ctx.actor_id.to_string())
         .bind(ExamEventAction::DraftSaved)
-        .bind(now)
         .execute(&mut *tx)
         .await?;
 
@@ -241,18 +295,27 @@ impl BuilderService {
     pub async fn publish_exam(
         &self,
         ctx: &ActorContext,
-        exam_id: Uuid,
+        exam_id: String,
         req: PublishExamRequest,
     ) -> Result<ExamVersion, BuilderError> {
         let mut tx = self.pool.begin().await?;
 
         // Verify exam exists and check revision
         let exam: ExamEntity =
-            sqlx::query_as("SELECT * FROM exam_entities WHERE id = $1 FOR UPDATE")
-                .bind(exam_id)
+            sqlx::query_as("SELECT * FROM exam_entities WHERE id = ? FOR UPDATE")
+                .bind(&exam_id)
                 .fetch_optional(&mut *tx)
                 .await?
                 .ok_or(BuilderError::NotFound)?;
+
+        // Check authorization: user must have access to this exam
+        if let Some(org_id_str) = &exam.organization_id {
+            if let Ok(org_id) = Uuid::parse_str(org_id_str) {
+                if !AuthorizationService::can_modify_exam_content(ctx, org_id.to_string()) {
+                    return Err(BuilderError::NotFound);
+                }
+            }
+        }
 
         if exam.revision != req.revision {
             return Err(BuilderError::Conflict(
@@ -269,46 +332,45 @@ impl BuilderService {
         let draft_version_id = exam.current_draft_version_id.unwrap();
 
         // Update the draft version to published
-        let now = Utc::now();
-
-        let version = sqlx::query_as::<_, ExamVersion>(
+        sqlx::query(
             r#"
             UPDATE exam_versions
-            SET 
+            SET
                 is_draft = false,
                 is_published = true,
-                publish_notes = $1,
-                created_at = $2,
+                publish_notes = ?,
+                created_at = NOW(),
                 revision = revision + 1
-            WHERE id = $3
-            RETURNING *
+            WHERE id = ?
             "#,
         )
         .bind(&req.publish_notes)
-        .bind(now)
-        .bind(draft_version_id)
-        .fetch_one(&mut *tx)
+        .bind(&draft_version_id)
+        .execute(&mut *tx)
         .await?;
+
+        let version = sqlx::query_as::<_, ExamVersion>("SELECT * FROM exam_versions WHERE id = ?")
+            .bind(&draft_version_id)
+            .fetch_one(&mut *tx)
+            .await?;
 
         // Update exam entity
         sqlx::query(
             r#"
             UPDATE exam_entities
-            SET 
+            SET
                 current_draft_version_id = NULL,
-                current_published_version_id = $1,
-                status = $2,
-                published_at = $3,
-                updated_at = $4,
+                current_published_version_id = ?,
+                status = ?,
+                published_at = NOW(),
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $5
+            WHERE id = ?
             "#,
         )
-        .bind(draft_version_id)
-        .bind(ExamStatus::Published)
-        .bind(now)
-        .bind(now)
-        .bind(exam_id)
+        .bind(&draft_version_id)
+        .bind("published")
+        .bind(&exam_id)
         .execute(&mut *tx)
         .await?;
 
@@ -316,17 +378,16 @@ impl BuilderService {
         sqlx::query(
             r#"
             INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, from_state, to_state, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
             "#,
         )
-        .bind(Uuid::new_v4())
-        .bind(exam_id)
-        .bind(draft_version_id)
+        .bind(Uuid::new_v4().to_string())
+        .bind(&exam_id)
+        .bind(&draft_version_id)
         .bind(ctx.actor_id.to_string())
         .bind(ExamEventAction::Published)
-        .bind(ExamStatus::Draft.to_string())
-        .bind(ExamStatus::Published.to_string())
-        .bind(now)
+        .bind("draft".to_string())
+        .bind("published".to_string())
         .execute(&mut *tx)
         .await?;
 
@@ -337,25 +398,40 @@ impl BuilderService {
 
     pub async fn get_version(
         &self,
-        _ctx: &ActorContext,
-        version_id: Uuid,
+        ctx: &ActorContext,
+        version_id: String,
     ) -> Result<ExamVersion, BuilderError> {
-        sqlx::query_as::<_, ExamVersion>("SELECT * FROM exam_versions WHERE id = $1")
-            .bind(version_id)
+        let version = sqlx::query_as::<_, ExamVersion>("SELECT * FROM exam_versions WHERE id = ?")
+            .bind(&version_id)
             .fetch_optional(&self.pool)
             .await?
-            .ok_or(BuilderError::NotFound)
+            .ok_or(BuilderError::NotFound)?;
+
+        // Check authorization: user must have access to the exam
+        let exam = self.get_exam(ctx, version.exam_id.clone()).await?;
+        if let Some(org_id_str) = &exam.organization_id {
+            if let Ok(org_id) = Uuid::parse_str(org_id_str) {
+                if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
+                    return Err(BuilderError::NotFound);
+                }
+            }
+        }
+
+        Ok(version)
     }
 
     pub async fn list_versions(
         &self,
-        _ctx: &ActorContext,
-        exam_id: Uuid,
+        ctx: &ActorContext,
+        exam_id: String,
     ) -> Result<Vec<ExamVersion>, BuilderError> {
+        // Check authorization: user must have access to the exam
+        let exam = self.get_exam(ctx, exam_id.clone()).await?;
+
         sqlx::query_as::<_, ExamVersion>(
-            "SELECT * FROM exam_versions WHERE exam_id = $1 ORDER BY created_at DESC",
+            "SELECT * FROM exam_versions WHERE exam_id = ? ORDER BY created_at DESC",
         )
-        .bind(exam_id)
+        .bind(&exam_id)
         .fetch_all(&self.pool)
         .await
         .map_err(BuilderError::from)
@@ -363,13 +439,16 @@ impl BuilderService {
 
     pub async fn list_events(
         &self,
-        _ctx: &ActorContext,
-        exam_id: Uuid,
+        ctx: &ActorContext,
+        exam_id: String,
     ) -> Result<Vec<ExamEvent>, BuilderError> {
+        // Check authorization: user must have access to the exam
+        let exam = self.get_exam(ctx, exam_id.clone()).await?;
+
         sqlx::query_as::<_, ExamEvent>(
-            "SELECT * FROM exam_events WHERE exam_id = $1 ORDER BY created_at DESC",
+            "SELECT * FROM exam_events WHERE exam_id = ? ORDER BY created_at DESC",
         )
-        .bind(exam_id)
+        .bind(&exam_id)
         .fetch_all(&self.pool)
         .await
         .map_err(BuilderError::from)
@@ -377,11 +456,14 @@ impl BuilderService {
 
     pub async fn delete_exam(
         &self,
-        _ctx: &ActorContext,
-        exam_id: Uuid,
+        ctx: &ActorContext,
+        exam_id: String,
     ) -> Result<(), BuilderError> {
-        let deleted = sqlx::query("DELETE FROM exam_entities WHERE id = $1")
-            .bind(exam_id)
+        // Check authorization: user must have access to this exam
+        let exam = self.get_exam(ctx, exam_id.clone()).await?;
+
+        let deleted = sqlx::query("DELETE FROM exam_entities WHERE id = ?")
+            .bind(&exam_id)
             .execute(&self.pool)
             .await?;
 
@@ -396,9 +478,9 @@ impl BuilderService {
     pub async fn validate_exam(
         &self,
         ctx: &ActorContext,
-        exam_id: Uuid,
+        exam_id: String,
     ) -> Result<ExamValidationSummary, BuilderError> {
-        let exam = self.get_exam(ctx, exam_id).await?;
+        let exam = self.get_exam(ctx, exam_id.clone()).await?;
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
 
@@ -450,7 +532,7 @@ impl BuilderService {
 
         Ok(ExamValidationSummary {
             exam_id: exam.id,
-            draft_version_id: draft_version.as_ref().map(|version| version.id),
+            draft_version_id: draft_version.as_ref().map(|version| version.id.clone()),
             can_publish: errors.is_empty(),
             errors,
             warnings,
@@ -461,8 +543,8 @@ impl BuilderService {
     #[allow(clippy::too_many_arguments)]
     async fn record_event(
         &self,
-        exam_id: &Uuid,
-        version_id: Option<Uuid>,
+        exam_id: &String,
+        version_id: Option<String>,
         ctx: &ActorContext,
         action: ExamEventAction,
         from_state: Option<String>,
@@ -472,10 +554,10 @@ impl BuilderService {
         sqlx::query(
             r#"
             INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, from_state, to_state, payload, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Uuid::new_v4().to_string())
         .bind(exam_id)
         .bind(version_id)
         .bind(ctx.actor_id.to_string())
@@ -483,7 +565,6 @@ impl BuilderService {
         .bind(&from_state)
         .bind(&to_state)
         .bind(&payload)
-        .bind(Utc::now())
         .execute(&self.pool)
         .await?;
 

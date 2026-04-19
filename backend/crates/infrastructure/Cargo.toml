@@ -20,7 +20,7 @@ rand = "0.8.5"
 serde = { version = "1.0.216", features = ["derive"] }
 serde_json = "1.0.133"
 sha2 = "0.10.8"
-sqlx = { version = "0.7.4", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono"] }
+sqlx = { version = "0.7.4", features = ["mysql", "runtime-tokio-rustls", "uuid", "chrono"] }
 subtle = "2.6.1"
 tracing = "0.1.41"
 tracing-opentelemetry = "0.28.0"

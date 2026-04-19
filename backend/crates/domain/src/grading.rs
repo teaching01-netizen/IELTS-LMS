@@ -10,11 +10,11 @@ use sqlx::FromRow;
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct GradingSession {
-    pub id: Uuid,
-    pub schedule_id: Uuid,
-    pub exam_id: Uuid,
+    pub id: String,
+    pub schedule_id: String,
+    pub exam_id: String,
     pub exam_title: String,
-    pub published_version_id: Uuid,
+    pub published_version_id: String,
     pub cohort_name: String,
     pub institution: Option<String>,
     pub start_time: DateTime<Utc>,
@@ -83,11 +83,11 @@ pub enum ReleaseStatus {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct StudentSubmission {
-    pub id: Uuid,
-    pub attempt_id: Uuid,
-    pub schedule_id: Uuid,
-    pub exam_id: Uuid,
-    pub published_version_id: Uuid,
+    pub id: String,
+    pub attempt_id: String,
+    pub schedule_id: String,
+    pub exam_id: String,
+    pub published_version_id: String,
     pub student_id: String,
     pub student_name: String,
     pub student_email: Option<String>,
@@ -110,8 +110,8 @@ pub struct StudentSubmission {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct SectionSubmission {
-    pub id: Uuid,
-    pub submission_id: Uuid,
+    pub id: String,
+    pub submission_id: String,
     pub section: String,
     pub answers: Value,
     pub auto_grading_results: Option<Value>,
@@ -127,9 +127,9 @@ pub struct SectionSubmission {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct WritingTaskSubmission {
-    pub id: Uuid,
-    pub section_submission_id: Uuid,
-    pub submission_id: Uuid,
+    pub id: String,
+    pub section_submission_id: String,
+    pub submission_id: String,
     pub task_id: String,
     pub task_label: String,
     pub prompt: String,
@@ -151,8 +151,8 @@ pub struct WritingTaskSubmission {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewDraft {
-    pub id: Uuid,
-    pub submission_id: Uuid,
+    pub id: String,
+    pub submission_id: String,
     pub student_id: String,
     pub teacher_id: String,
     pub release_status: ReleaseStatus,
@@ -193,8 +193,8 @@ pub enum ReviewAction {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewEvent {
-    pub id: Uuid,
-    pub submission_id: Uuid,
+    pub id: String,
+    pub submission_id: String,
     pub teacher_id: String,
     pub teacher_name: String,
     pub action: ReviewAction,
@@ -212,8 +212,8 @@ pub struct ReviewEvent {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct StudentResult {
-    pub id: Uuid,
-    pub submission_id: Uuid,
+    pub id: String,
+    pub submission_id: String,
     pub student_id: String,
     pub student_name: String,
     pub release_status: ReleaseStatus,
@@ -228,7 +228,7 @@ pub struct StudentResult {
     pub speaking_result: Option<Value>,
     pub teacher_summary: Value,
     pub version: i32,
-    pub previous_version_id: Option<Uuid>,
+    pub previous_version_id: Option<String>,
     pub revision_reason: Option<String>,
     pub authorized_actor_id: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -239,9 +239,9 @@ pub struct StudentResult {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseEvent {
-    pub id: Uuid,
-    pub result_id: Uuid,
-    pub submission_id: Uuid,
+    pub id: String,
+    pub result_id: String,
+    pub submission_id: String,
     pub actor_id: String,
     pub action: String,
     pub payload: Option<Value>,
@@ -262,7 +262,7 @@ pub enum MediaAssetStatus {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct MediaAsset {
-    pub id: Uuid,
+    pub id: String,
     pub owner_kind: String,
     pub owner_id: String,
     pub content_type: String,

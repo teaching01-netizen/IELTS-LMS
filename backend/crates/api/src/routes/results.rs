@@ -2,7 +2,10 @@ use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use ielts_backend_application::results::ResultsService;
 use ielts_backend_domain::auth::UserRole;
-use ielts_backend_infrastructure::rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult};
+use ielts_backend_infrastructure::{
+    actor_context::ActorContext,
+    rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -20,8 +23,9 @@ pub async fn list_results(
     principal: AuthenticatedUser,
 ) -> Result<ApiResponse<Vec<ielts_backend_domain::grading::StudentResult>>, ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Grader, UserRole::Proctor])?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal);
     let service = ResultsService::new(state.db_pool());
-    let results = service.list_results().await?;
+    let results = service.list_results(&ctx).await?;
     Ok(ApiResponse::success_with_request_id(results, request_id.0))
 }
 
@@ -60,7 +64,7 @@ pub async fn export_results(
     principal.require_one_of(&[UserRole::Admin, UserRole::Grader])?;
 
     // Apply per-user rate limiting for exports (expensive operation)
-    let key = RateLimitKey::User(principal.user.id);
+    let key = RateLimitKey::User(principal.user.id.clone());
     let config = RateLimitConfig::new(
         state.config.rate_limit_export_per_user,
         state.config.rate_limit_export_per_user_window_secs,
@@ -75,8 +79,9 @@ pub async fn export_results(
             ));
         }
     }
+    let ctx = crate::http::auth::actor_context_from_principal(&principal);
     let service = ResultsService::new(state.db_pool());
-    let export = service.export_results().await?;
+    let export = service.export_results(&ctx).await?;
     Ok(ApiResponse::success_with_request_id(export, request_id.0))
 }
 

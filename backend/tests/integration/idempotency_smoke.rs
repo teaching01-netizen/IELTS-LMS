@@ -1,5 +1,5 @@
-#[path = "../support/postgres.rs"]
-mod postgres;
+#[path = "../support/mysql.rs"]
+mod mysql;
 
 use serde_json::json;
 
@@ -20,7 +20,7 @@ const INFRA_MIGRATIONS: &[&str] = &[
 
 #[tokio::test]
 async fn idempotency_keys_replay_same_hash_and_conflict_on_mismatch() {
-    let database = postgres::TestDatabase::new(INFRA_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(INFRA_MIGRATIONS).await;
     let repository = IdempotencyRepository::new(database.pool().clone());
 
     let (created_status, created) = repository
@@ -30,7 +30,7 @@ async fn idempotency_keys_replay_same_hash_and_conflict_on_mismatch() {
             "idem-1",
             "hash-a",
             200,
-            &json!({ "ok": true }),
+            json!({ "ok": true }),
         )
         .await
         .expect("store idempotency record");
@@ -44,7 +44,7 @@ async fn idempotency_keys_replay_same_hash_and_conflict_on_mismatch() {
             "idem-1",
             "hash-a",
             200,
-            &json!({ "ok": true }),
+            json!({ "ok": true }),
         )
         .await
         .expect("replay idempotency record");
@@ -58,7 +58,7 @@ async fn idempotency_keys_replay_same_hash_and_conflict_on_mismatch() {
             "idem-1",
             "hash-b",
             409,
-            &json!({ "ok": false }),
+            json!({ "ok": false }),
         )
         .await
         .expect("conflict result");

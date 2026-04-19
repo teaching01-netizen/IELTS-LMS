@@ -5,7 +5,7 @@ use ielts_backend_domain::library::{
     UpdateQuestionRequest,
 };
 use ielts_backend_infrastructure::actor_context::ActorContext;
-use sqlx::PgPool;
+use sqlx::MySqlPool;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -22,11 +22,11 @@ pub enum LibraryError {
 }
 
 pub struct LibraryService {
-    pool: PgPool,
+    pool: MySqlPool,
 }
 
 impl LibraryService {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
 
@@ -40,18 +40,17 @@ impl LibraryService {
         let id = Uuid::new_v4();
         let now = Utc::now();
 
-        let passage = sqlx::query_as::<_, PassageLibraryItem>(
+        sqlx::query(
             r#"
             INSERT INTO passage_library_items (
                 id, organization_id, title, passage_snapshot, difficulty, topic,
                 tags, word_count, estimated_time_minutes, usage_count,
                 created_by, created_at, updated_at, revision
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-            RETURNING *
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
             "#,
         )
-        .bind(id)
+        .bind(id.to_string())
         .bind(ctx.organization_id.as_ref().map(|id| id.to_string()))
         .bind(&req.title)
         .bind(&req.passage_snapshot)
@@ -62,11 +61,14 @@ impl LibraryService {
         .bind(req.estimated_time_minutes)
         .bind(0)
         .bind(ctx.actor_id.to_string())
-        .bind(now)
-        .bind(now)
         .bind(0)
-        .fetch_one(&self.pool)
+        .execute(&self.pool)
         .await?;
+
+        let passage = sqlx::query_as::<_, PassageLibraryItem>("SELECT * FROM passage_library_items WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(passage)
     }
@@ -76,8 +78,8 @@ impl LibraryService {
         _ctx: &ActorContext,
         id: Uuid,
     ) -> Result<PassageLibraryItem, LibraryError> {
-        sqlx::query_as::<_, PassageLibraryItem>("SELECT * FROM passage_library_items WHERE id = $1")
-            .bind(id)
+        sqlx::query_as::<_, PassageLibraryItem>("SELECT * FROM passage_library_items WHERE id = ?")
+            .bind(id.to_string())
             .fetch_optional(&self.pool)
             .await?
             .ok_or(LibraryError::NotFound)
@@ -99,24 +101,22 @@ impl LibraryService {
 
         let updated_at = Utc::now();
 
-        let passage = sqlx::query_as::<_, PassageLibraryItem>(
+        sqlx::query(
             r#"
             UPDATE passage_library_items
-            SET 
-                title = COALESCE($2, title),
-                passage_snapshot = COALESCE($3, passage_snapshot),
-                difficulty = COALESCE($4, difficulty),
-                topic = COALESCE($5, topic),
-                tags = COALESCE($6, tags),
-                word_count = COALESCE($7, word_count),
-                estimated_time_minutes = COALESCE($8, estimated_time_minutes),
-                updated_at = $9,
+            SET
+                title = COALESCE(?, title),
+                passage_snapshot = COALESCE(?, passage_snapshot),
+                difficulty = COALESCE(?, difficulty),
+                topic = COALESCE(?, topic),
+                tags = COALESCE(?, tags),
+                word_count = COALESCE(?, word_count),
+                estimated_time_minutes = COALESCE(?, estimated_time_minutes),
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1
-            RETURNING *
+            WHERE id = ?
             "#,
         )
-        .bind(id)
         .bind(&req.title)
         .bind(&req.passage_snapshot)
         .bind(&req.difficulty)
@@ -124,16 +124,21 @@ impl LibraryService {
         .bind(&req.tags)
         .bind(req.word_count)
         .bind(req.estimated_time_minutes)
-        .bind(updated_at)
-        .fetch_one(&self.pool)
+        .bind(id.to_string())
+        .execute(&self.pool)
         .await?;
+
+        let passage = sqlx::query_as::<_, PassageLibraryItem>("SELECT * FROM passage_library_items WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(passage)
     }
 
     pub async fn delete_passage(&self, _ctx: &ActorContext, id: Uuid) -> Result<(), LibraryError> {
-        let result = sqlx::query("DELETE FROM passage_library_items WHERE id = $1")
-            .bind(id)
+        let result = sqlx::query("DELETE FROM passage_library_items WHERE id = ?")
+            .bind(id.to_string())
             .execute(&self.pool)
             .await?;
 
@@ -152,23 +157,18 @@ impl LibraryService {
         limit: i64,
     ) -> Result<Vec<PassageLibraryItem>, LibraryError> {
         let mut query = String::from(
-            "SELECT * FROM passage_library_items WHERE organization_id IS NOT DISTINCT FROM $1",
+            "SELECT * FROM passage_library_items WHERE (organization_id = ? OR organization_id IS NULL)",
         );
-        let mut param_count = 1;
 
         if difficulty.is_some() {
-            param_count += 1;
-            query.push_str(&format!(" AND difficulty = ${}", param_count));
+            query.push_str(" AND difficulty = ?");
         }
 
         if topic.is_some() {
-            param_count += 1;
-            query.push_str(&format!(" AND topic = ${}", param_count));
+            query.push_str(" AND topic = ?");
         }
 
-        query.push_str(" ORDER BY updated_at DESC LIMIT ");
-        param_count += 1;
-        query.push_str(&format!("{}", param_count));
+        query.push_str(" ORDER BY updated_at DESC LIMIT ?");
 
         let org_id = ctx.organization_id.as_ref().map(|id| id.to_string());
         let mut q = sqlx::query_as::<_, PassageLibraryItem>(&query).bind(org_id);
@@ -196,17 +196,16 @@ impl LibraryService {
         let id = Uuid::new_v4();
         let now = Utc::now();
 
-        let question = sqlx::query_as::<_, QuestionBankItem>(
+        sqlx::query(
             r#"
             INSERT INTO question_bank_items (
                 id, organization_id, question_type, block_snapshot, difficulty, topic,
                 tags, usage_count, created_by, created_at, updated_at, revision
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            RETURNING *
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
             "#,
         )
-        .bind(id)
+        .bind(id.to_string())
         .bind(ctx.organization_id.as_ref().map(|id| id.to_string()))
         .bind(&req.question_type)
         .bind(&req.block_snapshot)
@@ -215,11 +214,14 @@ impl LibraryService {
         .bind(&req.tags)
         .bind(0)
         .bind(ctx.actor_id.to_string())
-        .bind(now)
-        .bind(now)
         .bind(0)
-        .fetch_one(&self.pool)
+        .execute(&self.pool)
         .await?;
+
+        let question = sqlx::query_as::<_, QuestionBankItem>("SELECT * FROM question_bank_items WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(question)
     }
@@ -229,8 +231,8 @@ impl LibraryService {
         _ctx: &ActorContext,
         id: Uuid,
     ) -> Result<QuestionBankItem, LibraryError> {
-        sqlx::query_as::<_, QuestionBankItem>("SELECT * FROM question_bank_items WHERE id = $1")
-            .bind(id)
+        sqlx::query_as::<_, QuestionBankItem>("SELECT * FROM question_bank_items WHERE id = ?")
+            .bind(id.to_string())
             .fetch_optional(&self.pool)
             .await?
             .ok_or(LibraryError::NotFound)
@@ -252,37 +254,40 @@ impl LibraryService {
 
         let updated_at = Utc::now();
 
-        let question = sqlx::query_as::<_, QuestionBankItem>(
+        sqlx::query(
             r#"
             UPDATE question_bank_items
-            SET 
-                question_type = COALESCE($2, question_type),
-                block_snapshot = COALESCE($3, block_snapshot),
-                difficulty = COALESCE($4, difficulty),
-                topic = COALESCE($5, topic),
-                tags = COALESCE($6, tags),
-                updated_at = $7,
+            SET
+                question_type = COALESCE(?, question_type),
+                block_snapshot = COALESCE(?, block_snapshot),
+                difficulty = COALESCE(?, difficulty),
+                topic = COALESCE(?, topic),
+                tags = COALESCE(?, tags),
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1
-            RETURNING *
+            WHERE id = ?
             "#,
         )
-        .bind(id)
         .bind(&req.question_type)
         .bind(&req.block_snapshot)
         .bind(&req.difficulty)
         .bind(&req.topic)
         .bind(&req.tags)
-        .bind(updated_at)
-        .fetch_one(&self.pool)
+        .bind(id.to_string())
+        .execute(&self.pool)
         .await?;
+
+        let question = sqlx::query_as::<_, QuestionBankItem>("SELECT * FROM question_bank_items WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(question)
     }
 
     pub async fn delete_question(&self, _ctx: &ActorContext, id: Uuid) -> Result<(), LibraryError> {
-        let result = sqlx::query("DELETE FROM question_bank_items WHERE id = $1")
-            .bind(id)
+        let result = sqlx::query("DELETE FROM question_bank_items WHERE id = ?")
+            .bind(id.to_string())
             .execute(&self.pool)
             .await?;
 
@@ -302,28 +307,22 @@ impl LibraryService {
         limit: i64,
     ) -> Result<Vec<QuestionBankItem>, LibraryError> {
         let mut query = String::from(
-            "SELECT * FROM question_bank_items WHERE organization_id IS NOT DISTINCT FROM $1",
+            "SELECT * FROM question_bank_items WHERE (organization_id = ? OR organization_id IS NULL)",
         );
-        let mut param_count = 1;
 
         if question_type.is_some() {
-            param_count += 1;
-            query.push_str(&format!(" AND question_type = ${}", param_count));
+            query.push_str(" AND question_type = ?");
         }
 
         if difficulty.is_some() {
-            param_count += 1;
-            query.push_str(&format!(" AND difficulty = ${}", param_count));
+            query.push_str(" AND difficulty = ?");
         }
 
         if topic.is_some() {
-            param_count += 1;
-            query.push_str(&format!(" AND topic = ${}", param_count));
+            query.push_str(" AND topic = ?");
         }
 
-        query.push_str(" ORDER BY updated_at DESC LIMIT ");
-        param_count += 1;
-        query.push_str(&format!("{}", param_count));
+        query.push_str(" ORDER BY updated_at DESC LIMIT ?");
 
         let org_id = ctx.organization_id.as_ref().map(|id| id.to_string());
         let mut q = sqlx::query_as::<_, QuestionBankItem>(&query).bind(&org_id);
@@ -374,22 +373,25 @@ impl LibraryService {
 
         let now = Utc::now();
 
-        let profile = sqlx::query_as::<_, AdminDefaultProfile>(
+        sqlx::query(
             r#"
             UPDATE admin_default_profiles
-            SET 
-                config_snapshot = $1,
-                updated_at = $2,
+            SET
+                config_snapshot = ?,
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $3
-            RETURNING *
+            WHERE id = ?
             "#,
         )
         .bind(&req.config_snapshot)
-        .bind(now)
-        .bind(existing.id)
-        .fetch_one(&self.pool)
+        .bind(&existing.id)
+        .execute(&self.pool)
         .await?;
+
+        let profile = sqlx::query_as::<_, AdminDefaultProfile>("SELECT * FROM admin_default_profiles WHERE id = ?")
+            .bind(&existing.id)
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(profile)
     }

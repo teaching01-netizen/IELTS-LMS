@@ -1,5 +1,5 @@
-#[path = "../support/postgres.rs"]
-mod postgres;
+#[path = "../support/mysql.rs"]
+mod mysql;
 
 use axum::{
     body::{to_bytes, Body},
@@ -104,9 +104,9 @@ async fn readyz_preserves_an_incoming_request_id() {
 
 #[tokio::test]
 async fn list_exams_returns_seeded_exam_entities() {
-    let database = postgres::TestDatabase::new(BUILDER_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
     let seeded = seed_exam(database.pool()).await;
-    let auth = postgres::create_authenticated_user(
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Builder,
         "builder@example.com",
@@ -140,9 +140,9 @@ async fn list_exams_returns_seeded_exam_entities() {
 
 #[tokio::test]
 async fn get_exam_returns_exam_detail_by_id() {
-    let database = postgres::TestDatabase::new(BUILDER_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
     let seeded = seed_exam(database.pool()).await;
-    let auth = postgres::create_authenticated_user(
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Builder,
         "builder@example.com",
@@ -177,9 +177,9 @@ async fn get_exam_returns_exam_detail_by_id() {
 
 #[tokio::test]
 async fn patch_draft_creates_a_new_version_and_advances_the_exam_pointer() {
-    let database = postgres::TestDatabase::new(BUILDER_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
     let seeded = seed_exam(database.pool()).await;
-    let auth = postgres::create_authenticated_user(
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Builder,
         "builder@example.com",
@@ -242,9 +242,9 @@ async fn patch_draft_creates_a_new_version_and_advances_the_exam_pointer() {
 
 #[tokio::test]
 async fn get_validation_reports_publish_readiness_for_the_current_draft() {
-    let database = postgres::TestDatabase::new(BUILDER_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
     let seeded = seed_exam(database.pool()).await;
-    let auth = postgres::create_authenticated_user(
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Builder,
         "builder@example.com",
@@ -301,9 +301,9 @@ async fn get_validation_reports_publish_readiness_for_the_current_draft() {
 
 #[tokio::test]
 async fn get_events_returns_exam_history_for_the_exam() {
-    let database = postgres::TestDatabase::new(BUILDER_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
     let seeded = seed_exam(database.pool()).await;
-    let auth = postgres::create_authenticated_user(
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Builder,
         "builder@example.com",
@@ -359,7 +359,7 @@ async fn get_events_returns_exam_history_for_the_exam() {
     database.shutdown().await;
 }
 
-fn app_state(pool: sqlx::PgPool) -> AppState {
+fn app_state(pool: sqlx::MySqlPool) -> AppState {
     let config = AppConfig::default();
 
     AppState {
@@ -376,7 +376,7 @@ fn contract_actor() -> ActorContext {
     ActorContext::new(Uuid::new_v4(), ActorRole::Admin)
 }
 
-async fn seed_exam(pool: &sqlx::PgPool) -> ExamEntity {
+async fn seed_exam(pool: &sqlx::MySqlPool) -> ExamEntity {
     BuilderService::new(pool.clone())
         .create_exam(
             &contract_actor(),

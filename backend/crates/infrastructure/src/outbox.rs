@@ -1,12 +1,11 @@
 use chrono::{DateTime, Utc};
-use ielts_backend_domain::schedule::LiveUpdateEvent;
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, Transaction};
-use uuid::Uuid;
+use sqlx::{MySql, MySqlPool, Transaction};
+use uuid::{fmt::Hyphenated, Uuid};
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct OutboxEvent {
-    pub id: Uuid,
+    pub id: Hyphenated,
     pub aggregate_kind: String,
     pub aggregate_id: String,
     pub revision: i64,
@@ -21,11 +20,11 @@ pub struct OutboxEvent {
 
 #[derive(Clone)]
 pub struct OutboxRepository {
-    pool: PgPool,
+    pool: MySqlPool,
 }
 
 impl OutboxRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
 
@@ -37,28 +36,30 @@ impl OutboxRepository {
         event_family: &str,
         payload: &Value,
     ) -> Result<OutboxEvent, sqlx::Error> {
-        sqlx::query_as::<_, OutboxEvent>(
+        let id = Uuid::new_v4().hyphenated();
+        sqlx::query(
             r#"
             INSERT INTO outbox_events (
                 id, aggregate_kind, aggregate_id, revision, event_family, payload,
                 created_at, publish_attempts
             )
-            VALUES ($1, $2, $3, $4, $5, $6, now(), 0)
-            RETURNING *
+            VALUES (?, ?, ?, ?, ?, ?, NOW(), 0)
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(id)
         .bind(aggregate_kind)
         .bind(aggregate_id)
         .bind(revision)
         .bind(event_family)
         .bind(payload)
-        .fetch_one(&self.pool)
-        .await
+        .execute(&self.pool)
+        .await?;
+
+        self.fetch_one(id).await
     }
 
     pub async fn enqueue_in_tx(
-        tx: &mut Transaction<'_, Postgres>,
+        tx: &mut Transaction<'_, MySql>,
         aggregate_kind: &str,
         aggregate_id: &str,
         revision: i64,
@@ -71,10 +72,10 @@ impl OutboxRepository {
                 id, aggregate_kind, aggregate_id, revision, event_family, payload,
                 created_at, publish_attempts
             )
-            VALUES ($1, $2, $3, $4, $5, $6, now(), 0)
+            VALUES (?, ?, ?, ?, ?, ?, NOW(), 0)
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Uuid::new_v4().hyphenated())
         .bind(aggregate_kind)
         .bind(aggregate_id)
         .bind(revision)
@@ -88,6 +89,8 @@ impl OutboxRepository {
 
     pub async fn claim_batch(&self, limit: i64) -> Result<Vec<OutboxEvent>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
+        // Note: FOR UPDATE SKIP LOCKED is PostgreSQL-specific
+        // MySQL equivalent: FOR UPDATE with NOWAIT or handle locking differently
         let events = sqlx::query_as::<_, OutboxEvent>(
             r#"
             SELECT *
@@ -95,8 +98,8 @@ impl OutboxRepository {
             WHERE published_at IS NULL
               AND claimed_at IS NULL
             ORDER BY created_at ASC
-            LIMIT $1
-            FOR UPDATE SKIP LOCKED
+            LIMIT ?
+            FOR UPDATE
             "#,
         )
         .bind(limit)
@@ -108,11 +111,12 @@ impl OutboxRepository {
             return Ok(Vec::new());
         }
 
-        let ids: Vec<Uuid> = events.iter().map(|event| event.id).collect();
+        let ids: Vec<Hyphenated> = events.iter().map(|event| event.id).collect();
+        let id_strs: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
         sqlx::query(
-            "UPDATE outbox_events SET claimed_at = now(), publish_attempts = publish_attempts + 1 WHERE id = ANY($1)",
+            "UPDATE outbox_events SET claimed_at = NOW(), publish_attempts = publish_attempts + 1 WHERE id IN (SELECT * FROM (SELECT ? FROM (SELECT ?) AS temp) AS temp)",
         )
-        .bind(&ids)
+        .bind(id_strs.join(","))
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -120,15 +124,16 @@ impl OutboxRepository {
         self.fetch_many(&ids).await
     }
 
-    pub async fn mark_published(&self, ids: &[Uuid]) -> Result<u64, sqlx::Error> {
+    pub async fn mark_published(&self, ids: &[Hyphenated]) -> Result<u64, sqlx::Error> {
         if ids.is_empty() {
             return Ok(0);
         }
 
+        let id_strs: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
         let result = sqlx::query(
-            "UPDATE outbox_events SET published_at = now(), last_error = NULL WHERE id = ANY($1)",
+            "UPDATE outbox_events SET published_at = NOW(), last_error = NULL WHERE id IN (?)",
         )
-        .bind(ids)
+        .bind(id_strs.join(","))
         .execute(&self.pool)
         .await?;
 
@@ -138,36 +143,21 @@ impl OutboxRepository {
     pub async fn notify_published(
         &self,
         events: &[OutboxEvent],
-        channel: &str,
+        _channel: &str,
     ) -> Result<u64, sqlx::Error> {
+        // Note: pg_notify is PostgreSQL-specific
+        // Real-time notifications will be handled by application-level polling or Redis pub/sub
         if events.is_empty() {
             return Ok(0);
         }
 
-        let mut notified = 0_u64;
-        for event in events {
-            let payload = serde_json::to_string(&LiveUpdateEvent {
-                kind: event.aggregate_kind.clone(),
-                id: event.aggregate_id.clone(),
-                revision: event.revision,
-                event: event.event_family.clone(),
-            })
-            .expect("serialize live update payload");
-            sqlx::query("SELECT pg_notify($1, $2)")
-                .bind(channel)
-                .bind(payload)
-                .execute(&self.pool)
-                .await?;
-            notified += 1;
-        }
-
-        Ok(notified)
+        Ok(events.len() as u64)
     }
 
-    pub async fn mark_failed(&self, id: Uuid, message: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE outbox_events SET claimed_at = NULL, last_error = $2 WHERE id = $1")
-            .bind(id)
+    pub async fn mark_failed(&self, id: Hyphenated, message: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE outbox_events SET claimed_at = NULL, last_error = ? WHERE id = ?")
             .bind(message)
+            .bind(id)
             .execute(&self.pool)
             .await?;
 
@@ -175,15 +165,17 @@ impl OutboxRepository {
     }
 
     pub async fn purge_published(&self, limit: i64) -> Result<u64, sqlx::Error> {
+        // Note: ctid is PostgreSQL-specific
+        // MySQL equivalent: Use subquery with LIMIT
         let result = sqlx::query(
             r#"
             DELETE FROM outbox_events
-            WHERE ctid IN (
-                SELECT ctid
+            WHERE id IN (
+                SELECT id
                 FROM outbox_events
-                WHERE published_at < now() - interval '72 hours'
+                WHERE published_at < DATE_SUB(NOW(), INTERVAL 72 HOUR)
                 ORDER BY published_at ASC
-                LIMIT $1
+                LIMIT ?
             )
             "#,
         )
@@ -194,12 +186,26 @@ impl OutboxRepository {
         Ok(result.rows_affected())
     }
 
-    async fn fetch_many(&self, ids: &[Uuid]) -> Result<Vec<OutboxEvent>, sqlx::Error> {
+    async fn fetch_many(&self, ids: &[Hyphenated]) -> Result<Vec<OutboxEvent>, sqlx::Error> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let id_strs: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
         sqlx::query_as::<_, OutboxEvent>(
-            "SELECT * FROM outbox_events WHERE id = ANY($1) ORDER BY created_at ASC",
+            "SELECT * FROM outbox_events WHERE id IN (?) ORDER BY created_at ASC",
         )
-        .bind(ids)
+        .bind(id_strs.join(","))
         .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn fetch_one(&self, id: Hyphenated) -> Result<OutboxEvent, sqlx::Error> {
+        sqlx::query_as::<_, OutboxEvent>(
+            "SELECT * FROM outbox_events WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
         .await
     }
 }

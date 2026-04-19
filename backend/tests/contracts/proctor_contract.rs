@@ -1,5 +1,5 @@
-#[path = "../support/postgres.rs"]
-mod postgres;
+#[path = "../support/mysql.rs"]
+mod mysql;
 
 use axum::{
     body::{to_bytes, Body},
@@ -27,7 +27,7 @@ use ielts_backend_domain::{
     },
 };
 
-use postgres::{assign_staff_to_schedule, create_authenticated_user};
+use mysql::{assign_staff_to_schedule, create_authenticated_user};
 use ielts_backend_infrastructure::{
     actor_context::{ActorContext, ActorRole},
     config::AppConfig,
@@ -48,7 +48,7 @@ const PROCTOR_MIGRATIONS: &[&str] = &[
 
 #[tokio::test]
 async fn list_sessions_and_detail_include_runtime_and_attempts() {
-    let database = postgres::TestDatabase::new(PROCTOR_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let attempt_id = bootstrap_attempt(database.pool(), schedule.id, "alice").await;
     let auth = create_authenticated_user(
@@ -116,7 +116,7 @@ async fn list_sessions_and_detail_include_runtime_and_attempts() {
 
 #[tokio::test]
 async fn presence_and_student_commands_update_session_state_and_alerts() {
-    let database = postgres::TestDatabase::new(PROCTOR_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let attempt_id = bootstrap_attempt(database.pool(), schedule.id, "alice").await;
     let auth = create_authenticated_user(
@@ -238,7 +238,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
 
 #[tokio::test]
 async fn control_commands_extend_end_sections_and_complete_exam() {
-    let database = postgres::TestDatabase::new(PROCTOR_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let auth = create_authenticated_user(
         database.pool(),
@@ -329,7 +329,7 @@ async fn control_commands_extend_end_sections_and_complete_exam() {
 
 #[tokio::test]
 async fn websocket_live_endpoint_rejects_unauthenticated_connections() {
-    let database = postgres::TestDatabase::new(PROCTOR_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
     
     let state = AppState::with_pool(AppConfig::default(), database.pool().clone());
     let router_state = state.clone();
@@ -360,7 +360,7 @@ async fn websocket_live_endpoint_rejects_unauthenticated_connections() {
 
 #[tokio::test]
 async fn websocket_live_endpoint_accepts_authenticated_connections_with_cookie() {
-    let database = postgres::TestDatabase::new(PROCTOR_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
     let auth = create_authenticated_user(
         database.pool(),
         UserRole::Proctor,
@@ -435,7 +435,7 @@ async fn websocket_live_endpoint_accepts_authenticated_connections_with_cookie()
 
 async fn issue_attempt_command(
     app: &axum::Router,
-    auth: &postgres::TestAuthContext,
+    auth: &mysql::TestAuthContext,
     schedule_id: Uuid,
     attempt_id: Uuid,
     action: &str,
@@ -460,7 +460,7 @@ async fn issue_attempt_command(
     json_body(response).await
 }
 
-async fn bootstrap_attempt(pool: &sqlx::PgPool, schedule_id: Uuid, candidate_id: &str) -> Uuid {
+async fn bootstrap_attempt(pool: &sqlx::MySqlPool, schedule_id: Uuid, candidate_id: &str) -> Uuid {
     let context = DeliveryService::new(pool.clone())
         .bootstrap(
             schedule_id,
@@ -469,6 +469,8 @@ async fn bootstrap_attempt(pool: &sqlx::PgPool, schedule_id: Uuid, candidate_id:
                 candidate_id: candidate_id.to_owned(),
                 candidate_name: format!("Candidate {candidate_id}"),
                 candidate_email: format!("{candidate_id}@example.com"),
+                email: Some(format!("{candidate_id}@example.com")),
+                wcode: Some("W123456".to_owned()),
                 client_session_id: Uuid::new_v4(),
             },
         )
@@ -478,7 +480,7 @@ async fn bootstrap_attempt(pool: &sqlx::PgPool, schedule_id: Uuid, candidate_id:
     context.attempt.expect("attempt").id
 }
 
-async fn seed_schedule(pool: &sqlx::PgPool) -> ielts_backend_domain::schedule::ExamSchedule {
+async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
     let actor = contract_actor();
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service

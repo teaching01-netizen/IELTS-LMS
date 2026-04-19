@@ -21,6 +21,7 @@ pub struct AppConfig {
     pub frontend_dist_dir: String,
     pub auth_session_cookie_name: String,
     pub auth_csrf_cookie_name: String,
+    pub auth_cookie_secure: bool,
     pub auth_secret: String,
     pub session_absolute_lifetime_hours: i64,
     pub session_idle_timeout_staff_minutes: i64,
@@ -127,6 +128,10 @@ impl AppConfig {
                 .ok()
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or(default.auth_csrf_cookie_name),
+            auth_cookie_secure: env::var("AUTH_COOKIE_SECURE")
+                .ok()
+                .and_then(|value| parse_bool(&value))
+                .unwrap_or(default.auth_cookie_secure),
             auth_secret: env::var("AUTH_SECRET")
                 .ok()
                 .filter(|value| !value.trim().is_empty())
@@ -267,6 +272,7 @@ impl Default for AppConfig {
             frontend_dist_dir: "/app/frontend/dist".to_owned(),
             auth_session_cookie_name: "__Host-session".to_owned(),
             auth_csrf_cookie_name: "__Host-csrf".to_owned(),
+            auth_cookie_secure: true,
             auth_secret: "dev-auth-secret-change-me".to_owned(),
             session_absolute_lifetime_hours: 12,
             session_idle_timeout_staff_minutes: 30,

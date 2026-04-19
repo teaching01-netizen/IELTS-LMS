@@ -32,7 +32,7 @@ pub struct VerifiedCsrf;
 
 impl AuthenticatedUser {
     pub fn actor_context(&self) -> ActorContext {
-        ActorContext::new(self.user.id, self.user.role.actor_role())
+        ActorContext::new(self.user.id.clone(), self.user.role.actor_role())
     }
 
     pub fn require_one_of(&self, roles: &[UserRole]) -> Result<(), ApiError> {
@@ -251,4 +251,8 @@ pub fn parse_uuid_or_400(value: &str, field: &str) -> Result<Uuid, ApiError> {
             &format!("{field} must be a valid UUID."),
         )
     })
+}
+
+pub fn actor_context_from_principal(principal: &AuthenticatedUser) -> ActorContext {
+    ActorContext::new(principal.user.id.clone(), principal.user.role.actor_role())
 }

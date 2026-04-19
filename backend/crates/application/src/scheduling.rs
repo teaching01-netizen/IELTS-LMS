@@ -5,11 +5,14 @@ use ielts_backend_domain::schedule::{
     RuntimeCommandRequest, RuntimeSectionState, RuntimeStatus, ScheduleSectionPlanEntry,
     ScheduleStatus, SectionRuntimeStatus, UpdateScheduleRequest,
 };
-use ielts_backend_infrastructure::actor_context::ActorContext;
+use ielts_backend_infrastructure::{
+    actor_context::ActorContext,
+    authorization::AuthorizationService,
+};
 use serde_json::Value;
-use sqlx::{FromRow, PgPool};
+use sqlx::{FromRow, MySql, MySqlPool};
 use thiserror::Error;
-use uuid::Uuid;
+use uuid::{fmt::Hyphenated, Uuid};
 
 #[derive(Error, Debug)]
 pub enum SchedulingError {
@@ -24,11 +27,11 @@ pub enum SchedulingError {
 }
 
 pub struct SchedulingService {
-    pool: PgPool,
+    pool: MySqlPool,
 }
 
 impl SchedulingService {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
 
@@ -37,10 +40,10 @@ impl SchedulingService {
         ctx: &ActorContext,
         req: CreateScheduleRequest,
     ) -> Result<ExamSchedule, SchedulingError> {
-        let exam = self.load_exam_context(req.exam_id).await?;
-        let version = self.load_version_context(req.published_version_id).await?;
+        let exam = self.load_exam_context(req.exam_id.clone()).await?;
+        let version = self.load_version_context(req.published_version_id.clone()).await?;
 
-        if version.exam_id != req.exam_id {
+        if version.exam_id.to_string() != req.exam_id {
             return Err(SchedulingError::Validation(
                 "Published version does not belong to the requested exam.".to_owned(),
             ));
@@ -50,7 +53,8 @@ impl SchedulingService {
         let planned_duration_minutes = plan_total_minutes(&plan);
         validate_schedule_window(req.start_time, req.end_time, planned_duration_minutes)?;
 
-        let schedule = sqlx::query_as::<_, ExamSchedule>(
+        let schedule_id = Uuid::new_v4();
+        sqlx::query(
             r#"
             INSERT INTO exam_schedules (
                 id, exam_id, organization_id, exam_title, published_version_id, cohort_name,
@@ -58,21 +62,15 @@ impl SchedulingService {
                 recurrence_type, recurrence_interval, auto_start, auto_stop, status, created_by,
                 created_at, updated_at, revision
             )
-            VALUES (
-                $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11,
-                $12, $13, $14, $15, $16, $17,
-                $18, $19, $20
-            )
-            RETURNING *
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
             "#,
         )
-        .bind(Uuid::new_v4())
-        .bind(req.exam_id)
-        .bind(exam.organization_id)
-        .bind(exam.title)
-        .bind(req.published_version_id)
-        .bind(req.cohort_name)
+        .bind(schedule_id.to_string())
+        .bind(&req.exam_id)
+        .bind(&exam.organization_id)
+        .bind(&exam.title)
+        .bind(&req.published_version_id)
+        .bind(&req.cohort_name)
         .bind(req.institution)
         .bind(req.start_time)
         .bind(req.end_time)
@@ -84,37 +82,70 @@ impl SchedulingService {
         .bind(req.auto_stop)
         .bind(ScheduleStatus::Scheduled)
         .bind(ctx.actor_id.to_string())
-        .bind(Utc::now())
-        .bind(Utc::now())
         .bind(0)
-        .fetch_one(&self.pool)
+        .execute(&self.pool)
         .await?;
+
+        let schedule = sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(schedule)
     }
 
     pub async fn list_schedules(
         &self,
-        _ctx: &ActorContext,
+        ctx: &ActorContext,
     ) -> Result<Vec<ExamSchedule>, SchedulingError> {
-        sqlx::query_as::<_, ExamSchedule>(
-            "SELECT * FROM exam_schedules ORDER BY start_time ASC, created_at DESC",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(SchedulingError::from)
+        // Admins and AdminObservers can see all schedules
+        // Other roles can only see schedules from their organization
+        let query = if matches!(
+            ctx.role,
+            ielts_backend_infrastructure::actor_context::ActorRole::Admin
+                | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+        ) {
+            "SELECT * FROM exam_schedules ORDER BY start_time ASC, created_at DESC"
+        } else if let Some(ref org_id) = ctx.organization_id {
+            "SELECT * FROM exam_schedules WHERE organization_id = ? ORDER BY start_time ASC, created_at DESC"
+        } else {
+            "SELECT * FROM exam_schedules WHERE 1=0 ORDER BY start_time ASC, created_at DESC" // No access
+        };
+
+        let schedules = if let Some(org_id) = ctx.organization_id.clone() {
+            sqlx::query_as::<_, ExamSchedule>(query)
+                .bind(org_id.to_string())
+                .fetch_all(&self.pool)
+                .await?
+        } else {
+            sqlx::query_as::<_, ExamSchedule>(query)
+                .fetch_all(&self.pool)
+                .await?
+        };
+
+        Ok(schedules)
     }
 
     pub async fn get_schedule(
         &self,
-        _ctx: &ActorContext,
+        ctx: &ActorContext,
         schedule_id: Uuid,
     ) -> Result<ExamSchedule, SchedulingError> {
-        sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = $1")
-            .bind(schedule_id)
+        let schedule = sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+            .bind(schedule_id.to_string())
             .fetch_optional(&self.pool)
             .await?
-            .ok_or(SchedulingError::NotFound)
+            .ok_or(SchedulingError::NotFound)?;
+
+        // Check authorization: user must have access to this schedule
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_access_schedule(ctx, schedule_id.to_string(), org_id.to_string()) {
+                return Err(SchedulingError::NotFound);
+            }
+        }
+
+        Ok(schedule)
     }
 
     pub async fn update_schedule(
@@ -125,30 +156,36 @@ impl SchedulingService {
     ) -> Result<ExamSchedule, SchedulingError> {
         let existing = self.get_schedule(ctx, schedule_id).await?;
 
+        // Check if user can modify this schedule
+        let organization_id = existing.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
+                return Err(SchedulingError::NotFound);
+            }
+        }
+
         if existing.revision != req.revision {
             return Err(SchedulingError::Conflict(
                 "Schedule has been modified by another user.".to_owned(),
             ));
         }
 
-        let updated = sqlx::query_as::<_, ExamSchedule>(
+        sqlx::query(
             r#"
             UPDATE exam_schedules
             SET
-                cohort_name = COALESCE($2, cohort_name),
-                institution = COALESCE($3, institution),
-                start_time = COALESCE($4, start_time),
-                end_time = COALESCE($5, end_time),
-                auto_start = COALESCE($6, auto_start),
-                auto_stop = COALESCE($7, auto_stop),
-                status = COALESCE($8, status),
-                updated_at = $9,
+                cohort_name = COALESCE(?, cohort_name),
+                institution = COALESCE(?, institution),
+                start_time = COALESCE(?, start_time),
+                end_time = COALESCE(?, end_time),
+                auto_start = COALESCE(?, auto_start),
+                auto_stop = COALESCE(?, auto_stop),
+                status = COALESCE(?, status),
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1
-            RETURNING *
+            WHERE id = ?
             "#,
         )
-        .bind(schedule_id)
         .bind(req.cohort_name)
         .bind(req.institution)
         .bind(req.start_time)
@@ -156,20 +193,35 @@ impl SchedulingService {
         .bind(req.auto_start)
         .bind(req.auto_stop)
         .bind(req.status)
-        .bind(Utc::now())
-        .fetch_one(&self.pool)
+        .bind(schedule_id.to_string())
+        .execute(&self.pool)
         .await?;
+
+        let updated = sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(updated)
     }
 
     pub async fn delete_schedule(
         &self,
-        _ctx: &ActorContext,
+        ctx: &ActorContext,
         schedule_id: Uuid,
     ) -> Result<(), SchedulingError> {
-        let deleted = sqlx::query("DELETE FROM exam_schedules WHERE id = $1")
-            .bind(schedule_id)
+        let schedule = self.get_schedule(ctx, schedule_id).await?;
+
+        // Check if user can delete this schedule
+        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
+                return Err(SchedulingError::NotFound);
+            }
+        }
+
+        let deleted = sqlx::query("DELETE FROM exam_schedules WHERE id = ?")
+            .bind(schedule_id.to_string())
             .execute(&self.pool)
             .await?;
 
@@ -182,13 +234,16 @@ impl SchedulingService {
 
     pub async fn get_runtime(
         &self,
-        _ctx: &ActorContext,
+        ctx: &ActorContext,
         schedule_id: Uuid,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
+        // Check authorization before accessing runtime
+        self.get_schedule(ctx, schedule_id).await?;
+
         if let Some(runtime_row) = sqlx::query_as::<_, RuntimeRow>(
-            "SELECT * FROM exam_session_runtimes WHERE schedule_id = $1",
+            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_optional(&self.pool)
         .await?
         {
@@ -205,6 +260,9 @@ impl SchedulingService {
         schedule_id: Uuid,
         req: RuntimeCommandRequest,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
+        // Check authorization before applying runtime command
+        self.get_schedule(ctx, schedule_id).await?;
+
         match req.action {
             RuntimeCommandAction::StartRuntime => self.start_runtime(ctx, schedule_id).await,
             RuntimeCommandAction::PauseRuntime => {
@@ -220,10 +278,10 @@ impl SchedulingService {
         ctx: &ActorContext,
         schedule_id: Uuid,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
-        if sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM exam_session_runtimes WHERE schedule_id = $1",
+        if sqlx::query_scalar::<_, Hyphenated>(
+            "SELECT id FROM exam_session_runtimes WHERE schedule_id = ?",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_optional(&self.pool)
         .await?
         .is_some()
@@ -247,24 +305,18 @@ impl SchedulingService {
                 active_section_key, current_section_key, current_section_remaining_seconds,
                 waiting_for_next_section, is_overrun, total_paused_seconds, created_at, updated_at, revision
             )
-            VALUES (
-                $1, $2, $3, $4, $5, $6, NULL,
-                $7, $8, $9,
-                false, false, 0, $10, $11, 0
-            )
+            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, false, false, 0, NOW(), NOW(), 0)
             "#,
         )
-        .bind(runtime_id)
-        .bind(context.schedule.id)
-        .bind(context.schedule.exam_id)
+        .bind(runtime_id.to_string())
+        .bind(&context.schedule.id)
+        .bind(&context.schedule.exam_id)
         .bind(RuntimeStatus::Live)
         .bind(plan_snapshot)
         .bind(now)
         .bind(context.plan.first().map(|entry| entry.section_key.clone()))
         .bind(context.plan.first().map(|entry| entry.section_key.clone()))
         .bind(context.plan.first().map(|entry| entry.duration_minutes * 60).unwrap_or(0))
-        .bind(now)
-        .bind(now)
         .execute(&mut *tx)
         .await?;
 
@@ -286,15 +338,11 @@ impl SchedulingService {
                     gap_after_minutes, status, available_at, actual_start_at, actual_end_at, paused_at,
                     accumulated_paused_seconds, extension_minutes, completion_reason, projected_start_at, projected_end_at
                 )
-                VALUES (
-                    $1, $2, $3, $4, $5, $6,
-                    $7, $8, $9, $10, NULL, NULL,
-                    0, 0, NULL, $11, $12
-                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, 0, NULL, ?, ?)
                 "#,
             )
-            .bind(Uuid::new_v4())
-            .bind(runtime_id)
+            .bind(Uuid::new_v4().to_string())
+            .bind(runtime_id.to_string())
             .bind(&entry.section_key)
             .bind(&entry.label)
             .bind(entry.order)
@@ -310,19 +358,18 @@ impl SchedulingService {
         }
 
         sqlx::query(
-            "UPDATE exam_schedules SET status = $2, updated_at = $3, revision = revision + 1 WHERE id = $1",
+            "UPDATE exam_schedules SET status = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?",
         )
-        .bind(schedule_id)
         .bind(ScheduleStatus::Live)
-        .bind(now)
+        .bind(schedule_id.to_string())
         .execute(&mut *tx)
         .await?;
 
         insert_control_event(
             &mut tx,
-            runtime_id,
-            context.schedule.id,
-            context.schedule.exam_id,
+            runtime_id.to_string(),
+            context.schedule.id.clone(),
+            context.schedule.exam_id.clone(),
             &ctx.actor_id.to_string(),
             RuntimeCommandEvent::StartRuntime,
             None,
@@ -341,9 +388,9 @@ impl SchedulingService {
         reason: Option<String>,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
         let runtime = sqlx::query_as::<_, RuntimeRow>(
-            "SELECT * FROM exam_session_runtimes WHERE schedule_id = $1",
+            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_optional(&self.pool)
         .await?
         .ok_or(SchedulingError::NotFound)?;
@@ -359,29 +406,27 @@ impl SchedulingService {
         let mut tx = self.pool.begin().await?;
 
         sqlx::query(
-            "UPDATE exam_session_runtimes SET status = $2, updated_at = $3, revision = revision + 1 WHERE id = $1",
+            "UPDATE exam_session_runtimes SET status = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?",
         )
-        .bind(runtime.id)
         .bind(RuntimeStatus::Paused)
-        .bind(now)
+        .bind(runtime.id)
         .execute(&mut *tx)
         .await?;
 
         sqlx::query(
-            "UPDATE exam_session_runtime_sections SET status = $2, paused_at = $3 WHERE runtime_id = $1 AND section_key = $4",
+            "UPDATE exam_session_runtime_sections SET status = ?, paused_at = NOW() WHERE runtime_id = ? AND section_key = ?",
         )
-        .bind(runtime.id)
         .bind(SectionRuntimeStatus::Paused)
-        .bind(now)
+        .bind(runtime.id)
         .bind(active_section_key)
         .execute(&mut *tx)
         .await?;
 
         insert_control_event(
             &mut tx,
-            runtime.id,
-            schedule_id,
-            runtime.exam_id,
+            runtime.id.to_string(),
+            schedule_id.to_string(),
+            runtime.exam_id.to_string(),
             &ctx.actor_id.to_string(),
             RuntimeCommandEvent::PauseRuntime,
             reason,
@@ -399,9 +444,9 @@ impl SchedulingService {
         schedule_id: Uuid,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
         let runtime = sqlx::query_as::<_, RuntimeRow>(
-            "SELECT * FROM exam_session_runtimes WHERE schedule_id = $1",
+            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_optional(&self.pool)
         .await?
         .ok_or(SchedulingError::NotFound)?;
@@ -416,7 +461,7 @@ impl SchedulingService {
             SchedulingError::Conflict("Runtime has no active section.".to_owned())
         })?;
         let paused_at = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
-            "SELECT paused_at FROM exam_session_runtime_sections WHERE runtime_id = $1 AND section_key = $2",
+            "SELECT paused_at FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ?",
         )
         .bind(runtime.id)
         .bind(&active_section_key)
@@ -429,30 +474,29 @@ impl SchedulingService {
         let mut tx = self.pool.begin().await?;
 
         sqlx::query(
-            "UPDATE exam_session_runtimes SET status = $2, total_paused_seconds = total_paused_seconds + $3, updated_at = $4, revision = revision + 1 WHERE id = $1",
+            "UPDATE exam_session_runtimes SET status = ?, total_paused_seconds = total_paused_seconds + ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?",
         )
-        .bind(runtime.id)
         .bind(RuntimeStatus::Live)
         .bind(paused_seconds)
-        .bind(now)
+        .bind(runtime.id)
         .execute(&mut *tx)
         .await?;
 
         sqlx::query(
-            "UPDATE exam_session_runtime_sections SET status = $2, paused_at = NULL, accumulated_paused_seconds = accumulated_paused_seconds + $3 WHERE runtime_id = $1 AND section_key = $4",
+            "UPDATE exam_session_runtime_sections SET status = ?, paused_at = NULL, accumulated_paused_seconds = accumulated_paused_seconds + ? WHERE runtime_id = ? AND section_key = ?",
         )
-        .bind(runtime.id)
         .bind(SectionRuntimeStatus::Live)
         .bind(paused_seconds)
+        .bind(runtime.id)
         .bind(active_section_key)
         .execute(&mut *tx)
         .await?;
 
         insert_control_event(
             &mut tx,
-            runtime.id,
-            schedule_id,
-            runtime.exam_id,
+            runtime.id.to_string(),
+            schedule_id.to_string(),
+            runtime.exam_id.to_string(),
             &ctx.actor_id.to_string(),
             RuntimeCommandEvent::ResumeRuntime,
             None,
@@ -470,9 +514,9 @@ impl SchedulingService {
         schedule_id: Uuid,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
         let runtime = sqlx::query_as::<_, RuntimeRow>(
-            "SELECT * FROM exam_session_runtimes WHERE schedule_id = $1",
+            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .fetch_optional(&self.pool)
         .await?
         .ok_or(SchedulingError::NotFound)?;
@@ -491,21 +535,19 @@ impl SchedulingService {
             r#"
             UPDATE exam_session_runtimes
             SET
-                status = $2,
-                actual_end_at = $3,
+                status = ?,
+                actual_end_at = NOW(),
                 active_section_key = NULL,
                 current_section_key = NULL,
                 current_section_remaining_seconds = 0,
                 waiting_for_next_section = false,
-                updated_at = $4,
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1
+            WHERE id = ?
             "#,
         )
-        .bind(runtime.id)
         .bind(RuntimeStatus::Completed)
-        .bind(now)
-        .bind(now)
+        .bind(runtime.id)
         .execute(&mut *tx)
         .await?;
 
@@ -513,33 +555,31 @@ impl SchedulingService {
             r#"
             UPDATE exam_session_runtime_sections
             SET
-                status = $2,
-                actual_end_at = COALESCE(actual_end_at, $3),
+                status = ?,
+                actual_end_at = COALESCE(actual_end_at, NOW()),
                 completion_reason = COALESCE(completion_reason, 'proctor_complete'),
                 paused_at = NULL
-            WHERE runtime_id = $1
+            WHERE runtime_id = ?
             "#,
         )
-        .bind(runtime.id)
         .bind(SectionRuntimeStatus::Completed)
-        .bind(now)
+        .bind(runtime.id)
         .execute(&mut *tx)
         .await?;
 
         sqlx::query(
-            "UPDATE exam_schedules SET status = $2, updated_at = $3, revision = revision + 1 WHERE id = $1",
+            "UPDATE exam_schedules SET status = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?",
         )
-        .bind(schedule_id)
         .bind(ScheduleStatus::Completed)
-        .bind(now)
+        .bind(schedule_id.to_string())
         .execute(&mut *tx)
         .await?;
 
         insert_control_event(
             &mut tx,
-            runtime.id,
-            schedule_id,
-            runtime.exam_id,
+            runtime.id.to_string(),
+            schedule_id.to_string(),
+            runtime.exam_id.to_string(),
             &ctx.actor_id.to_string(),
             RuntimeCommandEvent::CompleteRuntime,
             None,
@@ -556,16 +596,16 @@ impl SchedulingService {
         runtime_row: RuntimeRow,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
         let sections = sqlx::query_as::<_, RuntimeSectionRow>(
-            "SELECT * FROM exam_session_runtime_sections WHERE runtime_id = $1 ORDER BY section_order ASC",
+            "SELECT * FROM exam_session_runtime_sections WHERE runtime_id = ? ORDER BY section_order ASC",
         )
         .bind(runtime_row.id)
         .fetch_all(&self.pool)
         .await?;
 
         Ok(ExamSessionRuntime {
-            id: runtime_row.id,
-            schedule_id: runtime_row.schedule_id,
-            exam_id: runtime_row.exam_id,
+            id: runtime_row.id.to_string(),
+            schedule_id: runtime_row.schedule_id.to_string(),
+            exam_id: runtime_row.exam_id.to_string(),
             status: runtime_row.status,
             plan_snapshot: serde_json::from_value(runtime_row.plan_snapshot).unwrap_or_default(),
             actual_start_at: runtime_row.actual_start_at,
@@ -590,25 +630,25 @@ impl SchedulingService {
         let schedule = self
             .get_schedule(
                 &ActorContext::new(
-                    Uuid::nil(),
+                    Uuid::nil().to_string(),
                     ielts_backend_infrastructure::actor_context::ActorRole::Admin,
                 ),
                 schedule_id,
             )
             .await?;
         let version = self
-            .load_version_context(schedule.published_version_id)
+            .load_version_context(schedule.published_version_id.clone())
             .await?;
         let plan = build_section_plan(&version.config_snapshot)?;
 
         Ok(ScheduleContext { schedule, plan })
     }
 
-    async fn load_exam_context(&self, exam_id: Uuid) -> Result<ExamContext, SchedulingError> {
+    async fn load_exam_context(&self, exam_id: String) -> Result<ExamContext, SchedulingError> {
         sqlx::query_as::<_, ExamContext>(
-            "SELECT title, organization_id FROM exam_entities WHERE id = $1",
+            "SELECT title, organization_id FROM exam_entities WHERE id = ?",
         )
-        .bind(exam_id)
+        .bind(&exam_id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or(SchedulingError::NotFound)
@@ -616,12 +656,12 @@ impl SchedulingService {
 
     async fn load_version_context(
         &self,
-        version_id: Uuid,
+        version_id: String,
     ) -> Result<VersionContext, SchedulingError> {
         sqlx::query_as::<_, VersionContext>(
-            "SELECT exam_id, config_snapshot FROM exam_versions WHERE id = $1",
+            "SELECT exam_id, config_snapshot FROM exam_versions WHERE id = ?",
         )
-        .bind(version_id)
+        .bind(&version_id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or(SchedulingError::NotFound)
@@ -642,9 +682,9 @@ impl SchedulingService {
         self.get_schedule(ctx, schedule_id).await?;
 
         let existing = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM schedule_registrations WHERE schedule_id = $1 AND wcode = $2"
+            "SELECT COUNT(*) FROM schedule_registrations WHERE schedule_id = ? AND wcode = ?"
         )
-        .bind(schedule_id)
+        .bind(schedule_id.to_string())
         .bind(&wcode)
         .fetch_one(&self.pool)
         .await?;
@@ -664,12 +704,13 @@ impl SchedulingService {
                 id, schedule_id, user_id, actor_id, wcode, student_key, student_id, student_name, student_email,
                 access_state, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $3::text, $4, $5, $6, $7, $8, 'invited', now(), now())
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'invited', NOW(), NOW())
             "#
         )
-        .bind(registration_id)
-        .bind(schedule_id)
-        .bind(user_id)
+        .bind(registration_id.to_string())
+        .bind(schedule_id.to_string())
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
         .bind(&wcode)
         .bind(&student_key)
         .bind(&wcode)
@@ -708,7 +749,7 @@ struct ExamContext {
 
 #[derive(Debug, Clone, FromRow)]
 struct VersionContext {
-    exam_id: Uuid,
+    exam_id: Hyphenated,
     config_snapshot: Value,
 }
 
@@ -720,9 +761,9 @@ struct ScheduleContext {
 
 #[derive(Debug, Clone, FromRow)]
 struct RuntimeRow {
-    id: Uuid,
-    schedule_id: Uuid,
-    exam_id: Uuid,
+    id: Hyphenated,
+    schedule_id: Hyphenated,
+    exam_id: Hyphenated,
     status: RuntimeStatus,
     plan_snapshot: Value,
     actual_start_at: Option<DateTime<Utc>>,
@@ -740,8 +781,8 @@ struct RuntimeRow {
 
 #[derive(Debug, Clone, FromRow)]
 struct RuntimeSectionRow {
-    id: Uuid,
-    runtime_id: Uuid,
+    id: Hyphenated,
+    runtime_id: Hyphenated,
     section_key: String,
     label: String,
     section_order: i32,
@@ -762,8 +803,8 @@ struct RuntimeSectionRow {
 impl From<RuntimeSectionRow> for RuntimeSectionState {
     fn from(value: RuntimeSectionRow) -> Self {
         Self {
-            id: value.id,
-            runtime_id: value.runtime_id,
+            id: value.id.to_string(),
+            runtime_id: value.runtime_id.to_string(),
             section_key: value.section_key,
             label: value.label,
             section_order: value.section_order,
@@ -784,10 +825,10 @@ impl From<RuntimeSectionRow> for RuntimeSectionState {
 }
 
 async fn insert_control_event(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    runtime_id: Uuid,
-    schedule_id: Uuid,
-    exam_id: Uuid,
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    runtime_id: String,
+    schedule_id: String,
+    exam_id: String,
     actor_id: &str,
     action: RuntimeCommandEvent,
     reason: Option<String>,
@@ -797,17 +838,16 @@ async fn insert_control_event(
         INSERT INTO cohort_control_events (
             id, schedule_id, runtime_id, exam_id, actor_id, action, reason, created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(schedule_id)
-    .bind(runtime_id)
-    .bind(exam_id)
+    .bind(Uuid::new_v4().to_string())
+    .bind(schedule_id.to_string())
+    .bind(runtime_id.to_string())
+    .bind(exam_id.to_string())
     .bind(actor_id)
     .bind(action)
     .bind(reason)
-    .bind(Utc::now())
     .execute(tx.as_mut())
     .await?;
 
@@ -821,9 +861,9 @@ fn build_not_started_runtime(
     let created_at = Utc::now();
 
     ExamSessionRuntime {
-        id: Uuid::nil(),
-        schedule_id: schedule.id,
-        exam_id: schedule.exam_id,
+        id: Uuid::nil().to_string(),
+        schedule_id: schedule.id.clone(),
+        exam_id: schedule.exam_id.clone(),
         status: RuntimeStatus::NotStarted,
         plan_snapshot: plan.to_vec(),
         actual_start_at: None,
@@ -840,8 +880,8 @@ fn build_not_started_runtime(
         sections: plan
             .iter()
             .map(|entry| RuntimeSectionState {
-                id: Uuid::nil(),
-                runtime_id: Uuid::nil(),
+                id: Uuid::nil().to_string(),
+                runtime_id: Uuid::nil().to_string(),
                 section_key: entry.section_key.clone(),
                 label: entry.label.clone(),
                 section_order: entry.order,

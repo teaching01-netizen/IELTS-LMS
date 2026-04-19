@@ -144,7 +144,7 @@ pub async fn create_student_registration(
     // Registration is the first step in becoming a student of a schedule
     // Use a system actor context for registration
     use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
-    let ctx = ActorContext::new(Uuid::new_v4(), ActorRole::Admin);
+    let ctx = ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin);
     let service = SchedulingService::new(state.db_pool());
     
     // For public registration, use a system user ID
@@ -164,7 +164,7 @@ pub async fn create_student_registration(
 
     Ok(ApiResponse::success_with_request_id(
         ielts_backend_domain::attempt::StudentRegistrationResponse {
-            registration_id: registration.id,
+            registration_id: registration.id.to_string(),
             wcode: registration.wcode,
             email: registration.email,
             student_name: registration.student_name,

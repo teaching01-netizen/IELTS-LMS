@@ -8,7 +8,7 @@ use ielts_backend_infrastructure::{
     database_monitor::{inspect_storage_budget, StorageBudgetLevel},
 };
 use ielts_backend_worker::jobs;
-use sqlx::postgres::{PgListener, PgPoolOptions};
+use sqlx::mysql::MySqlPoolOptions;
 use tokio::sync::broadcast;
 
 const MAX_OUTBOX_BATCHES_PER_CYCLE: usize = 20;
@@ -44,24 +44,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Ok(());
     };
 
-    let pool = PgPoolOptions::new()
+    let pool = MySqlPoolOptions::new()
         .max_connections(config.db_pool_max_connections)
         .acquire_timeout(Duration::from_millis(config.db_pool_acquire_timeout_ms))
         .connect(&database_url)
         .await?;
     let fallback_interval = Duration::from_secs(config.worker_fallback_interval_secs);
-    let outbox_listener_url = config.database_direct_url.clone();
-    if outbox_listener_url.is_none() {
-        tracing::warn!(
-            channel = %config.worker_outbox_notify_channel,
-            "DATABASE_DIRECT_URL is not configured; outbox notify listener disabled"
-        );
-    }
-    let mut outbox_listener = connect_outbox_listener(
-        outbox_listener_url.as_deref(),
-        &config.worker_outbox_notify_channel,
-    )
-    .await;
     let (shutdown_tx, _) = broadcast::channel(1);
     let maintenance_handle = spawn_maintenance_loop(
         pool.clone(),
@@ -74,63 +62,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         legacy_poll_interval_ms = config.worker_poll_interval_ms,
         fallback_interval_secs = config.worker_fallback_interval_secs,
         max_connections = config.db_pool_max_connections,
-        outbox_notify_channel = %config.worker_outbox_notify_channel,
-        outbox_listener_enabled = outbox_listener.is_some(),
-        "worker started"
+        "worker started (MySQL mode - outbox notify listener disabled)"
     );
 
     let result: Result<(), sqlx::Error> = 'worker: loop {
-        if outbox_listener.is_none() && outbox_listener_url.is_some() {
-            outbox_listener = connect_outbox_listener(
-                outbox_listener_url.as_deref(),
-                &config.worker_outbox_notify_channel,
-            )
-            .await;
-        }
-
-        let mut listener_disconnected = false;
-        let trigger = if let Some(listener) = outbox_listener.as_mut() {
-            tokio::select! {
-                notification = listener.recv() => {
-                    match notification {
-                        Ok(notification) => {
-                            tracing::debug!(
-                                channel = %config.worker_outbox_notify_channel,
-                                payload = notification.payload(),
-                                "received outbox wakeup"
-                            );
-                            WorkerTrigger::Notify
-                        }
-                        Err(error) => {
-                            tracing::warn!(
-                                error = %error,
-                                channel = %config.worker_outbox_notify_channel,
-                                "outbox notify listener disconnected"
-                            );
-                            listener_disconnected = true;
-                            WorkerTrigger::Poll
-                        }
-                    }
-                }
-                _ = tokio::time::sleep(fallback_interval) => WorkerTrigger::Poll,
-                _ = shutdown_signal() => {
-                    tracing::info!("worker received shutdown signal");
-                    break 'worker Ok(());
-                }
-            }
-        } else {
-            tokio::select! {
-                _ = tokio::time::sleep(fallback_interval) => WorkerTrigger::Poll,
-                _ = shutdown_signal() => {
-                    tracing::info!("worker received shutdown signal");
-                    break 'worker Ok(());
-                }
+        let trigger = tokio::select! {
+            _ = tokio::time::sleep(fallback_interval) => WorkerTrigger::Poll,
+            _ = shutdown_signal() => {
+                tracing::info!("worker received shutdown signal");
+                break 'worker Ok(());
             }
         };
-
-        if listener_disconnected {
-            outbox_listener = None;
-        }
 
         let cycle_started = Instant::now();
         if let Err(error) = run_outbox_cycle(&pool, &config, trigger, cycle_started).await {
@@ -149,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 async fn run_outbox_cycle(
-    pool: &sqlx::PgPool,
+    pool: &sqlx::MySqlPool,
     config: &AppConfig,
     trigger: WorkerTrigger,
     cycle_started: Instant,
@@ -185,7 +127,7 @@ async fn run_outbox_cycle(
 }
 
 fn spawn_maintenance_loop(
-    pool: sqlx::PgPool,
+    pool: sqlx::MySqlPool,
     config: AppConfig,
     interval: Duration,
     mut shutdown: broadcast::Receiver<()>,
@@ -213,7 +155,7 @@ fn spawn_maintenance_loop(
 }
 
 async fn run_maintenance_cycle(
-    pool: &sqlx::PgPool,
+    pool: &sqlx::MySqlPool,
     config: &AppConfig,
     cycle_started: Instant,
 ) -> Result<(), sqlx::Error> {
@@ -241,7 +183,7 @@ async fn run_maintenance_cycle(
 }
 
 async fn drain_outbox_until_empty(
-    pool: sqlx::PgPool,
+    pool: sqlx::MySqlPool,
     notify_channel: &str,
 ) -> Result<jobs::outbox::OutboxRunReport, sqlx::Error> {
     let started = Instant::now();
@@ -273,32 +215,7 @@ async fn drain_outbox_until_empty(
     Ok(total)
 }
 
-async fn connect_outbox_listener(listen_url: Option<&str>, channel: &str) -> Option<PgListener> {
-    let listen_url = listen_url?;
-
-    match PgListener::connect(listen_url).await {
-        Ok(mut listener) => match listener.listen(channel).await {
-            Ok(()) => {
-                tracing::info!(channel = channel, "listening for outbox wakeups");
-                Some(listener)
-            }
-            Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    channel = channel,
-                    "failed to subscribe to outbox wakeup channel"
-                );
-                None
-            }
-        },
-        Err(error) => {
-            tracing::warn!(error = %error, "failed to connect postgres outbox listener");
-            None
-        }
-    }
-}
-
-async fn log_storage_budget(pool: &sqlx::PgPool, config: &AppConfig) -> Result<(), sqlx::Error> {
+async fn log_storage_budget(pool: &sqlx::MySqlPool, config: &AppConfig) -> Result<(), sqlx::Error> {
     let snapshot = inspect_storage_budget(pool, config.storage_budget_thresholds.clone()).await?;
 
     match snapshot.level {

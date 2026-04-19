@@ -1,5 +1,5 @@
-#[path = "../support/postgres.rs"]
-mod postgres;
+#[path = "../support/mysql.rs"]
+mod mysql;
 
 use chrono::{Duration, TimeZone, Utc};
 use serde_json::json;
@@ -27,7 +27,7 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
 
 #[tokio::test]
 async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
-    let database = postgres::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let service = DeliveryService::new(database.pool().clone());
     let session = service
@@ -38,6 +38,8 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
                 candidate_id: "alice".to_owned(),
                 candidate_name: "Alice Roe".to_owned(),
                 candidate_email: "alice@example.com".to_owned(),
+                email: Some("alice@example.com".to_owned()),
+                wcode: Some("W123456".to_owned()),
                 client_session_id: Uuid::new_v4(),
             },
         )
@@ -134,7 +136,7 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
     assert!(overlap.is_err());
 
     let stored_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = $1")
+        sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?")
             .bind(attempt.id)
             .fetch_one(database.pool())
             .await
@@ -144,7 +146,7 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
     database.shutdown().await;
 }
 
-async fn seed_schedule(pool: &sqlx::PgPool) -> ielts_backend_domain::schedule::ExamSchedule {
+async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
     let actor = ActorContext::new(Uuid::new_v4(), ActorRole::Admin);
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service

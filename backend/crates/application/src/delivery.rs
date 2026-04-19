@@ -14,9 +14,9 @@ use ielts_backend_infrastructure::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Map, Value};
-use sqlx::{PgConnection, PgPool};
+use sqlx::{MySqlConnection, MySqlPool};
 use thiserror::Error;
-use uuid::Uuid;
+use uuid::{fmt::Hyphenated, Uuid};
 
 use crate::scheduling::SchedulingService;
 
@@ -35,11 +35,11 @@ pub enum DeliveryError {
 }
 
 pub struct DeliveryService {
-    pool: PgPool,
+    pool: MySqlPool,
 }
 
 impl DeliveryService {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
 
@@ -51,16 +51,16 @@ impl DeliveryService {
         candidate_id: Option<String>,
     ) -> Result<StudentSessionContext, DeliveryError> {
         let schedule = self.load_schedule(schedule_id).await?;
-        let version = self.load_version(schedule.published_version_id).await?;
+        let version = self.load_version(schedule.published_version_id.clone()).await?;
         let runtime = self.load_runtime(schedule_id).await?;
         
         let attempt = if let Some(wcode) = wcode {
-            self.load_attempt_by_wcode(schedule_id, &wcode).await?
+            self.load_attempt_by_wcode(schedule_id.to_string(), &wcode).await?
         } else if let Some(student_key) = student_key {
-            self.load_attempt_by_student_key(schedule_id, &student_key).await?
+            self.load_attempt_by_student_key(schedule_id.to_string(), &student_key).await?
         } else if let Some(candidate_id) = candidate_id {
             let derived = derive_student_key(schedule_id, &candidate_id);
-            self.load_attempt_by_student_key(schedule_id, &derived).await?
+            self.load_attempt_by_student_key(schedule_id.to_string(), &derived).await?
         } else {
             None
         };
@@ -81,7 +81,7 @@ impl DeliveryService {
         req: StudentPrecheckRequest,
     ) -> Result<StudentAttempt, DeliveryError> {
         let schedule = self.load_schedule(schedule_id).await?;
-        let version = self.load_version(schedule.published_version_id).await?;
+        let version = self.load_version(schedule.published_version_id.clone()).await?;
         let runtime = self.load_runtime(schedule_id).await?;
         let attempt = self
             .get_or_create_attempt(
@@ -148,7 +148,7 @@ impl DeliveryService {
         req: StudentBootstrapRequest,
     ) -> Result<StudentSessionContext, DeliveryError> {
         let schedule = self.load_schedule(schedule_id).await?;
-        let version = self.load_version(schedule.published_version_id).await?;
+        let version = self.load_version(schedule.published_version_id.clone()).await?;
         let runtime = self.load_runtime(schedule_id).await?;
         let attempt = self
             .get_or_create_attempt(
@@ -240,10 +240,10 @@ impl DeliveryService {
 
         let mut tx = self.pool.begin().await?;
         let mut attempt = self
-            .load_attempt_by_id_for_update(tx.as_mut(), req.attempt_id)
+            .load_attempt_by_id_for_update(tx.as_mut(), req.attempt_id.clone())
             .await?
             .ok_or(DeliveryError::NotFound)?;
-        if attempt.schedule_id != schedule_id || attempt.student_key != req.student_key {
+        if attempt.schedule_id != schedule_id.to_string() || attempt.student_key != req.student_key {
             return Err(DeliveryError::Validation(
                 "Attempt does not belong to the provided schedule or student key.".to_owned(),
             ));
@@ -267,10 +267,10 @@ impl DeliveryService {
         }
 
         let existing_max_seq: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(mutation_seq), 0) FROM student_attempt_mutations WHERE attempt_id = $1 AND client_session_id = $2",
+            "SELECT COALESCE(MAX(mutation_seq), 0) FROM student_attempt_mutations WHERE attempt_id = ? AND client_session_id = ?",
         )
-        .bind(req.attempt_id)
-        .bind(req.client_session_id)
+        .bind(&req.attempt_id)
+        .bind(&req.client_session_id)
         .fetch_one(tx.as_mut())
         .await?;
 
@@ -313,7 +313,7 @@ impl DeliveryService {
                 "pendingMutationCount": 0,
                 "syncState": "saved",
                 "serverAcceptedThroughSeq": server_accepted_through_seq,
-                "clientSessionId": req.client_session_id.to_string()
+                "clientSessionId": req.client_session_id.clone()
             }),
         );
 
@@ -325,49 +325,50 @@ impl DeliveryService {
                     client_mutation_id, mutation_seq, payload, client_timestamp,
                     server_received_at, applied_revision, applied_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())
                 "#,
             )
-            .bind(Uuid::new_v4())
-            .bind(req.attempt_id)
-            .bind(schedule_id)
-            .bind(req.client_session_id)
+            .bind(Uuid::new_v4().to_string())
+            .bind(&req.attempt_id)
+            .bind(schedule_id.to_string())
+            .bind(&req.client_session_id)
             .bind(&mutation.mutation_type)
             .bind(&mutation.id)
             .bind(mutation.seq)
             .bind(&mutation.payload)
             .bind(mutation.timestamp)
-            .bind(now)
             .bind(attempt.revision + 1)
-            .bind(now)
             .execute(tx.as_mut())
             .await?;
         }
 
-        attempt = sqlx::query_as::<_, StudentAttempt>(
+        sqlx::query(
             r#"
             UPDATE student_attempts
             SET
-                answers = $2,
-                writing_answers = $3,
-                flags = $4,
-                current_question_id = $5,
-                recovery = $6,
-                updated_at = $7,
+                answers = ?,
+                writing_answers = ?,
+                flags = ?,
+                current_question_id = ?,
+                recovery = ?,
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1
-            RETURNING *
+            WHERE id = ?
             "#,
         )
-        .bind(req.attempt_id)
         .bind(answers)
         .bind(writing_answers)
         .bind(flags)
         .bind(current_question_id)
         .bind(recovery)
-        .bind(now)
-        .fetch_one(tx.as_mut())
+        .bind(&req.attempt_id)
+        .execute(tx.as_mut())
         .await?;
+
+        attempt = sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+            .bind(&req.attempt_id)
+            .fetch_one(tx.as_mut())
+            .await?;
 
         let response = StudentMutationBatchResponse {
             attempt,
@@ -400,12 +401,12 @@ impl DeliveryService {
         let attempt = if let Some(attempt_id) = req.attempt_id {
             self.load_attempt_by_id(attempt_id).await?
         } else {
-            self.load_attempt_by_student_key(schedule_id, &req.student_key)
+            self.load_attempt_by_student_key(schedule_id.to_string(), &req.student_key)
                 .await?
         }
         .ok_or(DeliveryError::NotFound)?;
 
-        if attempt.schedule_id != schedule_id {
+        if attempt.schedule_id != schedule_id.to_string() {
             return Err(DeliveryError::Validation(
                 "Attempt does not belong to the provided schedule.".to_owned(),
             ));
@@ -464,16 +465,15 @@ impl DeliveryService {
                 INSERT INTO student_heartbeat_events (
                     id, attempt_id, schedule_id, event_type, payload, client_timestamp, server_received_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                VALUES (?, ?, ?, ?, ?, ?, NOW())
                 "#,
             )
-            .bind(Uuid::new_v4())
-            .bind(updated.id)
-            .bind(schedule_id)
+            .bind(Uuid::new_v4().to_string())
+            .bind(&updated.id)
+            .bind(schedule_id.to_string())
             .bind(&req.event_type)
             .bind(&req.payload)
             .bind(req.client_timestamp)
-            .bind(now)
             .execute(&self.pool)
             .await?;
         }
@@ -509,10 +509,10 @@ impl DeliveryService {
 
         let mut tx = self.pool.begin().await?;
         let attempt = self
-            .load_attempt_by_id_for_update(tx.as_mut(), req.attempt_id)
+            .load_attempt_by_id_for_update(tx.as_mut(), req.attempt_id.clone())
             .await?
             .ok_or(DeliveryError::NotFound)?;
-        if attempt.schedule_id != schedule_id || attempt.student_key != req.student_key {
+        if attempt.schedule_id != schedule_id.to_string() || attempt.student_key != req.student_key {
             return Err(DeliveryError::Validation(
                 "Attempt does not belong to the provided schedule or student key.".to_owned(),
             ));
@@ -564,28 +564,30 @@ impl DeliveryService {
             }),
         );
 
-        let attempt = sqlx::query_as::<_, StudentAttempt>(
+        sqlx::query(
             r#"
             UPDATE student_attempts
             SET
-                phase = $2,
-                recovery = $3,
-                final_submission = $4,
-                submitted_at = $5,
-                updated_at = $6,
+                phase = ?,
+                recovery = ?,
+                final_submission = ?,
+                submitted_at = NOW(),
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1
-            RETURNING *
+            WHERE id = ?
             "#,
         )
-        .bind(req.attempt_id)
         .bind("post-exam")
         .bind(recovery)
         .bind(&final_submission)
-        .bind(now)
-        .bind(now)
-        .fetch_one(tx.as_mut())
+        .bind(&req.attempt_id)
+        .execute(tx.as_mut())
         .await?;
+
+        let attempt = sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+            .bind(&req.attempt_id)
+            .fetch_one(tx.as_mut())
+            .await?;
 
         let response = StudentSubmitResponse {
             attempt,
@@ -623,20 +625,21 @@ impl DeliveryService {
         candidate_email: &str,
     ) -> Result<StudentAttempt, DeliveryError> {
         if let Some(attempt) = self
-            .load_attempt_by_student_key(schedule.id, student_key)
+            .load_attempt_by_student_key(schedule.id.clone(), student_key)
             .await?
         {
             return Ok(attempt);
         }
 
         let registration = self
-            .load_registration_by_student_key(schedule.id, student_key)
+            .load_registration_by_student_key(schedule.id.clone(), student_key)
             .await?;
         let phase = determine_phase(runtime, false, false);
         let current_module = first_enabled_module(&version.config_snapshot);
         let now = Utc::now();
 
-        sqlx::query_as::<_, StudentAttempt>(
+        let attempt_id = Uuid::new_v4();
+        sqlx::query(
             r#"
             INSERT INTO student_attempts (
                 id, schedule_id, registration_id, wcode, student_key, organization_id, exam_id, published_version_id,
@@ -644,23 +647,17 @@ impl DeliveryService {
                 answers, writing_answers, flags, violations_snapshot, integrity, recovery,
                 created_at, updated_at, revision
             )
-            VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8,
-                $9, $10, $11, $12, $13, $14,
-                $15, $16, $17, $18, $19, $20,
-                $21, $22, 0
-            )
-            RETURNING *
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), 0)
             "#,
         )
-        .bind(Uuid::new_v4())
-        .bind(schedule.id)
-        .bind(registration.as_ref().map(|value| value.registration_id))
+        .bind(attempt_id.to_string())
+        .bind(&schedule.id)
+        .bind(registration.as_ref().map(|value| value.registration_id.clone()))
         .bind(wcode.unwrap_or(""))
         .bind(student_key)
         .bind(&schedule.organization_id)
-        .bind(schedule.exam_id)
-        .bind(schedule.published_version_id)
+        .bind(&schedule.exam_id)
+        .bind(&schedule.published_version_id)
         .bind(&schedule.exam_title)
         .bind(candidate_id)
         .bind(candidate_name)
@@ -687,17 +684,20 @@ impl DeliveryService {
             "syncState": "idle",
             "serverAcceptedThroughSeq": 0
         }))
-        .bind(now)
-        .bind(now)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(DeliveryError::from)
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+            .bind(attempt_id.to_string())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(DeliveryError::from)
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn update_attempt(
         &self,
-        attempt_id: Uuid,
+        attempt_id: String,
         phase: String,
         current_module: String,
         current_question_id: Option<String>,
@@ -710,28 +710,26 @@ impl DeliveryService {
         final_submission: Option<Value>,
         submitted_at: Option<DateTime<Utc>>,
     ) -> Result<StudentAttempt, DeliveryError> {
-        sqlx::query_as::<_, StudentAttempt>(
+        sqlx::query(
             r#"
             UPDATE student_attempts
             SET
-                phase = $2,
-                current_module = $3,
-                current_question_id = $4,
-                answers = $5,
-                writing_answers = $6,
-                flags = $7,
-                violations_snapshot = $8,
-                integrity = $9,
-                recovery = $10,
-                final_submission = $11,
-                submitted_at = $12,
-                updated_at = $13,
+                phase = ?,
+                current_module = ?,
+                current_question_id = ?,
+                answers = ?,
+                writing_answers = ?,
+                flags = ?,
+                violations_snapshot = ?,
+                integrity = ?,
+                recovery = ?,
+                final_submission = ?,
+                submitted_at = ?,
+                updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = $1
-            RETURNING *
+            WHERE id = ?
             "#,
         )
-        .bind(attempt_id)
         .bind(phase)
         .bind(current_module)
         .bind(current_question_id)
@@ -743,23 +741,32 @@ impl DeliveryService {
         .bind(recovery)
         .bind(final_submission)
         .bind(submitted_at)
-        .bind(Utc::now())
-        .fetch_one(&self.pool)
-        .await
-        .map_err(DeliveryError::from)
+        .bind(attempt_id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+            .bind(attempt_id.to_string())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(DeliveryError::from)
     }
 
     async fn load_schedule(&self, schedule_id: Uuid) -> Result<ExamSchedule, DeliveryError> {
-        sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = $1")
-            .bind(schedule_id)
+        sqlx::query_as::<_, ExamSchedule>(
+            "SELECT id, CAST(exam_id AS CHAR) as exam_id, CAST(exam_version_id AS CHAR) as exam_version_id, title, start_time, end_time, duration_minutes, CAST(created_by AS CHAR) as created_by, CAST(organization_id AS CHAR) as organization_id, created_at, updated_at, status FROM exam_schedules WHERE id = ?"
+        )
+            .bind(schedule_id.to_string())
             .fetch_optional(&self.pool)
             .await?
             .ok_or(DeliveryError::NotFound)
     }
 
-    async fn load_version(&self, version_id: Uuid) -> Result<ExamVersion, DeliveryError> {
-        sqlx::query_as::<_, ExamVersion>("SELECT * FROM exam_versions WHERE id = $1")
-            .bind(version_id)
+    async fn load_version(&self, version_id: String) -> Result<ExamVersion, DeliveryError> {
+        sqlx::query_as::<_, ExamVersion>(
+            "SELECT id, CAST(exam_id AS CHAR) as exam_id, version_number, CAST(parent_version_id AS CHAR) as parent_version_id, content_snapshot, config_snapshot, validation_snapshot, CAST(created_by AS CHAR) as created_by, created_at, publish_notes, is_draft, is_published, revision FROM exam_versions WHERE id = ?"
+        )
+            .bind(&version_id)
             .fetch_optional(&self.pool)
             .await?
             .ok_or(DeliveryError::NotFound)
@@ -769,7 +776,7 @@ impl DeliveryService {
         &self,
         schedule_id: Uuid,
     ) -> Result<Option<ExamSessionRuntime>, DeliveryError> {
-        let actor = ActorContext::new(Uuid::nil(), ActorRole::Admin);
+        let actor = ActorContext::new(Uuid::nil().to_string(), ActorRole::Admin);
         SchedulingService::new(self.pool.clone())
             .get_runtime(&actor, schedule_id)
             .await
@@ -790,13 +797,13 @@ impl DeliveryService {
 
     async fn load_attempt_by_student_key(
         &self,
-        schedule_id: Uuid,
+        schedule_id: String,
         student_key: &str,
     ) -> Result<Option<StudentAttempt>, DeliveryError> {
         sqlx::query_as::<_, StudentAttempt>(
-            "SELECT * FROM student_attempts WHERE schedule_id = $1 AND student_key = $2",
+            "SELECT * FROM student_attempts WHERE schedule_id = ? AND student_key = ?",
         )
-        .bind(schedule_id)
+        .bind(&schedule_id)
         .bind(student_key)
         .fetch_optional(&self.pool)
         .await
@@ -805,13 +812,13 @@ impl DeliveryService {
 
     async fn load_attempt_by_wcode(
         &self,
-        schedule_id: Uuid,
+        schedule_id: String,
         wcode: &str,
     ) -> Result<Option<StudentAttempt>, DeliveryError> {
         sqlx::query_as::<_, StudentAttempt>(
-            "SELECT * FROM student_attempts WHERE schedule_id = $1 AND wcode = $2",
+            "SELECT * FROM student_attempts WHERE schedule_id = ? AND wcode = ?",
         )
-        .bind(schedule_id)
+        .bind(&schedule_id)
         .bind(wcode)
         .fetch_optional(&self.pool)
         .await
@@ -820,19 +827,19 @@ impl DeliveryService {
 
     async fn load_registration_by_student_key(
         &self,
-        schedule_id: Uuid,
+        schedule_id: String,
         student_key: &str,
     ) -> Result<Option<AttemptRegistrationRow>, DeliveryError> {
         sqlx::query_as::<_, AttemptRegistrationRow>(
             r#"
             SELECT id AS registration_id, user_id
             FROM schedule_registrations
-            WHERE schedule_id = $1
-              AND student_key = $2
+            WHERE schedule_id = ?
+              AND student_key = ?
             LIMIT 1
             "#,
         )
-        .bind(schedule_id)
+        .bind(&schedule_id)
         .bind(student_key)
         .fetch_optional(&self.pool)
         .await
@@ -841,10 +848,10 @@ impl DeliveryService {
 
     async fn load_attempt_by_id(
         &self,
-        attempt_id: Uuid,
+        attempt_id: String,
     ) -> Result<Option<StudentAttempt>, DeliveryError> {
-        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = $1")
-            .bind(attempt_id)
+        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
             .fetch_optional(&self.pool)
             .await
             .map_err(DeliveryError::from)
@@ -852,13 +859,13 @@ impl DeliveryService {
 
     async fn load_attempt_by_id_for_update(
         &self,
-        connection: &mut PgConnection,
-        attempt_id: Uuid,
+        connection: &mut MySqlConnection,
+        attempt_id: String,
     ) -> Result<Option<StudentAttempt>, DeliveryError> {
         sqlx::query_as::<_, StudentAttempt>(
-            "SELECT * FROM student_attempts WHERE id = $1 FOR UPDATE",
+            "SELECT * FROM student_attempts WHERE id = ? FOR UPDATE",
         )
-        .bind(attempt_id)
+        .bind(&attempt_id)
         .fetch_optional(connection)
         .await
         .map_err(DeliveryError::from)
@@ -915,7 +922,7 @@ impl DeliveryService {
 
     async fn store_idempotent_response<T>(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut MySqlConnection,
         repository: &IdempotencyRepository,
         actor_id: &str,
         route_key: &str,
@@ -949,7 +956,7 @@ impl DeliveryService {
 
     async fn lookup_idempotent_response_on_connection<T>(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut MySqlConnection,
         actor_id: &str,
         route_key: &str,
         idempotency_key: Option<&str>,
@@ -997,8 +1004,8 @@ fn submit_route_key(schedule_id: Uuid) -> String {
 
 #[derive(sqlx::FromRow)]
 struct AttemptRegistrationRow {
-    registration_id: Uuid,
-    user_id: Option<Uuid>,
+    registration_id: Hyphenated,
+    user_id: Option<Hyphenated>,
 }
 
 fn deserialize_idempotent_response<T>(record: &IdempotencyRecord) -> Result<T, DeliveryError>

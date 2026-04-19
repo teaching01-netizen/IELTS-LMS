@@ -56,7 +56,7 @@ pub async fn get_exam(
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
-    let exam = service.get_exam(&ctx, id).await?;
+    let exam = service.get_exam(&ctx, id.to_string()).await?;
     Ok(ApiResponse::success_with_request_id(exam, request_id.0))
 }
 
@@ -71,7 +71,7 @@ pub async fn update_exam(
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
-    let exam = service.update_exam(&ctx, id, req).await?;
+    let exam = service.update_exam(&ctx, id.to_string(), req).await?;
     Ok(ApiResponse::success_with_request_id(exam, request_id.0))
 }
 
@@ -86,7 +86,7 @@ pub async fn save_draft(
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
-    let version = service.save_draft(&ctx, exam_id, req).await?;
+    let version = service.save_draft(&ctx, exam_id.to_string(), req).await?;
     Ok(ApiResponse::success_with_request_id(version, request_id.0))
 }
 
@@ -102,7 +102,7 @@ pub async fn publish_exam(
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let started = Instant::now();
-    let version = service.publish_exam(&ctx, exam_id, req).await?;
+    let version = service.publish_exam(&ctx, exam_id.to_string(), req).await?;
     state
         .telemetry
         .observe_db_operation("builder.publish_exam", started.elapsed());
@@ -118,7 +118,7 @@ pub async fn get_version(
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
-    let version = service.get_version(&ctx, version_id).await?;
+    let version = service.get_version(&ctx, version_id.to_string()).await?;
     Ok(ApiResponse::success_with_request_id(version, request_id.0))
 }
 
@@ -131,7 +131,7 @@ pub async fn list_versions(
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
-    let versions = service.list_versions(&ctx, exam_id).await?;
+    let versions = service.list_versions(&ctx, exam_id.to_string()).await?;
     Ok(ApiResponse::success_with_request_id(versions, request_id.0))
 }
 
@@ -144,7 +144,7 @@ pub async fn list_events(
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
-    let events = service.list_events(&ctx, exam_id).await?;
+    let events = service.list_events(&ctx, exam_id.to_string()).await?;
     Ok(ApiResponse::success_with_request_id(events, request_id.0))
 }
 
@@ -157,7 +157,7 @@ pub async fn delete_exam(
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
-    service.delete_exam(&ctx, id).await?;
+    service.delete_exam(&ctx, id.to_string()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -171,15 +171,15 @@ pub async fn get_validation(
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let started = Instant::now();
-    let summary = service.validate_exam(&ctx, exam_id).await?;
+    let validation = service.validate_exam(&ctx, exam_id.to_string()).await?;
     let duration = started.elapsed();
     state
         .telemetry
         .observe_db_operation("builder.validate_exam", duration);
     state
         .telemetry
-        .observe_publish_validation(if summary.can_publish { "ok" } else { "blocked" }, duration);
-    Ok(ApiResponse::success_with_request_id(summary, request_id.0))
+        .observe_publish_validation(if validation.can_publish { "ok" } else { "blocked" }, duration);
+    Ok(ApiResponse::success_with_request_id(validation, request_id.0))
 }
 
 impl From<BuilderError> for ApiError {

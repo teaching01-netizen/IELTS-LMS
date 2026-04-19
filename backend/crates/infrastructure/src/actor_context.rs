@@ -33,15 +33,15 @@ impl fmt::Display for ActorRole {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorContext {
-    pub actor_id: Uuid,
+    pub actor_id: String,
     pub role: ActorRole,
-    pub organization_id: Option<Uuid>,
-    pub schedule_scope_id: Option<Uuid>,
+    pub organization_id: Option<String>,
+    pub schedule_scope_id: Option<String>,
     pub student_scope_key: Option<String>,
 }
 
 impl ActorContext {
-    pub fn new(actor_id: Uuid, role: ActorRole) -> Self {
+    pub fn new(actor_id: String, role: ActorRole) -> Self {
         Self {
             actor_id,
             role,
@@ -51,12 +51,12 @@ impl ActorContext {
         }
     }
 
-    pub fn with_organization_id(mut self, organization_id: Uuid) -> Self {
+    pub fn with_organization_id(mut self, organization_id: String) -> Self {
         self.organization_id = Some(organization_id);
         self
     }
 
-    pub fn with_schedule_scope_id(mut self, schedule_scope_id: Uuid) -> Self {
+    pub fn with_schedule_scope_id(mut self, schedule_scope_id: String) -> Self {
         self.schedule_scope_id = Some(schedule_scope_id);
         self
     }

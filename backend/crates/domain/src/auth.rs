@@ -30,7 +30,7 @@ pub enum UserState {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct User {
-    pub id: Uuid,
+    pub id: String,
     pub email: String,
     pub display_name: Option<String>,
     pub role: UserRole,
@@ -46,7 +46,7 @@ pub struct User {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct UserPasswordCredential {
-    pub user_id: Uuid,
+    pub user_id: String,
     pub password_hash: String,
     pub updated_at: DateTime<Utc>,
 }
@@ -55,8 +55,8 @@ pub struct UserPasswordCredential {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct UserSession {
-    pub id: Uuid,
-    pub user_id: Uuid,
+    pub id: String,
+    pub user_id: String,
     pub session_token_hash: String,
     pub csrf_token: String,
     pub role_snapshot: UserRole,
@@ -74,9 +74,9 @@ pub struct UserSession {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct UserSessionEvent {
-    pub id: Uuid,
-    pub session_id: Uuid,
-    pub user_id: Uuid,
+    pub id: String,
+    pub session_id: String,
+    pub user_id: String,
     pub event_type: String,
     pub metadata: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
@@ -86,8 +86,8 @@ pub struct UserSessionEvent {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct PasswordResetToken {
-    pub id: Uuid,
-    pub user_id: Uuid,
+    pub id: String,
+    pub user_id: String,
     pub token_hash: String,
     pub expires_at: DateTime<Utc>,
     pub used_at: Option<DateTime<Utc>>,
@@ -98,8 +98,8 @@ pub struct PasswordResetToken {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct AccountActivationToken {
-    pub id: Uuid,
-    pub user_id: Uuid,
+    pub id: String,
+    pub user_id: String,
     pub token_hash: String,
     pub expires_at: DateTime<Utc>,
     pub used_at: Option<DateTime<Utc>>,
@@ -110,7 +110,7 @@ pub struct AccountActivationToken {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct StudentProfile {
-    pub user_id: Uuid,
+    pub user_id: String,
     pub student_id: String,
     pub full_name: String,
     pub email: Option<String>,
@@ -123,7 +123,7 @@ pub struct StudentProfile {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct StaffProfile {
-    pub user_id: Uuid,
+    pub user_id: String,
     pub staff_code: Option<String>,
     pub full_name: String,
     pub email: Option<String>,
@@ -135,11 +135,11 @@ pub struct StaffProfile {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct AttemptSession {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub schedule_id: Uuid,
-    pub attempt_id: Uuid,
-    pub client_session_id: Uuid,
+    pub id: String,
+    pub user_id: String,
+    pub schedule_id: String,
+    pub attempt_id: String,
+    pub client_session_id: String,
     pub token_id: String,
     pub device_fingerprint_hash: Option<String>,
     pub issued_at: DateTime<Utc>,
@@ -152,7 +152,7 @@ pub struct AttemptSession {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionUser {
-    pub id: Uuid,
+    pub id: String,
     pub email: String,
     pub display_name: Option<String>,
     pub role: UserRole,
@@ -214,7 +214,7 @@ pub struct IssueAttemptToken {
 impl From<&User> for SessionUser {
     fn from(value: &User) -> Self {
         Self {
-            id: value.id,
+            id: value.id.clone(),
             email: value.email.clone(),
             display_name: value.display_name.clone(),
             role: value.role.clone(),

@@ -112,7 +112,7 @@ describe('ExamLifecycleService backend mode', () => {
     expect(result.version?.id).toBe('ver-1');
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/v1/exams/',
+      '/api/v1/exams',
       expect.objectContaining({ method: 'POST' }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(

@@ -134,7 +134,7 @@ impl Telemetry {
         );
         registry.register(
             "backend_storage_budget_bytes",
-            "Current PostgreSQL database size in bytes.",
+            "Current database size in bytes.",
             storage_budget_bytes.clone(),
         );
         registry.register(

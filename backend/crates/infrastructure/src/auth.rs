@@ -19,10 +19,10 @@ type HmacSha256 = Hmac<Sha256>;
 #[serde(rename_all = "camelCase")]
 pub struct AttemptTokenClaims {
     pub token_id: String,
-    pub user_id: Uuid,
-    pub schedule_id: Uuid,
-    pub attempt_id: Uuid,
-    pub client_session_id: Uuid,
+    pub user_id: String,
+    pub schedule_id: String,
+    pub attempt_id: String,
+    pub client_session_id: String,
     pub exp: DateTime<Utc>,
 }
 

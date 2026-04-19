@@ -105,7 +105,7 @@ pub async fn bootstrap_student_session(
     principal.require_one_of(&[UserRole::Student])?;
 
     // Apply per-user rate limiting for bootstrap
-    let key = RateLimitKey::User(principal.user.id);
+    let key = RateLimitKey::User(principal.user.id.clone());
     let config = RateLimitConfig::new(
         state.config.rate_limit_student_bootstrap_per_user,
         state.config.rate_limit_student_bootstrap_per_user_window_secs,
@@ -129,6 +129,8 @@ pub async fn bootstrap_student_session(
     } else {
         None
     };
+
+    let client_session_id = req.client_session_id.clone();
     
     let mut session = service
         .bootstrap(
@@ -155,9 +157,10 @@ pub async fn bootstrap_student_session(
                     user: principal.user.clone(),
                     session: principal.session.clone(),
                 },
-                schedule_id,
-                attempt.id,
-                req.client_session_id,
+                schedule_id.to_string(),
+                attempt.id.clone(),
+                client_session_id,
+                None,
                 None,
             )
             .await
@@ -177,8 +180,12 @@ pub async fn apply_mutation_batch(
     Path((schedule_id, _batch)): Path<(Uuid, String)>,
     Json(mut req): Json<StudentMutationBatchRequest>,
 ) -> Result<ApiResponse<StudentMutationBatchResponse>, ApiError> {
+    let attempt_id = principal.authorization.claims.attempt_id.clone();
+    let claims_schedule_id = principal.authorization.claims.schedule_id.clone();
+    let claims_client_session_id = principal.authorization.claims.client_session_id.clone();
+
     // Apply per-attempt rate limiting for mutations
-    let key = RateLimitKey::Attempt(principal.authorization.claims.attempt_id);
+    let key = RateLimitKey::Attempt(attempt_id.clone());
     let config = RateLimitConfig::new(
         state.config.rate_limit_mutation_per_attempt,
         state.config.rate_limit_mutation_per_attempt_window_secs,
@@ -194,16 +201,16 @@ pub async fn apply_mutation_batch(
         }
     }
 
-    if principal.authorization.claims.schedule_id != schedule_id {
+    if claims_schedule_id != schedule_id.to_string() {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "FORBIDDEN",
             "Attempt credential does not match the schedule.",
         ));
     }
-    req.attempt_id = principal.authorization.claims.attempt_id;
-    req.client_session_id = principal.authorization.claims.client_session_id;
-    req.student_key = load_attempt_student_key(&state, principal.authorization.claims.attempt_id)
+    req.attempt_id = attempt_id.clone();
+    req.client_session_id = claims_client_session_id;
+    req.student_key = load_attempt_student_key(&state, &attempt_id)
         .await?;
     let service = DeliveryService::new(state.db_pool());
     let started = Instant::now();
@@ -232,8 +239,12 @@ pub async fn record_heartbeat(
     Path(schedule_id): Path<Uuid>,
     Json(mut req): Json<StudentHeartbeatRequest>,
 ) -> Result<ApiResponse<StudentHeartbeatResponse>, ApiError> {
+    let attempt_id = principal.authorization.claims.attempt_id.clone();
+    let claims_schedule_id = principal.authorization.claims.schedule_id.clone();
+    let claims_client_session_id = principal.authorization.claims.client_session_id.clone();
+
     // Apply per-attempt rate limiting for heartbeats (generous limit)
-    let key = RateLimitKey::Attempt(principal.authorization.claims.attempt_id);
+    let key = RateLimitKey::Attempt(attempt_id.clone());
     let config = RateLimitConfig::new(
         state.config.rate_limit_heartbeat_per_attempt,
         state.config.rate_limit_heartbeat_per_attempt_window_secs,
@@ -249,16 +260,16 @@ pub async fn record_heartbeat(
         }
     }
 
-    if principal.authorization.claims.schedule_id != schedule_id {
+    if claims_schedule_id != schedule_id.to_string() {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "FORBIDDEN",
             "Attempt credential does not match the schedule.",
         ));
     }
-    req.attempt_id = Some(principal.authorization.claims.attempt_id);
-    req.client_session_id = principal.authorization.claims.client_session_id;
-    req.student_key = load_attempt_student_key(&state, principal.authorization.claims.attempt_id)
+    req.attempt_id = Some(attempt_id.clone());
+    req.client_session_id = claims_client_session_id;
+    req.student_key = load_attempt_student_key(&state, &attempt_id)
         .await?;
     let service = DeliveryService::new(state.db_pool());
     let started = Instant::now();
@@ -287,8 +298,11 @@ pub async fn submit_student_session(
     Path(schedule_id): Path<Uuid>,
     Json(mut req): Json<StudentSubmitRequest>,
 ) -> Result<ApiResponse<StudentSubmitResponse>, ApiError> {
+    let attempt_id = principal.authorization.claims.attempt_id.clone();
+    let claims_schedule_id = principal.authorization.claims.schedule_id.clone();
+
     // Apply strict per-attempt rate limiting for submit (idempotency enforcement)
-    let key = RateLimitKey::Attempt(principal.authorization.claims.attempt_id);
+    let key = RateLimitKey::Attempt(attempt_id.clone());
     let config = RateLimitConfig::new(
         state.config.rate_limit_submit_per_attempt,
         state.config.rate_limit_submit_per_attempt_window_secs,
@@ -304,15 +318,15 @@ pub async fn submit_student_session(
         }
     }
 
-    if principal.authorization.claims.schedule_id != schedule_id {
+    if claims_schedule_id != schedule_id.to_string() {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "FORBIDDEN",
             "Attempt credential does not match the schedule.",
         ));
     }
-    req.attempt_id = principal.authorization.claims.attempt_id;
-    req.student_key = load_attempt_student_key(&state, principal.authorization.claims.attempt_id)
+    req.attempt_id = attempt_id.clone();
+    req.student_key = load_attempt_student_key(&state, &attempt_id)
         .await?;
     let service = DeliveryService::new(state.db_pool());
     let started = Instant::now();
@@ -410,7 +424,7 @@ fn access_key(access: &StudentAccess) -> String {
         .unwrap_or_else(|| format!("student-{}-{}", access.registration_id, access.student_id))
 }
 
-async fn load_attempt_student_key(state: &AppState, attempt_id: Uuid) -> Result<String, ApiError> {
+async fn load_attempt_student_key(state: &AppState, attempt_id: &str) -> Result<String, ApiError> {
     query_scalar("SELECT student_key FROM student_attempts WHERE id = $1")
         .bind(attempt_id)
         .fetch_optional(&state.db_pool())

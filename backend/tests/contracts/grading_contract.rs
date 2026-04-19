@@ -1,5 +1,5 @@
-#[path = "../support/postgres.rs"]
-mod postgres;
+#[path = "../support/mysql.rs"]
+mod mysql;
 
 use axum::{
     body::{to_bytes, Body},
@@ -26,7 +26,7 @@ use ielts_backend_infrastructure::{
     config::AppConfig,
 };
 
-use postgres::{assign_staff_to_schedule, create_authenticated_user};
+use mysql::{assign_staff_to_schedule, create_authenticated_user};
 
 const GRADING_MIGRATIONS: &[&str] = &[
     "0001_roles.sql",
@@ -43,7 +43,7 @@ const GRADING_MIGRATIONS: &[&str] = &[
 
 #[tokio::test]
 async fn grading_review_and_result_release_flow_round_trips() {
-    let database = postgres::TestDatabase::new(GRADING_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(GRADING_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let attempt_id = bootstrap_and_submit(database.pool(), schedule.id, "alice").await;
     let auth = create_authenticated_user(
@@ -358,7 +358,7 @@ async fn grading_review_and_result_release_flow_round_trips() {
 
 #[tokio::test]
 async fn media_upload_intent_and_completion_round_trip() {
-    let database = postgres::TestDatabase::new(GRADING_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(GRADING_MIGRATIONS).await;
     let auth = create_authenticated_user(
         database.pool(),
         UserRole::Grader,
@@ -440,7 +440,7 @@ async fn media_upload_intent_and_completion_round_trip() {
     database.shutdown().await;
 }
 
-async fn bootstrap_and_submit(pool: &sqlx::PgPool, schedule_id: Uuid, candidate_id: &str) -> Uuid {
+async fn bootstrap_and_submit(pool: &sqlx::MySqlPool, schedule_id: Uuid, candidate_id: &str) -> Uuid {
     let service = DeliveryService::new(pool.clone());
     let context = service
         .bootstrap(
@@ -450,6 +450,8 @@ async fn bootstrap_and_submit(pool: &sqlx::PgPool, schedule_id: Uuid, candidate_
                 candidate_id: candidate_id.to_owned(),
                 candidate_name: format!("Candidate {candidate_id}"),
                 candidate_email: format!("{candidate_id}@example.com"),
+                email: Some(format!("{candidate_id}@example.com")),
+                wcode: Some("W123456".to_owned()),
                 client_session_id: Uuid::new_v4(),
             },
         )
@@ -471,7 +473,7 @@ async fn bootstrap_and_submit(pool: &sqlx::PgPool, schedule_id: Uuid, candidate_
     attempt_id
 }
 
-async fn seed_schedule(pool: &sqlx::PgPool) -> ielts_backend_domain::schedule::ExamSchedule {
+async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
     let actor = contract_actor();
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service

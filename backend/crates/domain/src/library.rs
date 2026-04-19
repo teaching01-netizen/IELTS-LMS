@@ -9,13 +9,13 @@ use sqlx::FromRow;
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct PassageLibraryItem {
-    pub id: Uuid,
+    pub id: String,
     pub organization_id: Option<String>,
     pub title: String,
     pub passage_snapshot: serde_json::Value,
     pub difficulty: Difficulty,
     pub topic: String,
-    pub tags: Vec<String>,
+    pub tags: serde_json::Value,
     pub word_count: i32,
     pub estimated_time_minutes: i32,
     pub usage_count: i32,
@@ -29,13 +29,13 @@ pub struct PassageLibraryItem {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct QuestionBankItem {
-    pub id: Uuid,
+    pub id: String,
     pub organization_id: Option<String>,
     pub question_type: String,
     pub block_snapshot: serde_json::Value,
     pub difficulty: Difficulty,
     pub topic: String,
-    pub tags: Vec<String>,
+    pub tags: serde_json::Value,
     pub usage_count: i32,
     pub created_by: String,
     pub created_at: DateTime<Utc>,
@@ -56,7 +56,7 @@ pub enum Difficulty {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct AdminDefaultProfile {
-    pub id: Uuid,
+    pub id: String,
     pub organization_id: Option<String>,
     pub profile_name: String,
     pub config_snapshot: serde_json::Value,
@@ -74,7 +74,7 @@ pub struct CreatePassageRequest {
     pub passage_snapshot: serde_json::Value,
     pub difficulty: Difficulty,
     pub topic: String,
-    pub tags: Vec<String>,
+    pub tags: serde_json::Value,
     pub word_count: i32,
     pub estimated_time_minutes: i32,
 }
@@ -86,7 +86,7 @@ pub struct UpdatePassageRequest {
     pub passage_snapshot: Option<serde_json::Value>,
     pub difficulty: Option<Difficulty>,
     pub topic: Option<String>,
-    pub tags: Option<Vec<String>>,
+    pub tags: Option<serde_json::Value>,
     pub word_count: Option<i32>,
     pub estimated_time_minutes: Option<i32>,
     pub revision: i32,
@@ -99,7 +99,7 @@ pub struct CreateQuestionRequest {
     pub block_snapshot: serde_json::Value,
     pub difficulty: Difficulty,
     pub topic: String,
-    pub tags: Vec<String>,
+    pub tags: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,7 +109,7 @@ pub struct UpdateQuestionRequest {
     pub block_snapshot: Option<serde_json::Value>,
     pub difficulty: Option<Difficulty>,
     pub topic: Option<String>,
-    pub tags: Option<Vec<String>>,
+    pub tags: Option<serde_json::Value>,
     pub revision: i32,
 }
 

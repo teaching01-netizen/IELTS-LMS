@@ -1,12 +1,12 @@
-use sqlx::PgPool;
+use sqlx::MySqlPool;
 
 #[derive(Clone, Debug)]
 pub struct DatabasePool {
-    inner: Option<PgPool>,
+    inner: Option<MySqlPool>,
 }
 
 impl DatabasePool {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { inner: Some(pool) }
     }
 
@@ -14,7 +14,7 @@ impl DatabasePool {
         Self { inner: None }
     }
 
-    pub fn inner(&self) -> Option<&PgPool> {
+    pub fn inner(&self) -> Option<&MySqlPool> {
         self.inner.as_ref()
     }
 

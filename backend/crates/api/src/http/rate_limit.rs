@@ -73,13 +73,13 @@ where
 }
 
 /// Create a rate limit key from user ID.
-pub fn user_rate_limit_key(user_id: uuid::Uuid) -> RateLimitKey {
-    RateLimitKey::User(user_id)
+pub fn user_rate_limit_key(user_id: impl Into<String>) -> RateLimitKey {
+    RateLimitKey::User(user_id.into())
 }
 
 /// Create a rate limit key from attempt ID.
-pub fn attempt_rate_limit_key(attempt_id: uuid::Uuid) -> RateLimitKey {
-    RateLimitKey::Attempt(attempt_id)
+pub fn attempt_rate_limit_key(attempt_id: impl Into<String>) -> RateLimitKey {
+    RateLimitKey::Attempt(attempt_id.into())
 }
 
 /// Create a rate limit key from IP address.

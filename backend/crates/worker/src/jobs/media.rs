@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use sqlx::PgPool;
+use sqlx::MySqlPool;
 
 const CLEANUP_BATCH_LIMIT: i64 = 1000;
 
@@ -18,19 +18,19 @@ impl MediaRunReport {
 }
 
 #[tracing::instrument(skip(pool))]
-pub async fn run_once(pool: PgPool) -> Result<MediaRunReport, sqlx::Error> {
+pub async fn run_once(pool: MySqlPool) -> Result<MediaRunReport, sqlx::Error> {
     let started = Instant::now();
     let orphaned_rows = sqlx::query(
         r#"
         UPDATE media_assets
-        SET upload_status = 'orphaned', updated_at = now()
+        SET upload_status = 'orphaned', updated_at = NOW()
         WHERE id IN (
             SELECT id
             FROM media_assets
             WHERE upload_status = 'pending'
-              AND created_at < now() - interval '24 hours'
+              AND created_at < NOW() - INTERVAL 24 HOUR
             ORDER BY created_at ASC
-            LIMIT $1
+            LIMIT ?
         )
         "#,
     )
@@ -44,9 +44,9 @@ pub async fn run_once(pool: PgPool) -> Result<MediaRunReport, sqlx::Error> {
             SELECT id
             FROM media_assets
             WHERE delete_after_at IS NOT NULL
-              AND delete_after_at < now()
+              AND delete_after_at < NOW()
             ORDER BY delete_after_at ASC
-            LIMIT $1
+            LIMIT ?
         )
         "#,
     )

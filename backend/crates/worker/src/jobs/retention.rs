@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use ielts_backend_infrastructure::{idempotency::IdempotencyRepository, outbox::OutboxRepository};
-use sqlx::PgPool;
+use sqlx::MySqlPool;
 
 const CLEANUP_BATCH_LIMIT: i64 = 1000;
 
@@ -26,7 +26,7 @@ impl RetentionRunReport {
 }
 
 #[tracing::instrument(skip(pool))]
-pub async fn run_once(pool: PgPool) -> Result<RetentionRunReport, sqlx::Error> {
+pub async fn run_once(pool: MySqlPool) -> Result<RetentionRunReport, sqlx::Error> {
     let started = Instant::now();
     let idempotency = IdempotencyRepository::new(pool.clone());
     let outbox = OutboxRepository::new(pool.clone());
@@ -34,13 +34,13 @@ pub async fn run_once(pool: PgPool) -> Result<RetentionRunReport, sqlx::Error> {
     let cache_rows = sqlx::query(
         r#"
         DELETE FROM shared_cache_entries
-        WHERE ctid IN (
-            SELECT ctid
+        WHERE id IN (
+            SELECT id
             FROM shared_cache_entries
-            WHERE (invalidated_at IS NOT NULL AND invalidated_at < now() - interval '24 hours')
-               OR (expires_at IS NOT NULL AND expires_at < now() - interval '24 hours')
+            WHERE (invalidated_at IS NOT NULL AND invalidated_at < NOW() - INTERVAL 24 HOUR)
+               OR (expires_at IS NOT NULL AND expires_at < NOW() - INTERVAL 24 HOUR)
             ORDER BY COALESCE(invalidated_at, expires_at) ASC NULLS LAST
-            LIMIT $1
+            LIMIT ?
         )
         "#,
     )
@@ -52,15 +52,15 @@ pub async fn run_once(pool: PgPool) -> Result<RetentionRunReport, sqlx::Error> {
     let heartbeat_rows = sqlx::query(
         r#"
         DELETE FROM student_heartbeat_events
-        WHERE ctid IN (
-            SELECT heartbeat.ctid
+        WHERE id IN (
+            SELECT heartbeat.id
             FROM student_heartbeat_events AS heartbeat
             INNER JOIN exam_schedules AS schedule
                 ON schedule.id = heartbeat.schedule_id
-            WHERE heartbeat.server_received_at < now() - interval '7 days'
+            WHERE heartbeat.server_received_at < NOW() - INTERVAL 7 DAY
               AND schedule.status <> 'live'
             ORDER BY heartbeat.server_received_at ASC
-            LIMIT $1
+            LIMIT ?
         )
         "#,
     )
@@ -71,20 +71,20 @@ pub async fn run_once(pool: PgPool) -> Result<RetentionRunReport, sqlx::Error> {
     let mutation_rows = sqlx::query(
         r#"
         DELETE FROM student_attempt_mutations
-        WHERE ctid IN (
-            SELECT mutation.ctid
+        WHERE id IN (
+            SELECT mutation.id
             FROM student_attempt_mutations AS mutation
             INNER JOIN student_attempts AS attempt
                 ON attempt.id = mutation.attempt_id
             INNER JOIN exam_schedules AS schedule
                 ON schedule.id = mutation.schedule_id
-            WHERE COALESCE(mutation.applied_at, mutation.server_received_at) < now() - interval '30 days'
+            WHERE COALESCE(mutation.applied_at, mutation.server_received_at) < NOW() - INTERVAL 30 DAY
               AND (
                   attempt.submitted_at IS NOT NULL
                   OR schedule.status IN ('completed', 'cancelled')
               )
             ORDER BY COALESCE(mutation.applied_at, mutation.server_received_at) ASC
-            LIMIT $1
+            LIMIT ?
         )
         "#,
     )

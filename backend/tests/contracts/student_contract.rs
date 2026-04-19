@@ -1,5 +1,5 @@
-#[path = "../support/postgres.rs"]
-mod postgres;
+#[path = "../support/mysql.rs"]
+mod mysql;
 
 use axum::{
     body::{to_bytes, Body},
@@ -41,7 +41,7 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
 
 #[tokio::test]
 async fn get_student_session_returns_schedule_and_version_before_bootstrap() {
-    let database = postgres::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let (auth, _student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
     let app = build_router(AppState::with_pool(
@@ -78,7 +78,7 @@ async fn get_student_session_returns_schedule_and_version_before_bootstrap() {
 
 #[tokio::test]
 async fn precheck_persists_integrity_on_the_attempt() {
-    let database = postgres::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
     let app = build_router(AppState::with_pool(
@@ -98,6 +98,8 @@ async fn precheck_persists_integrity_on_the_attempt() {
                         candidate_id: "alice".to_owned(),
                         candidate_name: "Alice Roe".to_owned(),
                         candidate_email: "alice@example.com".to_owned(),
+                        email: Some("alice@example.com".to_owned()),
+                        wcode: Some("W123456".to_owned()),
                         client_session_id: Uuid::new_v4(),
                         pre_check: json!({
                             "completedAt": "2026-01-10T08:50:00Z",
@@ -135,7 +137,7 @@ async fn precheck_persists_integrity_on_the_attempt() {
 
 #[tokio::test]
 async fn bootstrap_creates_or_hydrates_the_attempt_context() {
-    let database = postgres::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
     let app = build_router(AppState::with_pool(
@@ -158,6 +160,8 @@ async fn bootstrap_creates_or_hydrates_the_attempt_context() {
                         candidate_id: "alice".to_owned(),
                         candidate_name: "Alice Roe".to_owned(),
                         candidate_email: "alice@example.com".to_owned(),
+                        email: Some("alice@example.com".to_owned()),
+                        wcode: Some("W123456".to_owned()),
                         client_session_id: Uuid::new_v4(),
                     })
                     .unwrap(),
@@ -183,7 +187,7 @@ async fn bootstrap_creates_or_hydrates_the_attempt_context() {
 
 #[tokio::test]
 async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
-    let database = postgres::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
     let app = build_router(AppState::with_pool(
@@ -249,7 +253,7 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
 
 #[tokio::test]
 async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch() {
-    let database = postgres::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
     let app = build_router(AppState::with_pool(
@@ -364,7 +368,7 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
 
 #[tokio::test]
 async fn heartbeat_records_disconnect_transitions() {
-    let database = postgres::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
     let app = build_router(AppState::with_pool(
@@ -413,7 +417,7 @@ async fn heartbeat_records_disconnect_transitions() {
     );
 
     let event_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM student_heartbeat_events WHERE attempt_id = $1")
+        sqlx::query_scalar("SELECT COUNT(*) FROM student_heartbeat_events WHERE attempt_id = ?")
             .bind(attempt_id)
             .fetch_one(database.pool())
             .await
@@ -425,7 +429,7 @@ async fn heartbeat_records_disconnect_transitions() {
 
 #[tokio::test]
 async fn submit_finalizes_the_attempt_idempotently() {
-    let database = postgres::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
     let app = build_router(AppState::with_pool(
@@ -495,7 +499,7 @@ async fn submit_finalizes_the_attempt_idempotently() {
 
 #[tokio::test]
 async fn submit_replays_cached_response_for_the_same_idempotency_key() {
-    let database = postgres::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let (auth, student_key) = create_student_auth(database.pool(), schedule.id, "alice").await;
     let app = build_router(AppState::with_pool(
@@ -543,11 +547,10 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
     sqlx::query(
         r#"
         UPDATE student_attempts
-        SET final_submission = $2
-        WHERE id = $1
+        SET final_submission = ?
+        WHERE id = ?
         "#,
     )
-    .bind(attempt_id)
     .bind(json!({
         "submissionId": "tampered-submission",
         "submittedAt": first_submitted_at,
@@ -555,6 +558,7 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
         "writingAnswers": {},
         "flags": {}
     }))
+    .bind(attempt_id)
     .execute(database.pool())
     .await
     .unwrap();
@@ -587,9 +591,9 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
         r#"
         SELECT COUNT(*)
         FROM idempotency_keys
-        WHERE actor_id = $1
-          AND route_key = $2
-          AND idempotency_key = $3
+        WHERE actor_id = ?
+          AND route_key = ?
+          AND idempotency_key = ?
         "#,
     )
     .bind(student_key)
@@ -608,7 +612,7 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
 
 async fn bootstrap_attempt(
     app: &axum::Router,
-    auth: &postgres::TestAuthContext,
+    auth: &mysql::TestAuthContext,
     schedule_id: Uuid,
     candidate_id: &str,
     student_key: &str,
@@ -629,6 +633,8 @@ async fn bootstrap_attempt(
                         candidate_id: candidate_id.to_owned(),
                         candidate_name: format!("{candidate_id} Candidate"),
                         candidate_email: format!("{candidate_id}@example.com"),
+                        email: Some(format!("{candidate_id}@example.com")),
+                        wcode: Some("W123456".to_owned()),
                         client_session_id,
                         pre_check: json!({
                             "completedAt": "2026-01-10T08:50:00Z",
@@ -659,6 +665,8 @@ async fn bootstrap_attempt(
                         candidate_id: candidate_id.to_owned(),
                         candidate_name: format!("{candidate_id} Candidate"),
                         candidate_email: format!("{candidate_id}@example.com"),
+                        email: Some(format!("{candidate_id}@example.com")),
+                        wcode: Some("W123456".to_owned()),
                         client_session_id,
                     })
                     .unwrap(),
@@ -672,18 +680,18 @@ async fn bootstrap_attempt(
 }
 
 async fn create_student_auth(
-    pool: &sqlx::PgPool,
+    pool: &sqlx::MySqlPool,
     schedule_id: Uuid,
     candidate_id: &str,
-) -> (postgres::TestAuthContext, String) {
-    let auth = postgres::create_authenticated_user(
+) -> (mysql::TestAuthContext, String) {
+    let auth = mysql::create_authenticated_user(
         pool,
         UserRole::Student,
         &format!("{candidate_id}@example.com"),
         &format!("{candidate_id} Candidate"),
     )
     .await;
-    let student_key = postgres::create_student_registration(
+    let student_key = mysql::create_student_registration(
         pool,
         schedule_id,
         auth.user_id,
@@ -702,7 +710,7 @@ fn with_attempt_token(
     builder.header("authorization", format!("Bearer {token}"))
 }
 
-async fn seed_schedule(pool: &sqlx::PgPool) -> ielts_backend_domain::schedule::ExamSchedule {
+async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
     let actor = contract_actor();
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service

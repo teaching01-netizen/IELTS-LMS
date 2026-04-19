@@ -10,11 +10,11 @@ use sqlx::FromRow;
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct ExamSchedule {
-    pub id: Uuid,
-    pub exam_id: Uuid,
+    pub id: String,
+    pub exam_id: String,
     pub organization_id: Option<String>,
     pub exam_title: String,
-    pub published_version_id: Uuid,
+    pub published_version_id: String,
     pub cohort_name: String,
     pub institution: Option<String>,
     pub start_time: DateTime<Utc>,
@@ -35,16 +35,14 @@ pub struct ExamSchedule {
     pub revision: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum DeliveryMode {
     ProctorStart,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum RecurrenceType {
     None,
     Daily,
@@ -52,9 +50,8 @@ pub enum RecurrenceType {
     Monthly,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum ScheduleStatus {
     Scheduled,
     Live,
@@ -62,9 +59,8 @@ pub enum ScheduleStatus {
     Cancelled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum RuntimeStatus {
     NotStarted,
     Live,
@@ -73,9 +69,8 @@ pub enum RuntimeStatus {
     Cancelled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum SectionRuntimeStatus {
     Locked,
     Live,
@@ -98,8 +93,8 @@ pub struct ScheduleSectionPlanEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSectionState {
-    pub id: Uuid,
-    pub runtime_id: Uuid,
+    pub id: String,
+    pub runtime_id: String,
     pub section_key: String,
     pub label: String,
     pub section_order: i32,
@@ -120,9 +115,9 @@ pub struct RuntimeSectionState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExamSessionRuntime {
-    pub id: Uuid,
-    pub schedule_id: Uuid,
-    pub exam_id: Uuid,
+    pub id: String,
+    pub schedule_id: String,
+    pub exam_id: String,
     pub status: RuntimeStatus,
     pub plan_snapshot: Vec<ScheduleSectionPlanEntry>,
     pub actual_start_at: Option<DateTime<Utc>>,
@@ -143,10 +138,10 @@ pub struct ExamSessionRuntime {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct CohortControlEvent {
-    pub id: Uuid,
-    pub schedule_id: Uuid,
-    pub runtime_id: Uuid,
-    pub exam_id: Uuid,
+    pub id: String,
+    pub schedule_id: String,
+    pub runtime_id: String,
+    pub exam_id: String,
     pub actor_id: String,
     pub action: RuntimeCommandEvent,
     pub section_key: Option<String>,
@@ -156,9 +151,8 @@ pub struct CohortControlEvent {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum RuntimeCommandEvent {
     StartRuntime,
     PauseRuntime,
@@ -169,11 +163,107 @@ pub enum RuntimeCommandEvent {
     AutoTimeout,
 }
 
+#[cfg(feature = "sqlx")]
+mod sqlx_text_enums {
+    use super::{
+        DeliveryMode, RecurrenceType, RuntimeCommandEvent, RuntimeStatus, ScheduleStatus,
+        SectionRuntimeStatus,
+    };
+
+    use sqlx::{
+        decode::Decode,
+        encode::Encode,
+        error::BoxDynError,
+        mysql::MySqlTypeInfo,
+        MySql, Type,
+    };
+
+    fn invalid_enum_value(name: &str, value: &str) -> BoxDynError {
+        format!("invalid {name} value: {value}").into()
+    }
+
+    macro_rules! impl_text_enum {
+        ($ty:ty, { $($variant:ident => $value:expr),+ $(,)? }) => {
+            impl Type<MySql> for $ty {
+                fn type_info() -> MySqlTypeInfo {
+                    <&str as Type<MySql>>::type_info()
+                }
+
+                fn compatible(ty: &MySqlTypeInfo) -> bool {
+                    <&str as Type<MySql>>::compatible(ty)
+                }
+            }
+
+            impl<'q> Encode<'q, MySql> for $ty {
+                fn encode_by_ref(&self, buf: &mut Vec<u8>) -> sqlx::encode::IsNull {
+                    let value = match self {
+                        $(Self::$variant => $value,)+
+                    };
+                    <&str as Encode<MySql>>::encode_by_ref(&value, buf)
+                }
+            }
+
+            impl<'r> Decode<'r, MySql> for $ty {
+                fn decode(value: sqlx::mysql::MySqlValueRef<'r>) -> Result<Self, BoxDynError> {
+                    let text = <&str as Decode<MySql>>::decode(value)?;
+                    match text {
+                        $($value => Ok(Self::$variant),)+
+                        other => Err(invalid_enum_value(stringify!($ty), other)),
+                    }
+                }
+            }
+        };
+    }
+
+    impl_text_enum!(DeliveryMode, {
+        ProctorStart => "proctor_start",
+    });
+
+    impl_text_enum!(RecurrenceType, {
+        None => "none",
+        Daily => "daily",
+        Weekly => "weekly",
+        Monthly => "monthly",
+    });
+
+    impl_text_enum!(ScheduleStatus, {
+        Scheduled => "scheduled",
+        Live => "live",
+        Completed => "completed",
+        Cancelled => "cancelled",
+    });
+
+    impl_text_enum!(RuntimeStatus, {
+        NotStarted => "not_started",
+        Live => "live",
+        Paused => "paused",
+        Completed => "completed",
+        Cancelled => "cancelled",
+    });
+
+    impl_text_enum!(SectionRuntimeStatus, {
+        Locked => "locked",
+        Live => "live",
+        Paused => "paused",
+        Completed => "completed",
+    });
+
+    impl_text_enum!(RuntimeCommandEvent, {
+        StartRuntime => "start_runtime",
+        PauseRuntime => "pause_runtime",
+        ResumeRuntime => "resume_runtime",
+        ExtendSection => "extend_section",
+        EndSectionNow => "end_section_now",
+        CompleteRuntime => "complete_runtime",
+        AutoTimeout => "auto_timeout",
+    });
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateScheduleRequest {
-    pub exam_id: Uuid,
-    pub published_version_id: Uuid,
+    pub exam_id: String,
+    pub published_version_id: String,
     pub cohort_name: String,
     pub institution: Option<String>,
     pub start_time: DateTime<Utc>,
@@ -224,8 +314,8 @@ pub enum PresenceAction {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct ProctorPresence {
-    pub id: Uuid,
-    pub schedule_id: Uuid,
+    pub id: String,
+    pub schedule_id: String,
     pub proctor_id: String,
     pub proctor_name: String,
     pub status: String,
@@ -238,11 +328,11 @@ pub struct ProctorPresence {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAuditLog {
-    pub id: Uuid,
-    pub schedule_id: Uuid,
+    pub id: String,
+    pub schedule_id: String,
     pub actor: String,
     pub action_type: String,
-    pub target_student_id: Option<Uuid>,
+    pub target_student_id: Option<String>,
     pub payload: Option<Value>,
     pub acknowledged_at: Option<DateTime<Utc>>,
     pub acknowledged_by: Option<String>,
@@ -253,8 +343,8 @@ pub struct SessionAuditLog {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionNote {
-    pub id: Uuid,
-    pub schedule_id: Uuid,
+    pub id: String,
+    pub schedule_id: String,
     pub author: String,
     pub category: String,
     pub content: String,
@@ -267,8 +357,8 @@ pub struct SessionNote {
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
 pub struct ViolationRule {
-    pub id: Uuid,
-    pub schedule_id: Uuid,
+    pub id: String,
+    pub schedule_id: String,
     pub trigger_type: String,
     pub threshold: i32,
     pub specific_violation_type: Option<String>,
@@ -282,11 +372,11 @@ pub struct ViolationRule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudentSessionSummary {
-    pub attempt_id: Uuid,
+    pub attempt_id: String,
     pub student_id: String,
     pub student_name: String,
     pub student_email: String,
-    pub schedule_id: Uuid,
+    pub schedule_id: String,
     pub status: String,
     pub current_section: String,
     pub time_remaining: i32,

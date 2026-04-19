@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use sqlx::PgPool;
+use sqlx::MySqlPool;
 
 #[derive(Clone, Debug)]
 pub struct OutboxBacklogSnapshot {
@@ -66,20 +66,20 @@ pub struct StorageBudgetSnapshot {
     pub largest_relations: Vec<RelationSize>,
 }
 
-pub async fn ping_database(pool: &PgPool) -> Result<Duration, sqlx::Error> {
+pub async fn ping_database(pool: &MySqlPool) -> Result<Duration, sqlx::Error> {
     let started = Instant::now();
-    sqlx::query_scalar::<_, i64>("SELECT 1::bigint")
+    sqlx::query_scalar::<_, i64>("SELECT 1")
         .fetch_one(pool)
         .await?;
     Ok(started.elapsed())
 }
 
-pub async fn inspect_outbox_backlog(pool: &PgPool) -> Result<OutboxBacklogSnapshot, sqlx::Error> {
+pub async fn inspect_outbox_backlog(pool: &MySqlPool) -> Result<OutboxBacklogSnapshot, sqlx::Error> {
     let row = sqlx::query_as::<_, OutboxBacklogRow>(
         r#"
         SELECT
-            COUNT(*)::bigint AS pending_count,
-            COALESCE(EXTRACT(EPOCH FROM now() - MIN(created_at))::bigint, 0) AS oldest_age_seconds
+            COUNT(*) AS pending_count,
+            COALESCE(TIMESTAMPDIFF(SECOND, MIN(created_at), NOW()), 0) AS oldest_age_seconds
         FROM outbox_events
         WHERE published_at IS NULL
         "#,
@@ -94,21 +94,32 @@ pub async fn inspect_outbox_backlog(pool: &PgPool) -> Result<OutboxBacklogSnapsh
 }
 
 pub async fn inspect_storage_budget(
-    pool: &PgPool,
+    pool: &MySqlPool,
     thresholds: StorageBudgetThresholds,
 ) -> Result<StorageBudgetSnapshot, sqlx::Error> {
-    let total_bytes = sqlx::query_scalar::<_, i64>("SELECT pg_database_size(current_database())")
-        .fetch_one(pool)
-        .await?
-        .max(0) as u64;
+    // Note: pg_database_size is PostgreSQL-specific
+    // MySQL equivalent: SELECT SUM(data_length + index_length) FROM information_schema.tables WHERE table_schema = DATABASE()
+    let total_bytes = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COALESCE(SUM(data_length + index_length), 0)
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+        "#,
+    )
+    .fetch_one(pool)
+    .await?
+    .max(0) as u64;
 
+    // Note: pg_statio_user_tables is PostgreSQL-specific
+    // MySQL equivalent: SELECT table_name, data_length + index_length FROM information_schema.tables
     let largest_relations = sqlx::query_as::<_, RelationSizeRow>(
         r#"
         SELECT
-            relname AS relation_name,
-            pg_total_relation_size(relid)::bigint AS total_bytes
-        FROM pg_catalog.pg_statio_user_tables
-        ORDER BY pg_total_relation_size(relid) DESC
+            table_name AS relation_name,
+            (data_length + index_length) AS total_bytes
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+        ORDER BY (data_length + index_length) DESC
         LIMIT 5
         "#,
     )

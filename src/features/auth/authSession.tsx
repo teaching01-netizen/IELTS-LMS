@@ -8,6 +8,7 @@ import React, {
   type ReactNode,
 } from 'react';
 import { apiClient } from '../../app/api/apiClient';
+import { logError } from '../../app/error/errorLogger';
 import {
   authService,
   type AuthSession,
@@ -84,8 +85,15 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
 
   const refresh = useCallback(async () => {
-    const nextSession = await authService.getSession();
-    return setSessionState(nextSession, setSession, setStatus);
+    try {
+      const nextSession = await authService.getSession();
+      return setSessionState(nextSession, setSession, setStatus);
+    } catch (error) {
+      logError(error instanceof Error ? error : new Error('Failed to refresh session'), {
+        scope: 'authSession.refresh',
+      });
+      return setSessionState(null, setSession, setStatus);
+    }
   }, []);
 
   useEffect(() => {

@@ -253,6 +253,7 @@ fn with_auth_cookies(
     session_token: &str,
     csrf_token: &str,
 ) -> CookieJar {
+    let secure = state.config.auth_cookie_secure;
     let session_cookie = Cookie::build((
         state.config.auth_session_cookie_name.clone(),
         session_token.to_owned(),
@@ -260,7 +261,7 @@ fn with_auth_cookies(
     .http_only(true)
     .same_site(SameSite::Lax)
     .path("/")
-    .secure(true)
+    .secure(secure)
     .build();
     let csrf_cookie = Cookie::build((
         state.config.auth_csrf_cookie_name.clone(),
@@ -269,7 +270,7 @@ fn with_auth_cookies(
     .http_only(false)
     .same_site(SameSite::Lax)
     .path("/")
-    .secure(true)
+    .secure(secure)
     .build();
     jar.add(session_cookie).add(csrf_cookie)
 }

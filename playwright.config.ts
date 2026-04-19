@@ -1,6 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const backendApiUrl = process.env['VITE_BACKEND_API_URL'] ?? 'http://127.0.0.1:4000';
+const backendApiUrl = process.env['VITE_BACKEND_API_URL'] ?? 'http://localhost:4000';
+const backendCookieEnv = {
+  AUTH_COOKIE_SECURE: process.env['AUTH_COOKIE_SECURE'] ?? 'false',
+  AUTH_SESSION_COOKIE_NAME: process.env['AUTH_SESSION_COOKIE_NAME'] ?? 'session',
+  AUTH_CSRF_COOKIE_NAME: process.env['AUTH_CSRF_COOKIE_NAME'] ?? 'csrf',
+};
 const backendFeatureEnv = {
   VITE_BACKEND_API_URL: backendApiUrl,
   VITE_FEATURE_USE_BACKEND_BUILDER: 'true',
@@ -33,14 +38,26 @@ export default defineConfig({
       use: { ...devices['Desktop Safari'] },
     },
   ],
-  webServer: {
-    command: 'npm run dev',
-    env: {
-      ...process.env,
-      ...backendFeatureEnv,
+  webServer: [
+    {
+      command:
+        'cd backend && set -a && . ./.env && set +a && cargo build -p ielts-backend-api && exec ./target/debug/ielts-backend-api',
+      env: {
+        ...process.env,
+        ...backendCookieEnv,
+      },
+      url: 'http://localhost:4000/healthz',
+      reuseExistingServer: !process.env['CI'],
     },
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env['CI'],
-  },
+    {
+      command: 'npm run dev',
+      env: {
+        ...process.env,
+        ...backendFeatureEnv,
+      },
+      url: 'http://localhost:3000',
+      reuseExistingServer: !process.env['CI'],
+    },
+  ],
   workers: 1,
 });

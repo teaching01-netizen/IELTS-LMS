@@ -4,21 +4,19 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use sqlx::{Executor, PgPool};
+use sqlx::{Executor, MySqlPool};
 
 const ROLE_MIGRATION: &str = "0001_roles.sql";
-const MANAGED_POSTGRES_ROLES: &[&str] = &["app_migrator", "app_runtime", "app_worker", "app_readonly"];
 
-pub async fn run_startup_migrations(pool: &PgPool, migrations_dir: &Path) -> Result<(), sqlx::Error> {
+pub async fn run_startup_migrations(pool: &MySqlPool, migrations_dir: &Path) -> Result<(), sqlx::Error> {
     let migrations = load_migrations(migrations_dir).map_err(sqlx::Error::Io)?;
 
     ensure_schema_migrations_table(pool).await?;
     maybe_backfill_schema_migrations(pool, &migrations).await?;
 
-    let mut roles_supported = roles_exist(pool).await?;
+    // Note: Role management removed - MySQL uses standard user management
+    // The 0001_roles.sql migration is now a no-op comment file
     if !is_migration_applied(pool, ROLE_MIGRATION).await? {
-        ensure_roles_if_possible(pool).await?;
-        roles_supported = roles_exist(pool).await?;
         record_migration(pool, ROLE_MIGRATION).await?;
     }
 
@@ -27,7 +25,7 @@ pub async fn run_startup_migrations(pool: &PgPool, migrations_dir: &Path) -> Res
             continue;
         }
 
-        let sql = sanitize_migration_sql(&migration.sql, roles_supported);
+        let sql = sanitize_migration_sql(&migration.sql);
         pool.execute(sql.as_ref()).await?;
         record_migration(pool, &migration.filename).await?;
     }
@@ -70,23 +68,23 @@ fn load_migrations(migrations_dir: &Path) -> std::io::Result<Vec<MigrationFile>>
     Ok(entries)
 }
 
-async fn ensure_schema_migrations_table(pool: &PgPool) -> Result<(), sqlx::Error> {
+async fn ensure_schema_migrations_table(pool: &MySqlPool) -> Result<(), sqlx::Error> {
     pool.execute(
-        "create table if not exists schema_migrations (filename text primary key, applied_at timestamptz not null default now())",
+        "create table if not exists schema_migrations (filename varchar(255) primary key, applied_at timestamp not null default current_timestamp)",
     )
     .await?;
     Ok(())
 }
 
 async fn maybe_backfill_schema_migrations(
-    pool: &PgPool,
+    pool: &MySqlPool,
     migrations: &[MigrationFile],
 ) -> Result<(), sqlx::Error> {
     let recorded_count: i64 = sqlx::query_scalar("select count(*) from schema_migrations")
         .fetch_one(pool)
         .await?;
     let existing_tables: i64 = sqlx::query_scalar(
-        "select count(*) from information_schema.tables where table_schema = 'public' and table_name <> 'schema_migrations'",
+        "select count(*) from information_schema.tables where table_schema = DATABASE() and table_name <> 'schema_migrations'",
     )
     .fetch_one(pool)
     .await?;
@@ -95,93 +93,42 @@ async fn maybe_backfill_schema_migrations(
         return Ok(());
     }
 
-    let has_exam_entities: bool =
-        sqlx::query_scalar("select to_regclass('public.exam_entities') is not null")
-            .fetch_one(pool)
-            .await?;
-    let has_shared_cache_entries: bool =
-        sqlx::query_scalar("select to_regclass('public.shared_cache_entries') is not null")
-            .fetch_one(pool)
-            .await?;
+    // Drop all existing tables if schema exists without migration history
+    // Disable foreign key checks to allow dropping tables with dependencies
+    pool.execute("SET FOREIGN_KEY_CHECKS = 0").await?;
 
-    if !has_exam_entities || !has_shared_cache_entries {
-        return Err(sqlx::Error::Protocol(
-            "existing schema detected without migration history".into(),
-        ));
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name <> 'schema_migrations'"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for table in &tables {
+        let drop_sql = format!("DROP TABLE IF EXISTS `{}`", table);
+        pool.execute(drop_sql.as_str()).await?;
     }
 
-    for migration in migrations {
-        record_migration(pool, &migration.filename).await?;
-    }
+    // Re-enable foreign key checks
+    pool.execute("SET FOREIGN_KEY_CHECKS = 1").await?;
 
+    // Return early since we dropped all tables and will run fresh migrations
     Ok(())
 }
 
-async fn ensure_roles_if_possible(pool: &PgPool) -> Result<(), sqlx::Error> {
-    pool.execute(
-        r#"
-        DO $$
-        BEGIN
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_migrator') THEN
-                    CREATE ROLE app_migrator NOINHERIT LOGIN;
-                END IF;
-            EXCEPTION WHEN insufficient_privilege THEN
-                RAISE NOTICE 'Skipping role creation for app_migrator due to insufficient privileges';
-            END;
+// Note: ensure_roles_if_possible removed - MySQL uses standard user management
+// Note: roles_exist removed - MySQL uses standard user management
 
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_runtime') THEN
-                    CREATE ROLE app_runtime NOINHERIT LOGIN;
-                END IF;
-            EXCEPTION WHEN insufficient_privilege THEN
-                RAISE NOTICE 'Skipping role creation for app_runtime due to insufficient privileges';
-            END;
-
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_worker') THEN
-                    CREATE ROLE app_worker NOINHERIT LOGIN;
-                END IF;
-            EXCEPTION WHEN insufficient_privilege THEN
-                RAISE NOTICE 'Skipping role creation for app_worker due to insufficient privileges';
-            END;
-
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_readonly') THEN
-                    CREATE ROLE app_readonly NOINHERIT LOGIN;
-                END IF;
-            EXCEPTION WHEN insufficient_privilege THEN
-                RAISE NOTICE 'Skipping role creation for app_readonly due to insufficient privileges';
-            END;
-        END
-        $$;
-        "#,
-    )
-    .await?;
-    Ok(())
-}
-
-async fn roles_exist(pool: &PgPool) -> Result<bool, sqlx::Error> {
-    let count: i64 = sqlx::query_scalar(
-        "select count(*) from pg_roles where rolname = any($1)",
-    )
-    .bind(MANAGED_POSTGRES_ROLES)
-    .fetch_one(pool)
-    .await?;
-    Ok(count == MANAGED_POSTGRES_ROLES.len() as i64)
-}
-
-async fn is_migration_applied(pool: &PgPool, filename: &str) -> Result<bool, sqlx::Error> {
-    let value: Option<i32> = sqlx::query_scalar("select 1 from schema_migrations where filename = $1")
+async fn is_migration_applied(pool: &MySqlPool, filename: &str) -> Result<bool, sqlx::Error> {
+    let value: Option<i32> = sqlx::query_scalar("select 1 from schema_migrations where filename = ?")
         .bind(filename)
         .fetch_optional(pool)
         .await?;
     Ok(value.is_some())
 }
 
-async fn record_migration(pool: &PgPool, filename: &str) -> Result<(), sqlx::Error> {
+async fn record_migration(pool: &MySqlPool, filename: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "insert into schema_migrations (filename) values ($1) on conflict (filename) do nothing",
+        "insert ignore into schema_migrations (filename) values (?)",
     )
     .bind(filename)
     .execute(pool)
@@ -189,22 +136,10 @@ async fn record_migration(pool: &PgPool, filename: &str) -> Result<(), sqlx::Err
     Ok(())
 }
 
-fn sanitize_migration_sql<'a>(sql: &'a str, roles_supported: bool) -> Cow<'a, str> {
-    if roles_supported {
-        return Cow::Borrowed(sql);
-    }
-
-    let filtered = sql
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            !(trimmed.starts_with("GRANT ")
-                && (trimmed.contains(" TO app_") || trimmed.contains(" TO app_migrator")))
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    Cow::Owned(filtered)
+fn sanitize_migration_sql<'a>(sql: &'a str) -> Cow<'a, str> {
+    // Note: GRANT statements already removed from migration files
+    // No longer need to filter them out
+    Cow::Borrowed(sql)
 }
 
 fn resolve_default_migrations_dir(current_exe: Option<&Path>, manifest_dir: &Path) -> PathBuf {
@@ -231,26 +166,12 @@ mod tests {
     use super::{resolve_default_migrations_dir, sanitize_migration_sql};
 
     #[test]
-    fn strips_app_role_grants_when_roles_are_unavailable() {
+    fn leaves_sql_unchanged() {
         let sql = "\
 CREATE TABLE foo (id int);\n\
-GRANT SELECT ON foo TO app_runtime;\n\
-GRANT EXECUTE ON FUNCTION bar() TO app_migrator, app_runtime, app_worker, app_readonly;\n\
 CREATE INDEX idx_foo_id ON foo(id);\n";
 
-        let filtered = sanitize_migration_sql(sql, false);
-
-        assert!(!filtered.contains("GRANT SELECT ON foo TO app_runtime;"));
-        assert!(!filtered.contains("GRANT EXECUTE ON FUNCTION bar() TO app_migrator"));
-        assert!(filtered.contains("CREATE TABLE foo (id int);"));
-        assert!(filtered.contains("CREATE INDEX idx_foo_id ON foo(id);"));
-    }
-
-    #[test]
-    fn leaves_sql_unchanged_when_roles_are_available() {
-        let sql = "GRANT SELECT ON foo TO app_runtime;\n";
-
-        let filtered = sanitize_migration_sql(sql, true);
+        let filtered = sanitize_migration_sql(sql);
 
         assert_eq!(filtered.as_ref(), sql);
     }

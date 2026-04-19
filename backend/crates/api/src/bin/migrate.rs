@@ -1,7 +1,7 @@
 use std::{env, path::PathBuf, time::Duration};
 
 use ielts_backend_infrastructure::migrations::{default_migrations_dir, run_startup_migrations};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::mysql::MySqlPoolOptions;
 
 fn migration_database_url() -> Option<String> {
     env::var("DATABASE_MIGRATOR_URL")
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Ok(());
     };
 
-    let pool = PgPoolOptions::new()
+    let pool = MySqlPoolOptions::new()
         .max_connections(1)
         .acquire_timeout(Duration::from_secs(10))
         .connect(&database_url)

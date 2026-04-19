@@ -2,6 +2,7 @@
 
 pub mod actor_context;
 pub mod auth;
+pub mod authorization;
 pub mod cache;
 pub mod config;
 pub mod database_monitor;

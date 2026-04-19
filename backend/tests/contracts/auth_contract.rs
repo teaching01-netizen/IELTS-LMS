@@ -1,5 +1,5 @@
-#[path = "../support/postgres.rs"]
-mod postgres;
+#[path = "../support/mysql.rs"]
+mod mysql;
 
 use axum::{
     body::{to_bytes, Body},
@@ -26,7 +26,7 @@ const AUTH_MIGRATIONS: &[&str] = &[
 
 #[tokio::test]
 async fn login_returns_session_and_sets_secure_cookie() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
     let _user = create_test_user(database.pool(), "test@example.com", "password123").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
@@ -66,7 +66,7 @@ async fn login_returns_session_and_sets_secure_cookie() {
 
 #[tokio::test]
 async fn login_rejects_invalid_credentials() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
     let _user = create_test_user(database.pool(), "test@example.com", "password123").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
@@ -102,7 +102,7 @@ async fn login_rejects_invalid_credentials() {
 
 #[tokio::test]
 async fn login_accepts_configured_master_key_without_db_user() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
     let app = build_router(AppState::with_pool(
         AppConfig {
             master_key_enabled: true,
@@ -143,8 +143,8 @@ async fn login_accepts_configured_master_key_without_db_user() {
 
 #[tokio::test]
 async fn session_endpoint_returns_current_session() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
-    let auth = postgres::create_authenticated_user(
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         ielts_backend_domain::auth::UserRole::Builder,
         "builder@example.com",
@@ -177,7 +177,7 @@ async fn session_endpoint_returns_current_session() {
 
 #[tokio::test]
 async fn session_endpoint_rejects_invalid_session() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -204,8 +204,8 @@ async fn session_endpoint_rejects_invalid_session() {
 
 #[tokio::test]
 async fn logout_revokes_session() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
-    let auth = postgres::create_authenticated_user(
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         ielts_backend_domain::auth::UserRole::Builder,
         "builder@example.com",
@@ -249,8 +249,8 @@ async fn logout_revokes_session() {
 
 #[tokio::test]
 async fn csrf_protection_rejects_requests_without_csrf_token() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
-    let auth = postgres::create_authenticated_user(
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         ielts_backend_domain::auth::UserRole::Builder,
         "builder@example.com",
@@ -283,8 +283,8 @@ async fn csrf_protection_rejects_requests_without_csrf_token() {
 
 #[tokio::test]
 async fn csrf_protection_rejects_invalid_csrf_token() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
-    let auth = postgres::create_authenticated_user(
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         ielts_backend_domain::auth::UserRole::Builder,
         "builder@example.com",
@@ -318,8 +318,8 @@ async fn csrf_protection_rejects_invalid_csrf_token() {
 
 #[tokio::test]
 async fn role_enforcement_rejects_builder_accessing_proctor_routes() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
-    let auth = postgres::create_authenticated_user(
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         ielts_backend_domain::auth::UserRole::Builder,
         "builder@example.com",
@@ -348,8 +348,8 @@ async fn role_enforcement_rejects_builder_accessing_proctor_routes() {
 
 #[tokio::test]
 async fn role_enforcement_rejects_student_accessing_staff_routes() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
-    let auth = postgres::create_authenticated_user(
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let auth = mysql::create_authenticated_user(
         database.pool(),
         ielts_backend_domain::auth::UserRole::Student,
         "student@example.com",
@@ -378,7 +378,7 @@ async fn role_enforcement_rejects_student_accessing_staff_routes() {
 
 #[tokio::test]
 async fn password_reset_request_returns_success_even_for_unknown_email() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -412,7 +412,7 @@ async fn password_reset_request_returns_success_even_for_unknown_email() {
 
 #[tokio::test]
 async fn login_is_rate_limited_per_account_even_across_different_ips() {
-    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
     let _user = create_test_user(database.pool(), "test@example.com", "password123").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
@@ -469,7 +469,7 @@ async fn login_is_rate_limited_per_account_even_across_different_ips() {
     database.shutdown().await;
 }
 
-async fn create_test_user(pool: &sqlx::PgPool, email: &str, password: &str) -> postgres::TestAuthContext {
+async fn create_test_user(pool: &sqlx::MySqlPool, email: &str, password: &str) -> mysql::TestAuthContext {
     use ielts_backend_domain::auth::UserRole;
     
     let user_id = uuid::Uuid::new_v4();
@@ -483,7 +483,7 @@ async fn create_test_user(pool: &sqlx::PgPool, email: &str, password: &str) -> p
         INSERT INTO users (
             id, email, display_name, role, state, failed_login_count, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, 0, $6, $6)
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?)
         "#,
     )
     .bind(user_id)
@@ -492,12 +492,13 @@ async fn create_test_user(pool: &sqlx::PgPool, email: &str, password: &str) -> p
     .bind("builder")
     .bind("active")
     .bind(now)
+    .bind(now)
     .execute(pool)
     .await
     .expect("insert user");
 
     sqlx::query(
-        "INSERT INTO user_password_credentials (user_id, password_hash, updated_at) VALUES ($1, $2, $3)",
+        "INSERT INTO user_password_credentials (user_id, password_hash, updated_at) VALUES (?, ?, ?)",
     )
     .bind(user_id)
     .bind(password_hash)
@@ -509,12 +510,13 @@ async fn create_test_user(pool: &sqlx::PgPool, email: &str, password: &str) -> p
     sqlx::query(
         r#"
         INSERT INTO staff_profiles (user_id, full_name, email, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $4)
+        VALUES (?, ?, ?, ?, ?)
         "#,
     )
     .bind(user_id)
     .bind("Test User")
     .bind(email)
+    .bind(now)
     .bind(now)
     .execute(pool)
     .await
@@ -526,7 +528,7 @@ async fn create_test_user(pool: &sqlx::PgPool, email: &str, password: &str) -> p
             id, user_id, session_token_hash, csrf_token, role_snapshot, issued_at,
             last_seen_at, expires_at, idle_timeout_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(uuid::Uuid::new_v4())
@@ -535,13 +537,14 @@ async fn create_test_user(pool: &sqlx::PgPool, email: &str, password: &str) -> p
     .bind(&csrf_token)
     .bind("builder")
     .bind(now)
+    .bind(now)
     .bind(now + chrono::Duration::hours(12))
     .bind(now + chrono::Duration::minutes(30))
     .execute(pool)
     .await
     .expect("insert session");
 
-    postgres::TestAuthContext {
+    mysql::TestAuthContext {
         user_id,
         role: UserRole::Builder,
         email: email.to_owned(),

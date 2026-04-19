@@ -13,13 +13,13 @@ use ielts_backend_infrastructure::{
     config::AppConfig,
 };
 use serde_json::json;
-use sqlx::{FromRow, PgPool};
+use sqlx::{FromRow, MySql, MySqlPool};
 use thiserror::Error;
-use uuid::Uuid;
+use uuid::{fmt::Hyphenated, Uuid};
 
 #[derive(Debug, Clone)]
 pub struct AuthService {
-    pool: PgPool,
+    pool: MySqlPool,
     config: AppConfig,
 }
 
@@ -73,7 +73,7 @@ pub enum AuthError {
 }
 
 impl AuthService {
-    pub fn new(pool: PgPool, config: AppConfig) -> Self {
+    pub fn new(pool: MySqlPool, config: AppConfig) -> Self {
         Self { pool, config }
     }
 
@@ -89,7 +89,7 @@ impl AuthService {
             return self.login_with_master_key(&email, user_agent, ip_address).await;
         }
 
-        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
+        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = ?")
             .bind(&email)
             .fetch_optional(&self.pool)
             .await?
@@ -100,21 +100,21 @@ impl AuthService {
         }
 
         if user.state == UserState::Locked {
-            if user.locked_until.is_some_and(|value| value > Utc::now()) {
+            if user.locked_until.map(|value| value > Utc::now()).unwrap_or(false) {
                 return Err(AuthError::Forbidden);
             }
             sqlx::query(
-                "UPDATE users SET state = 'active', locked_until = NULL, failed_login_count = 0 WHERE id = $1",
+                "UPDATE users SET state = 'active', locked_until = NULL, failed_login_count = 0 WHERE id = ?",
             )
-            .bind(user.id)
+            .bind(&user.id)
             .execute(&self.pool)
             .await?;
         }
 
         let credential = sqlx::query_as::<_, ielts_backend_domain::auth::UserPasswordCredential>(
-            "SELECT * FROM user_password_credentials WHERE user_id = $1",
+            "SELECT * FROM user_password_credentials WHERE user_id = ?",
         )
-        .bind(user.id)
+        .bind(&user.id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or(AuthError::InvalidCredentials)?;
@@ -132,27 +132,27 @@ impl AuthService {
                 None
             };
             sqlx::query(
-                "UPDATE users SET failed_login_count = $2, state = $3, locked_until = $4, updated_at = now() WHERE id = $1",
+                "UPDATE users SET failed_login_count = ?, state = ?, locked_until = ?, updated_at = NOW() WHERE id = ?",
             )
-            .bind(user.id)
             .bind(next_count)
             .bind(next_state)
             .bind(locked_until)
+            .bind(&user.id)
             .execute(&self.pool)
             .await?;
             return Err(AuthError::InvalidCredentials);
         }
 
         sqlx::query(
-            "UPDATE users SET failed_login_count = 0, state = 'active', locked_until = NULL, last_login_at = now(), updated_at = now() WHERE id = $1",
+            "UPDATE users SET failed_login_count = 0, state = 'active', locked_until = NULL, last_login_at = NOW(), updated_at = NOW() WHERE id = ?",
         )
-        .bind(user.id)
+        .bind(&user.id)
         .execute(&self.pool)
         .await?;
 
-        self.revoke_active_sessions(user.id, "rotated_on_login")
+        self.revoke_active_sessions(user.id.clone(), "rotated_on_login")
             .await?;
-        self.create_session(user.id, &user.role, user_agent, ip_address)
+        self.create_session(user.id.clone(), &user.role, user_agent.map(|s| s.to_string()), ip_address.map(|s| s.to_string()))
             .await
     }
 
@@ -188,7 +188,7 @@ impl AuthService {
                 s.revocation_reason
             FROM user_sessions s
             JOIN users u ON u.id = s.user_id
-            WHERE s.session_token_hash = $1
+            WHERE s.session_token_hash = ?
             "#,
         )
         .bind(session_hash)
@@ -211,10 +211,10 @@ impl AuthService {
         let session = row.session();
         let new_idle_timeout = Utc::now() + session_idle(&user.role, &self.config);
         sqlx::query(
-            "UPDATE user_sessions SET last_seen_at = now(), idle_timeout_at = $2 WHERE id = $1",
+            "UPDATE user_sessions SET last_seen_at = NOW(), idle_timeout_at = ? WHERE id = ?",
         )
-        .bind(session.id)
         .bind(new_idle_timeout)
+        .bind(&session.id)
         .execute(&self.pool)
         .await?;
 
@@ -243,7 +243,7 @@ impl AuthService {
 
     pub async fn logout(&self, session_token: &str) -> Result<(), AuthError> {
         sqlx::query(
-            "UPDATE user_sessions SET revoked_at = now(), revocation_reason = 'logout' WHERE session_token_hash = $1 AND revoked_at IS NULL",
+            "UPDATE user_sessions SET revoked_at = NOW(), revocation_reason = 'logout' WHERE session_token_hash = ? AND revoked_at IS NULL",
         )
         .bind(sha256_hex(session_token))
         .execute(&self.pool)
@@ -251,13 +251,13 @@ impl AuthService {
         Ok(())
     }
 
-    pub async fn logout_all(&self, user_id: Uuid) -> Result<(), AuthError> {
+    pub async fn logout_all(&self, user_id: String) -> Result<(), AuthError> {
         self.revoke_active_sessions(user_id, "logout_all").await
     }
 
     pub async fn request_password_reset(&self, req: PasswordResetRequest) -> Result<(), AuthError> {
         let email = req.email.trim().to_ascii_lowercase();
-        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
+        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = ?")
             .bind(email)
             .fetch_optional(&self.pool)
             .await?;
@@ -269,10 +269,10 @@ impl AuthService {
         sqlx::query(
             r#"
             INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, created_at)
-            VALUES ($1, $2, $3, $4, now())
+            VALUES (?, ?, ?, ?, NOW())
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(Uuid::new_v4().to_string())
         .bind(user.id)
         .bind(sha256_hex(&token))
         .bind(Utc::now() + Duration::minutes(15))
@@ -293,7 +293,7 @@ impl AuthService {
             SELECT p.user_id, p.expires_at, p.used_at, u.role
             FROM password_reset_tokens p
             JOIN users u ON u.id = p.user_id
-            WHERE p.token_hash = $1
+            WHERE p.token_hash = ?
             "#,
         )
         .bind(token_hash)
@@ -308,21 +308,21 @@ impl AuthService {
         sqlx::query(
             r#"
             UPDATE user_password_credentials
-            SET password_hash = $2, updated_at = now()
-            WHERE user_id = $1
+            SET password_hash = ?, updated_at = NOW()
+            WHERE user_id = ?
             "#,
         )
-        .bind(row.user_id)
         .bind(password_hash)
+        .bind(row.user_id)
         .execute(&self.pool)
         .await?;
-        sqlx::query("UPDATE password_reset_tokens SET used_at = now() WHERE token_hash = $1")
+        sqlx::query("UPDATE password_reset_tokens SET used_at = NOW() WHERE token_hash = ?")
             .bind(sha256_hex(&req.token))
             .execute(&self.pool)
             .await?;
-        self.revoke_active_sessions(row.user_id, "password_reset")
+        self.revoke_active_sessions(row.user_id.to_string(), "password_reset")
             .await?;
-        self.create_session(row.user_id, &row.role, user_agent, ip_address)
+        self.create_session(row.user_id.to_string(), &row.role, user_agent.map(|s| s.to_string()), ip_address.map(|s| s.to_string()))
             .await
     }
 
@@ -338,7 +338,7 @@ impl AuthService {
             SELECT a.user_id, a.expires_at, a.used_at, u.role
             FROM account_activation_tokens a
             JOIN users u ON u.id = a.user_id
-            WHERE a.token_hash = $1
+            WHERE a.token_hash = ?
             "#,
         )
         .bind(token_hash)
@@ -353,8 +353,8 @@ impl AuthService {
         sqlx::query(
             r#"
             INSERT INTO user_password_credentials (user_id, password_hash, updated_at)
-            VALUES ($1, $2, now())
-            ON CONFLICT (user_id) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = EXCLUDED.updated_at
+            VALUES (?, ?, NOW())
+            ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), updated_at = VALUES(updated_at)
             "#,
         )
         .bind(row.user_id)
@@ -362,25 +362,25 @@ impl AuthService {
         .execute(&self.pool)
         .await?;
         sqlx::query(
-            "UPDATE users SET state = 'active', display_name = COALESCE($2, display_name), updated_at = now() WHERE id = $1",
+            "UPDATE users SET state = 'active', display_name = COALESCE(?, display_name), updated_at = NOW() WHERE id = ?",
         )
-        .bind(row.user_id)
         .bind(req.display_name)
+        .bind(row.user_id)
         .execute(&self.pool)
         .await?;
-        sqlx::query("UPDATE account_activation_tokens SET used_at = now() WHERE token_hash = $1")
+        sqlx::query("UPDATE account_activation_tokens SET used_at = NOW() WHERE token_hash = ?")
             .bind(sha256_hex(&req.token))
             .execute(&self.pool)
             .await?;
 
-        self.create_session(row.user_id, &row.role, user_agent, ip_address)
+        self.create_session(row.user_id.to_string(), &row.role, user_agent.map(|s| s.to_string()), ip_address.map(|s| s.to_string()))
             .await
     }
 
     pub async fn authorize_staff_schedule(
         &self,
         principal: &AuthenticatedSession,
-        schedule_id: Uuid,
+        schedule_id: String,
         required_role: UserRole,
     ) -> Result<StaffAccess, AuthError> {
         if principal.user.role == UserRole::Admin {
@@ -395,14 +395,14 @@ impl AuthService {
             r#"
             SELECT COUNT(*)
             FROM schedule_staff_assignments
-            WHERE schedule_id = $1
-              AND user_id = $2
-              AND role = $3
+            WHERE schedule_id = ?
+              AND user_id = ?
+              AND role = ?
               AND revoked_at IS NULL
             "#,
         )
-        .bind(schedule_id)
-        .bind(principal.user.id)
+        .bind(schedule_id.to_string())
+        .bind(&principal.user.id)
         .bind(required_role.sql_role())
         .fetch_one(&self.pool)
         .await?;
@@ -426,14 +426,14 @@ impl AuthService {
             r#"
             SELECT id, wcode, student_id, student_name, student_email, student_key, access_state
             FROM schedule_registrations
-            WHERE schedule_id = $1
-              AND user_id = $2::text
+            WHERE schedule_id = ?
+              AND user_id = ?
             ORDER BY updated_at DESC
             LIMIT 1
             "#,
         )
-        .bind(schedule_id)
-        .bind(principal.user.id)
+        .bind(schedule_id.to_string())
+        .bind(principal.user.id.to_string())
         .fetch_optional(&self.pool)
         .await?
         .ok_or(AuthError::Forbidden)?;
@@ -444,7 +444,7 @@ impl AuthService {
             return Err(AuthError::Forbidden);
         }
         Ok(StudentAccess {
-            registration_id: registration.id,
+            registration_id: registration.id.into_uuid(),
             wcode: registration.wcode,
             email: registration.student_email,
             student_id: registration.student_id,
@@ -457,8 +457,8 @@ impl AuthService {
         &self,
         user_id: Uuid,
     ) -> Result<Option<StudentProfile>, AuthError> {
-        sqlx::query_as::<_, StudentProfile>("SELECT * FROM student_profiles WHERE user_id = $1")
-            .bind(user_id)
+        sqlx::query_as::<_, StudentProfile>("SELECT * FROM student_profiles WHERE user_id = ?")
+            .bind(user_id.to_string())
             .fetch_optional(&self.pool)
             .await
             .map_err(AuthError::from)
@@ -467,51 +467,57 @@ impl AuthService {
     pub async fn issue_attempt_token(
         &self,
         principal: &AuthenticatedSession,
-        schedule_id: Uuid,
-        attempt_id: Uuid,
-        client_session_id: Uuid,
-        device_fingerprint_hash: Option<String>,
+        schedule_id: String,
+        attempt_id: String,
+        client_session_id: String,
+        user_agent: Option<&str>,
+        ip_address: Option<&str>,
     ) -> Result<IssueAttemptToken, AuthError> {
         let now = Utc::now();
         let expires_at = now + Duration::minutes(self.config.attempt_token_ttl_minutes);
-        let session = sqlx::query_as::<_, AttemptSession>(
+        let session_id = Uuid::new_v4().to_string();
+        let token_id = random_token(24);
+        sqlx::query(
             r#"
             INSERT INTO attempt_sessions (
                 id, user_id, schedule_id, attempt_id, client_session_id, token_id,
                 device_fingerprint_hash, issued_at, last_seen_at, expires_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9)
-            ON CONFLICT (attempt_id, client_session_id)
-            DO UPDATE SET
-                user_id = EXCLUDED.user_id,
-                token_id = EXCLUDED.token_id,
-                device_fingerprint_hash = COALESCE(EXCLUDED.device_fingerprint_hash, attempt_sessions.device_fingerprint_hash),
-                issued_at = EXCLUDED.issued_at,
-                last_seen_at = EXCLUDED.last_seen_at,
-                expires_at = EXCLUDED.expires_at,
+            VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
+            ON DUPLICATE KEY UPDATE
+                user_id = VALUES(user_id),
+                token_id = VALUES(token_id),
+                device_fingerprint_hash = COALESCE(VALUES(device_fingerprint_hash), attempt_sessions.device_fingerprint_hash),
+                issued_at = VALUES(issued_at),
+                last_seen_at = VALUES(last_seen_at),
+                expires_at = VALUES(expires_at),
                 revoked_at = NULL,
                 revocation_reason = NULL
-            RETURNING *
             "#,
         )
-        .bind(Uuid::new_v4())
-        .bind(principal.user.id)
-        .bind(schedule_id)
-        .bind(attempt_id)
-        .bind(client_session_id)
-        .bind(random_token(24))
-        .bind(device_fingerprint_hash)
-        .bind(now)
+        .bind(&session_id)
+        .bind(&session_id)
+        .bind(&principal.user.id)
+        .bind(&schedule_id)
+        .bind(&attempt_id)
+        .bind(&client_session_id)
+        .bind(&token_id)
+        .bind(None::<String>)
         .bind(expires_at)
-        .fetch_one(&self.pool)
+        .execute(&self.pool)
         .await?;
+
+        let session = sqlx::query_as::<_, AttemptSession>("SELECT * FROM attempt_sessions WHERE id = ?")
+            .bind(&session_id)
+            .fetch_one(&self.pool)
+            .await?;
 
         let claims = AttemptTokenClaims {
             token_id: session.token_id.clone(),
-            user_id: principal.user.id,
-            schedule_id,
-            attempt_id,
-            client_session_id,
+            user_id: principal.user.id.clone(),
+            schedule_id: schedule_id.clone(),
+            attempt_id: attempt_id.clone(),
+            client_session_id: client_session_id.clone(),
             exp: expires_at,
         };
         Ok(IssueAttemptToken {
@@ -532,7 +538,7 @@ impl AuthService {
             r#"
             SELECT *
             FROM attempt_sessions
-            WHERE token_id = $1
+            WHERE token_id = ?
               AND revoked_at IS NULL
             "#,
         )
@@ -549,10 +555,10 @@ impl AuthService {
             return Err(AuthError::Unauthorized);
         }
         sqlx::query(
-            "UPDATE attempt_sessions SET last_seen_at = now(), expires_at = $2 WHERE id = $1",
+            "UPDATE attempt_sessions SET last_seen_at = NOW(), expires_at = ? WHERE id = ?",
         )
-        .bind(session.id)
         .bind(Utc::now() + Duration::minutes(self.config.attempt_token_ttl_minutes))
+        .bind(&session.id)
         .execute(&self.pool)
         .await?;
         Ok(AttemptAuthorization { session, claims })
@@ -565,26 +571,26 @@ impl AuthService {
         if authorization.session.expires_at - Utc::now() > Duration::minutes(5) {
             return Ok(None);
         }
-        let principal = self
-            .current_user_by_id(authorization.session.user_id)
-            .await?
-            .ok_or(AuthError::Unauthorized)?;
         let session = AuthenticatedSession {
-            user: principal,
+            user: self
+                .current_user_by_id(authorization.session.user_id.clone())
+                .await?
+                .ok_or(AuthError::Unauthorized)?,
             session: sqlx::query_as::<_, UserSession>(
-                "SELECT * FROM user_sessions WHERE user_id = $1 AND revoked_at IS NULL ORDER BY last_seen_at DESC LIMIT 1",
+                "SELECT * FROM user_sessions WHERE user_id = ? AND revoked_at IS NULL ORDER BY last_seen_at DESC LIMIT 1",
             )
-            .bind(authorization.session.user_id)
+            .bind(&authorization.session.user_id)
             .fetch_optional(&self.pool)
             .await?
             .ok_or(AuthError::Unauthorized)?,
         };
         self.issue_attempt_token(
             &session,
-            authorization.session.schedule_id,
-            authorization.session.attempt_id,
-            authorization.session.client_session_id,
-            authorization.session.device_fingerprint_hash.clone(),
+            authorization.session.schedule_id.clone(),
+            authorization.session.attempt_id.clone(),
+            authorization.session.client_session_id.clone(),
+            None,
+            None,
         )
         .await
         .map(Some)
@@ -606,14 +612,15 @@ impl AuthService {
         ip_address: Option<&str>,
     ) -> Result<SessionIssue, AuthError> {
         let user_id = self.ensure_master_key_user(email).await?;
-        self.revoke_active_sessions(user_id, "rotated_on_login")
+        self.revoke_active_sessions(user_id.clone(), "rotated_on_login")
             .await?;
-        self.create_session(user_id, &UserRole::Admin, user_agent, ip_address)
+        self.create_session(user_id, &UserRole::Admin, user_agent.map(|s| s.to_string()), ip_address.map(|s| s.to_string()))
             .await
     }
 
-    async fn ensure_master_key_user(&self, email: &str) -> Result<Uuid, AuthError> {
-        let user_id = sqlx::query_scalar::<_, Uuid>(
+    async fn ensure_master_key_user(&self, email: &str) -> Result<String, AuthError> {
+        let user_id = Uuid::new_v4().to_string();
+        sqlx::query(
             r#"
             INSERT INTO users (
                 id,
@@ -627,90 +634,97 @@ impl AuthService {
                 created_at,
                 updated_at
             )
-            VALUES ($1, $2, $3, 'admin', 'active', 0, NULL, now(), now(), now())
-            ON CONFLICT (email) DO UPDATE
-            SET
-                display_name = COALESCE(users.display_name, EXCLUDED.display_name),
+            VALUES (?, ?, ?, 'admin', 'active', 0, NULL, NOW(), NOW(), NOW())
+            ON DUPLICATE KEY UPDATE
+                display_name = COALESCE(users.display_name, VALUES(display_name)),
                 role = 'admin',
                 state = 'active',
                 failed_login_count = 0,
                 locked_until = NULL,
-                last_login_at = now(),
-                updated_at = now()
-            RETURNING id
+                last_login_at = NOW(),
+                updated_at = NOW()
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(&user_id)
         .bind(email)
         .bind("Master Key Admin")
-        .fetch_one(&self.pool)
+        .execute(&self.pool)
         .await?;
+
+        let actual_user_id: String = sqlx::query_scalar("SELECT id FROM users WHERE email = ?")
+            .bind(email)
+            .fetch_one(&self.pool)
+            .await?;
 
         sqlx::query(
             r#"
             INSERT INTO staff_profiles (user_id, staff_code, full_name, email, created_at, updated_at)
-            VALUES ($1, NULL, $2, $3, now(), now())
-            ON CONFLICT (user_id) DO UPDATE
-            SET
-                full_name = EXCLUDED.full_name,
-                email = EXCLUDED.email,
-                updated_at = EXCLUDED.updated_at
+            VALUES (?, NULL, ?, ?, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE
+                full_name = VALUES(full_name),
+                email = VALUES(email),
+                updated_at = VALUES(updated_at)
             "#,
         )
-        .bind(user_id)
+        .bind(&actual_user_id)
         .bind("Master Key Admin")
         .bind(email)
         .execute(&self.pool)
         .await?;
 
-        Ok(user_id)
+        Ok(actual_user_id)
     }
 
     async fn create_session(
         &self,
-        user_id: Uuid,
+        user_id: String,
         role: &UserRole,
-        user_agent: Option<&str>,
-        ip_address: Option<&str>,
+        user_agent: Option<String>,
+        ip_address: Option<String>,
     ) -> Result<SessionIssue, AuthError> {
         let session_token = random_token(32);
         let csrf_token = random_token(24);
         let (expires_at, idle_timeout_at) = session_expiry(role, &self.config);
-        let session = sqlx::query_as::<_, UserSession>(
+        let session_id = Uuid::new_v4().to_string();
+        sqlx::query(
             r#"
             INSERT INTO user_sessions (
                 id, user_id, session_token_hash, csrf_token, role_snapshot, issued_at,
                 last_seen_at, expires_at, idle_timeout_at, user_agent_hash, ip_metadata
             )
-            VALUES ($1, $2, $3, $4, $5, now(), now(), $6, $7, $8, $9)
-            RETURNING *
+            VALUES (?, ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?, ?)
             "#,
         )
-        .bind(Uuid::new_v4())
-        .bind(user_id)
+        .bind(&session_id)
+        .bind(&user_id)
         .bind(sha256_hex(&session_token))
         .bind(&csrf_token)
         .bind(role.sql_role())
         .bind(expires_at)
         .bind(idle_timeout_at)
-        .bind(normalize_user_agent(user_agent))
-        .bind(ip_address.map(|value| json!({ "ip": value })))
-        .fetch_one(&self.pool)
+        .bind(normalize_user_agent(user_agent.as_deref()))
+        .bind(ip_address.as_ref().map(|value| json!({ "ip": value })))
+        .execute(&self.pool)
         .await?;
+
+        let session = sqlx::query_as::<_, UserSession>("SELECT * FROM user_sessions WHERE id = ?")
+            .bind(&session_id)
+            .fetch_one(&self.pool)
+            .await?;
         let user = self
-            .current_user_by_id(user_id)
+            .current_user_by_id(user_id.clone())
             .await?
             .ok_or(AuthError::Unauthorized)?;
         sqlx::query(
             r#"
             INSERT INTO user_session_events (id, session_id, user_id, event_type, metadata, created_at)
-            VALUES ($1, $2, $3, 'login', $4, now())
+            VALUES (?, ?, ?, 'login', ?, NOW())
             "#,
         )
-        .bind(Uuid::new_v4())
-        .bind(session.id)
-        .bind(user_id)
-        .bind(ip_address.map(|value| json!({ "ip": value })))
+        .bind(Uuid::new_v4().to_string())
+        .bind(&session.id)
+        .bind(&user_id)
+        .bind(ip_address.as_ref().map(|value| json!({ "ip": value })))
         .execute(&self.pool)
         .await?;
 
@@ -724,23 +738,23 @@ impl AuthService {
         })
     }
 
-    async fn revoke_active_sessions(&self, user_id: Uuid, reason: &str) -> Result<(), AuthError> {
+    async fn revoke_active_sessions(&self, user_id: String, reason: &str) -> Result<(), AuthError> {
         sqlx::query(
-            "UPDATE user_sessions SET revoked_at = now(), revocation_reason = $2 WHERE user_id = $1 AND revoked_at IS NULL",
+            "UPDATE user_sessions SET revoked_at = NOW(), revocation_reason = ? WHERE user_id = ? AND revoked_at IS NULL",
         )
-        .bind(user_id)
         .bind(reason)
+        .bind(&user_id)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
-    async fn current_user_by_id(&self, user_id: Uuid) -> Result<Option<User>, AuthError> {
-        sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
-            .bind(user_id)
+    async fn current_user_by_id(&self, user_id: String) -> Result<Option<User>, AuthError> {
+        sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+            .bind(&user_id)
             .fetch_optional(&self.pool)
             .await
-            .map_err(AuthError::from)
+            .map_err(AuthError::Database)
     }
 }
 
@@ -753,7 +767,7 @@ fn session_idle(role: &UserRole, config: &AppConfig) -> Duration {
 
 #[derive(FromRow)]
 struct JoinedSessionRow {
-    user_id: Uuid,
+    user_id: Hyphenated,
     email: String,
     display_name: Option<String>,
     role: UserRole,
@@ -763,7 +777,7 @@ struct JoinedSessionRow {
     last_login_at: Option<chrono::DateTime<Utc>>,
     user_created_at: chrono::DateTime<Utc>,
     user_updated_at: chrono::DateTime<Utc>,
-    session_id: Uuid,
+    session_id: Hyphenated,
     session_token_hash: String,
     csrf_token: String,
     role_snapshot: UserRole,
@@ -780,7 +794,7 @@ struct JoinedSessionRow {
 impl JoinedSessionRow {
     fn user(&self) -> User {
         User {
-            id: self.user_id,
+            id: self.user_id.to_string(),
             email: self.email.clone(),
             display_name: self.display_name.clone(),
             role: self.role.clone(),
@@ -795,8 +809,8 @@ impl JoinedSessionRow {
 
     fn session(&self) -> UserSession {
         UserSession {
-            id: self.session_id,
-            user_id: self.user_id,
+            id: self.session_id.to_string(),
+            user_id: self.user_id.to_string(),
             session_token_hash: self.session_token_hash.clone(),
             csrf_token: self.csrf_token.clone(),
             role_snapshot: self.role_snapshot.clone(),
@@ -814,7 +828,7 @@ impl JoinedSessionRow {
 
 #[derive(FromRow)]
 struct ResetTokenRow {
-    user_id: Uuid,
+    user_id: Hyphenated,
     expires_at: chrono::DateTime<Utc>,
     used_at: Option<chrono::DateTime<Utc>>,
     role: UserRole,
@@ -822,7 +836,7 @@ struct ResetTokenRow {
 
 #[derive(FromRow)]
 struct RegistrationRow {
-    id: Uuid,
+    id: Hyphenated,
     wcode: String,
     student_id: String,
     student_name: String,

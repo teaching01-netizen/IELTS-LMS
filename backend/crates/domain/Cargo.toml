@@ -13,7 +13,7 @@ sqlx = ["dep:sqlx"]
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "serde"] }
 serde = { version = "1.0.216", features = ["derive"] }
 serde_json = "1.0.133"
-sqlx = { version = "0.7.4", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono"], optional = true }
+sqlx = { version = "0.7.4", features = ["mysql", "runtime-tokio-rustls", "uuid", "chrono"], optional = true }
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
 base64 = "0.22.1"
 regex = "1.11.1"
