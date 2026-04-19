@@ -21,7 +21,9 @@ export function RequireAuth({ allowedRoles, children }: RequireAuthProps) {
     return <LoadingSurface label="Loading Session..." />;
   }
 
-  if (!session) {
+  // Allow student routes without web auth - students authenticate via wcode, not session
+  const isStudentRoute = location.pathname.startsWith('/student/') && location.pathname.split('/').length >= 4;
+  if (!session && !isStudentRoute) {
     return (
       <Navigate
         to={`/login?next=${encodeURIComponent(buildNextPath(location))}`}
@@ -30,7 +32,8 @@ export function RequireAuth({ allowedRoles, children }: RequireAuthProps) {
     );
   }
 
-  if (allowedRoles && !allowedRoles.includes(session.user.role)) {
+  // If user has a session, validate their role
+  if (session && allowedRoles && !allowedRoles.includes(session.user.role)) {
     return <Navigate to={resolveRoleLandingPath(session.user.role)} replace />;
   }
 

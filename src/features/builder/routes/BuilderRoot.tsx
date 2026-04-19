@@ -460,7 +460,7 @@ export function BuilderRoot() {
         id: 'undo',
         title: 'Undo',
         subtitle:
-          history.undoStackLabels[history.undoStackLabels.length - 1] ?? 'No previous action',
+          (history.undoStackLabels[history.undoStackLabels.length - 1] ?? 'No previous action'),
         category: 'Actions',
         keywords: ['undo', 'history'],
         perform: handleUndo,
@@ -468,7 +468,7 @@ export function BuilderRoot() {
       {
         id: 'redo',
         title: 'Redo',
-        subtitle: history.redoStackLabels[0] ?? 'No next action',
+        subtitle: (history.redoStackLabels[0] ?? 'No next action'),
         category: 'Actions',
         keywords: ['redo', 'history'],
         perform: handleRedo,

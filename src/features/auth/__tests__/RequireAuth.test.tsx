@@ -49,4 +49,14 @@ describe('RequireAuth', () => {
     expect(await screen.findByText('student session')).toBeInTheDocument();
     expect(screen.queryByText('admin exams')).not.toBeInTheDocument();
   });
+
+  it('allows registered students to access session routes without web auth session', async () => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue(null);
+
+    renderProtectedRoute(['student']);
+
+    // This should NOT redirect to login - students with wcode should access exam directly
+    // Currently this fails because RequireAuth redirects to login when session is null
+    expect(await screen.findByText('student session')).toBeInTheDocument();
+  });
 });

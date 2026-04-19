@@ -259,10 +259,10 @@ const applyRubricWeights = (
   weights: Record<string, number>,
 ): RubricDefinition => ({
   ...rubric,
-  criteria: rubric.criteria.map((criterion) => ({
+  criteria: Array.isArray(rubric.criteria) ? rubric.criteria.map((criterion) => ({
     ...criterion,
     weight: weights[criterion.id] ?? criterion.weight,
-  })),
+  })) : [],
 });
 
 const toWritingWeightMap = (weights: WritingRubricWeights): Record<string, number> => ({

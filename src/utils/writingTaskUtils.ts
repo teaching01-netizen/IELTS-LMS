@@ -31,7 +31,7 @@ export function normalizeWritingTaskContents(
 ): WritingTaskContent[] {
   const existing = new Map((writing.tasks ?? []).map((task) => [task.taskId, { ...task }]));
 
-  return taskConfigs.map((taskConfig) => existing.get(taskConfig.id) ?? getLegacyTaskContent(writing, taskConfig.id));
+  return Array.isArray(taskConfigs) ? taskConfigs.map((taskConfig) => existing.get(taskConfig.id) ?? getLegacyTaskContent(writing, taskConfig.id)) : [];
 }
 
 export function getWritingTaskContent(

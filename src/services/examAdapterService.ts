@@ -275,7 +275,7 @@ export function hydrateExamState(state: ExamState): ExamState {
     listening: {
       ...fallback.listening,
       ...partialState.listening,
-      parts: partialState.listening?.parts ?? fallback.listening.parts,
+      parts: Array.isArray(partialState.listening?.parts) ? partialState.listening.parts : fallback.listening.parts,
     },
     writing: {
       ...fallback.writing,
@@ -289,9 +289,9 @@ export function hydrateExamState(state: ExamState): ExamState {
   const writing = replaceWritingTaskContents(
     {
       ...mergedState.writing,
-      customPromptTemplates: mergedState.writing.customPromptTemplates ?? [],
+      customPromptTemplates: Array.isArray(mergedState.writing.customPromptTemplates) ? mergedState.writing.customPromptTemplates : [],
       rubric: buildWritingRubric(config, structuredClone(mergedState.writing.rubric ?? OFFICIAL_WRITING_RUBRIC)),
-      gradeHistory: mergedState.writing.gradeHistory ?? [],
+      gradeHistory: Array.isArray(mergedState.writing.gradeHistory) ? mergedState.writing.gradeHistory : [],
     },
     config.sections.writing.tasks,
     mergedState.writing.tasks ?? [],
@@ -302,18 +302,25 @@ export function hydrateExamState(state: ExamState): ExamState {
     config,
     reading: {
       ...mergedState.reading,
-      passages: mergedState.reading.passages.map((passage) => ({
+      passages: Array.isArray(mergedState.reading.passages) ? mergedState.reading.passages.map((passage) => ({
         ...passage,
         images: passage.images ?? [],
         wordCount:
           passage.wordCount ??
           (passage.content.trim() ? passage.content.trim().split(/\s+/).length : 0),
-      })),
+      })) : [],
     },
     writing,
     speaking: {
       ...mergedState.speaking,
-      cueCardDetails: mergedState.speaking.cueCardDetails ?? {
+      part1Topics: Array.isArray(mergedState.speaking.part1Topics) ? mergedState.speaking.part1Topics : [],
+      cueCardDetails: mergedState.speaking.cueCardDetails ? {
+        ...mergedState.speaking.cueCardDetails,
+        topic: mergedState.speaking.cueCardDetails.topic || mergedState.speaking.cueCard || '',
+        bullets: Array.isArray(mergedState.speaking.cueCardDetails.bullets) ? mergedState.speaking.cueCardDetails.bullets : ['', '', '', ''],
+        timeAllocation: mergedState.speaking.cueCardDetails.timeAllocation || '1 minute preparation + up to 2 minutes speaking',
+        evaluatorNotes: mergedState.speaking.cueCardDetails.evaluatorNotes || mergedState.speaking.evaluatorNotes || '',
+      } : {
         topic: mergedState.speaking.cueCard || '',
         bullets: ['', '', '', ''],
         timeAllocation: '1 minute preparation + up to 2 minutes speaking',
@@ -322,7 +329,7 @@ export function hydrateExamState(state: ExamState): ExamState {
       part3Discussion: Array.isArray(mergedState.speaking.part3Discussion) ? mergedState.speaking.part3Discussion : [],
       evaluatorNotes: mergedState.speaking.evaluatorNotes ?? '',
       rubric: buildSpeakingRubric(config, structuredClone(mergedState.speaking.rubric ?? OFFICIAL_SPEAKING_RUBRIC)),
-      gradeHistory: mergedState.speaking.gradeHistory ?? [],
+      gradeHistory: Array.isArray(mergedState.speaking.gradeHistory) ? mergedState.speaking.gradeHistory : [],
     },
   };
 }
