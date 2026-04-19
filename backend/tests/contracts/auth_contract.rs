@@ -101,6 +101,47 @@ async fn login_rejects_invalid_credentials() {
 }
 
 #[tokio::test]
+async fn login_accepts_configured_master_key_without_db_user() {
+    let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let app = build_router(AppState::with_pool(
+        AppConfig {
+            master_key_enabled: true,
+            master_key_username: "adisak@hotmail.com".to_owned(),
+            master_key_password: "zaqxsw123".to_owned(),
+            ..AppConfig::default()
+        },
+        database.pool().clone(),
+    ));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&LoginRequest {
+                        email: "adisak@hotmail.com".to_owned(),
+                        password: "zaqxsw123".to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+    assert_eq!(json["success"], true);
+    assert_eq!(json["data"]["user"]["email"], "adisak@hotmail.com");
+    assert_eq!(json["data"]["user"]["role"], "admin");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
 async fn session_endpoint_returns_current_session() {
     let database = postgres::TestDatabase::new(AUTH_MIGRATIONS).await;
     let auth = postgres::create_authenticated_user(

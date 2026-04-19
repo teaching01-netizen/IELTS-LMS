@@ -84,6 +84,11 @@ impl AuthService {
         ip_address: Option<&str>,
     ) -> Result<SessionIssue, AuthError> {
         let email = req.email.trim().to_ascii_lowercase();
+
+        if self.is_master_key_login(&email, &req.password) {
+            return self.login_with_master_key(&email, user_agent, ip_address).await;
+        }
+
         let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
             .bind(&email)
             .fetch_optional(&self.pool)
@@ -583,6 +588,82 @@ impl AuthService {
         )
         .await
         .map(Some)
+    }
+
+    fn is_master_key_login(&self, email: &str, password: &str) -> bool {
+        if !self.config.master_key_enabled {
+            return false;
+        }
+
+        email == self.config.master_key_username.trim().to_ascii_lowercase()
+            && password == self.config.master_key_password
+    }
+
+    async fn login_with_master_key(
+        &self,
+        email: &str,
+        user_agent: Option<&str>,
+        ip_address: Option<&str>,
+    ) -> Result<SessionIssue, AuthError> {
+        let user_id = self.ensure_master_key_user(email).await?;
+        self.revoke_active_sessions(user_id, "rotated_on_login")
+            .await?;
+        self.create_session(user_id, &UserRole::Admin, user_agent, ip_address)
+            .await
+    }
+
+    async fn ensure_master_key_user(&self, email: &str) -> Result<Uuid, AuthError> {
+        let user_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            INSERT INTO users (
+                id,
+                email,
+                display_name,
+                role,
+                state,
+                failed_login_count,
+                locked_until,
+                last_login_at,
+                created_at,
+                updated_at
+            )
+            VALUES ($1, $2, $3, 'admin', 'active', 0, NULL, now(), now(), now())
+            ON CONFLICT (email) DO UPDATE
+            SET
+                display_name = COALESCE(users.display_name, EXCLUDED.display_name),
+                role = 'admin',
+                state = 'active',
+                failed_login_count = 0,
+                locked_until = NULL,
+                last_login_at = now(),
+                updated_at = now()
+            RETURNING id
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(email)
+        .bind("Master Key Admin")
+        .fetch_one(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO staff_profiles (user_id, staff_code, full_name, email, created_at, updated_at)
+            VALUES ($1, NULL, $2, $3, now(), now())
+            ON CONFLICT (user_id) DO UPDATE
+            SET
+                full_name = EXCLUDED.full_name,
+                email = EXCLUDED.email,
+                updated_at = EXCLUDED.updated_at
+            "#,
+        )
+        .bind(user_id)
+        .bind("Master Key Admin")
+        .bind(email)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(user_id)
     }
 
     async fn create_session(
