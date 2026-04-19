@@ -57,10 +57,11 @@ impl AppConfig {
 
         Self {
             api_host: env::var("API_HOST").unwrap_or(default.api_host),
-            api_port: env::var("API_PORT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.api_port),
+            api_port: resolve_api_port(
+                env::var("API_PORT").ok().as_deref(),
+                env::var("PORT").ok().as_deref(),
+                default.api_port,
+            ),
             live_mode_enabled: env::var("LIVE_MODE_ENABLED")
                 .ok()
                 .and_then(|value| parse_bool(&value))
@@ -239,6 +240,13 @@ impl AppConfig {
     }
 }
 
+fn resolve_api_port(api_port: Option<&str>, port: Option<&str>, default_port: u16) -> u16 {
+    api_port
+        .and_then(|value| value.parse().ok())
+        .or_else(|| port.and_then(|value| value.parse().ok()))
+        .unwrap_or(default_port)
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -300,10 +308,20 @@ fn parse_bool(value: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::AppConfig;
+    use super::{resolve_api_port, AppConfig};
 
     #[test]
     fn default_frontend_dist_dir_points_at_the_runtime_image_path() {
         assert_eq!(AppConfig::default().frontend_dist_dir, "/app/frontend/dist");
+    }
+
+    #[test]
+    fn api_port_prefers_api_port_env() {
+        assert_eq!(resolve_api_port(Some("4100"), Some("4200"), 4000), 4100);
+    }
+
+    #[test]
+    fn api_port_falls_back_to_port_env() {
+        assert_eq!(resolve_api_port(None, Some("4300"), 4000), 4300);
     }
 }
