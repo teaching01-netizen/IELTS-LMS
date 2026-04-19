@@ -4,6 +4,10 @@ backend/.data/
 build/
 dist/
 coverage/
+.vite/
+*.tsbuildinfo
+.tsbuildinfo
+.eslintcache
 *.log
 .env*
 !.env.example
@@ -11,6 +15,11 @@ coverage/
 *storybook.log
 storybook-static
 e2e/.generated/
+
+# Cloudflare / Wrangler
+.cloudflare/
+.wrangler/
+.dev.vars
 
 # Railway deployment
 .railway/
@@ -27,6 +36,8 @@ playwright/.cache/
 # IDE
 .vscode/
 .idea/
+.windsurf/
+.worktrees/
 *.swp
 *.swo
 *~

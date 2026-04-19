@@ -8,20 +8,12 @@ describe('isBackendLibraryEnabled', () => {
     document.cookie = 'app-session=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   });
 
-  it('returns false when builder mode is disabled and there is no authenticated session', () => {
-    expect(isBackendLibraryEnabled()).toBe(false);
-  });
-
-  it('returns true when the builder backend flag is enabled', () => {
-    vi.stubEnv('VITE_FEATURE_USE_BACKEND_BUILDER', 'true');
-
+  it('returns true (backend is always enabled)', () => {
     expect(isBackendLibraryEnabled()).toBe(true);
   });
 
-  it('returns true for authenticated sessions even without the builder backend flag', () => {
-    vi.stubEnv('VITE_AUTH_SESSION_COOKIE_NAME', 'app-session');
+  it('remains true regardless of cookies', () => {
     document.cookie = 'app-session=active-session; path=/';
-
     expect(isBackendLibraryEnabled()).toBe(true);
   });
 });

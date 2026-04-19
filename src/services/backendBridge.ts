@@ -200,36 +200,27 @@ function compactObject<T extends Record<string, unknown>>(value: T): T {
 }
 
 export function isBackendBuilderEnabled(): boolean {
-  return featureFlag('VITE_FEATURE_USE_BACKEND_BUILDER', 'FEATURE_USE_BACKEND_BUILDER');
+  return true;
 }
 
 export function isBackendLibraryEnabled(): boolean {
-  return isBackendBuilderEnabled() || hasAuthenticatedSessionCookie();
+  return true;
 }
 
 export function isBackendSchedulingEnabled(): boolean {
-  return (
-    featureFlag('VITE_FEATURE_USE_BACKEND_SCHEDULING', 'FEATURE_USE_BACKEND_SCHEDULING') ||
-    hasAuthenticatedSessionCookie()
-  );
+  return true;
 }
 
 export function isBackendDeliveryEnabled(): boolean {
-  return featureFlag('VITE_FEATURE_USE_BACKEND_DELIVERY', 'FEATURE_USE_BACKEND_DELIVERY');
+  return true;
 }
 
 export function isBackendProctoringEnabled(): boolean {
-  return (
-    featureFlag('VITE_FEATURE_USE_BACKEND_PROCTORING', 'FEATURE_USE_BACKEND_PROCTORING') ||
-    hasAuthenticatedSessionCookie()
-  );
+  return true;
 }
 
 export function isBackendGradingEnabled(): boolean {
-  return (
-    featureFlag('VITE_FEATURE_USE_BACKEND_GRADING', 'FEATURE_USE_BACKEND_GRADING') ||
-    hasAuthenticatedSessionCookie()
-  );
+  return true;
 }
 
 export function hasBackendStatusCode(error: unknown, statusCode: number): boolean {

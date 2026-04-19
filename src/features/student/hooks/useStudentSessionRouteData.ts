@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAsyncPolling } from '@app/hooks/useAsyncPolling';
 import { useAuthSession } from '../../auth/authSession';
-import { examDeliveryService } from '@services/examDeliveryService';
-import { getExamStateFromEntity, hydrateExamState } from '@services/examAdapterService';
+import { hydrateExamState } from '@services/examAdapterService';
 import {
   backendGet,
   isBackendDeliveryEnabled,
@@ -10,7 +9,6 @@ import {
   mapBackendRuntime,
   mapBackendSchedule,
 } from '@services/backendBridge';
-import { examRepository } from '@services/examRepository';
 import {
   hasAttemptCredential,
   mapBackendStudentAttempt,
@@ -147,30 +145,6 @@ export function useStudentSessionRouteData(
     }
   }, [candidateId, scheduleId]);
 
-  const refreshRuntimeSnapshot = useCallback(async () => {
-    if (!scheduleId) {
-      return;
-    }
-
-    try {
-      const snapshot = await examDeliveryService.getRuntimeSnapshot(scheduleId);
-      setRuntimeSnapshot(snapshot);
-    } catch {
-      setRuntimeSnapshot(null);
-    }
-  }, [scheduleId]);
-
-  const refreshAttemptSnapshot = useCallback(async () => {
-    if (!scheduleId || !studentKey) {
-      return;
-    }
-
-    const nextAttempt = await studentAttemptRepository.getAttemptByScheduleId(scheduleId, studentKey);
-    if (nextAttempt) {
-      setAttemptSnapshot(nextAttempt);
-    }
-  }, [scheduleId, studentKey]);
-
   const loadStudentData = useCallback(async () => {
     if (!scheduleId) {
       setError('Schedule ID not found');
@@ -260,44 +234,6 @@ export function useStudentSessionRouteData(
 
         return;
       }
-
-      const schedules = await examRepository.getAllSchedules();
-      const scheduleEntity = schedules.find((candidate) => candidate.id === scheduleId);
-
-      if (!scheduleEntity) {
-        throw new Error('Schedule not found');
-      }
-      setSchedule(scheduleEntity);
-
-      const examEntity = await examRepository.getExamById(scheduleEntity.examId);
-      if (!examEntity) {
-        throw new Error('Exam not found');
-      }
-
-      const examState = await getExamStateFromEntity(examEntity, examRepository);
-      setState(examState);
-      const snapshot = await examDeliveryService.getRuntimeSnapshot(scheduleId);
-      setRuntimeSnapshot(snapshot);
-
-      const existingAttempt = await studentAttemptRepository.getAttemptByScheduleId(scheduleId, studentKey);
-
-      if (existingAttempt) {
-        setAttemptSnapshot(existingAttempt);
-      } else {
-        const firstEnabledModule =
-          (['listening', 'reading', 'writing', 'speaking'] as const).find(
-            (module) => examState.config.sections[module].enabled,
-          ) ?? 'listening';
-        const createdAttempt = await studentAttemptRepository.createAttempt({
-          scheduleId,
-          studentKey,
-          examId: scheduleEntity.examId,
-          examTitle: scheduleEntity.examTitle,
-          ...createCandidateProfile(candidateId),
-          currentModule: snapshot?.currentSectionKey ?? firstEnabledModule,
-        });
-        setAttemptSnapshot(createdAttempt);
-      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load exam data');
     } finally {
@@ -310,12 +246,7 @@ export function useStudentSessionRouteData(
   }, [loadStudentData]);
 
   useAsyncPolling(async () => {
-    if (shouldUseBackendDelivery) {
-      await refreshBackendSessionSnapshot();
-      return;
-    }
-
-    await Promise.all([refreshRuntimeSnapshot(), refreshAttemptSnapshot()]);
+    await refreshBackendSessionSnapshot();
   }, {
     enabled: Boolean(scheduleId && state && !error),
     intervalMs: 1_000,
@@ -329,7 +260,7 @@ export function useStudentSessionRouteData(
     runtimeSnapshot,
     schedule,
     state,
-    refreshRuntime: shouldUseBackendDelivery ? refreshBackendSessionSnapshot : refreshRuntimeSnapshot,
+    refreshRuntime: refreshBackendSessionSnapshot,
     retry: loadStudentData,
   };
 }
