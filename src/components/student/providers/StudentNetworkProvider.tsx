@@ -200,25 +200,6 @@ export function StudentNetworkProvider({
       const previousHash = attemptState.attempt?.integrity.deviceFingerprintHash;
       if (!previousHash) {
         await attemptActions.setDeviceFingerprintHash(fingerprint.hash);
-        return;
-      }
-
-      if (!policy.requireDeviceContinuityOnReconnect) {
-        return;
-      }
-
-      if (hasDeviceContinuityMismatch(previousHash, fingerprint.hash)) {
-        runtimeActions.addViolation(
-          'DEVICE_MISMATCH',
-          'critical',
-          'Device continuity check failed.',
-        );
-        runtimeActions.setBlockingReason('device_mismatch');
-        await saveStudentAuditEvent(scheduleId, 'DEVICE_CONTINUITY_FAILED', {
-          previousHash,
-          nextHash: fingerprint.hash,
-          phase: 'initial_load',
-        }, attemptState.attemptId ?? undefined);
       }
     })();
 
@@ -229,8 +210,6 @@ export function StudentNetworkProvider({
     attemptActions,
     attemptState.attempt?.id,
     attemptState.attempt?.integrity.deviceFingerprintHash,
-    policy.requireDeviceContinuityOnReconnect,
-    runtimeActions,
     scheduleId,
   ]);
 

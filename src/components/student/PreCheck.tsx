@@ -90,9 +90,48 @@ function canUseStorage() {
   }
 }
 
+function getFullscreenElement() {
+  return (
+    document.fullscreenElement ??
+    (
+      document as Document & {
+        webkitFullscreenElement?: Element | null;
+      }
+    ).webkitFullscreenElement ??
+    null
+  );
+}
+
+async function requestFullscreenMode(): Promise<boolean> {
+  if (getFullscreenElement()) {
+    return true;
+  }
+
+  try {
+    if (document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen();
+      return true;
+    }
+
+    const webkitDocumentElement = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    };
+
+    if (typeof webkitDocumentElement.webkitRequestFullscreen === 'function') {
+      await webkitDocumentElement.webkitRequestFullscreen();
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
 function runChecks(config?: ExamConfig): StudentPreCheckResult {
   const browser = detectBrowser(navigator.userAgent);
   const policy = getStudentIntegritySecurityPolicy(config);
+  const fullscreenRequired = config?.security.requireFullscreen ?? false;
   const fullscreenSupported =
     typeof document.documentElement.requestFullscreen === 'function' ||
     'webkitRequestFullscreen' in document.documentElement;
@@ -134,11 +173,13 @@ function runChecks(config?: ExamConfig): StudentPreCheckResult {
   const fullscreenCheck: CheckItem = {
     id: 'fullscreen',
     label: 'Fullscreen API',
-    message: fullscreenSupported
-      ? 'Fullscreen is available.'
-      : 'This browser cannot enforce fullscreen mode.',
-    required: true,
-    status: fullscreenSupported ? 'pass' : 'fail',
+    message: !fullscreenRequired
+      ? 'Fullscreen is optional for this exam.'
+      : fullscreenSupported
+        ? 'Fullscreen is available.'
+        : 'This browser cannot enforce fullscreen mode.',
+    required: fullscreenRequired,
+    status: !fullscreenRequired || fullscreenSupported ? 'pass' : 'fail',
     icon: Monitor,
   };
 
@@ -226,6 +267,37 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
     !isRunning &&
     !hasRequiredFailure &&
     (!requiresSafariAcknowledgement || acknowledgedSafariLimitation);
+
+  const handleContinue = async () => {
+    if (!result) {
+      return;
+    }
+
+    if (config?.security.requireFullscreen) {
+      const enteredFullscreen = await requestFullscreenMode();
+      if (!enteredFullscreen) {
+        setResult({
+          ...result,
+          checks: result.checks.map((check) =>
+            check.id === 'fullscreen'
+              ? {
+                  ...check,
+                  required: true,
+                  status: 'fail',
+                  message: 'Fullscreen entry was blocked. Allow fullscreen and try again.',
+                }
+              : check,
+          ),
+        });
+        return;
+      }
+    }
+
+    onComplete({
+      ...result,
+      acknowledgedSafariLimitation,
+    });
+  };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full bg-gray-50 p-3 sm:p-4 md:p-6 lg:p-8">
@@ -344,14 +416,7 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
               variant="primary"
               disabled={!canContinue || !result}
               onClick={() => {
-                if (!result) {
-                  return;
-                }
-
-                onComplete({
-                  ...result,
-                  acknowledgedSafariLimitation,
-                });
+                void handleContinue();
               }}
               size="sm"
               className="flex-1 md:flex-none min-w-[80px] sm:min-w-[100px] md:min-w-[120px] text-[10px] sm:text-xs"

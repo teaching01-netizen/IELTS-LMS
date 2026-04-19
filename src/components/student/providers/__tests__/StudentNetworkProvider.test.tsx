@@ -16,6 +16,8 @@ vi.mock('../../../../utils/deviceFingerprinting', () => ({
   })),
 }));
 
+import { getDeviceFingerprint } from '../../../../utils/deviceFingerprinting';
+
 function createExamState(): ExamState {
   return {
     title: 'Test Exam',
@@ -266,5 +268,29 @@ describe('StudentNetworkProvider', () => {
     });
 
     expect(result.current.network.state.isRecovering).toBe(false);
+  });
+
+  it('does not hard-block on initial load when the stored fingerprint differs', async () => {
+    vi.mocked(getDeviceFingerprint).mockResolvedValue({
+      components: {},
+      hash: 'fp-2',
+    });
+
+    const { result } = renderHook(
+      () => ({
+        runtime: useStudentRuntime(),
+        network: useStudentNetwork(),
+      }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(result.current.network.state.isOnline).toBe(true);
+    });
+
+    expect(result.current.runtime.state.blocking.reason).not.toBe('device_mismatch');
+    expect(
+      result.current.runtime.state.violations.some((violation) => violation.type === 'DEVICE_MISMATCH'),
+    ).toBe(false);
   });
 });

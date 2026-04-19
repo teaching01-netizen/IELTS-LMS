@@ -309,6 +309,22 @@ describe('StudentProctoringProvider', () => {
     expect(requestFullscreen).toHaveBeenCalled();
   });
 
+  it('requests fullscreen when the exam starts and fullscreen is required', async () => {
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(document.documentElement, 'requestFullscreen', {
+      value: requestFullscreen,
+      configurable: true,
+    });
+
+    renderHarness();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(requestFullscreen).toHaveBeenCalledTimes(1);
+  });
+
   it('terminates once fullscreen violations hit the configured limit', async () => {
     const harness = renderHarness({
       ...mockConfig,

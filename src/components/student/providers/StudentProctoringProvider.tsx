@@ -31,6 +31,18 @@ function isSafariBrowser() {
   return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 }
 
+function getFullscreenElement() {
+  return (
+    document.fullscreenElement ??
+    (
+      document as Document & {
+        webkitFullscreenElement?: Element | null;
+      }
+    ).webkitFullscreenElement ??
+    null
+  );
+}
+
 export function ProctoringProvider({
   children,
   config,
@@ -40,6 +52,7 @@ export function ProctoringProvider({
   const { state: attemptState } = useStudentAttempt();
   const cooldownByTypeRef = useRef<Record<string, number>>({});
   const fullscreenReentryAttempts = useRef(0);
+  const fullscreenEntryAttemptedRef = useRef(false);
   const violationCooldownMs = 5_000;
   const violationCountsRef = useRef<Record<ViolationSeverity, number>>({
     low: 0,
@@ -166,6 +179,10 @@ export function ProctoringProvider({
 
   const requestFullscreen = useCallback(async (): Promise<boolean> => {
     try {
+      if (getFullscreenElement()) {
+        return true;
+      }
+
       if (document.documentElement.requestFullscreen) {
         await document.documentElement.requestFullscreen();
         return true;
@@ -185,6 +202,20 @@ export function ProctoringProvider({
       return false;
     }
   }, []);
+
+  useEffect(() => {
+    if (runtimeState.phase !== 'exam' || !config.security.requireFullscreen) {
+      fullscreenEntryAttemptedRef.current = false;
+      return;
+    }
+
+    if (getFullscreenElement() || fullscreenEntryAttemptedRef.current) {
+      return;
+    }
+
+    fullscreenEntryAttemptedRef.current = true;
+    void requestFullscreen();
+  }, [config.security.requireFullscreen, requestFullscreen, runtimeState.phase]);
 
   const detectSecondaryScreens = useCallback(async () => {
     if (!config.security.detectSecondaryScreen || runtimeState.phase !== 'exam') {
@@ -297,7 +328,7 @@ export function ProctoringProvider({
         return;
       }
 
-      if (document.fullscreenElement) {
+      if (getFullscreenElement()) {
         fullscreenReentryAttempts.current = 0;
         return;
       }
