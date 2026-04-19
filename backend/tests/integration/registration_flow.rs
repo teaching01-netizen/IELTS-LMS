@@ -27,14 +27,15 @@ const SCHEDULING_MIGRATIONS: &[&str] = &[
 async fn registration_rejects_invalid_wcode_and_prevents_duplicates() {
     let database = mysql::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).expect("schedule id");
     let service = SchedulingService::new(database.pool().clone());
-    let actor = ActorContext::new(Uuid::new_v4(), ActorRole::Admin);
+    let actor = ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin);
     let user_id = Uuid::new_v4();
 
     let invalid = service
         .create_student_registration(
             &actor,
-            schedule.id,
+            schedule_id,
             "123456".to_owned(),
             "alice@example.com".to_owned(),
             "Alice Roe".to_owned(),
@@ -46,7 +47,7 @@ async fn registration_rejects_invalid_wcode_and_prevents_duplicates() {
     let created = service
         .create_student_registration(
             &actor,
-            schedule.id,
+            schedule_id,
             "W123456".to_owned(),
             "alice@example.com".to_owned(),
             "Alice Roe".to_owned(),
@@ -57,13 +58,13 @@ async fn registration_rejects_invalid_wcode_and_prevents_duplicates() {
     assert_eq!(created.wcode, "W123456");
     assert_eq!(
         created.student_key,
-        format!("student-{}-W123456", schedule.id)
+        format!("student-{}-W123456", schedule_id)
     );
 
     let duplicate = service
         .create_student_registration(
             &actor,
-            schedule.id,
+            schedule_id,
             "W123456".to_owned(),
             "other@example.com".to_owned(),
             "Other Name".to_owned(),
@@ -75,7 +76,7 @@ async fn registration_rejects_invalid_wcode_and_prevents_duplicates() {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM schedule_registrations WHERE schedule_id = ? AND wcode = ?",
     )
-    .bind(schedule.id.to_string())
+    .bind(schedule_id.to_string())
     .bind("W123456")
     .fetch_one(database.pool())
     .await
@@ -86,7 +87,7 @@ async fn registration_rejects_invalid_wcode_and_prevents_duplicates() {
 }
 
 async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
-    let actor = ActorContext::new(Uuid::new_v4(), ActorRole::Admin);
+    let actor = ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin);
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service
         .create_exam(
@@ -94,8 +95,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             CreateExamRequest {
                 slug: "cambridge-19-academic-registration".to_owned(),
                 title: "Cambridge 19 Academic Registration".to_owned(),
-                exam_type: ExamType::Academic,
-                visibility: Visibility::Organization,
+                exam_type: ExamType::Academic.as_str().to_owned(),
+                visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
             },
         )
@@ -167,4 +168,3 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .await
         .expect("create schedule")
 }
-

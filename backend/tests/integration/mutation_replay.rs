@@ -47,15 +47,17 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
         .await
         .expect("bootstrap attempt");
     let attempt = session.attempt.expect("attempt");
+    let attempt_id = attempt.id.clone();
+    let student_key = student_key(schedule_id, "alice");
     let client_session_id = Uuid::new_v4().to_string();
 
     let first_batch = service
         .apply_mutation_batch(
             schedule_id,
             StudentMutationBatchRequest {
-                attempt_id: attempt.id,
-                student_key: student_key(schedule_id, "alice"),
-                client_session_id,
+                attempt_id: attempt_id.clone(),
+                student_key: student_key.clone(),
+                client_session_id: client_session_id.clone(),
                 mutations: vec![
                     MutationEnvelope {
                         id: "m1".to_owned(),
@@ -86,9 +88,9 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
         .apply_mutation_batch(
             schedule_id,
             StudentMutationBatchRequest {
-                attempt_id: attempt.id,
-                student_key: student_key(schedule_id, "alice"),
-                client_session_id,
+                attempt_id: attempt_id.clone(),
+                student_key: student_key.clone(),
+                client_session_id: client_session_id.clone(),
                 mutations: vec![
                     MutationEnvelope {
                         id: "m3".to_owned(),
@@ -119,8 +121,8 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
         .apply_mutation_batch(
             schedule_id,
             StudentMutationBatchRequest {
-                attempt_id: attempt.id,
-                student_key: student_key(schedule_id, "alice"),
+                attempt_id: attempt_id.clone(),
+                student_key: student_key.clone(),
                 client_session_id,
                 mutations: vec![MutationEnvelope {
                     id: "m-overlap".to_owned(),
@@ -138,7 +140,7 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
 
     let stored_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?")
-            .bind(attempt.id)
+            .bind(attempt_id)
             .fetch_one(database.pool())
             .await
             .unwrap();
@@ -148,7 +150,7 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
 }
 
 async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
-    let actor = ActorContext::new(Uuid::new_v4(), ActorRole::Admin);
+    let actor = ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin);
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service
         .create_exam(
@@ -156,18 +158,19 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             CreateExamRequest {
                 slug: "cambridge-19-academic-mutation".to_owned(),
                 title: "Cambridge 19 Academic Mutation".to_owned(),
-                exam_type: ExamType::Academic,
-                visibility: Visibility::Organization,
+                exam_type: ExamType::Academic.as_str().to_owned(),
+                visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
             },
         )
         .await
         .expect("seed exam");
+    let exam_id = exam.id.clone();
 
     builder_service
         .save_draft(
             &actor,
-            exam.id,
+            exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
                     "reading": {"passages": [{"id": "reading-1"}]},
@@ -190,14 +193,14 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .expect("save draft");
 
     let exam_after_draft = builder_service
-        .get_exam(&actor, exam.id)
+        .get_exam(&actor, exam_id.clone())
         .await
         .expect("exam after draft");
 
     let published_version = builder_service
         .publish_exam(
             &actor,
-            exam.id,
+            exam_id.clone(),
             PublishExamRequest {
                 publish_notes: Some("ready for mutation replay".to_owned()),
                 revision: exam_after_draft.revision,
@@ -210,7 +213,7 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .create_schedule(
             &actor,
             CreateScheduleRequest {
-                exam_id: exam.id,
+                exam_id,
                 published_version_id: published_version.id,
                 cohort_name: "Mutation Replay Cohort".to_owned(),
                 institution: Some("IELTS Centre".to_owned()),

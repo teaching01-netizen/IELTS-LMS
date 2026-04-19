@@ -60,17 +60,18 @@ export function useConfigRouteController(
 
       setExam(entity);
 
-      if (!entity.currentDraftVersionId) {
-        setError('No draft version exists for this exam');
+      const versionId = entity.currentDraftVersionId ?? entity.currentPublishedVersionId;
+      if (!versionId) {
+        setError('No version exists for this exam');
         setIsLoading(false);
         return;
       }
 
-      const currentVersion = await examRepository.getVersionById(entity.currentDraftVersionId);
+      const currentVersion = await examRepository.getVersionById(versionId);
       if (currentVersion) {
         setConfig(currentVersion.configSnapshot);
       } else {
-        setError('Current draft version not found');
+        setError('Current version not found');
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load exam');

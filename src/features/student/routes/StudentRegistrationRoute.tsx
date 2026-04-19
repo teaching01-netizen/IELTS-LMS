@@ -18,6 +18,7 @@ function isUuid(value: string): boolean {
 export function StudentRegistrationRoute() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
   const navigate = useNavigate();
+  const { status: authStatus } = useAuthSession();
   const [formData, setFormData] = useState<RegistrationFormData>({
     wcode: '',
     email: '',
@@ -75,14 +76,20 @@ export function StudentRegistrationRoute() {
       setErrors(newErrors);
       return;
     }
+
+    // Check authentication for backend registration
+    const shouldUseBackendRegistration =
+      Boolean(scheduleId) && isBackendSchedulingEnabled() && isUuid(scheduleId);
+
+    if (shouldUseBackendRegistration && authStatus !== 'authenticated') {
+      setSubmitError('Please log in to register for this exam');
+      return;
+    }
     
     setIsLoading(true);
     setSubmitError(null);
     
     try {
-      const shouldUseBackendRegistration =
-        Boolean(scheduleId) && isBackendSchedulingEnabled() && isUuid(scheduleId);
-
       if (shouldUseBackendRegistration) {
         const response = await backendPost<{
           registrationId: string;

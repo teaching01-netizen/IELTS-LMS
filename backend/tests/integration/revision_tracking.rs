@@ -29,12 +29,13 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
 async fn revision_increments_and_mutations_record_applied_revision() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).expect("schedule id");
     let service = DeliveryService::new(database.pool().clone());
 
-    let student_key = format!("student-{}-alice", schedule.id);
+    let student_key = format!("student-{}-alice", schedule_id);
     let session = service
         .bootstrap(
-            schedule.id,
+            schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key.clone(),
                 candidate_id: "alice".to_owned(),
@@ -42,7 +43,7 @@ async fn revision_increments_and_mutations_record_applied_revision() {
                 candidate_email: "alice@example.com".to_owned(),
                 email: Some("alice@example.com".to_owned()),
                 wcode: Some("W123456".to_owned()),
-                client_session_id: Uuid::new_v4(),
+                client_session_id: Uuid::new_v4().to_string(),
             },
         )
         .await
@@ -50,10 +51,10 @@ async fn revision_increments_and_mutations_record_applied_revision() {
     let attempt = session.attempt.expect("attempt");
     assert_eq!(attempt.revision, 0);
 
-    let client_session_id = Uuid::new_v4();
+    let client_session_id = Uuid::new_v4().to_string();
     let first = service
         .apply_mutation_batch(
-            schedule.id,
+            schedule_id,
             StudentMutationBatchRequest {
                 attempt_id: attempt.id,
                 student_key: student_key.clone(),
@@ -93,7 +94,7 @@ async fn revision_increments_and_mutations_record_applied_revision() {
 
     let second = service
         .apply_mutation_batch(
-            schedule.id,
+            schedule_id,
             StudentMutationBatchRequest {
                 attempt_id: first.attempt.id,
                 student_key: student_key.clone(),
@@ -126,7 +127,7 @@ async fn revision_increments_and_mutations_record_applied_revision() {
 }
 
 async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
-    let actor = ActorContext::new(Uuid::new_v4(), ActorRole::Admin);
+    let actor = ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin);
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service
         .create_exam(
@@ -134,8 +135,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             CreateExamRequest {
                 slug: "cambridge-19-academic-revision".to_owned(),
                 title: "Cambridge 19 Academic Revision".to_owned(),
-                exam_type: ExamType::Academic,
-                visibility: Visibility::Organization,
+                exam_type: ExamType::Academic.as_str().to_owned(),
+                visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
             },
         )
@@ -207,4 +208,3 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .await
         .expect("create schedule")
 }
-

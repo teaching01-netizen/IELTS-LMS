@@ -137,19 +137,17 @@ pub async fn apply_runtime_command(
 pub async fn create_student_registration(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
     Path(schedule_id): Path<Uuid>,
     Json(req): Json<StudentRegistrationRequest>,
 ) -> Result<ApiResponse<ielts_backend_domain::attempt::StudentRegistrationResponse>, ApiError> {
-    // Public registration endpoint - no authentication required
-    // Registration is the first step in becoming a student of a schedule
-    // Use a system actor context for registration
-    use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
-    let ctx = ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin);
+    principal.require_one_of(&[UserRole::Student])?;
+    let ctx = principal.actor_context();
     let service = SchedulingService::new(state.db_pool());
     
-    // For public registration, use a system user ID
-    // In a real implementation, this would create a user account first
-    let user_id = Uuid::new_v4();
+    // Use the authenticated user's ID for registration
+    let user_id = Uuid::parse_str(&principal.user.id)
+        .map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", "Invalid user ID format"))?;
     
     let registration = service
         .create_student_registration(

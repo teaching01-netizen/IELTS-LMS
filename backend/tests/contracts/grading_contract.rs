@@ -45,7 +45,8 @@ const GRADING_MIGRATIONS: &[&str] = &[
 async fn grading_review_and_result_release_flow_round_trips() {
     let database = mysql::TestDatabase::new(GRADING_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let attempt_id = bootstrap_and_submit(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let attempt_id = bootstrap_and_submit(database.pool(), schedule_id, "alice").await;
     let auth = create_authenticated_user(
         database.pool(),
         UserRole::Grader,
@@ -53,7 +54,7 @@ async fn grading_review_and_result_release_flow_round_trips() {
         "Test Grader",
     )
     .await;
-    assign_staff_to_schedule(database.pool(), schedule.id, auth.user_id, "grader").await;
+    assign_staff_to_schedule(database.pool(), schedule_id, auth.user_id, "grader").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -452,7 +453,7 @@ async fn bootstrap_and_submit(pool: &sqlx::MySqlPool, schedule_id: Uuid, candida
                 candidate_email: format!("{candidate_id}@example.com"),
                 email: Some(format!("{candidate_id}@example.com")),
                 wcode: Some("W123456".to_owned()),
-                client_session_id: Uuid::new_v4(),
+                client_session_id: Uuid::new_v4().to_string(),
             },
         )
         .await
@@ -470,7 +471,7 @@ async fn bootstrap_and_submit(pool: &sqlx::MySqlPool, schedule_id: Uuid, candida
         .await
         .expect("submit attempt");
 
-    attempt_id
+    Uuid::parse_str(&attempt_id).expect("attempt id")
 }
 
 async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
@@ -482,8 +483,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             CreateExamRequest {
                 slug: "cambridge-19-academic-grading".to_owned(),
                 title: "Cambridge 19 Academic Grading".to_owned(),
-                exam_type: ExamType::Academic,
-                visibility: Visibility::Organization,
+                exam_type: ExamType::Academic.as_str().to_owned(),
+                visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
             },
         )
@@ -565,5 +566,5 @@ fn student_key(schedule_id: Uuid, candidate_id: &str) -> String {
 }
 
 fn contract_actor() -> ActorContext {
-    ActorContext::new(Uuid::new_v4(), ActorRole::Admin)
+    ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin)
 }

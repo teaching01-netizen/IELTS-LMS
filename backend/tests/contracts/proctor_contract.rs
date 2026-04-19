@@ -50,7 +50,8 @@ const PROCTOR_MIGRATIONS: &[&str] = &[
 async fn list_sessions_and_detail_include_runtime_and_attempts() {
     let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let attempt_id = bootstrap_attempt(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let attempt_id = bootstrap_attempt(database.pool(), schedule_id, "alice").await;
     let auth = create_authenticated_user(
         database.pool(),
         UserRole::Proctor,
@@ -58,11 +59,11 @@ async fn list_sessions_and_detail_include_runtime_and_attempts() {
         "Test Proctor",
     )
     .await;
-    assign_staff_to_schedule(database.pool(), schedule.id, auth.user_id, "proctor").await;
+    assign_staff_to_schedule(database.pool(), schedule_id, auth.user_id, "proctor").await;
     SchedulingService::new(database.pool().clone())
         .apply_runtime_command(
             &contract_actor(),
-            schedule.id,
+            schedule_id,
             RuntimeCommandRequest {
                 action: RuntimeCommandAction::StartRuntime,
                 reason: None,
@@ -96,7 +97,7 @@ async fn list_sessions_and_detail_include_runtime_and_attempts() {
     let detail = app
         .oneshot(
             auth.with_auth(
-                Request::builder().uri(format!("/api/v1/proctor/sessions/{}", schedule.id)),
+                Request::builder().uri(format!("/api/v1/proctor/sessions/{}", schedule_id)),
             )
             .body(Body::empty())
             .unwrap(),
@@ -118,7 +119,8 @@ async fn list_sessions_and_detail_include_runtime_and_attempts() {
 async fn presence_and_student_commands_update_session_state_and_alerts() {
     let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
-    let attempt_id = bootstrap_attempt(database.pool(), schedule.id, "alice").await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let attempt_id = bootstrap_attempt(database.pool(), schedule_id, "alice").await;
     let auth = create_authenticated_user(
         database.pool(),
         UserRole::Proctor,
@@ -126,7 +128,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
         "Test Proctor",
     )
     .await;
-    assign_staff_to_schedule(database.pool(), schedule.id, auth.user_id, "proctor").await;
+    assign_staff_to_schedule(database.pool(), schedule_id, auth.user_id, "proctor").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -137,7 +139,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
         .oneshot(
             auth.with_csrf(Request::builder())
                 .method("POST")
-                .uri(format!("/api/v1/proctor/sessions/{}/presence", schedule.id))
+                .uri(format!("/api/v1/proctor/sessions/{}/presence", schedule_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&ProctorPresenceRequest {
@@ -156,7 +158,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
     let warn = issue_attempt_command(
         &app,
         &auth,
-        schedule.id,
+        schedule_id,
         attempt_id,
         "warn",
         json!({ "message": "Look at the camera" }),
@@ -203,7 +205,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
     let audit_logs: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND attempt_id = ? AND action_type = 'STUDENT_WARN'",
     )
-    .bind(schedule.id.to_string())
+    .bind(schedule_id.to_string())
     .bind(attempt_id.to_string())
     .fetch_one(database.pool())
     .await
@@ -213,7 +215,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
     let pause = issue_attempt_command(
         &app,
         &auth,
-        schedule.id,
+        schedule_id,
         attempt_id,
         "pause",
         json!({ "reason": "Manual pause" }),
@@ -224,7 +226,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
     let resume = issue_attempt_command(
         &app,
         &auth,
-        schedule.id,
+        schedule_id,
         attempt_id,
         "resume",
         json!({}),
@@ -236,7 +238,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
         .clone()
         .oneshot(
             auth.with_auth(
-                Request::builder().uri(format!("/api/v1/proctor/sessions/{}", schedule.id)),
+                Request::builder().uri(format!("/api/v1/proctor/sessions/{}", schedule_id)),
             )
             .body(Body::empty())
             .unwrap(),
@@ -271,7 +273,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
     let terminate = issue_attempt_command(
         &app,
         &auth,
-        schedule.id,
+        schedule_id,
         attempt_id,
         "terminate",
         json!({ "reason": "Escalated violation" }),
@@ -286,6 +288,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
 async fn control_commands_extend_end_sections_and_complete_exam() {
     let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
     let auth = create_authenticated_user(
         database.pool(),
         UserRole::Proctor,
@@ -293,11 +296,11 @@ async fn control_commands_extend_end_sections_and_complete_exam() {
         "Test Proctor",
     )
     .await;
-    assign_staff_to_schedule(database.pool(), schedule.id, auth.user_id, "proctor").await;
+    assign_staff_to_schedule(database.pool(), schedule_id, auth.user_id, "proctor").await;
     SchedulingService::new(database.pool().clone())
         .apply_runtime_command(
             &contract_actor(),
-            schedule.id,
+            schedule_id,
             RuntimeCommandRequest {
                 action: RuntimeCommandAction::StartRuntime,
                 reason: None,
@@ -317,7 +320,7 @@ async fn control_commands_extend_end_sections_and_complete_exam() {
                 .method("POST")
                 .uri(format!(
                     "/api/v1/proctor/sessions/{}/control/extend-section",
-                    schedule.id
+                    schedule_id
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -338,7 +341,7 @@ async fn control_commands_extend_end_sections_and_complete_exam() {
                 .method("POST")
                 .uri(format!(
                     "/api/v1/proctor/sessions/{}/control/end-section-now",
-                    schedule.id
+                    schedule_id
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -358,7 +361,7 @@ async fn control_commands_extend_end_sections_and_complete_exam() {
                 .method("POST")
                 .uri(format!(
                     "/api/v1/proctor/sessions/{}/control/complete-exam",
-                    schedule.id
+                    schedule_id
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(serde_json::to_vec(&json!({})).unwrap()))
@@ -517,13 +520,14 @@ async fn bootstrap_attempt(pool: &sqlx::MySqlPool, schedule_id: Uuid, candidate_
                 candidate_email: format!("{candidate_id}@example.com"),
                 email: Some(format!("{candidate_id}@example.com")),
                 wcode: Some("W123456".to_owned()),
-                client_session_id: Uuid::new_v4(),
+                client_session_id: Uuid::new_v4().to_string(),
             },
         )
         .await
         .expect("bootstrap attempt");
 
-    context.attempt.expect("attempt").id
+    let attempt_id = context.attempt.expect("attempt").id;
+    Uuid::parse_str(&attempt_id).expect("attempt id")
 }
 
 async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
@@ -535,8 +539,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             CreateExamRequest {
                 slug: "cambridge-19-academic-proctor".to_owned(),
                 title: "Cambridge 19 Academic Proctor".to_owned(),
-                exam_type: ExamType::Academic,
-                visibility: Visibility::Organization,
+                exam_type: ExamType::Academic.as_str().to_owned(),
+                visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
             },
         )
@@ -618,5 +622,5 @@ fn student_key(schedule_id: Uuid, candidate_id: &str) -> String {
 }
 
 fn contract_actor() -> ActorContext {
-    ActorContext::new(Uuid::new_v4(), ActorRole::Admin)
+    ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin)
 }

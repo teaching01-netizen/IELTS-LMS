@@ -156,6 +156,7 @@ async fn get_runtime_returns_a_not_started_projection_before_commands_run() {
 async fn runtime_commands_transition_the_runtime_state_machine() {
     let database = mysql::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
     let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Admin,
@@ -168,7 +169,7 @@ async fn runtime_commands_transition_the_runtime_state_machine() {
         database.pool().clone(),
     ));
 
-    let start = command_request(&app, &auth, schedule.id, json!({ "action": "start_runtime" })).await;
+    let start = command_request(&app, &auth, schedule_id, json!({ "action": "start_runtime" })).await;
     assert_eq!(start.status(), StatusCode::OK);
     let start_json = json_body(start).await;
     assert_eq!(start_json["data"]["status"], "live");
@@ -178,7 +179,7 @@ async fn runtime_commands_transition_the_runtime_state_machine() {
     let pause = command_request(
         &app,
         &auth,
-        schedule.id,
+        schedule_id,
         json!({ "action": "pause_runtime", "reason": "manual_pause" }),
     )
     .await;
@@ -187,13 +188,13 @@ async fn runtime_commands_transition_the_runtime_state_machine() {
     assert_eq!(pause_json["data"]["status"], "paused");
     assert_eq!(pause_json["data"]["sections"][0]["status"], "paused");
 
-    let resume = command_request(&app, &auth, schedule.id, json!({ "action": "resume_runtime" })).await;
+    let resume = command_request(&app, &auth, schedule_id, json!({ "action": "resume_runtime" })).await;
     assert_eq!(resume.status(), StatusCode::OK);
     let resume_json = json_body(resume).await;
     assert_eq!(resume_json["data"]["status"], "live");
     assert_eq!(resume_json["data"]["sections"][0]["status"], "live");
 
-    let end = command_request(&app, &auth, schedule.id, json!({ "action": "end_runtime" })).await;
+    let end = command_request(&app, &auth, schedule_id, json!({ "action": "end_runtime" })).await;
     assert_eq!(end.status(), StatusCode::OK);
     let end_json = json_body(end).await;
     assert_eq!(end_json["data"]["status"], "completed");
@@ -210,6 +211,7 @@ async fn runtime_commands_transition_the_runtime_state_machine() {
 async fn delete_schedule_removes_the_schedule_and_runtime() {
     let database = mysql::TestDatabase::new(SCHEDULING_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
     let auth = mysql::create_authenticated_user(
         database.pool(),
         UserRole::Admin,
@@ -222,7 +224,7 @@ async fn delete_schedule_removes_the_schedule_and_runtime() {
         database.pool().clone(),
     ));
 
-    let start = command_request(&app, &auth, schedule.id, json!({ "action": "start_runtime" })).await;
+    let start = command_request(&app, &auth, schedule_id, json!({ "action": "start_runtime" })).await;
     assert_eq!(start.status(), StatusCode::OK);
 
     let delete_response = app
@@ -230,7 +232,7 @@ async fn delete_schedule_removes_the_schedule_and_runtime() {
         .oneshot(
             auth.with_csrf(Request::builder())
                 .method("DELETE")
-                .uri(format!("/api/v1/schedules/{}", schedule.id))
+                .uri(format!("/api/v1/schedules/{}", schedule_id))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -253,7 +255,7 @@ async fn delete_schedule_removes_the_schedule_and_runtime() {
     let runtime = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM exam_session_runtimes WHERE schedule_id = ?",
     )
-    .bind(schedule.id)
+    .bind(schedule_id)
     .fetch_optional(database.pool())
     .await
     .expect("runtime lookup");
@@ -271,8 +273,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             CreateExamRequest {
                 slug: "cambridge-19-academic-schedule".to_owned(),
                 title: "Cambridge 19 Academic Schedule".to_owned(),
-                exam_type: ExamType::Academic,
-                visibility: Visibility::Organization,
+                exam_type: ExamType::Academic.as_str().to_owned(),
+                visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
             },
         )
@@ -396,5 +398,5 @@ async fn json_body(response: axum::response::Response) -> serde_json::Value {
 }
 
 fn contract_actor() -> ActorContext {
-    ActorContext::new(Uuid::new_v4(), ActorRole::Admin)
+    ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin)
 }

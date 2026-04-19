@@ -227,13 +227,13 @@ async fn patch_draft_creates_a_new_version_and_advances_the_exam_pointer() {
     assert_eq!(json["data"]["isDraft"], true);
 
     let exam_after = BuilderService::new(database.pool().clone())
-        .get_exam(&contract_actor(), seeded.id)
+        .get_exam(&contract_actor(), seeded.id.clone())
         .await
         .expect("exam after draft save");
 
     assert_eq!(
         exam_after.current_draft_version_id,
-        Some(Uuid::parse_str(version_id).unwrap())
+        Some(version_id.to_owned())
     );
     assert_eq!(exam_after.revision, seeded.revision + 1);
 
@@ -255,7 +255,7 @@ async fn get_validation_reports_publish_readiness_for_the_current_draft() {
     let saved_version = service
         .save_draft(
             &contract_actor(),
-            seeded.id,
+            seeded.id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
                     "listening": {"parts": [{"id": "part-1"}]},
@@ -315,7 +315,7 @@ async fn get_events_returns_exam_history_for_the_exam() {
     service
         .save_draft(
             &contract_actor(),
-            seeded.id,
+            seeded.id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
                     "reading": {"passages": [{"id": "reading-1"}]},
@@ -373,7 +373,7 @@ fn app_state(pool: sqlx::MySqlPool) -> AppState {
 }
 
 fn contract_actor() -> ActorContext {
-    ActorContext::new(Uuid::new_v4(), ActorRole::Admin)
+    ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin)
 }
 
 async fn seed_exam(pool: &sqlx::MySqlPool) -> ExamEntity {
@@ -383,8 +383,8 @@ async fn seed_exam(pool: &sqlx::MySqlPool) -> ExamEntity {
             CreateExamRequest {
                 slug: "cambridge-19-academic".to_owned(),
                 title: "Cambridge 19 Academic".to_owned(),
-                exam_type: ExamType::Academic,
-                visibility: Visibility::Organization,
+                exam_type: ExamType::Academic.as_str().to_owned(),
+                visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
             },
         )

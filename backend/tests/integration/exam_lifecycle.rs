@@ -29,14 +29,15 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
 async fn phase_progression_precheck_lobby_exam_post_exam() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).expect("schedule id");
     let service = DeliveryService::new(database.pool().clone());
 
-    let student_key = format!("student-{}-alice", schedule.id);
+    let student_key = format!("student-{}-alice", schedule_id);
     let wcode = "W123456".to_owned();
 
     let bootstrap = service
         .bootstrap(
-            schedule.id,
+            schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key.clone(),
                 candidate_id: "alice".to_owned(),
@@ -44,7 +45,7 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
                 candidate_email: "alice@example.com".to_owned(),
                 email: Some("alice@example.com".to_owned()),
                 wcode: Some(wcode.clone()),
-                client_session_id: Uuid::new_v4(),
+                client_session_id: Uuid::new_v4().to_string(),
             },
         )
         .await
@@ -54,7 +55,7 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
 
     let precheck = service
         .persist_precheck(
-            schedule.id,
+            schedule_id,
             StudentPrecheckRequest {
                 attempt_id: None,
                 student_key: student_key.clone(),
@@ -63,7 +64,7 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
                 candidate_email: "alice@example.com".to_owned(),
                 email: Some("alice@example.com".to_owned()),
                 wcode: Some(wcode.clone()),
-                client_session_id: Uuid::new_v4(),
+                client_session_id: Uuid::new_v4().to_string(),
                 pre_check: json!({
                     "completedAt": "2026-01-10T08:50:00Z",
                     "checks": [{"id": "browser", "status": "pass"}]
@@ -77,8 +78,8 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
 
     SchedulingService::new(database.pool().clone())
         .apply_runtime_command(
-            &ActorContext::new(Uuid::new_v4(), ActorRole::Admin),
-            schedule.id,
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
+            schedule_id,
             RuntimeCommandRequest {
                 action: RuntimeCommandAction::StartRuntime,
                 reason: None,
@@ -89,7 +90,7 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
 
     let bootstrap_again = service
         .bootstrap(
-            schedule.id,
+            schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key.clone(),
                 candidate_id: "alice".to_owned(),
@@ -97,7 +98,7 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
                 candidate_email: "alice@example.com".to_owned(),
                 email: Some("alice@example.com".to_owned()),
                 wcode: Some(wcode.clone()),
-                client_session_id: Uuid::new_v4(),
+                client_session_id: Uuid::new_v4().to_string(),
             },
         )
         .await
@@ -107,9 +108,9 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
 
     let submitted = service
         .submit_attempt(
-            schedule.id,
+            schedule_id,
             StudentSubmitRequest {
-                attempt_id: attempt_after_runtime.id,
+                attempt_id: attempt_after_runtime.id.clone(),
                 student_key: student_key.clone(),
             },
             None,
@@ -130,7 +131,7 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
 }
 
 async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
-    let actor = ActorContext::new(Uuid::new_v4(), ActorRole::Admin);
+    let actor = ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin);
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service
         .create_exam(
@@ -138,8 +139,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             CreateExamRequest {
                 slug: "cambridge-19-academic-lifecycle".to_owned(),
                 title: "Cambridge 19 Academic Lifecycle".to_owned(),
-                exam_type: ExamType::Academic,
-                visibility: Visibility::Organization,
+                exam_type: ExamType::Academic.as_str().to_owned(),
+                visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
             },
         )
@@ -211,4 +212,3 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .await
         .expect("create schedule")
 }
-
