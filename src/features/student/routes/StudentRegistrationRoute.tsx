@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { isBackendSchedulingEnabled } from '../../../services/backendBridge';
 import { backendPost } from '../../../services/backendBridge';
+import { useAuthSession } from '../../auth/authSession';
 
 interface RegistrationFormData {
   wcode: string;

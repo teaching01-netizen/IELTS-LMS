@@ -24,3 +24,15 @@ axum = { version = "0.7.9", features = ["ws"] }
 [[test]]
 name = "mutation_replay"
 path = "../../tests/integration/mutation_replay.rs"
+
+[[test]]
+name = "exam_lifecycle"
+path = "../../tests/integration/exam_lifecycle.rs"
+
+[[test]]
+name = "registration_flow"
+path = "../../tests/integration/registration_flow.rs"
+
+[[test]]
+name = "revision_tracking"
+path = "../../tests/integration/revision_tracking.rs"

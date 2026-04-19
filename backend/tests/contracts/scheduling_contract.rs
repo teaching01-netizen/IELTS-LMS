@@ -280,11 +280,12 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         )
         .await
         .expect("seed exam");
+    let exam_id = exam.id.clone();
 
     builder_service
         .save_draft(
             &actor,
-            exam.id,
+            exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
                     "reading": {"passages": [{"id": "reading-1"}]},
@@ -300,14 +301,14 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .expect("save draft");
 
     let exam_after_draft = builder_service
-        .get_exam(&actor, exam.id)
+        .get_exam(&actor, exam_id.clone())
         .await
         .expect("exam after draft");
 
     let published_version = builder_service
         .publish_exam(
             &actor,
-            exam.id,
+            exam_id.clone(),
             PublishExamRequest {
                 publish_notes: Some("ready for scheduling".to_owned()),
                 revision: exam_after_draft.revision,
@@ -324,7 +325,7 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .create_schedule(
             &actor,
             CreateScheduleRequest {
-                exam_id: exam.id,
+                exam_id,
                 published_version_id: published_version.id,
                 cohort_name: "Bangkok Morning Cohort".to_owned(),
                 institution: Some("IELTS Centre".to_owned()),

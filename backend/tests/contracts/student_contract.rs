@@ -274,9 +274,9 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
         .unwrap()
         .to_owned();
     let request = StudentMutationBatchRequest {
-        attempt_id,
+        attempt_id: attempt_id.clone(),
         student_key: student_key.clone(),
-        client_session_id,
+        client_session_id: client_session_id.clone(),
         mutations: vec![
             ielts_backend_domain::attempt::MutationEnvelope {
                 id: "mutation-1".to_owned(),
@@ -348,9 +348,9 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
                 .header("idempotency-key", "mutation-replay-1")
                 .body(Body::from(
                     serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id,
+                        attempt_id: attempt_id.clone(),
                         student_key: student_key.clone(),
-                        client_session_id,
+                        client_session_id: client_session_id.clone(),
                         mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
                             id: "mutation-3".to_owned(),
                             seq: 3,
@@ -924,11 +924,12 @@ async fn seed_schedule_with_slug(
         )
         .await
         .expect("seed exam");
+    let exam_id = exam.id.clone();
 
     builder_service
         .save_draft(
             &actor,
-            exam.id,
+            exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
                     "reading": {"passages": [{"id": "reading-1"}]},
@@ -944,14 +945,14 @@ async fn seed_schedule_with_slug(
         .expect("save draft");
 
     let exam_after_draft = builder_service
-        .get_exam(&actor, exam.id)
+        .get_exam(&actor, exam_id.clone())
         .await
         .expect("exam after draft");
 
     let published_version = builder_service
         .publish_exam(
             &actor,
-            exam.id,
+            exam_id.clone(),
             PublishExamRequest {
                 publish_notes: Some("ready for delivery".to_owned()),
                 revision: exam_after_draft.revision,
@@ -968,7 +969,7 @@ async fn seed_schedule_with_slug(
         .create_schedule(
             &actor,
             CreateScheduleRequest {
-                exam_id: exam.id,
+                exam_id,
                 published_version_id: published_version.id,
                 cohort_name: "Delivery Cohort".to_owned(),
                 institution: Some("IELTS Centre".to_owned()),
