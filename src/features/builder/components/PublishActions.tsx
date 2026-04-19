@@ -14,6 +14,7 @@ interface PublishActionsProps {
   publishReadiness?: PublishReadiness;
   onPublish: (notes?: string) => void;
   onSchedulePublish: (scheduledTime: string) => void;
+  scheduledTime?: string;
   onOpenSchedulingWorkflow?: (() => void) | undefined;
   onUnpublish: (reason?: string) => void;
   onArchive?: (() => void) | undefined;
@@ -32,6 +33,7 @@ export function PublishActions({
   publishReadiness,
   onPublish,
   onSchedulePublish,
+  scheduledTime: scheduledTimeProp,
   onOpenSchedulingWorkflow,
   onUnpublish,
   onArchive,
@@ -50,7 +52,8 @@ export function PublishActions({
   const isValidationPassed = publishReadiness?.canPublish ?? false;
   const isContentReviewed = true;
   const usesSchedulingWorkflow = Boolean(onOpenSchedulingWorkflow);
-  const isScheduled = !usesSchedulingWorkflow && scheduledTime.length > 0;
+  const effectiveScheduledTime = usesSchedulingWorkflow ? scheduledTimeProp ?? '' : scheduledTime;
+  const isScheduled = effectiveScheduledTime.length > 0;
 
   const missingPrerequisites = [];
   if (!isValidationPassed) missingPrerequisites.push('Technical validation');
@@ -164,7 +167,7 @@ export function PublishActions({
                   ? usesSchedulingWorkflow
                     ? 'Open the real scheduling workflow'
                     : 'Set a schedule for when students can access the exam'
-                  : `Scheduled for ${scheduledTime}`
+                  : `Scheduled for ${effectiveScheduledTime}`
               }
             >
               {isScheduled ? (
@@ -173,7 +176,7 @@ export function PublishActions({
                 <Circle size={14} className="text-blue-400 flex-shrink-0" aria-hidden="true" />
               )}
               <span>
-                Exam scheduled {isScheduled ? `(${scheduledTime})` : usesSchedulingWorkflow ? '(open scheduler)' : '(click to set date)'}
+                Exam scheduled {isScheduled ? `(${effectiveScheduledTime})` : usesSchedulingWorkflow ? '(open scheduler)' : '(click to set date)'}
               </span>
             </div>
           </div>

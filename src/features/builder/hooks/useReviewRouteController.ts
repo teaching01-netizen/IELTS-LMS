@@ -4,7 +4,7 @@ import { hydrateExamState } from '@services/examAdapterService';
 import { examLifecycleService } from '@services/examLifecycleService';
 import { examRepository } from '@services/examRepository';
 import type { ExamState } from '../../../types';
-import type { ExamEntity, ExamVersion, PublishReadiness } from '../../../types/domain';
+import type { ExamEntity, ExamVersion, PublishReadiness, ExamSchedule } from '../../../types/domain';
 
 export interface ReviewRouteController {
   error: string | null;
@@ -20,6 +20,7 @@ export interface ReviewRouteController {
   handleRepublishVersion: (versionId: string) => Promise<void>;
   handleNavigateToBuilder: () => void;
   handleOpenScheduling: () => void;
+  handleCreateSchedule: (schedule: ExamSchedule) => Promise<void>;
   handleBackToAdmin: () => void;
   reload: () => Promise<void>;
 }
@@ -159,6 +160,10 @@ export function useReviewRouteController(
     });
   }, [examId, navigate]);
 
+  const handleCreateSchedule = useCallback(async (schedule: ExamSchedule) => {
+    await examRepository.saveSchedule(schedule);
+  }, []);
+
   const handleBackToAdmin = useCallback(() => {
     navigate('/admin');
   }, [navigate]);
@@ -177,6 +182,7 @@ export function useReviewRouteController(
     handleRepublishVersion,
     handleNavigateToBuilder,
     handleOpenScheduling,
+    handleCreateSchedule,
     handleBackToAdmin,
     reload: loadExam,
   };

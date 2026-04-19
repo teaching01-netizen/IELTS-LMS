@@ -1,13 +1,17 @@
 import React from 'react';
 import { useParams } from 'react-router-dom';
+import { ScheduleSessionModal } from '../../../components/admin/ScheduleSessionModal';
 import { ExamVersionHistory } from '../../../components/admin/ExamVersionHistory';
 import { PublishActions } from '../components/PublishActions';
 import { ValidationSummary } from '../components/ValidationSummary';
 import { useReviewRouteController } from '../hooks/useReviewRouteController';
+import { Exam } from '../../../types';
 
 export function ExamReviewRoute() {
   const { examId } = useParams<{ examId: string }>();
   const controller = useReviewRouteController(examId);
+  const [showScheduleModal, setShowScheduleModal] = React.useState(false);
+  const [scheduledTime, setScheduledTime] = React.useState('');
 
   if (controller.isLoading) {
     return (
@@ -52,7 +56,8 @@ export function ExamReviewRoute() {
                   publishReadiness={controller.publishReadiness}
                   onPublish={controller.handlePublish}
                   onSchedulePublish={controller.handleSchedulePublish}
-                  onOpenSchedulingWorkflow={controller.handleOpenScheduling}
+                  scheduledTime={scheduledTime}
+                  onOpenSchedulingWorkflow={() => setShowScheduleModal(true)}
                   onUnpublish={controller.handleUnpublish}
                   exam={{ title: controller.exam?.title || 'Untitled Exam' }}
                 />
@@ -76,6 +81,33 @@ export function ExamReviewRoute() {
             )}
           </div>
         </div>
+
+        {controller.exam && (
+          <ScheduleSessionModal
+            isOpen={showScheduleModal}
+            exams={
+              [
+                {
+                  id: controller.exam.id,
+                  title: controller.exam.title,
+                  type: controller.exam.type,
+                  status: controller.exam.status === 'published' ? 'Published' : controller.exam.status === 'archived' ? 'Archived' : 'Draft',
+                  author: controller.exam.owner,
+                  lastModified: controller.exam.updatedAt,
+                  createdAt: controller.exam.createdAt,
+                  content: controller.state as Exam['content'],
+                },
+              ] satisfies Exam[]
+            }
+            examEntities={[controller.exam]}
+            initialExamId={controller.exam.id}
+            onClose={() => setShowScheduleModal(false)}
+            onCreateSchedule={async (schedule) => {
+              await controller.handleCreateSchedule(schedule);
+              setScheduledTime(new Date(schedule.startTime).toLocaleString());
+            }}
+          />
+        )}
 
         <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-sm border-t border-slate-200 px-8 py-4">
           <div className="max-w-7xl mx-auto flex items-center justify-between">
