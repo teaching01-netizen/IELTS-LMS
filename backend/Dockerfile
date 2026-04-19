@@ -10,13 +10,13 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY Cargo.toml ./
-COPY Cargo.lock ./
-COPY crates/api/Cargo.toml ./crates/api/
-COPY crates/application/Cargo.toml ./crates/application/
-COPY crates/domain/Cargo.toml ./crates/domain/
-COPY crates/infrastructure/Cargo.toml ./crates/infrastructure/
-COPY crates/worker/Cargo.toml ./crates/worker/
+COPY backend/Cargo.toml ./
+COPY backend/Cargo.lock ./
+COPY backend/crates/api/Cargo.toml ./crates/api/
+COPY backend/crates/application/Cargo.toml ./crates/application/
+COPY backend/crates/domain/Cargo.toml ./crates/domain/
+COPY backend/crates/infrastructure/Cargo.toml ./crates/infrastructure/
+COPY backend/crates/worker/Cargo.toml ./crates/worker/
 
 RUN mkdir -p crates/api/src && printf 'fn main() {}\n' > crates/api/src/main.rs
 RUN mkdir -p crates/worker/src && printf 'fn main() {}\n' > crates/worker/src/main.rs
@@ -32,7 +32,7 @@ RUN rm -rf crates/api/src/main.rs \
     crates/domain/src/lib.rs \
     crates/infrastructure/src/lib.rs
 
-COPY crates ./crates
+COPY backend/crates ./crates
 
 RUN cargo build --release --workspace
 
