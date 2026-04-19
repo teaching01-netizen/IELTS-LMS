@@ -47,6 +47,13 @@ interface AccountActivationPayload {
   displayName?: string | undefined;
 }
 
+interface StudentEntryPayload {
+  scheduleId: string;
+  wcode: string;
+  email: string;
+  studentName: string;
+}
+
 function extractEnvelopeData<T>(response: { data?: BackendEnvelope<T> | T | undefined }): T {
   const payload = response.data;
 
@@ -119,6 +126,13 @@ class AuthService {
 
   async activateAccount(payload: AccountActivationPayload): Promise<AuthSession> {
     const response = await post<BackendEnvelope<AuthSession>>('/v1/auth/activate', payload, {
+      retries: 0,
+    });
+    return extractEnvelopeData<AuthSession>(response);
+  }
+
+  async studentEntry(payload: StudentEntryPayload): Promise<AuthSession> {
+    const response = await post<BackendEnvelope<AuthSession>>('/v1/auth/student/entry', payload, {
       retries: 0,
     });
     return extractEnvelopeData<AuthSession>(response);

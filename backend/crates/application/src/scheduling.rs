@@ -74,6 +74,44 @@ impl SchedulingService {
         .map_err(SchedulingError::from)
     }
 
+    async fn update_registration_contact(
+        &self,
+        schedule_id: Uuid,
+        wcode: &str,
+        email: &str,
+        student_name: &str,
+        user_id: Uuid,
+    ) -> Result<ScheduleRegistrationRow, SchedulingError> {
+        sqlx::query(
+            r#"
+            UPDATE schedule_registrations
+            SET
+                student_email = ?,
+                student_name = ?,
+                student_id = ?,
+                user_id = ?,
+                actor_id = ?,
+                updated_at = NOW(),
+                revision = revision + 1
+            WHERE schedule_id = ?
+              AND wcode = ?
+            "#,
+        )
+        .bind(email)
+        .bind(student_name)
+        .bind(wcode)
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .bind(schedule_id.to_string())
+        .bind(wcode)
+        .execute(&self.pool)
+        .await?;
+
+        self.load_registration_by_wcode(schedule_id, wcode)
+            .await?
+            .ok_or(SchedulingError::NotFound)
+    }
+
     pub async fn create_schedule(
         &self,
         ctx: &ActorContext,
@@ -730,7 +768,16 @@ impl SchedulingService {
                 || row.actor_id.as_deref() == Some(user_id_str.as_str());
 
             if same_user {
-                return Ok(row.into_domain());
+                let updated = self
+                    .update_registration_contact(
+                        schedule_id,
+                        &wcode,
+                        &email,
+                        &student_name,
+                        user_id,
+                    )
+                    .await?;
+                return Ok(updated.into_domain());
             }
 
             return Err(SchedulingError::Conflict(format!(
@@ -796,7 +843,16 @@ impl SchedulingService {
                     || row.actor_id.as_deref() == Some(user_id_str.as_str());
 
                 if same_user {
-                    Ok(row.into_domain())
+                    let updated = self
+                        .update_registration_contact(
+                            schedule_id,
+                            &wcode,
+                            &email,
+                            &student_name,
+                            user_id,
+                        )
+                        .await?;
+                    Ok(updated.into_domain())
                 } else {
                     Err(SchedulingError::Conflict(format!(
                         "Wcode {} is already registered for this schedule",

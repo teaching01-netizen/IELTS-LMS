@@ -13,6 +13,25 @@ function buildNextPath(location: ReturnType<typeof useLocation>) {
   return `${location.pathname}${location.search}${location.hash}`;
 }
 
+function parseStudentPath(pathname: string): { scheduleId: string; wcode?: string } | null {
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments[0] !== 'student') {
+    return null;
+  }
+
+  const scheduleId = segments[1];
+  if (!scheduleId) {
+    return null;
+  }
+
+  const wcode = segments[2];
+  if (wcode) {
+    return { scheduleId, wcode };
+  }
+
+  return { scheduleId };
+}
+
 export function RequireAuth({ allowedRoles, children }: RequireAuthProps) {
   const location = useLocation();
   const { session, status } = useAuthSession();
@@ -21,9 +40,23 @@ export function RequireAuth({ allowedRoles, children }: RequireAuthProps) {
     return <LoadingSurface label="Loading Session..." />;
   }
 
-  // Allow student routes without web auth - students authenticate via wcode, not session
-  const isStudentRoute = location.pathname.startsWith('/student/') && location.pathname.split('/').length >= 4;
-  if (!session && !isStudentRoute) {
+  if (!session) {
+    const studentPath = parseStudentPath(location.pathname);
+    if (studentPath) {
+      // Allow check-in without auth, but require a session for active exam delivery routes.
+      const isEntryRoute = location.pathname === `/student/${studentPath.scheduleId}`;
+      if (isEntryRoute) {
+        return <>{children}</>;
+      }
+
+      if (studentPath.wcode) {
+        const query = new URLSearchParams({ wcode: studentPath.wcode });
+        return <Navigate to={`/student/${studentPath.scheduleId}?${query.toString()}`} replace />;
+      }
+
+      return <Navigate to={`/student/${studentPath.scheduleId}`} replace />;
+    }
+
     return (
       <Navigate
         to={`/login?next=${encodeURIComponent(buildNextPath(location))}`}

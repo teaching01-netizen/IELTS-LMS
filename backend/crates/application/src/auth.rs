@@ -377,6 +377,40 @@ impl AuthService {
             .await
     }
 
+    pub async fn student_entry(
+        &self,
+        schedule_id: Uuid,
+        wcode: String,
+        student_name: String,
+        user_agent: Option<&str>,
+        ip_address: Option<&str>,
+    ) -> Result<SessionIssue, AuthError> {
+        let normalized_wcode = wcode.trim().to_ascii_uppercase();
+        if normalized_wcode.is_empty() {
+            return Err(AuthError::Validation("Wcode is required.".to_owned()));
+        }
+
+        let normalized_name = student_name.trim();
+        let display_name = if normalized_name.is_empty() {
+            format!("Student {normalized_wcode}")
+        } else {
+            normalized_name.to_owned()
+        };
+
+        let internal_email = build_student_entry_email(schedule_id, &normalized_wcode);
+        let user_id = self
+            .ensure_student_entry_user(&internal_email, &display_name)
+            .await?;
+
+        self.create_session(
+            user_id,
+            &UserRole::Student,
+            user_agent.map(|s| s.to_string()),
+            ip_address.map(|s| s.to_string()),
+        )
+        .await
+    }
+
     pub async fn authorize_staff_schedule(
         &self,
         principal: &AuthenticatedSession,
@@ -672,6 +706,50 @@ impl AuthService {
         Ok(actual_user_id)
     }
 
+    async fn ensure_student_entry_user(
+        &self,
+        internal_email: &str,
+        display_name: &str,
+    ) -> Result<String, AuthError> {
+        let user_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            r#"
+            INSERT INTO users (
+                id,
+                email,
+                display_name,
+                role,
+                state,
+                failed_login_count,
+                locked_until,
+                last_login_at,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, 'student', 'active', 0, NULL, NOW(), NOW(), NOW())
+            ON DUPLICATE KEY UPDATE
+                display_name = VALUES(display_name),
+                role = 'student',
+                state = 'active',
+                failed_login_count = 0,
+                locked_until = NULL,
+                last_login_at = NOW(),
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&user_id)
+        .bind(internal_email)
+        .bind(display_name)
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query_scalar("SELECT id FROM users WHERE email = ?")
+            .bind(internal_email)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(AuthError::from)
+    }
+
     async fn create_session(
         &self,
         user_id: String,
@@ -760,6 +838,10 @@ fn session_idle(role: &UserRole, config: &AppConfig) -> Duration {
         UserRole::Student => Duration::minutes(config.session_idle_timeout_student_minutes),
         _ => Duration::minutes(config.session_idle_timeout_staff_minutes),
     }
+}
+
+fn build_student_entry_email(schedule_id: Uuid, wcode: &str) -> String {
+    format!("student+{}+{}@wcode.invalid", schedule_id, wcode)
 }
 
 #[derive(FromRow)]

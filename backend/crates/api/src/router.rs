@@ -25,6 +25,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/auth",
             Router::new()
                 .route("/login", post(auth::login))
+                .route("/student/entry", post(auth::student_entry))
                 .route("/session", get(auth::session))
                 .route("/logout", post(auth::logout))
                 .route("/logout-all", post(auth::logout_all))

@@ -26,6 +26,8 @@ import {
   clearScheduleRevision,
   getExamRevision,
   getScheduleRevision,
+  isBackendBuilderEnabled,
+  isBackendSchedulingEnabled,
   isBackendNotFound,
   mapBackendExamEntity,
   mapBackendExamEvent,
@@ -33,6 +35,16 @@ import {
   mapBackendRuntime,
   mapBackendSchedule,
 } from './backendBridge';
+
+const STORAGE_KEY_EXAMS = 'ielts_exams';
+const STORAGE_KEY_VERSIONS = 'ielts_exam_versions';
+const STORAGE_KEY_EVENTS = 'ielts_exam_events';
+const STORAGE_KEY_SCHEDULES = 'ielts_exam_schedules';
+const STORAGE_KEY_RUNTIMES = 'ielts_exam_runtimes';
+const STORAGE_KEY_CONTROL_EVENTS = 'ielts_cohort_control_events';
+const STORAGE_KEY_AUDIT_LOGS = 'ielts_session_audit_logs';
+const STORAGE_KEY_SESSION_NOTES = 'ielts_session_notes';
+const STORAGE_KEY_VIOLATION_RULES = 'ielts_violation_rules';
 
 /**
  * Repository interface for exam data operations

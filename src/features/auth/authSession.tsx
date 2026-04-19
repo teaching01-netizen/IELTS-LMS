@@ -21,6 +21,12 @@ interface AuthSessionContextValue {
   session: AuthSession | null;
   status: AuthStatus;
   login: (email: string, password: string) => Promise<AuthSession>;
+  studentEntry: (payload: {
+    scheduleId: string;
+    wcode: string;
+    email: string;
+    studentName: string;
+  }) => Promise<AuthSession>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
   refresh: () => Promise<AuthSession | null>;
@@ -105,6 +111,16 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     return setSessionState(nextSession, setSession, setStatus) as AuthSession;
   }, []);
 
+  const studentEntry = useCallback(async (payload: {
+    scheduleId: string;
+    wcode: string;
+    email: string;
+    studentName: string;
+  }) => {
+    const nextSession = await authService.studentEntry(payload);
+    return setSessionState(nextSession, setSession, setStatus) as AuthSession;
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await authService.logout();
@@ -147,6 +163,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       session,
       status,
       login,
+      studentEntry,
       logout,
       logoutAll,
       refresh,
@@ -158,6 +175,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       activateAccount,
       completePasswordReset,
       login,
+      studentEntry,
       logout,
       logoutAll,
       refresh,

@@ -6,10 +6,13 @@ use axum::{
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use ielts_backend_application::auth::{AuthError, AuthService};
+use ielts_backend_application::scheduling::SchedulingService;
 use ielts_backend_domain::auth::{
     AccountActivationRequest, LoginRequest, PasswordResetCompleteRequest, PasswordResetRequest,
-    SessionResponse,
+    SessionResponse, StudentEntryRequest,
 };
+use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
+use uuid::Uuid;
 
 use ielts_backend_infrastructure::rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult};
 
@@ -241,6 +244,92 @@ pub async fn complete_password_reset(
         &issued.session_token,
         &issued.response.csrf_token,
     );
+    Ok((
+        jar,
+        ApiResponse::success_with_request_id(issued.response, request_id.0),
+    ))
+}
+
+pub async fn student_entry(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    jar: CookieJar,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<StudentEntryRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let schedule_id = Uuid::parse_str(req.schedule_id.trim()).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            "Schedule ID must be a UUID.",
+        )
+    })?;
+
+    if req.wcode.trim().is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            "Wcode is required.",
+        ));
+    }
+
+    if req.student_name.trim().is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            "Student name is required.",
+        ));
+    }
+
+    if req.email.trim().is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            "Email is required.",
+        ));
+    }
+
+    let auth_service = AuthService::new(state.db_pool(), state.config.clone());
+    let issued = auth_service
+        .student_entry(
+            schedule_id,
+            req.wcode.clone(),
+            req.student_name.clone(),
+            user_agent(&headers),
+            ip_address(&headers),
+        )
+        .await
+        .map_err(map_auth_error)?;
+
+    let user_id = Uuid::parse_str(&issued.response.user.id).map_err(|_| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "INTERNAL_ERROR",
+            "Issued session contained an invalid user id.",
+        )
+    })?;
+
+    let ctx = ActorContext::new(user_id.to_string(), ActorRole::Student)
+        .with_schedule_scope_id(schedule_id.to_string());
+    let scheduling_service = SchedulingService::new(state.db_pool());
+    scheduling_service
+        .create_student_registration(
+            &ctx,
+            schedule_id,
+            req.wcode,
+            req.email,
+            req.student_name,
+            user_id,
+        )
+        .await?;
+
+    let jar = with_auth_cookies(
+        jar,
+        &state,
+        &issued.session_token,
+        &issued.response.csrf_token,
+    );
+
     Ok((
         jar,
         ApiResponse::success_with_request_id(issued.response, request_id.0),

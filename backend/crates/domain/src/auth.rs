@@ -268,6 +268,15 @@ pub struct AccountActivationRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StudentEntryRequest {
+    pub schedule_id: String,
+    pub wcode: String,
+    pub email: String,
+    pub student_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IssueAttemptToken {
     pub attempt_token: String,
     pub expires_at: DateTime<Utc>,

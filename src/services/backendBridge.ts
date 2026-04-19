@@ -144,6 +144,10 @@ function envFlag(name: string): boolean {
   return String(env[name] ?? 'false') === 'true';
 }
 
+function featureFlag(viteName: string, legacyName: string): boolean {
+  return envFlag(viteName) || envFlag(legacyName);
+}
+
 function readCookie(name: string): string | null {
   if (typeof document === 'undefined') {
     return null;
@@ -163,7 +167,6 @@ function hasAuthenticatedSessionCookie(): boolean {
   const cookieNames = [
     typeof configuredName === 'string' ? configuredName : null,
     '__Host-session',
-    'session',
   ].filter((value): value is string => Boolean(value));
 
   return cookieNames.some((cookieName) => Boolean(readCookie(cookieName)));
@@ -197,27 +200,36 @@ function compactObject<T extends Record<string, unknown>>(value: T): T {
 }
 
 export function isBackendBuilderEnabled(): boolean {
-  return true; // Always use backend API for cross-device synchronization
+  return featureFlag('VITE_FEATURE_USE_BACKEND_BUILDER', 'FEATURE_USE_BACKEND_BUILDER');
 }
 
 export function isBackendLibraryEnabled(): boolean {
-  return true; // Always use backend API for cross-device synchronization
+  return isBackendBuilderEnabled() || hasAuthenticatedSessionCookie();
 }
 
 export function isBackendSchedulingEnabled(): boolean {
-  return true; // Always use backend API for cross-device synchronization
+  return (
+    featureFlag('VITE_FEATURE_USE_BACKEND_SCHEDULING', 'FEATURE_USE_BACKEND_SCHEDULING') ||
+    hasAuthenticatedSessionCookie()
+  );
 }
 
 export function isBackendDeliveryEnabled(): boolean {
-  return true; // Always use backend API for cross-device synchronization
+  return featureFlag('VITE_FEATURE_USE_BACKEND_DELIVERY', 'FEATURE_USE_BACKEND_DELIVERY');
 }
 
 export function isBackendProctoringEnabled(): boolean {
-  return true; // Always use backend API for cross-device synchronization
+  return (
+    featureFlag('VITE_FEATURE_USE_BACKEND_PROCTORING', 'FEATURE_USE_BACKEND_PROCTORING') ||
+    hasAuthenticatedSessionCookie()
+  );
 }
 
 export function isBackendGradingEnabled(): boolean {
-  return true; // Always use backend API for cross-device synchronization
+  return (
+    featureFlag('VITE_FEATURE_USE_BACKEND_GRADING', 'FEATURE_USE_BACKEND_GRADING') ||
+    hasAuthenticatedSessionCookie()
+  );
 }
 
 export function hasBackendStatusCode(error: unknown, statusCode: number): boolean {
