@@ -18,6 +18,7 @@ pub struct AppConfig {
     pub worker_outbox_notify_channel: String,
     pub live_mode_notify_channel: String,
     pub storage_budget_thresholds: StorageBudgetThresholds,
+    pub frontend_dist_dir: String,
     pub auth_session_cookie_name: String,
     pub auth_csrf_cookie_name: String,
     pub auth_secret: String,
@@ -113,6 +114,10 @@ impl AppConfig {
                     .and_then(|value| value.parse().ok())
                     .unwrap_or(default.storage_budget_thresholds.critical_bytes),
             },
+            frontend_dist_dir: env::var("FRONTEND_DIST_DIR")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(default.frontend_dist_dir),
             auth_session_cookie_name: env::var("AUTH_SESSION_COOKIE_NAME")
                 .ok()
                 .filter(|value| !value.trim().is_empty())
@@ -251,6 +256,7 @@ impl Default for AppConfig {
             worker_outbox_notify_channel: "backend_outbox_wakeup".to_owned(),
             live_mode_notify_channel: "backend_live_wakeup".to_owned(),
             storage_budget_thresholds: StorageBudgetThresholds::default(),
+            frontend_dist_dir: "/app/frontend/dist".to_owned(),
             auth_session_cookie_name: "__Host-session".to_owned(),
             auth_csrf_cookie_name: "__Host-csrf".to_owned(),
             auth_secret: "dev-auth-secret-change-me".to_owned(),
@@ -289,5 +295,15 @@ fn parse_bool(value: &str) -> Option<bool> {
         "1" | "true" | "yes" | "on" => Some(true),
         "0" | "false" | "no" | "off" => Some(false),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppConfig;
+
+    #[test]
+    fn default_frontend_dist_dir_points_at_the_runtime_image_path() {
+        assert_eq!(AppConfig::default().frontend_dist_dir, "/app/frontend/dist");
     }
 }

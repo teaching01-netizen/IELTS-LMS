@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ExamState, ListeningPart, QuestionBlock } from '../../types';
 import { QuestionBuilderPane } from '../QuestionBuilderPane';
 import { Play, Square, Rewind, FastForward, Volume2, MapPin, Plus, Trash2, Link as LinkIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { normalizeAudioUrl } from '../../utils/audioUrl';
 
 interface ListeningWorkspaceProps {
   state: ExamState;
@@ -15,6 +16,7 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(80);
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
+  const [audioInputMode, setAudioInputMode] = useState<'googleDrive' | 'direct'>('googleDrive');
   const [isQuestionBuilderCollapsed, setIsQuestionBuilderCollapsed] = useState(() => {
     const saved = localStorage.getItem('listening-question-builder-collapsed');
     return saved === 'true';
@@ -95,6 +97,10 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
       p.id === activePart.id ? { ...p, ...updates } : p
     );
     setState({ ...state, listening: { ...state.listening, parts: newParts } });
+  };
+
+  const handleAudioUrlChange = (value: string) => {
+    updatePart({ audioUrl: normalizeAudioUrl(value) });
   };
 
   const formatTime = (seconds: number) => {
@@ -206,17 +212,53 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
         <div className="p-8 flex flex-col items-center overflow-y-auto">
           <div className="w-full max-w-lg">
             <div className="mb-6">
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-2">Audio URL</label>
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-2">
+                Audio Source
+              </span>
+              <div className="mb-3 inline-flex rounded-md border border-gray-200 bg-gray-50 p-1 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setAudioInputMode('googleDrive')}
+                  className={`rounded px-3 py-1.5 transition-colors ${
+                    audioInputMode === 'googleDrive'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                  aria-pressed={audioInputMode === 'googleDrive'}
+                >
+                  Google Drive URL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAudioInputMode('direct')}
+                  className={`rounded px-3 py-1.5 transition-colors ${
+                    audioInputMode === 'direct'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                  aria-pressed={audioInputMode === 'direct'}
+                >
+                  Direct URL
+                </button>
+              </div>
               <div className="relative">
                 <LinkIcon size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="url"
+                  aria-label="Audio URL"
                   value={activePart.audioUrl || ''}
-                  onChange={(e) => updatePart({ audioUrl: e.target.value })}
-                  placeholder="https://example.com/audio.mp3"
+                  onChange={(e) => handleAudioUrlChange(e.target.value)}
+                  placeholder={
+                    audioInputMode === 'googleDrive'
+                      ? 'Paste a Google Drive share link'
+                      : 'Paste a direct audio URL'
+                  }
                   className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-sm text-sm outline-none focus:border-blue-700 focus:ring-1 focus:ring-blue-700 transition-colors text-gray-800"
                 />
               </div>
+              <p className="mt-2 text-xs text-gray-500">
+                Google Drive share links are converted to a direct playback URL when possible. The file must be shared so anyone with the link can access it.
+              </p>
             </div>
 
             {activePart.audioUrl && (

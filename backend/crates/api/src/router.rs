@@ -5,6 +5,7 @@ use axum::{
 };
 
 use crate::{
+    frontend,
     http::request_id::request_id_middleware,
     routes::{
         auth, exams, grading, health, library, media, proctor, results, schedules, settings,
@@ -229,6 +230,7 @@ pub fn build_router(state: AppState) -> Router {
                 .route("/:asset_id", get(media::get_asset)),
         )
         .route("/api/v1/ws/*path", get(ws::websocket_live))
+        .fallback(frontend::serve_frontend)
         .layer(middleware::from_fn_with_state(
             middleware_state,
             request_id_middleware,

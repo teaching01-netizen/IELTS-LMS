@@ -9,6 +9,7 @@ pub mod http {
     pub mod response;
 }
 
+pub mod frontend;
 pub mod live_updates;
 pub mod router;
 pub mod routes;

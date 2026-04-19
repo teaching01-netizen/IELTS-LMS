@@ -18,6 +18,7 @@ serde_json = "1.0.133"
 sqlx = { version = "0.7.4", features = ["postgres", "runtime-tokio-rustls", "uuid"] }
 tokio = { version = "1.42.0", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5.2", features = ["limit", "util"] }
+tower-http = { version = "0.6.6", features = ["fs"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
 uuid = { version = "1.11.0", features = ["v4"] }
@@ -50,3 +51,7 @@ path = "../../tests/contracts/grading_contract.rs"
 [[test]]
 name = "auth_contract"
 path = "../../tests/contracts/auth_contract.rs"
+
+[[test]]
+name = "frontend_static"
+path = "../../tests/frontend_static.rs"
