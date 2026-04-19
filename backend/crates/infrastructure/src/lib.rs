@@ -7,6 +7,7 @@ pub mod config;
 pub mod database_monitor;
 pub mod idempotency;
 pub mod live_mode;
+pub mod migrations;
 pub mod object_store;
 pub mod outbox;
 pub mod pool;

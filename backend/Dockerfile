@@ -52,14 +52,18 @@ RUN apt-get update && apt-get install -y \
 ENV FRONTEND_DIST_DIR=/app/frontend/dist
 
 COPY --from=backend-builder /app/backend/target/release/ielts-backend-api /app/api
+COPY --from=backend-builder /app/backend/target/release/migrate /app/migrate
 COPY --from=backend-builder /app/backend/target/release/ielts-backend-worker /app/worker
 COPY --from=frontend-builder /app/dist /app/frontend/dist
+COPY backend/migrations /app/migrations
 
 RUN cat > /app/start.sh << 'EOF'
 #!/bin/bash
 set -euo pipefail
 
 echo "Starting IELTS Backend Service..."
+
+/app/migrate
 
 /app/api &
 API_PID=$!
