@@ -20,8 +20,8 @@ The browser loads the app from `/` and talks to the backend on the same origin u
 
 Make sure these files are present:
 
-- `backend/Dockerfile`
-- `backend/railway.json`
+- `Dockerfile`
+- `railway.json`
 - `.dockerignore`
 - `backend/.env.railway` or equivalent Railway variables
 
@@ -38,10 +38,10 @@ The frontend no longer needs a separate Railway service or a separate backend UR
 
 Set the app service to use:
 
-- Dockerfile: `backend/Dockerfile`
+- Dockerfile: `Dockerfile`
 - build context: repository root
 
-If you use the committed Railway config, `backend/railway.json` already points Railway at the correct Dockerfile and health check.
+If you use the committed Railway config, `railway.json` already points Railway at the correct Dockerfile and health check.
 
 ### Required Environment Variables
 
