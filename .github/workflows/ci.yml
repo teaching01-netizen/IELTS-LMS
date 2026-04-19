@@ -123,3 +123,32 @@ jobs:
         with:
           uploadArtifacts: true
           temporaryPublicStorage: true
+
+  railway-deploy:
+    runs-on: ubuntu-latest
+    needs: [quality-gates]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        run: railway up --service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Run Unit Tests Against Production
+        run: |
+          # Wait for deployment to be healthy
+          echo "Waiting for Railway deployment to be healthy..."
+          sleep 30
+          
+          # Get the deployment URL
+          DEPLOYMENT_URL=$(railway domain --service)
+          echo "Testing against: $DEPLOYMENT_URL"
+          
+          # Run unit tests with production environment
+          VITE_API_BASE_URL=https://$DEPLOYMENT_URL npm run test:run

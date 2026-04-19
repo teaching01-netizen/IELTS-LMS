@@ -3,7 +3,8 @@
   "build": {
     "builder": "DOCKERFILE",
     "dockerfilePath": "backend/Dockerfile",
-    "dockerContext": "."
+    "dockerContext": ".",
+    "preBuild": "npm ci && npm run test:run"
   },
   "deploy": {
     "healthcheckPath": "/healthz",
