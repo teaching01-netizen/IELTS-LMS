@@ -172,7 +172,7 @@ async fn roles_exist(pool: &PgPool) -> Result<bool, sqlx::Error> {
 }
 
 async fn is_migration_applied(pool: &PgPool, filename: &str) -> Result<bool, sqlx::Error> {
-    let value: Option<i64> = sqlx::query_scalar("select 1 from schema_migrations where filename = $1")
+    let value: Option<i32> = sqlx::query_scalar("select 1 from schema_migrations where filename = $1")
         .bind(filename)
         .fetch_optional(pool)
         .await?;
