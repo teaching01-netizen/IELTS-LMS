@@ -272,14 +272,16 @@ pub async fn acknowledge_alert(
     Path(alert_id): Path<Uuid>,
     Json(req): Json<AlertAckRequest>,
 ) -> Result<ApiResponse<SessionAuditLog>, ApiError> {
-    let schedule_id: Uuid = sqlx::query_scalar(
+    let schedule_id_str: String = sqlx::query_scalar(
         "SELECT schedule_id FROM session_audit_logs WHERE id = ?",
     )
-    .bind(alert_id)
+    .bind(alert_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
     .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    let schedule_id: Uuid = Uuid::parse_str(&schedule_id_str)
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "PARSE_ERROR", "Invalid schedule ID in audit log"))?;
     authorize_schedule(&state, &principal, schedule_id).await?;
     let ctx = crate::http::auth::actor_context_from_principal(&principal)
         .with_schedule_scope_id(schedule_id.to_string());
@@ -350,8 +352,8 @@ async fn assigned_schedule_ids(
         r#"
         SELECT schedule_id
         FROM schedule_staff_assignments
-        WHERE user_id = $1
-          AND role = $2
+        WHERE user_id = ?
+          AND role = ?
           AND revoked_at IS NULL
         "#,
     )

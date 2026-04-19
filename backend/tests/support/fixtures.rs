@@ -117,14 +117,14 @@ pub async fn create_test_attempt(
     pool: &MySqlPool,
     schedule_id: Uuid,
     student_key: &str,
-    exam_version_id: Uuid,
+    published_version_id: Uuid,
 ) -> Result<Uuid, sqlx::Error> {
     let attempt_id = Uuid::new_v4();
     
     sqlx::query(
         r#"
         INSERT INTO student_attempts (
-            id, schedule_id, student_key, exam_version_id,
+            id, schedule_id, student_key, published_version_id,
             started_at, last_mutation_sequence, status,
             created_at, updated_at
         )
@@ -134,7 +134,7 @@ pub async fn create_test_attempt(
     .bind(attempt_id)
     .bind(schedule_id)
     .bind(student_key)
-    .bind(exam_version_id)
+    .bind(published_version_id)
     .execute(pool)
     .await?;
     

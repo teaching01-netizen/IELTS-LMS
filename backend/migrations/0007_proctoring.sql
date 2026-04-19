@@ -2,9 +2,9 @@
 -- Note: Proctoring columns already added to student_attempts in 0006_delivery.sql
 
 CREATE TABLE IF NOT EXISTS student_violation_events (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL,
-    attempt_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL,
+    attempt_id VARCHAR(36) NOT NULL,
     violation_type VARCHAR(255) NOT NULL,
     severity VARCHAR(50) NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
     description TEXT NOT NULL,
@@ -20,8 +20,8 @@ CREATE INDEX IF NOT EXISTS idx_student_violation_events_attempt_created
     ON student_violation_events(attempt_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS proctor_presence (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL,
     proctor_id VARCHAR(255) NOT NULL,
     proctor_name VARCHAR(255) NOT NULL,
     status VARCHAR(50) NOT NULL CHECK (status IN ('active', 'left')),
@@ -37,11 +37,11 @@ CREATE INDEX IF NOT EXISTS idx_proctor_presence_schedule_heartbeat
     ON proctor_presence(schedule_id, last_heartbeat_at DESC);
 
 CREATE TABLE IF NOT EXISTS session_audit_logs (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL,
     actor VARCHAR(255) NOT NULL,
     action_type VARCHAR(255) NOT NULL,
-    target_student_id CHAR(36),
+    target_student_id VARCHAR(36),
     payload JSON,
     acknowledged_at TIMESTAMP,
     acknowledged_by VARCHAR(255),
@@ -56,8 +56,8 @@ CREATE INDEX IF NOT EXISTS idx_session_audit_logs_target_created
     ON session_audit_logs(target_student_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS session_notes (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL,
     author VARCHAR(255) NOT NULL,
     category VARCHAR(50) NOT NULL CHECK (category IN ('general', 'incident', 'handover')),
     content TEXT NOT NULL,
@@ -71,8 +71,8 @@ CREATE INDEX IF NOT EXISTS idx_session_notes_schedule_created
     ON session_notes(schedule_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS violation_rules (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL,
     trigger_type VARCHAR(50) NOT NULL CHECK (trigger_type IN ('violation_count', 'specific_violation_type', 'severity_threshold')),
     threshold INT NOT NULL CHECK (threshold > 0),
     specific_violation_type VARCHAR(255),

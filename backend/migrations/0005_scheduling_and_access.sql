@@ -1,11 +1,11 @@
 -- Scheduling and runtime tables
 
 CREATE TABLE IF NOT EXISTS exam_schedules (
-    id CHAR(36) PRIMARY KEY,
-    exam_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    exam_id VARCHAR(36) NOT NULL,
     organization_id VARCHAR(255),
     exam_title VARCHAR(255) NOT NULL,
-    published_version_id CHAR(36) NOT NULL,
+    published_version_id VARCHAR(36) NOT NULL,
     cohort_name VARCHAR(255) NOT NULL,
     institution VARCHAR(255),
     start_time TIMESTAMP NOT NULL,
@@ -33,8 +33,8 @@ CREATE INDEX IF NOT EXISTS idx_exam_schedules_exam_start ON exam_schedules(exam_
 CREATE INDEX IF NOT EXISTS idx_exam_schedules_version ON exam_schedules(published_version_id);
 
 CREATE TABLE IF NOT EXISTS schedule_registrations (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL,
     student_key VARCHAR(255) NOT NULL,
     actor_id VARCHAR(255),
     student_id VARCHAR(255) NOT NULL,
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS schedule_registrations (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     revision INT NOT NULL DEFAULT 0,
     wcode VARCHAR(10) NOT NULL DEFAULT '',
-    user_id CHAR(36),
+    user_id VARCHAR(36),
     CONSTRAINT schedule_registrations_schedule_student_key UNIQUE (schedule_id, student_key),
     FOREIGN KEY (schedule_id) REFERENCES exam_schedules(id) ON DELETE CASCADE
 );
@@ -68,14 +68,14 @@ CREATE INDEX IF NOT EXISTS idx_schedule_registrations_schedule_user_active
 CREATE INDEX IF NOT EXISTS idx_schedule_registrations_wcode ON schedule_registrations(wcode);
 
 CREATE TABLE IF NOT EXISTS schedule_staff_assignments (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL,
     actor_id VARCHAR(255) NOT NULL,
     role VARCHAR(50) NOT NULL CHECK (role IN ('proctor', 'grader', 'admin_observer')),
     granted_by VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     revoked_at TIMESTAMP,
-    user_id CHAR(36),
+    user_id VARCHAR(36),
     FOREIGN KEY (schedule_id) REFERENCES exam_schedules(id) ON DELETE CASCADE
 );
 
@@ -87,9 +87,9 @@ CREATE INDEX IF NOT EXISTS idx_schedule_staff_assignments_user_role_created
     ON schedule_staff_assignments(user_id, role, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS exam_session_runtimes (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL UNIQUE,
-    exam_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL UNIQUE,
+    exam_id VARCHAR(36) NOT NULL,
     status VARCHAR(50) NOT NULL CHECK (status IN ('not_started', 'live', 'paused', 'completed', 'cancelled')),
     plan_snapshot JSON NOT NULL,
     actual_start_at TIMESTAMP,
@@ -108,8 +108,8 @@ CREATE TABLE IF NOT EXISTS exam_session_runtimes (
 );
 
 CREATE TABLE IF NOT EXISTS exam_session_runtime_sections (
-    id CHAR(36) PRIMARY KEY,
-    runtime_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    runtime_id VARCHAR(36) NOT NULL,
     section_key VARCHAR(50) NOT NULL CHECK (section_key IN ('listening', 'reading', 'writing', 'speaking')),
     label VARCHAR(255) NOT NULL,
     section_order INT NOT NULL,
@@ -133,10 +133,10 @@ CREATE INDEX IF NOT EXISTS idx_runtime_sections_runtime_order
     ON exam_session_runtime_sections(runtime_id, section_order);
 
 CREATE TABLE IF NOT EXISTS cohort_control_events (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL,
-    runtime_id CHAR(36) NOT NULL,
-    exam_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL,
+    runtime_id VARCHAR(36) NOT NULL,
+    exam_id VARCHAR(36) NOT NULL,
     actor_id VARCHAR(255) NOT NULL,
     action VARCHAR(50) NOT NULL CHECK (action IN ('start_runtime', 'pause_runtime', 'resume_runtime', 'extend_section', 'end_section_now', 'complete_runtime', 'auto_timeout')),
     section_key VARCHAR(50),

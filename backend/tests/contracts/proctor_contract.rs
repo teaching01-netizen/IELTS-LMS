@@ -203,7 +203,7 @@ async fn presence_and_student_commands_update_session_state_and_alerts() {
     assert_eq!(violation_events, 1);
 
     let audit_logs: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND attempt_id = ? AND action_type = 'STUDENT_WARN'",
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND target_student_id = ? AND action_type = 'STUDENT_WARN'",
     )
     .bind(schedule_id.to_string())
     .bind(attempt_id.to_string())

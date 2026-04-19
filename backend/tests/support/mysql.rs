@@ -196,7 +196,7 @@ pub async fn create_authenticated_user(
         VALUES (?, ?, ?, ?, ?, 0, ?, ?)
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(email)
     .bind(display_name)
     .bind(role_sql(&role))
@@ -210,7 +210,7 @@ pub async fn create_authenticated_user(
     sqlx::query(
         "INSERT INTO user_password_credentials (user_id, password_hash, updated_at) VALUES (?, ?, ?)",
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(password_hash)
     .bind(now)
     .execute(pool)
@@ -225,7 +225,7 @@ pub async fn create_authenticated_user(
                 VALUES (?, ?, ?, ?, ?, ?)
                 "#,
             )
-            .bind(user_id)
+            .bind(user_id.to_string())
             .bind(email.split('@').next().unwrap_or("student"))
             .bind(display_name)
             .bind(email)
@@ -242,7 +242,7 @@ pub async fn create_authenticated_user(
                 VALUES (?, ?, ?, ?, ?)
                 "#,
             )
-            .bind(user_id)
+            .bind(user_id.to_string())
             .bind(display_name)
             .bind(email)
             .bind(now)
@@ -262,8 +262,8 @@ pub async fn create_authenticated_user(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(user_id)
+    .bind(Uuid::new_v4().to_string())
+    .bind(user_id.to_string())
     .bind(sha256_hex(&session_token))
     .bind(&csrf_token)
     .bind(role_sql(&role))
@@ -302,9 +302,9 @@ pub async fn assign_staff_to_schedule(
         VALUES (?, ?, ?, ?, ?, ?, NOW())
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(schedule_id)
-    .bind(user_id)
+    .bind(Uuid::new_v4().to_string())
+    .bind(schedule_id.to_string())
+    .bind(user_id.to_string())
     .bind(user_id.to_string())
     .bind(role)
     .bind(user_id.to_string())
@@ -326,9 +326,9 @@ pub async fn bind_student_registration(
         WHERE schedule_id = ? AND student_key = ?
         "#,
     )
-    .bind(user_id)
     .bind(user_id.to_string())
-    .bind(schedule_id)
+    .bind(user_id.to_string())
+    .bind(schedule_id.to_string())
     .bind(student_key)
     .execute(pool)
     .await
@@ -353,9 +353,9 @@ pub async fn create_student_registration(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', NOW(), NOW())
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(schedule_id)
-    .bind(user_id)
+    .bind(Uuid::new_v4().to_string())
+    .bind(schedule_id.to_string())
+    .bind(user_id.to_string())
     .bind(user_id.to_string())
     .bind(&student_key)
     .bind(student_id)

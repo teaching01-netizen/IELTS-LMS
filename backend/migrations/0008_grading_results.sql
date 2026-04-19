@@ -1,11 +1,11 @@
 -- Grading, submissions, and released results
 
 CREATE TABLE IF NOT EXISTS grading_sessions (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL UNIQUE,
-    exam_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL UNIQUE,
+    exam_id VARCHAR(36) NOT NULL,
     exam_title VARCHAR(255) NOT NULL,
-    published_version_id CHAR(36) NOT NULL,
+    published_version_id VARCHAR(36) NOT NULL,
     cohort_name VARCHAR(255) NOT NULL,
     institution VARCHAR(255),
     start_time TIMESTAMP NOT NULL,
@@ -27,11 +27,11 @@ CREATE TABLE IF NOT EXISTS grading_sessions (
 );
 
 CREATE TABLE IF NOT EXISTS student_submissions (
-    id CHAR(36) PRIMARY KEY,
-    attempt_id CHAR(36) NOT NULL UNIQUE,
-    schedule_id CHAR(36) NOT NULL,
-    exam_id CHAR(36) NOT NULL,
-    published_version_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    attempt_id VARCHAR(36) NOT NULL UNIQUE,
+    schedule_id VARCHAR(36) NOT NULL,
+    exam_id VARCHAR(36) NOT NULL,
+    published_version_id VARCHAR(36) NOT NULL,
     student_id VARCHAR(255) NOT NULL,
     student_name VARCHAR(255) NOT NULL,
     student_email VARCHAR(255),
@@ -60,8 +60,8 @@ CREATE INDEX IF NOT EXISTS idx_student_submissions_status_updated
     ON student_submissions(grading_status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS section_submissions (
-    id CHAR(36) PRIMARY KEY,
-    submission_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    submission_id VARCHAR(36) NOT NULL,
     section VARCHAR(50) NOT NULL CHECK (section IN ('listening', 'reading', 'writing', 'speaking')),
     answers JSON NOT NULL,
     auto_grading_results JSON,
@@ -76,9 +76,9 @@ CREATE TABLE IF NOT EXISTS section_submissions (
 );
 
 CREATE TABLE IF NOT EXISTS writing_task_submissions (
-    id CHAR(36) PRIMARY KEY,
-    section_submission_id CHAR(36) NOT NULL,
-    submission_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    section_submission_id VARCHAR(36) NOT NULL,
+    submission_id VARCHAR(36) NOT NULL,
     task_id VARCHAR(255) NOT NULL,
     task_label VARCHAR(255) NOT NULL,
     prompt TEXT NOT NULL,
@@ -100,8 +100,8 @@ CREATE TABLE IF NOT EXISTS writing_task_submissions (
 );
 
 CREATE TABLE IF NOT EXISTS review_drafts (
-    id CHAR(36) PRIMARY KEY,
-    submission_id CHAR(36) NOT NULL UNIQUE,
+    id VARCHAR(36) PRIMARY KEY,
+    submission_id VARCHAR(36) NOT NULL UNIQUE,
     student_id VARCHAR(255) NOT NULL,
     teacher_id VARCHAR(255) NOT NULL,
     release_status VARCHAR(50) NOT NULL CHECK (release_status IN ('draft', 'grading_complete', 'ready_to_release', 'released', 'reopened')),
@@ -122,8 +122,8 @@ CREATE TABLE IF NOT EXISTS review_drafts (
 );
 
 CREATE TABLE IF NOT EXISTS review_events (
-    id CHAR(36) PRIMARY KEY,
-    submission_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    submission_id VARCHAR(36) NOT NULL,
     teacher_id VARCHAR(255) NOT NULL,
     teacher_name VARCHAR(255) NOT NULL,
     action VARCHAR(255) NOT NULL CHECK (action IN ('review_started', 'review_assigned', 'draft_saved', 'comment_added', 'comment_updated', 'rubric_updated', 'review_finalized', 'review_reopened', 'score_override', 'feedback_updated', 'release_now', 'mark_ready_to_release')),
@@ -142,8 +142,8 @@ CREATE INDEX IF NOT EXISTS idx_review_events_submission_created
     ON review_events(submission_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS student_results (
-    id CHAR(36) PRIMARY KEY,
-    submission_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    submission_id VARCHAR(36) NOT NULL,
     student_id VARCHAR(255) NOT NULL,
     student_name VARCHAR(255) NOT NULL,
     release_status VARCHAR(50) NOT NULL CHECK (release_status IN ('draft', 'grading_complete', 'ready_to_release', 'released', 'reopened')),
@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS student_results (
     speaking_result JSON,
     teacher_summary JSON NOT NULL,
     version INT NOT NULL DEFAULT 1,
-    previous_version_id CHAR(36),
+    previous_version_id VARCHAR(36),
     revision_reason TEXT,
     authorized_actor_id VARCHAR(255),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -173,9 +173,9 @@ CREATE INDEX IF NOT EXISTS idx_student_results_release_status_updated
     ON student_results(release_status, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS release_events (
-    id CHAR(36) PRIMARY KEY,
-    result_id CHAR(36) NOT NULL,
-    submission_id CHAR(36) NOT NULL,
+    id VARCHAR(36) PRIMARY KEY,
+    result_id VARCHAR(36) NOT NULL,
+    submission_id VARCHAR(36) NOT NULL,
     actor_id VARCHAR(255) NOT NULL,
     action VARCHAR(255) NOT NULL,
     payload JSON,

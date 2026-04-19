@@ -141,7 +141,12 @@ pub async fn create_student_registration(
     Path(schedule_id): Path<Uuid>,
     Json(req): Json<StudentRegistrationRequest>,
 ) -> Result<ApiResponse<ielts_backend_domain::attempt::StudentRegistrationResponse>, ApiError> {
-    principal.require_one_of(&[UserRole::Student])?;
+    principal.require_one_of(&[
+        UserRole::Student,
+        UserRole::Admin,
+        UserRole::Builder,
+        UserRole::Proctor,
+    ])?;
     let ctx = principal.actor_context();
     let service = SchedulingService::new(state.db_pool());
     

@@ -647,7 +647,7 @@ impl DeliveryService {
                 answers, writing_answers, flags, violations_snapshot, integrity, recovery,
                 created_at, updated_at, revision
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), 0)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), 0)
             "#,
         )
         .bind(attempt_id.to_string())
@@ -754,7 +754,7 @@ impl DeliveryService {
 
     async fn load_schedule(&self, schedule_id: Uuid) -> Result<ExamSchedule, DeliveryError> {
         sqlx::query_as::<_, ExamSchedule>(
-            "SELECT id, CAST(exam_id AS CHAR) as exam_id, CAST(exam_version_id AS CHAR) as exam_version_id, title, start_time, end_time, duration_minutes, CAST(created_by AS CHAR) as created_by, CAST(organization_id AS CHAR) as organization_id, created_at, updated_at, status FROM exam_schedules WHERE id = ?"
+            "SELECT * FROM exam_schedules WHERE id = ?"
         )
             .bind(schedule_id.to_string())
             .fetch_optional(&self.pool)

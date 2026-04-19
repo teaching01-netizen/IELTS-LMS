@@ -459,7 +459,7 @@ impl ProctoringService {
             UPDATE exam_session_runtime_sections
             SET
                 extension_minutes = extension_minutes + ?,
-                projected_end_at = COALESCE(projected_end_at, NOW()) + INTERVAL (? MINUTE)
+                projected_end_at = COALESCE(projected_end_at, NOW()) + INTERVAL ? MINUTE
             WHERE runtime_id = ? AND section_key = ?
             "#,
         )
@@ -677,7 +677,7 @@ impl ProctoringService {
             VALUES (?, ?, ?, 'PROCTOR_WARNING', 'medium', ?, ?, NOW())
             "#,
         )
-        .bind(warning_id)
+        .bind(warning_id.to_string())
         .bind(schedule_id.to_string())
         .bind(attempt_id.to_string())
         .bind(&description)
@@ -839,7 +839,7 @@ impl ProctoringService {
         let alert: SessionAuditLog = sqlx::query_as(
             "SELECT * FROM session_audit_logs WHERE id = ?"
         )
-        .bind(alert_id)
+        .bind(alert_id.to_string())
         .fetch_optional(&self.pool)
         .await?
         .ok_or(ProctoringError::NotFound)?;
@@ -866,12 +866,12 @@ impl ProctoringService {
             "#,
         )
         .bind(&ctx.actor_id.to_string())
-        .bind(alert_id)
+        .bind(alert_id.to_string())
         .execute(&self.pool)
             .await?;
 
         sqlx::query_as::<_, SessionAuditLog>("SELECT * FROM session_audit_logs WHERE id = ?")
-            .bind(alert_id)
+            .bind(alert_id.to_string())
             .fetch_optional(&self.pool)
             .await?
             .ok_or(ProctoringError::NotFound)
@@ -1300,7 +1300,7 @@ async fn insert_audit_log(
     sqlx::query(
         r#"
         INSERT INTO session_audit_logs (
-            id, schedule_id, actor, action_type, target_attempt_id, metadata, created_at
+            id, schedule_id, actor, action_type, target_student_id, payload, created_at
         )
         VALUES (?, ?, ?, ?, ?, ?, NOW())
         "#,

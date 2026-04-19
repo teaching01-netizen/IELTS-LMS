@@ -1,13 +1,13 @@
 -- Student delivery tables
 
 CREATE TABLE IF NOT EXISTS student_attempts (
-    id CHAR(36) PRIMARY KEY,
-    schedule_id CHAR(36) NOT NULL,
-    registration_id CHAR(36),
+    id VARCHAR(36) PRIMARY KEY,
+    schedule_id VARCHAR(36) NOT NULL,
+    registration_id VARCHAR(36),
     student_key VARCHAR(255) NOT NULL,
     organization_id VARCHAR(255),
-    exam_id CHAR(36) NOT NULL,
-    published_version_id CHAR(36) NOT NULL,
+    exam_id VARCHAR(36) NOT NULL,
+    published_version_id VARCHAR(36) NOT NULL,
     exam_title VARCHAR(255) NOT NULL,
     candidate_id VARCHAR(255) NOT NULL,
     candidate_name VARCHAR(255) NOT NULL,
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS student_attempts (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     revision INT NOT NULL DEFAULT 0,
     wcode VARCHAR(10) NOT NULL DEFAULT '',
-    user_id CHAR(36),
+    user_id VARCHAR(36),
     proctor_status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK (proctor_status IN ('active', 'warned', 'paused', 'terminated', 'idle', 'connecting')),
     proctor_note TEXT,
     proctor_updated_at TIMESTAMP,
@@ -51,10 +51,10 @@ CREATE INDEX IF NOT EXISTS idx_student_attempts_schedule_user
 CREATE INDEX IF NOT EXISTS idx_student_attempts_wcode ON student_attempts(wcode);
 
 CREATE TABLE IF NOT EXISTS student_attempt_mutations (
-    id CHAR(36) NOT NULL PRIMARY KEY,
-    attempt_id CHAR(36) NOT NULL,
-    schedule_id CHAR(36) NOT NULL,
-    client_session_id CHAR(36) NOT NULL,
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    attempt_id VARCHAR(36) NOT NULL,
+    schedule_id VARCHAR(36) NOT NULL,
+    client_session_id VARCHAR(36) NOT NULL,
     mutation_type VARCHAR(255) NOT NULL,
     client_mutation_id VARCHAR(255) NOT NULL,
     mutation_seq BIGINT NOT NULL,
@@ -79,9 +79,9 @@ CREATE INDEX IF NOT EXISTS idx_student_attempt_mutations_server_received_at
     ON student_attempt_mutations(server_received_at);
 
 CREATE TABLE IF NOT EXISTS student_heartbeat_events (
-    id CHAR(36) NOT NULL PRIMARY KEY,
-    attempt_id CHAR(36) NOT NULL,
-    schedule_id CHAR(36) NOT NULL,
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    attempt_id VARCHAR(36) NOT NULL,
+    schedule_id VARCHAR(36) NOT NULL,
     event_type VARCHAR(50) NOT NULL CHECK (event_type IN ('heartbeat', 'disconnect', 'reconnect', 'lost')),
     payload JSON,
     client_timestamp TIMESTAMP NOT NULL,

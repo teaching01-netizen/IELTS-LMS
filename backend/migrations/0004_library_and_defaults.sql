@@ -2,7 +2,7 @@
 
 -- admin_default_profiles
 CREATE TABLE IF NOT EXISTS admin_default_profiles (
-    id CHAR(36) PRIMARY KEY,
+    id VARCHAR(36) PRIMARY KEY,
     organization_id VARCHAR(255),
     profile_name VARCHAR(255) NOT NULL,
     config_snapshot JSON NOT NULL,
@@ -20,7 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_admin_default_profiles_org_updated ON admin_defau
 
 -- passage_library_items
 CREATE TABLE IF NOT EXISTS passage_library_items (
-    id CHAR(36) PRIMARY KEY,
+    id VARCHAR(36) PRIMARY KEY,
     organization_id VARCHAR(255),
     title VARCHAR(255) NOT NULL,
     passage_snapshot JSON NOT NULL,
@@ -44,7 +44,7 @@ CREATE INDEX IF NOT EXISTS idx_passage_library_org_difficulty_updated
 
 -- question_bank_items
 CREATE TABLE IF NOT EXISTS question_bank_items (
-    id CHAR(36) PRIMARY KEY,
+    id VARCHAR(36) PRIMARY KEY,
     organization_id VARCHAR(255),
     question_type VARCHAR(255) NOT NULL,
     block_snapshot JSON NOT NULL,

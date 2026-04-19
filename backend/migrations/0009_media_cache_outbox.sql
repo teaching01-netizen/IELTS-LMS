@@ -1,7 +1,7 @@
 -- Media metadata, shared cache, idempotency, and outbox coordination
 
 CREATE TABLE IF NOT EXISTS media_assets (
-    id CHAR(36) PRIMARY KEY,
+    id VARCHAR(36) PRIMARY KEY,
     owner_kind VARCHAR(50) NOT NULL,
     owner_id VARCHAR(255) NOT NULL,
     content_type VARCHAR(255) NOT NULL,
@@ -48,7 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_idempotency_keys_expires_at
     ON idempotency_keys(expires_at ASC);
 
 CREATE TABLE IF NOT EXISTS outbox_events (
-    id CHAR(36) NOT NULL PRIMARY KEY,
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
     aggregate_kind VARCHAR(50) NOT NULL,
     aggregate_id VARCHAR(255) NOT NULL,
     revision BIGINT NOT NULL DEFAULT 0,

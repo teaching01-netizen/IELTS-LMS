@@ -58,7 +58,7 @@ async fn revision_increments_and_mutations_record_applied_revision() {
             StudentMutationBatchRequest {
                 attempt_id: attempt.id,
                 student_key: student_key.clone(),
-                client_session_id,
+                client_session_id: client_session_id.clone(),
                 mutations: vec![
                     MutationEnvelope {
                         id: "m1".to_owned(),
@@ -81,11 +81,12 @@ async fn revision_increments_and_mutations_record_applied_revision() {
         .await
         .expect("apply first batch");
     assert_eq!(first.attempt.revision, 1);
+    let attempt_id = first.attempt.id.clone();
 
     let applied_1: i64 = sqlx::query_scalar(
         "SELECT applied_revision FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
     )
-    .bind(first.attempt.id)
+    .bind(attempt_id.clone())
     .bind("m1")
     .fetch_one(database.pool())
     .await
@@ -96,7 +97,7 @@ async fn revision_increments_and_mutations_record_applied_revision() {
         .apply_mutation_batch(
             schedule_id,
             StudentMutationBatchRequest {
-                attempt_id: first.attempt.id,
+                attempt_id,
                 student_key: student_key.clone(),
                 client_session_id,
                 mutations: vec![MutationEnvelope {
@@ -142,11 +143,12 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         )
         .await
         .expect("seed exam");
+    let exam_id = exam.id.clone();
 
     builder_service
         .save_draft(
             &actor,
-            exam.id,
+            exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
                     "reading": {"passages": [{"id": "reading-1"}]},
@@ -169,14 +171,14 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .expect("save draft");
 
     let exam_after_draft = builder_service
-        .get_exam(&actor, exam.id)
+        .get_exam(&actor, exam_id.clone())
         .await
         .expect("exam after draft");
 
     let published_version = builder_service
         .publish_exam(
             &actor,
-            exam.id,
+            exam_id.clone(),
             PublishExamRequest {
                 publish_notes: Some("ready for revision".to_owned()),
                 revision: exam_after_draft.revision,
@@ -189,7 +191,7 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .create_schedule(
             &actor,
             CreateScheduleRequest {
-                exam_id: exam.id,
+                exam_id,
                 published_version_id: published_version.id,
                 cohort_name: "Revision Cohort".to_owned(),
                 institution: Some("IELTS Centre".to_owned()),
@@ -198,11 +200,6 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
                     + Duration::minutes(180),
                 auto_start: false,
                 auto_stop: false,
-                delivery_mode: ielts_backend_domain::schedule::DeliveryMode::ProctorStart,
-                recurrence_type: ielts_backend_domain::schedule::RecurrenceType::Once,
-                recurrence_param: None,
-                organization_id: Some("org-1".to_owned()),
-                metadata: None,
             },
         )
         .await

@@ -419,9 +419,7 @@ impl AuthService {
         principal: &AuthenticatedSession,
         schedule_id: Uuid,
     ) -> Result<StudentAccess, AuthError> {
-        if principal.user.role != UserRole::Student {
-            return Err(AuthError::Forbidden);
-        }
+
         let registration = sqlx::query_as::<_, RegistrationRow>(
             r#"
             SELECT id, wcode, student_id, student_name, student_email, student_key, access_state
@@ -495,7 +493,6 @@ impl AuthService {
                 revocation_reason = NULL
             "#,
         )
-        .bind(&session_id)
         .bind(&session_id)
         .bind(&principal.user.id)
         .bind(&schedule_id)

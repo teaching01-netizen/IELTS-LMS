@@ -33,7 +33,12 @@ pub async fn get_student_session(
     Path(schedule_id): Path<Uuid>,
     Query(_query): Query<StudentSessionQuery>,
 ) -> Result<ApiResponse<StudentSessionContext>, ApiError> {
-    principal.require_one_of(&[UserRole::Student])?;
+    principal.require_one_of(&[
+        UserRole::Student,
+        UserRole::Admin,
+        UserRole::Builder,
+        UserRole::Proctor,
+    ])?;
     let access = authorize_student(&state, &principal, schedule_id).await?;
     let service = DeliveryService::new(state.db_pool());
     let started = Instant::now();
@@ -61,7 +66,12 @@ pub async fn save_precheck(
     Path(schedule_id): Path<Uuid>,
     Json(req): Json<StudentPrecheckRequest>,
 ) -> Result<ApiResponse<ielts_backend_domain::attempt::StudentAttempt>, ApiError> {
-    principal.require_one_of(&[UserRole::Student])?;
+    principal.require_one_of(&[
+        UserRole::Student,
+        UserRole::Admin,
+        UserRole::Builder,
+        UserRole::Proctor,
+    ])?;
     let access = authorize_student(&state, &principal, schedule_id).await?;
     let service = DeliveryService::new(state.db_pool());
     let started = Instant::now();
@@ -102,7 +112,12 @@ pub async fn bootstrap_student_session(
     Path(schedule_id): Path<Uuid>,
     Json(req): Json<StudentBootstrapRequest>,
 ) -> Result<ApiResponse<StudentSessionContext>, ApiError> {
-    principal.require_one_of(&[UserRole::Student])?;
+    principal.require_one_of(&[
+        UserRole::Student,
+        UserRole::Admin,
+        UserRole::Builder,
+        UserRole::Proctor,
+    ])?;
 
     // Apply per-user rate limiting for bootstrap
     let key = RateLimitKey::User(principal.user.id.clone());
@@ -425,7 +440,7 @@ fn access_key(access: &StudentAccess) -> String {
 }
 
 async fn load_attempt_student_key(state: &AppState, attempt_id: &str) -> Result<String, ApiError> {
-    query_scalar("SELECT student_key FROM student_attempts WHERE id = $1")
+    query_scalar("SELECT student_key FROM student_attempts WHERE id = ?")
         .bind(attempt_id)
         .fetch_optional(&state.db_pool())
         .await
