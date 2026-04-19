@@ -1,5 +1,15 @@
-# Backend Dockerfile for Railway
-# Single-service build for frontend SPA + Rust API + worker
+# Backend Dockerfile for Railway single-service deployment.
+# Builds the frontend SPA, Rust API, and Rust worker in one image.
+
+FROM node:22-bookworm-slim AS frontend-builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
 
 FROM rust:1.88-slim AS backend-builder
 
@@ -26,13 +36,9 @@ RUN mkdir -p crates/infrastructure/src && printf '' > crates/infrastructure/src/
 
 RUN cargo build --release --workspace
 
-RUN rm -rf crates/api/src/main.rs \
-    crates/worker/src/main.rs \
-    crates/application/src/lib.rs \
-    crates/domain/src/lib.rs \
-    crates/infrastructure/src/lib.rs
+RUN rm -rf crates
 
-COPY backend/crates ./crates
+COPY backend/crates ./crates/
 
 RUN cargo build --release --workspace
 
@@ -49,7 +55,7 @@ ENV FRONTEND_DIST_DIR=/app/frontend/dist
 
 COPY --from=backend-builder /app/backend/target/release/ielts-backend-api /app/api
 COPY --from=backend-builder /app/backend/target/release/ielts-backend-worker /app/worker
-COPY dist /app/frontend/dist
+COPY --from=frontend-builder /app/dist /app/frontend/dist
 
 RUN cat > /app/start.sh << 'EOF'
 #!/bin/bash
