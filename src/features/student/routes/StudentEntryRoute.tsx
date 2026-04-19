@@ -9,6 +9,7 @@ interface EntryFormData {
 }
 
 const LAST_WCODE_STORAGE_PREFIX = 'ielts-student-last-wcode:';
+const PROFILE_STORAGE_PREFIX = 'ielts-student-profile:';
 
 function validateWcode(wcode: string): boolean {
   return /^W[0-9]{6}$/.test(wcode);
@@ -32,6 +33,21 @@ function storeLastWcode(scheduleId: string, wcode: string): void {
   }
 
   window.localStorage.setItem(`${LAST_WCODE_STORAGE_PREFIX}${scheduleId}`, wcode);
+}
+
+function storeCandidateProfile(
+  scheduleId: string,
+  wcode: string,
+  profile: { studentName: string; email: string },
+): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(
+    `${PROFILE_STORAGE_PREFIX}${scheduleId}:${wcode}`,
+    JSON.stringify(profile),
+  );
 }
 
 export function StudentEntryRoute() {
@@ -124,6 +140,10 @@ export function StudentEntryRoute() {
       });
 
       storeLastWcode(scheduleId, normalizedWcode);
+      storeCandidateProfile(scheduleId, normalizedWcode, {
+        studentName: normalizedName,
+        email: normalizedEmail,
+      });
       navigate(`/student/${scheduleId}/${normalizedWcode}`);
     } catch (error) {
       setSubmitError(
@@ -214,4 +234,3 @@ export function StudentEntryRoute() {
     </div>
   );
 }
-

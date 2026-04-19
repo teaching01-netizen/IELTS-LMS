@@ -20,6 +20,8 @@ import type { ExamState } from '../../../types';
 import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 
+const PROFILE_STORAGE_PREFIX = 'ielts-student-profile:';
+
 function getStableCandidateId(scheduleId?: string, studentId?: string) {
   if (studentId) {
     return studentId;
@@ -49,11 +51,41 @@ function buildBackendSessionEndpoint(scheduleId: string, candidateId: string) {
   return `/v1/student/sessions/${scheduleId}?${query.toString()}`;
 }
 
-function createCandidateProfile(candidateId: string) {
+function loadStoredCandidateProfile(
+  scheduleId: string,
+  candidateId: string,
+): { candidateName?: string; candidateEmail?: string } | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(`${PROFILE_STORAGE_PREFIX}${scheduleId}:${candidateId}`);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { studentName?: unknown; email?: unknown };
+    const studentName = typeof parsed.studentName === 'string' ? parsed.studentName.trim() : '';
+    const email = typeof parsed.email === 'string' ? parsed.email.trim() : '';
+
+    return {
+      candidateName: studentName || undefined,
+      candidateEmail: email || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function createCandidateProfile(
+  candidateId: string,
+  stored: { candidateName?: string; candidateEmail?: string } | null,
+) {
   return {
     candidateId,
-    candidateName: `Candidate ${candidateId}`,
-    candidateEmail: `${candidateId}@example.com`,
+    candidateName: stored?.candidateName ?? `Candidate ${candidateId}`,
+    candidateEmail: stored?.candidateEmail ?? `${candidateId}@example.com`,
   };
 }
 
@@ -72,14 +104,19 @@ export function useStudentSessionRouteData(
   scheduleId?: string,
   studentId?: string,
 ): StudentSessionRouteData {
-  const { status: authStatus } = useAuthSession();
+  const { session, status: authStatus } = useAuthSession();
   const [attemptSnapshot, setAttemptSnapshot] = useState<StudentAttempt | null>(null);
   const [schedule, setSchedule] = useState<ExamSchedule | null>(null);
   const [state, setState] = useState<ExamState | null>(null);
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<ExamSessionRuntime | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const shouldUseBackendDelivery = isBackendDeliveryEnabled() || session?.user.role === 'student';
   const candidateId = useMemo(() => getStableCandidateId(scheduleId, studentId), [scheduleId, studentId]);
+  const storedCandidateProfile = useMemo(
+    () => (scheduleId ? loadStoredCandidateProfile(scheduleId, candidateId) : null),
+    [candidateId, scheduleId],
+  );
   const studentKey = useMemo(
     () => (scheduleId ? buildStudentKey(scheduleId, candidateId) : null),
     [candidateId, scheduleId],
@@ -141,7 +178,7 @@ export function useStudentSessionRouteData(
       return;
     }
 
-    if (isBackendDeliveryEnabled() && authStatus === 'loading') {
+    if (shouldUseBackendDelivery && authStatus === 'loading') {
       return;
     }
 
@@ -153,7 +190,7 @@ export function useStudentSessionRouteData(
         throw new Error('Student identity not found');
       }
 
-      if (isBackendDeliveryEnabled()) {
+      if (shouldUseBackendDelivery) {
         const session = await backendGet<{
           schedule: Parameters<typeof mapBackendSchedule>[0];
           version: Parameters<typeof mapBackendExamVersion>[0];
@@ -212,7 +249,7 @@ export function useStudentSessionRouteData(
             studentKey,
             examId: scheduleEntity.examId,
             examTitle: scheduleEntity.examTitle,
-            ...createCandidateProfile(candidateId),
+            ...createCandidateProfile(candidateId, storedCandidateProfile),
             currentModule:
               (session.runtime
                 ? mapBackendRuntime(session.runtime, scheduleEntity).currentSectionKey
@@ -266,14 +303,14 @@ export function useStudentSessionRouteData(
     } finally {
       setIsLoading(false);
     }
-  }, [authStatus, candidateId, scheduleId, studentKey]);
+  }, [authStatus, candidateId, scheduleId, shouldUseBackendDelivery, storedCandidateProfile, studentKey]);
 
   useEffect(() => {
     void loadStudentData();
   }, [loadStudentData]);
 
   useAsyncPolling(async () => {
-    if (isBackendDeliveryEnabled()) {
+    if (shouldUseBackendDelivery) {
       await refreshBackendSessionSnapshot();
       return;
     }
@@ -292,7 +329,7 @@ export function useStudentSessionRouteData(
     runtimeSnapshot,
     schedule,
     state,
-    refreshRuntime: isBackendDeliveryEnabled() ? refreshBackendSessionSnapshot : refreshRuntimeSnapshot,
+    refreshRuntime: shouldUseBackendDelivery ? refreshBackendSessionSnapshot : refreshRuntimeSnapshot,
     retry: loadStudentData,
   };
 }
