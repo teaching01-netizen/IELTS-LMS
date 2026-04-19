@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
 import { AdminScheduling } from '@components/admin/AdminScheduling';
 import { useAdminContext } from './AdminContext';
 
@@ -9,7 +10,17 @@ import { useAdminContext } from './AdminContext';
  * and starting scheduled sessions.
  */
 export function SchedulingRoute() {
+  const location = useLocation();
   const { schedules, exams, examEntities, onCreateSchedule, onUpdateSchedule, onDeleteSchedule, onStartScheduledSession } = useAdminContext();
+  const initialScheduleDraft = (
+    location.state as {
+      initialScheduleDraft?: {
+        examId?: string;
+        openCreateModal?: boolean;
+      };
+    } | null
+  )?.initialScheduleDraft;
+
   return (
     <AdminScheduling
       schedules={schedules}
@@ -19,6 +30,8 @@ export function SchedulingRoute() {
       onUpdateSchedule={onUpdateSchedule}
       onDeleteSchedule={onDeleteSchedule}
       onStartScheduledSession={onStartScheduledSession}
+      initialExamId={initialScheduleDraft?.examId}
+      autoOpenCreate={initialScheduleDraft?.openCreateModal}
     />
   );
 }

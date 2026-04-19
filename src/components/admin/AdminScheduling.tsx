@@ -14,6 +14,8 @@ interface AdminSchedulingProps {
   onUpdateSchedule: (schedule: ExamSchedule) => Promise<void> | void;
   onDeleteSchedule: (scheduleId: string) => Promise<void> | void;
   onStartScheduledSession: (scheduleId: string) => Promise<void> | void;
+  initialExamId?: string;
+  autoOpenCreate?: boolean;
 }
 
 interface ScheduleDraft {
@@ -42,10 +44,13 @@ export function AdminScheduling({
   onCreateSchedule,
   onUpdateSchedule,
   onDeleteSchedule,
-  onStartScheduledSession
+  onStartScheduledSession,
+  initialExamId,
+  autoOpenCreate = false,
 }: AdminSchedulingProps) {
   const defaultExamId = examEntities[0]?.id || exams[0]?.id || '';
   const [showModal, setShowModal] = useState(false);
+  const [hasConsumedRouteIntent, setHasConsumedRouteIntent] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ScheduleDraft>({
     examId: defaultExamId,
@@ -104,8 +109,8 @@ export function AdminScheduling({
     };
   }, [draft.examId, draft.publishedVersionId, examEntities]);
 
-  const openCreateModal = () => {
-    const exam = examEntities[0];
+  const openCreateModal = (targetExamId?: string) => {
+    const exam = examEntities.find((item) => item.id === targetExamId) ?? examEntities[0];
     const versionId = exam?.currentPublishedVersionId || exam?.currentDraftVersionId || '';
     setEditingScheduleId(null);
     setDraft({
@@ -117,6 +122,15 @@ export function AdminScheduling({
     });
     setShowModal(true);
   };
+
+  useEffect(() => {
+    if (!autoOpenCreate || hasConsumedRouteIntent || showModal || examEntities.length === 0) {
+      return;
+    }
+
+    openCreateModal(initialExamId);
+    setHasConsumedRouteIntent(true);
+  }, [autoOpenCreate, examEntities, hasConsumedRouteIntent, initialExamId, showModal]);
 
   const openEditModal = async (schedule: ExamSchedule) => {
     setEditingScheduleId(schedule.id);
@@ -201,7 +215,7 @@ export function AdminScheduling({
         </div>
 
         <button
-          onClick={openCreateModal}
+          onClick={() => openCreateModal()}
           className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors"
         >
           <Plus size={18} />

@@ -86,4 +86,88 @@ describe('AdminScheduling', () => {
     expect(screen.getByRole('button', { name: 'Create Schedule' })).toBeDisabled();
     expect(onCreateSchedule).not.toHaveBeenCalled();
   });
+
+  it('opens create schedule modal with the routed exam preselected', async () => {
+    localStorage.clear();
+    const config = createDefaultConfig('Academic', 'Academic');
+    const examOne: ExamEntity = {
+      id: 'exam-1',
+      slug: 'mock-exam-1',
+      title: 'Mock Exam 1',
+      type: 'Academic',
+      status: 'published',
+      visibility: 'organization',
+      owner: 'Owner',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      currentDraftVersionId: null,
+      currentPublishedVersionId: 'ver-1',
+      canEdit: true,
+      canPublish: true,
+      canDelete: true,
+      schemaVersion: SCHEMA_VERSION
+    };
+    const examTwo: ExamEntity = {
+      ...examOne,
+      id: 'exam-2',
+      slug: 'mock-exam-2',
+      title: 'Mock Exam 2',
+      currentPublishedVersionId: 'ver-2',
+    };
+
+    const versionOne: ExamVersion = {
+      id: 'ver-1',
+      examId: 'exam-1',
+      versionNumber: 1,
+      parentVersionId: null,
+      contentSnapshot: {
+        title: 'Mock Exam 1',
+        type: 'Academic',
+        activeModule: 'reading',
+        activePassageId: 'p1',
+        activeListeningPartId: 'l1',
+        config,
+        reading: { passages: [] },
+        listening: { parts: [] },
+        writing: { task1Prompt: 'Task 1', task2Prompt: 'Task 2' },
+        speaking: { part1Topics: [], cueCard: '', part3Discussion: [] }
+      },
+      configSnapshot: config,
+      createdBy: 'Owner',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      isDraft: false,
+      isPublished: true
+    };
+    const versionTwo: ExamVersion = {
+      ...versionOne,
+      id: 'ver-2',
+      examId: 'exam-2',
+      contentSnapshot: {
+        ...versionOne.contentSnapshot,
+        title: 'Mock Exam 2',
+      },
+    };
+
+    await examRepository.saveVersion(versionOne);
+    await examRepository.saveVersion(versionTwo);
+
+    render(
+      <AdminScheduling
+        schedules={[]}
+        exams={[]}
+        examEntities={[examOne, examTwo]}
+        onCreateSchedule={vi.fn()}
+        onUpdateSchedule={vi.fn()}
+        onDeleteSchedule={vi.fn()}
+        onStartScheduledSession={vi.fn()}
+        initialExamId="exam-2"
+        autoOpenCreate
+      />
+    );
+
+    await screen.findByText('Schedule New Session');
+
+    const examSelect = screen.getByLabelText('Exam') as HTMLSelectElement;
+    expect(examSelect.value).toBe('exam-2');
+  });
 });

@@ -163,4 +163,22 @@ describe('PublishActions', () => {
     const continueButton = screen.getByRole('button', { name: /continue editing draft/i });
     expect(continueButton).toBeTruthy();
   });
+
+  it('opens the real scheduling workflow when provided', () => {
+    const onOpenSchedulingWorkflow = vi.fn();
+
+    render(
+      <PublishActions
+        {...defaultProps}
+        onOpenSchedulingWorkflow={onOpenSchedulingWorkflow}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /open scheduling workflow/i }));
+
+    expect(onOpenSchedulingWorkflow).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText(/scheduling is managed in the real cohort scheduler/i),
+    ).toBeTruthy();
+  });
 });

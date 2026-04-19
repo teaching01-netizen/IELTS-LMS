@@ -19,6 +19,7 @@ export interface ReviewRouteController {
   handleRestoreVersion: (versionId: string) => Promise<void>;
   handleRepublishVersion: (versionId: string) => Promise<void>;
   handleNavigateToBuilder: () => void;
+  handleOpenScheduling: () => void;
   handleBackToAdmin: () => void;
   reload: () => Promise<void>;
 }
@@ -143,6 +144,21 @@ export function useReviewRouteController(
     navigate(`/builder/${examId}/builder`);
   }, [examId, navigate]);
 
+  const handleOpenScheduling = useCallback(() => {
+    if (!examId) {
+      return;
+    }
+
+    navigate('/admin/scheduling', {
+      state: {
+        initialScheduleDraft: {
+          examId,
+          openCreateModal: true,
+        },
+      },
+    });
+  }, [examId, navigate]);
+
   const handleBackToAdmin = useCallback(() => {
     navigate('/admin');
   }, [navigate]);
@@ -160,6 +176,7 @@ export function useReviewRouteController(
     handleRestoreVersion,
     handleRepublishVersion,
     handleNavigateToBuilder,
+    handleOpenScheduling,
     handleBackToAdmin,
     reload: loadExam,
   };

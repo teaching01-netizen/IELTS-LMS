@@ -52,6 +52,7 @@ export function ExamReviewRoute() {
                   publishReadiness={controller.publishReadiness}
                   onPublish={controller.handlePublish}
                   onSchedulePublish={controller.handleSchedulePublish}
+                  onOpenSchedulingWorkflow={controller.handleOpenScheduling}
                   onUnpublish={controller.handleUnpublish}
                   exam={{ title: controller.exam?.title || 'Untitled Exam' }}
                 />

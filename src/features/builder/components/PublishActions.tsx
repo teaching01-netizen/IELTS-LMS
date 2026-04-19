@@ -14,6 +14,7 @@ interface PublishActionsProps {
   publishReadiness?: PublishReadiness;
   onPublish: (notes?: string) => void;
   onSchedulePublish: (scheduledTime: string) => void;
+  onOpenSchedulingWorkflow?: (() => void) | undefined;
   onUnpublish: (reason?: string) => void;
   onArchive?: (() => void) | undefined;
   onNavigateToConfig?: () => void;
@@ -31,6 +32,7 @@ export function PublishActions({
   publishReadiness,
   onPublish,
   onSchedulePublish,
+  onOpenSchedulingWorkflow,
   onUnpublish,
   onArchive,
   onNavigateToConfig,
@@ -47,7 +49,8 @@ export function PublishActions({
 
   const isValidationPassed = publishReadiness?.canPublish ?? false;
   const isContentReviewed = true;
-  const isScheduled = scheduledTime.length > 0;
+  const usesSchedulingWorkflow = Boolean(onOpenSchedulingWorkflow);
+  const isScheduled = !usesSchedulingWorkflow && scheduledTime.length > 0;
 
   const missingPrerequisites = [];
   if (!isValidationPassed) missingPrerequisites.push('Technical validation');
@@ -143,17 +146,35 @@ export function PublishActions({
             </div>
             <div
               className={`flex items-center gap-2 text-xs ${isScheduled ? 'text-slate-600' : 'text-slate-400'}`}
-              onClick={!isScheduled ? () => setShowSchedule(true) : undefined}
+              onClick={
+                !isScheduled
+                  ? () => {
+                      if (usesSchedulingWorkflow) {
+                        onOpenSchedulingWorkflow?.();
+                        return;
+                      }
+                      setShowSchedule(true);
+                    }
+                  : undefined
+              }
               role={!isScheduled ? 'button' : undefined}
               tabIndex={!isScheduled ? 0 : undefined}
-              title={!isScheduled ? 'Set a schedule for when students can access the exam' : `Scheduled for ${scheduledTime}`}
+              title={
+                !isScheduled
+                  ? usesSchedulingWorkflow
+                    ? 'Open the real scheduling workflow'
+                    : 'Set a schedule for when students can access the exam'
+                  : `Scheduled for ${scheduledTime}`
+              }
             >
               {isScheduled ? (
                 <CheckCircle2 size={14} className="text-emerald-600 flex-shrink-0" aria-hidden="true" />
               ) : (
                 <Circle size={14} className="text-blue-400 flex-shrink-0" aria-hidden="true" />
               )}
-              <span>Exam scheduled {isScheduled ? `(${scheduledTime})` : '(click to set date)'}</span>
+              <span>
+                Exam scheduled {isScheduled ? `(${scheduledTime})` : usesSchedulingWorkflow ? '(open scheduler)' : '(click to set date)'}
+              </span>
             </div>
           </div>
         </div>
@@ -181,16 +202,37 @@ export function PublishActions({
             Publish & Schedule
           </button>
           <button
-            onClick={() => setShowSchedule(!showSchedule)}
+            onClick={() => {
+              if (usesSchedulingWorkflow) {
+                onOpenSchedulingWorkflow?.();
+                return;
+              }
+              setShowSchedule(!showSchedule);
+            }}
             className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-all duration-200 flex items-center justify-center gap-2"
-            aria-label="Toggle schedule options"
-            aria-expanded={showSchedule}
+            aria-label={usesSchedulingWorkflow ? 'Open scheduling workflow' : 'Toggle schedule options'}
+            aria-expanded={usesSchedulingWorkflow ? undefined : showSchedule}
           >
-            <Calendar size={16} aria-hidden="true" /> Schedule
+            <Calendar size={16} aria-hidden="true" /> {usesSchedulingWorkflow ? 'Open Scheduler' : 'Schedule'}
           </button>
         </div>
 
-        {showSchedule && (
+        {usesSchedulingWorkflow && (
+          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+            <p className="text-sm text-slate-700">
+              Scheduling is managed in the real cohort scheduler. Open it to create the session for this exam.
+            </p>
+            <button
+              onClick={() => onOpenSchedulingWorkflow?.()}
+              className="w-full px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-all duration-200 shadow-sm hover:shadow-md"
+              aria-label="Open scheduler"
+            >
+              Open Scheduler
+            </button>
+          </div>
+        )}
+
+        {!usesSchedulingWorkflow && showSchedule && (
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Scheduled Time</label>
             <input
@@ -241,8 +283,12 @@ export function PublishActions({
         }}
         onSetSchedule={() => {
           setShowConfirmModal(false);
-          setShowSchedule(true);
-          onSetSchedule?.();
+          if (usesSchedulingWorkflow) {
+            onOpenSchedulingWorkflow?.();
+          } else {
+            setShowSchedule(true);
+            onSetSchedule?.();
+          }
         }}
         prerequisites={{
           validationPassed: isValidationPassed,
