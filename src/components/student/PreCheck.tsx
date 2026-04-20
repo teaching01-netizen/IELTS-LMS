@@ -80,6 +80,23 @@ function detectBrowser(userAgent: string): BrowserInfo {
   };
 }
 
+function isMobileDevice(userAgent: string): boolean {
+  if (/(iPhone|iPad|iPod)/i.test(userAgent)) {
+    return true;
+  }
+
+  // iPadOS 13+ can identify as "Macintosh" but includes "Mobile"
+  if (/Macintosh/i.test(userAgent) && /Mobile/i.test(userAgent)) {
+    return true;
+  }
+
+  if (/Android/i.test(userAgent)) {
+    return true;
+  }
+
+  return false;
+}
+
 function canUseStorage() {
   try {
     localStorage.setItem('__student-precheck__', 'ok');
@@ -129,7 +146,9 @@ async function requestFullscreenMode(): Promise<boolean> {
 }
 
 function runChecks(config?: ExamConfig): StudentPreCheckResult {
-  const browser = detectBrowser(navigator.userAgent);
+  const userAgent = navigator.userAgent;
+  const browser = detectBrowser(userAgent);
+  const mobileDevice = isMobileDevice(userAgent);
   const policy = getStudentIntegritySecurityPolicy(config);
   const fullscreenRequired = config?.security.requireFullscreen ?? false;
   const fullscreenSupported =
@@ -142,18 +161,27 @@ function runChecks(config?: ExamConfig): StudentPreCheckResult {
     typeof window.clearInterval === 'function';
   const heartbeatReady = javascriptReady && navigator.onLine;
 
+  const secureModeEnabled = Boolean(
+    config?.security.requireFullscreen || config?.security.detectSecondaryScreen,
+  );
+  const mobileAllowed = !secureModeEnabled;
+  const mobileCompatibilityOk = !mobileDevice || mobileAllowed;
+
   const browserSupported =
-    (browser.family === 'chrome' || browser.family === 'edge') &&
-      (browser.version ?? 0) >= 111 ||
-    browser.family === 'safari' ||
-    browser.family === 'firefox';
+    mobileCompatibilityOk &&
+    (((browser.family === 'chrome' || browser.family === 'edge') &&
+      (browser.version ?? 0) >= 111) ||
+      browser.family === 'safari' ||
+      browser.family === 'firefox');
 
   const browserCheck: CheckItem = {
     id: 'browser',
     label: 'Browser compatibility',
     message: browserSupported
       ? `${browser.family.toUpperCase()} ${browser.version ?? ''}`.trim()
-      : 'Use Chrome 111+, Edge, Safari, or Firefox.',
+      : mobileDevice && !mobileAllowed
+        ? 'Mobile/iPad is supported only in non-secure mode. Disable fullscreen and secondary screen detection, or use a computer.'
+        : 'Use Chrome 111+, Edge, Safari, or Firefox.',
     required: true,
     status: browserSupported ? 'pass' : 'fail',
     icon: Globe,
@@ -208,19 +236,25 @@ function runChecks(config?: ExamConfig): StudentPreCheckResult {
   const screenCheck: CheckItem = {
     id: 'screen-details',
     label: 'Secondary screen detection',
-    message: screenDetailsSupported
-      ? 'Screen details API available.'
-      : browser.family === 'safari' && policy.allowSafariWithAcknowledgement
-        ? 'Safari cannot verify external displays. Acknowledgment required.'
-        : browser.family === 'safari'
-          ? 'Safari is blocked for this exam because external display verification is unavailable.'
-          : 'This browser cannot verify external displays.',
-    required: !(browser.family === 'safari' && policy.allowSafariWithAcknowledgement),
-    status: screenDetailsSupported
+    message: !config?.security.detectSecondaryScreen
+      ? 'Secondary screen detection is disabled for this exam.'
+      : screenDetailsSupported
+        ? 'Screen details API available.'
+        : browser.family === 'safari' && policy.allowSafariWithAcknowledgement
+          ? 'Safari cannot verify external displays. Acknowledgment required.'
+          : browser.family === 'safari'
+            ? 'Safari is blocked for this exam because external display verification is unavailable.'
+            : 'This browser cannot verify external displays.',
+    required:
+      Boolean(config?.security.detectSecondaryScreen) &&
+      !(browser.family === 'safari' && policy.allowSafariWithAcknowledgement),
+    status: !config?.security.detectSecondaryScreen
       ? 'pass'
-      : browser.family === 'safari' && policy.allowSafariWithAcknowledgement
-        ? 'warn'
-        : 'fail',
+      : screenDetailsSupported
+        ? 'pass'
+        : browser.family === 'safari' && policy.allowSafariWithAcknowledgement
+          ? 'warn'
+          : 'fail',
     icon: Monitor,
   };
 

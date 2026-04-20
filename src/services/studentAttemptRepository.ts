@@ -631,6 +631,8 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
           ...buildAttemptAuthorizationHeader(attempt),
           'Idempotency-Key': `student-submit-${attempt.id}`,
         },
+        timeout: 60_000,
+        retries: 0,
       },
     );
 

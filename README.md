@@ -52,3 +52,10 @@ make worker
 - Treat route behavior as the source of truth.
 - Keep direct persistence access inside repositories/services, not routes or UI components.
 - Mark inactive shells and unfinished surfaces as legacy or in-progress instead of implying they are live.
+
+## Device Support (Student Delivery)
+
+- **Secure mode** (fullscreen and/or secondary-screen detection enabled) is intended for **desktop/laptop** browsers.
+- **Mobile/iPad** devices are supported only in **non-secure mode**, meaning both:
+  - `config.security.requireFullscreen = false`
+  - `config.security.detectSecondaryScreen = false`

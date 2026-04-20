@@ -117,7 +117,7 @@ impl DeliveryService {
 
         let phase = determine_phase(runtime.as_ref(), true, attempt.submitted_at.is_some());
 
-        self.update_attempt(
+        let updated = self.update_attempt(
             attempt.id,
             phase,
             attempt.current_module.clone(),
@@ -140,7 +140,29 @@ impl DeliveryService {
             attempt.final_submission.clone(),
             attempt.submitted_at,
         )
-        .await
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO session_audit_logs (
+                id, schedule_id, actor, action_type, target_student_id, payload, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, NOW())
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(schedule_id.to_string())
+        .bind(&updated.candidate_name)
+        .bind("STUDENT_PRECHECK")
+        .bind(&updated.id)
+        .bind(json!({
+            "clientSessionId": req.client_session_id,
+            "hasDeviceFingerprint": req.device_fingerprint_hash.is_some()
+        }))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(updated)
     }
 
     #[tracing::instrument(skip(self, req), fields(schedule_id = %schedule_id))]
@@ -405,6 +427,41 @@ impl DeliveryService {
             .fetch_one(tx.as_mut())
             .await?;
 
+        let seq_from = req.mutations.iter().map(|mutation| mutation.seq).min();
+        let seq_to = req.mutations.iter().map(|mutation| mutation.seq).max();
+        let mut mutation_types: HashSet<String> = HashSet::new();
+        for mutation in &req.mutations {
+            mutation_types.insert(mutation.mutation_type.clone());
+        }
+        let mut mutation_types: Vec<String> = mutation_types.into_iter().collect();
+        mutation_types.sort();
+
+        sqlx::query(
+            r#"
+            INSERT INTO session_audit_logs (
+                id, schedule_id, actor, action_type, target_student_id, payload, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, NOW())
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(schedule_id.to_string())
+        .bind(&attempt.candidate_name)
+        .bind("STUDENT_MUTATION_BATCH")
+        .bind(&attempt.id)
+        .bind(json!({
+            "count": req.mutations.len(),
+            "seqFrom": seq_from,
+            "seqTo": seq_to,
+            "types": mutation_types,
+            "phase": attempt.phase,
+            "currentModule": attempt.current_module,
+            "currentQuestionId": attempt.current_question_id,
+            "clientSessionId": req.client_session_id
+        }))
+        .execute(tx.as_mut())
+        .await?;
+
         let response = StudentMutationBatchResponse {
             attempt,
             applied_mutation_count: req.mutations.len(),
@@ -493,6 +550,29 @@ impl DeliveryService {
                 attempt.submitted_at,
             )
             .await?;
+
+        if req.event_type != "heartbeat" {
+            sqlx::query(
+                r#"
+                INSERT INTO session_audit_logs (
+                    id, schedule_id, actor, action_type, target_student_id, payload, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, NOW())
+                "#,
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(schedule_id.to_string())
+            .bind(&updated.candidate_name)
+            .bind("STUDENT_NETWORK")
+            .bind(&updated.id)
+            .bind(json!({
+                "eventType": req.event_type,
+                "clientTimestamp": req.client_timestamp,
+                "payload": req.payload
+            }))
+            .execute(&self.pool)
+            .await?;
+        }
 
         if req.event_type != "heartbeat" {
             sqlx::query(
@@ -669,6 +749,26 @@ impl DeliveryService {
             .await?;
 
         let submitted_at = attempt.submitted_at.unwrap_or(now);
+        sqlx::query(
+            r#"
+            INSERT INTO session_audit_logs (
+                id, schedule_id, actor, action_type, target_student_id, payload, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, NOW())
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(schedule_id.to_string())
+        .bind(&attempt.candidate_name)
+        .bind("STUDENT_SUBMIT")
+        .bind(&attempt.id)
+        .bind(json!({
+            "submissionId": submission_id,
+            "submittedAt": submitted_at
+        }))
+        .execute(tx.as_mut())
+        .await?;
+
         let response = StudentSubmitResponse {
             attempt,
             submission_id,
@@ -763,6 +863,29 @@ impl DeliveryService {
             "pendingMutationCount": 0,
             "syncState": "idle",
             "serverAcceptedThroughSeq": 0
+        }))
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO session_audit_logs (
+                id, schedule_id, actor, action_type, target_student_id, payload, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, NOW())
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&schedule.id)
+        .bind(candidate_name)
+        .bind("STUDENT_ATTEMPT_CREATED")
+        .bind(attempt_id.to_string())
+        .bind(json!({
+            "candidateId": candidate_id,
+            "candidateEmail": candidate_email,
+            "wcode": wcode.unwrap_or(""),
+            "currentModule": current_module,
+            "phase": phase
         }))
         .execute(&self.pool)
         .await?;

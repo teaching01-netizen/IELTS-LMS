@@ -62,6 +62,46 @@ export function StudentDetailPanel({
     () => alerts.filter((alert) => !student || alert.studentId === student.studentId),
     [alerts, student],
   );
+  const timelineEvents = useMemo(() => {
+    type TimelineEvent = {
+      id: string;
+      timestamp: string;
+      title: string;
+      detail: string;
+    };
+
+    const events: TimelineEvent[] = [];
+
+    for (const log of studentAuditLogs) {
+      events.push({
+        id: `audit-${log.id}`,
+        timestamp: log.timestamp,
+        title: log.actionType,
+        detail: log.actor,
+      });
+    }
+
+    for (const alert of studentAlerts) {
+      events.push({
+        id: `alert-${alert.id}`,
+        timestamp: alert.timestamp,
+        title: alert.message,
+        detail: `${alert.type} · ${alert.severity}`,
+      });
+    }
+
+    for (const violation of student?.violations ?? []) {
+      events.push({
+        id: `violation-${violation.id}`,
+        timestamp: violation.timestamp,
+        title: violation.type,
+        detail: violation.description,
+      });
+    }
+
+    events.sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime());
+    return events;
+  }, [student?.violations, studentAlerts, studentAuditLogs]);
 
   if (!student || !cohort) {
     return (
@@ -143,23 +183,14 @@ export function StudentDetailPanel({
         <div className="min-h-0 overflow-auto px-6 py-4">
           {activeTab === 'timeline' ? (
             <div className="grid gap-3">
-              {studentAlerts.length === 0 && student.violations.length === 0 ? <p className="text-sm text-slate-500">No recent timeline events for this student.</p> : null}
-              {studentAlerts.map((alert) => (
-                <div key={alert.id} className="grid gap-1 border-b border-slate-100 pb-3">
+              {timelineEvents.length === 0 ? <p className="text-sm text-slate-500">No recent timeline events for this student.</p> : null}
+              {timelineEvents.map((event) => (
+                <div key={event.id} className="grid gap-1 border-b border-slate-100 pb-3">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="font-medium text-slate-900">{alert.message}</p>
-                    <span className="text-xs text-slate-400">{new Date(alert.timestamp).toLocaleTimeString()}</span>
+                    <p className="font-medium text-slate-900">{event.title}</p>
+                    <span className="text-xs text-slate-400">{new Date(event.timestamp).toLocaleString()}</span>
                   </div>
-                  <p className="text-sm text-slate-500">{alert.type} · {alert.severity}</p>
-                </div>
-              ))}
-              {student.violations.map((violation) => (
-                <div key={violation.id} className="grid gap-1 border-b border-slate-100 pb-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-medium text-slate-900">{violation.type}</p>
-                    <span className="text-xs text-slate-400">{new Date(violation.timestamp).toLocaleTimeString()}</span>
-                  </div>
-                  <p className="text-sm text-slate-500">{violation.description}</p>
+                  <p className="text-sm text-slate-500">{event.detail}</p>
                 </div>
               ))}
             </div>

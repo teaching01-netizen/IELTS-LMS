@@ -64,9 +64,37 @@ test.describe('Student LRW workflow', () => {
         return 'unknown';
       }, { timeout: 20_000 })
       .toBe('saved');
-    await page.getByRole('button', { name: 'Finish' }).click({ force: true });
+    const finishButton = page.getByRole('button', { name: 'Finish' });
+    const submitResponsePromise = page
+      .waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          response.url().includes(`/api/v1/student/sessions/${manifest.student.scheduleId}/submit`),
+        { timeout: 60_000 },
+      )
+      .catch(() => null);
 
-    await expect(page.getByText(/Examination Complete!/i)).toBeVisible({ timeout: 30_000 });
+    await finishButton.scrollIntoViewIfNeeded();
+    await finishButton.click().catch(async () => {
+      await finishButton.click({ force: true });
+    });
+
+    const submitResponse = await submitResponsePromise;
+    if (!submitResponse) {
+      throw new Error('Did not observe a submit network request.');
+    }
+    expect(submitResponse.ok()).toBeTruthy();
+
+    const completionHeading = page.getByRole('heading', { name: /Examination Complete!/i });
+    await expect
+      .poll(async () => {
+        if (await completionHeading.isVisible().catch(() => false)) {
+          return 'complete';
+        }
+        const stillInExam = await finishButton.isVisible().catch(() => false);
+        return stillInExam ? 'exam' : 'pending';
+      }, { timeout: 45_000 })
+      .toBe('complete');
     await context.close();
   });
 });

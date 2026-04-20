@@ -157,8 +157,27 @@ test.describe('Student security guardrails (LRW)', () => {
     // Headless browsers don't always emit real tab-switch signals consistently.
     // Dispatch a `blur` event directly to trigger the proctoring rule.
     await page.evaluate(() => {
-      window.dispatchEvent(new Event('blur'));
-      document.dispatchEvent(new Event('blur'));
+      const safeDispatch = (target: EventTarget, type: string) => {
+        try {
+          target.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
+        } catch {
+          // Ignore
+        }
+      };
+
+      safeDispatch(window, 'blur');
+      safeDispatch(document, 'blur');
+
+      try {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      } catch {
+        // Ignore environments that prevent overriding these properties.
+      }
+      safeDispatch(document, 'visibilitychange');
+
+      safeDispatch(window, 'pagehide');
+      safeDispatch(document, 'pagehide');
     });
 
     await expect

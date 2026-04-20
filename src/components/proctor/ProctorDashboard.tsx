@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckSquare, ChevronLeft, FastForward, Filter, LayoutGrid, List, Pause, Play, Square, StopCircle, Timer, X } from 'lucide-react';
+import { AlertTriangle, CheckSquare, ChevronLeft, FastForward, Filter, LayoutGrid, List, Loader2, Pause, Play, Square, StopCircle, Timer, X } from 'lucide-react';
 import type { AuditActionType, ExamGroup, ModuleType, ProctorAlert, SessionAuditLog, SessionNote, StudentSession, StudentStatus } from '../../types';
 import type { ExamSchedule, ExamSessionRuntime } from '../../types/domain';
+import { ConfirmModal } from '../ConfirmModal';
+import { Toast, ToastContainer, type ToastVariant } from '../ui/Toast';
 import { PresenceIndicator } from './PresenceIndicator';
 import { StudentCard } from './StudentCard';
 import { StudentDetailPanel, type StudentDrawerTab } from './StudentDetailPanel';
@@ -53,6 +55,8 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
 }: ProctorDashboardProps) {
   void onUpdateAlerts;
 
+  type CohortControlAction = 'start' | 'pause' | 'resume' | 'end_section' | 'extend_5' | 'extend_10' | 'complete';
+
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
@@ -62,6 +66,11 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [listDensity, setListDensity] = useState<'compact' | 'comfortable'>('compact');
   const [drawerTab, setDrawerTab] = useState<StudentDrawerTab>('timeline');
+  const [pendingCohortAction, setPendingCohortAction] = useState<CohortControlAction | null>(null);
+  const [confirmAction, setConfirmAction] = useState<Extract<CohortControlAction, 'end_section' | 'complete'> | null>(null);
+  const [toasts, setToasts] = useState<
+    Array<{ id: string; variant: ToastVariant; title?: string; message: string }>
+  >([]);
 
   const enrichedSessions = useMemo(
     () =>
@@ -323,8 +332,18 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     });
   };
 
+  const pushToast = useCallback((toast: Omit<(typeof toasts)[number], 'id'>) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+    setToasts((current) => [...current, { ...toast, id }]);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
+
   const controlDisabled = !selectedScheduleId;
   const selectedRuntimeStatus = selectedGroup?.runtimeStatus ?? 'not_started';
+  const controlsBusy = pendingCohortAction !== null;
   const startDisabled =
     controlDisabled ||
     !selectedGroup?.isReadyToStart ||
@@ -333,8 +352,91 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     selectedRuntimeStatus === 'completed' ||
     selectedRuntimeStatus === 'cancelled';
 
+  const getStartDisabledReason = (): string | undefined => {
+    if (controlsBusy) return 'An action is already in progress.';
+    if (controlDisabled) return 'Select a cohort to enable controls.';
+    if (!selectedGroup?.isReadyToStart) return 'This cohort is not ready to start yet.';
+    if (selectedRuntimeStatus === 'live') return 'The exam is already live.';
+    if (selectedRuntimeStatus === 'paused') return 'The exam is paused; resume or complete it instead.';
+    if (selectedRuntimeStatus === 'completed') return 'The exam has already been completed.';
+    if (selectedRuntimeStatus === 'cancelled') return 'This cohort has been cancelled.';
+    return undefined;
+  };
+
+  const getPauseDisabledReason = (): string | undefined => {
+    if (controlsBusy) return 'An action is already in progress.';
+    if (controlDisabled) return 'Select a cohort to enable controls.';
+    if (selectedRuntimeStatus !== 'live') return 'The exam must be live to pause the cohort.';
+    return undefined;
+  };
+
+  const getResumeDisabledReason = (): string | undefined => {
+    if (controlsBusy) return 'An action is already in progress.';
+    if (controlDisabled) return 'Select a cohort to enable controls.';
+    if (selectedRuntimeStatus !== 'paused') return 'The cohort must be paused to resume.';
+    return undefined;
+  };
+
+  const getSectionControlDisabledReason = (): string | undefined => {
+    if (controlsBusy) return 'An action is already in progress.';
+    if (controlDisabled) return 'Select a cohort to enable controls.';
+    if (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') return 'The exam must be live or paused to manage sections.';
+    return undefined;
+  };
+
+  const getCompleteDisabledReason = (): string | undefined => {
+    if (controlsBusy) return 'An action is already in progress.';
+    if (controlDisabled) return 'Select a cohort to enable controls.';
+    if (selectedRuntimeStatus === 'completed') return 'The exam has already been completed.';
+    return undefined;
+  };
+
+  const runCohortAction = useCallback(
+    async (action: CohortControlAction, options: { label: string; successMessage: string; fn: () => Promise<void> | void }) => {
+      if (!selectedScheduleId) return;
+      if (pendingCohortAction) return;
+
+      setPendingCohortAction(action);
+      try {
+        await options.fn();
+        pushToast({
+          variant: 'success',
+          title: options.label,
+          message: options.successMessage,
+        });
+        return true;
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error';
+        pushToast({
+          variant: 'error',
+          title: `${options.label} failed`,
+          message: errorMessage,
+        });
+        return false;
+      } finally {
+        setPendingCohortAction(null);
+      }
+    },
+    [pendingCohortAction, pushToast, selectedScheduleId],
+  );
+
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_1fr] bg-slate-50">
+      <ToastContainer position="top-right">
+        {toasts.map((toast) => (
+          <Toast
+            key={toast.id}
+            id={toast.id}
+            variant={toast.variant}
+            title={toast.title}
+            message={toast.message}
+            duration={toast.variant === 'error' ? 0 : 5_000}
+            onClose={() => dismissToast(toast.id)}
+          />
+        ))}
+      </ToastContainer>
+
       <section className="border-b border-slate-200 bg-white px-6 py-4">
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
           <div className="grid gap-3">
@@ -366,26 +468,120 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
             ) : null}
           </div>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            <button onClick={() => selectedScheduleId && void onStartScheduledSession(selectedScheduleId)} disabled={startDisabled} className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
-              <Play size={14} /> Start Exam
+            <button
+              onClick={() =>
+                void runCohortAction('start', {
+                  label: 'Start exam',
+                  successMessage: 'Exam started for the selected cohort.',
+                  fn: async () => {
+                    if (!selectedScheduleId) return;
+                    await onStartScheduledSession(selectedScheduleId);
+                  },
+                })
+              }
+              disabled={startDisabled || controlsBusy}
+              title={startDisabled || controlsBusy ? getStartDisabledReason() : undefined}
+              aria-busy={pendingCohortAction === 'start'}
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-950 px-3 py-2 text-sm font-medium text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+            >
+              {pendingCohortAction === 'start' ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Play size={14} />}
+              {pendingCohortAction === 'start' ? 'Starting…' : 'Start Exam'}
             </button>
-            <button onClick={() => selectedScheduleId && void onPauseCohort(selectedScheduleId)} disabled={controlDisabled || selectedRuntimeStatus !== 'live'} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400">
-              <Pause size={14} /> Pause Cohort
+            <button
+              onClick={() =>
+                void runCohortAction('pause', {
+                  label: 'Pause cohort',
+                  successMessage: 'Cohort paused.',
+                  fn: async () => {
+                    if (!selectedScheduleId) return;
+                    await onPauseCohort(selectedScheduleId);
+                  },
+                })
+              }
+              disabled={controlDisabled || selectedRuntimeStatus !== 'live' || controlsBusy}
+              title={controlDisabled || selectedRuntimeStatus !== 'live' || controlsBusy ? getPauseDisabledReason() : undefined}
+              aria-busy={pendingCohortAction === 'pause'}
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              {pendingCohortAction === 'pause' ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Pause size={14} />}
+              {pendingCohortAction === 'pause' ? 'Pausing…' : 'Pause Cohort'}
             </button>
-            <button onClick={() => selectedScheduleId && void onResumeCohort(selectedScheduleId)} disabled={controlDisabled || selectedRuntimeStatus !== 'paused'} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400">
-              <Play size={14} /> Resume Cohort
+            <button
+              onClick={() =>
+                void runCohortAction('resume', {
+                  label: 'Resume cohort',
+                  successMessage: 'Cohort resumed.',
+                  fn: async () => {
+                    if (!selectedScheduleId) return;
+                    await onResumeCohort(selectedScheduleId);
+                  },
+                })
+              }
+              disabled={controlDisabled || selectedRuntimeStatus !== 'paused' || controlsBusy}
+              title={controlDisabled || selectedRuntimeStatus !== 'paused' || controlsBusy ? getResumeDisabledReason() : undefined}
+              aria-busy={pendingCohortAction === 'resume'}
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              {pendingCohortAction === 'resume' ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Play size={14} />}
+              {pendingCohortAction === 'resume' ? 'Resuming…' : 'Resume Cohort'}
             </button>
-            <button onClick={() => selectedScheduleId && void onEndSectionNow(selectedScheduleId)} disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused')} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400">
-              <FastForward size={14} /> End Section
+            <button
+              onClick={() => setConfirmAction('end_section')}
+              disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') || controlsBusy}
+              title={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') || controlsBusy ? getSectionControlDisabledReason() : undefined}
+              aria-busy={pendingCohortAction === 'end_section'}
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              {pendingCohortAction === 'end_section' ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <FastForward size={14} />}
+              {pendingCohortAction === 'end_section' ? 'Ending…' : 'End Section'}
             </button>
-            <button onClick={() => selectedScheduleId && void onExtendCurrentSection(selectedScheduleId, 5)} disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused')} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400">
-              <Timer size={14} /> Extend +5
+            <button
+              onClick={() =>
+                void runCohortAction('extend_5', {
+                  label: 'Extend section',
+                  successMessage: 'Current section extended by 5 minutes.',
+                  fn: async () => {
+                    if (!selectedScheduleId) return;
+                    await onExtendCurrentSection(selectedScheduleId, 5);
+                  },
+                })
+              }
+              disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') || controlsBusy}
+              title={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') || controlsBusy ? getSectionControlDisabledReason() : undefined}
+              aria-busy={pendingCohortAction === 'extend_5'}
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              {pendingCohortAction === 'extend_5' ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Timer size={14} />}
+              {pendingCohortAction === 'extend_5' ? 'Extending…' : 'Extend +5'}
             </button>
-            <button onClick={() => selectedScheduleId && void onExtendCurrentSection(selectedScheduleId, 10)} disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused')} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:text-slate-400">
-              <Timer size={14} /> Extend +10
+            <button
+              onClick={() =>
+                void runCohortAction('extend_10', {
+                  label: 'Extend section',
+                  successMessage: 'Current section extended by 10 minutes.',
+                  fn: async () => {
+                    if (!selectedScheduleId) return;
+                    await onExtendCurrentSection(selectedScheduleId, 10);
+                  },
+                })
+              }
+              disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') || controlsBusy}
+              title={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') || controlsBusy ? getSectionControlDisabledReason() : undefined}
+              aria-busy={pendingCohortAction === 'extend_10'}
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              {pendingCohortAction === 'extend_10' ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Timer size={14} />}
+              {pendingCohortAction === 'extend_10' ? 'Extending…' : 'Extend +10'}
             </button>
-            <button onClick={() => selectedScheduleId && void onCompleteExam(selectedScheduleId)} disabled={controlDisabled || selectedRuntimeStatus === 'completed'} className="inline-flex items-center justify-center gap-2 rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
-              <StopCircle size={14} /> Complete
+            <button
+              onClick={() => setConfirmAction('complete')}
+              disabled={controlDisabled || selectedRuntimeStatus === 'completed' || controlsBusy}
+              title={controlDisabled || selectedRuntimeStatus === 'completed' || controlsBusy ? getCompleteDisabledReason() : undefined}
+              aria-busy={pendingCohortAction === 'complete'}
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+            >
+              {pendingCohortAction === 'complete' ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <StopCircle size={14} />}
+              {pendingCohortAction === 'complete' ? 'Completing…' : 'Complete'}
             </button>
           </div>
         </div>
@@ -399,6 +595,44 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
           </div>
         ) : null}
       </section>
+
+      <ConfirmModal
+        isOpen={confirmAction === 'end_section'}
+        onClose={() => setConfirmAction(null)}
+        title="End section now?"
+        description="This will immediately end the current section for the entire cohort and advance the runtime. This can impact candidates currently working."
+        confirmLabel="End section"
+        tone="warning"
+        onConfirm={async () => {
+          return await runCohortAction('end_section', {
+            label: 'End section',
+            successMessage: 'Current section ended for the cohort.',
+            fn: async () => {
+              if (!selectedScheduleId) return;
+              await onEndSectionNow(selectedScheduleId);
+            },
+          });
+        }}
+      />
+
+      <ConfirmModal
+        isOpen={confirmAction === 'complete'}
+        onClose={() => setConfirmAction(null)}
+        title="Complete exam for cohort?"
+        description="This will end the exam for all candidates in the selected cohort. This action cannot be undone."
+        confirmLabel="Complete exam"
+        tone="danger"
+        onConfirm={async () => {
+          return await runCohortAction('complete', {
+            label: 'Complete exam',
+            successMessage: 'Exam completed for the cohort.',
+            fn: async () => {
+              if (!selectedScheduleId) return;
+              await onCompleteExam(selectedScheduleId);
+            },
+          });
+        }}
+      />
 
       <section className="min-h-0 overflow-auto px-6 py-5">
         {!selectedScheduleId ? (
