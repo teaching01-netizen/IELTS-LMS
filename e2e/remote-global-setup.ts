@@ -74,6 +74,11 @@ export default async function globalSetup(config: FullConfig) {
     throw new Error('E2E remote baseURL is not configured.');
   }
 
+  if (process.env.E2E_SKIP_SEED === 'true') {
+    await fs.mkdir(GENERATED_DIR, { recursive: true });
+    return;
+  }
+
   requireExplicitDbResetConsent(frontendOrigin);
 
   await fs.mkdir(GENERATED_DIR, { recursive: true });
@@ -101,4 +106,3 @@ export default async function globalSetup(config: FullConfig) {
 
   await runSeedCommand(cargoArgs, backendRoot, process.env);
 }
-
