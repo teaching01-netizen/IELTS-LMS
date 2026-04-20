@@ -403,11 +403,7 @@ describe('StudentRuntimeProvider - Violation Tracking', () => {
 
   describe('attempt hydration and blocking state', () => {
     const hydratedWrapper = ({ children }: { children: React.ReactNode }) => (
-      <StudentRuntimeProvider
-        state={mockExamState}
-        onExit={vi.fn()}
-        attemptSnapshot={hydratedAttempt}
-      >
+      <StudentRuntimeProvider state={mockExamState} onExit={vi.fn()} attemptSnapshot={hydratedAttempt}>
         {children}
       </StudentRuntimeProvider>
     );
@@ -423,6 +419,46 @@ describe('StudentRuntimeProvider - Violation Tracking', () => {
       expect(result.current.state.flags).toEqual({ q1: true });
       expect(result.current.state.violations).toHaveLength(1);
       expect(result.current.state.attemptSyncState).toBe('saved');
+    });
+
+    it('preserves locally-recorded violations across attempt re-hydration refreshes', () => {
+      let attemptSnapshot = hydratedAttempt;
+      const wrapperWithAttempt = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: wrapperWithAttempt });
+
+      act(() => {
+        result.current.actions.addViolation('CLIPBOARD_BLOCKED', 'medium', 'Clipboard blocked');
+      });
+
+      const localViolation = result.current.state.violations.find(
+        (violation) => violation.type === 'CLIPBOARD_BLOCKED',
+      );
+      expect(localViolation).toBeDefined();
+
+      const refreshedAttempt: StudentAttempt = {
+        ...hydratedAttempt,
+        // Simulate the backend returning an older snapshot that doesn't include the local violation yet.
+        violations: hydratedAttempt.violations,
+        updatedAt: '2026-01-01T00:00:01.000Z',
+      };
+
+      act(() => {
+        attemptSnapshot = refreshedAttempt;
+        rerender();
+      });
+
+      expect(
+        result.current.state.violations.some((violation) => violation.id === localViolation?.id),
+      ).toBe(true);
     });
 
     it('supports explicit blocking reasons and sync-state updates', () => {

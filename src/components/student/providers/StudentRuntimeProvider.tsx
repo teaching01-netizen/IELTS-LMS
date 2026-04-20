@@ -295,6 +295,37 @@ function createInitialRuntimeState(
   };
 }
 
+function mergeViolations(snapshot: Violation[], local: Violation[]): Violation[] {
+  if (local.length === 0) {
+    return snapshot;
+  }
+
+  if (snapshot.length === 0) {
+    return local;
+  }
+
+  const seen = new Set<string>();
+  const merged: Violation[] = [];
+
+  for (const violation of snapshot) {
+    if (seen.has(violation.id)) {
+      continue;
+    }
+    seen.add(violation.id);
+    merged.push(violation);
+  }
+
+  for (const violation of local) {
+    if (seen.has(violation.id)) {
+      continue;
+    }
+    seen.add(violation.id);
+    merged.push(violation);
+  }
+
+  return merged;
+}
+
 function runtimeReducer(
   state: RuntimeReducerState,
   action: RuntimeAction,
@@ -338,6 +369,7 @@ function runtimeReducer(
         action.snapshot.proctorStatus === 'terminated'
           ? 'post-exam'
           : action.snapshot.phase;
+      const mergedViolations = mergeViolations(action.snapshot.violations, state.violations);
 
       if (
         state.phase === nextPhase &&
@@ -346,7 +378,7 @@ function runtimeReducer(
         JSON.stringify(state.answers) === JSON.stringify(action.snapshot.answers) &&
         JSON.stringify(state.writingAnswers) === JSON.stringify(action.snapshot.writingAnswers) &&
         JSON.stringify(state.flags) === JSON.stringify(action.snapshot.flags) &&
-        JSON.stringify(state.violations) === JSON.stringify(action.snapshot.violations) &&
+        JSON.stringify(state.violations) === JSON.stringify(mergedViolations) &&
         state.proctorStatus === action.snapshot.proctorStatus &&
         state.proctorNote === action.snapshot.proctorNote &&
         state.attemptSyncState === action.snapshot.recovery.syncState
@@ -362,8 +394,8 @@ function runtimeReducer(
         answers: action.snapshot.answers,
         writingAnswers: action.snapshot.writingAnswers,
         flags: action.snapshot.flags,
-        violations: action.snapshot.violations,
-        fullscreenViolationCount: countFullscreenViolations(action.snapshot.violations),
+        violations: mergedViolations,
+        fullscreenViolationCount: countFullscreenViolations(mergedViolations),
         proctorStatus: action.snapshot.proctorStatus,
         proctorNote: action.snapshot.proctorNote,
         attemptSyncState: action.snapshot.recovery.syncState,
