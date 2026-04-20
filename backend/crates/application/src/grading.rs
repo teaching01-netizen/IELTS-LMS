@@ -951,13 +951,16 @@ impl GradingService {
         .await?;
 
         for schedule in schedules {
+            let assigned_teachers = json!([]);
             sqlx::query(
                 r#"
                 INSERT INTO grading_sessions (
                     id, schedule_id, exam_id, exam_title, published_version_id, cohort_name,
-                    institution, start_time, end_time, status, created_at, created_by, updated_at
+                    institution, start_time, end_time, status, total_students, submitted_count,
+                    pending_manual_reviews, in_progress_reviews, finalized_reviews, overdue_reviews,
+                    assigned_teachers, created_at, created_by, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     exam_id = VALUES(exam_id),
                     exam_title = VALUES(exam_title),
@@ -980,6 +983,7 @@ impl GradingService {
             .bind(schedule.start_time)
             .bind(schedule.end_time)
             .bind(map_schedule_status(schedule.status))
+            .bind(assigned_teachers)
             .bind(schedule.created_at)
             .bind(schedule.created_by)
             .bind(schedule.updated_at)

@@ -237,6 +237,12 @@ class ApiClient {
         requestId,
         attempts: retries + 1,
       });
+    } else if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) {
+      logWarn(lastError || new Error('Request failed'), {
+        endpoint,
+        requestId,
+        attempts: retries + 1,
+      });
     } else {
       logError(lastError || new Error('Request failed after retries'), {
         endpoint,

@@ -348,11 +348,13 @@ impl LibraryService {
 
     pub async fn get_exam_defaults(
         &self,
-        _ctx: &ActorContext,
+        ctx: &ActorContext,
     ) -> Result<AdminDefaultProfile, LibraryError> {
+        let organization_id = ctx.organization_id.as_ref().map(|id| id.to_string());
         sqlx::query_as::<_, AdminDefaultProfile>(
-            "SELECT * FROM admin_default_profiles WHERE is_active = true LIMIT 1",
+            "SELECT * FROM admin_default_profiles WHERE is_active = true AND organization_id <=> ? LIMIT 1",
         )
+        .bind(organization_id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or(LibraryError::NotFound)
@@ -363,35 +365,77 @@ impl LibraryService {
         ctx: &ActorContext,
         req: UpdateExamDefaultsRequest,
     ) -> Result<AdminDefaultProfile, LibraryError> {
-        let existing = self.get_exam_defaults(ctx).await?;
-
-        if existing.revision != req.revision {
-            return Err(LibraryError::Conflict(
-                "Defaults have been modified by another user".to_string(),
-            ));
-        }
-
-        let now = Utc::now();
-
-        sqlx::query(
-            r#"
-            UPDATE admin_default_profiles
-            SET
-                config_snapshot = ?,
-                updated_at = NOW(),
-                revision = revision + 1
-            WHERE id = ?
-            "#,
+        let organization_id = ctx.organization_id.as_ref().map(|id| id.to_string());
+        let existing = sqlx::query_as::<_, AdminDefaultProfile>(
+            "SELECT * FROM admin_default_profiles WHERE is_active = true AND organization_id <=> ? LIMIT 1",
         )
-        .bind(&req.config_snapshot)
-        .bind(&existing.id)
-        .execute(&self.pool)
+        .bind(organization_id.clone())
+        .fetch_optional(&self.pool)
         .await?;
 
-        let profile = sqlx::query_as::<_, AdminDefaultProfile>("SELECT * FROM admin_default_profiles WHERE id = ?")
+        if let Some(existing) = existing {
+            if existing.revision != req.revision {
+                return Err(LibraryError::Conflict(
+                    "Defaults have been modified by another user".to_string(),
+                ));
+            }
+
+            sqlx::query(
+                r#"
+                UPDATE admin_default_profiles
+                SET
+                    config_snapshot = ?,
+                    updated_at = NOW(),
+                    revision = revision + 1
+                WHERE id = ?
+                "#,
+            )
+            .bind(&req.config_snapshot)
+            .bind(&existing.id)
+            .execute(&self.pool)
+            .await?;
+
+            let profile = sqlx::query_as::<_, AdminDefaultProfile>(
+                "SELECT * FROM admin_default_profiles WHERE id = ?",
+            )
             .bind(&existing.id)
             .fetch_one(&self.pool)
             .await?;
+
+            return Ok(profile);
+        }
+
+        let id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO admin_default_profiles (
+                id,
+                organization_id,
+                profile_name,
+                config_snapshot,
+                is_active,
+                created_by,
+                created_at,
+                updated_at,
+                revision
+            )
+            VALUES (?, ?, ?, ?, true, ?, NOW(), NOW(), 0)
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(organization_id)
+        .bind("Default")
+        .bind(&req.config_snapshot)
+        .bind(ctx.actor_id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        let profile = sqlx::query_as::<_, AdminDefaultProfile>(
+            "SELECT * FROM admin_default_profiles WHERE id = ?",
+        )
+        .bind(id.to_string())
+        .fetch_one(&self.pool)
+        .await?;
 
         Ok(profile)
     }
