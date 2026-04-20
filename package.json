@@ -20,7 +20,8 @@
     "playwright": "playwright test",
     "playwright:ui": "playwright test --ui",
     "playwright:debug": "playwright test --debug",
-    "e2e:prod-smoke": "playwright test --config playwright.prod-smoke.config.ts"
+    "e2e:prod-smoke": "playwright test --config playwright.prod-smoke.config.ts",
+    "e2e:prod-load": "playwright test --config playwright.prod-load.config.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

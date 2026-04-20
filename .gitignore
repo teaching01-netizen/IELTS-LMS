@@ -15,6 +15,7 @@ coverage/
 *storybook.log
 storybook-static
 e2e/.generated/
+e2e/prod-data/prod-creds.json
 
 # Cloudflare / Wrangler
 .cloudflare/

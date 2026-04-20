@@ -1,0 +1,19 @@
+{
+  "editor": {
+    "email": "editor@example.com",
+    "password": "REPLACE_ME"
+  },
+  "proctors": [
+    { "email": "proctor01@example.com", "password": "REPLACE_ME_UNIQUE_01" },
+    { "email": "proctor02@example.com", "password": "REPLACE_ME_UNIQUE_02" },
+    { "email": "proctor03@example.com", "password": "REPLACE_ME_UNIQUE_03" },
+    { "email": "proctor04@example.com", "password": "REPLACE_ME_UNIQUE_04" },
+    { "email": "proctor05@example.com", "password": "REPLACE_ME_UNIQUE_05" },
+    { "email": "proctor06@example.com", "password": "REPLACE_ME_UNIQUE_06" },
+    { "email": "proctor07@example.com", "password": "REPLACE_ME_UNIQUE_07" },
+    { "email": "proctor08@example.com", "password": "REPLACE_ME_UNIQUE_08" },
+    { "email": "proctor09@example.com", "password": "REPLACE_ME_UNIQUE_09" },
+    { "email": "proctor10@example.com", "password": "REPLACE_ME_UNIQUE_10" }
+  ]
+}
+

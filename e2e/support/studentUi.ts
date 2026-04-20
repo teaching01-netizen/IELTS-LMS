@@ -18,13 +18,56 @@ export async function stubScreenDetails(context: BrowserContext) {
   });
 }
 
+export async function grantStrictProctoringPermissions(
+  context: BrowserContext,
+  origin: string,
+) {
+  await context.grantPermissions(['camera', 'microphone'], { origin });
+}
+
+export async function triggerTabSwitchViolation(page: Page) {
+  await page.evaluate(() => {
+    try {
+      window.dispatchEvent(new Event('blur', { bubbles: true, cancelable: true }));
+    } catch {
+      // Ignore
+    }
+  });
+}
+
+export async function triggerClipboardBlockedViolation(page: Page) {
+  await page.evaluate(() => {
+    const target = document.activeElement;
+    if (!target) return;
+    try {
+      const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+    } catch {
+      // Ignore
+    }
+  });
+}
+
+export async function triggerContextMenuBlockedViolation(page: Page) {
+  await page.keyboard.press('Shift+F10').catch(() => {});
+  await page.evaluate(() => {
+    try {
+      document.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }),
+      );
+    } catch {
+      // Ignore
+    }
+  });
+}
+
 export async function studentCheckIn(
   page: Page,
   scheduleId: string,
   payload: { wcode: string; email: string; fullName: string },
 ) {
-  await page.goto(`/student/${scheduleId}`);
-  await page.getByRole('heading', { name: 'Exam Check-in' }).waitFor({ state: 'visible' });
+  await openStudentCheckIn(page, scheduleId);
+
   await page.waitForTimeout(250);
   const wcodeField = page.getByLabel('Wcode');
   const emailField = page.getByLabel('Email');
@@ -66,6 +109,61 @@ export async function studentCheckIn(
   }
 }
 
+export async function openStudentCheckIn(page: Page, scheduleId: string) {
+  const loadingError = page.getByRole('heading', { name: 'Loading Error' });
+  const retryButton = page.getByRole('button', { name: 'Retry' });
+  const checkInHeading = page.getByRole('heading', { name: 'Exam Check-in' });
+
+  // Production variants: some deployments mount check-in at `/student/:scheduleId/register`.
+  // Also handle transient "Loading Error" screens with retry.
+  const entryUrls = [`/student/${scheduleId}/register`, `/student/${scheduleId}`];
+
+  let loaded = false;
+  for (const entryUrl of entryUrls) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt === 0) {
+        await page.goto(entryUrl);
+      } else {
+        const canRetry = await retryButton.isVisible().catch(() => false);
+        if (canRetry) {
+          await retryButton.click().catch(() => {});
+        } else {
+          await page.goto(entryUrl);
+        }
+      }
+
+      await page.waitForLoadState('domcontentloaded');
+
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 20_000) {
+        if (await checkInHeading.isVisible().catch(() => false)) {
+          loaded = true;
+          break;
+        }
+
+        if (await loadingError.isVisible().catch(() => false)) {
+          break;
+        }
+
+        await page.waitForTimeout(250);
+      }
+
+      if (loaded) break;
+    }
+
+    if (loaded) break;
+  }
+
+  if (!loaded) {
+    const errorCopy = await page.locator('body').innerText().catch(() => '');
+    throw new Error(
+      `Student check-in screen did not load for scheduleId=${scheduleId}. ` +
+        `Last page URL=${page.url()}. ` +
+        (errorCopy ? `Body=${errorCopy.slice(0, 200)}` : ''),
+    );
+  }
+}
+
 export async function completePreCheckIfPresent(page: Page) {
   const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
   await compatibilityCheck.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
@@ -90,6 +188,17 @@ export async function startLobbyIfPresent(page: Page) {
   const startExamVisible = await startExam.isVisible().catch(() => false);
   if (startExamVisible) {
     await startExam.click();
+  }
+}
+
+export async function acknowledgeWarningOverlayIfPresent(page: Page) {
+  const overlay = page.getByText(/Tab switching detected/i);
+  const understand = page.getByRole('button', { name: /I Understand/i });
+  const visible = await overlay.isVisible().catch(() => false);
+  if (!visible) return;
+  const canClick = await understand.isVisible().catch(() => false);
+  if (canClick) {
+    await understand.click().catch(() => {});
   }
 }
 
