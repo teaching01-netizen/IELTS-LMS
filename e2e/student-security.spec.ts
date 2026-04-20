@@ -166,18 +166,6 @@ test.describe('Student security guardrails (LRW)', () => {
       };
 
       safeDispatch(window, 'blur');
-      safeDispatch(document, 'blur');
-
-      try {
-        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
-        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
-      } catch {
-        // Ignore environments that prevent overriding these properties.
-      }
-      safeDispatch(document, 'visibilitychange');
-
-      safeDispatch(window, 'pagehide');
-      safeDispatch(document, 'pagehide');
     });
 
     await expect

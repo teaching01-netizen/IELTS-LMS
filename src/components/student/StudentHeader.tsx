@@ -65,7 +65,14 @@ export function StudentHeader({
             <div className="w-px h-5 md:h-6 lg:h-8 bg-gray-200 hidden sm:block"></div>
             <div className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-bold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border-2 rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? 'bg-red-100 border-red-700 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-900'}`}>
               <Clock size={14} className={timeRemaining < 300 ? 'text-red-900' : 'text-gray-700'} />
-              <span className="font-mono">{formatTime(timeRemaining)}</span>
+              <span
+                className="font-mono"
+                role="timer"
+                aria-label="Time remaining"
+                data-testid="student-time-remaining"
+              >
+                {formatTime(timeRemaining)}
+              </span>
             </div>
             <div className="text-right hidden md:block">
               <div className="text-[9px] md:text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-0.5">Total</div>

@@ -679,6 +679,20 @@ impl SchedulingService {
         .fetch_all(&self.pool)
         .await?;
 
+        let now = Utc::now();
+        let computed_runtime = compute_runtime_remaining_seconds(
+            runtime_row.current_section_key.as_deref(),
+            runtime_row.active_section_key.as_deref(),
+            &sections,
+            now,
+        );
+        let current_section_remaining_seconds = computed_runtime
+            .map(|computed| computed.remaining_seconds)
+            .unwrap_or(runtime_row.current_section_remaining_seconds);
+        let is_overrun = computed_runtime
+            .map(|computed| computed.is_overrun)
+            .unwrap_or(runtime_row.is_overrun);
+
         Ok(ExamSessionRuntime {
             id: runtime_row.id.to_string(),
             schedule_id: runtime_row.schedule_id.to_string(),
@@ -689,9 +703,9 @@ impl SchedulingService {
             actual_end_at: runtime_row.actual_end_at,
             active_section_key: runtime_row.active_section_key,
             current_section_key: runtime_row.current_section_key,
-            current_section_remaining_seconds: runtime_row.current_section_remaining_seconds,
+            current_section_remaining_seconds,
             waiting_for_next_section: runtime_row.waiting_for_next_section,
-            is_overrun: runtime_row.is_overrun,
+            is_overrun,
             total_paused_seconds: runtime_row.total_paused_seconds,
             created_at: runtime_row.created_at,
             updated_at: runtime_row.updated_at,
@@ -977,6 +991,62 @@ struct RuntimeSectionRow {
     projected_end_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ComputedSectionTime {
+    remaining_seconds: i32,
+    is_overrun: bool,
+}
+
+fn compute_runtime_remaining_seconds(
+    current_section_key: Option<&str>,
+    active_section_key: Option<&str>,
+    sections: &[RuntimeSectionRow],
+    now: DateTime<Utc>,
+) -> Option<ComputedSectionTime> {
+    let section_key = current_section_key.or(active_section_key)?;
+    let section = sections.iter().find(|section| section.section_key == section_key)?;
+    let actual_start_at = section.actual_start_at?;
+
+    Some(compute_section_remaining_seconds(
+        actual_start_at,
+        section.planned_duration_minutes,
+        section.extension_minutes,
+        section.paused_at,
+        section.accumulated_paused_seconds,
+        section.status.clone(),
+        now,
+    ))
+}
+
+fn compute_section_remaining_seconds(
+    actual_start_at: DateTime<Utc>,
+    planned_duration_minutes: i32,
+    extension_minutes: i32,
+    paused_at: Option<DateTime<Utc>>,
+    accumulated_paused_seconds: i32,
+    status: SectionRuntimeStatus,
+    now: DateTime<Utc>,
+) -> ComputedSectionTime {
+    let duration_seconds = i64::from(planned_duration_minutes.saturating_add(extension_minutes))
+        .saturating_mul(60);
+
+    let time_base = if status == SectionRuntimeStatus::Paused || paused_at.is_some() {
+        paused_at.unwrap_or(now)
+    } else {
+        now
+    };
+
+    let raw_elapsed_seconds = (time_base - actual_start_at).num_seconds().max(0);
+    let elapsed_seconds = raw_elapsed_seconds.saturating_sub(i64::from(accumulated_paused_seconds.max(0)));
+
+    let remaining_seconds = (duration_seconds - elapsed_seconds).clamp(0, duration_seconds);
+
+    ComputedSectionTime {
+        remaining_seconds: remaining_seconds as i32,
+        is_overrun: elapsed_seconds > duration_seconds,
+    }
+}
+
 impl From<RuntimeSectionRow> for RuntimeSectionState {
     fn from(value: RuntimeSectionRow) -> Self {
         Self {
@@ -998,6 +1068,89 @@ impl From<RuntimeSectionRow> for RuntimeSectionState {
             projected_start_at: value.projected_start_at,
             projected_end_at: value.projected_end_at,
         }
+    }
+}
+
+#[cfg(test)]
+mod computed_time_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn compute_section_remaining_seconds_counts_down_when_live() {
+        let start = Utc.with_ymd_and_hms(2026, 4, 20, 0, 0, 0).unwrap();
+        let now = start + chrono::Duration::seconds(30);
+
+        let computed = compute_section_remaining_seconds(
+            start,
+            10,
+            0,
+            None,
+            0,
+            SectionRuntimeStatus::Live,
+            now,
+        );
+
+        assert_eq!(computed.remaining_seconds, 600 - 30);
+        assert_eq!(computed.is_overrun, false);
+    }
+
+    #[test]
+    fn compute_section_remaining_seconds_freezes_when_paused() {
+        let start = Utc.with_ymd_and_hms(2026, 4, 20, 0, 0, 0).unwrap();
+        let paused_at = start + chrono::Duration::seconds(20);
+        let now = start + chrono::Duration::seconds(50);
+
+        let computed = compute_section_remaining_seconds(
+            start,
+            10,
+            0,
+            Some(paused_at),
+            0,
+            SectionRuntimeStatus::Paused,
+            now,
+        );
+
+        assert_eq!(computed.remaining_seconds, 600 - 20);
+        assert_eq!(computed.is_overrun, false);
+    }
+
+    #[test]
+    fn compute_section_remaining_seconds_includes_extensions() {
+        let start = Utc.with_ymd_and_hms(2026, 4, 20, 0, 0, 0).unwrap();
+        let now = start + chrono::Duration::seconds(30);
+
+        let computed = compute_section_remaining_seconds(
+            start,
+            10,
+            5,
+            None,
+            0,
+            SectionRuntimeStatus::Live,
+            now,
+        );
+
+        assert_eq!(computed.remaining_seconds, (15 * 60) - 30);
+        assert_eq!(computed.is_overrun, false);
+    }
+
+    #[test]
+    fn compute_section_remaining_seconds_clamps_to_zero_and_marks_overrun() {
+        let start = Utc.with_ymd_and_hms(2026, 4, 20, 0, 0, 0).unwrap();
+        let now = start + chrono::Duration::seconds(700);
+
+        let computed = compute_section_remaining_seconds(
+            start,
+            10,
+            0,
+            None,
+            0,
+            SectionRuntimeStatus::Live,
+            now,
+        );
+
+        assert_eq!(computed.remaining_seconds, 0);
+        assert_eq!(computed.is_overrun, true);
     }
 }
 

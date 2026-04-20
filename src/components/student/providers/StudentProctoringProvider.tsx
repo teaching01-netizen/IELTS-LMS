@@ -380,8 +380,8 @@ export function ProctoringProvider({
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    document.addEventListener('blur', handleBlur);
-    document.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('pagehide', handlePageHide);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
     if (runtimeState.phase === 'exam' && config.security.detectSecondaryScreen) {
@@ -392,8 +392,8 @@ export function ProctoringProvider({
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      document.removeEventListener('blur', handleBlur);
-      document.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('pagehide', handlePageHide);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       if (tabSwitchDebounceTimer) {
         window.clearTimeout(tabSwitchDebounceTimer);

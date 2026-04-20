@@ -273,6 +273,25 @@ describe('StudentProctoringProvider', () => {
     ).toBe(true);
   });
 
+  it('logs a tab-switch warning on window blur', async () => {
+    const harness = renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'warn' },
+    });
+
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(true);
+  });
+
   it('terminates the exam when tab-switch policy is terminate', async () => {
     const harness = renderHarness({
       ...mockConfig,
