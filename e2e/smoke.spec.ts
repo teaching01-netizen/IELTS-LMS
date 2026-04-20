@@ -1,10 +1,16 @@
 import { expect, test } from '@playwright/test';
 import {
   readBackendE2EManifest,
-  STUDENT_STORAGE_STATE_PATH,
   BUILDER_STORAGE_STATE_PATH,
   ADMIN_STORAGE_STATE_PATH,
 } from './support/backendE2e';
+import {
+  completePreCheckIfPresent,
+  deterministicWcode,
+  startLobbyIfPresent,
+  studentCheckIn,
+  stubScreenDetails,
+} from './support/studentUi';
 
 test.describe('Application smoke tests', () => {
   test('login page loads the sign-in form', async ({ page }) => {
@@ -23,29 +29,21 @@ test.describe('Application smoke tests', () => {
     await expect(page.getByRole('button', { name: 'Request Reset Link' })).toBeVisible();
   });
 
-  test('student exam interface loads with proper accessibility', async ({ browser }) => {
+  test('student exam interface loads with proper accessibility', async ({ browser }, testInfo) => {
     const manifest = readBackendE2EManifest();
-    const studentContext = await browser.newContext({
-      storageState: STUDENT_STORAGE_STATE_PATH,
-    });
+    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
+    const studentContext = await browser.newContext();
+    await stubScreenDetails(studentContext);
     const studentPage = await studentContext.newPage();
 
-    await studentPage.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    // Session may already be active from previous test runs, so handle both states
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-
-    if (isCompatibilityCheckVisible) {
-      await expect(compatibilityCheck).toBeVisible();
-    } else {
-      // If session is already active, verify the exam interface loaded
-      await studentPage.waitForLoadState('networkidle');
-      // TODO: Fix selector - temporarily skipping this assertion
-      // await expect(studentPage.getByLabel('Answer for question 1')).toBeVisible();
-    }
+    await studentCheckIn(studentPage, manifest.student.scheduleId, {
+      wcode,
+      email: `e2e+${wcode.toLowerCase()}@example.com`,
+      fullName: 'E2E Candidate',
+    });
+    await completePreCheckIfPresent(studentPage);
+    await startLobbyIfPresent(studentPage);
+    await studentPage.waitForLoadState('networkidle');
 
     const skipLink = studentPage
       .locator('a[href*="main"]')
@@ -124,12 +122,12 @@ test.describe('Application smoke tests', () => {
 
   test('student registration page loads', async ({ page }) => {
     const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/register`);
+    await page.goto(`/student/${manifest.studentSelfPaced.scheduleId}`);
 
     await expect(page.getByLabel('Wcode')).toBeVisible();
     await expect(page.getByLabel('Email')).toBeVisible();
     await expect(page.getByLabel('Full Name')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Register' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
   });
 
   test('main routing paths are accessible', async ({ page }) => {

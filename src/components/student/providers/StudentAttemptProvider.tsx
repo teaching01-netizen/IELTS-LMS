@@ -8,8 +8,9 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
+import { backendPost, isBackendDeliveryEnabled } from '@services/backendBridge';
 import { buildStudentHeartbeatEvent } from '@services/studentIntegrityService';
-import { studentAttemptRepository } from '@services/studentAttemptRepository';
+import { mapBackendStudentAttempt, studentAttemptRepository } from '@services/studentAttemptRepository';
 import { saveStudentAuditEvent } from '@services/studentAuditService';
 import type { ModuleType, Violation } from '../../../types';
 import type {
@@ -83,6 +84,30 @@ function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function generateUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`;
+}
+
+function getClientSessionId(scheduleId: string, studentKey: string): string {
+  if (typeof window === 'undefined') {
+    return generateUuid();
+  }
+
+  const storageKey = `ielts-student-client-session:${scheduleId}:${studentKey}`;
+  const stored = window.sessionStorage.getItem(storageKey);
+  if (stored) {
+    return stored;
+  }
+
+  const nextId = generateUuid();
+  window.sessionStorage.setItem(storageKey, nextId);
+  return nextId;
+}
+
 function mergeAttempt(attempt: StudentAttempt, patch: AttemptPatch): StudentAttempt {
   return {
     ...attempt,
@@ -138,6 +163,7 @@ export function StudentAttemptProvider({
   const objectiveFlushTimeoutRef = useRef<number | null>(null);
   const writingFlushTimeoutRef = useRef<number | null>(null);
   const flushPendingRef = useRef<() => Promise<boolean>>(async () => true);
+  const flushInFlightRef = useRef<Promise<boolean> | null>(null);
 
   const setPendingMutations = useCallback((nextMutations: StudentAttemptMutation[]) => {
     pendingMutationsRef.current = nextMutations;
@@ -215,6 +241,11 @@ export function StudentAttemptProvider({
   }, [scheduleFlush, setPendingMutations, syncAttemptState]);
 
   const flushPending = useCallback(async () => {
+    if (flushInFlightRef.current) {
+      return flushInFlightRef.current;
+    }
+
+    const promise = (async () => {
     const currentAttempt = attemptRef.current;
     if (!currentAttempt) {
       return true;
@@ -269,6 +300,16 @@ export function StudentAttemptProvider({
       });
       syncAttemptState(erroredAttempt);
       return false;
+    }
+    })();
+
+    flushInFlightRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      if (flushInFlightRef.current === promise) {
+        flushInFlightRef.current = null;
+      }
     }
   }, [setRuntimeAttemptSyncState, syncAttemptState]);
 
@@ -355,12 +396,16 @@ export function StudentAttemptProvider({
     if (nextObserved.violations !== observedRef.current.violations) {
       void applyPatch(objectivePatch, 'violation', 400, {
         changedAreas: ['violation'],
+        violations: runtimeState.violations,
       });
     }
 
     if (nextObserved.position !== observedRef.current.position) {
       void applyPatch(objectivePatch, 'position', 400, {
         changedAreas: ['position'],
+        phase: runtimeState.phase,
+        currentModule: runtimeState.currentModule,
+        currentQuestionId: runtimeState.currentQuestionId,
       });
     }
 
@@ -471,30 +516,72 @@ export function StudentAttemptProvider({
   }, [applyPatch]);
 
   const recordPreCheckResult = useCallback(async (result: StudentPreCheckResult) => {
-    await applyPatch(
-      {
-        integrity: {
-          preCheck: result,
+    const currentAttempt = attemptRef.current;
+    if (!currentAttempt) {
+      throw new Error('Missing student attempt context.');
+    }
+
+    const resolvedScheduleId = scheduleId ?? currentAttempt.scheduleId;
+
+    if (isBackendDeliveryEnabled()) {
+      try {
+        const persisted = await backendPost<any>(
+          `/v1/student/sessions/${resolvedScheduleId}/precheck`,
+          {
+            studentKey: currentAttempt.studentKey,
+            candidateId: currentAttempt.candidateId,
+            candidateName: currentAttempt.candidateName,
+            candidateEmail: currentAttempt.candidateEmail,
+            clientSessionId: getClientSessionId(resolvedScheduleId, currentAttempt.studentKey),
+            preCheck: result,
+            deviceFingerprintHash: currentAttempt.integrity.deviceFingerprintHash ?? undefined,
+          },
+          { retries: 0 },
+        );
+        const nextAttempt = mapBackendStudentAttempt(persisted);
+        // The pre-check POST is authoritative in runtime-backed delivery. Any locally queued
+        // mutations generated during the pre-check UI can be safely discarded to avoid replaying
+        // overlapping mutation sequences during bootstrap/polling races.
+        await studentAttemptRepository.clearPendingMutations(nextAttempt.id);
+        await studentAttemptRepository.saveAttempt(nextAttempt);
+        syncAttemptState(nextAttempt);
+      } catch (error) {
+        syncAttemptState(
+          mergeAttempt(currentAttempt, {
+            recovery: {
+              syncState: 'error',
+            },
+          }),
+        );
+        throw error instanceof Error ? error : new Error('Failed to save system check.');
+      }
+    } else {
+      await applyPatch(
+        {
+          integrity: {
+            preCheck: result,
+          },
         },
-      },
-      'precheck',
-      0,
-      {
-        completedAt: result.completedAt,
-      },
-    );
-    await saveStudentAuditEvent(scheduleId, 'PRECHECK_COMPLETED', {
+        'precheck',
+        0,
+        {
+          completedAt: result.completedAt,
+        },
+      );
+    }
+
+    await saveStudentAuditEvent(resolvedScheduleId, 'PRECHECK_COMPLETED', {
       completedAt: result.completedAt,
       checks: result.checks,
       acknowledgedSafariLimitation: result.acknowledgedSafariLimitation,
     });
 
     if (result.acknowledgedSafariLimitation) {
-      await saveStudentAuditEvent(scheduleId, 'PRECHECK_WARNING_ACKNOWLEDGED', {
+      await saveStudentAuditEvent(resolvedScheduleId, 'PRECHECK_WARNING_ACKNOWLEDGED', {
         completedAt: result.completedAt,
       });
     }
-  }, [applyPatch, scheduleId]);
+  }, [applyPatch, scheduleId, syncAttemptState]);
 
   const recordNetworkStatus = useCallback(async (
     status: 'offline' | 'online',

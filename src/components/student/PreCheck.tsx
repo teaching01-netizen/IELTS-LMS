@@ -19,7 +19,7 @@ import { Button } from '../ui/Button';
 
 interface PreCheckProps {
   config?: ExamConfig | undefined;
-  onComplete: (result: StudentPreCheckResult) => void;
+  onComplete: (result: StudentPreCheckResult) => Promise<void> | void;
   onExit: () => void;
 }
 
@@ -244,8 +244,10 @@ function runChecks(config?: ExamConfig): StudentPreCheckResult {
 
 export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
   const [isRunning, setIsRunning] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<StudentPreCheckResult | null>(null);
   const [acknowledgedSafariLimitation, setAcknowledgedSafariLimitation] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -265,6 +267,7 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
   );
   const canContinue =
     !isRunning &&
+    !isSubmitting &&
     !hasRequiredFailure &&
     (!requiresSafariAcknowledgement || acknowledgedSafariLimitation);
 
@@ -273,6 +276,7 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
       return;
     }
 
+    setSubmitError(null);
     if (config?.security.requireFullscreen) {
       const enteredFullscreen = await requestFullscreenMode();
       if (!enteredFullscreen) {
@@ -293,10 +297,18 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
       }
     }
 
-    onComplete({
-      ...result,
-      acknowledgedSafariLimitation,
-    });
+    setIsSubmitting(true);
+    try {
+      await onComplete({
+        ...result,
+        acknowledgedSafariLimitation,
+      });
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to continue. Please try again.');
+      return;
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -397,6 +409,12 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
               </span>
             </label>
           ) : null}
+
+          {submitError ? (
+            <div className="mt-4 rounded-sm border border-red-200 bg-red-50 p-3 text-xs sm:text-sm text-red-900">
+              {submitError}
+            </div>
+          ) : null}
         </div>
 
         <div className="p-3 sm:p-4 md:p-6 lg:px-10 border-t border-gray-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 sm:gap-3 md:gap-4 flex-shrink-0 bg-white">
@@ -409,7 +427,13 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
           </div>
 
           <div className="flex gap-2 sm:gap-3 md:gap-4 w-full md:w-auto">
-            <Button variant="secondary" onClick={onExit} size="sm" className="flex-1 md:flex-none text-[10px] sm:text-xs">
+            <Button
+              variant="secondary"
+              onClick={onExit}
+              size="sm"
+              disabled={isSubmitting}
+              className="flex-1 md:flex-none text-[10px] sm:text-xs"
+            >
               Exit
             </Button>
             <Button
@@ -421,7 +445,7 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
               size="sm"
               className="flex-1 md:flex-none min-w-[80px] sm:min-w-[100px] md:min-w-[120px] text-[10px] sm:text-xs"
             >
-              Continue
+              {isSubmitting ? 'Saving…' : 'Continue'}
             </Button>
           </div>
         </div>

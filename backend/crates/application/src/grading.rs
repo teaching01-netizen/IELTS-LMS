@@ -11,6 +11,7 @@ use ielts_backend_domain::{
 };
 use ielts_backend_infrastructure::{
     actor_context::ActorContext,
+    actor_context::ActorRole,
     authorization::AuthorizationService,
 };
 use serde_json::{json, Map, Value};
@@ -37,6 +38,33 @@ pub struct GradingService {
 impl GradingService {
     pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
+    }
+
+    fn ensure_can_grade_schedule(
+        ctx: &ActorContext,
+        schedule_id: &str,
+        organization_id: Option<&str>,
+    ) -> Result<(), GradingError> {
+        let allowed = match organization_id {
+            Some(org_id) => AuthorizationService::can_grade_submissions(
+                ctx,
+                schedule_id.to_owned(),
+                org_id.to_owned(),
+            ),
+            None => match ctx.role {
+                ActorRole::Admin | ActorRole::AdminObserver => true,
+                ActorRole::Grader | ActorRole::Proctor => {
+                    ctx.schedule_scope_id.as_deref() == Some(schedule_id)
+                }
+                ActorRole::Builder | ActorRole::Student => false,
+            },
+        };
+
+        if allowed {
+            Ok(())
+        } else {
+            Err(GradingError::NotFound)
+        }
     }
 
     pub async fn list_sessions(&self, ctx: &ActorContext) -> Result<Vec<GradingSession>, GradingError> {
@@ -129,12 +157,11 @@ impl GradingService {
         .ok_or(GradingError::NotFound)?;
 
         // Check authorization: user must have access to grade this schedule
-        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
-        if let Some(org_id) = organization_id {
-            if !AuthorizationService::can_grade_submissions(ctx, submission.schedule_id.clone(), org_id.to_string()) {
-                return Err(GradingError::NotFound);
-            }
-        }
+        Self::ensure_can_grade_schedule(
+            ctx,
+            &submission.schedule_id,
+            schedule.organization_id.as_deref(),
+        )?;
 
         let sections = sqlx::query_as::<_, SectionSubmission>(
             "SELECT * FROM section_submissions WHERE submission_id = ? ORDER BY section ASC",
@@ -192,12 +219,11 @@ impl GradingService {
         .ok_or(GradingError::NotFound)?;
 
         // Check authorization: user must have access to grade this schedule
-        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
-        if let Some(org_id) = organization_id {
-            if !AuthorizationService::can_grade_submissions(ctx, submission.schedule_id.clone(), org_id.to_string()) {
-                return Err(GradingError::NotFound);
-            }
-        }
+        Self::ensure_can_grade_schedule(
+            ctx,
+            &submission.schedule_id,
+            schedule.organization_id.as_deref(),
+        )?;
 
         if let Some(existing) =
             sqlx::query_as::<_, ReviewDraft>("SELECT * FROM review_drafts WHERE submission_id = ?")
@@ -309,12 +335,11 @@ impl GradingService {
         .ok_or(GradingError::NotFound)?;
 
         // Check authorization: user must have access to grade this schedule
-        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
-        if let Some(org_id) = organization_id {
-            if !AuthorizationService::can_grade_submissions(ctx, submission.schedule_id.clone(), org_id.to_string()) {
-                return Err(GradingError::NotFound);
-            }
-        }
+        Self::ensure_can_grade_schedule(
+            ctx,
+            &submission.schedule_id,
+            schedule.organization_id.as_deref(),
+        )?;
 
         let existing = self.get_review_draft(submission_id).await?;
         if let Some(revision) = req.revision {
@@ -461,12 +486,11 @@ impl GradingService {
         .ok_or(GradingError::NotFound)?;
 
         // Check authorization: user must have access to grade this schedule
-        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
-        if let Some(org_id) = organization_id {
-            if !AuthorizationService::can_grade_submissions(ctx, submission.schedule_id.clone(), org_id.to_string()) {
-                return Err(GradingError::NotFound);
-            }
-        }
+        Self::ensure_can_grade_schedule(
+            ctx,
+            &submission.schedule_id,
+            schedule.organization_id.as_deref(),
+        )?;
 
         let draft = self.get_review_draft(submission_id).await?;
         let section_bands = build_section_bands(&draft.section_drafts);
@@ -608,12 +632,11 @@ impl GradingService {
         .ok_or(GradingError::NotFound)?;
 
         // Check authorization: user must have access to grade this schedule
-        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
-        if let Some(org_id) = organization_id {
-            if !AuthorizationService::can_grade_submissions(ctx, submission.schedule_id.clone(), org_id.to_string()) {
-                return Err(GradingError::NotFound);
-            }
-        }
+        Self::ensure_can_grade_schedule(
+            ctx,
+            &submission.schedule_id,
+            schedule.organization_id.as_deref(),
+        )?;
 
         let draft = self.get_review_draft(submission_id).await?;
         let section_bands = build_section_bands(&draft.section_drafts);

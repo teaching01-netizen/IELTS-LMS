@@ -16,6 +16,7 @@ use ielts_backend_infrastructure::{
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Map, Value};
 use sqlx::{MySqlConnection, MySqlPool};
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
 
@@ -267,6 +268,32 @@ impl DeliveryService {
             ));
         }
 
+        let schedule_status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM exam_schedules WHERE id = ?",
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(tx.as_mut())
+        .await?;
+        if schedule_status.as_deref() == Some("cancelled") {
+            return Err(DeliveryError::Conflict(
+                "Cancelled schedules can no longer accept mutations.".to_owned(),
+            ));
+        }
+
+        let runtime_gate = sqlx::query_as::<_, RuntimeGateRow>(
+            "SELECT status, actual_end_at FROM exam_session_runtimes WHERE schedule_id = ?",
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(tx.as_mut())
+        .await?;
+        let now = Utc::now();
+        let objective_mutations_allowed =
+            objective_mutations_allowed(runtime_gate.as_ref(), now);
+
+        let version = self.load_version(attempt.published_version_id.clone()).await?;
+        let answer_schema = build_answer_schema(&version.content_snapshot)?;
+        let writing_task_ids = build_writing_task_ids(&version.config_snapshot);
+
         let existing_max_seq: i64 = sqlx::query_scalar(
             "SELECT COALESCE(MAX(mutation_seq), 0) FROM student_attempt_mutations WHERE attempt_id = ? AND client_session_id = ?",
         )
@@ -275,27 +302,28 @@ impl DeliveryService {
         .fetch_one(tx.as_mut())
         .await?;
 
-        if req
-            .mutations
-            .iter()
-            .any(|mutation| mutation.seq <= existing_max_seq)
-        {
-            return Err(DeliveryError::Conflict(
-                "Mutation sequence overlaps with an already accepted range.".to_owned(),
-            ));
-        }
+        validate_contiguous_sequences(existing_max_seq, &req.mutations)?;
 
         let mut answers = attempt.answers.clone();
         let mut writing_answers = attempt.writing_answers.clone();
         let mut flags = attempt.flags.clone();
+        let mut violations_snapshot = attempt.violations_snapshot.clone();
+        let mut phase = attempt.phase.clone();
+        let mut current_module = attempt.current_module.clone();
         let mut current_question_id = attempt.current_question_id.clone();
 
         for mutation in &req.mutations {
             apply_mutation(
                 mutation,
+                &answer_schema,
+                &writing_task_ids,
+                objective_mutations_allowed,
                 &mut answers,
                 &mut writing_answers,
                 &mut flags,
+                &mut violations_snapshot,
+                &mut phase,
+                &mut current_module,
                 &mut current_question_id,
             )?;
         }
@@ -347,9 +375,12 @@ impl DeliveryService {
             r#"
             UPDATE student_attempts
             SET
+                phase = ?,
+                current_module = ?,
                 answers = ?,
                 writing_answers = ?,
                 flags = ?,
+                violations_snapshot = ?,
                 current_question_id = ?,
                 recovery = ?,
                 updated_at = NOW(),
@@ -357,9 +388,12 @@ impl DeliveryService {
             WHERE id = ?
             "#,
         )
+        .bind(phase)
+        .bind(current_module)
         .bind(answers)
         .bind(writing_answers)
         .bind(flags)
+        .bind(violations_snapshot)
         .bind(current_question_id)
         .bind(recovery)
         .bind(&req.attempt_id)
@@ -529,6 +563,49 @@ impl DeliveryService {
             .await?
         {
             return Ok(response);
+        }
+
+        if !matches!(attempt.phase.as_str(), "exam" | "post-exam") {
+            return Err(DeliveryError::Conflict(
+                "Attempt cannot be submitted before the exam starts.".to_owned(),
+            ));
+        }
+
+        let schedule_status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM exam_schedules WHERE id = ?",
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(tx.as_mut())
+        .await?;
+        if schedule_status.as_deref() == Some("cancelled") {
+            return Err(DeliveryError::Conflict(
+                "Cancelled schedules cannot accept submissions.".to_owned(),
+            ));
+        }
+
+        let runtime_gate = sqlx::query_as::<_, RuntimeGateRow>(
+            "SELECT status, actual_end_at FROM exam_session_runtimes WHERE schedule_id = ?",
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(tx.as_mut())
+        .await?;
+        match runtime_gate.as_ref().map(|row| row.status.as_str()) {
+            Some("live") | Some("paused") | Some("completed") => {}
+            Some("not_started") | None => {
+                return Err(DeliveryError::Validation(
+                    "Exam runtime has not started.".to_owned(),
+                ));
+            }
+            Some("cancelled") => {
+                return Err(DeliveryError::Conflict(
+                    "Cancelled schedules cannot accept submissions.".to_owned(),
+                ));
+            }
+            Some(_) => {
+                return Err(DeliveryError::Validation(
+                    "Invalid runtime status.".to_owned(),
+                ));
+            }
         }
 
         if let Some(submitted_at) = attempt.submitted_at {
@@ -1089,56 +1166,588 @@ fn validate_batch_sequences(mutations: &[MutationEnvelope]) -> Result<(), Delive
     Ok(())
 }
 
+fn validate_contiguous_sequences(
+    existing_max_seq: i64,
+    mutations: &[MutationEnvelope],
+) -> Result<(), DeliveryError> {
+    let mut seqs: Vec<i64> = mutations.iter().map(|mutation| mutation.seq).collect();
+    seqs.sort_unstable();
+
+    let Some(&first) = seqs.first() else {
+        return Err(DeliveryError::Validation(
+            "Mutation batch must contain at least one mutation.".to_owned(),
+        ));
+    };
+    if first != existing_max_seq + 1 {
+        return Err(DeliveryError::Conflict(
+            "Mutation sequence must continue from the last accepted value.".to_owned(),
+        ));
+    }
+
+    for window in seqs.windows(2) {
+        let [left, right] = window else { continue };
+        if *right != *left + 1 {
+            return Err(DeliveryError::Conflict(
+                "Mutation sequence must be contiguous.".to_owned(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+const POST_END_OBJECTIVE_MUTATION_GRACE_SECONDS: i64 = 120;
+
+#[derive(sqlx::FromRow)]
+struct RuntimeGateRow {
+    status: String,
+    actual_end_at: Option<DateTime<Utc>>,
+}
+
+fn objective_mutations_allowed(runtime: Option<&RuntimeGateRow>, now: DateTime<Utc>) -> bool {
+    let Some(runtime) = runtime else {
+        return false;
+    };
+    match runtime.status.as_str() {
+        "live" | "paused" => true,
+        "completed" => runtime.actual_end_at.is_some_and(|end| {
+            now <= end + chrono::Duration::seconds(POST_END_OBJECTIVE_MUTATION_GRACE_SECONDS)
+        }),
+        _ => false,
+    }
+}
+
+#[derive(Debug, Clone)]
+enum AnswerConstraint {
+    Text,
+    Enum(HashSet<String>),
+    MultiChoice { allowed: HashSet<String>, max: usize },
+    ArrayText { max_len: usize },
+    EnumArray { allowed: HashSet<String>, max_len: usize },
+}
+
+#[derive(Debug, Clone)]
+struct AnswerSchema {
+    constraints: HashMap<String, AnswerConstraint>,
+}
+
+fn build_writing_task_ids(config_snapshot: &Value) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    if let Some(tasks) = config_snapshot
+        .get("sections")
+        .and_then(|sections| sections.get("writing"))
+        .and_then(|writing| writing.get("tasks"))
+        .and_then(Value::as_array)
+    {
+        for task in tasks {
+            if let Some(id) = task.get("id").and_then(Value::as_str) {
+                ids.insert(id.to_owned());
+            }
+        }
+    }
+    if ids.is_empty() {
+        ids.insert("task1".to_owned());
+        ids.insert("task2".to_owned());
+    }
+    ids
+}
+
+fn build_answer_schema(content_snapshot: &Value) -> Result<AnswerSchema, DeliveryError> {
+    let mut constraints: HashMap<String, AnswerConstraint> = HashMap::new();
+
+    if let Some(passages) = content_snapshot
+        .get("reading")
+        .and_then(|reading| reading.get("passages"))
+        .and_then(Value::as_array)
+    {
+        for passage in passages {
+            if let Some(blocks) = passage.get("blocks").and_then(Value::as_array) {
+                for block in blocks {
+                    index_block(block, &mut constraints)?;
+                }
+            }
+        }
+    }
+
+    if let Some(parts) = content_snapshot
+        .get("listening")
+        .and_then(|listening| listening.get("parts"))
+        .and_then(Value::as_array)
+    {
+        for part in parts {
+            if let Some(blocks) = part.get("blocks").and_then(Value::as_array) {
+                for block in blocks {
+                    index_block(block, &mut constraints)?;
+                }
+            }
+        }
+    }
+
+    Ok(AnswerSchema { constraints })
+}
+
+fn index_block(
+    block: &Value,
+    constraints: &mut HashMap<String, AnswerConstraint>,
+) -> Result<(), DeliveryError> {
+    let Some(block_type) = block.get("type").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let block_id = block.get("id").and_then(Value::as_str).map(ToOwned::to_owned);
+
+    match block_type {
+        "TFNG" | "CLOZE" | "MATCHING" | "MAP" | "SHORT_ANSWER" => {
+            let Some(questions) = block.get("questions").and_then(Value::as_array) else {
+                return Ok(());
+            };
+            let mut allowed_heading_ids: Option<HashSet<String>> = None;
+            if block_type == "MATCHING" {
+                if let Some(headings) = block.get("headings").and_then(Value::as_array) {
+                    let mut ids = HashSet::new();
+                    for heading in headings {
+                        if let Some(id) = heading.get("id").and_then(Value::as_str) {
+                            ids.insert(id.to_owned());
+                        }
+                    }
+                    if !ids.is_empty() {
+                        allowed_heading_ids = Some(ids);
+                    }
+                }
+            }
+            for question in questions {
+                let Some(id) = question.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let constraint = match block_type {
+                    "TFNG" => {
+                        let mode = block.get("mode").and_then(Value::as_str).unwrap_or("TFNG");
+                        let allowed: HashSet<String> = match mode {
+                            "YNNG" => ["Y", "N", "NG"].into_iter().map(|v| v.to_owned()).collect(),
+                            _ => ["T", "F", "NG"].into_iter().map(|v| v.to_owned()).collect(),
+                        };
+                        AnswerConstraint::Enum(allowed)
+                    }
+                    "MATCHING" => allowed_heading_ids
+                        .clone()
+                        .map(AnswerConstraint::Enum)
+                        .unwrap_or(AnswerConstraint::Text),
+                    _ => AnswerConstraint::Text,
+                };
+                constraints.insert(id.to_owned(), constraint);
+            }
+        }
+        "SENTENCE_COMPLETION" | "NOTE_COMPLETION" => {
+            let Some(questions) = block.get("questions").and_then(Value::as_array) else {
+                return Ok(());
+            };
+            for question in questions {
+                let Some(id) = question.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let max_len = question
+                    .get("blanks")
+                    .and_then(Value::as_array)
+                    .map(|value| value.len())
+                    .unwrap_or(0);
+                constraints.insert(
+                    id.to_owned(),
+                    AnswerConstraint::ArrayText { max_len },
+                );
+            }
+        }
+        "MULTI_MCQ" => {
+            let Some(block_id) = block_id else { return Ok(()); };
+            let required = block
+                .get("requiredSelections")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let mut allowed = HashSet::new();
+            if let Some(options) = block.get("options").and_then(Value::as_array) {
+                for option in options {
+                    if let Some(id) = option.get("id").and_then(Value::as_str) {
+                        allowed.insert(id.to_owned());
+                    }
+                }
+            }
+            constraints.insert(
+                block_id,
+                AnswerConstraint::MultiChoice {
+                    allowed,
+                    max: required.max(1),
+                },
+            );
+        }
+        "SINGLE_MCQ" => {
+            let Some(block_id) = block_id else { return Ok(()); };
+            let mut allowed = HashSet::new();
+            if let Some(options) = block.get("options").and_then(Value::as_array) {
+                for option in options {
+                    if let Some(id) = option.get("id").and_then(Value::as_str) {
+                        allowed.insert(id.to_owned());
+                    }
+                }
+            }
+            constraints.insert(block_id, AnswerConstraint::Enum(allowed));
+        }
+        "DIAGRAM_LABELING" => {
+            let Some(block_id) = block_id else { return Ok(()); };
+            let max_len = block
+                .get("labels")
+                .and_then(Value::as_array)
+                .map(|value| value.len())
+                .unwrap_or(0);
+            constraints.insert(block_id, AnswerConstraint::ArrayText { max_len });
+        }
+        "FLOW_CHART" => {
+            let Some(block_id) = block_id else { return Ok(()); };
+            let max_len = block
+                .get("steps")
+                .and_then(Value::as_array)
+                .map(|value| value.len())
+                .unwrap_or(0);
+            constraints.insert(block_id, AnswerConstraint::ArrayText { max_len });
+        }
+        "TABLE_COMPLETION" => {
+            let Some(block_id) = block_id else { return Ok(()); };
+            let max_len = block
+                .get("cells")
+                .and_then(Value::as_array)
+                .map(|value| value.len())
+                .unwrap_or(0);
+            constraints.insert(block_id, AnswerConstraint::ArrayText { max_len });
+        }
+        "CLASSIFICATION" => {
+            let Some(block_id) = block_id else { return Ok(()); };
+            let max_len = block
+                .get("items")
+                .and_then(Value::as_array)
+                .map(|value| value.len())
+                .unwrap_or(0);
+            let mut allowed = HashSet::new();
+            if let Some(categories) = block.get("categories").and_then(Value::as_array) {
+                for category in categories.iter().filter_map(Value::as_str) {
+                    allowed.insert(category.to_owned());
+                }
+            }
+            constraints.insert(
+                block_id,
+                AnswerConstraint::EnumArray { allowed, max_len },
+            );
+        }
+        "MATCHING_FEATURES" => {
+            let Some(block_id) = block_id else { return Ok(()); };
+            let max_len = block
+                .get("features")
+                .and_then(Value::as_array)
+                .map(|value| value.len())
+                .unwrap_or(0);
+            let mut allowed = HashSet::new();
+            if let Some(options) = block.get("options").and_then(Value::as_array) {
+                for option in options.iter().filter_map(Value::as_str) {
+                    allowed.insert(option.to_owned());
+                }
+            }
+            constraints.insert(
+                block_id,
+                AnswerConstraint::EnumArray { allowed, max_len },
+            );
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn validate_answer_value(constraint: &AnswerConstraint, value: &Value) -> Result<(), DeliveryError> {
+    match constraint {
+        AnswerConstraint::Text => match value {
+            Value::Null | Value::String(_) => Ok(()),
+            _ => Err(DeliveryError::Validation(
+                "Answer value must be a string (or null).".to_owned(),
+            )),
+        },
+        AnswerConstraint::Enum(allowed) => match value {
+            Value::Null => Ok(()),
+            Value::String(text) => {
+                if text.is_empty() || allowed.is_empty() || allowed.contains(text) {
+                    Ok(())
+                } else {
+                    Err(DeliveryError::Validation(
+                        "Answer value is not valid for this question.".to_owned(),
+                    ))
+                }
+            }
+            _ => Err(DeliveryError::Validation(
+                "Answer value must be a string (or null).".to_owned(),
+            )),
+        },
+        AnswerConstraint::MultiChoice { allowed, max } => match value {
+            Value::Null => Ok(()),
+            Value::Array(values) => {
+                if values.len() > *max {
+                    return Err(DeliveryError::Validation(
+                        "Too many selections for this question.".to_owned(),
+                    ));
+                }
+                let mut seen = HashSet::new();
+                for entry in values {
+                    let Some(text) = entry.as_str() else {
+                        return Err(DeliveryError::Validation(
+                            "Selections must be strings.".to_owned(),
+                        ));
+                    };
+                    if !seen.insert(text) {
+                        return Err(DeliveryError::Validation(
+                            "Selections must be unique.".to_owned(),
+                        ));
+                    }
+                    if !allowed.is_empty() && !allowed.contains(text) {
+                        return Err(DeliveryError::Validation(
+                            "Selection is not valid for this question.".to_owned(),
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(DeliveryError::Validation(
+                "Answer value must be an array (or null).".to_owned(),
+            )),
+        },
+        AnswerConstraint::ArrayText { max_len } => match value {
+            Value::Null => Ok(()),
+            Value::Array(values) => {
+                if *max_len > 0 && values.len() > *max_len {
+                    return Err(DeliveryError::Validation(
+                        "Answer array is longer than expected.".to_owned(),
+                    ));
+                }
+                for entry in values {
+                    if !(entry.is_string() || entry.is_null()) {
+                        return Err(DeliveryError::Validation(
+                            "Answer array values must be strings (or null).".to_owned(),
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(DeliveryError::Validation(
+                "Answer value must be an array (or null).".to_owned(),
+            )),
+        },
+        AnswerConstraint::EnumArray { allowed, max_len } => match value {
+            Value::Null => Ok(()),
+            Value::Array(values) => {
+                if *max_len > 0 && values.len() > *max_len {
+                    return Err(DeliveryError::Validation(
+                        "Answer array is longer than expected.".to_owned(),
+                    ));
+                }
+                for entry in values {
+                    match entry {
+                        Value::Null => continue,
+                        Value::String(text) => {
+                            if !text.is_empty() && !allowed.is_empty() && !allowed.contains(text) {
+                                return Err(DeliveryError::Validation(
+                                    "Answer value is not valid for this question.".to_owned(),
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(DeliveryError::Validation(
+                                "Answer array values must be strings (or null).".to_owned(),
+                            ));
+                        }
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(DeliveryError::Validation(
+                "Answer value must be an array (or null).".to_owned(),
+            )),
+        },
+    }
+}
+
 fn apply_mutation(
     mutation: &MutationEnvelope,
+    answer_schema: &AnswerSchema,
+    writing_task_ids: &HashSet<String>,
+    objective_mutations_allowed: bool,
     answers: &mut Value,
     writing_answers: &mut Value,
     flags: &mut Value,
+    violations_snapshot: &mut Value,
+    phase: &mut String,
+    current_module: &mut String,
     current_question_id: &mut Option<String>,
 ) -> Result<(), DeliveryError> {
     match mutation.mutation_type.as_str() {
         "answer" => {
             let question_id = required_string(&mutation.payload, "questionId")?;
+            if !objective_mutations_allowed {
+                return Err(DeliveryError::Conflict(
+                    "This session can no longer accept answer mutations.".to_owned(),
+                ));
+            }
+            let value = mutation
+                .payload
+                .get("value")
+                .ok_or_else(|| DeliveryError::Validation(
+                    "Mutation payload is missing `value`.".to_owned(),
+                ))?
+                .clone();
+            let constraint = answer_schema
+                .constraints
+                .get(&question_id)
+                .ok_or_else(|| DeliveryError::Validation(
+                    "Mutation references an unknown `questionId`.".to_owned(),
+                ))?;
+            validate_answer_value(constraint, &value)?;
             let next_answers = ensure_object(std::mem::take(answers));
             *current_question_id = Some(question_id.clone());
             *answers = Value::Object(set_value(
                 next_answers,
                 question_id,
-                mutation
-                    .payload
-                    .get("value")
-                    .cloned()
-                    .unwrap_or(Value::Null),
+                value,
             ));
         }
         "writing_answer" => {
             let task_id = required_string(&mutation.payload, "taskId")?;
+            if !objective_mutations_allowed {
+                return Err(DeliveryError::Conflict(
+                    "This session can no longer accept writing mutations.".to_owned(),
+                ));
+            }
+            if !writing_task_ids.contains(&task_id) {
+                return Err(DeliveryError::Validation(
+                    "Mutation references an unknown `taskId`.".to_owned(),
+                ));
+            }
+            let value = mutation
+                .payload
+                .get("value")
+                .ok_or_else(|| DeliveryError::Validation(
+                    "Mutation payload is missing `value`.".to_owned(),
+                ))?
+                .clone();
+            if !matches!(value, Value::String(_) | Value::Null) {
+                return Err(DeliveryError::Validation(
+                    "Writing answers must be a string (or null).".to_owned(),
+                ));
+            }
             let next_writing_answers = ensure_object(std::mem::take(writing_answers));
             *current_question_id = Some(task_id.clone());
             *writing_answers = Value::Object(set_value(
                 next_writing_answers,
                 task_id,
-                mutation
-                    .payload
-                    .get("value")
-                    .cloned()
-                    .unwrap_or(Value::String(String::new())),
+                value,
             ));
         }
         "flag" => {
             let question_id = required_string(&mutation.payload, "questionId")?;
+            if !objective_mutations_allowed {
+                return Err(DeliveryError::Conflict(
+                    "This session can no longer accept flag mutations.".to_owned(),
+                ));
+            }
+            if !answer_schema.constraints.contains_key(&question_id) {
+                return Err(DeliveryError::Validation(
+                    "Mutation references an unknown `questionId`.".to_owned(),
+                ));
+            }
+            let value = mutation
+                .payload
+                .get("value")
+                .ok_or_else(|| DeliveryError::Validation(
+                    "Mutation payload is missing `value`.".to_owned(),
+                ))?
+                .clone();
+            let flag_value = value
+                .as_bool()
+                .ok_or_else(|| DeliveryError::Validation(
+                    "Flag values must be boolean.".to_owned(),
+                ))?;
             let next_flags = ensure_object(std::mem::take(flags));
             *flags = Value::Object(set_value(
                 next_flags,
                 question_id,
-                mutation
-                    .payload
-                    .get("value")
-                    .cloned()
-                    .unwrap_or(Value::Bool(false)),
+                Value::Bool(flag_value),
             ));
         }
-        _ => {}
+        "position" => {
+            // These mutations keep proctor state in sync. Allow them even if objective
+            // mutations are no longer accepted.
+            let next_phase = required_string(&mutation.payload, "phase")?;
+            match next_phase.as_str() {
+                "pre-check" | "lobby" | "exam" | "post-exam" => {}
+                _ => {
+                    return Err(DeliveryError::Validation(
+                        "Invalid `phase` value in position mutation.".to_owned(),
+                    ));
+                }
+            }
+            let next_module = required_string(&mutation.payload, "currentModule")?;
+            match next_module.as_str() {
+                "listening" | "reading" | "writing" | "speaking" => {}
+                _ => {
+                    return Err(DeliveryError::Validation(
+                        "Invalid `currentModule` value in position mutation.".to_owned(),
+                    ));
+                }
+            }
+
+            let next_question_id = mutation
+                .payload
+                .get("currentQuestionId")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let parsed_question_id = match next_question_id {
+                Value::Null => None,
+                Value::String(value) => Some(value),
+                _ => {
+                    return Err(DeliveryError::Validation(
+                        "`currentQuestionId` must be a string or null.".to_owned(),
+                    ));
+                }
+            };
+            if let Some(ref value) = parsed_question_id {
+                let known_objective = answer_schema.constraints.contains_key(value);
+                let known_writing = writing_task_ids.contains(value);
+                if !(known_objective || known_writing) {
+                    return Err(DeliveryError::Validation(
+                        "Position mutation references an unknown `currentQuestionId`.".to_owned(),
+                    ));
+                }
+            }
+
+            *phase = next_phase;
+            *current_module = next_module;
+            *current_question_id = parsed_question_id;
+        }
+        "violation" => {
+            // Payloads vary; apply only when the client includes an authoritative snapshot.
+            if let Some(snapshot) = mutation.payload.get("violations") {
+                if snapshot.is_array() {
+                    *violations_snapshot = snapshot.clone();
+                } else {
+                    return Err(DeliveryError::Validation(
+                        "`violations` must be an array when present.".to_owned(),
+                    ));
+                }
+            } else {
+                tracing::warn!(
+                    mutation_id = %mutation.id,
+                    "violation mutation missing `violations` snapshot; skipping apply"
+                );
+            }
+        }
+        other => {
+            tracing::warn!(
+                mutation_id = %mutation.id,
+                mutation_type = other,
+                "unrecognized mutation type; stored but not applied"
+            );
+        }
     }
 
     Ok(())
@@ -1220,9 +1829,26 @@ mod tests {
 
     #[test]
     fn apply_mutation_tracks_current_question_and_separates_writing_answers() {
+        let answer_schema = AnswerSchema {
+            constraints: HashMap::from_iter([(
+                "q1".to_owned(),
+                AnswerConstraint::Enum(
+                    ["A", "B", "C", "D"]
+                        .into_iter()
+                        .map(|value| value.to_owned())
+                        .collect(),
+                ),
+            )]),
+        };
+        let writing_task_ids: HashSet<String> =
+            ["task-1".to_owned()].into_iter().collect();
+
         let mut answers = json!({});
         let mut writing_answers = json!({});
         let mut flags = json!({});
+        let mut violations_snapshot = json!([]);
+        let mut phase = "exam".to_owned();
+        let mut current_module = "reading".to_owned();
         let mut current_question_id = None;
 
         apply_mutation(
@@ -1233,9 +1859,15 @@ mod tests {
                 mutation_type: "answer".to_owned(),
                 payload: json!({"questionId": "q1", "value": "A"}),
             },
+            &answer_schema,
+            &writing_task_ids,
+            true,
             &mut answers,
             &mut writing_answers,
             &mut flags,
+            &mut violations_snapshot,
+            &mut phase,
+            &mut current_module,
             &mut current_question_id,
         )
         .expect("apply answer");
@@ -1252,9 +1884,15 @@ mod tests {
                 mutation_type: "writing_answer".to_owned(),
                 payload: json!({"taskId": "task-1", "value": "Draft 1"}),
             },
+            &answer_schema,
+            &writing_task_ids,
+            true,
             &mut answers,
             &mut writing_answers,
             &mut flags,
+            &mut violations_snapshot,
+            &mut phase,
+            &mut current_module,
             &mut current_question_id,
         )
         .expect("apply writing answer");
@@ -1271,14 +1909,78 @@ mod tests {
                 mutation_type: "flag".to_owned(),
                 payload: json!({"questionId": "q1", "value": true}),
             },
+            &answer_schema,
+            &writing_task_ids,
+            true,
             &mut answers,
             &mut writing_answers,
             &mut flags,
+            &mut violations_snapshot,
+            &mut phase,
+            &mut current_module,
             &mut current_question_id,
         )
         .expect("apply flag");
 
         assert_eq!(flags["q1"], true);
         assert_eq!(current_question_id.as_deref(), Some("task-1"));
+    }
+
+    #[test]
+    fn validate_contiguous_sequences_rejects_gaps() {
+        let base = MutationEnvelope {
+            id: "m".to_owned(),
+            seq: 0,
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+            mutation_type: "answer".to_owned(),
+            payload: json!({"questionId": "q1", "value": "A"}),
+        };
+        let mut a = base.clone();
+        a.seq = 2;
+        let mut b = base.clone();
+        b.seq = 4;
+        let err = validate_contiguous_sequences(1, &[a, b]).unwrap_err();
+        assert!(matches!(err, DeliveryError::Conflict(_)));
+    }
+
+    #[test]
+    fn apply_mutation_updates_position_fields() {
+        let answer_schema = AnswerSchema {
+            constraints: HashMap::from_iter([("q1".to_owned(), AnswerConstraint::Text)]),
+        };
+        let writing_task_ids: HashSet<String> =
+            ["task1".to_owned()].into_iter().collect();
+        let mut answers = json!({});
+        let mut writing_answers = json!({});
+        let mut flags = json!({});
+        let mut violations_snapshot = json!([]);
+        let mut phase = "pre-check".to_owned();
+        let mut current_module = "listening".to_owned();
+        let mut current_question_id = None;
+
+        apply_mutation(
+            &MutationEnvelope {
+                id: "m-pos".to_owned(),
+                seq: 1,
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+                mutation_type: "position".to_owned(),
+                payload: json!({"phase":"exam","currentModule":"reading","currentQuestionId":"q1"}),
+            },
+            &answer_schema,
+            &writing_task_ids,
+            false,
+            &mut answers,
+            &mut writing_answers,
+            &mut flags,
+            &mut violations_snapshot,
+            &mut phase,
+            &mut current_module,
+            &mut current_question_id,
+        )
+        .expect("apply position");
+
+        assert_eq!(phase, "exam");
+        assert_eq!(current_module, "reading");
+        assert_eq!(current_question_id.as_deref(), Some("q1"));
     }
 }

@@ -41,6 +41,12 @@ export interface BackendE2EManifest {
     expectedAnswer: string;
     storageStatePath: string;
   };
+  studentSelfPaced: {
+    examId: string;
+    examSlug: string;
+    publishedVersionId: string;
+    scheduleId: string;
+  };
   unregisteredStudent: {
     email: string;
     password: string;

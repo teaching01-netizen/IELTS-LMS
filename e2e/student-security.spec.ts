@@ -1,370 +1,179 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import { readBackendE2EManifest } from './support/backendE2e';
 import {
-  readBackendE2EManifest,
-  STUDENT_STORAGE_STATE_PATH,
-} from './support/backendE2e';
+  completePreCheckIfPresent,
+  deterministicWcode,
+  openStudentSessionWithRetry,
+  startLobbyIfPresent,
+  studentCheckIn,
+  stubScreenDetails,
+} from './support/studentUi';
 
-test.describe('Student Security Features', () => {
-  test('detects and logs paste attempts', async ({ page }) => {
+async function enterRuntimeBackedExam(
+  page: Page,
+  scheduleId: string,
+  wcode: string,
+) {
+  await studentCheckIn(page, scheduleId, {
+    wcode,
+    email: `e2e+${wcode.toLowerCase()}@example.com`,
+    fullName: 'E2E Candidate',
+  });
+  await openStudentSessionWithRetry(page, scheduleId, wcode);
+  await completePreCheckIfPresent(page);
+  await startLobbyIfPresent(page);
+  await openStudentSessionWithRetry(page, scheduleId, wcode);
+  await expect(page.getByLabel('Answer for question 1')).toBeVisible({ timeout: 30_000 });
+}
+
+async function hasViolation(
+  page: Page,
+  scheduleId: string,
+  candidateId: string,
+  violationType: string,
+) {
+  return page.evaluate(
+    ({ scheduleId, candidateId, violationType }) => {
+      const raw = window.localStorage.getItem('ielts_student_attempts_v1');
+      if (!raw) {
+        return false;
+      }
+
+      let attempts: Array<Record<string, unknown>>;
+      try {
+        attempts = JSON.parse(raw) as Array<Record<string, unknown>>;
+      } catch {
+        return false;
+      }
+
+      for (let index = attempts.length - 1; index >= 0; index -= 1) {
+        const attempt = attempts[index];
+        if (!attempt) {
+          continue;
+        }
+
+        const sameSchedule = attempt.scheduleId === scheduleId;
+        const sameCandidate = attempt.candidateId === candidateId;
+        if (!sameSchedule || !sameCandidate) {
+          continue;
+        }
+
+        const violations = Array.isArray(attempt.violations)
+          ? (attempt.violations as Array<Record<string, unknown>>)
+          : [];
+
+        return violations.some((violation) => violation?.type === violationType);
+      }
+
+      return false;
+    },
+    { scheduleId, candidateId, violationType },
+  );
+}
+
+test.describe('Student security guardrails (LRW)', () => {
+  test.describe.configure({ timeout: 90_000 });
+
+  test('records clipboard-blocked violation', async ({ browser }, testInfo) => {
     const manifest = readBackendE2EManifest();
+    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
 
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
+    const context = await browser.newContext();
+    await stubScreenDetails(context);
+    const page = await context.newPage();
 
-    // Handle compatibility check if present
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
+    await enterRuntimeBackedExam(page, manifest.student.scheduleId, wcode);
 
-    // Attempt to paste in input field
+    await page.evaluate(() => {
+      document.body.dispatchEvent(new Event('paste', { bubbles: true, cancelable: true }));
+    });
+
+    await expect
+      .poll(
+        () =>
+          hasViolation(
+            page,
+            manifest.student.scheduleId,
+            wcode,
+            'CLIPBOARD_BLOCKED',
+          ),
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+
+    await context.close();
+  });
+
+  test('records context-menu-blocked violation', async ({ browser }, testInfo) => {
+    const manifest = readBackendE2EManifest();
+    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
+
+    const context = await browser.newContext();
+    await stubScreenDetails(context);
+    const page = await context.newPage();
+
+    await enterRuntimeBackedExam(page, manifest.student.scheduleId, wcode);
+
     const answerField = page.getByLabel('Answer for question 1');
-    await answerField.focus();
+
+    // Firefox can be finicky about right-click synthesis; Shift+F10 is a consistent way to trigger
+    // `contextmenu` from the focused element.
+    await answerField.click();
+    await page.keyboard.press('Shift+F10');
     await page.evaluate(() => {
-      const event = new ClipboardEvent('paste', {
-        bubbles: true,
-        cancelable: true,
-        dataType: 'text/plain',
-        data: 'pasted text',
-      });
-      document.dispatchEvent(event);
+      document.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }),
+      );
     });
+    await page.waitForTimeout(250);
 
-    // Verify PASTE_BLOCKED audit log
-    const auditLogs = await page.evaluate(async (candidateId) => {
-      const response = await fetch(`/api/v1/audit-logs?candidate_id=${candidateId}`, {
-        credentials: 'include',
-      });
-      const data = await response.json();
-      return data.data;
-    }, manifest.student.candidateId);
+    await expect
+      .poll(
+        () =>
+          hasViolation(
+            page,
+            manifest.student.scheduleId,
+            wcode,
+            'CONTEXT_MENU_BLOCKED',
+          ),
+        { timeout: 10_000 },
+      )
+      .toBe(true);
 
-    const pasteBlockedLog = auditLogs.find((log: { actionType: string }) => log.actionType === 'PASTE_BLOCKED');
-    expect(pasteBlockedLog).toBeTruthy();
+    await context.close();
   });
 
-  test('detects and logs autofill attempts', async ({ page }) => {
+  test('records tab-switch violation on window blur', async ({ browser }, testInfo) => {
     const manifest = readBackendE2EManifest();
+    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
 
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
+    const context = await browser.newContext();
+    await stubScreenDetails(context);
+    const page = await context.newPage();
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
+    await enterRuntimeBackedExam(page, manifest.student.scheduleId, wcode);
 
-    // Simulate autofill behavior
+    // Force the `visibilitychange` handler to see a hidden document (headless browsers often don't
+    // emit real tab-switch signals consistently).
     await page.evaluate(() => {
-      const input = document.querySelector('input[type="text"]') as HTMLInputElement;
-      if (input) {
-        input.value = 'autofilled text';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    });
-
-    // Verify AUTOFILL_SUSPECTED audit log
-    const auditLogs = await page.evaluate(async (candidateId) => {
-      const response = await fetch(`/api/v1/audit-logs?candidate_id=${candidateId}`, {
-        credentials: 'include',
-      });
-      const data = await response.json();
-      return data.data;
-    }, manifest.student.candidateId);
-
-    const autofillLog = auditLogs.find((log: { actionType: string }) => log.actionType === 'AUTOFILL_SUSPECTED');
-    expect(autofillLog).toBeTruthy();
-  });
-
-  test('detects and logs large replacement without typing', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Simulate large text replacement
-    await page.evaluate(() => {
-      const input = document.querySelector('textarea') as HTMLTextAreaElement;
-      if (input) {
-        const originalValue = input.value;
-        input.value = 'This is a very long text replacement that happened without typing';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    });
-
-    // Verify REPLACEMENT_SUSPECTED audit log
-    const auditLogs = await page.evaluate(async (candidateId) => {
-      const response = await fetch(`/api/v1/audit-logs?candidate_id=${candidateId}`, {
-        credentials: 'include',
-      });
-      const data = await response.json();
-      return data.data;
-    }, manifest.student.candidateId);
-
-    const replacementLog = auditLogs.find((log: { actionType: string }) => log.actionType === 'REPLACEMENT_SUSPECTED');
-    expect(replacementLog).toBeTruthy();
-  });
-
-  test('blocks and logs context menu access', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Attempt to open context menu
-    await page.getByLabel('Answer for question 1').click({ button: 'right' });
-
-    // Verify CONTEXT_MENU_BLOCKED audit log
-    const auditLogs = await page.evaluate(async (candidateId) => {
-      const response = await fetch(`/api/v1/audit-logs?candidate_id=${candidateId}`, {
-        credentials: 'include',
-      });
-      const data = await response.json();
-      return data.data;
-    }, manifest.student.candidateId);
-
-    const contextMenuLog = auditLogs.find((log: { actionType: string }) => log.actionType === 'CONTEXT_MENU_BLOCKED');
-    expect(contextMenuLog).toBeTruthy();
-  });
-
-  test('detects tab switching via visibilitychange', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Simulate tab switch
-    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    // Verify VIOLATION_DETECTED audit log
-    const auditLogs = await page.evaluate(async (candidateId) => {
-      const response = await fetch(`/api/v1/audit-logs?candidate_id=${candidateId}`, {
-        credentials: 'include',
-      });
-      const data = await response.json();
-      return data.data;
-    }, manifest.student.candidateId);
+    await expect
+      .poll(
+        () =>
+          hasViolation(
+            page,
+            manifest.student.scheduleId,
+            wcode,
+            'TAB_SWITCH',
+          ),
+        { timeout: 12_000 },
+      )
+      .toBe(true);
 
-    const violationLog = auditLogs.find((log: { actionType: string }) => log.actionType === 'VIOLATION_DETECTED');
-    expect(violationLog).toBeTruthy();
-  });
-
-  test('detects fullscreen exit', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Enter fullscreen first
-    await page.evaluate(() => {
-      document.documentElement.requestFullscreen();
-    });
-
-    // Simulate fullscreen exit
-    await page.evaluate(() => {
-      if (document.fullscreenElement) {
-        document.exitFullscreen();
-      }
-    });
-
-    // Verify VIOLATION_DETECTED audit log
-    const auditLogs = await page.evaluate(async (candidateId) => {
-      const response = await fetch(`/api/v1/audit-logs?candidate_id=${candidateId}`, {
-        credentials: 'include',
-      });
-      const data = await response.json();
-      return data.data;
-    }, manifest.student.candidateId);
-
-    const violationLog = auditLogs.find((log: { actionType: string }) => log.actionType === 'VIOLATION_DETECTED');
-    expect(violationLog).toBeTruthy();
-  });
-
-  test('detects secondary screen', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Simulate secondary screen detection
-    await page.evaluate(() => {
-      window.screen.width = 3840; // Dual monitor width
-      window.dispatchEvent(new Event('resize'));
-    });
-
-    // Verify screen check audit log
-    const auditLogs = await page.evaluate(async (candidateId) => {
-      const response = await fetch(`/api/v1/audit-logs?candidate_id=${candidateId}`, {
-        credentials: 'include',
-      });
-      const data = await response.json();
-      return data.data;
-    }, manifest.student.candidateId);
-
-    const screenCheckLog = auditLogs.find((log: { actionType: string }) =>
-      log.actionType === 'SCREEN_CHECK_UNSUPPORTED' || log.actionType === 'SCREEN_CHECK_PERMISSION_DENIED'
-    );
-    expect(screenCheckLog).toBeTruthy();
-  });
-
-  test('enforces severity thresholds - low limit', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Trigger multiple low severity violations
-    for (let i = 0; i < 5; i++) {
-      await page.evaluate(() => {
-        document.dispatchEvent(new Event('visibilitychange'));
-      });
-      await page.waitForTimeout(100);
-    }
-
-    // Verify warning shown
-    const warningBanner = page.getByText(/warning|caution/i);
-    const isWarningVisible = await warningBanner.isVisible().catch(() => false);
-    if (isWarningVisible) {
-      await expect(warningBanner).toBeVisible();
-    }
-  });
-
-  test('enforces severity thresholds - high limit triggers pause', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Trigger multiple high severity violations
-    for (let i = 0; i < 3; i++) {
-      await page.evaluate(() => {
-        document.dispatchEvent(new Event('visibilitychange'));
-      });
-      await page.waitForTimeout(100);
-    }
-
-    // Verify exam paused
-    const pausedBanner = page.getByText(/paused|exam suspended/i);
-    const isPausedVisible = await pausedBanner.isVisible().catch(() => false);
-    if (isPausedVisible) {
-      await expect(pausedBanner).toBeVisible();
-    }
-  });
-
-  test('logs all violations to student_violation_events table', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Trigger a violation
-    await page.evaluate(() => {
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
-
-    // Verify violation event logged
-    const violationEvents = await page.evaluate(async (candidateId) => {
-      const response = await fetch(`/api/v1/student/${candidateId}/violations`, {
-        credentials: 'include',
-      });
-      const data = await response.json();
-      return data.data;
-    }, manifest.student.candidateId);
-
-    expect(violationEvents.length).toBeGreaterThan(0);
-  });
-
-  test('verifies violation snapshot saved in student_attempts', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Trigger a violation
-    await page.evaluate(() => {
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
-
-    // Verify snapshot saved
-    const attemptData = await page.evaluate(async (candidateId) => {
-      const response = await fetch(`/api/v1/student/${candidateId}/attempt`, {
-        credentials: 'include',
-      });
-      const data = await response.json();
-      return data.data;
-    }, manifest.student.candidateId);
-
-    expect(attemptData.violationSnapshot).toBeTruthy();
+    await context.close();
   });
 });

@@ -11,7 +11,7 @@ use ielts_backend_application::{
 };
 use ielts_backend_domain::{
     auth::{UserRole, UserState},
-    exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
+    exam::{CreateExamRequest, PublishExamRequest, SaveDraftRequest},
     schedule::{CreateScheduleRequest, RuntimeCommandAction, RuntimeCommandRequest},
 };
 use ielts_backend_infrastructure::{
@@ -31,7 +31,7 @@ const STUDENT_NAME: &str = "Alice Candidate";
 const STUDENT_CANDIDATE_ID: &str = "alice";
 const UNREGISTERED_STUDENT_EMAIL: &str = "e2e.unregistered.student@example.com";
 const UNREGISTERED_STUDENT_NAME: &str = "Bob Candidate";
-const UNREGISTERED_STUDENT_CANDIDATE_ID: &str = "bob";
+const UNREGISTERED_STUDENT_CANDIDATE_ID: &str = "W250334";
 const ADMIN_OPERATOR_EMAIL: &str = "e2e.admin.operator@example.com";
 const ADMIN_OPERATOR_NAME: &str = "E2E Admin Operator";
 const ADMIN_EMAIL: &str = "e2e.admin@example.com";
@@ -41,7 +41,8 @@ const ADMIN_PASSWORD_RESET_PASSWORD: &str = "Password456!";
 const BUILDER_EXAM_SLUG: &str = "e2e-builder-backend-draft";
 const STUDENT_EXAM_SLUG: &str = "e2e-student-backend-live";
 const STUDENT_EXPECTED_ANSWER: &str = "seeded answer";
-const STUDENT_QUESTION_ID: &str = "reading-q1";
+const STUDENT_LISTENING_QUESTION_ID: &str = "listening-q1";
+const STUDENT_READING_QUESTION_ID: &str = "reading-q1";
 const DEFAULT_FRONTEND_ORIGIN: &str = "http://localhost:3000";
 
 #[derive(Debug)]
@@ -61,6 +62,7 @@ struct Manifest {
     generated_at: String,
     builder: BuilderFixtureManifest,
     student: StudentFixtureManifest,
+    student_self_paced: StudentSelfPacedFixtureManifest,
     unregistered_student: UnregisteredStudentFixtureManifest,
     auth: AuthFixtureManifest,
 }
@@ -103,6 +105,15 @@ struct StudentFixtureManifest {
     question_id: String,
     expected_answer: String,
     storage_state_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StudentSelfPacedFixtureManifest {
+    exam_id: String,
+    exam_slug: String,
+    published_version_id: String,
+    schedule_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -166,7 +177,8 @@ struct BuilderFixture {
 struct StudentFixture {
     exam_id: String,
     published_version_id: String,
-    schedule_id: String,
+    live_schedule_id: String,
+    self_paced_schedule_id: String,
 }
 
 #[derive(Debug)]
@@ -280,14 +292,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             storage_state_path: args.builder_storage_path.display().to_string(),
         },
         student: StudentFixtureManifest {
+            exam_id: student_fixture.exam_id.clone(),
+            exam_slug: STUDENT_EXAM_SLUG.to_owned(),
+            published_version_id: student_fixture.published_version_id.clone(),
+            schedule_id: student_fixture.live_schedule_id.clone(),
+            candidate_id: STUDENT_CANDIDATE_ID.to_owned(),
+            question_id: STUDENT_LISTENING_QUESTION_ID.to_owned(),
+            expected_answer: STUDENT_EXPECTED_ANSWER.to_owned(),
+            storage_state_path: args.student_storage_path.display().to_string(),
+        },
+        student_self_paced: StudentSelfPacedFixtureManifest {
             exam_id: student_fixture.exam_id,
             exam_slug: STUDENT_EXAM_SLUG.to_owned(),
             published_version_id: student_fixture.published_version_id,
-            schedule_id: student_fixture.schedule_id,
-            candidate_id: STUDENT_CANDIDATE_ID.to_owned(),
-            question_id: STUDENT_QUESTION_ID.to_owned(),
-            expected_answer: STUDENT_EXPECTED_ANSWER.to_owned(),
-            storage_state_path: args.student_storage_path.display().to_string(),
+            schedule_id: student_fixture.self_paced_schedule_id,
         },
         unregistered_student: UnregisteredStudentFixtureManifest {
             email: UNREGISTERED_STUDENT_EMAIL.to_owned(),
@@ -490,7 +508,7 @@ async fn seed_student_fixture(
                 content_snapshot: minimal_exam_state(
                     "Student Backend E2E Delivery",
                     "student-passage-1",
-                    STUDENT_QUESTION_ID,
+                    STUDENT_READING_QUESTION_ID,
                     "Write the missing word from the passage.",
                     STUDENT_EXPECTED_ANSWER,
                 ),
@@ -514,14 +532,14 @@ async fn seed_student_fixture(
 
     let scheduling_service = SchedulingService::new(pool.clone());
     let start_time = Utc::now() - Duration::minutes(5);
-    let end_time = start_time + Duration::minutes(90);
+    let end_time = start_time + Duration::minutes(180);
     let published_version_id = published_version.id.clone();
-    let schedule = scheduling_service
+    let live_schedule = scheduling_service
         .create_schedule(
             &builder_actor,
             CreateScheduleRequest {
                 exam_id: exam_id.clone(),
-                published_version_id,
+                published_version_id: published_version_id.clone(),
                 cohort_name: "Backend E2E Cohort".to_owned(),
                 institution: Some("Codex IELTS Lab".to_owned()),
                 start_time,
@@ -532,11 +550,11 @@ async fn seed_student_fixture(
         )
         .await?;
 
-    let schedule_id = Uuid::parse_str(&schedule.id)?;
-    let schedule_id_str = schedule.id.clone();
+    let live_schedule_id = Uuid::parse_str(&live_schedule.id)?;
+    let live_schedule_id_str = live_schedule.id.clone();
     create_student_registration(
         pool,
-        schedule_id,
+        live_schedule_id,
         student_user_id,
         STUDENT_CANDIDATE_ID,
         STUDENT_NAME,
@@ -547,7 +565,7 @@ async fn seed_student_fixture(
     scheduling_service
         .apply_runtime_command(
             &builder_actor,
-            schedule_id,
+            live_schedule_id,
             RuntimeCommandRequest {
                 action: RuntimeCommandAction::StartRuntime,
                 reason: Some("seed backend-backed student workflow".to_owned()),
@@ -555,10 +573,27 @@ async fn seed_student_fixture(
         )
         .await?;
 
+    let self_paced_schedule = scheduling_service
+        .create_schedule(
+            &builder_actor,
+            CreateScheduleRequest {
+                exam_id: exam_id.clone(),
+                published_version_id,
+                cohort_name: "Backend E2E Self-paced".to_owned(),
+                institution: Some("Codex IELTS Lab".to_owned()),
+                start_time,
+                end_time,
+                auto_start: false,
+                auto_stop: false,
+            },
+        )
+        .await?;
+
     Ok(StudentFixture {
         exam_id: exam.id,
         published_version_id: published_version.id,
-        schedule_id: schedule_id_str,
+        live_schedule_id: live_schedule_id_str,
+        self_paced_schedule_id: self_paced_schedule.id,
     })
 }
 
@@ -898,12 +933,14 @@ fn minimal_exam_state(
     correct_answer: &str,
 ) -> Value {
     let config = minimal_reading_config(title);
+    // Very small silent WAV for deterministic, offline-friendly playback.
+    let audio_url = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
     json!({
         "title": title,
         "type": "Academic",
-        "activeModule": "reading",
+        "activeModule": "listening",
         "activePassageId": passage_id,
-        "activeListeningPartId": "",
+        "activeListeningPartId": "listening-part-1",
         "config": config,
         "reading": {
             "passages": [
@@ -929,11 +966,51 @@ fn minimal_exam_state(
                 }
             ]
         },
-        "listening": { "parts": [] },
+        "listening": {
+            "parts": [
+                {
+                    "id": "listening-part-1",
+                    "title": "Backend E2E Listening Part 1",
+                    "audioUrl": audio_url,
+                    "pins": [],
+                    "blocks": [
+                        {
+                            "id": "listening-block-1",
+                            "type": "SHORT_ANSWER",
+                            "instruction": "Answer the listening question using one word.",
+                            "questions": [
+                                {
+                                    "id": STUDENT_LISTENING_QUESTION_ID,
+                                    "prompt": "What is the seeded listening answer?",
+                                    "correctAnswer": correct_answer,
+                                    "answerRule": "ONE_WORD"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
         "writing": {
             "task1Prompt": "",
             "task2Prompt": "",
-            "tasks": []
+            "tasks": [
+                {
+                    "taskId": "task1",
+                    "prompt": "Task 1: Summarise the information by selecting and reporting the main features.",
+                    "chart": {
+                        "id": "chart-1",
+                        "title": "Seeded chart data",
+                        "type": "bar",
+                        "labels": ["A", "B", "C"],
+                        "values": [10, 20, 15]
+                    }
+                },
+                {
+                    "taskId": "task2",
+                    "prompt": "Task 2: Discuss both views and give your own opinion."
+                }
+            ]
         },
         "speaking": {
             "part1Topics": [],
@@ -954,7 +1031,7 @@ fn minimal_reading_config(title: &str) -> Value {
         },
         "sections": {
             "listening": {
-                "enabled": false,
+                "enabled": true,
                 "label": "Listening",
                 "duration": 30,
                 "order": 0,
@@ -976,7 +1053,7 @@ fn minimal_reading_config(title: &str) -> Value {
                     "37": 8.5,
                     "39": 9.0
                 },
-                "allowedQuestionTypes": ["TFNG", "CLOZE", "MATCHING", "MAP", "MULTI_MCQ"]
+                "allowedQuestionTypes": ["TFNG", "CLOZE", "MATCHING", "MAP", "MULTI_MCQ", "SHORT_ANSWER"]
             },
             "reading": {
                 "enabled": true,
@@ -1011,7 +1088,7 @@ fn minimal_reading_config(title: &str) -> Value {
                 ]
             },
             "writing": {
-                "enabled": false,
+                "enabled": true,
                 "label": "Writing",
                 "duration": 60,
                 "order": 2,

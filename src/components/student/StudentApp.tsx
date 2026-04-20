@@ -228,8 +228,8 @@ export function StudentApp() {
         <main id="main-content" role="main">
           <PreCheck
             config={examState.config}
-            onComplete={(result) => {
-              void attemptActions.recordPreCheckResult(result);
+            onComplete={async (result) => {
+              await attemptActions.recordPreCheckResult(result);
               runtimeActions.setPhase(runtimeState.runtimeBacked ? 'exam' : 'lobby');
             }}
             onExit={onExit}

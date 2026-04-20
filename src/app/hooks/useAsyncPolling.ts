@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent } from 'react';
+import { useEffect, useEffectEvent, useRef } from 'react';
 
 interface UseAsyncPollingOptions {
   enabled?: boolean;
@@ -21,6 +21,7 @@ export function useAsyncPolling(
   }: UseAsyncPollingOptions = {},
 ) {
   const runTask = useEffectEvent(task);
+  const inFlightRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -38,11 +39,23 @@ export function useAsyncPolling(
     };
 
     const poll = async () => {
+      if (inFlightRef.current) {
+        scheduleNext(intervalMs);
+        return;
+      }
+
+      let promise: Promise<void> | null = null;
       try {
-        await runTask();
+        promise = Promise.resolve().then(() => runTask());
+        inFlightRef.current = promise;
+        await promise;
         nextDelay = intervalMs;
       } catch {
         nextDelay = Math.min(nextDelay * 2, maxIntervalMs);
+      } finally {
+        if (promise && inFlightRef.current === promise) {
+          inFlightRef.current = null;
+        }
       }
 
       if (!cancelled) {

@@ -538,10 +538,17 @@ impl AuthService {
         .execute(&self.pool)
         .await?;
 
-        let session = sqlx::query_as::<_, AttemptSession>("SELECT * FROM attempt_sessions WHERE id = ?")
-            .bind(&session_id)
-            .fetch_one(&self.pool)
-            .await?;
+        // The table enforces a unique constraint on `(attempt_id, client_session_id)`. If this
+        // request races or repeats (e.g. React StrictMode / retries), the insert will upsert the
+        // existing row and keep its original `id`, so selecting by the freshly generated `id`
+        // can fail.
+        let session = sqlx::query_as::<_, AttemptSession>(
+            "SELECT * FROM attempt_sessions WHERE attempt_id = ? AND client_session_id = ?",
+        )
+        .bind(&attempt_id)
+        .bind(&client_session_id)
+        .fetch_one(&self.pool)
+        .await?;
 
         let claims = AttemptTokenClaims {
             token_id: session.token_id.clone(),

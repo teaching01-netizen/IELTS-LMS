@@ -197,19 +197,11 @@ export function useStudentSessionRouteData(
           if (isSubmittedAttempt) {
             setAttemptSnapshot(nextAttempt);
           } else if (!hasAttemptCredential(nextAttempt.scheduleId, nextAttempt.id)) {
-            const reboundAttempt = await studentAttemptRepository.createAttempt({
+            const hydratedAttempt = await studentAttemptRepository.getAttemptByScheduleId(
               scheduleId,
-              studentKey: nextAttempt.studentKey,
-              examId: nextAttempt.examId,
-              examTitle: nextAttempt.examTitle,
-              candidateId: nextAttempt.candidateId,
-              candidateName: nextAttempt.candidateName,
-              candidateEmail: nextAttempt.candidateEmail,
-              currentModule: nextAttempt.currentModule,
-              currentQuestionId: nextAttempt.currentQuestionId,
-              phase: nextAttempt.phase,
-            });
-            setAttemptSnapshot(reboundAttempt);
+              nextAttempt.studentKey,
+            );
+            setAttemptSnapshot(hydratedAttempt ?? nextAttempt);
           } else {
             setAttemptSnapshot(nextAttempt);
           }

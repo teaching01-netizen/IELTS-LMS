@@ -1,14 +1,19 @@
 import { expect, test } from '@playwright/test';
 import {
   readBackendE2EManifest,
-  STUDENT_STORAGE_STATE_PATH,
 } from './support/backendE2e';
+import {
+  completePreCheckIfPresent,
+  deterministicWcode,
+  studentCheckIn,
+  stubScreenDetails,
+} from './support/studentUi';
 
 test.describe('Full browser lifecycle', () => {
   test('activates an admin account, signs in, exercises the student route, and starts password recovery', async ({
     browser,
     page,
-  }) => {
+  }, testInfo) => {
     const manifest = readBackendE2EManifest();
 
     await page.goto(`/activate?token=${manifest.auth.adminLifecycle.activationToken}`);
@@ -36,21 +41,17 @@ test.describe('Full browser lifecycle', () => {
     await loginPage.getByRole('button', { name: 'Update Schedule' }).click();
     await expect(loginPage.getByText('Morning Batch B').first()).toBeVisible();
 
-    const studentContext = await browser.newContext({
-      storageState: STUDENT_STORAGE_STATE_PATH,
-    });
+    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
+    const studentContext = await browser.newContext();
+    await stubScreenDetails(studentContext);
     const studentPage = await studentContext.newPage();
-    await studentPage.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
+    await studentCheckIn(studentPage, manifest.student.scheduleId, {
+      wcode,
+      email: `e2e+${wcode.toLowerCase()}@example.com`,
+      fullName: 'E2E Candidate',
+    });
 
-    // Session may already be active from previous test runs, so handle both states
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-
-    if (isCompatibilityCheckVisible) {
-      await studentPage.getByRole('button', { name: 'Continue' }).click();
-    }
+    await completePreCheckIfPresent(studentPage);
 
     await expect(studentPage.getByLabel('Answer for question 1')).toBeVisible();
 
@@ -71,25 +72,22 @@ test.describe('Full browser lifecycle', () => {
     await loginContext.close();
   });
 
-  test('completes full exam lifecycle from registration to grading', async ({ browser }) => {
+  test('completes full exam lifecycle from registration to grading', async ({ browser }, testInfo) => {
     const manifest = readBackendE2EManifest();
+    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
 
     // Step 1: Student registration
     const studentContext = await browser.newContext();
+    await stubScreenDetails(studentContext);
     const studentPage = await studentContext.newPage();
-    await studentPage.goto(`/student/${manifest.student.scheduleId}/register`);
-    await studentPage.getByLabel('Wcode').fill('W250334');
-    await studentPage.getByLabel('Email').fill(`lifecycle-${manifest.unregisteredStudent.email}`);
-    await studentPage.getByLabel('Full Name').fill('Lifecycle Test Student');
-    await studentPage.getByRole('button', { name: 'Register' }).click();
-    await studentPage.waitForURL(new RegExp(`/student/${manifest.student.scheduleId}/`));
+    await studentCheckIn(studentPage, manifest.student.scheduleId, {
+      wcode,
+      email: `lifecycle-${manifest.unregisteredStudent.email}`,
+      fullName: 'Lifecycle Test Student',
+    });
 
     // Step 2: Complete pre-check
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await studentPage.getByRole('button', { name: 'Continue' }).click();
-    }
+    await completePreCheckIfPresent(studentPage);
 
     // Step 3: Complete exam sections
     await studentPage.getByLabel('Answer for question 1').fill('lifecycle test answer');
@@ -118,8 +116,9 @@ test.describe('Full browser lifecycle', () => {
     await adminContext.close();
   });
 
-  test('verifies end-to-end audit trail across all roles', async ({ browser }) => {
+  test('verifies end-to-end audit trail across all roles', async ({ browser }, testInfo) => {
     const manifest = readBackendE2EManifest();
+    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
 
     // Admin makes a change
     const adminContext = await browser.newContext({
@@ -131,18 +130,15 @@ test.describe('Full browser lifecycle', () => {
     await adminPage.getByRole('button', { name: 'Save Profile' }).click();
 
     // Student takes an action
-    const studentContext = await browser.newContext({
-      storageState: STUDENT_STORAGE_STATE_PATH,
-    });
+    const studentContext = await browser.newContext();
+    await stubScreenDetails(studentContext);
     const studentPage = await studentContext.newPage();
-    await studentPage.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await studentPage.getByRole('button', { name: 'Continue' }).click();
-    }
+    await studentCheckIn(studentPage, manifest.student.scheduleId, {
+      wcode,
+      email: `e2e+${wcode.toLowerCase()}@example.com`,
+      fullName: 'E2E Candidate',
+    });
+    await completePreCheckIfPresent(studentPage);
     await studentPage.getByLabel('Answer for question 1').fill('audit trail test');
 
     // Verify audit logs capture all actions
@@ -180,7 +176,7 @@ test.describe('Full browser lifecycle', () => {
     // Student can register for the schedule
     const studentContext = await browser.newContext();
     const studentPage = await studentContext.newPage();
-    await studentPage.goto(`/student/${manifest.student.scheduleId}/register`);
+    await studentPage.goto(`/student/${manifest.studentSelfPaced.scheduleId}`);
     await expect(studentPage.getByLabel('Wcode')).toBeVisible();
 
     await studentContext.close();

@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useReducer,
   type ReactNode,
 } from 'react';
@@ -524,6 +525,9 @@ export function StudentRuntimeProvider({
     runtimeReducer,
     createInitialRuntimeState(state, runtimeBacked, runtimeSnapshot, attemptSnapshot),
   );
+  const lastHydratedAttemptRef = useRef<string | null>(
+    attemptSnapshot ? `${attemptSnapshot.id}:${attemptSnapshot.updatedAt}` : null,
+  );
 
   useEffect(() => {
     if (!attemptSnapshot || runtimeState.phase === 'post-exam') {
@@ -537,6 +541,12 @@ export function StudentRuntimeProvider({
       return;
     }
 
+    const attemptFingerprint = `${attemptSnapshot.id}:${attemptSnapshot.updatedAt}`;
+    if (lastHydratedAttemptRef.current === attemptFingerprint) {
+      return;
+    }
+
+    lastHydratedAttemptRef.current = attemptFingerprint;
     dispatch({
       type: 'hydrate_attempt',
       snapshot: attemptSnapshot,

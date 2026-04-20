@@ -210,4 +210,39 @@ describe('StudentAttemptProvider', () => {
     expect(second.result.current.state.pendingMutationCount).toBe(1);
     expect(second.result.current.state.attemptId).toBe('attempt-1');
   });
+
+  it('does not attempt state updates after unmount while flushing', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    let resolveSave: (() => void) | null = null;
+    vi.mocked(studentAttemptRepository.saveAttempt).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+
+    const wrapper = createWrapper();
+    const harness = renderHook(() => useStudentAttempt(), { wrapper });
+
+    await act(async () => {
+      harness.result.current.actions.persistAnswer('q1', 'A');
+    });
+
+    let flushPromise: Promise<boolean>;
+    await act(async () => {
+      flushPromise = harness.result.current.actions.flushPending();
+    });
+    await act(async () => {
+      harness.unmount();
+    });
+
+    await act(async () => {
+      resolveSave?.();
+      await flushPromise;
+    });
+
+    expect(consoleSpy).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
 });

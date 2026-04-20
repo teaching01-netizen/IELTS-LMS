@@ -347,7 +347,16 @@ export interface IStudentAttemptRepository {
 export class LocalStorageStudentAttemptRepository implements IStudentAttemptRepository {
   private getItem<T>(key: string): T[] {
     const item = localStorage.getItem(key);
-    return item ? (JSON.parse(item) as T[]) : [];
+    if (!item) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(item) as unknown;
+      return Array.isArray(parsed) ? (parsed as T[]) : [];
+    } catch {
+      return [];
+    }
   }
 
   private setItem<T>(key: string, data: T[]): void {
@@ -545,6 +554,10 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 
     const pendingMutations = await this.cache.getPendingMutations(attempt.id);
     if (pendingMutations.length === 0) {
+      return;
+    }
+
+    if (!hasAttemptCredential(attempt.scheduleId, attempt.id)) {
       return;
     }
 
