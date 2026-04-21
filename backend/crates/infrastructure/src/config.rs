@@ -29,6 +29,12 @@ pub struct AppConfig {
     pub attempt_token_ttl_minutes: i64,
     pub websocket_connection_cap: usize,
     pub websocket_connections_per_user_cap: usize,
+    // Admission control / join-storm hardening
+    pub student_entry_max_concurrent: usize,
+    pub student_session_summary_max_concurrent: usize,
+    pub student_session_version_max_concurrent: usize,
+    pub student_bootstrap_max_concurrent: usize,
+    pub server_busy_retry_after_secs: u64,
     // Rate limiting configurations
     pub rate_limit_login_per_ip: u32,
     pub rate_limit_login_per_ip_window_secs: u64,
@@ -162,6 +168,26 @@ impl AppConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.websocket_connections_per_user_cap),
+            student_entry_max_concurrent: env::var("STUDENT_ENTRY_MAX_CONCURRENT")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.student_entry_max_concurrent),
+            student_session_summary_max_concurrent: env::var("STUDENT_SESSION_SUMMARY_MAX_CONCURRENT")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.student_session_summary_max_concurrent),
+            student_session_version_max_concurrent: env::var("STUDENT_SESSION_VERSION_MAX_CONCURRENT")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.student_session_version_max_concurrent),
+            student_bootstrap_max_concurrent: env::var("STUDENT_BOOTSTRAP_MAX_CONCURRENT")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.student_bootstrap_max_concurrent),
+            server_busy_retry_after_secs: env::var("SERVER_BUSY_RETRY_AFTER_SECS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.server_busy_retry_after_secs),
             // Rate limiting env vars
             rate_limit_login_per_ip: env::var("RATE_LIMIT_LOGIN_PER_IP")
                 .ok()
@@ -290,6 +316,11 @@ impl Default for AppConfig {
             attempt_token_ttl_minutes: 15,
             websocket_connection_cap: 200,
             websocket_connections_per_user_cap: 5,
+            student_entry_max_concurrent: 50,
+            student_session_summary_max_concurrent: 100,
+            student_session_version_max_concurrent: 20,
+            student_bootstrap_max_concurrent: 30,
+            server_busy_retry_after_secs: 2,
             // Rate limiting defaults based on spec recommendations
             rate_limit_login_per_ip: 10,
             rate_limit_login_per_ip_window_secs: 60,

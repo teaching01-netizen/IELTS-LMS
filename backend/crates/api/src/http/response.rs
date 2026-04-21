@@ -1,5 +1,5 @@
 use axum::{
-    http::StatusCode,
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -82,6 +82,9 @@ pub struct ApiError {
     pub status: StatusCode,
     pub code: String,
     pub message: String,
+    pub details: Option<serde_json::Value>,
+    pub headers: HeaderMap,
+    pub request_id: Option<String>,
 }
 
 impl ApiError {
@@ -90,7 +93,25 @@ impl ApiError {
             status,
             code: code.to_string(),
             message: message.to_string(),
+            details: None,
+            headers: HeaderMap::new(),
+            request_id: None,
         }
+    }
+
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+
+    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
+        self.request_id = Some(request_id.into());
+        self
+    }
+
+    pub fn with_header(mut self, name: HeaderName, value: HeaderValue) -> Self {
+        self.headers.insert(name, value);
+        self
     }
 }
 
@@ -102,18 +123,22 @@ impl From<ApiError> for StatusCode {
 
 impl From<ApiError> for Response<axum::body::Body> {
     fn from(err: ApiError) -> Self {
+        let request_id = err.request_id.clone().unwrap_or_default();
         let body = Json(serde_json::json!({
             "success": false,
             "error": {
                 "code": err.code,
                 "message": err.message,
+                "details": err.details,
             },
             "metadata": {
-                "requestId": "",
+                "requestId": request_id,
                 "timestamp": Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
             }
         }));
-        (err.status, body).into_response()
+        let mut response = (err.status, body).into_response();
+        response.headers_mut().extend(err.headers);
+        response
     }
 }
 

@@ -3,7 +3,7 @@ use ielts_backend_domain::{
     attempt::{
         MutationEnvelope, StudentAttempt, StudentBootstrapRequest, StudentHeartbeatRequest,
         StudentMutationBatchRequest, StudentMutationBatchResponse, StudentPrecheckRequest,
-        StudentSessionContext, StudentSubmitRequest, StudentSubmitResponse,
+        StudentSessionContext, StudentSessionSummary, StudentSubmitRequest, StudentSubmitResponse,
     },
     exam::ExamVersion,
     schedule::{ExamSchedule, ExamSessionRuntime},
@@ -75,6 +75,43 @@ impl DeliveryService {
             attempt_credential: None,
             degraded_live_mode: false,
         })
+    }
+
+    pub async fn get_session_summary(
+        &self,
+        schedule_id: Uuid,
+        wcode: Option<String>,
+        student_key: Option<String>,
+        candidate_id: Option<String>,
+    ) -> Result<StudentSessionSummary, DeliveryError> {
+        let schedule = self.load_schedule(schedule_id).await?;
+        let runtime = self.load_runtime(schedule_id).await?;
+
+        let attempt = if let Some(wcode) = wcode {
+            self.load_attempt_by_wcode(schedule_id.to_string(), &wcode).await?
+        } else if let Some(student_key) = student_key {
+            self.load_attempt_by_student_key(schedule_id.to_string(), &student_key).await?
+        } else if let Some(candidate_id) = candidate_id {
+            let derived = derive_student_key(schedule_id, &candidate_id);
+            self.load_attempt_by_student_key(schedule_id.to_string(), &derived).await?
+        } else {
+            None
+        };
+
+        Ok(StudentSessionSummary {
+            schedule,
+            runtime,
+            attempt,
+            degraded_live_mode: false,
+        })
+    }
+
+    pub async fn get_published_version(
+        &self,
+        schedule_id: Uuid,
+    ) -> Result<ExamVersion, DeliveryError> {
+        let schedule = self.load_schedule(schedule_id).await?;
+        self.load_version(schedule.published_version_id.clone()).await
     }
 
     pub async fn persist_precheck(

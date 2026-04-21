@@ -12,7 +12,9 @@ use ielts_backend_domain::attempt::{
     StudentHeartbeatResponse, StudentMutationBatchResponse, StudentPrecheckRequest,
     StudentSessionContext, StudentSessionQuery, StudentSubmitRequest, StudentSubmitResponse,
     StudentAuditLogRequest,
+    StudentSessionSummary,
 };
+use ielts_backend_domain::exam::ExamVersion;
 use serde_json::{json, Value};
 use sqlx::query_scalar;
 use std::time::Instant;
@@ -25,6 +27,7 @@ use crate::{
         auth::{AttemptPrincipal, AuthenticatedUser, VerifiedCsrf},
         request_id::RequestId,
         response::{ApiError, ApiResponse},
+        server_busy::server_busy_from_state,
     },
     state::AppState,
 };
@@ -107,6 +110,99 @@ pub async fn get_student_session(
     Ok(ApiResponse::success_with_request_id(session, request_id.0))
 }
 
+pub async fn get_student_session_summary(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    Path(schedule_id): Path<Uuid>,
+    Query(query): Query<StudentSessionQuery>,
+) -> Result<ApiResponse<StudentSessionSummary>, ApiError> {
+    state.telemetry.inc_student_session_summary_requests();
+    let _permit = state
+        .busy_gates
+        .student_session_summary
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            server_busy_from_state(
+                &state,
+                &request_id.0,
+                "student_session_summary",
+                Some(schedule_id),
+                query.candidate_id.as_deref(),
+            )
+        })?;
+
+    principal.require_one_of(&[
+        UserRole::Student,
+        UserRole::Admin,
+        UserRole::Builder,
+        UserRole::Proctor,
+    ])?;
+    let access = authorize_student(&state, &principal, schedule_id).await?;
+    let service = DeliveryService::new(state.db_pool());
+    let started = Instant::now();
+
+    let wcode = if !access.wcode.is_empty() {
+        Some(access.wcode.clone())
+    } else {
+        None
+    };
+
+    let summary = service
+        .get_session_summary(
+            schedule_id,
+            wcode,
+            access.legacy_student_key.clone(),
+            query.candidate_id.clone(),
+        )
+        .await?;
+
+    state
+        .telemetry
+        .observe_db_operation("delivery.get_session_summary", started.elapsed());
+    Ok(ApiResponse::success_with_request_id(summary, request_id.0))
+}
+
+pub async fn get_student_session_version(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    Path(schedule_id): Path<Uuid>,
+) -> Result<ApiResponse<ExamVersion>, ApiError> {
+    state.telemetry.inc_student_session_version_requests();
+    let _permit = state
+        .busy_gates
+        .student_session_version
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            server_busy_from_state(
+                &state,
+                &request_id.0,
+                "student_session_version",
+                Some(schedule_id),
+                Some(principal.user.id.as_str()),
+            )
+        })?;
+
+    principal.require_one_of(&[
+        UserRole::Student,
+        UserRole::Admin,
+        UserRole::Builder,
+        UserRole::Proctor,
+    ])?;
+    authorize_student(&state, &principal, schedule_id).await?;
+
+    let service = DeliveryService::new(state.db_pool());
+    let started = Instant::now();
+    let version = service.get_published_version(schedule_id).await?;
+    state
+        .telemetry
+        .observe_db_operation("delivery.get_published_version", started.elapsed());
+    Ok(ApiResponse::success_with_request_id(version, request_id.0))
+}
+
 pub async fn save_precheck(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
@@ -161,6 +257,21 @@ pub async fn bootstrap_student_session(
     Path(schedule_id): Path<Uuid>,
     Json(req): Json<StudentBootstrapRequest>,
 ) -> Result<ApiResponse<StudentSessionContext>, ApiError> {
+    let _permit = state
+        .busy_gates
+        .student_bootstrap
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            server_busy_from_state(
+                &state,
+                &request_id.0,
+                "student_bootstrap",
+                Some(schedule_id),
+                Some(req.candidate_id.as_str()),
+            )
+        })?;
+
     principal.require_one_of(&[
         UserRole::Student,
         UserRole::Admin,
@@ -675,5 +786,83 @@ fn map_auth_error(error: ielts_backend_application::auth::AuthError) -> ApiError
         ielts_backend_application::auth::AuthError::Validation(message) => {
             ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", &message)
         }
+    }
+}
+
+#[cfg(test)]
+mod join_storm_hardening_tests {
+    use super::*;
+    use axum::extract::{Extension, Path, Query, State};
+    use chrono::{Duration, Utc};
+    use ielts_backend_domain::auth::{User, UserRole, UserSession, UserState};
+    use ielts_backend_infrastructure::config::AppConfig;
+
+    fn dummy_student_principal() -> AuthenticatedUser {
+        let now = Utc::now();
+        AuthenticatedUser {
+            user: User {
+                id: "student-user-1".to_owned(),
+                email: "student@example.com".to_owned(),
+                display_name: Some("Student".to_owned()),
+                role: UserRole::Student,
+                state: UserState::Active,
+                failed_login_count: 0,
+                locked_until: None,
+                last_login_at: None,
+                created_at: now,
+                updated_at: now,
+            },
+            session: UserSession {
+                id: "sess-1".to_owned(),
+                user_id: "student-user-1".to_owned(),
+                session_token_hash: "hash".to_owned(),
+                csrf_token: "csrf".to_owned(),
+                role_snapshot: UserRole::Student,
+                issued_at: now,
+                last_seen_at: now,
+                expires_at: now + Duration::hours(1),
+                idle_timeout_at: now + Duration::minutes(30),
+                user_agent_hash: None,
+                ip_metadata: None,
+                revoked_at: None,
+                revocation_reason: None,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn summary_returns_server_busy_when_gate_exhausted() {
+        let mut config = AppConfig::default();
+        config.student_session_summary_max_concurrent = 0;
+        config.server_busy_retry_after_secs = 2;
+        let state = AppState::new(config);
+
+        let result = get_student_session_summary(
+            State(state),
+            Extension(RequestId("req-test".to_owned())),
+            dummy_student_principal(),
+            Path(Uuid::new_v4()),
+            Query(StudentSessionQuery {
+                student_key: None,
+                candidate_id: Some("W123456".to_owned()),
+                refresh_attempt_credential: None,
+                client_session_id: None,
+            }),
+        )
+        .await;
+
+        let err = result.expect_err("expected SERVER_BUSY");
+        assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(err.code, "SERVER_BUSY");
+        assert_eq!(err.request_id.as_deref(), Some("req-test"));
+        assert_eq!(
+            err.headers
+                .get("Retry-After")
+                .and_then(|value| value.to_str().ok()),
+            Some("2")
+        );
+        let details = err.details.expect("details");
+        assert_eq!(details["retryAfterSeconds"], 2);
+        assert_eq!(details["gate"], "student_session_summary");
     }
 }

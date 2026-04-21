@@ -7,6 +7,7 @@ pub mod http {
     pub mod rate_limit;
     pub mod request_id;
     pub mod response;
+    pub mod server_busy;
 }
 
 pub mod frontend;

@@ -18,6 +18,7 @@ import {
 import type { ExamState } from '../../../types';
 import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
 import type { StudentAttempt } from '../../../types/studentAttempt';
+import { ServerBusyError } from '@app/error/errorTypes';
 
 const PROFILE_STORAGE_PREFIX = 'ielts-student-profile:';
 
@@ -38,9 +39,13 @@ function buildStudentKey(scheduleId: string, candidateId: string) {
   return `student-${scheduleId}-${candidateId}`;
 }
 
-function buildBackendSessionEndpoint(scheduleId: string, candidateId: string) {
+function buildBackendSessionSummaryEndpoint(scheduleId: string, candidateId: string) {
   const query = new URLSearchParams({ candidateId });
-  return `/v1/student/sessions/${scheduleId}?${query.toString()}`;
+  return `/v1/student/sessions/${scheduleId}/summary?${query.toString()}`;
+}
+
+function buildBackendSessionVersionEndpoint(scheduleId: string) {
+  return `/v1/student/sessions/${scheduleId}/version`;
 }
 
 function loadStoredCandidateProfile(
@@ -89,6 +94,7 @@ interface StudentSessionRouteData {
   attemptSnapshot: StudentAttempt | null;
   error: string | null;
   isLoading: boolean;
+  isServerBusy: boolean;
   runtimeSnapshot: ExamSessionRuntime | null;
   schedule: ExamSchedule | null;
   state: ExamState | null;
@@ -100,12 +106,14 @@ export function useStudentSessionRouteData(
   scheduleId?: string,
   studentId?: string,
 ): StudentSessionRouteData {
-  const { session, status: authStatus } = useAuthSession();
+  const { status: authStatus } = useAuthSession();
   const [attemptSnapshot, setAttemptSnapshot] = useState<StudentAttempt | null>(null);
   const [schedule, setSchedule] = useState<ExamSchedule | null>(null);
   const [state, setState] = useState<ExamState | null>(null);
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<ExamSessionRuntime | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isServerBusy, setIsServerBusy] = useState(false);
+  const [serverBusyRetryAfterMs, setServerBusyRetryAfterMs] = useState(2_000);
   const [error, setError] = useState<string | null>(null);
   const candidateId = useMemo(() => normalizeWcodeCandidateId(studentId), [studentId]);
   const storedCandidateProfile = useMemo(
@@ -117,28 +125,53 @@ export function useStudentSessionRouteData(
     [candidateId, scheduleId],
   );
 
+  useEffect(() => {
+    setAttemptSnapshot(null);
+    setSchedule(null);
+    setState(null);
+    setRuntimeSnapshot(null);
+    setIsLoading(true);
+    setIsServerBusy(false);
+    setServerBusyRetryAfterMs(2_000);
+    setError(null);
+  }, [candidateId, scheduleId]);
+
   const refreshBackendSessionSnapshot = useCallback(async () => {
     if (!scheduleId || !candidateId || !isWcodeCandidateId(candidateId)) {
       return;
     }
 
-    const session = await backendGet<{
+    try {
+      const session = await backendGet<{
       schedule: Parameters<typeof mapBackendSchedule>[0];
-      version: Parameters<typeof mapBackendExamVersion>[0];
       runtime?: Parameters<typeof mapBackendRuntime>[0] | null | undefined;
       attempt?: Parameters<typeof mapBackendStudentAttempt>[0] | null | undefined;
-    }>(buildBackendSessionEndpoint(scheduleId, candidateId));
-    const nextSchedule = mapBackendSchedule(session.schedule);
+      degradedLiveMode?: boolean | undefined;
+    }>(buildBackendSessionSummaryEndpoint(scheduleId, candidateId), { retries: 0 });
+      const nextSchedule = mapBackendSchedule(session.schedule);
 
-    setSchedule(nextSchedule);
-    setRuntimeSnapshot(
-      session.runtime ? mapBackendRuntime(session.runtime, nextSchedule) : null,
-    );
+      setSchedule(nextSchedule);
+      setRuntimeSnapshot(
+        session.runtime ? mapBackendRuntime(session.runtime, nextSchedule) : null,
+      );
 
-    if (session.attempt) {
-      const nextAttempt = mapBackendStudentAttempt(session.attempt);
-      await studentAttemptRepository.saveAttempt(nextAttempt);
-      setAttemptSnapshot(nextAttempt);
+      if (session.attempt) {
+        const nextAttempt = mapBackendStudentAttempt(session.attempt);
+        await studentAttemptRepository.saveAttempt(nextAttempt);
+        setAttemptSnapshot(nextAttempt);
+      }
+
+      setIsServerBusy(false);
+    } catch (loadError) {
+      if (loadError instanceof ServerBusyError) {
+        setIsServerBusy(true);
+        const retryAfterSeconds = (loadError.details as { retryAfterSeconds?: unknown } | undefined)
+          ?.retryAfterSeconds;
+        if (typeof retryAfterSeconds === 'number' && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+          setServerBusyRetryAfterMs(Math.round(retryAfterSeconds * 1000));
+        }
+      }
+      throw loadError;
     }
   }, [candidateId, scheduleId]);
 
@@ -165,30 +198,38 @@ export function useStudentSessionRouteData(
         throw new Error('Student identity not found');
       }
 
-      const session = await backendGet<{
+      const summary = await backendGet<{
         schedule: Parameters<typeof mapBackendSchedule>[0];
-        version: Parameters<typeof mapBackendExamVersion>[0];
         runtime?: Parameters<typeof mapBackendRuntime>[0] | null | undefined;
         attempt?: Parameters<typeof mapBackendStudentAttempt>[0] | null | undefined;
-      }>(buildBackendSessionEndpoint(scheduleId, candidateId));
-      const scheduleEntity = mapBackendSchedule(session.schedule);
-      const version = mapBackendExamVersion(session.version);
-      const examState = hydrateExamState({
-        ...version.contentSnapshot,
-        config: version.configSnapshot,
-      } satisfies ExamState);
+        degradedLiveMode?: boolean | undefined;
+      }>(buildBackendSessionSummaryEndpoint(scheduleId, candidateId), { retries: 0 });
+      const scheduleEntity = mapBackendSchedule(summary.schedule);
+
+      let examState = state;
+      if (!examState) {
+        const version = await backendGet<Parameters<typeof mapBackendExamVersion>[0]>(
+          buildBackendSessionVersionEndpoint(scheduleId),
+          { retries: 0 },
+        );
+        const mapped = mapBackendExamVersion(version);
+        examState = hydrateExamState({
+          ...mapped.contentSnapshot,
+          config: mapped.configSnapshot,
+        } satisfies ExamState);
+        setState(examState);
+      }
 
       setSchedule(scheduleEntity);
-      setState(examState);
       setRuntimeSnapshot(
-        session.runtime ? mapBackendRuntime(session.runtime, scheduleEntity) : null,
+        summary.runtime ? mapBackendRuntime(summary.runtime, scheduleEntity) : null,
       );
 
-      if (session.attempt) {
-        const nextAttempt = mapBackendStudentAttempt(session.attempt);
+      if (summary.attempt) {
+        const nextAttempt = mapBackendStudentAttempt(summary.attempt);
         const isSubmittedAttempt = Boolean(
           (
-            session.attempt as {
+            summary.attempt as {
               submittedAt?: string | null | undefined;
             }
           ).submittedAt,
@@ -226,38 +267,55 @@ export function useStudentSessionRouteData(
           examTitle: scheduleEntity.examTitle,
           ...createCandidateProfile(candidateId, storedCandidateProfile),
           currentModule:
-            (session.runtime
-              ? mapBackendRuntime(session.runtime, scheduleEntity).currentSectionKey
+            (summary.runtime
+              ? mapBackendRuntime(summary.runtime, scheduleEntity).currentSectionKey
               : null) ?? firstEnabledModule,
         });
         setAttemptSnapshot(createdAttempt);
       }
+      setIsServerBusy(false);
+      setIsLoading(false);
     } catch (loadError) {
+      if (loadError instanceof ServerBusyError) {
+        setIsServerBusy(true);
+        const retryAfterSeconds = (loadError.details as { retryAfterSeconds?: unknown } | undefined)
+          ?.retryAfterSeconds;
+        if (typeof retryAfterSeconds === 'number' && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+          setServerBusyRetryAfterMs(Math.round(retryAfterSeconds * 1000));
+        }
+        setError(null);
+        throw loadError;
+      }
+      setIsServerBusy(false);
       setError(loadError instanceof Error ? loadError.message : 'Failed to load exam data');
-    } finally {
       setIsLoading(false);
     }
-  }, [authStatus, candidateId, scheduleId, storedCandidateProfile, studentKey]);
+  }, [authStatus, candidateId, scheduleId, state, storedCandidateProfile, studentKey]);
 
-  useEffect(() => {
-    void loadStudentData();
-  }, [loadStudentData]);
+  useAsyncPolling(loadStudentData, {
+    enabled: Boolean(scheduleId && authStatus !== 'loading' && !state && !error),
+    intervalMs: isServerBusy ? serverBusyRetryAfterMs : 2_000,
+    maxIntervalMs: isServerBusy ? serverBusyRetryAfterMs : 30_000,
+    jitterMs: 250,
+  });
 
-  const pollIntervalMs = runtimeSnapshot?.status === 'live' ? 10_000 : 4_000;
-  const pollMaxIntervalMs = runtimeSnapshot?.status === 'live' ? 15_000 : 8_000;
+  const pollIntervalMs = runtimeSnapshot?.status === 'live' ? 10_000 : 15_000;
+  const pollMaxIntervalMs = runtimeSnapshot?.status === 'live' ? 15_000 : 30_000;
 
   useAsyncPolling(async () => {
     await refreshBackendSessionSnapshot();
   }, {
-    enabled: Boolean(scheduleId && state && !error),
+    enabled: Boolean(scheduleId && state && !error && !isLoading),
     intervalMs: pollIntervalMs,
     maxIntervalMs: pollMaxIntervalMs,
+    jitterMs: runtimeSnapshot?.status === 'live' ? 750 : 15_000,
   });
 
   return {
     attemptSnapshot,
     error,
     isLoading,
+    isServerBusy,
     runtimeSnapshot,
     schedule,
     state,

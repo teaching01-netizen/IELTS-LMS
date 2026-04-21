@@ -21,6 +21,7 @@ use crate::{
         auth::{AuthenticatedUser, VerifiedCsrf},
         request_id::RequestId,
         response::{ApiError, ApiResponse},
+        server_busy::server_busy_from_state,
     },
     state::AppState,
 };
@@ -264,6 +265,15 @@ pub async fn student_entry(
             "Schedule ID must be a UUID.",
         )
     })?;
+
+    let _permit = state
+        .busy_gates
+        .student_entry
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            server_busy_from_state(&state, &request_id.0, "student_entry", Some(schedule_id), Some(req.wcode.trim()))
+        })?;
 
     if req.wcode.trim().is_empty() {
         return Err(ApiError::new(

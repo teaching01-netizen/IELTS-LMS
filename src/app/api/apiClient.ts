@@ -3,7 +3,7 @@
  * Centralized HTTP communication with interceptors, error handling, and retry logic
  */
 
-import { NetworkError, ServiceUnavailableError } from '../error/errorTypes';
+import { AppError, NetworkError, ServerBusyError, ServiceUnavailableError } from '../error/errorTypes';
 import { logError, logInfo, logWarn } from '../error/errorLogger';
 
 export interface ApiRequestConfig {
@@ -218,7 +218,7 @@ class ApiClient {
 
         // Log retry
         if (attempt < retries) {
-          const delay = this.calculateRetryDelay(attempt);
+          const delay = this.calculateRetryDelayWithRetryAfter(attempt, lastError);
           logWarn(`Retrying request ${attempt + 1}/${retries} after ${delay}ms`, {
             endpoint,
             requestId,
@@ -296,10 +296,22 @@ class ApiClient {
    */
   private createErrorFromResponse(response: Response, errorData: unknown): Error {
     const status = response.status;
+    const serverError = this.extractServerError(errorData);
     const message = this.extractErrorMessage(errorData, response.statusText);
+    const retryAfterSeconds = this.extractRetryAfterSeconds(response, serverError?.details);
 
     if (status === 503) {
-      return new ServiceUnavailableError(message);
+      if (serverError?.code === 'SERVER_BUSY') {
+        const gate =
+          serverError.details &&
+          typeof serverError.details === 'object' &&
+          'gate' in serverError.details &&
+          typeof (serverError.details as { gate?: unknown }).gate === 'string'
+            ? (serverError.details as { gate: string }).gate
+            : undefined;
+        return new ServerBusyError(message, retryAfterSeconds, gate);
+      }
+      return new ServiceUnavailableError(message, retryAfterSeconds);
     }
 
     if (status >= 500) {
@@ -307,6 +319,51 @@ class ApiClient {
     }
 
     return this.withStatusCode(new Error(message), status);
+  }
+
+  private extractServerError(
+    errorData: unknown,
+  ): { code?: string; message?: string; details?: unknown } | null {
+    if (!errorData || typeof errorData !== 'object') {
+      return null;
+    }
+
+    if ('error' in errorData) {
+      const nested = (errorData as { error?: unknown }).error;
+      if (nested && typeof nested === 'object') {
+        const code =
+          'code' in nested && typeof (nested as { code?: unknown }).code === 'string'
+            ? (nested as { code: string }).code
+            : undefined;
+        const message =
+          'message' in nested && typeof (nested as { message?: unknown }).message === 'string'
+            ? (nested as { message: string }).message
+            : undefined;
+        const details = 'details' in nested ? (nested as { details?: unknown }).details : undefined;
+        return { code, message, details };
+      }
+    }
+
+    return null;
+  }
+
+  private extractRetryAfterSeconds(response: Response, details?: unknown): number | undefined {
+    const header = response.headers.get('Retry-After');
+    if (header) {
+      const parsed = Number.parseInt(header, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+
+    if (details && typeof details === 'object' && 'retryAfterSeconds' in details) {
+      const raw = (details as { retryAfterSeconds?: unknown }).retryAfterSeconds;
+      if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+        return raw;
+      }
+    }
+
+    return undefined;
   }
 
   private extractErrorMessage(errorData: unknown, fallback: string): string {
@@ -368,6 +425,33 @@ class ApiClient {
    */
   private calculateRetryDelay(attempt: number): number {
     return Math.min(1000 * 2 ** attempt, 30000);
+  }
+
+  private calculateRetryDelayWithRetryAfter(attempt: number, error: Error | null): number {
+    const retryAfterMs = this.retryAfterMsFromError(error);
+    const baseDelay = retryAfterMs ?? this.calculateRetryDelay(attempt);
+    return this.addJitter(baseDelay);
+  }
+
+  private retryAfterMsFromError(error: Error | null): number | null {
+    if (!error) {
+      return null;
+    }
+
+    if (error instanceof AppError) {
+      const raw = (error.details as { retryAfterSeconds?: unknown } | undefined)
+        ?.retryAfterSeconds;
+      if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+        return Math.round(raw * 1000);
+      }
+    }
+
+    return null;
+  }
+
+  private addJitter(delayMs: number): number {
+    const jitterMs = Math.floor(Math.random() * 250);
+    return Math.max(0, delayMs + jitterMs);
   }
 
   /**

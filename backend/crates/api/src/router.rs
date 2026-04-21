@@ -88,6 +88,14 @@ pub fn build_router(state: AppState) -> Router {
                 "/sessions",
                 Router::new()
                     .route("/:schedule_id", get(student::get_student_session))
+                    .route(
+                        "/:schedule_id/summary",
+                        get(student::get_student_session_summary),
+                    )
+                    .route(
+                        "/:schedule_id/version",
+                        get(student::get_student_session_version),
+                    )
                     .route("/:schedule_id/precheck", post(student::save_precheck))
                     .route(
                         "/:schedule_id/bootstrap",

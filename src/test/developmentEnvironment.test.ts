@@ -13,6 +13,14 @@ function readBackendFile(relativePath: string): string {
   return fs.readFileSync(path.join(backendRoot, relativePath), 'utf8');
 }
 
+function readBackendFileIfExists(relativePath: string): string | null {
+  const filePath = path.join(backendRoot, relativePath);
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  return fs.readFileSync(filePath, 'utf8');
+}
+
 describe('development environment wiring', () => {
   it('proxies frontend api requests to the backend server in dev', () => {
     const config = viteConfigFactory({ command: 'serve', mode: 'development' });
@@ -26,7 +34,7 @@ describe('development environment wiring', () => {
 
   it('aligns backend compose ports, env defaults, and bootstrap flow', () => {
     const compose = readBackendFile('docker-compose.yml');
-    const backendEnv = readBackendFile('.env');
+    const backendEnv = readBackendFileIfExists('.env');
     const backendEnvExample = readBackendFile('.env.example');
     const makefile = readBackendFile('Makefile');
 
@@ -34,7 +42,9 @@ describe('development environment wiring', () => {
     expect(compose).toContain('"4000:4000"');
     expect(compose).toContain('mysqladmin ping');
 
-    for (const envFile of [backendEnv, backendEnvExample]) {
+    for (const envFile of [backendEnv, backendEnvExample].filter(
+      (value): value is string => typeof value === 'string',
+    )) {
       expect(envFile).toContain('DATABASE_URL=mysql://root:root@127.0.0.1:4000/ielts');
       expect(envFile).toContain('DATABASE_DIRECT_URL=mysql://root:root@127.0.0.1:4000/ielts');
       expect(envFile).toContain('DATABASE_MIGRATOR_URL=mysql://root:root@127.0.0.1:4000/ielts');

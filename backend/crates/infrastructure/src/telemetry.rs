@@ -37,6 +37,11 @@ struct ThresholdLabels {
     level: String,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct ServerBusyLabels {
+    gate: String,
+}
+
 #[derive(Clone)]
 pub struct Telemetry {
     registry: Arc<Mutex<Registry>>,
@@ -53,6 +58,9 @@ pub struct Telemetry {
     process_resident_memory_bytes: Gauge<i64, AtomicI64>,
     rate_limiter_buckets: Gauge<i64, AtomicI64>,
     storage_budget_threshold_hits: Family<ThresholdLabels, Counter>,
+    server_busy_total: Family<ServerBusyLabels, Counter>,
+    student_session_summary_requests_total: Counter,
+    student_session_version_requests_total: Counter,
 }
 
 impl fmt::Debug for Telemetry {
@@ -94,6 +102,9 @@ impl Telemetry {
         let process_resident_memory_bytes = Gauge::<i64, AtomicI64>::default();
         let rate_limiter_buckets = Gauge::<i64, AtomicI64>::default();
         let storage_budget_threshold_hits = Family::<ThresholdLabels, Counter>::default();
+        let server_busy_total = Family::<ServerBusyLabels, Counter>::default();
+        let student_session_summary_requests_total = Counter::default();
+        let student_session_version_requests_total = Counter::default();
 
         let mut registry = Registry::default();
         registry.register(
@@ -161,6 +172,21 @@ impl Telemetry {
             "Number of times storage budget checks have hit a given severity.",
             storage_budget_threshold_hits.clone(),
         );
+        registry.register(
+            "server_busy_total",
+            "Number of 503 SERVER_BUSY responses, labeled by gate.",
+            server_busy_total.clone(),
+        );
+        registry.register(
+            "student_session_summary_requests_total",
+            "Total requests served by the student session summary endpoint.",
+            student_session_summary_requests_total.clone(),
+        );
+        registry.register(
+            "student_session_version_requests_total",
+            "Total requests served by the student session version endpoint.",
+            student_session_version_requests_total.clone(),
+        );
 
         Self {
             registry: Arc::new(Mutex::new(registry)),
@@ -177,6 +203,9 @@ impl Telemetry {
             process_resident_memory_bytes,
             rate_limiter_buckets,
             storage_budget_threshold_hits,
+            server_busy_total,
+            student_session_summary_requests_total,
+            student_session_version_requests_total,
         }
     }
 
@@ -237,6 +266,21 @@ impl Telemetry {
     pub fn set_process_resident_memory_bytes(&self, resident_bytes: u64) {
         self.process_resident_memory_bytes
             .set(i64::try_from(resident_bytes).unwrap_or(i64::MAX));
+    }
+
+    pub fn inc_server_busy(&self, gate: &str) {
+        let labels = ServerBusyLabels {
+            gate: gate.to_owned(),
+        };
+        self.server_busy_total.get_or_create(&labels).inc();
+    }
+
+    pub fn inc_student_session_summary_requests(&self) {
+        self.student_session_summary_requests_total.inc();
+    }
+
+    pub fn inc_student_session_version_requests(&self) {
+        self.student_session_version_requests_total.inc();
     }
 
     pub fn set_rate_limiter_bucket_count(&self, buckets: usize) {

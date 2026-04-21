@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { StudentAppWrapper } from '@components/student/StudentAppWrapper';
-import { ErrorSurface, LoadingSurface } from '@components/ui';
+import { Banner, ErrorSurface, LoadingSurface } from '@components/ui';
 import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRouteData';
 
 /**
@@ -17,6 +17,7 @@ export function StudentSessionRoute() {
     attemptSnapshot,
     error,
     isLoading,
+    isServerBusy,
     retry,
     runtimeSnapshot,
     state,
@@ -34,7 +35,20 @@ export function StudentSessionRoute() {
   };
 
   if (isLoading) {
-    return <LoadingSurface label="Loading Exam…" />;
+    return (
+      <div className="min-h-screen flex flex-col">
+        {isServerBusy && (
+          <Banner
+            variant="info"
+            title="High traffic"
+            message="High traffic, retrying…"
+            className="w-full"
+            showIcon
+          />
+        )}
+        <LoadingSurface label="Loading Exam…" />
+      </div>
+    );
   }
 
   if (error) {
@@ -74,13 +88,24 @@ export function StudentSessionRoute() {
   }
 
   return (
-    <StudentAppWrapper
-      state={state}
-      onExit={navigateToStudentCheckIn}
-      scheduleId={scheduleId}
-      attemptSnapshot={attemptSnapshot}
-      onRuntimeRefresh={refreshRuntime}
-      runtimeSnapshot={runtimeSnapshot}
-    />
+    <div className="min-h-screen flex flex-col">
+      {isServerBusy && (
+        <Banner
+          variant="info"
+          title="High traffic"
+          message="High traffic, retrying…"
+          className="w-full"
+          showIcon
+        />
+      )}
+      <StudentAppWrapper
+        state={state}
+        onExit={navigateToStudentCheckIn}
+        scheduleId={scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        onRuntimeRefresh={refreshRuntime}
+        runtimeSnapshot={runtimeSnapshot}
+      />
+    </div>
   );
 }

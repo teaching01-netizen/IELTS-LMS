@@ -161,6 +161,15 @@ pub struct StudentSessionContext {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StudentSessionSummary {
+    pub schedule: crate::schedule::ExamSchedule,
+    pub runtime: Option<crate::schedule::ExamSessionRuntime>,
+    pub attempt: Option<StudentAttempt>,
+    pub degraded_live_mode: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StudentMutationBatchResponse {
     pub attempt: StudentAttempt,
     pub applied_mutation_count: usize,
@@ -200,4 +209,50 @@ pub struct StudentRegistrationResponse {
     pub email: String,
     pub student_name: String,
     pub access_state: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StudentSessionSummary;
+    use crate::schedule::{DeliveryMode, ExamSchedule, RecurrenceType, ScheduleStatus};
+    use chrono::Utc;
+
+    #[test]
+    fn student_session_summary_does_not_include_version_snapshot() {
+        let now = Utc::now();
+        let summary = StudentSessionSummary {
+            schedule: ExamSchedule {
+                id: "sched-1".to_owned(),
+                exam_id: "exam-1".to_owned(),
+                organization_id: None,
+                exam_title: "Exam".to_owned(),
+                published_version_id: "ver-1".to_owned(),
+                cohort_name: "Cohort".to_owned(),
+                institution: None,
+                start_time: now,
+                end_time: now,
+                planned_duration_minutes: 60,
+                delivery_mode: DeliveryMode::ProctorStart,
+                recurrence_type: RecurrenceType::None,
+                recurrence_interval: 1,
+                recurrence_end_date: None,
+                buffer_before_minutes: None,
+                buffer_after_minutes: None,
+                auto_start: false,
+                auto_stop: false,
+                status: ScheduleStatus::Scheduled,
+                created_at: now,
+                created_by: "system".to_owned(),
+                updated_at: now,
+                revision: 1,
+            },
+            runtime: None,
+            attempt: None,
+            degraded_live_mode: false,
+        };
+
+        let value = serde_json::to_value(summary).expect("serialize");
+        assert!(value.get("version").is_none());
+        assert!(value.get("schedule").is_some());
+    }
 }

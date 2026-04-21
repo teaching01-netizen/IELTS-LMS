@@ -5,6 +5,7 @@ interface UseAsyncPollingOptions {
   intervalMs?: number;
   maxIntervalMs?: number;
   runImmediately?: boolean;
+  jitterMs?: number;
 }
 
 /**
@@ -18,6 +19,7 @@ export function useAsyncPolling(
     intervalMs = 1_000,
     maxIntervalMs = intervalMs * 4,
     runImmediately = true,
+    jitterMs = 0,
   }: UseAsyncPollingOptions = {},
 ) {
   const runTask = useEffectEvent(task);
@@ -31,11 +33,13 @@ export function useAsyncPolling(
     let cancelled = false;
     let timeoutId: number | undefined;
     let nextDelay = intervalMs;
+    const effectiveJitterMs = Math.max(0, jitterMs);
 
     const scheduleNext = (delay: number) => {
+      const jitter = effectiveJitterMs > 0 ? Math.floor(Math.random() * effectiveJitterMs) : 0;
       timeoutId = window.setTimeout(() => {
         void poll();
-      }, delay);
+      }, delay + jitter);
     };
 
     const poll = async () => {

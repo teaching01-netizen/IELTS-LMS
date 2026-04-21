@@ -143,6 +143,12 @@ function buildSessionContext(attempt: Record<string, unknown> | null) {
   };
 }
 
+function buildSessionSummary(attempt: Record<string, unknown> | null) {
+  const full = buildSessionContext(attempt);
+  const { version: _version, ...summary } = full;
+  return summary;
+}
+
 function buildAttempt() {
   return {
     id: 'attempt-1',
@@ -195,17 +201,29 @@ describe('useStudentSessionRouteData backend mode', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    vi.useRealTimers();
     global.fetch = originalFetch;
   });
 
   it('hydrates schedule, runtime, and attempt snapshots through the backend delivery session API', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
     vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(buildSessionContext(null)))
-      .mockResolvedValueOnce(jsonResponse(buildSessionContext(buildAttempt())))
-      .mockResolvedValue(jsonResponse(buildSessionContext(buildAttempt())));
+
+    let summaryCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/v1/student/sessions/sched-1/summary')) {
+        summaryCalls += 1;
+        return jsonResponse(summaryCalls === 1 ? buildSessionSummary(null) : buildSessionSummary(buildAttempt()));
+      }
+      if (url.includes('/api/v1/student/sessions/sched-1/version')) {
+        return jsonResponse(buildSessionContext(null).version);
+      }
+      if (url.includes('/api/v1/student/sessions/sched-1/bootstrap')) {
+        return jsonResponse({ attempt: buildAttempt(), attemptCredential: { attemptToken: 'tok-1', expiresAt: '2026-01-01T12:00:00.000Z' } });
+      }
+      throw new Error(`Unhandled fetch: ${url} ${init?.method ?? ''}`);
+    });
     global.fetch = fetchMock as typeof fetch;
 
     const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
@@ -235,13 +253,15 @@ describe('useStudentSessionRouteData backend mode', () => {
       scheduleId: 'sched-1',
     });
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      '/api/v1/student/sessions/sched-1?candidateId=W250334',
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/student/sessions/sched-1/summary?candidateId=W250334',
       expect.objectContaining({ method: 'GET' }),
     );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/student/sessions/sched-1/version',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/student/sessions/sched-1/bootstrap',
       expect.objectContaining({ method: 'POST' }),
     );
@@ -258,10 +278,19 @@ describe('useStudentSessionRouteData backend mode', () => {
         }),
     );
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(buildSessionContext(null)))
-      .mockResolvedValueOnce(jsonResponse(buildSessionContext(buildAttempt())));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/student/sessions/sched-1/summary')) {
+        return jsonResponse(buildSessionSummary(null));
+      }
+      if (url.includes('/api/v1/student/sessions/sched-1/version')) {
+        return jsonResponse(buildSessionContext(null).version);
+      }
+      if (url.includes('/api/v1/student/sessions/sched-1/bootstrap')) {
+        return jsonResponse({ attempt: buildAttempt(), attemptCredential: { attemptToken: 'tok-1', expiresAt: '2026-01-01T12:00:00.000Z' } });
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
     global.fetch = fetchMock as typeof fetch;
 
     renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
@@ -275,14 +304,14 @@ describe('useStudentSessionRouteData backend mode', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(
         1,
-        '/api/v1/student/sessions/sched-1?candidateId=W250334',
+        '/api/v1/student/sessions/sched-1/summary?candidateId=W250334',
         expect.objectContaining({ method: 'GET' }),
       );
     });
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(
-        2,
+        3,
         '/api/v1/student/sessions/sched-1/bootstrap',
         expect.objectContaining({ method: 'POST' }),
       );
@@ -305,5 +334,119 @@ describe('useStudentSessionRouteData backend mode', () => {
 
     expect(result.current.error).toMatch(/invalid access code/i);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('polls only the summary endpoint and never re-downloads the exam version', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+
+    const submittedAttempt = { ...buildAttempt(), submittedAt: '2026-01-01T11:00:00.000Z' };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/student/sessions/sched-1/summary')) {
+        return jsonResponse(buildSessionSummary(submittedAttempt));
+      }
+      if (url.includes('/api/v1/student/sessions/sched-1/version')) {
+        return jsonResponse(buildSessionContext(null).version);
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.state).not.toBeNull();
+    });
+
+    const versionCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/api/v1/student/sessions/sched-1/version'),
+    );
+    expect(versionCalls).toHaveLength(1);
+
+    await result.current.refreshRuntime();
+    await result.current.refreshRuntime();
+
+    const versionCallsAfter = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/api/v1/student/sessions/sched-1/version'),
+    );
+    expect(versionCallsAfter).toHaveLength(1);
+
+    const summaryCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/api/v1/student/sessions/sched-1/summary'),
+    );
+    expect(summaryCalls.length).toBeGreaterThan(1);
+  });
+
+  it('retries server-busy responses and exposes a banner state', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+
+    let summaryCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/student/sessions/sched-1/summary')) {
+        summaryCalls += 1;
+        if (summaryCalls === 1) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: {
+                code: 'SERVER_BUSY',
+                message: 'busy',
+                details: { retryAfterSeconds: 2, gate: 'student_session_summary' },
+              },
+              metadata: { timestamp: '2026-01-01T00:00:00.000Z', requestId: 'req-1' },
+            }),
+            {
+              status: 503,
+              headers: { 'content-type': 'application/json', 'Retry-After': '2' },
+            },
+          );
+        }
+        return jsonResponse(buildSessionSummary(null));
+      }
+      if (url.includes('/api/v1/student/sessions/sched-1/version')) {
+        return jsonResponse(buildSessionContext(null).version);
+      }
+      if (url.includes('/api/v1/student/sessions/sched-1/bootstrap')) {
+        return jsonResponse({ attempt: buildAttempt(), attemptCredential: { attemptToken: 'tok-1', expiresAt: '2026-01-01T12:00:00.000Z' } });
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    for (let i = 0; i < 10; i += 1) {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      if (result.current.isServerBusy) {
+        break;
+      }
+    }
+    expect(result.current.isServerBusy).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    for (let i = 0; i < 20; i += 1) {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      if (!result.current.isLoading && result.current.state && !result.current.isServerBusy) {
+        break;
+      }
+    }
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.state).not.toBeNull();
+    expect(result.current.isServerBusy).toBe(false);
+
+    expect(summaryCalls).toBeGreaterThan(1);
   });
 });

@@ -87,8 +87,18 @@ export class RateLimitError extends AppError {
  * Service unavailable errors
  */
 export class ServiceUnavailableError extends AppError {
-  constructor(message: string = 'Service temporarily unavailable') {
-    super(message, 'SERVICE_UNAVAILABLE', 503);
+  constructor(message: string = 'Service temporarily unavailable', retryAfterSeconds?: number) {
+    super(message, 'SERVICE_UNAVAILABLE', 503, { retryAfterSeconds });
+  }
+}
+
+export class ServerBusyError extends AppError {
+  constructor(
+    message: string = 'High traffic. Retrying shortly.',
+    retryAfterSeconds?: number,
+    gate?: string,
+  ) {
+    super(message, 'SERVER_BUSY', 503, { retryAfterSeconds, gate });
   }
 }
 
