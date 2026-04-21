@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, createBrowserRouter } from 'react-router-dom';
+import { Navigate, createBrowserRouter, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { ErrorSurface } from '../components/ui/ErrorSurface';
 import { ActivateAccountPage } from '../features/auth/ActivateAccountPage';
@@ -126,6 +126,11 @@ function AdminIndexRedirect() {
   return <Navigate to={resolveRoleLandingPath(session.user.role)} replace />;
 }
 
+function StudentRegisterRedirect() {
+  const { scheduleId } = useParams<{ scheduleId: string }>();
+  return <Navigate to={`/student/${scheduleId}`} replace />;
+}
+
 function withAuth(element: React.ReactNode, allowedRoles?: Array<'admin' | 'builder' | 'proctor' | 'grader' | 'student'>) {
   return <RequireAuth allowedRoles={allowedRoles}>{element}</RequireAuth>;
 }
@@ -250,7 +255,7 @@ export const appRoutes = [
         ), ['admin', 'proctor']),
       },
       {
-        path: 'student/:scheduleId/register',
+        path: 'student/:scheduleId',
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>
             <StudentRegistrationRoute />
@@ -258,7 +263,11 @@ export const appRoutes = [
         ),
       },
       {
-        path: 'student/:scheduleId/:studentId?',
+        path: 'student/:scheduleId/register',
+        element: <StudentRegisterRedirect />,
+      },
+      {
+        path: 'student/:scheduleId/:studentId',
         element: withAuth((
           <Suspense fallback={<RouteLoadingFallback />}>
             <StudentSessionRoute />

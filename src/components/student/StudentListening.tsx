@@ -4,6 +4,7 @@ import { QuestionRenderer } from './QuestionRenderer';
 import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight, ArrowLeft, ArrowRight, Flag } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
+import { prefersReducedMotion } from './prefersReducedMotion';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -45,7 +46,7 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
     if (currentQuestionId && questionContainerRef.current) {
       const element = document.getElementById(`question-${currentQuestionId}`);
       if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        element.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
       }
     }
   }, [currentQuestionId]);
@@ -211,6 +212,7 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
                   className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
                   title="Rewind 10s"
                   disabled={!hasAudio}
+                  aria-label="Rewind 10 seconds"
                 >
                   <SkipBack size={14} />
                 </button>
@@ -220,6 +222,7 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
                   className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
                   title="Forward 10s"
                   disabled={!hasAudio}
+                  aria-label="Forward 10 seconds"
                 >
                   <SkipForward size={14} />
                 </button>

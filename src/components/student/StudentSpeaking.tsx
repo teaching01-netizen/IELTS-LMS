@@ -150,9 +150,9 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
             </div>
             
             <div className="w-16 md:w-24 flex flex-col justify-center gap-3 md:gap-4">
-              <button className="w-10 h-10 md:w-14 md:h-14 bg-white/5 hover:bg-white/10 text-white rounded-2xl flex items-center justify-center transition-all border border-white/5"><Mic size={18} /></button>
-              <button className="w-10 h-10 md:w-14 md:h-14 bg-white/5 hover:bg-white/10 text-white rounded-2xl flex items-center justify-center transition-all border border-white/5"><Video size={18} /></button>
-              <button className="w-10 h-10 md:w-14 md:h-14 bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white rounded-2xl flex items-center justify-center transition-all border border-red-600/20"><PhoneOff size={18} /></button>
+              <button aria-label="Toggle microphone" className="w-10 h-10 md:w-14 md:h-14 bg-white/5 hover:bg-white/10 text-white rounded-2xl flex items-center justify-center transition-all border border-white/5"><Mic size={18} /></button>
+              <button aria-label="Toggle camera" className="w-10 h-10 md:w-14 md:h-14 bg-white/5 hover:bg-white/10 text-white rounded-2xl flex items-center justify-center transition-all border border-white/5"><Video size={18} /></button>
+              <button aria-label="End call" className="w-10 h-10 md:w-14 md:h-14 bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white rounded-2xl flex items-center justify-center transition-all border border-red-600/20"><PhoneOff size={18} /></button>
             </div>
           </div>
         </div>

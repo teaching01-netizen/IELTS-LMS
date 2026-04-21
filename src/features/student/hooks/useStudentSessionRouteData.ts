@@ -19,24 +19,17 @@ import type { StudentAttempt } from '../../../types/studentAttempt';
 
 const PROFILE_STORAGE_PREFIX = 'ielts-student-profile:';
 
-function getStableCandidateId(scheduleId?: string, studentId?: string) {
-  if (studentId) {
-    return studentId;
+function normalizeWcodeCandidateId(studentId?: string) {
+  if (!studentId) {
+    return null;
   }
 
-  if (!scheduleId || typeof window === 'undefined') {
-    return `anon-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  }
+  const normalized = studentId.trim().toUpperCase();
+  return normalized || null;
+}
 
-  const storageKey = `ielts-student-candidate:${scheduleId}`;
-  const storedCandidateId = window.sessionStorage.getItem(storageKey);
-  if (storedCandidateId) {
-    return storedCandidateId;
-  }
-
-  const generatedCandidateId = `anon-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  window.sessionStorage.setItem(storageKey, generatedCandidateId);
-  return generatedCandidateId;
+function isWcodeCandidateId(candidateId: string) {
+  return /^W[0-9]{6}$/.test(candidateId);
 }
 
 function buildStudentKey(scheduleId: string, candidateId: string) {
@@ -112,18 +105,18 @@ export function useStudentSessionRouteData(
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<ExamSessionRuntime | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const candidateId = useMemo(() => getStableCandidateId(scheduleId, studentId), [scheduleId, studentId]);
+  const candidateId = useMemo(() => normalizeWcodeCandidateId(studentId), [studentId]);
   const storedCandidateProfile = useMemo(
-    () => (scheduleId ? loadStoredCandidateProfile(scheduleId, candidateId) : null),
+    () => (scheduleId && candidateId ? loadStoredCandidateProfile(scheduleId, candidateId) : null),
     [candidateId, scheduleId],
   );
   const studentKey = useMemo(
-    () => (scheduleId ? buildStudentKey(scheduleId, candidateId) : null),
+    () => (scheduleId && candidateId ? buildStudentKey(scheduleId, candidateId) : null),
     [candidateId, scheduleId],
   );
 
   const refreshBackendSessionSnapshot = useCallback(async () => {
-    if (!scheduleId) {
+    if (!scheduleId || !candidateId || !isWcodeCandidateId(candidateId)) {
       return;
     }
 
@@ -162,6 +155,10 @@ export function useStudentSessionRouteData(
     setError(null);
 
     try {
+      if (!candidateId || !isWcodeCandidateId(candidateId)) {
+        throw new Error('Invalid access code. Please check in again.');
+      }
+
       if (!studentKey) {
         throw new Error('Student identity not found');
       }

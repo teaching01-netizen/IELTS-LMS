@@ -24,19 +24,27 @@ export function StudentSessionRoute() {
   } =
     useStudentSessionRouteData(scheduleId, studentId);
 
+  const navigateToStudentCheckIn = () => {
+    if (scheduleId) {
+      navigate(`/student/${scheduleId}`);
+      return;
+    }
+
+    navigate('/');
+  };
+
   if (isLoading) {
-    return <LoadingSurface label="Loading Exam..." />;
+    return <LoadingSurface label="Loading Exam…" />;
   }
 
   if (error) {
+    const isInvalidAccessCode = error.toLowerCase().includes('invalid access code');
     return (
       <ErrorSurface
-        title="Loading Error"
+        title={isInvalidAccessCode ? 'Access code invalid' : 'Loading Error'}
         description={error}
-        actionLabel="Retry"
-        onAction={() => {
-          void retry();
-        }}
+        actionLabel={isInvalidAccessCode ? 'Back to Check-in' : 'Retry'}
+        onAction={isInvalidAccessCode ? navigateToStudentCheckIn : () => void retry()}
       />
     );
   }
@@ -46,8 +54,8 @@ export function StudentSessionRoute() {
       <ErrorSurface
         title="Exam Not Found"
         description="Student delivery requires a valid schedule-backed route."
-        actionLabel="Return to Admin"
-        onAction={() => navigate('/admin')}
+        actionLabel="Back to Check-in"
+        onAction={navigateToStudentCheckIn}
       />
     );
   }
@@ -55,7 +63,7 @@ export function StudentSessionRoute() {
   return (
     <StudentAppWrapper
       state={state}
-      onExit={() => navigate('/admin')}
+      onExit={navigateToStudentCheckIn}
       scheduleId={scheduleId}
       attemptSnapshot={attemptSnapshot}
       onRuntimeRefresh={refreshRuntime}

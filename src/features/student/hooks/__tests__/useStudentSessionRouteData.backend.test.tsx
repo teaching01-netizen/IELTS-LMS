@@ -148,14 +148,14 @@ function buildAttempt() {
     id: 'attempt-1',
     scheduleId: 'sched-1',
     registrationId: null,
-    studentKey: 'student-sched-1-alice',
+    studentKey: 'student-sched-1-W250334',
     organizationId: null,
     examId: 'exam-1',
     publishedVersionId: 'ver-1',
     examTitle: 'Mock Exam',
-    candidateId: 'alice',
-    candidateName: 'Alice Roe',
-    candidateEmail: 'alice@example.com',
+    candidateId: 'W250334',
+    candidateName: 'Student One',
+    candidateEmail: 'student@example.com',
     phase: 'exam',
     currentModule: 'reading',
     currentQuestionId: null,
@@ -208,7 +208,7 @@ describe('useStudentSessionRouteData backend mode', () => {
       .mockResolvedValue(jsonResponse(buildSessionContext(buildAttempt())));
     global.fetch = fetchMock as typeof fetch;
 
-    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'alice'), {
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
       wrapper: createWrapper(),
     });
 
@@ -231,13 +231,13 @@ describe('useStudentSessionRouteData backend mode', () => {
     });
     expect(result.current.attemptSnapshot).toMatchObject({
       id: 'attempt-1',
-      candidateId: 'alice',
+      candidateId: 'W250334',
       scheduleId: 'sched-1',
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/v1/student/sessions/sched-1?candidateId=alice',
+      '/api/v1/student/sessions/sched-1?candidateId=W250334',
       expect.objectContaining({ method: 'GET' }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -264,7 +264,7 @@ describe('useStudentSessionRouteData backend mode', () => {
       .mockResolvedValueOnce(jsonResponse(buildSessionContext(buildAttempt())));
     global.fetch = fetchMock as typeof fetch;
 
-    renderHook(() => useStudentSessionRouteData('sched-1', 'alice'), {
+    renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
       wrapper: createWrapper(),
     });
 
@@ -275,7 +275,7 @@ describe('useStudentSessionRouteData backend mode', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(
         1,
-        '/api/v1/student/sessions/sched-1?candidateId=alice',
+        '/api/v1/student/sessions/sched-1?candidateId=W250334',
         expect.objectContaining({ method: 'GET' }),
       );
     });
@@ -287,5 +287,23 @@ describe('useStudentSessionRouteData backend mode', () => {
         expect.objectContaining({ method: 'POST' }),
       );
     });
+  });
+
+  it('rejects non-wcode student ids and never calls the backend session API', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'alice'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.error).toMatch(/invalid access code/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

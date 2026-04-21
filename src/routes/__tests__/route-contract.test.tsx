@@ -18,13 +18,14 @@ describe('route contracts', () => {
   });
 
   it('treats student phases as internal runtime state', () => {
-    expect(getLeafPath('/student/schedule-123')).toBe('student/:scheduleId/:studentId?');
-    expect(getLeafPath('/student/schedule-123/candidate-1')).toBe('student/:scheduleId/:studentId?');
-    expect(getLeafPath('/student/schedule-123/precheck')).toBe('student/:scheduleId/:studentId?');
-    expect(getLeafPath('/student/schedule-123/candidate-1/precheck')).toBe('*');
-    expect(getLeafPath('/student/schedule-123/candidate-1/lobby')).toBe('*');
-    expect(getLeafPath('/student/schedule-123/candidate-1/exam')).toBe('*');
-    expect(getLeafPath('/student/schedule-123/candidate-1/complete')).toBe('*');
+    expect(getLeafPath('/student/schedule-123')).toBe('student/:scheduleId');
+    expect(getLeafPath('/student/schedule-123/register')).toBe('student/:scheduleId/register');
+    expect(getLeafPath('/student/schedule-123/W250334')).toBe('student/:scheduleId/:studentId');
+    expect(getLeafPath('/student/schedule-123/precheck')).toBe('student/:scheduleId/:studentId');
+    expect(getLeafPath('/student/schedule-123/W250334/precheck')).toBe('*');
+    expect(getLeafPath('/student/schedule-123/W250334/lobby')).toBe('*');
+    expect(getLeafPath('/student/schedule-123/W250334/exam')).toBe('*');
+    expect(getLeafPath('/student/schedule-123/W250334/complete')).toBe('*');
   });
 
   it('hides proctor settings from the active route tree', () => {

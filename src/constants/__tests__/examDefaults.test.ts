@@ -11,6 +11,7 @@ describe('examDefaults standards', () => {
   it('creates default standards for academic exams', () => {
     const config = createDefaultConfig('Academic', 'Academic');
 
+    expect(config.security.blockClipboard).toBe(true);
     expect(config.standards.passageWordCount).toEqual({
       optimalMin: 700,
       optimalMax: 1000,

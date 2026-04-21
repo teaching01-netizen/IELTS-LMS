@@ -99,9 +99,10 @@ describe('StudentKeyboardProvider', () => {
     vi.clearAllMocks();
   });
 
-  function renderHarness() {
+  function renderHarness(overrideState?: (nextState: ExamState) => void) {
     let runtimeContext: ReturnType<typeof useStudentRuntime> | null = null;
     const state = createExamState();
+    overrideState?.(state);
     const attemptSnapshot = createAttemptSnapshot();
 
     function Probe() {
@@ -149,6 +150,44 @@ describe('StudentKeyboardProvider', () => {
 
   it('blocks clipboard shortcuts during exam phase', () => {
     const harness = renderHarness();
+    const event = new KeyboardEvent('keydown', {
+      key: 'c',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    act(() => {
+      document.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(harness.runtime.state.violations.at(-1)?.type).toBe('RESTRICTED_SHORTCUT');
+  });
+
+  it('allows clipboard shortcuts when config disables clipboard blocking', () => {
+    const harness = renderHarness((state) => {
+      state.config.security.blockClipboard = false;
+    });
+    const event = new KeyboardEvent('keydown', {
+      key: 'c',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    act(() => {
+      document.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(harness.runtime.state.violations).toHaveLength(0);
+  });
+
+  it('defaults to blocking clipboard shortcuts when flag is missing', () => {
+    const harness = renderHarness((state) => {
+      delete (state.config.security as any).blockClipboard;
+    });
     const event = new KeyboardEvent('keydown', {
       key: 'c',
       ctrlKey: true,

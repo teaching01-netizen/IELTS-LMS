@@ -47,12 +47,13 @@ function isEditingTarget(target: EventTarget | null) {
 }
 
 export function KeyboardProvider({ children }: KeyboardProviderProps) {
-  const { state: runtimeState, actions: runtimeActions } = useStudentRuntime();
+  const { state: runtimeState, actions: runtimeActions, examState } = useStudentRuntime();
   const { state: attemptState } = useStudentAttempt();
   const { handleViolation } = useProctoring();
 
   const sessionId = attemptState.attempt?.scheduleId;
   const studentId = attemptState.attemptId ?? undefined;
+  const shouldBlockClipboard = examState.config.security.blockClipboard !== false;
 
   useEffect(() => {
     const handleRestrictedInteraction = (
@@ -99,7 +100,7 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
         return;
       }
 
-      if ((event.metaKey || event.ctrlKey) && blockedModifierKeys.has(normalizedKey)) {
+      if (shouldBlockClipboard && (event.metaKey || event.ctrlKey) && blockedModifierKeys.has(normalizedKey)) {
         if (editingTarget && normalizedKey === 'a' && !event.altKey && !event.shiftKey) {
           return;
         }
@@ -190,7 +191,11 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       }
     };
 
-    const handleCopy = (event: ClipboardEvent) => {
+    const handleClipboardEvent = (event: ClipboardEvent) => {
+      if (!shouldBlockClipboard) {
+        return;
+      }
+
       const target = event.target;
       const targetElement = target instanceof HTMLElement ? target : null;
       
@@ -216,6 +221,10 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
     };
 
     const handleContextMenu = (event: MouseEvent) => {
+      if (!shouldBlockClipboard) {
+        return;
+      }
+
       handleRestrictedInteraction(
         event,
         'CONTEXT_MENU_BLOCKED',
@@ -224,6 +233,10 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
     };
 
     const handleDragDrop = (event: DragEvent) => {
+      if (!shouldBlockClipboard) {
+        return;
+      }
+
       handleRestrictedInteraction(
         event,
         'DRAG_DROP_BLOCKED',
@@ -232,18 +245,18 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
     };
 
     document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('copy', handleCopy);
-    document.addEventListener('cut', handleCopy);
-    document.addEventListener('paste', handleCopy);
+    document.addEventListener('copy', handleClipboardEvent);
+    document.addEventListener('cut', handleClipboardEvent);
+    document.addEventListener('paste', handleClipboardEvent);
     document.addEventListener('contextmenu', handleContextMenu);
     document.addEventListener('dragstart', handleDragDrop);
     document.addEventListener('drop', handleDragDrop);
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('copy', handleCopy);
-      document.removeEventListener('cut', handleCopy);
-      document.removeEventListener('paste', handleCopy);
+      document.removeEventListener('copy', handleClipboardEvent);
+      document.removeEventListener('cut', handleClipboardEvent);
+      document.removeEventListener('paste', handleClipboardEvent);
       document.removeEventListener('contextmenu', handleContextMenu);
       document.removeEventListener('dragstart', handleDragDrop);
       document.removeEventListener('drop', handleDragDrop);
@@ -251,6 +264,7 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
   }, [
     attemptState.attempt?.scheduleId,
     attemptState.attemptId,
+    examState.config.security.blockClipboard,
     handleViolation,
     runtimeActions,
     runtimeState,

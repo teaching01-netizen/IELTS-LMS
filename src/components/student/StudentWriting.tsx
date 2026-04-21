@@ -149,28 +149,14 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
       lastKeydownRef.current = Date.now();
     };
 
-    const handlePaste = (event: ClipboardEvent) => {
-      saveStudentAuditEvent(
-        sessionId,
-        'PASTE_BLOCKED',
-        {
-          target: 'writing-editor',
-          targetType: 'contentEditable',
-        },
-        studentId,
-      );
-    };
-
     editor.addEventListener('beforeinput', handleBeforeInput);
     editor.addEventListener('input', handleInput);
     editor.addEventListener('keydown', handleKeydown);
-    editor.addEventListener('paste', handlePaste);
 
     return () => {
       editor.removeEventListener('beforeinput', handleBeforeInput);
       editor.removeEventListener('input', handleInput);
       editor.removeEventListener('keydown', handleKeydown);
-      editor.removeEventListener('paste', handlePaste);
     };
   }, [sessionId, studentId]);
 
@@ -314,6 +300,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
                 onClick={() => handleFormat('bold')}
                 className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
                 title="Bold"
+                aria-label="Bold"
               >
                 <Bold size={14} />
               </button>
@@ -321,6 +308,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
                 onClick={() => handleFormat('italic')}
                 className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
                 title="Italic"
+                aria-label="Italic"
               >
                 <Italic size={14} />
               </button>
@@ -328,6 +316,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
                 onClick={() => handleFormat('underline')}
                 className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
                 title="Underline"
+                aria-label="Underline"
               >
                 <Underline size={14} />
               </button>
@@ -336,6 +325,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
                 onClick={() => handleFormat('justifyLeft')}
                 className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
                 title="Align Left"
+                aria-label="Align Left"
               >
                 <AlignLeft size={14} />
               </button>
@@ -343,6 +333,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
                 onClick={() => handleFormat('justifyCenter')}
                 className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
                 title="Align Center"
+                aria-label="Align Center"
               >
                 <AlignCenter size={14} />
               </button>
@@ -351,6 +342,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
                 onClick={() => handleFormat('insertUnorderedList')}
                 className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
                 title="Bullet List"
+                aria-label="Bullet List"
               >
                 <List size={14} />
               </button>
@@ -359,6 +351,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
                 onClick={() => handleFormat('undo')}
                 className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
                 title="Undo"
+                aria-label="Undo"
               >
                 <Undo size={14} />
               </button>
@@ -366,6 +359,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
                 onClick={() => handleFormat('redo')}
                 className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
                 title="Redo"
+                aria-label="Redo"
               >
                 <Redo size={14} />
               </button>
@@ -375,7 +369,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
               ref={editorRef}
               contentEditable
               onInput={handleEditorInput}
-              className="flex-1 w-full p-4 md:p-6 lg:p-8 outline-none text-base md:text-lg leading-relaxed text-gray-800 placeholder:text-gray-200 font-serif overflow-y-auto"
+              className="flex-1 w-full p-4 md:p-6 lg:p-8 text-base md:text-lg leading-relaxed text-gray-800 placeholder:text-gray-200 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
               dangerouslySetInnerHTML={{ __html: currentText }}
               style={{ minHeight: MIN_HEIGHTS.WRITING_EDITOR }}
               spellCheck={!security.preventAutocorrect}

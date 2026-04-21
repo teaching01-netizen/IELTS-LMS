@@ -336,6 +336,7 @@ const buildDefaultConfig = (
       requireFullscreen: true,
       tabSwitchRule: 'warn',
       detectSecondaryScreen: true,
+      blockClipboard: true,
       preventAutofill: true,
       preventAutocorrect: true,
       fullscreenAutoReentry: true,

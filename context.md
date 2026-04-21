@@ -35,8 +35,9 @@ Source: `src/app/router/route-manifest.ts`, `src/routes/index.tsx`
 - **Proctor**
   - `/proctor` (monitoring + interventions)
 - **Student**
-  - `/student/:scheduleId/register` (public check-in → issues session)
-  - `/student/:scheduleId/:studentId?` (authenticated; phases are internal)
+  - `/student/:scheduleId` (public check-in → issues session)
+  - `/student/:scheduleId/register` (legacy alias → redirects to check-in)
+  - `/student/:scheduleId/:wcode` (authenticated student session; phases are internal)
     - Phases: `pre-check` → `lobby` → `exam` → `post-exam`
 
 ## Roles and permissions
@@ -53,7 +54,7 @@ Frontend route gating: `src/features/auth/RequireAuth.tsx`, `src/routes/index.ts
 - `/admin/*`: `admin`, `builder`, `grader`
 - `/builder/*`: `admin`, `builder`
 - `/proctor`: `admin`, `proctor`
-- `/student/:scheduleId/:studentId?`: `student` **and** staff roles (for support/impersonation style access)
+- `/student/:scheduleId/:wcode`: `student` **and** staff roles (for support/impersonation style access)
 
 ### High-level authorization rules
 
@@ -258,6 +259,10 @@ Backend source of truth: `backend/crates/application/src/scheduling.rs`, `backen
   - It creates/ensures a user with an internal email:
     - `student+{scheduleId}+{wcode}@wcode.invalid`
   - Display name defaults to `Student {WCODE}` if blank.
+  - Frontend entry routes:
+    - Check-in UI: `/student/:scheduleId`
+    - Alias: `/student/:scheduleId/register`
+    - Delivery session requires a validated wcode segment: `/student/:scheduleId/:wcode`
 
 ### 5) Student delivery lifecycle (precheck → lobby → exam → post-exam)
 
@@ -312,6 +317,7 @@ Checks:
 - Local storage availability
 - Online/heartbeat readiness
 - Secondary screen detection capability **if enabled**
+  - Clipboard restrictions **if enabled** (`security.blockClipboard=true`)
 
 Mobile/iPad rule:
 - If **secure mode** is enabled (`requireFullscreen` or `detectSecondaryScreen`), mobile/iPad is **not allowed**.
@@ -328,6 +334,14 @@ Source: `src/components/student/providers/StudentNetworkProvider.tsx`, `src/serv
 - On going offline:
   - Records audit `NETWORK_DISCONNECTED`.
   - Optionally blocks exam (`pauseOnOffline=true`).
+
+#### During exam: clipboard / shortcut restrictions
+
+Source: `src/components/student/providers/StudentKeyboardProvider.tsx`
+
+- When `config.security.blockClipboard=true`, the client blocks clipboard interactions during `phase=exam`:
+  - Copy/cut/paste, context menu, and common “exam escape” shortcuts (print/save/find).
+- When `config.security.blockClipboard=false`, clipboard operations are allowed (devtools/inspector shortcuts may still be restricted).
   - Sets attempt sync state to `offline`.
 - On reconnect:
   - Blocks with `syncing_reconnect`.
@@ -573,4 +587,3 @@ Source: `backend/crates/api/src/router.rs`
 - Ending a runtime auto-submits remaining attempts.
 - Proctor actions are durable and auditable (audit logs + violation events + outbox).
 - Grading sessions/submissions are derived (“materialized”) from schedules/attempts.
-

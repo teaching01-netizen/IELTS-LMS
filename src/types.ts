@@ -538,6 +538,7 @@ export interface ExamConfig {
     requireFullscreen: boolean;
     tabSwitchRule: 'none' | 'warn' | 'terminate';
     detectSecondaryScreen: boolean;
+    blockClipboard: boolean;
     preventAutofill: boolean;
     preventAutocorrect: boolean;
     fullscreenAutoReentry: boolean;

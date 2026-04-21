@@ -35,7 +35,7 @@ export const routeManifest = {
     children: {
       entry: '/student/:scheduleId',
       register: '/student/:scheduleId/register',
-      session: '/student/:scheduleId/:studentId?',
+      session: '/student/:scheduleId/:studentId',
     },
   },
 } as const;

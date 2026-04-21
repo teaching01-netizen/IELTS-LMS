@@ -4,6 +4,7 @@ import { QuestionRenderer } from './QuestionRenderer';
 import { ArrowLeft, ArrowRight, ArrowLeftRight, Flag } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
+import { prefersReducedMotion } from './prefersReducedMotion';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -46,7 +47,7 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
     if (currentQuestionId && questionContainerRef.current) {
       const element = document.getElementById(`question-${currentQuestionId}`);
       if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        element.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
       }
     }
   }, [currentQuestionId]);

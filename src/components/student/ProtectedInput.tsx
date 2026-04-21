@@ -2,10 +2,16 @@ import React, { useRef, useEffect } from 'react';
 import { ExamConfig } from '../../types';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 
-interface ProtectedInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
-  security: ExamConfig['security'];
-  sessionId?: string;
-  studentId?: string;
+type ProtectedInputSecurity = Pick<
+  ExamConfig['security'],
+  'preventAutofill' | 'preventAutocorrect'
+>;
+
+interface ProtectedInputProps
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'security'> {
+  security: ProtectedInputSecurity;
+  sessionId?: string | undefined;
+  studentId?: string | undefined;
 }
 
 export function ProtectedInput({
@@ -69,28 +75,14 @@ export function ProtectedInput({
       lastKeydownRef.current = Date.now();
     };
 
-    const handlePaste = (event: ClipboardEvent) => {
-      saveStudentAuditEvent(
-        sessionId,
-        'PASTE_BLOCKED',
-        {
-          targetName: input.name || 'unknown',
-          targetType: input.type || 'text',
-        },
-        studentId,
-      );
-    };
-
     input.addEventListener('beforeinput', handleBeforeInput);
     input.addEventListener('input', handleInput);
     input.addEventListener('keydown', handleKeydown);
-    input.addEventListener('paste', handlePaste);
 
     return () => {
       input.removeEventListener('beforeinput', handleBeforeInput);
       input.removeEventListener('input', handleInput);
       input.removeEventListener('keydown', handleKeydown);
-      input.removeEventListener('paste', handlePaste);
     };
   }, [sessionId, studentId]);
 
