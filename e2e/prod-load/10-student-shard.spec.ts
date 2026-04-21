@@ -41,6 +41,30 @@ async function waitForExamSurface(page: Page) {
     .not.toBe('pending');
 }
 
+async function waitForExamStart(page: Page) {
+  const waiting = page.getByRole('heading', { name: /Waiting for start/i });
+  const completeHeading = page.getByRole('heading', { name: /Examination Complete!/i });
+  const answerField = page.getByLabel(/Answer for question/i);
+  const writingEditor = page.locator('[contenteditable="true"]').first();
+  const finishButton = page.getByRole('button', { name: 'Finish' });
+  const reviewSubmitButton = page.getByRole('button', { name: 'Review & Submit' });
+
+  const timeoutMinutes = Number(process.env['E2E_PROD_WAIT_FOR_START_TIMEOUT_MINUTES'] ?? '30');
+  const timeoutMs = Math.max(5, timeoutMinutes) * 60_000;
+
+  await expect
+    .poll(async () => {
+      if (await completeHeading.isVisible().catch(() => false)) return 'complete';
+      if (await answerField.isVisible().catch(() => false)) return 'answer';
+      if (await writingEditor.isVisible().catch(() => false)) return 'writing';
+      if (await finishButton.isVisible().catch(() => false)) return 'finish';
+      if (await reviewSubmitButton.isVisible().catch(() => false)) return 'review';
+      if (await waiting.isVisible().catch(() => false)) return 'waiting';
+      return 'pending';
+    }, { timeout: timeoutMs })
+    .not.toBe('waiting');
+}
+
 async function performViolationIfAssignedWith(
   page: Page,
   assignments: ReturnType<typeof computeScenarioAssignments>,
@@ -82,6 +106,7 @@ async function tryProgressAndSubmit(
   wcode: string,
 ) {
   const completeHeading = page.getByRole('heading', { name: /Examination Complete!/i });
+  const waiting = page.getByRole('heading', { name: /Waiting for start/i });
   const submitSection = page.getByRole('button', { name: 'Submit Section' });
   const confirmSubmission = page.getByRole('button', { name: 'Confirm Submission' });
   const reviewSubmitButton = page.getByRole('button', { name: 'Review & Submit' });
@@ -89,13 +114,21 @@ async function tryProgressAndSubmit(
   const answerField = page.getByLabel(/Answer for question/i).first();
   const writingEditor = page.locator('[contenteditable="true"]').first();
 
+  const progressTimeoutMinutes = Number(process.env['E2E_PROD_STUDENT_PROGRESS_TIMEOUT_MINUTES'] ?? '25');
+  const progressTimeoutMs = Math.max(5, progressTimeoutMinutes) * 60_000;
+
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 8 * 60_000) {
+  while (Date.now() - startedAt < progressTimeoutMs) {
     if (await completeHeading.isVisible().catch(() => false)) return 'submitted';
 
     const terminatedCopy = page.getByText(/terminated|exam ended/i);
     if (assignments.terminate.has(wcode) && (await terminatedCopy.isVisible().catch(() => false))) {
       return 'terminated';
+    }
+
+    if (await waiting.isVisible().catch(() => false)) {
+      await page.waitForTimeout(1000);
+      continue;
     }
 
     await acknowledgeWarningOverlayIfPresent(page);
@@ -188,7 +221,7 @@ test.describe('Prod load: student shard', () => {
         await page.goto(`/student/${target.scheduleId}/register`);
         await page.getByRole('heading', { name: 'Exam Check-in' }).waitFor({ state: 'visible' });
         await page.getByRole('button', { name: 'Continue' }).click();
-        await expect(page.getByText(/required/i)).toBeVisible();
+        await expect(page.getByText(/required/i).first()).toBeVisible();
       }
 
       await studentCheckIn(page, target.scheduleId, {
@@ -203,6 +236,7 @@ test.describe('Prod load: student shard', () => {
 
       await openStudentSessionWithRetry(page, target.scheduleId, student.wcode);
       await waitForExamSurface(page);
+      await waitForExamStart(page);
 
       await performViolationIfAssignedWith(page, assignments, student.wcode);
       await toggleOfflineBrieflyIfAssignedWith(context, assignments, student.wcode);

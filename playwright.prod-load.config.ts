@@ -38,22 +38,36 @@ function readBaseURL(): string {
 const baseURL = readBaseURL();
 const testTimeoutMinutes = Number(process.env['E2E_PROD_TEST_TIMEOUT_MINUTES'] ?? '45');
 const testTimeoutMs = Math.max(5, testTimeoutMinutes) * 60 * 1000;
+const shardIndex = Number(process.env['E2E_PROD_SHARD_INDEX'] ?? '0');
+const shardCount = Number(process.env['E2E_PROD_SHARD_COUNT'] ?? '1');
+const runId = process.env['E2E_PROD_RUN_ID'] ?? 'prod-load';
+
+// Default to minimal artifacts for long-running prod runs; enable as needed.
+const traceMode = (process.env['E2E_PROD_TRACE'] ?? 'off') as 'off' | 'on' | 'retain-on-failure' | 'on-first-retry';
+const videoMode = (process.env['E2E_PROD_VIDEO'] ?? 'off') as 'off' | 'on' | 'retain-on-failure' | 'on-first-retry';
+const screenshotMode = (process.env['E2E_PROD_SCREENSHOT'] ?? 'only-on-failure') as
+  | 'off'
+  | 'on'
+  | 'only-on-failure';
 
 export default defineConfig({
   testDir: './e2e/prod-load',
   fullyParallel: false,
   forbidOnly: !!process.env['CI'],
   retries: 0,
-  reporter: process.env['CI'] ? 'list' : 'html',
+  reporter: process.env['CI']
+    ? 'list'
+    : [['html', { outputFolder: `playwright-report/prod-load-${runId}-shard-${shardIndex}-of-${shardCount}`, open: 'never' }]],
+  outputDir: `test-results/prod-load-${runId}-shard-${shardIndex}-of-${shardCount}`,
   timeout: testTimeoutMs,
   expect: {
     timeout: 30_000,
   },
   use: {
     baseURL,
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    trace: traceMode,
+    screenshot: screenshotMode,
+    video: videoMode,
   },
   projects: [
     {

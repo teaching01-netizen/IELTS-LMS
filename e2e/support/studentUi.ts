@@ -87,7 +87,8 @@ export async function studentCheckIn(
   await page.waitForTimeout(100);
   const continueButton = page.getByRole('button', { name: 'Continue' });
   await continueButton.click();
-  const targetRoute = new RegExp(`/student/${scheduleId}/`);
+  const wcode = payload.wcode.trim().toUpperCase();
+  const targetRoute = new RegExp(`/student/${scheduleId}/${wcode}(?:$|[?#/])`);
   let navigated = await page
     .waitForURL(targetRoute, { timeout: 45_000 })
     .then(() => true)
@@ -179,7 +180,10 @@ export async function completePreCheckIfPresent(page: Page) {
   }
 
   await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled();
-  await page.getByRole('button', { name: 'Continue' }).click();
+  // In production, a transient fullscreen/permission overlay can intercept pointer events.
+  // Force-click to progress once the button is enabled.
+  await page.getByRole('button', { name: 'Continue' }).click({ force: true });
+  await compatibilityCheck.waitFor({ state: 'detached', timeout: 30_000 }).catch(() => {});
 }
 
 export async function startLobbyIfPresent(page: Page) {

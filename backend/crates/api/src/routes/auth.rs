@@ -397,9 +397,15 @@ fn user_agent(headers: &axum::http::HeaderMap) -> Option<&str> {
 }
 
 fn ip_address(headers: &axum::http::HeaderMap) -> Option<&str> {
-    headers
+    let raw = headers
         .get("x-forwarded-for")
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().ok())?;
+    let first = raw.split(',').next()?.trim();
+    if first.is_empty() || first.eq_ignore_ascii_case("unknown") {
+        None
+    } else {
+        Some(first)
+    }
 }
 
 fn map_auth_error(error: AuthError) -> ApiError {

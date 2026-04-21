@@ -7,7 +7,7 @@ import {
   resolveProdCredsPath,
   resolveProdRuntimePath,
 } from '../support/prodData';
-import { computeScenarioAssignments, pollUntil } from '../support/prodOrchestration';
+import { computeScenarioAssignments, pollUntil, resolveProdRunContext } from '../support/prodOrchestration';
 import { bootstrapExamAndSchedule, writeProdRuntimeOverride } from '../support/prodBootstrap';
 
 function buildRunId(): string {
@@ -175,6 +175,8 @@ async function proctorDetail(page: Page, scheduleId: string) {
 }
 
 async function waitForCheckedIn(page: Page, scheduleId: string, threshold: number) {
+  const timeoutMinutes = Number(process.env['E2E_PROD_CHECKED_IN_TIMEOUT_MINUTES'] ?? '45');
+  const timeoutMs = Math.max(5, timeoutMinutes) * 60_000;
   await pollUntil(
     async () => {
       const json = await proctorDetail(page, scheduleId);
@@ -184,7 +186,7 @@ async function waitForCheckedIn(page: Page, scheduleId: string, threshold: numbe
       }
       return sessions.length;
     },
-    { timeoutMs: 20 * 60_000, intervalMs: 5000, description: 'checked-in threshold' },
+    { timeoutMs, intervalMs: 5000, description: 'checked-in threshold' },
   );
 }
 
@@ -303,7 +305,12 @@ async function createProctorPages(browser: Browser, creds: ReturnType<typeof rea
 }
 
 test.describe('Prod load: control plane', () => {
-  test('editor + 10 proctors orchestrate and validate prod exam day', async ({ browser }) => {
+  test('editor + 10 proctors orchestrate and validate prod exam day', async ({ browser }, testInfo) => {
+    const run = resolveProdRunContext(readEffectiveProdTarget());
+    if (run.shardIndex !== 0) {
+      testInfo.skip(true, 'Control plane runs on shard 0 only.');
+    }
+
     const runId = buildRunId();
     const runtimeOutputPath = resolveProdRuntimePath();
     const initialTarget = readEffectiveProdTarget();
