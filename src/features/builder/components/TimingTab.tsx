@@ -11,6 +11,7 @@ interface TimingTabProps {
 
 export function TimingTab({ config, onChange }: TimingTabProps) {
   const sectionPlan = useMemo(() => examDeliveryService.buildSectionPlan(config), [config]);
+  const isIeltsMode = Boolean(config.general.ieltsMode);
 
   const timingValidation = useMemo(() => {
     const errors: Array<{ field: string; message: string }> = [];
@@ -58,6 +59,37 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
         }
       }
     });
+  };
+
+  const updateIeltsMode = (enabled: boolean) => {
+    onChange(
+      syncConfigWithStandards({
+        ...config,
+        general: {
+          ...config.general,
+          ieltsMode: enabled,
+        },
+      }),
+    );
+  };
+
+  const toggleAllowedExtensionMinute = (minutes: number) => {
+    const current = Array.isArray(config.delivery.allowedExtensionMinutes)
+      ? config.delivery.allowedExtensionMinutes
+      : [];
+    const next = current.includes(minutes)
+      ? current.filter((value) => value !== minutes)
+      : [...current, minutes].sort((a, b) => a - b);
+
+    onChange(
+      syncConfigWithStandards({
+        ...config,
+        delivery: {
+          ...config.delivery,
+          allowedExtensionMinutes: next,
+        },
+      }),
+    );
   };
 
   const updateStandards = (value: Partial<ExamConfig['standards']>) => {
@@ -139,6 +171,30 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
 
   return (
     <div className="space-y-6">
+      <section className="space-y-3">
+        <div className="flex items-start justify-between gap-4 rounded-xl border border-amber-100 bg-amber-50/60 p-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-amber-800">Authentic IELTS Mode</p>
+            <p className="mt-1 text-sm font-semibold text-amber-950">
+              Lock timing and runtime controls to match official IELTS expectations.
+            </p>
+            <p className="mt-1 text-[11px] text-amber-800">
+              When enabled: fixed L/R/W durations, no gaps, auto-submit on time up, no cohort pause, and no
+              section extensions or proctor section overrides.
+            </p>
+          </div>
+          <label className="flex items-center gap-2">
+            <span className="text-xs font-bold text-amber-900">{isIeltsMode ? 'ON' : 'OFF'}</span>
+            <input
+              type="checkbox"
+              checked={isIeltsMode}
+              onChange={(e) => updateIeltsMode(e.target.checked)}
+              className="h-4 w-4 rounded border-amber-300 text-amber-700 focus:ring-amber-500"
+            />
+          </label>
+        </div>
+      </section>
+
       <section className="space-y-4">
         <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest flex items-center gap-2">
           <Clock size={16} className="text-blue-500" /> Section Flow
@@ -188,6 +244,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
                       type="number" 
                       value={section.order}
                       onChange={(e) => updateSection(m, { order: parseInt(e.target.value) })}
+                      disabled={isIeltsMode}
                       className="w-14 px-2 py-1 border border-gray-200 rounded text-sm text-right outline-none focus:ring-2 focus:ring-blue-100"
                     />
                     <span className="text-xs text-gray-400 font-medium uppercase">Order</span>
@@ -202,6 +259,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
                       min={1}
                       value={section.duration}
                       onChange={(e) => updateSection(m, { duration: parseInt(e.target.value) })}
+                      disabled={isIeltsMode}
                       className="w-full px-2 py-1 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-blue-100"
                     />
                   </div>
@@ -212,6 +270,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
                       min={0}
                       value={section.gapAfterMinutes ?? 0}
                       onChange={(e) => updateSection(m, { gapAfterMinutes: parseInt(e.target.value) })}
+                      disabled={isIeltsMode}
                       className="w-full px-2 py-1 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-blue-100"
                     />
                   </div>
@@ -385,13 +444,34 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
           </div>
           <div>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Allowed Extension Minutes</p>
-            <div className="flex flex-wrap gap-2">
-              {config.delivery.allowedExtensionMinutes.map((minutes) => (
-                <span key={minutes} className="px-3 py-1 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs font-bold">
-                  +{minutes} min
-                </span>
-              ))}
-            </div>
+            {isIeltsMode ? (
+              <p className="text-xs font-semibold text-gray-600">Disabled (IELTS mode)</p>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  {[5, 10, 15].map((minutes) => {
+                    const selected = config.delivery.allowedExtensionMinutes.includes(minutes);
+                    return (
+                      <button
+                        key={minutes}
+                        type="button"
+                        onClick={() => toggleAllowedExtensionMinute(minutes)}
+                        className={`px-3 py-1 rounded-full border text-xs font-bold transition-colors ${
+                          selected
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                            : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+                        }`}
+                      >
+                        +{minutes} min
+                      </button>
+                    );
+                  })}
+                </div>
+                {config.delivery.allowedExtensionMinutes.length === 0 ? (
+                  <p className="text-[11px] text-gray-500">No extensions allowed.</p>
+                ) : null}
+              </div>
+            )}
           </div>
         </div>
 
@@ -405,6 +485,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
               type="checkbox" 
               checked={config.progression.autoSubmit}
               onChange={(e) => updateConfig('progression', { autoSubmit: e.target.checked })}
+              disabled={isIeltsMode}
               className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
           </div>
@@ -417,6 +498,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
               type="checkbox" 
               checked={config.progression.lockAfterSubmit}
               onChange={(e) => updateConfig('progression', { lockAfterSubmit: e.target.checked })}
+              disabled={isIeltsMode}
               className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
           </div>
@@ -429,6 +511,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
               type="checkbox" 
               checked={config.progression.allowPause}
               onChange={(e) => updateConfig('progression', { allowPause: e.target.checked })}
+              disabled={isIeltsMode}
               className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
           </div>

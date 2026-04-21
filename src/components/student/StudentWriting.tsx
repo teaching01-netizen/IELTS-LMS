@@ -5,6 +5,7 @@ import { getWritingTaskContent } from '../../utils/writingTaskUtils';
 import { MIN_HEIGHTS, CHAR_HEIGHT_PX, WRITING } from '../../constants/uiConstants';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
+import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -24,6 +25,9 @@ interface StudentWritingProps {
 }
 
 export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmit, currentQuestionId, onNavigate, timeRemaining, onTimeExpired, security = { preventAutofill: false, preventAutocorrect: false }, sessionId, studentId }: StudentWritingProps) {
+  const attemptContext = useOptionalStudentAttempt();
+  const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
+  const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
   const writingConfig = state.config.sections.writing;
   const [activeTaskId, setActiveTaskId] = useState<string>(currentQuestionId || writingConfig.tasks[0]?.id || 'task1');
   const [leftWidth, setLeftWidth] = useState(50);
@@ -107,14 +111,14 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
     const handleBeforeInput = (event: InputEvent) => {
       if (event.inputType === 'insertReplacementText') {
         saveStudentAuditEvent(
-          sessionId,
+          resolvedSessionId,
           'AUTOFILL_SUSPECTED',
           {
             inputType: event.inputType,
             data: event.data,
             target: 'writing-editor',
           },
-          studentId,
+          resolvedStudentId,
         );
       }
     };
@@ -131,7 +135,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
       
       if (textChange > 50 && timeSinceKeydown > 500) {
         saveStudentAuditEvent(
-          sessionId,
+          resolvedSessionId,
           'REPLACEMENT_SUSPECTED',
           {
             previousLength: previousTextLength,
@@ -139,7 +143,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
             timeSinceKeydown,
             target: 'writing-editor',
           },
-          studentId,
+          resolvedStudentId,
         );
       }
       
@@ -159,7 +163,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
       editor.removeEventListener('input', handleInput);
       editor.removeEventListener('keydown', handleKeydown);
     };
-  }, [sessionId, studentId]);
+  }, [resolvedSessionId, resolvedStudentId]);
 
   const resolvedTimeRemaining = timeRemaining ?? writingConfig.duration * 60;
 

@@ -219,31 +219,68 @@ const deriveStandards = (
 };
 
 export const syncConfigWithStandards = (config: ExamConfig): ExamConfig => {
+  const applyIeltsMode = (next: ExamConfig): ExamConfig => {
+    if (!next.general.ieltsMode) return next;
+
+    return {
+      ...next,
+      sections: {
+        ...next.sections,
+        listening: { ...next.sections.listening, duration: 30, gapAfterMinutes: 0, order: 0 },
+        reading: { ...next.sections.reading, duration: 60, gapAfterMinutes: 0, order: 1 },
+        writing: { ...next.sections.writing, duration: 60, gapAfterMinutes: 0, order: 2 },
+        speaking: { ...next.sections.speaking, gapAfterMinutes: 0, order: 3 },
+      },
+      progression: {
+        ...next.progression,
+        autoSubmit: true,
+        lockAfterSubmit: true,
+        allowPause: false,
+      },
+      delivery: {
+        ...next.delivery,
+        allowedExtensionMinutes: [],
+      },
+      standards: {
+        ...next.standards,
+        writingTasks: {
+          ...next.standards.writingTasks,
+          task1: { ...next.standards.writingTasks.task1, minWords: 150, recommendedTime: 20 },
+          task2: { ...next.standards.writingTasks.task2, minWords: 250, recommendedTime: 40 },
+        },
+      },
+    };
+  };
+
+  const withPolicy = applyIeltsMode(config);
   const synced = {
-    ...config,
-    standards: cloneStandards(config.standards),
+    ...withPolicy,
+    standards: cloneStandards(withPolicy.standards),
     sections: {
-      ...config.sections,
+      ...withPolicy.sections,
       listening: {
-        ...config.sections.listening,
-        bandScoreTable: cloneBandTable(config.standards.bandScoreTables.listening),
+        ...withPolicy.sections.listening,
+        bandScoreTable: cloneBandTable(withPolicy.standards.bandScoreTables.listening),
       },
       reading: {
-        ...config.sections.reading,
+        ...withPolicy.sections.reading,
         bandScoreTable: cloneBandTable(
-          config.general.type === 'General Training'
-            ? config.standards.bandScoreTables.readingGeneralTraining
-            : config.standards.bandScoreTables.readingAcademic,
+          withPolicy.general.type === 'General Training'
+            ? withPolicy.standards.bandScoreTables.readingGeneralTraining
+            : withPolicy.standards.bandScoreTables.readingAcademic,
         ),
       },
       writing: {
-        ...config.sections.writing,
-        tasks: buildWritingTasksFromStandards(config.sections.writing.tasks, config.standards.writingTasks),
-        rubricWeights: { ...config.standards.rubricWeights.writing },
+        ...withPolicy.sections.writing,
+        tasks: buildWritingTasksFromStandards(
+          withPolicy.sections.writing.tasks,
+          withPolicy.standards.writingTasks,
+        ),
+        rubricWeights: { ...withPolicy.standards.rubricWeights.writing },
       },
       speaking: {
-        ...config.sections.speaking,
-        rubricWeights: { ...config.standards.rubricWeights.speaking },
+        ...withPolicy.sections.speaking,
+        rubricWeights: { ...withPolicy.standards.rubricWeights.speaking },
       },
     },
   };
@@ -265,6 +302,7 @@ const buildDefaultConfig = (
     general: {
       preset,
       type,
+      ieltsMode: false,
       title: '',
       summary: `Standard IELTS ${type} Exam`,
       instructions: 'Please follow the instructions for each section carefully.'
@@ -438,6 +476,19 @@ export const normalizeExamConfig = (config?: DeepPartial<ExamConfig>): ExamConfi
     return base;
   }
 
+  const normalizedSeverityThresholds =
+    config?.security?.severityThresholds != null
+      ? {
+          ...(base.security.severityThresholds ?? {
+            lowLimit: 5,
+            mediumLimit: 3,
+            highLimit: 2,
+            criticalAction: 'terminate' as const,
+          }),
+          ...config.security.severityThresholds,
+        }
+      : base.security.severityThresholds;
+
   const normalized = {
     ...base,
     ...config,
@@ -471,7 +522,8 @@ export const normalizeExamConfig = (config?: DeepPartial<ExamConfig>): ExamConfi
       proctoringFlags: {
         ...base.security.proctoringFlags,
         ...config.security?.proctoringFlags
-      }
+      },
+      severityThresholds: normalizedSeverityThresholds,
     }
   };
 

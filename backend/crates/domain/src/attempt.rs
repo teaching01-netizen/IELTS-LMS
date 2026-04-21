@@ -135,6 +135,14 @@ pub struct StudentHeartbeatRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StudentAuditLogRequest {
+    pub action_type: String,
+    pub payload: Option<Value>,
+    pub client_timestamp: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StudentSubmitRequest {
     pub attempt_id: String,
     pub student_key: String,

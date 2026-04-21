@@ -815,3 +815,7 @@ export function useStudentAttempt() {
   }
   return context;
 }
+
+export function useOptionalStudentAttempt(): StudentAttemptContextValue | null {
+  return useContext(StudentAttemptContext);
+}

@@ -508,6 +508,7 @@ export interface ExamConfig {
   general: {
     preset: 'Academic' | 'General Training' | 'Listening' | 'Reading' | 'Writing' | 'Speaking' | 'Custom';
     type: 'Academic' | 'General Training';
+    ieltsMode: boolean;
     title: string;
     summary: string;
     instructions: string;

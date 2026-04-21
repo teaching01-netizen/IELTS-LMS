@@ -9,6 +9,15 @@ vi.mock('../../../services/studentAuditService', () => ({
   saveStudentAuditEvent: (...args: unknown[]) => saveStudentAuditEventMock(...args),
 }));
 
+vi.mock('../providers/StudentAttemptProvider', () => ({
+  useOptionalStudentAttempt: () => ({
+    state: {
+      attempt: { scheduleId: 'sched-ctx' },
+      attemptId: 'attempt-ctx',
+    },
+  }),
+}));
+
 describe('ProtectedInput', () => {
   afterEach(() => {
     saveStudentAuditEventMock.mockReset();
@@ -30,5 +39,25 @@ describe('ProtectedInput', () => {
 
     expect(saveStudentAuditEventMock).not.toHaveBeenCalled();
   });
-});
 
+  it('defaults audit IDs from attempt context when props are omitted', () => {
+    render(
+      <ProtectedInput
+        security={{ preventAutofill: true, preventAutocorrect: true } as any}
+        name="answer"
+      />,
+    );
+
+    const input = screen.getByRole('textbox');
+    const event = new Event('beforeinput', { bubbles: true, cancelable: true });
+    Object.assign(event, { inputType: 'insertReplacementText', data: 'x' });
+    fireEvent(input, event);
+
+    expect(saveStudentAuditEventMock).toHaveBeenCalledWith(
+      'sched-ctx',
+      'AUTOFILL_SUSPECTED',
+      expect.any(Object),
+      'attempt-ctx',
+    );
+  });
+});

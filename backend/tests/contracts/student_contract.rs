@@ -15,7 +15,8 @@ use ielts_backend_application::{builder::BuilderService, scheduling::SchedulingS
 use ielts_backend_domain::{
     auth::UserRole,
     attempt::{
-        StudentBootstrapRequest, StudentHeartbeatRequest, StudentMutationBatchRequest,
+        StudentAuditLogRequest, StudentBootstrapRequest, StudentHeartbeatRequest,
+        StudentMutationBatchRequest,
         StudentPrecheckRequest, StudentSubmitRequest,
     },
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
@@ -427,11 +428,143 @@ async fn heartbeat_records_disconnect_transitions() {
 
     let event_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM student_heartbeat_events WHERE attempt_id = ?")
-            .bind(attempt_id)
+            .bind(&attempt_id)
             .fetch_one(database.pool())
             .await
             .unwrap();
     assert_eq!(event_count, 1);
+
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND target_student_id = ? AND action_type = 'NETWORK_DISCONNECTED'",
+    )
+    .bind(schedule_id.to_string())
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audit_count, 1);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn heartbeat_records_lost_transitions() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{}/heartbeat", schedule_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentHeartbeatRequest {
+                        attempt_id: Some(attempt_id.clone()),
+                        student_key: student_key.clone(),
+                        client_session_id,
+                        event_type: "lost".to_owned(),
+                        payload: Some(json!({"source": "browser"})),
+                        client_timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 6, 10).unwrap(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND target_student_id = ? AND action_type = 'HEARTBEAT_LOST'",
+    )
+    .bind(schedule_id.to_string())
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audit_count, 1);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn student_audit_inserts_session_log_and_violation_event() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{}/audit", schedule_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentAuditLogRequest {
+                        action_type: "VIOLATION_DETECTED".to_owned(),
+                        payload: Some(json!({
+                            "event": "VIOLATION_DETECTED",
+                            "violationType": "TAB_SWITCH",
+                            "severity": "critical",
+                            "message": "Tab switching detected."
+                        })),
+                        client_timestamp: Some(Utc.with_ymd_and_hms(2026, 1, 10, 9, 7, 0).unwrap()),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND target_student_id = ? AND action_type = 'VIOLATION_DETECTED'",
+    )
+    .bind(schedule_id.to_string())
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audit_count, 1);
+
+    let violation_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM student_violation_events WHERE schedule_id = ? AND attempt_id = ? AND violation_type = 'TAB_SWITCH' AND severity = 'critical'",
+    )
+    .bind(schedule_id.to_string())
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(violation_count, 1);
 
     database.shutdown().await;
 }

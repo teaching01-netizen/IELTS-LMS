@@ -585,6 +585,12 @@ impl DeliveryService {
             .await?;
 
         if req.event_type != "heartbeat" {
+            let action_type = match req.event_type.as_str() {
+                "disconnect" => "NETWORK_DISCONNECTED",
+                "reconnect" => "NETWORK_RECONNECTED",
+                "lost" => "HEARTBEAT_LOST",
+                _ => "STUDENT_NETWORK",
+            };
             sqlx::query(
                 r#"
                 INSERT INTO session_audit_logs (
@@ -596,7 +602,7 @@ impl DeliveryService {
             .bind(Uuid::new_v4().to_string())
             .bind(schedule_id.to_string())
             .bind(&updated.candidate_name)
-            .bind("STUDENT_NETWORK")
+            .bind(action_type)
             .bind(&updated.id)
             .bind(json!({
                 "eventType": req.event_type,

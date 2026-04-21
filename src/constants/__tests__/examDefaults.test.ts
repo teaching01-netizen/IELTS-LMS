@@ -91,4 +91,51 @@ describe('examDefaults standards', () => {
     expect(config.standards.bandScoreTables.readingGeneralTraining).toEqual({ 34: 9, 30: 8 });
     expect(config.sections.reading.bandScoreTable).toEqual({ 34: 9, 30: 8 });
   });
+
+  it('enforces IELTS authentic mode policy', () => {
+    const config = normalizeExamConfig({
+      general: {
+        ieltsMode: true,
+      },
+      sections: {
+        listening: { duration: 10, gapAfterMinutes: 99, order: 9 },
+        reading: { duration: 10, gapAfterMinutes: 99, order: 9 },
+        writing: { duration: 10, gapAfterMinutes: 99, order: 9 },
+        speaking: { gapAfterMinutes: 99, order: 9 },
+      },
+      progression: {
+        autoSubmit: false,
+        lockAfterSubmit: false,
+        allowPause: true,
+      },
+      delivery: {
+        allowedExtensionMinutes: [5, 10, 15],
+      },
+      standards: {
+        writingTasks: {
+          task1: { minWords: 123, recommendedTime: 1 },
+          task2: { minWords: 456, recommendedTime: 2 },
+        },
+      },
+    });
+
+    expect(config.general.ieltsMode).toBe(true);
+    expect(config.sections.listening.duration).toBe(30);
+    expect(config.sections.reading.duration).toBe(60);
+    expect(config.sections.writing.duration).toBe(60);
+    expect(config.sections.listening.gapAfterMinutes).toBe(0);
+    expect(config.sections.reading.gapAfterMinutes).toBe(0);
+    expect(config.sections.writing.gapAfterMinutes).toBe(0);
+    expect(config.sections.speaking.gapAfterMinutes).toBe(0);
+    expect(config.sections.listening.order).toBe(0);
+    expect(config.sections.reading.order).toBe(1);
+    expect(config.sections.writing.order).toBe(2);
+    expect(config.sections.speaking.order).toBe(3);
+    expect(config.progression.autoSubmit).toBe(true);
+    expect(config.progression.lockAfterSubmit).toBe(true);
+    expect(config.progression.allowPause).toBe(false);
+    expect(config.delivery.allowedExtensionMinutes).toEqual([]);
+    expect(config.standards.writingTasks.task1).toEqual({ minWords: 150, recommendedTime: 20 });
+    expect(config.standards.writingTasks.task2).toEqual({ minWords: 250, recommendedTime: 40 });
+  });
 });

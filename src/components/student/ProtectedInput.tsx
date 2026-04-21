@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { ExamConfig } from '../../types';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
+import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 
 type ProtectedInputSecurity = Pick<
   ExamConfig['security'],
@@ -21,6 +22,9 @@ export function ProtectedInput({
   className = '',
   ...inputProps
 }: ProtectedInputProps) {
+  const attemptContext = useOptionalStudentAttempt();
+  const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
+  const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
   const inputRef = useRef<HTMLInputElement>(null);
   const lastKeydownRef = useRef<number>(0);
   const previousValueRef = useRef<string>('');
@@ -33,14 +37,14 @@ export function ProtectedInput({
       if (event.inputType === 'insertReplacementText') {
         // This is likely autofill or autocorrect
         saveStudentAuditEvent(
-          sessionId,
+          resolvedSessionId,
           'AUTOFILL_SUSPECTED',
           {
             inputType: event.inputType,
             data: event.data,
             targetName: input.name || 'unknown',
           },
-          studentId,
+          resolvedStudentId,
         );
       }
     };
@@ -56,7 +60,7 @@ export function ProtectedInput({
       
       if (valueChange > 50 && timeSinceKeydown > 500) {
         saveStudentAuditEvent(
-          sessionId,
+          resolvedSessionId,
           'REPLACEMENT_SUSPECTED',
           {
             previousLength: previousValue.length,
@@ -64,7 +68,7 @@ export function ProtectedInput({
             timeSinceKeydown,
             targetName: input.name || 'unknown',
           },
-          studentId,
+          resolvedStudentId,
         );
       }
       
@@ -84,7 +88,7 @@ export function ProtectedInput({
       input.removeEventListener('input', handleInput);
       input.removeEventListener('keydown', handleKeydown);
     };
-  }, [sessionId, studentId]);
+  }, [resolvedSessionId, resolvedStudentId]);
 
   return (
     <input

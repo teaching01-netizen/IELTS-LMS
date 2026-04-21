@@ -98,6 +98,7 @@ pub fn build_router(state: AppState) -> Router {
                         post(student::apply_mutation_batch),
                     )
                     .route("/:schedule_id/heartbeat", post(student::record_heartbeat))
+                    .route("/:schedule_id/audit", post(student::record_audit))
                     .route(
                         "/:schedule_id/submit",
                         post(student::submit_student_session),

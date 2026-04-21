@@ -10,6 +10,7 @@ const mockConfig: ExamConfig = {
   general: {
     preset: 'Academic',
     type: 'Academic',
+    ieltsMode: false,
     title: 'Test Exam',
     summary: 'Test summary',
     instructions: 'Test instructions',

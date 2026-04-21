@@ -37,6 +37,40 @@ impl SchedulingService {
         Self { pool }
     }
 
+    async fn load_config_snapshot_for_schedule(
+        &self,
+        schedule_id: Uuid,
+    ) -> Result<Value, SchedulingError> {
+        sqlx::query_scalar::<_, Value>(
+            r#"
+            SELECT v.config_snapshot
+            FROM exam_schedules s
+            JOIN exam_versions v ON v.id = s.published_version_id
+            WHERE s.id = ?
+            "#,
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(SchedulingError::NotFound)
+    }
+
+    fn is_ielts_mode(config_snapshot: &Value) -> bool {
+        config_snapshot
+            .get("general")
+            .and_then(|general| general.get("ieltsMode"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    fn allow_pause(config_snapshot: &Value) -> bool {
+        config_snapshot
+            .get("progression")
+            .and_then(|progression| progression.get("allowPause"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
     async fn load_registration_by_wcode(
         &self,
         schedule_id: Uuid,
@@ -485,6 +519,13 @@ impl SchedulingService {
         schedule_id: Uuid,
         reason: Option<String>,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
+        let config_snapshot = self.load_config_snapshot_for_schedule(schedule_id).await?;
+        if Self::is_ielts_mode(&config_snapshot) || !Self::allow_pause(&config_snapshot) {
+            return Err(SchedulingError::Validation(
+                "Cohort pause is disabled by exam policy.".to_owned(),
+            ));
+        }
+
         let runtime = sqlx::query_as::<_, RuntimeRow>(
             "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
         )

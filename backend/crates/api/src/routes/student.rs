@@ -3,6 +3,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
+use chrono::Utc;
 use ielts_backend_application::auth::{AuthService, StudentAccess};
 use ielts_backend_application::delivery::{DeliveryError, DeliveryService};
 use ielts_backend_domain::auth::UserRole;
@@ -10,7 +11,9 @@ use ielts_backend_domain::attempt::{
     StudentBootstrapRequest, StudentHeartbeatRequest, StudentMutationBatchRequest,
     StudentHeartbeatResponse, StudentMutationBatchResponse, StudentPrecheckRequest,
     StudentSessionContext, StudentSessionQuery, StudentSubmitRequest, StudentSubmitResponse,
+    StudentAuditLogRequest,
 };
+use serde_json::{json, Value};
 use sqlx::query_scalar;
 use std::time::Instant;
 use uuid::Uuid;
@@ -351,6 +354,157 @@ pub async fn record_heartbeat(
     ))
 }
 
+pub async fn record_audit(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AttemptPrincipal,
+    Path(schedule_id): Path<Uuid>,
+    Json(req): Json<StudentAuditLogRequest>,
+) -> Result<ApiResponse<()>, ApiError> {
+    let attempt_id = principal.authorization.claims.attempt_id.clone();
+    let claims_schedule_id = principal.authorization.claims.schedule_id.clone();
+
+    // Apply per-attempt rate limiting for audits
+    let key = RateLimitKey::Attempt(attempt_id.clone());
+    let config = RateLimitConfig::new(
+        state.config.rate_limit_audit_per_attempt,
+        state.config.rate_limit_audit_per_attempt_window_secs,
+    )
+    .with_burst(30);
+    match state.rate_limiter.check_with_config(&key, &config).await {
+        RateLimitResult::Allowed { .. } => {}
+        RateLimitResult::Denied { retry_after } => {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "RATE_LIMIT_EXCEEDED",
+                &format!(
+                    "Too many audit attempts. Retry after {} seconds.",
+                    retry_after.as_secs()
+                ),
+            ));
+        }
+    }
+
+    if claims_schedule_id != schedule_id.to_string() {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "FORBIDDEN",
+            "Attempt credential does not match the schedule.",
+        ));
+    }
+
+    let candidate_name = load_attempt_candidate_name(&state, &attempt_id).await?;
+
+    let client_timestamp = req.client_timestamp.clone();
+
+    let mut payload_map = serde_json::Map::new();
+    if let Some(client_timestamp) = client_timestamp.as_ref() {
+        payload_map.insert("clientTimestamp".to_owned(), json!(client_timestamp));
+    }
+    if let Some(payload) = req.payload {
+        match payload {
+            Value::Object(fields) => {
+                for (key, value) in fields {
+                    payload_map.insert(key, value);
+                }
+            }
+            other => {
+                payload_map.insert("payload".to_owned(), other);
+            }
+        }
+    }
+    let payload_value = Value::Object(payload_map);
+
+    sqlx::query(
+        r#"
+        INSERT INTO session_audit_logs (
+            id, schedule_id, actor, action_type, target_student_id, payload, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(schedule_id.to_string())
+    .bind(&candidate_name)
+    .bind(&req.action_type)
+    .bind(&attempt_id)
+    .bind(payload_value.clone())
+    .execute(&state.db_pool())
+    .await
+    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?;
+
+    if req.action_type == "VIOLATION_DETECTED" {
+        let violation_type = payload_value
+            .get("violationType")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let severity = payload_value
+            .get("severity")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let description = payload_value
+            .get("message")
+            .or_else(|| payload_value.get("description"))
+            .and_then(Value::as_str)
+            .unwrap_or("Violation detected.")
+            .to_owned();
+
+        if let (Some(violation_type), Some(severity)) = (violation_type, severity) {
+            let allowed = matches!(
+                severity.as_str(),
+                "low" | "medium" | "high" | "critical"
+            );
+            if allowed {
+                let violation_id = Uuid::new_v4();
+                sqlx::query(
+                    r#"
+                    INSERT INTO student_violation_events (
+                        id, schedule_id, attempt_id, violation_type, severity, description, payload, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+                    "#,
+                )
+                .bind(violation_id.to_string())
+                .bind(schedule_id.to_string())
+                .bind(&attempt_id)
+                .bind(&violation_type)
+                .bind(&severity)
+                .bind(&description)
+                .bind(payload_value.clone())
+                .execute(&state.db_pool())
+                .await
+                .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?;
+
+                let violation_json = json!({
+                    "id": violation_id,
+                    "type": violation_type,
+                    "severity": severity,
+                    "timestamp": client_timestamp.unwrap_or_else(Utc::now),
+                    "description": description
+                });
+                sqlx::query(
+                    r#"
+                    UPDATE student_attempts
+                    SET
+                        violations_snapshot = JSON_MERGE_PRESERVE(COALESCE(violations_snapshot, JSON_ARRAY()), ?),
+                        updated_at = NOW(),
+                        revision = revision + 1
+                    WHERE id = ? AND schedule_id = ?
+                    "#,
+                )
+                .bind(violation_json)
+                .bind(&attempt_id)
+                .bind(schedule_id.to_string())
+                .execute(&state.db_pool())
+                .await
+                .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?;
+            }
+        }
+    }
+
+    Ok(ApiResponse::success_with_request_id((), request_id.0))
+}
+
 pub async fn submit_student_session(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
@@ -487,6 +641,15 @@ fn access_key(access: &StudentAccess) -> String {
 
 async fn load_attempt_student_key(state: &AppState, attempt_id: &str) -> Result<String, ApiError> {
     query_scalar("SELECT student_key FROM student_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_optional(&state.db_pool())
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))
+}
+
+async fn load_attempt_candidate_name(state: &AppState, attempt_id: &str) -> Result<String, ApiError> {
+    query_scalar("SELECT candidate_name FROM student_attempts WHERE id = ?")
         .bind(attempt_id)
         .fetch_optional(&state.db_pool())
         .await

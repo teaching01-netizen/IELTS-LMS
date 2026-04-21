@@ -40,6 +40,47 @@ impl ProctoringService {
         Self { pool }
     }
 
+    async fn load_config_snapshot_for_schedule(
+        &self,
+        schedule_id: Uuid,
+    ) -> Result<Value, ProctoringError> {
+        sqlx::query_scalar::<_, Value>(
+            r#"
+            SELECT v.config_snapshot
+            FROM exam_schedules s
+            JOIN exam_versions v ON v.id = s.published_version_id
+            WHERE s.id = ?
+            "#,
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(ProctoringError::NotFound)
+    }
+
+    fn is_ielts_mode(config_snapshot: &Value) -> bool {
+        config_snapshot
+            .get("general")
+            .and_then(|general| general.get("ieltsMode"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    fn allowed_extension_minutes(config_snapshot: &Value) -> Vec<i64> {
+        config_snapshot
+            .get("delivery")
+            .and_then(|delivery| delivery.get("allowedExtensionMinutes"))
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_i64)
+                    .filter(|value| *value > 0)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| vec![5, 10])
+    }
+
     pub async fn list_sessions(
         &self,
         live_mode_enabled: bool,
@@ -301,6 +342,13 @@ impl ProctoringService {
             }
         }
 
+        let config_snapshot = self.load_config_snapshot_for_schedule(schedule_id).await?;
+        if Self::is_ielts_mode(&config_snapshot) {
+            return Err(ProctoringError::Validation(
+                "Proctor section override is disabled in IELTS authentic mode.".to_owned(),
+            ));
+        }
+
         let mut tx = self.pool.begin().await?;
         let runtime = sqlx::query_as::<_, RuntimeRow>(
             "SELECT * FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
@@ -528,6 +576,23 @@ impl ProctoringService {
             return Err(ProctoringError::Validation(
                 "Extension minutes must be greater than zero.".to_owned(),
             ));
+        }
+
+        let config_snapshot = self.load_config_snapshot_for_schedule(schedule_id).await?;
+        if Self::is_ielts_mode(&config_snapshot) {
+            return Err(ProctoringError::Validation(
+                "Section extensions are disabled in IELTS authentic mode.".to_owned(),
+            ));
+        }
+
+        let allowed_extension_minutes = Self::allowed_extension_minutes(&config_snapshot);
+        if allowed_extension_minutes.is_empty()
+            || !allowed_extension_minutes.contains(&i64::from(req.minutes))
+        {
+            return Err(ProctoringError::Validation(format!(
+                "Extension of {} minutes is not allowed by exam policy.",
+                req.minutes
+            )));
         }
 
         let mut tx = self.pool.begin().await?;

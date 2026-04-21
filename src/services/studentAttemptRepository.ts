@@ -168,6 +168,17 @@ function buildAttemptAuthorizationHeader(
   };
 }
 
+export function tryBuildAttemptAuthorizationHeader(
+  scheduleId: string,
+  attemptId: string,
+): Record<string, string> | null {
+  try {
+    return buildAttemptAuthorizationHeader({ scheduleId, id: attemptId });
+  } catch {
+    return null;
+  }
+}
+
 function isUnauthorizedError(error: unknown): boolean {
   return (
     typeof error === 'object' &&

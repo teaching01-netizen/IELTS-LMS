@@ -1,9 +1,6 @@
 import type { AuditActionType, SessionAuditLog } from '../types';
-import { examRepository } from './examRepository';
-
-function generateId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
+import { backendPost } from './backendBridge';
+import { tryBuildAttemptAuthorizationHeader } from './studentAttemptRepository';
 
 const auditActions = new Set<AuditActionType>([
   'PRECHECK_COMPLETED',
@@ -38,12 +35,17 @@ export async function saveStudentAuditEvent(
   payload?: Record<string, unknown>,
   targetStudentId?: string,
 ): Promise<void> {
-  if (!sessionId) {
+  if (!sessionId || !targetStudentId) {
+    return;
+  }
+
+  const headers = tryBuildAttemptAuthorizationHeader(sessionId, targetStudentId);
+  if (!headers) {
     return;
   }
 
   const log: SessionAuditLog = {
-    id: generateId('audit'),
+    id: '',
     timestamp: new Date().toISOString(),
     actor: 'student-system',
     actionType: resolveActionType(event),
@@ -55,5 +57,15 @@ export async function saveStudentAuditEvent(
     },
   };
 
-  await examRepository.saveAuditLog(log);
+  void backendPost(
+    `/v1/student/sessions/${sessionId}/audit`,
+    {
+      actionType: log.actionType,
+      clientTimestamp: log.timestamp,
+      payload: log.payload,
+    },
+    { headers, retries: 0, timeout: 5_000 },
+  ).catch(() => {
+    // Best-effort only: never block the student experience.
+  });
 }
