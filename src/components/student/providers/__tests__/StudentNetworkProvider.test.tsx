@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultConfig } from '../../../../constants/examDefaults';
 import { studentAttemptRepository } from '../../../../services/studentAttemptRepository';
 import type { ExamState } from '../../../../types';
@@ -126,6 +126,10 @@ describe('StudentNetworkProvider', () => {
     vi.spyOn(studentAttemptRepository, 'saveHeartbeatEvent').mockResolvedValue();
     vi.spyOn(studentAttemptRepository, 'getHeartbeatEvents').mockResolvedValue([]);
     vi.spyOn(studentAttemptRepository, 'getPendingMutations').mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   function createWrapper(
@@ -282,6 +286,48 @@ describe('StudentNetworkProvider', () => {
     });
 
     expect(result.current.network.state.isRecovering).toBe(false);
+  });
+
+  it('hard-blocks once after repeated heartbeat failures', async () => {
+    vi.useFakeTimers();
+
+    const config = createExamState().config;
+    config.security.heartbeatIntervalSeconds = 0.01;
+    config.security.heartbeatWarningThreshold = 1;
+    config.security.heartbeatHardBlockThreshold = 2;
+
+    vi.mocked(studentAttemptRepository.saveHeartbeatEvent).mockImplementation(async (event: any) => {
+      if (event?.type === 'heartbeat') {
+        throw new Error('heartbeat failed');
+      }
+    });
+
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+
+    const { result } = renderHook(
+      () => ({
+        runtime: useStudentRuntime(),
+      }),
+      { wrapper: createWrapper(createAttemptSnapshot(), config) },
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+
+    expect(result.current.runtime.state.blocking.reason).toBe('heartbeat_lost');
+
+    expect(
+      result.current.runtime.state.violations.filter((violation) => violation.type === 'HEARTBEAT_LOST'),
+    ).toHaveLength(1);
+
+    const savedEventTypes = vi
+      .mocked(studentAttemptRepository.saveHeartbeatEvent)
+      .mock.calls.map((call) => call[0]?.type);
+    expect(savedEventTypes.filter((type) => type === 'lost')).toHaveLength(1);
   });
 
   it('does not hard-block on initial load when the stored fingerprint differs', async () => {

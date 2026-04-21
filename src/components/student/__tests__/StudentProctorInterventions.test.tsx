@@ -149,4 +149,28 @@ describe('Student proctor interventions', () => {
     expect(screen.getByText(/individual session paused/i)).toBeInTheDocument();
     expect(screen.getByText(/manual review in progress/i)).toBeInTheDocument();
   });
+
+  it('shows a termination message when the proctor terminates the individual session', async () => {
+    render(
+      <StudentAppWrapper
+        state={state}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={createAttemptSnapshot({
+          proctorStatus: 'terminated',
+          proctorUpdatedAt: '2026-01-01T00:05:00.000Z',
+          proctorUpdatedBy: 'Proctor',
+          proctorNote: 'Session terminated due to integrity review',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: /session terminated/i }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/examination complete/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/integrity review/i)).toBeInTheDocument();
+  });
 });

@@ -16,9 +16,9 @@ interface StudentDetailPanelProps {
   activeTab: StudentDrawerTab;
   onTabChange: (tab: StudentDrawerTab) => void;
   onClose: () => void;
-  onAction: (action: 'warn' | 'pause' | 'resume' | 'terminate', payload?: unknown) => void;
-  onSaveNote?: (content: string, category: NoteCategory) => void;
-  onToggleNote?: (noteId: string) => void;
+  onAction: (action: 'warn' | 'pause' | 'resume' | 'terminate', payload?: unknown) => Promise<void> | void;
+  onSaveNote?: (content: string, category: NoteCategory) => Promise<void> | void;
+  onToggleNote?: (noteId: string) => Promise<void> | void;
 }
 
 const formatTime = (seconds: number) => {
@@ -44,6 +44,12 @@ export function StudentDetailPanel({
 }: StudentDetailPanelProps) {
   const [draftNote, setDraftNote] = useState('');
   const [draftCategory, setDraftCategory] = useState<NoteCategory>('general');
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [saveNoteError, setSaveNoteError] = useState<string | null>(null);
+  const [togglingNoteId, setTogglingNoteId] = useState<string | null>(null);
+  const [toggleNoteError, setToggleNoteError] = useState<string | null>(null);
+  const [disciplineAction, setDisciplineAction] = useState<'warn' | 'pause' | 'resume' | 'terminate' | null>(null);
+  const [disciplineError, setDisciplineError] = useState<string | null>(null);
 
   const studentNotes = useMemo(
     () =>
@@ -125,6 +131,48 @@ export function StudentDetailPanel({
     `inline-flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-medium ${
       activeTab === tab ? 'border-slate-950 text-slate-950' : 'border-transparent text-slate-500 hover:text-slate-800'
     }`;
+
+  const handleSaveNote = async () => {
+    if (!draftNote.trim() || !onSaveNote) return;
+    setIsSavingNote(true);
+    setSaveNoteError(null);
+
+    try {
+      await onSaveNote(draftNote.trim(), draftCategory);
+      setDraftNote('');
+      setDraftCategory('general');
+    } catch (error) {
+      setSaveNoteError(error instanceof Error ? error.message : 'Failed to save note.');
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
+
+  const handleToggleNote = async (noteId: string) => {
+    if (!onToggleNote) return;
+    setTogglingNoteId(noteId);
+    setToggleNoteError(null);
+
+    try {
+      await onToggleNote(noteId);
+    } catch (error) {
+      setToggleNoteError(error instanceof Error ? error.message : 'Failed to update note.');
+    } finally {
+      setTogglingNoteId(null);
+    }
+  };
+
+  const handleDisciplineAction = async (action: 'warn' | 'pause' | 'resume' | 'terminate', payload?: unknown) => {
+    setDisciplineAction(action);
+    setDisciplineError(null);
+    try {
+      await onAction(action, payload);
+    } catch (error) {
+      setDisciplineError(error instanceof Error ? error.message : 'Action failed.');
+    } finally {
+      setDisciplineAction(null);
+    }
+  };
 
   return (
     <AnimatePresence initial={false}>
@@ -211,14 +259,42 @@ export function StudentDetailPanel({
           ) : null}
           {activeTab === 'notes' ? (
             <div className="grid gap-4">
+              {saveNoteError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="status" aria-live="polite">
+                  {saveNoteError}
+                </div>
+              ) : null}
+              {toggleNoteError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="status" aria-live="polite">
+                  {toggleNoteError}
+                </div>
+              ) : null}
               <div className="grid gap-3 rounded-md bg-slate-50 p-4 md:grid-cols-[140px_minmax(0,1fr)_auto]">
-                <select value={draftCategory} onChange={(event) => setDraftCategory(event.target.value as NoteCategory)} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none">
+                <select
+                  value={draftCategory}
+                  onChange={(event) => setDraftCategory(event.target.value as NoteCategory)}
+                  disabled={isSavingNote}
+                  className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                >
                   <option value="general">General</option>
                   <option value="incident">Incident</option>
                   <option value="handover">Handover</option>
                 </select>
-                <input value={draftNote} onChange={(event) => setDraftNote(event.target.value)} placeholder="Add note to this cohort or student" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none" />
-                <button onClick={() => { if (!draftNote.trim()) return; onSaveNote?.(draftNote.trim(), draftCategory); setDraftNote(''); setDraftCategory('general'); }} className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white">Save note</button>
+                <input
+                  value={draftNote}
+                  onChange={(event) => setDraftNote(event.target.value)}
+                  placeholder="Add note to this cohort or student"
+                  disabled={isSavingNote}
+                  className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSaveNote()}
+                  disabled={isSavingNote || !draftNote.trim() || !onSaveNote}
+                  className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingNote ? 'Saving…' : 'Save note'}
+                </button>
               </div>
               <div className="grid gap-3">
                 {studentNotes.length === 0 ? <p className="text-sm text-slate-500">No notes scoped to this student yet.</p> : null}
@@ -229,7 +305,14 @@ export function StudentDetailPanel({
                         <Badge variant={note.category === 'incident' ? 'danger' : note.category === 'handover' ? 'warning' : 'info'}>{note.category}</Badge>
                         {note.isResolved ? <Badge variant="success">resolved</Badge> : null}
                       </div>
-                      <button onClick={() => onToggleNote?.(note.id)} className="text-xs font-medium text-slate-500 hover:text-slate-900">{note.isResolved ? 'Reopen' : 'Resolve'}</button>
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleNote(note.id)}
+                        disabled={togglingNoteId === note.id}
+                        className="text-xs font-medium text-slate-500 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {togglingNoteId === note.id ? 'Saving…' : note.isResolved ? 'Reopen' : 'Resolve'}
+                      </button>
                     </div>
                     <p className="text-sm text-slate-900">{note.content}</p>
                     <p className="text-xs text-slate-400">{note.author} · {new Date(note.timestamp).toLocaleString()}</p>
@@ -255,14 +338,55 @@ export function StudentDetailPanel({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+          {disciplineError ? (
+            <div className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="status" aria-live="polite">
+              {disciplineError}
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="warning" size="sm" leftIcon={<AlertTriangle size={14} />} onClick={() => onAction('warn')}>Warn</Button>
+            <Button
+              variant="warning"
+              size="sm"
+              leftIcon={<AlertTriangle size={14} />}
+              isLoading={disciplineAction === 'warn'}
+              disabled={disciplineAction !== null}
+              onClick={() => void handleDisciplineAction('warn')}
+            >
+              Warn
+            </Button>
             {student.status === 'paused' ? (
-              <Button variant="primary" size="sm" leftIcon={<Play size={14} />} onClick={() => onAction('resume')}>Resume</Button>
+              <Button
+                variant="primary"
+                size="sm"
+                leftIcon={<Play size={14} />}
+                isLoading={disciplineAction === 'resume'}
+                disabled={disciplineAction !== null}
+                onClick={() => void handleDisciplineAction('resume')}
+              >
+                Resume
+              </Button>
             ) : (
-              <Button variant="secondary" size="sm" leftIcon={<Pause size={14} />} onClick={() => onAction('pause')}>Pause</Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<Pause size={14} />}
+                isLoading={disciplineAction === 'pause'}
+                disabled={disciplineAction !== null}
+                onClick={() => void handleDisciplineAction('pause')}
+              >
+                Pause
+              </Button>
             )}
-            <Button variant="danger" size="sm" leftIcon={<UserX size={14} />} onClick={() => onAction('terminate')}>Terminate</Button>
+            <Button
+              variant="danger"
+              size="sm"
+              leftIcon={<UserX size={14} />}
+              isLoading={disciplineAction === 'terminate'}
+              disabled={disciplineAction !== null}
+              onClick={() => void handleDisciplineAction('terminate')}
+            >
+              Terminate
+            </Button>
           </div>
           <div className="text-xs text-slate-400">Activity system scoped to {cohort.cohortName}</div>
         </div>

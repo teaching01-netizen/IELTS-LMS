@@ -419,7 +419,8 @@ export function getQuestionNumberLabel(
   }
 
   if (question.isMulti) {
-    return `${start}-${start + question.correctCount - 1}`;
+    const end = start + question.correctCount - 1;
+    return end === start ? `${start}` : `${start}-${end}`;
   }
 
   return `${start}`;
@@ -615,13 +616,17 @@ function buildMultiQuestionDescriptor(
   groupId: string,
   groupLabel: string,
 ): StudentQuestionDescriptor {
+  const requiredSelections = Number.isFinite(block.requiredSelections)
+    ? Math.floor(block.requiredSelections)
+    : 0;
+
   return {
     id: block.id,
     blockId: block.id,
     groupId,
     groupLabel,
     isMulti: true,
-    correctCount: block.requiredSelections,
+    correctCount: Math.max(1, requiredSelections),
     answerKey: block.id,
     block,
     question: null,

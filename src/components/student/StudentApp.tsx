@@ -457,6 +457,7 @@ export function StudentApp() {
   }
 
   if (runtimeState.phase === 'post-exam') {
+    const isProctorTerminated = runtimeState.proctorStatus === 'terminated';
     return (
       <div className="flex flex-col items-center justify-center h-full w-full bg-gray-50 p-4 font-sans text-gray-900">
         <a href="#main-content" className="skip-link">
@@ -464,10 +465,21 @@ export function StudentApp() {
         </a>
         <main id="main-content" role="main" className="flex flex-col items-center justify-center">
           <div className="bg-white p-6 md:p-8 rounded-lg shadow-md max-w-2xl w-full text-center">
-            <h1 className="text-3xl font-bold mb-4">🎉 Examination Complete!</h1>
-            <p className="text-gray-600 mb-8">
-              Congratulations! You have completed all modules of the IELTS examination.
-            </p>
+            <h1 className="text-3xl font-bold mb-4">
+              {isProctorTerminated ? 'Session terminated' : '🎉 Examination Complete!'}
+            </h1>
+            {isProctorTerminated ? (
+              <div className="text-gray-600 mb-8 space-y-3">
+                <p>Your session was terminated by the proctor.</p>
+                {runtimeState.proctorNote ? (
+                  <p className="text-gray-700">{runtimeState.proctorNote}</p>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-gray-600 mb-8">
+                Congratulations! You have completed all modules of the IELTS examination.
+              </p>
+            )}
             <Button onClick={onExit}>Exit Exam Platform</Button>
           </div>
         </main>

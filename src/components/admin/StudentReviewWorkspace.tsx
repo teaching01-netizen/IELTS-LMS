@@ -43,6 +43,15 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const [activeTask, setActiveTask] = useState<string>('task1');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [releaseAction, setReleaseAction] = useState<
+    | 'mark_grading_complete'
+    | 'mark_ready_to_release'
+    | 'release_now'
+    | 'schedule_release'
+    | 'reopen'
+    | null
+  >(null);
+  const [releaseError, setReleaseError] = useState<string | null>(null);
   const [showReportPreview, setShowReportPreview] = useState(false);
   const [commentBank] = useState<CommentBankItem[]>([
     { id: '1', category: 'grammar', label: 'Subject-verb agreement', text: 'Check subject-verb agreement in this sentence.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
@@ -112,63 +121,118 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
   const handleMarkGradingComplete = async () => {
     if (!reviewDraft) return;
-    const result = await gradingService.markGradingComplete(
-      submissionId,
-      currentTeacherId,
-      currentTeacherName
-    );
-    if (result.success && result.data) {
-      setReviewDraft(result.data);
+    setReleaseAction('mark_grading_complete');
+    setReleaseError(null);
+    try {
+      const result = await gradingService.markGradingComplete(
+        submissionId,
+        currentTeacherId,
+        currentTeacherName,
+      );
+      if (result.success && result.data) {
+        setReviewDraft(result.data);
+      } else {
+        throw new Error(result.error ?? 'Failed to mark grading complete');
+      }
+    } catch (error) {
+      logger.error('Failed to mark grading complete:', error);
+      setReleaseError(error instanceof Error ? error.message : 'Failed to mark grading complete.');
+    } finally {
+      setReleaseAction(null);
     }
   };
 
   const handleMarkReadyToRelease = async () => {
     if (!reviewDraft) return;
-    const result = await gradingService.markReadyToRelease(
-      submissionId,
-      currentTeacherId,
-      currentTeacherName
-    );
-    if (result.success && result.data) {
-      setReviewDraft(result.data);
+    setReleaseAction('mark_ready_to_release');
+    setReleaseError(null);
+    try {
+      const result = await gradingService.markReadyToRelease(
+        submissionId,
+        currentTeacherId,
+        currentTeacherName,
+      );
+      if (result.success && result.data) {
+        setReviewDraft(result.data);
+      } else {
+        throw new Error(result.error ?? 'Failed to mark ready to release');
+      }
+    } catch (error) {
+      logger.error('Failed to mark ready to release:', error);
+      setReleaseError(error instanceof Error ? error.message : 'Failed to mark ready to release.');
+    } finally {
+      setReleaseAction(null);
     }
   };
 
   const handleReleaseNow = async () => {
     if (!reviewDraft) return;
-    const result = await gradingService.releaseResult(
-      submissionId,
-      currentTeacherId,
-      currentTeacherName
-    );
-    if (result.success) {
-      await loadData();
+    setReleaseAction('release_now');
+    setReleaseError(null);
+    try {
+      const result = await gradingService.releaseResult(
+        submissionId,
+        currentTeacherId,
+        currentTeacherName,
+      );
+      if (result.success) {
+        await loadData();
+      } else {
+        throw new Error(result.error ?? 'Failed to release result');
+      }
+    } catch (error) {
+      logger.error('Failed to release result:', error);
+      setReleaseError(error instanceof Error ? error.message : 'Failed to release result.');
+    } finally {
+      setReleaseAction(null);
     }
   };
 
   const handleScheduleRelease = async (date: string) => {
     if (!reviewDraft) return;
-    const result = await gradingService.scheduleRelease(
-      submissionId,
-      date,
-      currentTeacherId,
-      currentTeacherName
-    );
-    if (result.success && result.data) {
-      setReviewDraft(result.data);
+    setReleaseAction('schedule_release');
+    setReleaseError(null);
+    try {
+      const result = await gradingService.scheduleRelease(
+        submissionId,
+        date,
+        currentTeacherId,
+        currentTeacherName,
+      );
+      if (result.success && result.data) {
+        setReviewDraft(result.data);
+      } else {
+        throw new Error(result.error ?? 'Failed to schedule release');
+      }
+    } catch (error) {
+      logger.error('Failed to schedule release:', error);
+      setReleaseError(error instanceof Error ? error.message : 'Failed to schedule release.');
+    } finally {
+      setReleaseAction(null);
     }
   };
 
   const handleReopen = async () => {
     if (!reviewDraft) return;
-    const result = await gradingService.reopenReview(
-      submissionId,
-      currentTeacherId,
-      currentTeacherName,
-      'Manual reopen'
-    );
-    if (result.success && result.data) {
-      setReviewDraft(result.data);
+    setReleaseAction('reopen');
+    setReleaseError(null);
+    try {
+      const result = await gradingService.reopenReview(
+        submissionId,
+        currentTeacherId,
+        currentTeacherName,
+        'Manual reopen',
+      );
+      if (result.success && result.data) {
+        setReviewDraft(result.data);
+      } else {
+        throw new Error(result.error ?? 'Failed to reopen review');
+      }
+    } catch (error) {
+      logger.error('Failed to reopen review:', error);
+      setReleaseError(error instanceof Error ? error.message : 'Failed to reopen review.');
+    } finally {
+      setReleaseAction(null);
     }
   };
 
@@ -282,7 +346,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <button onClick={onBack} aria-label="Back" className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
               <ArrowLeft size={20} className="text-gray-600" />
             </button>
             <div className="flex items-center gap-3">
@@ -690,24 +754,32 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           {/* Release Controls */}
           <div className="p-4 border-t border-gray-200 bg-gray-50 space-y-3">
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Release Workflow</h2>
+
+            {releaseError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="status" aria-live="polite">
+                {releaseError}
+              </div>
+            ) : null}
             
             {reviewDraft?.releaseStatus === 'draft' && (
               <button
                 onClick={handleMarkGradingComplete}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700"
+                disabled={releaseAction !== null}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <CheckSquare size={16} />
-                Mark Grading Complete
+                {releaseAction === 'mark_grading_complete' ? 'Working…' : 'Mark Grading Complete'}
               </button>
             )}
             
             {reviewDraft?.releaseStatus === 'grading_complete' && (
               <button
                 onClick={handleMarkReadyToRelease}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700"
+                disabled={releaseAction !== null}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <CheckSquare size={16} />
-                Mark Ready to Release
+                {releaseAction === 'mark_ready_to_release' ? 'Working…' : 'Mark Ready to Release'}
               </button>
             )}
             
@@ -715,27 +787,30 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               <>
                 <button
                   onClick={() => setShowReportPreview(true)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  disabled={releaseAction !== null}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Eye size={16} />
                   Preview as Student
                 </button>
                 <button
                   onClick={handleReleaseNow}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700"
+                  disabled={releaseAction !== null}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <CheckCircle size={16} />
-                  Release Now
+                  {releaseAction === 'release_now' ? 'Releasing…' : 'Release Now'}
                 </button>
                 <button
                   onClick={() => {
                     const date = prompt('Enter release date (YYYY-MM-DD):');
                     if (date) handleScheduleRelease(date);
                   }}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  disabled={releaseAction !== null}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Calendar size={16} />
-                  Schedule Release
+                  {releaseAction === 'schedule_release' ? 'Scheduling…' : 'Schedule Release'}
                 </button>
               </>
             )}
@@ -743,9 +818,10 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             {reviewDraft?.releaseStatus === 'released' && (
               <button
                 onClick={handleReopen}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                disabled={releaseAction !== null}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Reopen Result
+                {releaseAction === 'reopen' ? 'Working…' : 'Reopen Result'}
               </button>
             )}
           </div>

@@ -1212,20 +1212,7 @@ impl GradingService {
     }
 
     async fn refresh_session_counters(&self) -> Result<(), GradingError> {
-        let rows = sqlx::query_as::<_, SessionCounterRow>(
-            r#"
-            SELECT
-                schedule_id,
-                COUNT(*) AS total_students,
-                COUNT(*) AS submitted_count,
-                SUM(CASE WHEN grading_status IN ('submitted', 'reopened') THEN 1 ELSE 0 END) AS pending_manual_reviews,
-                SUM(CASE WHEN grading_status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress_reviews,
-                SUM(CASE WHEN grading_status IN ('grading_complete', 'ready_to_release', 'released') THEN 1 ELSE 0 END) AS finalized_reviews,
-                SUM(CASE WHEN is_overdue THEN 1 ELSE 0 END) AS overdue_reviews
-            FROM student_submissions
-            GROUP BY schedule_id
-            "#,
-        )
+        let rows = sqlx::query_as::<_, SessionCounterRow>(REFRESH_SESSION_COUNTERS_SQL)
         .fetch_all(&self.pool)
         .await?;
 
@@ -1258,6 +1245,22 @@ impl GradingService {
         Ok(())
     }
 }
+
+// MySQL returns `DECIMAL` for `SUM(...)` in many cases, which `sqlx` will not decode into `i64`.
+// Using `COUNT(CASE WHEN ... THEN 1 END)` keeps the column type as an integer while producing the
+// same result.
+const REFRESH_SESSION_COUNTERS_SQL: &str = r#"
+SELECT
+    schedule_id,
+    COUNT(*) AS total_students,
+    COUNT(*) AS submitted_count,
+    COUNT(CASE WHEN grading_status IN ('submitted', 'reopened') THEN 1 END) AS pending_manual_reviews,
+    COUNT(CASE WHEN grading_status = 'in_progress' THEN 1 END) AS in_progress_reviews,
+    COUNT(CASE WHEN grading_status IN ('grading_complete', 'ready_to_release', 'released') THEN 1 END) AS finalized_reviews,
+    COUNT(CASE WHEN is_overdue THEN 1 END) AS overdue_reviews
+FROM student_submissions
+GROUP BY schedule_id
+"#;
 
 #[derive(FromRow)]
 struct ScheduleSeedRow {
@@ -1326,6 +1329,23 @@ fn writing_task_array(writing_answers: &Value) -> Value {
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod refresh_session_counters_tests {
+    use super::REFRESH_SESSION_COUNTERS_SQL;
+
+    #[test]
+    fn refresh_session_counters_query_avoids_mysql_decimal_sum_type() {
+        assert!(
+            !REFRESH_SESSION_COUNTERS_SQL.contains("SUM("),
+            "SUM(...) frequently yields DECIMAL in MySQL, which breaks decoding into i64"
+        );
+        assert!(
+            REFRESH_SESSION_COUNTERS_SQL.contains("pending_manual_reviews"),
+            "sanity check: query should still compute pending_manual_reviews"
+        );
+    }
 }
 
 fn writing_task_entries(writing_answers: &Value) -> Vec<(String, Value)> {

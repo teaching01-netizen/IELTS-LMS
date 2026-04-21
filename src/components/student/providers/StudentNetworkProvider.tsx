@@ -263,7 +263,7 @@ export function StudentNetworkProvider({
             );
           }
 
-          if (missedHeartbeatsRef.current >= hardBlockThreshold) {
+          if (missedHeartbeatsRef.current === hardBlockThreshold) {
             runtimeActions.addViolation(
               'HEARTBEAT_LOST',
               'high',

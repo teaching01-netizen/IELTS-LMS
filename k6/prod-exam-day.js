@@ -3,6 +3,9 @@ import { check, fail, sleep } from 'k6';
 import { SharedArray } from 'k6/data';
 import { randomBytes } from 'k6/crypto';
 
+const EXPECT_2XX_OR_409 = http.expectedStatuses({ min: 200, max: 299 }, 409);
+const DEBUG = __ENV.K6_DEBUG === 'true';
+
 function readJson(path) {
   try {
     return JSON.parse(open(path));
@@ -137,7 +140,11 @@ const runId = __ENV.K6_RUN_ID || `k6-${Date.now()}`;
 
 const allStudents = new SharedArray('students', () => (target.students || []));
 const studentCount = clampInt(__ENV.K6_STUDENTS || '3', 1, allStudents.length || 1);
-const students = allStudents.slice(0, studentCount);
+const studentOffset = clampInt(__ENV.K6_STUDENT_OFFSET || '0', 0, Math.max(0, (allStudents.length || 1) - 1));
+const students = allStudents.slice(studentOffset, studentOffset + studentCount);
+if (students.length !== studentCount) {
+  throw new Error(`Not enough students in prod-target.json for K6_STUDENTS=${studentCount} at K6_STUDENT_OFFSET=${studentOffset}`);
+}
 
 export const options = {
   scenarios: {
@@ -163,15 +170,44 @@ export const options = {
 };
 
 export function controlFlow() {
+  const runStartedAtMs = Date.now();
   const jar = http.cookieJar();
-  const loginResp = http.post(
-    `${baseUrl}/api/v1/auth/login`,
-    JSON.stringify({ email: creds.editor.email, password: creds.editor.password }),
-    { jar, headers: jsonHeaders() },
-  );
-  check(loginResp, {
-    'control login 200': (r) => r.status === 200,
-  }) || fail(`Control login failed: status=${loginResp.status} body=${loginResp.body.slice(0, 200)}`);
+
+  // Default to editor-as-proctor unless explicitly disabled.
+  const preferEditorAsProctor = __ENV.K6_USE_EDITOR_AS_PROCTOR !== 'false';
+  const staffCandidates = [];
+  if (preferEditorAsProctor && creds.editor) staffCandidates.push(creds.editor);
+  if (Array.isArray(creds.proctors)) staffCandidates.push(...creds.proctors);
+  if (!preferEditorAsProctor && creds.editor) staffCandidates.push(creds.editor);
+
+  let authorized = false;
+  let selectedStaffEmail = '';
+  for (const staff of staffCandidates) {
+    jar.clear(baseUrl);
+    const loginResp = http.post(`${baseUrl}/api/v1/auth/login`, JSON.stringify(staff), {
+      jar,
+      headers: jsonHeaders(),
+    });
+    if (loginResp.status !== 200) continue;
+
+    // Verify the staff user can access the proctor schedule view (needs role + assignment).
+    const probe = http.get(`${baseUrl}/api/v1/proctor/sessions/${scheduleId}`, {
+      jar,
+      headers: jsonHeaders(csrfHeader(jar, baseUrl)),
+    });
+    if (probe.status === 200) {
+      authorized = true;
+      selectedStaffEmail = staff.email || '';
+      break;
+    }
+  }
+  if (!authorized) {
+    fail(
+      `No authorized staff account could access proctor view for scheduleId=${scheduleId}. ` +
+        `Assign at least one proctor/admin to the schedule, or set K6_USE_EDITOR_AS_PROCTOR=false and ensure creds.proctors[0] is assigned.`,
+    );
+  }
+  if (DEBUG) console.log(`[control] staff=${selectedStaffEmail || 'unknown'} scheduleId=${scheduleId} runId=${runId}`);
 
   // Proctor presence (matches real proctor dashboard behavior).
   const joinResp = http.post(
@@ -180,11 +216,15 @@ export function controlFlow() {
     { jar, headers: jsonHeaders(csrfHeader(jar, baseUrl)) },
   );
   check(joinResp, { 'proctor presence join 200': (r) => r.status === 200 }) ||
-    fail(`Presence join failed: status=${joinResp.status} body=${joinResp.body.slice(0, 200)}`);
+    fail(
+      `Presence join failed (staff=${selectedStaffEmail || 'unknown'}): status=${joinResp.status} body=${joinResp.body.slice(0, 200)}`,
+    );
 
-  const threshold = clampInt(__ENV.K6_CHECKED_IN_THRESHOLD || `${Math.min(1, studentCount)}`, 0, studentCount);
+  const threshold = clampInt(__ENV.K6_CHECKED_IN_THRESHOLD || `${studentCount}`, 0, studentCount);
   const checkedInTimeoutSeconds = clampInt(__ENV.K6_CHECKED_IN_TIMEOUT_SECONDS || '600', 30, 3600);
   const checkedInStartedAt = Date.now();
+  const expectedEmails = new Set(students.map((s) => s.email));
+  if (DEBUG) console.log(`[control] waiting for checked-in threshold=${threshold} students=${studentCount} offset=${studentOffset}`);
 
   // Wait for at least N student sessions to show up in proctor session detail.
   while (Date.now() - checkedInStartedAt < checkedInTimeoutSeconds * 1000) {
@@ -194,8 +234,14 @@ export function controlFlow() {
       continue;
     }
     const json = detail.json();
-    const sessions = (json && json.data && json.data.sessions) || [];
-    if (Array.isArray(sessions) && sessions.length >= threshold) break;
+    const sessions = ((json || {}).data || {}).sessions || [];
+    if (!Array.isArray(sessions)) {
+      sleep(2);
+      continue;
+    }
+    const matched = sessions.filter((s) => expectedEmails.has(String(s.studentEmail || '')));
+    if (DEBUG) console.log(`[control] roster matched=${matched.length}/${threshold} total=${sessions.length}`);
+    if (matched.length >= threshold) break;
     sleep(2);
   }
 
@@ -203,14 +249,40 @@ export function controlFlow() {
   const startResp = http.post(
     `${baseUrl}/api/v1/schedules/${scheduleId}/runtime/commands`,
     JSON.stringify({ action: 'start_runtime', reason: `k6 ${runId}` }),
-    { jar, headers: jsonHeaders(csrfHeader(jar, baseUrl)) },
+    { jar, headers: jsonHeaders(csrfHeader(jar, baseUrl)), responseCallback: EXPECT_2XX_OR_409 },
   );
 
   check(startResp, {
     'runtime start 200/409 ok': (r) => r.status === 200 || r.status === 409,
   }) || fail(`Start runtime failed: status=${startResp.status} body=${startResp.body.slice(0, 200)}`);
+  if (DEBUG) console.log(`[control] start_runtime status=${startResp.status}`);
 
-  const monitorSeconds = clampInt(__ENV.K6_PROCTOR_MONITOR_SECONDS || '180', 0, 1800);
+  // Ensure runtime becomes live (or is already live). If it's already completed/cancelled, fail fast.
+  const liveTimeoutSeconds = clampInt(__ENV.K6_WAIT_FOR_CONTROL_LIVE_TIMEOUT_SECONDS || '300', 10, 3600);
+  const liveStartedAt = Date.now();
+  while (Date.now() - liveStartedAt < liveTimeoutSeconds * 1000) {
+    const runtime = http.get(`${baseUrl}/api/v1/schedules/${scheduleId}/runtime`, {
+      jar,
+      headers: jsonHeaders(csrfHeader(jar, baseUrl)),
+    });
+    if (runtime.status !== 200) {
+      sleep(2);
+      continue;
+    }
+    const json = runtime.json();
+    const status = (((json || {}).data || {}).status || '').toString();
+    if (DEBUG) console.log(`[control] runtime status=${status}`);
+    if (status === 'live') break;
+    if (status === 'completed' || status === 'cancelled') {
+      fail(
+        `Schedule runtime is already ${status} for scheduleId=${scheduleId}. ` +
+          `Create a fresh schedule, or point K6_SCHEDULE_ID to a schedule with runtimeStatus=not_started.`,
+      );
+    }
+    sleep(2);
+  }
+
+  const monitorSeconds = clampInt(__ENV.K6_PROCTOR_MONITOR_SECONDS || '180', 0, 7200);
   const heartbeatEverySeconds = clampInt(__ENV.K6_PROCTOR_HEARTBEAT_SECONDS || '15', 5, 120);
   const startedAt = Date.now();
   let lastHeartbeatAt = 0;
@@ -253,6 +325,77 @@ export function controlFlow() {
     sleep(4);
   }
 
+  // Full-cycle verification (default): proctor can see all sessions have transitioned to post-exam
+  // (the proctor dashboard maps post-exam to `status="terminated"`). Student-side VUs also
+  // verify `attempt.submittedAt` after submit.
+  const verifyTimeoutSeconds = clampInt(__ENV.K6_WAIT_FOR_SUBMISSIONS_TIMEOUT_SECONDS || '1200', 30, 7200);
+  const verifyStartedAt = Date.now();
+  let verifiedDone = false;
+  while (Date.now() - verifyStartedAt < verifyTimeoutSeconds * 1000) {
+    const detail = http.get(`${baseUrl}/api/v1/proctor/sessions/${scheduleId}`, {
+      jar,
+      headers: jsonHeaders(csrfHeader(jar, baseUrl)),
+    });
+    if (detail.status !== 200) {
+      sleep(3);
+      continue;
+    }
+    const json = detail.json();
+    const sessions = ((json || {}).data || {}).sessions || [];
+    if (!Array.isArray(sessions)) {
+      sleep(3);
+      continue;
+    }
+    const recent = sessions.filter((s) => {
+      const last = Date.parse(String(s.lastActivity || '')) || 0;
+      return last >= runStartedAtMs - 30_000;
+    });
+    if (recent.length < studentCount) {
+      sleep(3);
+      continue;
+    }
+    const doneCount = recent.filter((s) => String(s.status || '').toLowerCase() === 'terminated').length;
+    if (doneCount >= studentCount) {
+      verifiedDone = true;
+      break;
+    }
+    sleep(3);
+  }
+  check({ verifiedDone }, { 'all students reached post-exam': (v) => v.verifiedDone === true }) ||
+    fail(`Timed out waiting for all ${studentCount} students to reach post-exam in proctor view.`);
+
+  // Optional stronger verification (requires Admin/Grader role on the editor account).
+  if (__ENV.K6_VERIFY_GRADING === 'true') {
+    const adminJar = http.cookieJar();
+    const adminLogin = http.post(
+      `${baseUrl}/api/v1/auth/login`,
+      JSON.stringify({ email: creds.editor.email, password: creds.editor.password }),
+      { jar: adminJar, headers: jsonHeaders() },
+    );
+    check(adminLogin, { 'admin login 200': (r) => r.status === 200 }) ||
+      fail(`Admin login failed: status=${adminLogin.status} body=${adminLogin.body.slice(0, 200)}`);
+
+    const resp = http.get(`${baseUrl}/api/v1/grading/sessions`, { jar: adminJar, headers: jsonHeaders() });
+    if (resp.status !== 200) {
+      fail(`Cannot verify grading sessions (need Admin/Grader). status=${resp.status} body=${resp.body.slice(0, 200)}`);
+    }
+    const listJson = resp.json();
+    const sessions = (listJson && listJson.data) || [];
+    const gradingSession = Array.isArray(sessions)
+      ? sessions.find((s) => String(s.scheduleId || s.schedule_id || '') === scheduleId)
+      : null;
+    if (!gradingSession) fail(`Could not find grading session for scheduleId=${scheduleId}`);
+  }
+
+  // End exam runtime (proctor ends cohort). This is the "Finish Exam" equivalent.
+  const endResp = http.post(
+    `${baseUrl}/api/v1/schedules/${scheduleId}/runtime/commands`,
+    JSON.stringify({ action: 'end_runtime', reason: `k6 end ${runId}` }),
+    { jar, headers: jsonHeaders(csrfHeader(jar, baseUrl)), responseCallback: EXPECT_2XX_OR_409 },
+  );
+  check(endResp, { 'runtime end 200/409 ok': (r) => r.status === 200 || r.status === 409 }) ||
+    fail(`End runtime failed: status=${endResp.status} body=${endResp.body.slice(0, 200)}`);
+
   http.post(
     `${baseUrl}/api/v1/proctor/sessions/${scheduleId}/presence`,
     JSON.stringify({ action: 'leave' }),
@@ -264,6 +407,7 @@ export function studentFlow() {
   const vuIndex = (__VU - 1) % students.length;
   const student = students[vuIndex];
   const jar = http.cookieJar();
+  if (DEBUG) console.log(`[student ${__VU}] start wcode=${student.wcode} email=${student.email}`);
 
   const maxJitter = clampInt(__ENV.K6_STUDENT_JITTER_MAX_SECONDS || '30', 0, 600);
   const jitter = computeJitterSeconds(runId, student.wcode, maxJitter);
@@ -283,6 +427,7 @@ export function studentFlow() {
   check(entryResp, {
     'student entry 200': (r) => r.status === 200,
   }) || fail(`Student entry failed (${student.wcode}): status=${entryResp.status} body=${entryResp.body.slice(0, 200)}`);
+  if (DEBUG) console.log(`[student ${__VU}] entry ok`);
 
   const clientSessionId = uuidV4();
   const bootstrapResp = http.post(
@@ -302,6 +447,7 @@ export function studentFlow() {
   check(bootstrapResp, {
     'student bootstrap 200': (r) => r.status === 200,
   }) || fail(`Bootstrap failed (${student.wcode}): status=${bootstrapResp.status} body=${bootstrapResp.body.slice(0, 200)}`);
+  if (DEBUG) console.log(`[student ${__VU}] bootstrap ok`);
 
   const bootstrapJson = bootstrapResp.json();
   const ctx = bootstrapJson && bootstrapJson.data;
@@ -340,10 +486,12 @@ export function studentFlow() {
   check(precheckResp, {
     'student precheck 200': (r) => r.status === 200,
   }) || fail(`Precheck failed (${student.wcode}): status=${precheckResp.status} body=${precheckResp.body.slice(0, 200)}`);
+  if (DEBUG) console.log(`[student ${__VU}] precheck ok; waiting for live`);
 
   // Wait until runtime becomes live via the student session context (matches prod truth).
   const waitTimeoutSeconds = clampInt(__ENV.K6_WAIT_FOR_LIVE_TIMEOUT_SECONDS || '1200', 30, 7200);
   const waitStartedAt = Date.now();
+  let lastStatusLogAt = 0;
   while (Date.now() - waitStartedAt < waitTimeoutSeconds * 1000) {
     const sessionResp = http.get(`${baseUrl}/api/v1/student/sessions/${scheduleId}`, { jar, headers: jsonHeaders() });
     if (sessionResp.status !== 200) {
@@ -352,9 +500,20 @@ export function studentFlow() {
     }
     const json = sessionResp.json();
     const status = (((json || {}).data || {}).runtime || {}).status || '';
+    if (DEBUG && Date.now() - lastStatusLogAt > 5000) {
+      lastStatusLogAt = Date.now();
+      console.log(`[student ${__VU}] runtime status=${status}`);
+    }
     if (status === 'live') break;
+    if (status === 'completed' || status === 'cancelled') {
+      fail(
+        `Student ${student.wcode} cannot start: runtime already ${status} for scheduleId=${scheduleId}. ` +
+          `Use a fresh schedule (runtimeStatus=not_started).`,
+      );
+    }
     sleep(2);
   }
+  if (DEBUG) console.log(`[student ${__VU}] runtime live; working`);
 
   // Act like a real client for a short interval: heartbeats + position + some answers.
   const workSeconds = clampInt(__ENV.K6_STUDENT_WORK_SECONDS || '60', 10, 1800);
@@ -453,6 +612,7 @@ export function studentFlow() {
             'Idempotency-Key': uuidV4(),
           }),
         ),
+        responseCallback: EXPECT_2XX_OR_409,
       },
     );
     check(mutationResp, { 'mutation batch 200/409 ok': (r) => r.status === 200 || r.status === 409 }) ||
@@ -471,12 +631,26 @@ export function studentFlow() {
         authorization: `Bearer ${attemptToken}`,
         'Idempotency-Key': uuidV4(),
       }),
+      responseCallback: EXPECT_2XX_OR_409,
     },
   );
 
   check(submitResp, {
     'submit 200/409 ok': (r) => r.status === 200 || r.status === 409,
   }) || fail(`Submit failed (${student.wcode}): status=${submitResp.status} body=${submitResp.body.slice(0, 200)}`);
+  if (DEBUG) console.log(`[student ${__VU}] submit ok`);
+
+  // Verify submitted_at is set in session context.
+  const afterSubmit = http.get(`${baseUrl}/api/v1/student/sessions/${scheduleId}`, { jar, headers: jsonHeaders() });
+  if (afterSubmit.status === 200) {
+    const json = afterSubmit.json();
+    const submittedAt = (((json || {}).data || {}).attempt || {}).submittedAt;
+    const ok = Boolean(submittedAt);
+    check({ ok }, { 'attempt submittedAt present': (v) => v.ok === true });
+    if (!ok) fail(`Missing attempt.submittedAt after submit (${student.wcode}).`);
+  } else {
+    fail(`Failed to load student session after submit (${student.wcode}): status=${afterSubmit.status}`);
+  }
 
   return;
 }

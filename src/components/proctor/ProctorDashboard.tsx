@@ -331,7 +331,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
 
     if (!deliveryResult.success) {
       logger.error('Failed to execute student action:', deliveryResult.error);
-      return;
+      throw new Error(deliveryResult.error ?? 'Failed to execute student action');
     }
 
     const nextSession = applyStudentAction(currentSession, action, payload);
@@ -746,7 +746,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
               activeTab={drawerTab}
               onTabChange={setDrawerTab}
               onClose={() => setSelectedStudentId(null)}
-              onAction={(action, payload) => selectedStudent && void handleDisciplineAction(selectedStudent.id, action, payload)}
+              onAction={(action, payload) => (selectedStudent ? handleDisciplineAction(selectedStudent.id, action, payload) : undefined)}
               onSaveNote={async (content, category) => {
                 if (!selectedScheduleId || !onUpdateNotes) return;
                 const newNote = {
@@ -883,7 +883,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                     isMultiSelected={selectedStudentIds.has(session.id)}
                     compact={listDensity === 'compact'}
                     onClick={() => handleSelectStudent(session.id)}
-                    onAction={(action) => void handleDisciplineAction(session.id, action)}
+                    onAction={(action) => handleDisciplineAction(session.id, action)}
                     onToggleSelection={(event) => {
                       event.stopPropagation();
                       handleToggleStudentSelection(session.id);

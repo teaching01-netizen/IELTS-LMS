@@ -9,7 +9,9 @@ Important limits:
 
 ## What this script does
 - **Students**: `/api/v1/auth/student/entry` → `/api/v1/student/sessions/:scheduleId/bootstrap` → `/precheck` → poll session until runtime `live` → submit a small mutation batch (position + answer + writing + violation where possible) → `/submit`
-- **Control (editor/proctor)**: login → wait for `checkedIn >= threshold` → `/api/v1/schedules/:scheduleId/runtime/commands` with `start_runtime`
+- **Control (proctor + admin verify)**:
+  - Proctor: login → `presence join/heartbeat` → wait for `checkedIn >= threshold` → **Start Exam** via `/api/v1/schedules/:scheduleId/runtime/commands` (`start_runtime`) → optional monitoring/interventions → **End Exam** via `end_runtime`
+  - Admin verify: poll `/api/v1/grading/sessions` until `submittedCount >= students`, then confirm submissions via `/api/v1/grading/sessions/:scheduleId`
 
 ## Inputs
 - Target (non-secrets): `e2e/prod-data/prod-target.json`
@@ -50,3 +52,6 @@ k6 run k6/prod-exam-day.js
 - `K6_WAIT_FOR_LIVE_TIMEOUT_SECONDS` (default `1200`)
 - `K6_STUDENT_WORK_SECONDS` (default `60`)
 - `K6_PROCTOR_MONITOR_SECONDS` (default `180`)
+- `K6_WAIT_FOR_SUBMISSIONS_TIMEOUT_SECONDS` (default `1200`)
+- `K6_USE_EDITOR_AS_PROCTOR` (set `true` to use editor creds for proctor actions)
+- `K6_VERIFY_SUBMISSIONS` (set `false` to skip grading-based verification)
