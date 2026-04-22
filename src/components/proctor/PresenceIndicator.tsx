@@ -65,29 +65,6 @@ export function PresenceIndicator({ proctorPresence, currentProctorId, currentPr
 
   return (
     <div className="flex items-center gap-2">
-      {activeProctors.length > 0 && (
-        <div className="flex -space-x-2">
-          {activeProctors.slice(0, 5).map(proctor => (
-            <div
-              key={proctor.proctorId}
-              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 ${
-                proctor.proctorId === currentProctorId
-                  ? 'bg-blue-600 text-white border-white'
-                  : 'bg-gray-200 text-gray-700 border-white'
-              }`}
-              title={`${proctor.proctorName} - Last seen ${formatTime(proctor.lastHeartbeat)}`}
-            >
-              {getInitials(proctor.proctorName)}
-            </div>
-          ))}
-          {activeProctors.length > 5 && (
-            <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-gray-300 text-gray-700 border-2 border-white">
-              +{activeProctors.length - 5}
-            </div>
-          )}
-        </div>
-      )}
-
       {!isCurrentUserPresent && onJoin ? (
         <button
           type="button"

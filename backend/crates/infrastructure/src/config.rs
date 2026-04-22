@@ -29,6 +29,10 @@ pub struct AppConfig {
     pub attempt_token_ttl_minutes: i64,
     pub websocket_connection_cap: usize,
     pub websocket_connections_per_user_cap: usize,
+    pub websocket_connections_per_schedule_cap: usize,
+    pub websocket_outbound_queue_cap: usize,
+    pub websocket_slow_client_disconnect_ms: u64,
+    pub websocket_write_timeout_ms: u64,
     // Rate limiting configurations
     pub rate_limit_login_per_ip: u32,
     pub rate_limit_login_per_ip_window_secs: u64,
@@ -170,6 +174,22 @@ impl AppConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.websocket_connections_per_user_cap),
+            websocket_connections_per_schedule_cap: env::var("WEBSOCKET_CONNECTIONS_PER_SCHEDULE_CAP")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.websocket_connections_per_schedule_cap),
+            websocket_outbound_queue_cap: env::var("WEBSOCKET_OUTBOUND_QUEUE_CAP")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.websocket_outbound_queue_cap),
+            websocket_slow_client_disconnect_ms: env::var("WEBSOCKET_SLOW_CLIENT_DISCONNECT_MS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.websocket_slow_client_disconnect_ms),
+            websocket_write_timeout_ms: env::var("WEBSOCKET_WRITE_TIMEOUT_MS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.websocket_write_timeout_ms),
             // Rate limiting env vars
             rate_limit_login_per_ip: env::var("RATE_LIMIT_LOGIN_PER_IP")
                 .ok()
@@ -330,6 +350,10 @@ impl Default for AppConfig {
             attempt_token_ttl_minutes: 15,
             websocket_connection_cap: 200,
             websocket_connections_per_user_cap: 5,
+            websocket_connections_per_schedule_cap: 100,
+            websocket_outbound_queue_cap: 16,
+            websocket_slow_client_disconnect_ms: 200,
+            websocket_write_timeout_ms: 200,
             // Rate limiting defaults based on spec recommendations
             rate_limit_login_per_ip: 10,
             rate_limit_login_per_ip_window_secs: 60,

@@ -11,6 +11,7 @@ axum = { version = "0.7.9", features = ["ws"] }
 axum-extra = { version = "0.9.6", features = ["cookie"] }
 chrono = { version = "0.4.38", default-features = false, features = ["clock"] }
 cookie = "0.18.1"
+futures-util = "0.3.31"
 ielts-backend-application = { path = "../application" }
 ielts-backend-domain = { path = "../domain" }
 ielts-backend-infrastructure = { path = "../infrastructure" }
