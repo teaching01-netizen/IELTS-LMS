@@ -113,7 +113,26 @@ export async function adaptExamEntitiesToLegacyExams(
   entities: ExamEntity[],
   repository: Pick<IExamRepository, 'getVersionById'>,
 ): Promise<Exam[]> {
-  return Promise.all(entities.map((entity) => adaptExamEntityToLegacyExam(entity, repository)));
+  const results = await Promise.allSettled(
+    entities.map((entity) => adaptExamEntityToLegacyExam(entity, repository)),
+  );
+
+  const exams: Exam[] = [];
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      exams.push(result.value);
+      return;
+    }
+
+    const entity = entities[index];
+    const reason =
+      result.reason instanceof Error ? result.reason.message : String(result.reason);
+    // Do not block the entire admin experience because of a single corrupt/incomplete exam entity.
+    // This can happen if legacy data lacks a draft/published version reference.
+    console.warn(`Skipping exam ${entity?.id ?? '(unknown)'}: ${reason}`);
+  });
+
+  return exams;
 }
 
 export function createInitialExamState(
