@@ -9,3 +9,4 @@ pub mod media;
 pub mod proctoring;
 pub mod results;
 pub mod scheduling;
+pub mod validation;

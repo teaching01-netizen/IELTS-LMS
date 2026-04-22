@@ -153,9 +153,7 @@ async fn get_exam_returns_exam_detail_by_id() {
 
     let response = app
         .oneshot(
-            auth.with_auth(
-                Request::builder().uri(format!("/api/v1/exams/{}", seeded.id)),
-            )
+            auth.with_auth(Request::builder().uri(format!("/api/v1/exams/{}", seeded.id)))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -258,14 +256,37 @@ async fn get_validation_reports_publish_readiness_for_the_current_draft() {
             seeded.id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
-                    "listening": {"parts": [{"id": "part-1"}]},
-                    "reading": {"passages": [{"id": "passage-1"}]},
-                    "writing": {"tasks": [{"id": "task-1"}]},
-                    "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
+                    "listening": {"parts": []},
+                    "reading": {
+                        "passages": [{
+                            "id": "passage-1",
+                            "title": "Passage 1",
+                            "questionBlocks": [{
+                                "id": "block-1",
+                                "type": "SINGLE_MCQ",
+                                "instruction": "Choose the correct answer",
+                                "stem": "What is the answer?",
+                                "options": [
+                                    {"id": "opt-1", "text": "Option A", "isCorrect": true},
+                                    {"id": "opt-2", "text": "Option B", "isCorrect": false}
+                                ]
+                            }]
+                        }]
+                    },
+                    "writing": {},
+                    "speaking": {}
                 }),
                 config_snapshot: json!({
                     "general": {"title": seeded.title},
-                    "sections": {"reading": {"enabled": true}}
+                    "sections": {
+                        "reading": {
+                            "enabled": true,
+                            "bandScoreTable": {"39": 9.0, "38": 8.5, "37": 8.0, "36": 7.5}
+                        },
+                        "listening": {"enabled": false},
+                        "writing": {"enabled": false},
+                        "speaking": {"enabled": false}
+                    }
                 }),
                 revision: seeded.revision,
             },
@@ -279,8 +300,8 @@ async fn get_validation_reports_publish_readiness_for_the_current_draft() {
             auth.with_auth(
                 Request::builder().uri(format!("/api/v1/exams/{}/validation", seeded.id)),
             )
-                .body(Body::empty())
-                .unwrap(),
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -336,9 +357,7 @@ async fn get_events_returns_exam_history_for_the_exam() {
     let app = build_router(app_state(database.pool().clone()));
     let response = app
         .oneshot(
-            auth.with_auth(
-                Request::builder().uri(format!("/api/v1/exams/{}/events", seeded.id)),
-            )
+            auth.with_auth(Request::builder().uri(format!("/api/v1/exams/{}/events", seeded.id)))
                 .body(Body::empty())
                 .unwrap(),
         )

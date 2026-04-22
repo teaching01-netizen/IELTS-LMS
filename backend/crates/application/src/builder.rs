@@ -4,12 +4,13 @@ use ielts_backend_domain::exam::{
     ExamVersion, PublishExamRequest, SaveDraftRequest, UpdateExamRequest, ValidationIssue,
 };
 use ielts_backend_infrastructure::{
-    actor_context::ActorContext,
-    authorization::AuthorizationService,
+    actor_context::ActorContext, authorization::AuthorizationService,
 };
 use sqlx::MySqlPool;
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::validation::validate_exam_content;
 
 #[derive(Error, Debug)]
 pub enum BuilderError {
@@ -97,7 +98,8 @@ impl BuilderService {
         } else if let Some(ref org_id) = ctx.organization_id {
             "SELECT * FROM exam_entities WHERE organization_id = ? ORDER BY updated_at DESC, created_at DESC"
         } else {
-            "SELECT * FROM exam_entities WHERE 1=0 ORDER BY updated_at DESC, created_at DESC" // No access
+            "SELECT * FROM exam_entities WHERE 1=0 ORDER BY updated_at DESC, created_at DESC"
+            // No access
         };
 
         let exams = if let Some(org_id) = ctx.organization_id.clone() {
@@ -217,7 +219,7 @@ impl BuilderService {
 
         // Get next version number - MySQL equivalent: use subquery with MAX
         let version_number: i32 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(version_number), 0) + 1 FROM exam_versions WHERE exam_id = ?"
+            "SELECT COALESCE(MAX(version_number), 0) + 1 FROM exam_versions WHERE exam_id = ?",
         )
         .bind(&exam_id)
         .fetch_one(&mut *tx)
@@ -484,6 +486,7 @@ impl BuilderService {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
 
+        // 1. Validate exam title
         if exam.title.trim().is_empty() {
             errors.push(ValidationIssue {
                 field: "title".to_owned(),
@@ -491,15 +494,21 @@ impl BuilderService {
             });
         }
 
+        // 2. Validate draft version exists
         let draft_version = if let Some(draft_version_id) = exam.current_draft_version_id {
             let version = self.get_version(ctx, draft_version_id).await?;
 
-            if version.content_snapshot.is_null()
-                || version
-                    .content_snapshot
-                    .as_object()
-                    .is_some_and(|value| value.is_empty())
-            {
+            // 3. Validate content and config snapshots
+            let content = &version.content_snapshot;
+            let config = &version.config_snapshot;
+
+            // Check for empty content/config (warnings)
+            if content.is_null() {
+                errors.push(ValidationIssue {
+                    field: "contentSnapshot".to_owned(),
+                    message: "Draft content is missing. Save a draft before publishing.".to_owned(),
+                });
+            } else if content.as_object().is_some_and(|value| value.is_empty()) {
                 warnings.push(ValidationIssue {
                     field: "contentSnapshot".to_owned(),
                     message: "Draft content is empty and should be reviewed before publishing."
@@ -507,18 +516,40 @@ impl BuilderService {
                 });
             }
 
-            if version.config_snapshot.is_null()
-                || version
-                    .config_snapshot
-                    .as_object()
-                    .is_some_and(|value| value.is_empty())
-            {
+            if config.is_null() {
+                errors.push(ValidationIssue {
+                    field: "configSnapshot".to_owned(),
+                    message: "Draft configuration is missing. Save a draft before publishing."
+                        .to_owned(),
+                });
+            } else if config.as_object().is_some_and(|value| value.is_empty()) {
                 warnings.push(ValidationIssue {
                     field: "configSnapshot".to_owned(),
                     message:
                         "Draft configuration is empty and should be reviewed before publishing."
                             .to_owned(),
                 });
+            }
+
+            // 4. Perform comprehensive content validation
+            if !content.is_null() && !config.is_null() {
+                let validation_result = validate_exam_content(content, config);
+
+                // Add validation errors
+                for error in validation_result.errors {
+                    errors.push(ValidationIssue {
+                        field: error.field,
+                        message: error.message,
+                    });
+                }
+
+                // Add validation warnings
+                for warning in validation_result.warnings {
+                    warnings.push(ValidationIssue {
+                        field: warning.field,
+                        message: warning.message,
+                    });
+                }
             }
 
             Some(version)

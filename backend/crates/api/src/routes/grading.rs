@@ -75,7 +75,7 @@ pub async fn get_submission(
     Path(submission_id): Path<Uuid>,
 ) -> Result<ApiResponse<SubmissionReviewBundle>, ApiError> {
     let schedule_id: Uuid = query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
-        .bind(submission_id)
+        .bind(submission_id.to_string())
         .fetch_optional(&state.db_pool())
         .await
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
@@ -100,8 +100,8 @@ pub async fn start_review(
     Path(submission_id): Path<Uuid>,
     Json(req): Json<StartReviewRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
-    let schedule_id: Uuid = query_scalar("SELECT schedule_id FROM student_submissions WHERE id = $1")
-        .bind(submission_id)
+    let schedule_id: Uuid = query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
+        .bind(submission_id.to_string())
         .fetch_optional(&state.db_pool())
         .await
         .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
@@ -127,9 +127,9 @@ pub async fn get_review_draft(
     Path(submission_id): Path<Uuid>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
     let schedule_id: Uuid = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = $1",
+        "SELECT schedule_id FROM student_submissions WHERE id = ?",
     )
-    .bind(submission_id)
+    .bind(submission_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
@@ -153,9 +153,9 @@ pub async fn save_review_draft(
     Json(req): Json<SaveReviewDraftRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
     let schedule_id: Uuid = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = $1",
+        "SELECT schedule_id FROM student_submissions WHERE id = ?",
     )
-    .bind(submission_id)
+    .bind(submission_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
@@ -183,9 +183,9 @@ pub async fn mark_grading_complete(
     Json(req): Json<ActorActionRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
     let schedule_id: Uuid = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = $1",
+        "SELECT schedule_id FROM student_submissions WHERE id = ?",
     )
-    .bind(submission_id)
+    .bind(submission_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
@@ -213,9 +213,9 @@ pub async fn mark_ready_to_release(
     Json(req): Json<ActorActionRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
     let schedule_id: Uuid = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = $1",
+        "SELECT schedule_id FROM student_submissions WHERE id = ?",
     )
-    .bind(submission_id)
+    .bind(submission_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
@@ -243,9 +243,9 @@ pub async fn release_now(
     Json(req): Json<ReleaseNowRequest>,
 ) -> Result<ApiResponse<StudentResult>, ApiError> {
     let schedule_id: Uuid = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = $1",
+        "SELECT schedule_id FROM student_submissions WHERE id = ?",
     )
-    .bind(submission_id)
+    .bind(submission_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
@@ -273,9 +273,9 @@ pub async fn schedule_release(
     Json(req): Json<ScheduleReleaseRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
     let schedule_id: Uuid = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = $1",
+        "SELECT schedule_id FROM student_submissions WHERE id = ?",
     )
-    .bind(submission_id)
+    .bind(submission_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
@@ -305,7 +305,7 @@ pub async fn reopen_review(
     let schedule_id: Uuid = query_scalar(
         "SELECT schedule_id FROM student_submissions WHERE id = ?",
     )
-    .bind(submission_id)
+    .bind(submission_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
@@ -335,11 +335,11 @@ pub async fn get_result_events(
         SELECT submissions.schedule_id
         FROM release_events events
         JOIN student_submissions submissions ON submissions.id = events.submission_id
-        WHERE events.result_id = $1
+        WHERE events.result_id = ?
         LIMIT 1
         "#,
     )
-    .bind(result_id)
+    .bind(result_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
     .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
@@ -391,7 +391,7 @@ async fn assigned_schedule_ids(
         r#"
         SELECT schedule_id
         FROM schedule_staff_assignments
-        WHERE user_id = $1
+        WHERE user_id = ?
           AND role = 'grader'
           AND revoked_at IS NULL
         "#,
