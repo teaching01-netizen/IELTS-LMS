@@ -524,15 +524,6 @@ export function QuestionRenderer({
                 }
               }}
             />
-            {diagramBlock.labels.map((label, index) => (
-              <span
-                key={label.id}
-                className="absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-blue-600 bg-white text-sm font-bold text-blue-700"
-                style={{ left: `${label.x}%`, top: `${label.y}%` }}
-              >
-                {number + index}
-              </span>
-            ))}
           </div>
         ) : (
           <div className="p-6 text-center text-sm text-gray-500">Add a diagram to support this question.</div>

@@ -163,12 +163,6 @@ function validateDiagramLabeling(block: DiagramLabelingBlock): ValidationError[]
     if (!label.correctAnswer || label.correctAnswer.trim() === '') {
       errors.push({ field: `label-${index}`, message: `Label ${index + 1} answer is required` });
     }
-    if (label.x < 0 || label.x > 100) {
-      errors.push({ field: `label-${index}-x`, message: `Label ${index + 1} X position must be between 0 and 100` });
-    }
-    if (label.y < 0 || label.y > 100) {
-      errors.push({ field: `label-${index}-y`, message: `Label ${index + 1} Y position must be between 0 and 100` });
-    }
   });
 
   return errors;

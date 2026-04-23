@@ -404,9 +404,6 @@ const validateDiagramLabelingBlock = (block: DiagramLabelingBlock): ValidationEr
     if (!label.correctAnswer.trim()) {
       errors.push({ blockId: block.id, field: `labels[${i}].correctAnswer`, message: `Label ${i + 1} has no answer`, type: 'error' });
     }
-    if (label.x < 0 || label.x > 100 || label.y < 0 || label.y > 100) {
-      errors.push({ blockId: block.id, field: `labels[${i}].position`, message: `Label ${i + 1} has invalid coordinates`, type: 'error' });
-    }
   });
   
   return errors;

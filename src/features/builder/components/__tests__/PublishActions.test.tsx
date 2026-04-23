@@ -26,95 +26,37 @@ describe('PublishActions', () => {
     exam: { title: 'Test Exam' }
   };
 
-  it('button is disabled when isPublishReady is false', () => {
+  it('not published + not scheduled: Schedule enabled and Publish disabled', () => {
     render(
       <PublishActions 
         {...defaultProps}
-        canPublish={false}
-        publishReadiness={{ ...mockPublishReadiness, canPublish: false }}
-      />
-    );
-
-    const publishButton = screen.getByRole('button', { name: /publish & schedule/i });
-    expect(publishButton).toBeDisabled();
-  });
-
-  it('button is enabled when isPublishReady is true', () => {
-    render(
-      <PublishActions 
-        {...defaultProps}
-        canPublish={true}
         publishReadiness={mockPublishReadiness}
       />
     );
 
-    const publishButton = screen.getByRole('button', { name: /publish & schedule/i }) as HTMLButtonElement;
-    expect(publishButton.disabled).toBe(false);
+    expect(screen.getByRole('button', { name: /^schedule$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^publish$/i })).toBeDisabled();
   });
 
-  it('tooltip shows missing prerequisites when disabled', () => {
+  it('not published + scheduled: Publish enabled and Reschedule shown', () => {
+    const onOpenSchedulingWorkflow = vi.fn();
     render(
       <PublishActions 
         {...defaultProps}
-        canPublish={false}
-        publishReadiness={{ 
-          ...mockPublishReadiness, 
-          canPublish: false,
-          errors: [{ field: 'title', message: 'Title required', severity: 'error' }]
-        }}
-      />
-    );
-
-    const publishButton = screen.getByRole('button', { name: /publish & schedule/i });
-    expect(publishButton.getAttribute('title')).toBeTruthy();
-  });
-
-  it('calls onPublish when button clicked', () => {
-    const onPublish = vi.fn();
-    render(
-      <PublishActions 
-        {...defaultProps}
-        canPublish={true}
         publishReadiness={mockPublishReadiness}
-        onPublish={onPublish}
+        scheduledTime="2026-04-20"
+        onOpenSchedulingWorkflow={onOpenSchedulingWorkflow}
       />
     );
 
-    const publishButton = screen.getByRole('button', { name: /publish & schedule/i });
-    fireEvent.click(publishButton);
-    
-    // The button opens the confirmation modal, not directly calls onPublish
-    // This is expected behavior
-  });
-
-  it('shows loading state during publish', () => {
-    render(
-      <PublishActions 
-        {...defaultProps}
-        canPublish={true}
-        publishReadiness={mockPublishReadiness}
-      />
-    );
-  });
-
-  it('has correct aria-labels for accessibility', () => {
-    render(
-      <PublishActions 
-        {...defaultProps}
-        canPublish={true}
-        publishReadiness={mockPublishReadiness}
-      />
-    );
-
-    const publishButton = screen.getByRole('button', { name: /publish & schedule/i });
-    expect(publishButton.getAttribute('aria-label')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^publish$/i })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /reschedule/i })).toBeTruthy();
   });
 
   it('shows success state after publish', () => {
     render(
       <PublishActions 
         {...defaultProps}
-        canPublish={true}
         publishReadiness={mockPublishReadiness}
         publishSuccess={{
           draftVersion: 3,
@@ -133,7 +75,6 @@ describe('PublishActions', () => {
     render(
       <PublishActions 
         {...defaultProps}
-        canPublish={true}
         publishReadiness={mockPublishReadiness}
         publishSuccess={{
           draftVersion: 3,
@@ -143,7 +84,7 @@ describe('PublishActions', () => {
       />
     );
 
-    const viewButton = screen.getByRole('button', { name: /view published version/i });
+    const viewButton = screen.getByRole('button', { name: /view published/i });
     expect(viewButton).toBeTruthy();
   });
 
@@ -151,7 +92,6 @@ describe('PublishActions', () => {
     render(
       <PublishActions 
         {...defaultProps}
-        canPublish={true}
         publishReadiness={mockPublishReadiness}
         publishSuccess={{
           draftVersion: 3,
@@ -168,7 +108,6 @@ describe('PublishActions', () => {
     render(
       <PublishActions
         {...defaultProps}
-        canPublish={true}
         publishReadiness={mockPublishReadiness}
         publishSuccess={{
           draftVersion: 3,
@@ -190,7 +129,6 @@ describe('PublishActions', () => {
     render(
       <PublishActions
         {...defaultProps}
-        canPublish={true}
         publishReadiness={mockPublishReadiness}
         onPublish={onPublish}
         publishSuccess={{
@@ -229,7 +167,6 @@ describe('PublishActions', () => {
     render(
       <PublishActions
         {...defaultProps}
-        canPublish={true}
         publishReadiness={mockPublishReadiness}
         publishSuccess={{
           draftVersion: 3,
@@ -257,11 +194,8 @@ describe('PublishActions', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /open scheduling workflow/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^schedule$/i }));
 
     expect(onOpenSchedulingWorkflow).toHaveBeenCalledTimes(1);
-    expect(
-      screen.getByText(/scheduling is managed in the real cohort scheduler/i),
-    ).toBeTruthy();
   });
 });

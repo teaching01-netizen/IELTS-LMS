@@ -102,6 +102,8 @@ export function PublishConfirmationModal({
   const modalTitle = mode === 'republish' ? 'Republish Exam' : 'Publish Exam';
   const confirmLabel = mode === 'republish' ? 'Confirm Republish' : 'Confirm Publish';
   const scheduleLabel = mode === 'republish' ? 'Reschedule' : 'Set Schedule';
+  const checklistTitle = mode === 'republish' ? 'Before republishing, confirm:' : 'Before publishing, confirm:';
+  const scheduleChecklistLabel = requireSchedule ? 'Exam is scheduled' : 'Exam is scheduled (optional)';
 
   return (
     <Dialog
@@ -143,7 +145,7 @@ export function PublishConfirmationModal({
     >
       <div className="space-y-4">
         <div>
-          <p className="text-sm font-medium text-gray-900 mb-3">Before publishing, confirm:</p>
+          <p className="text-sm font-medium text-gray-900 mb-3">{checklistTitle}</p>
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm">
               {prerequisites.validationPassed ? (
@@ -171,8 +173,14 @@ export function PublishConfirmationModal({
               ) : (
                 <Circle size={16} className="text-blue-400 flex-shrink-0" aria-hidden="true" />
               )}
-              <span className={prerequisites.isScheduled ? 'text-gray-700' : 'text-gray-400'}>
-                Exam is scheduled
+              <span
+                className={
+                  prerequisites.isScheduled || !requireSchedule
+                    ? 'text-gray-700'
+                    : 'text-gray-400'
+                }
+              >
+                {scheduleChecklistLabel}
               </span>
             </div>
           </div>

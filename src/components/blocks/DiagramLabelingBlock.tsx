@@ -34,7 +34,7 @@ export function DiagramLabelingBlock({ block, startNum, endNum, updateBlock, del
     updateBlock({ ...block, imageUrl });
   };
 
-  const updateLabel = (labelId: string, updates: { x?: number; y?: number; correctAnswer?: string }) => {
+  const updateLabel = (labelId: string, updates: { correctAnswer?: string }) => {
     const newLabels = block.labels.map(l =>
       l.id === labelId ? { ...l, ...updates } : l
     );
@@ -114,16 +114,6 @@ export function DiagramLabelingBlock({ block, startNum, endNum, updateBlock, del
                 }}
                 referrerPolicy="no-referrer"
               />
-              {block.labels.map((label, index) => (
-                <span
-                  key={label.id}
-                  className="absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-blue-600 bg-white text-sm font-bold text-blue-700"
-                  style={{ left: `${label.x}%`, top: `${label.y}%` }}
-                  title={`Label ${startNum + index} (${label.x}%, ${label.y}%)`}
-                >
-                  {startNum + index}
-                </span>
-              ))}
             </>
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 text-sm">
@@ -153,8 +143,6 @@ export function DiagramLabelingBlock({ block, startNum, endNum, updateBlock, del
           {block.labels.map((label, index) => (
             <div key={label.id} className="border rounded-md p-3 flex items-center gap-3">
               <span className="text-sm font-medium text-gray-700 w-16">{startNum + index}.</span>
-              <input type="number" value={label.x} onChange={(e) => updateLabel(label.id, { x: parseInt(e.target.value) || 0 })} className="w-16 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="X%" />
-              <input type="number" value={label.y} onChange={(e) => updateLabel(label.id, { y: parseInt(e.target.value) || 0 })} className="w-16 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Y%" />
               <input type="text" value={label.correctAnswer} onChange={(e) => updateLabel(label.id, { correctAnswer: e.target.value })} className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Answer..." />
               <button onClick={() => removeLabel(label.id)} className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
             </div>
