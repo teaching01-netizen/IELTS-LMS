@@ -724,7 +724,7 @@ impl SchedulingService {
             .await
             .map_err(|error| match error {
                 DeliveryError::Database(db) => SchedulingError::Database(db),
-                DeliveryError::Conflict(message)
+                DeliveryError::Conflict { message, .. }
                 | DeliveryError::Validation(message)
                 | DeliveryError::Internal(message) => SchedulingError::Validation(message),
                 DeliveryError::NotFound => SchedulingError::NotFound,

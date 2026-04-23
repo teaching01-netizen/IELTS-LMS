@@ -1,7 +1,7 @@
 import React from 'react';
 import { useParams } from 'react-router-dom';
-import { ScheduleSessionModal } from '../../../components/admin/ScheduleSessionModal';
-import { ExamVersionHistory } from '../../../components/admin/ExamVersionHistory';
+import { ScheduleSessionModal } from '@components/admin/ScheduleSessionModal';
+import { ExamVersionHistory } from '@components/admin/ExamVersionHistory';
 import { PublishActions } from '../components/PublishActions';
 import { ValidationSummary } from '../components/ValidationSummary';
 import { useReviewRouteController } from '../hooks/useReviewRouteController';

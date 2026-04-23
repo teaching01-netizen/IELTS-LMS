@@ -5,7 +5,7 @@ use axum::{
 };
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json;
+use serde_json::{self, Value};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -82,6 +82,8 @@ pub struct ApiError {
     pub status: StatusCode,
     pub code: String,
     pub message: String,
+    pub details: Option<Value>,
+    pub request_id: String,
 }
 
 impl ApiError {
@@ -90,7 +92,19 @@ impl ApiError {
             status,
             code: code.to_string(),
             message: message.to_string(),
+            details: None,
+            request_id: String::new(),
         }
+    }
+
+    pub fn with_details(mut self, details: Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+
+    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
+        self.request_id = request_id.into();
+        self
     }
 }
 
@@ -102,14 +116,18 @@ impl From<ApiError> for StatusCode {
 
 impl From<ApiError> for Response<axum::body::Body> {
     fn from(err: ApiError) -> Self {
+        let mut error = serde_json::Map::new();
+        error.insert("code".to_owned(), Value::String(err.code));
+        error.insert("message".to_owned(), Value::String(err.message));
+        if let Some(details) = err.details {
+            error.insert("details".to_owned(), details);
+        }
+
         let body = Json(serde_json::json!({
             "success": false,
-            "error": {
-                "code": err.code,
-                "message": err.message,
-            },
+            "error": Value::Object(error),
             "metadata": {
-                "requestId": "",
+                "requestId": err.request_id,
                 "timestamp": Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
             }
         }));

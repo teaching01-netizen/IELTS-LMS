@@ -14,6 +14,7 @@ import {
   hasAttemptCredential,
   ensureClientSessionIdForAttempt,
   mapBackendStudentAttempt,
+  refreshAttemptCredentialForAttempt,
   studentAttemptRepository,
 } from '@services/studentAttemptRepository';
 import { saveStudentAuditEvent } from '@services/studentAuditService';
@@ -58,6 +59,7 @@ interface StudentAttemptActions {
   setDeviceFingerprintHash: (hash: string) => Promise<void>;
   flushPending: () => Promise<boolean>;
   flushHeartbeatEvents: () => Promise<void>;
+  dismissDroppedMutationsBanner: () => Promise<void>;
 }
 
 interface StudentAttemptContextValue {
@@ -264,18 +266,24 @@ export function StudentAttemptProvider({
     }
 
     const timestamp = new Date().toISOString();
+    const payloadWithModule =
+      (mutationType === 'answer' || mutationType === 'flag' || mutationType === 'writing_answer') &&
+      payload['module'] === undefined
+        ? { ...payload, module: currentAttempt.currentModule }
+        : payload;
     const mutation: StudentAttemptMutation = {
       id: generateId('mutation'),
       attemptId: currentAttempt.id,
       scheduleId: currentAttempt.scheduleId,
       timestamp,
       type: mutationType,
-      payload,
+      payload: payloadWithModule,
     };
     const nextPendingMutations = coalescePendingMutations(pendingMutationsRef.current, mutation);
     setPendingMutations(nextPendingMutations);
 
-    const syncState: AttemptSyncState = navigator.onLine ? 'saving' : 'offline';
+    const syncState: AttemptSyncState =
+      patch.recovery?.syncState ?? (navigator.onLine ? 'saving' : 'offline');
     const nextAttempt = mergeAttempt(currentAttempt, {
       ...patch,
       recovery: {
@@ -324,14 +332,17 @@ export function StudentAttemptProvider({
       }
 
       if (!hasAttemptCredential(currentAttempt.scheduleId, currentAttempt.id)) {
-        const erroredAttempt = mergeAttempt(currentAttempt, {
-          recovery: {
-            syncState: 'error',
-            pendingMutationCount: pendingMutationsRef.current.length,
-          },
-        });
-        syncAttemptState(erroredAttempt);
-        return false;
+        const refreshed = await refreshAttemptCredentialForAttempt(currentAttempt).catch(() => false);
+        if (!refreshed) {
+          const erroredAttempt = mergeAttempt(currentAttempt, {
+            recovery: {
+              syncState: 'error',
+              pendingMutationCount: pendingMutationsRef.current.length,
+            },
+          });
+          syncAttemptState(erroredAttempt);
+          return false;
+        }
       }
 
       const savingAttempt = mergeAttempt(currentAttempt, {
@@ -356,7 +367,12 @@ export function StudentAttemptProvider({
         await studentAttemptRepository.clearPendingMutations(persistedAttempt.id);
         pendingMutationsRef.current = [];
         setPendingMutationCount(0);
-        syncAttemptState(persistedAttempt);
+        const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId(
+          persistedAttempt.scheduleId,
+        );
+        const refreshed =
+          cachedAttempts.find((candidate) => candidate.id === persistedAttempt.id) ?? persistedAttempt;
+        syncAttemptState(refreshed);
         return true;
       } catch {
         const erroredAttempt = mergeAttempt(savingAttempt, {
@@ -772,6 +788,25 @@ export function StudentAttemptProvider({
     await studentAttemptRepository.flushHeartbeatEvents(currentAttempt.id);
   }, []);
 
+  const dismissDroppedMutationsBanner = useCallback(async () => {
+    const currentAttempt = attemptRef.current;
+    if (!currentAttempt) {
+      return;
+    }
+
+    if (!currentAttempt.recovery.lastDroppedMutations) {
+      return;
+    }
+
+    const nextAttempt = mergeAttempt(currentAttempt, {
+      recovery: {
+        lastDroppedMutations: null,
+      },
+    });
+    syncAttemptState(nextAttempt);
+    await studentAttemptRepository.saveAttempt(nextAttempt).catch(() => {});
+  }, [syncAttemptState]);
+
   const value = useMemo<StudentAttemptContextValue>(() => ({
     state: {
       attempt,
@@ -794,6 +829,7 @@ export function StudentAttemptProvider({
       setDeviceFingerprintHash,
       flushPending,
       flushHeartbeatEvents,
+      dismissDroppedMutationsBanner,
     },
   }), [
     acknowledgeProctorWarning,
@@ -811,6 +847,7 @@ export function StudentAttemptProvider({
     submitAttempt,
     setDeviceFingerprintHash,
     flushHeartbeatEvents,
+    dismissDroppedMutationsBanner,
   ]);
 
   return (

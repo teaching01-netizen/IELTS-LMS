@@ -86,9 +86,13 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
     }
   }
 
-  const updateBlocks = (blocks: QuestionBlock[]) => {
+  const updateBlocks: React.Dispatch<React.SetStateAction<QuestionBlock[]>> = (value) => {
+    const currentBlocks =
+      state.listening.parts.find((part) => part.id === activePart.id)?.blocks ?? [];
+    const nextBlocks = typeof value === 'function' ? value(currentBlocks) : value;
+
     const newParts = state.listening.parts.map(p => 
-      p.id === activePart.id ? { ...p, blocks } : p
+      p.id === activePart.id ? { ...p, blocks: nextBlocks } : p
     );
     setState({ ...state, listening: { ...state.listening, parts: newParts } });
   };

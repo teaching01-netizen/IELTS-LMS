@@ -20,7 +20,10 @@ export function reconcileBuilderState(state: ExamState): ExamState {
     return state;
   }
 
-  const fallbackModule: ModuleType = enabledModules[0];
+  const fallbackModule = enabledModules[0];
+  if (!fallbackModule) {
+    return state;
+  }
   return {
     ...state,
     activeModule: fallbackModule,

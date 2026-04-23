@@ -487,7 +487,7 @@ impl ProctoringService {
                 .await
                 .map_err(|error| match error {
                     DeliveryError::Database(db) => ProctoringError::Database(db),
-                    DeliveryError::Conflict(message)
+                    DeliveryError::Conflict { message, .. }
                     | DeliveryError::Validation(message)
                     | DeliveryError::Internal(message) => ProctoringError::Validation(message),
                     DeliveryError::NotFound => ProctoringError::NotFound,
@@ -772,9 +772,9 @@ impl ProctoringService {
             .await
             .map_err(|error| match error {
                 DeliveryError::Database(db) => ProctoringError::Database(db),
-                DeliveryError::Conflict(message) | DeliveryError::Validation(message) | DeliveryError::Internal(message) => {
-                    ProctoringError::Validation(message)
-                }
+                DeliveryError::Conflict { message, .. }
+                | DeliveryError::Validation(message)
+                | DeliveryError::Internal(message) => ProctoringError::Validation(message),
                 DeliveryError::NotFound => ProctoringError::NotFound,
             })?;
 

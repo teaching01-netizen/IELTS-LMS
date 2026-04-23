@@ -11,8 +11,7 @@ export function TableLoadingSkeleton({ rows = 6 }: TableLoadingSkeletonProps) {
       <div className="space-y-2">
         {[...Array(rows)].map((_, index) => (
           <div
-            // eslint-disable-next-line react/no-array-index-key
-            key={index}
+            key={`row-${index}`}
             className="h-12 bg-gray-100 rounded animate-pulse"
             style={{ animationDelay: `${index * 0.06}s` }}
           />
@@ -21,4 +20,3 @@ export function TableLoadingSkeleton({ rows = 6 }: TableLoadingSkeletonProps) {
     </div>
   );
 }
-

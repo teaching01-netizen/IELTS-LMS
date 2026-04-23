@@ -62,28 +62,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
   };
 
   const currentTask = writingConfig.tasks.find(t => t.id === activeTaskId) || writingConfig.tasks[0];
-  if (!currentTask) {
-    return null;
-  }
   const currentText = writingAnswers[activeTaskId] || '';
-  const currentTaskContent = currentTask
-    ? getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id)
-    : null;
-  const currentPrompt = currentTaskContent?.prompt ?? '';
-  const minWords = currentTask.minWords || 150;
-  const currentChart = currentTaskContent?.chart;
-
-  const wordCount = currentText.trim() === '' ? 0 : currentText.replace(/<[^>]*>/g, '').trim().split(/\s+/).length;
-
-  const isWordCountMet = wordCount >= minWords;
-  const isWordCountWarning = wordCount > 0 && wordCount < minWords && wordCount >= minWords * 0.9;
-
-  // Word count guidance
-  const optimalMin = currentTask.optimalMin || Math.ceil(minWords * 1.1);
-  const optimalMax = currentTask.optimalMax || Math.ceil(minWords * 1.5);
-  const isOptimal = wordCount >= optimalMin && wordCount <= optimalMax;
-  const isOverLength = currentTask.maxWords && wordCount > currentTask.maxWords;
-  const overLengthWarning = currentTask.maxWords && wordCount > currentTask.maxWords * 0.9;
 
   useEffect(() => {
     if (currentQuestionId && currentQuestionId !== activeTaskId) {
@@ -164,6 +143,27 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
       editor.removeEventListener('keydown', handleKeydown);
     };
   }, [resolvedSessionId, resolvedStudentId]);
+
+  if (!currentTask) {
+    return null;
+  }
+
+  const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
+  const currentPrompt = currentTaskContent?.prompt ?? '';
+  const minWords = currentTask.minWords || 150;
+  const currentChart = currentTaskContent?.chart;
+
+  const wordCount = currentText.trim() === '' ? 0 : currentText.replace(/<[^>]*>/g, '').trim().split(/\s+/).length;
+
+  const isWordCountMet = wordCount >= minWords;
+  const isWordCountWarning = wordCount > 0 && wordCount < minWords && wordCount >= minWords * 0.9;
+
+  // Word count guidance
+  const optimalMin = currentTask.optimalMin || Math.ceil(minWords * 1.1);
+  const optimalMax = currentTask.optimalMax || Math.ceil(minWords * 1.5);
+  const isOptimal = wordCount >= optimalMin && wordCount <= optimalMax;
+  const isOverLength = currentTask.maxWords && wordCount > currentTask.maxWords;
+  const overLengthWarning = currentTask.maxWords && wordCount > currentTask.maxWords * 0.9;
 
   const resolvedTimeRemaining = timeRemaining ?? writingConfig.duration * 60;
 

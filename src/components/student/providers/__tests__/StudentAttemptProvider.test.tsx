@@ -2,6 +2,7 @@ import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultConfig } from '../../../../constants/examDefaults';
+import * as studentAttemptRepoModule from '../../../../services/studentAttemptRepository';
 import { studentAttemptRepository } from '../../../../services/studentAttemptRepository';
 import type { ExamState } from '../../../../types';
 import type { StudentAttempt, StudentAttemptMutation } from '../../../../types/studentAttempt';
@@ -120,6 +121,7 @@ describe('StudentAttemptProvider', () => {
     vi.spyOn(studentAttemptRepository, 'saveHeartbeatEvent').mockResolvedValue();
     vi.spyOn(studentAttemptRepository, 'getHeartbeatEvents').mockResolvedValue([]);
     vi.spyOn(studentAttemptRepository, 'getPendingMutations').mockResolvedValue([]);
+    vi.spyOn(studentAttemptRepoModule, 'refreshAttemptCredentialForAttempt').mockResolvedValue(false);
 
     Object.defineProperty(window.navigator, 'onLine', {
       configurable: true,
@@ -188,6 +190,18 @@ describe('StudentAttemptProvider', () => {
     });
 
     expect(result.current.state.lastPersistedAt).not.toBeNull();
+  });
+
+  it('preserves explicit sync state patches for network transitions', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      await result.current.actions.recordNetworkStatus('online', '2026-01-01T00:00:00.000Z');
+    });
+
+    expect(result.current.state.attempt?.recovery.syncState).toBe('syncing_reconnect');
+    vi.useRealTimers();
   });
 
   it('queues violation mutations with the full violations snapshot expected by the backend', async () => {
