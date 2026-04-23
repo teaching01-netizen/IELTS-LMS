@@ -4,7 +4,7 @@ import { MoreVertical, Plus, Trash2, GripVertical, Image as ImageIcon, ArrowUp, 
 import { MIN_HEIGHTS } from '../../constants/uiConstants';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
-import { normalizeImageUrl } from '../../utils/imageUrl';
+import { getImageUrlCandidates } from '../../utils/imageUrl';
 
 interface Props {
   block: QuestionBlock;
@@ -21,16 +21,19 @@ export const MapLabelingBlock: React.FC<Props> = ({ block, startNum, endNum, upd
   const [isDragging, setIsDragging] = useState(false);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [imageLoadError, setImageLoadError] = useState(false);
+  const [imageCandidateIndex, setImageCandidateIndex] = useState(0);
   const imageRef = useRef<HTMLDivElement>(null);
   
   const mapBlock = block as MapBlockType;
   const questions = mapBlock.questions || [];
-  const resolvedAssetUrl = normalizeImageUrl(mapBlock.assetUrl ?? '');
+  const imageCandidates = getImageUrlCandidates(mapBlock.assetUrl ?? '');
+  const resolvedAssetUrl = imageCandidates[imageCandidateIndex] ?? '';
   
   const getFieldError = (field: string) => errors.find(e => e.field.includes(field));
 
   useEffect(() => {
     setImageLoadError(false);
+    setImageCandidateIndex(0);
   }, [mapBlock.assetUrl]);
 
   const addHotspot = (x: number = 50, y: number = 50) => {
@@ -140,7 +143,16 @@ export const MapLabelingBlock: React.FC<Props> = ({ block, startNum, endNum, upd
 	              src={resolvedAssetUrl}
 	              alt="Map"
 	              className="w-full h-full object-contain pointer-events-none"
-	              onError={() => setImageLoadError(true)}
+	              onError={() => {
+	                setImageCandidateIndex((current) => {
+	                  const next = current + 1;
+	                  if (next < imageCandidates.length) {
+	                    return next;
+	                  }
+	                  setImageLoadError(true);
+	                  return current;
+	                });
+	              }}
 	              referrerPolicy="no-referrer"
 	            />
 	          ) : (

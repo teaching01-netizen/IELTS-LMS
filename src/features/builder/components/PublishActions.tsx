@@ -118,17 +118,41 @@ export function PublishActions({
                 aria-label="Publish notes"
               />
             </div>
-            <button
-              onClick={() => {
-                setConfirmMode('republish');
-                setShowConfirmModal(true);
-              }}
-              disabled={!canPublish}
-              className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none"
-              title={!canPublish ? tooltipText : 'Creates a new published version from the latest draft.'}
-            >
-              Republish (Latest Draft)
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setConfirmMode('republish');
+                  setShowConfirmModal(true);
+                }}
+                disabled={!isValidationPassed}
+                className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none"
+                title={
+                  !isValidationPassed
+                    ? 'Fix validation errors before republishing.'
+                    : 'Creates a new published version from the latest draft.'
+                }
+              >
+                Republish (Latest Draft)
+              </button>
+              <button
+                onClick={() => {
+                  if (usesSchedulingWorkflow) {
+                    onOpenSchedulingWorkflow?.();
+                    return;
+                  }
+                  setShowSchedule(true);
+                }}
+                className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-all duration-200 flex items-center justify-center gap-2"
+                aria-label={usesSchedulingWorkflow ? 'Open scheduling workflow' : 'Toggle schedule options'}
+              >
+                <Calendar size={16} aria-hidden="true" /> Reschedule
+              </button>
+            </div>
+            {!isValidationPassed && (
+              <p className="text-xs text-amber-900">
+                Republish is disabled until the current draft passes validation.
+              </p>
+            )}
           </div>
         )}
 

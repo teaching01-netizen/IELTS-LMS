@@ -101,6 +101,7 @@ export function PublishConfirmationModal({
 
   const modalTitle = mode === 'republish' ? 'Republish Exam' : 'Publish Exam';
   const confirmLabel = mode === 'republish' ? 'Confirm Republish' : 'Confirm Publish';
+  const scheduleLabel = mode === 'republish' ? 'Reschedule' : 'Set Schedule';
 
   return (
     <Dialog
@@ -110,7 +111,7 @@ export function PublishConfirmationModal({
       size="sm"
       footer={
         <>
-          {requireSchedule && !prerequisites.isScheduled && (
+          {(mode === 'republish' || (requireSchedule && !prerequisites.isScheduled)) && (
             <button
               onClick={() => {
                 onClose();
@@ -118,7 +119,7 @@ export function PublishConfirmationModal({
               }}
               className="px-4 py-2 text-sm font-semibold text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
             >
-              Set Schedule
+              {scheduleLabel}
             </button>
           )}
           <button

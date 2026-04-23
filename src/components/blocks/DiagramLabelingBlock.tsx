@@ -3,7 +3,7 @@ import { DiagramLabelingBlock as DiagramLabelingBlockType } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
-import { normalizeImageUrl } from '../../utils/imageUrl';
+import { getImageUrlCandidates } from '../../utils/imageUrl';
 
 interface DiagramLabelingBlockProps {
   block: DiagramLabelingBlockType;
@@ -17,10 +17,13 @@ interface DiagramLabelingBlockProps {
 
 export function DiagramLabelingBlock({ block, startNum, endNum, updateBlock, deleteBlock, moveBlock, errors = [] }: DiagramLabelingBlockProps) {
   const [imageLoadError, setImageLoadError] = useState(false);
-  const resolvedImageUrl = normalizeImageUrl(block.imageUrl ?? '');
+  const [imageCandidateIndex, setImageCandidateIndex] = useState(0);
+  const imageCandidates = getImageUrlCandidates(block.imageUrl ?? '');
+  const resolvedImageUrl = imageCandidates[imageCandidateIndex] ?? '';
 
   useEffect(() => {
     setImageLoadError(false);
+    setImageCandidateIndex(0);
   }, [block.imageUrl]);
 
   const updateInstruction = (instruction: string) => {
@@ -99,7 +102,16 @@ export function DiagramLabelingBlock({ block, startNum, endNum, updateBlock, del
                 src={resolvedImageUrl}
                 alt="Diagram preview"
                 className="h-auto w-full object-contain"
-                onError={() => setImageLoadError(true)}
+                onError={() => {
+                  setImageCandidateIndex((current) => {
+                    const next = current + 1;
+                    if (next < imageCandidates.length) {
+                      return next;
+                    }
+                    setImageLoadError(true);
+                    return current;
+                  });
+                }}
                 referrerPolicy="no-referrer"
               />
               {block.labels.map((label, index) => (

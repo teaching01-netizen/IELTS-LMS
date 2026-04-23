@@ -26,7 +26,7 @@ import {
 import { ProtectedInput } from './ProtectedInput';
 import { FormattedText } from './FormattedText';
 import { stripBoldMarkdown } from '../../utils/boldMarkdown';
-import { normalizeImageUrl } from '../../utils/imageUrl';
+import { getImageUrlCandidates } from '../../utils/imageUrl';
 
 interface QuestionRendererProps {
   question:
@@ -308,13 +308,25 @@ export function QuestionRenderer({
 
   const renderMap = (mapBlock: MapBlock, q: MapQuestion, num: number) => (
     <div className="flex flex-col gap-4">
-      {normalizeImageUrl(mapBlock.assetUrl ?? '') ? (
+      {getImageUrlCandidates(mapBlock.assetUrl ?? '')[0] ? (
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
           <img
-            src={normalizeImageUrl(mapBlock.assetUrl ?? '')}
+            src={getImageUrlCandidates(mapBlock.assetUrl ?? '')[0]}
             alt="Map reference"
             className="h-auto w-full object-contain"
             referrerPolicy="no-referrer"
+            data-candidate-index={0}
+            onError={(event) => {
+              const candidates = getImageUrlCandidates(mapBlock.assetUrl ?? '');
+              const img = event.currentTarget;
+              const currentIndex = Number(img.dataset['candidateIndex'] ?? '0');
+              const nextIndex = currentIndex + 1;
+              const nextSrc = candidates[nextIndex];
+              if (nextSrc) {
+                img.dataset['candidateIndex'] = String(nextIndex);
+                img.src = nextSrc;
+              }
+            }}
           />
         </div>
       ) : null}
@@ -492,13 +504,25 @@ export function QuestionRenderer({
   const renderDiagramLabeling = (diagramBlock: DiagramLabelingBlock) => (
     <div className="flex flex-col gap-4">
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-        {normalizeImageUrl(diagramBlock.imageUrl ?? '') ? (
+        {getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0] ? (
           <div className="relative">
             <img
-              src={normalizeImageUrl(diagramBlock.imageUrl ?? '')}
+              src={getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0]}
               alt="Diagram reference"
               className="h-auto w-full object-contain"
               referrerPolicy="no-referrer"
+              data-candidate-index={0}
+              onError={(event) => {
+                const candidates = getImageUrlCandidates(diagramBlock.imageUrl ?? '');
+                const img = event.currentTarget;
+                const currentIndex = Number(img.dataset['candidateIndex'] ?? '0');
+                const nextIndex = currentIndex + 1;
+                const nextSrc = candidates[nextIndex];
+                if (nextSrc) {
+                  img.dataset['candidateIndex'] = String(nextIndex);
+                  img.src = nextSrc;
+                }
+              }}
             />
             {diagramBlock.labels.map((label, index) => (
               <span
