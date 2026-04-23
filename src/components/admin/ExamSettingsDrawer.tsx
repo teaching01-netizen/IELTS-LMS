@@ -572,6 +572,44 @@ function ExamSettingsDrawerComponent({
                                 </div>
                               </div>
                             )}
+
+                            {m === 'listening' ? (
+                              <div className="space-y-4">
+                                <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                                      Candidate Audio Playback
+                                    </p>
+                                    <p className="mt-1 text-xs text-gray-500">
+                                      Turn off to disable the audio player for candidates (useful for test-day issues or accommodations).
+                                    </p>
+                                  </div>
+                                  <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                                    <input
+                                      type="checkbox"
+                                      checked={(config.sections.listening.audioPlaybackEnabled ?? true) === true}
+                                      onChange={(e) => updateSection('listening', { audioPlaybackEnabled: e.target.checked })}
+                                      className="sr-only peer"
+                                      aria-label="Enable listening audio playback"
+                                    />
+                                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                  </label>
+                                </div>
+
+                                <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+                                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
+                                    Staff Instructions (Listening)
+                                  </label>
+                                  <textarea
+                                    value={config.sections.listening.staffInstructions ?? ''}
+                                    onChange={(e) => updateSection('listening', { staffInstructions: e.target.value })}
+                                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-100"
+                                    rows={4}
+                                    placeholder="Optional message shown to candidates during the Listening section (e.g., 'Audio will be played by the invigilator. Do not use the on-screen controls.')"
+                                  />
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
                         )}
                       </div>

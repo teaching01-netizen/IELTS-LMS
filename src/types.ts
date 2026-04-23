@@ -487,6 +487,15 @@ export interface ModuleConfig {
 export interface ListeningConfig extends ModuleConfig {
   partCount: number;
   bandScoreTable: BandScoreTable;
+  /**
+   * When false, candidates will not be able to play the listening audio track.
+   * Defaults to true when omitted (backwards compatible with older exams).
+   */
+  audioPlaybackEnabled?: boolean | undefined;
+  /**
+   * Optional staff-authored instructions shown to candidates during Listening.
+   */
+  staffInstructions?: string | undefined;
 }
 
 export interface ReadingConfig extends ModuleConfig {

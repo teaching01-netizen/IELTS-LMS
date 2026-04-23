@@ -82,6 +82,18 @@ export function StudentFooter({
           const isActiveGroup = groupQuestions.some(
             (question) => question.id === currentQuestionId,
           );
+          const partNumber = index + 1;
+          const firstQuestionId = groupQuestions[0]?.id ?? null;
+          const groupAnsweredSlots = groupQuestions.reduce(
+            (count, question) => count + getAnsweredSlotCount(question, answers),
+            0,
+          );
+          const groupTotalSlots = groupQuestions.reduce(
+            (count, question) => count + (question.isMulti ? question.correctCount : 1),
+            0,
+          );
+          const groupProgressPct =
+            groupTotalSlots > 0 ? (groupAnsweredSlots / groupTotalSlots) * 100 : 0;
 
           return (
             <div
@@ -118,38 +130,35 @@ export function StudentFooter({
                   })}
                 </div>
               ) : (
-                <div className="flex items-center gap-1 md:gap-1.5">
+                <button
+                  type="button"
+                  disabled={!firstQuestionId}
+                  onClick={() => {
+                    if (firstQuestionId) {
+                      onNavigate(firstQuestionId);
+                    }
+                  }}
+                  aria-label={`Jump to Part ${partNumber}`}
+                  title={`Click to jump to Part ${partNumber}`}
+                  className="flex items-center gap-1 md:gap-1.5 rounded-sm px-1 py-0.5 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+                >
                   <div className="w-8 md:w-10 lg:w-12 h-1 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
                     <div
                       className="h-full bg-blue-800"
                       style={{
-                        width: `${
-                          (groupQuestions.reduce(
-                            (count, question) => count + getAnsweredSlotCount(question, answers),
-                            0,
-                          ) /
-                            groupQuestions.reduce(
-                              (count, question) =>
-                                count + (question.isMulti ? question.correctCount : 1),
-                              0,
-                            )) *
-                          100
-                        }%`,
+                        width: `${Math.max(0, Math.min(100, groupProgressPct))}%`,
                       }}
                     ></div>
                   </div>
-                  <span className="text-[7px] md:text-[8px] lg:text-[9px] font-bold text-gray-500">
-                    {groupQuestions.reduce(
-                      (count, question) => count + getAnsweredSlotCount(question, answers),
-                      0,
-                    )}
-                    /
-                    {groupQuestions.reduce(
-                      (count, question) => count + (question.isMulti ? question.correctCount : 1),
-                      0,
-                    )}
-                  </span>
-                </div>
+                  <div className="flex items-center gap-1 text-[7px] md:text-[8px] lg:text-[9px] font-bold text-gray-500">
+                    <span>
+                      {groupAnsweredSlots}/{groupTotalSlots}
+                    </span>
+                    <span className="underline decoration-dotted underline-offset-2">
+                      Part {partNumber}
+                    </span>
+                  </div>
+                </button>
               )}
               {index < passageGroups.length - 1 ? (
                 <div className="w-px h-3 md:h-4 lg:h-5 bg-gray-200 mx-0.5"></div>

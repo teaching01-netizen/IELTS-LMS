@@ -14,10 +14,24 @@ interface TableCompletionBlockProps {
   errors?: Array<{ field: string; message: string }>;
 }
 
+function normalizeTableRows(headers: string[], rows: string[][]) {
+  return rows.map((row) => {
+    if (row.length === headers.length) return row;
+    if (row.length > headers.length) return row.slice(0, headers.length);
+    return [...row, ...new Array(headers.length - row.length).fill('')];
+  });
+}
+
 export function TableCompletionBlock({ block, startNum, endNum, updateBlock, deleteBlock, moveBlock, errors = [] }: TableCompletionBlockProps) {
   const updateInstruction = (instruction: string) => {
     updateBlock({ ...block, instruction });
   };
+
+  React.useEffect(() => {
+    const needsNormalization = block.rows.some((row) => row.length !== block.headers.length);
+    if (!needsNormalization) return;
+    updateBlock({ ...block, rows: normalizeTableRows(block.headers, block.rows) });
+  }, [block, updateBlock]);
 
   const updateAnswerRule = (answerRule: AnswerRule) => {
     updateBlock({ ...block, answerRule });
@@ -29,6 +43,40 @@ export function TableCompletionBlock({ block, startNum, endNum, updateBlock, del
     updateBlock({ ...block, headers: newHeaders });
   };
 
+  const removeHeader = (index: number) => {
+    if (block.headers.length <= 2) return;
+
+    const nextHeaders = block.headers.filter((_, i) => i !== index);
+    const nextRows = normalizeTableRows(
+      nextHeaders,
+      block.rows.map((row) => row.filter((_, i) => i !== index)),
+    );
+    const nextCells = block.cells
+      .filter((cell) => cell.col !== index)
+      .map((cell) => (cell.col > index ? { ...cell, col: cell.col - 1 } : cell));
+
+    updateBlock({ ...block, headers: nextHeaders, rows: nextRows, cells: nextCells });
+  };
+
+  const updateRowCell = (rowIndex: number, cellIndex: number, value: string) => {
+    const nextRows = block.rows.map((row, rIdx) => {
+      if (rIdx !== rowIndex) return row;
+      return row.map((cellValue, cIdx) => (cIdx === cellIndex ? value : cellValue));
+    });
+    updateBlock({ ...block, rows: nextRows });
+  };
+
+  const removeRow = (rowIndex: number) => {
+    if (block.rows.length <= 1) return;
+
+    const nextRows = block.rows.filter((_, index) => index !== rowIndex);
+    const nextCells = block.cells
+      .filter((cell) => cell.row !== rowIndex)
+      .map((cell) => (cell.row > rowIndex ? { ...cell, row: cell.row - 1 } : cell));
+
+    updateBlock({ ...block, rows: nextRows, cells: nextCells });
+  };
+
   const updateCell = (cellId: string, updates: { correctAnswer?: string; row?: number; col?: number }) => {
     const newCells = block.cells.map(c =>
       c.id === cellId ? { ...c, ...updates } : c
@@ -37,7 +85,9 @@ export function TableCompletionBlock({ block, startNum, endNum, updateBlock, del
   };
 
   const addHeader = () => {
-    updateBlock({ ...block, headers: [...block.headers, ''] });
+    const nextHeaders = [...block.headers, ''];
+    const nextRows = normalizeTableRows(nextHeaders, block.rows);
+    updateBlock({ ...block, headers: nextHeaders, rows: nextRows });
   };
 
   const addRow = () => {
@@ -52,6 +102,10 @@ export function TableCompletionBlock({ block, startNum, endNum, updateBlock, del
       col: 0
     };
     updateBlock({ ...block, cells: [...block.cells, newCell] });
+  };
+
+  const removeCell = (cellId: string) => {
+    updateBlock({ ...block, cells: block.cells.filter((cell) => cell.id !== cellId) });
   };
 
   return (
@@ -96,15 +150,25 @@ export function TableCompletionBlock({ block, startNum, endNum, updateBlock, del
         </div>
         <div className="flex gap-2 mb-2">
           {block.headers.map((header, i) => (
-            <input
-              key={i}
-              type="text"
-              value={header}
-              onChange={(e) => updateHeader(i, e.target.value)}
-              onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateHeader(i, nextValue))}
-              className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
-              placeholder={`Column ${i + 1}`}
-            />
+            <div key={i} className="flex flex-1 items-center gap-1">
+              <input
+                type="text"
+                value={header}
+                onChange={(e) => updateHeader(i, e.target.value)}
+                onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateHeader(i, nextValue))}
+                className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
+                placeholder={`Column ${i + 1}`}
+              />
+              <button
+                type="button"
+                onClick={() => removeHeader(i)}
+                disabled={block.headers.length <= 2}
+                className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                title={block.headers.length <= 2 ? 'At least 2 columns are required' : 'Delete column'}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
           ))}
         </div>
       </div>
@@ -115,10 +179,27 @@ export function TableCompletionBlock({ block, startNum, endNum, updateBlock, del
           <button onClick={addRow} className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"><Plus size={14} /> Add Row</button>
         </div>
         {block.rows.map((row, rowIndex) => (
-          <div key={rowIndex} className="flex gap-2 mb-2">
+          <div key={rowIndex} className="flex gap-2 mb-2 items-center">
             {row.map((cell, cellIndex) => (
-              <input key={cellIndex} type="text" value={cell} className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm" placeholder={`Cell ${rowIndex + 1}-${cellIndex + 1}`} readOnly />
+              <input
+                key={cellIndex}
+                type="text"
+                value={cell}
+                onChange={(e) => updateRowCell(rowIndex, cellIndex, e.target.value)}
+                onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateRowCell(rowIndex, cellIndex, nextValue))}
+                className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
+                placeholder={`Cell ${rowIndex + 1}-${cellIndex + 1}`}
+              />
             ))}
+            <button
+              type="button"
+              onClick={() => removeRow(rowIndex)}
+              disabled={block.rows.length <= 1}
+              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+              title={block.rows.length <= 1 ? 'At least 1 row is required' : 'Delete row'}
+            >
+              <Trash2 size={14} />
+            </button>
           </div>
         ))}
       </div>
@@ -135,6 +216,14 @@ export function TableCompletionBlock({ block, startNum, endNum, updateBlock, del
               <input type="number" value={cell.row} onChange={(e) => updateCell(cell.id, { row: parseInt(e.target.value) || 0 })} className="w-16 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Row" />
               <input type="number" value={cell.col} onChange={(e) => updateCell(cell.id, { col: parseInt(e.target.value) || 0 })} className="w-16 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Col" />
               <input type="text" value={cell.correctAnswer} onChange={(e) => updateCell(cell.id, { correctAnswer: e.target.value })} className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Answer..." />
+              <button
+                type="button"
+                onClick={() => removeCell(cell.id)}
+                className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                title="Delete answer cell"
+              >
+                <Trash2 size={16} />
+              </button>
             </div>
           ))}
         </div>

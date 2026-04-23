@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { DiagramLabelingBlock as DiagramLabelingBlockType } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
@@ -15,6 +15,12 @@ interface DiagramLabelingBlockProps {
 }
 
 export function DiagramLabelingBlock({ block, startNum, endNum, updateBlock, deleteBlock, moveBlock, errors = [] }: DiagramLabelingBlockProps) {
+  const [imageLoadError, setImageLoadError] = useState(false);
+
+  useEffect(() => {
+    setImageLoadError(false);
+  }, [block.imageUrl]);
+
   const updateInstruction = (instruction: string) => {
     updateBlock({ ...block, instruction });
   };
@@ -79,6 +85,47 @@ export function DiagramLabelingBlock({ block, startNum, endNum, updateBlock, del
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-2">Diagram Image URL</label>
         <input type="text" value={block.imageUrl} onChange={(e) => updateImageUrl(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter image URL..." />
+      </div>
+
+      {/* Image Preview */}
+      <div className="mb-6">
+        <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Preview</div>
+        <div className="relative overflow-hidden rounded-md border border-gray-200 bg-gray-50" style={{ minHeight: 280 }}>
+          {block.imageUrl && !imageLoadError ? (
+            <>
+              <img
+                src={block.imageUrl}
+                alt="Diagram preview"
+                className="h-auto w-full object-contain"
+                onError={() => setImageLoadError(true)}
+              />
+              {block.labels.map((label, index) => (
+                <span
+                  key={label.id}
+                  className="absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-blue-600 bg-white text-sm font-bold text-blue-700"
+                  style={{ left: `${label.x}%`, top: `${label.y}%` }}
+                  title={`Label ${startNum + index} (${label.x}%, ${label.y}%)`}
+                >
+                  {startNum + index}
+                </span>
+              ))}
+            </>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 text-sm">
+              {block.imageUrl ? (
+                <>
+                  <p className="font-medium text-gray-700">Unable to load image</p>
+                  <p className="text-xs text-gray-400 mt-1">Check the URL above and try again.</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium text-gray-700">No image URL set</p>
+                  <p className="text-xs text-gray-400 mt-1">Paste a URL to preview the diagram.</p>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Labels */}

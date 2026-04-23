@@ -41,7 +41,10 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
       }) as React.CSSProperties,
     [leftWidth],
   );
-  const hasAudio = Boolean(activePart?.audioUrl);
+  const audioPlaybackEnabled = state.config.sections.listening.audioPlaybackEnabled ?? true;
+  const staffInstructions = (state.config.sections.listening.staffInstructions ?? '').trim();
+  const hasAudioSource = Boolean(activePart?.audioUrl);
+  const canPlayAudio = audioPlaybackEnabled && hasAudioSource;
 
   useEffect(() => {
     if (currentQuestionId && questionContainerRef.current) {
@@ -64,7 +67,7 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
   useEffect(() => {
     setIsPlaying(false);
     setProgress(0);
-  }, [activePart?.audioUrl]);
+  }, [activePart?.audioUrl, audioPlaybackEnabled]);
 
   const syncProgressFromAudio = () => {
     const audio = audioRef.current;
@@ -99,7 +102,7 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
 
   const togglePlayback = async () => {
     const audio = audioRef.current;
-    if (!audio) {
+    if (!audio || !canPlayAudio) {
       return;
     }
 
@@ -159,8 +162,15 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
       <div className="relative flex flex-1 flex-col overflow-hidden border-t border-gray-300 md:flex-row" style={splitPaneStyle}>
         <div className="h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12">
           <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePart.title}</h2>
-          
-          {activePart.audioUrl && (
+
+          {staffInstructions ? (
+            <div className="mb-4 md:mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-amber-800 mb-2">Staff Instructions</p>
+              <FormattedText as="div" className="text-sm md:text-base text-amber-900" text={staffInstructions} />
+            </div>
+          ) : null}
+
+          {canPlayAudio ? (
             <audio
               ref={audioRef}
               src={activePart.audioUrl}
@@ -170,16 +180,22 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
               onTimeUpdate={syncProgressFromAudio}
               onLoadedMetadata={syncProgressFromAudio}
             />
-          )}
+          ) : null}
           
           <div className="w-full bg-gray-50 rounded-xl p-4 md:p-6 border border-gray-200">
             <h2 className="font-semibold text-gray-800 mb-3 md:mb-4 text-base md:text-lg">Listening Audio Track</h2>
+
+            {!audioPlaybackEnabled ? (
+              <p className="mb-3 md:mb-4 text-xs md:text-sm text-gray-600">
+                Audio playback has been turned off by staff for this exam.
+              </p>
+            ) : null}
             
             <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
               <button 
                 type="button"
                 onClick={() => void togglePlayback()}
-                disabled={!hasAudio}
+                disabled={!canPlayAudio}
                 className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 shadow-md flex-shrink-0"
                 aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
               >
@@ -212,7 +228,7 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
                   onClick={() => adjustCurrentTime(-10)}
                   className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
                   title="Rewind 10s"
-                  disabled={!hasAudio}
+                  disabled={!canPlayAudio}
                   aria-label="Rewind 10 seconds"
                 >
                   <SkipBack size={14} />
@@ -222,7 +238,7 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
                   onClick={() => adjustCurrentTime(10)}
                   className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
                   title="Forward 10s"
-                  disabled={!hasAudio}
+                  disabled={!canPlayAudio}
                   aria-label="Forward 10 seconds"
                 >
                   <SkipForward size={14} />
@@ -239,6 +255,7 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
                   onChange={(e) => setVolume(Number.parseInt(e.target.value, 10))}
                   className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                   aria-label="Audio volume"
+                  disabled={!canPlayAudio}
                 />
               </div>
             </div>
