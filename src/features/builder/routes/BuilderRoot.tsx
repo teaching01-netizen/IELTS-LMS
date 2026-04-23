@@ -31,6 +31,7 @@ import {
   cloneListeningPartWithNewIds,
   cloneReadingPassageWithNewIds,
 } from '../../../utils/cloneExamContent';
+import { reconcileBuilderState } from '../utils/builderStateRecovery';
 
 const nowLabel = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -169,7 +170,7 @@ export function BuilderRoot() {
     handleArchive,
     handleOpenScheduling,
     handlePublish,
-    handleReturnToAdmin,
+    handleReturnToAdmin: navigateToAdmin,
     handleSaveDraft,
     handleSchedulePublish,
     handleUnpublish,
@@ -205,13 +206,18 @@ export function BuilderRoot() {
 
   useEffect(() => {
     if (state && examId && initializedExamId !== examId) {
-      history.reset(state, 'Loaded exam');
-      currentStateRef.current = state;
+      const recoveredState = reconcileBuilderState(state);
+      history.reset(recoveredState, 'Loaded exam');
+      currentStateRef.current = recoveredState;
       setInitializedExamId(examId);
     }
   }, [examId, history, initializedExamId, state]);
 
-  const currentState = history.state ?? state;
+  const historyState = history.state;
+  const currentState = useMemo(() => {
+    const rawState = historyState ?? state;
+    return rawState ? reconcileBuilderState(rawState) : null;
+  }, [historyState, state]);
 
   useEffect(() => {
     currentStateRef.current = currentState;
@@ -294,9 +300,10 @@ export function BuilderRoot() {
     }
 
     const resolvedState = typeof nextState === 'function' ? nextState(baseState) : nextState;
-    history.setState(resolvedState, label);
-    currentStateRef.current = resolvedState;
-    scheduleAutosave(resolvedState);
+    const recoveredState = reconcileBuilderState(resolvedState);
+    history.setState(recoveredState, label);
+    currentStateRef.current = recoveredState;
+    scheduleAutosave(recoveredState);
   };
 
   const handleUndo = () => {
@@ -334,7 +341,7 @@ export function BuilderRoot() {
   const saveDraftNow = async () => {
     const nextState = currentStateRef.current;
     if (!nextState) {
-      return;
+      return false;
     }
 
     if (debouncedAutosaveRef.current) {
@@ -348,7 +355,7 @@ export function BuilderRoot() {
     await saveRunnerRef.current?.idle();
 
     if (saveRunnerRef.current?.lastError) {
-      return;
+      return false;
     }
 
     pushToast({
@@ -357,16 +364,37 @@ export function BuilderRoot() {
       message: 'All changes saved.',
       timestamp: nowLabel(),
     });
+    return true;
   };
 
   const handleNavigateToConfig = () => {
     if (!examId) return;
-    navigate(`/builder/${examId}`);
+    void (async () => {
+      const saved = await saveDraftNow();
+      if (!saved) {
+        return;
+      }
+      navigate(`/builder/${examId}`);
+    })();
   };
 
-  const handleNavigateToReview = () => {
+  const handleNavigateToReview = async () => {
     if (!examId) return;
+    const saved = await saveDraftNow();
+    if (!saved) {
+      return;
+    }
     navigate(`/builder/${examId}/review`);
+  };
+
+  const handleReturnToAdmin = () => {
+    void (async () => {
+      const saved = await saveDraftNow();
+      if (!saved) {
+        return;
+      }
+      navigateToAdmin();
+    })();
   };
 
   const duplicateActiveLocation = () => {
@@ -650,7 +678,9 @@ export function BuilderRoot() {
           onUpdateState={(next) => updateBuilderState(next, 'Update exam header')}
           onReturnToAdmin={handleReturnToAdmin}
           onNavigateToConfig={handleNavigateToConfig}
-          onNavigateToReview={handleNavigateToReview}
+          onNavigateToReview={() => {
+            void handleNavigateToReview();
+          }}
           onSaveDraft={() => {
             void saveDraftNow();
           }}
@@ -665,7 +695,10 @@ export function BuilderRoot() {
           }
         />
         <div className="flex flex-1 min-w-0 overflow-hidden">
-          <Workspace state={currentState} setState={(next) => updateBuilderState(next, 'Update workspace')} />
+          <Workspace
+            state={currentState}
+            setState={(next) => updateBuilderState(next, 'Update workspace')}
+          />
           {isScoringOpen && (
             <ScoringAside
               state={currentState}

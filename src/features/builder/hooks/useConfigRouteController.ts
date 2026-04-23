@@ -20,8 +20,8 @@ export interface ConfigRouteController {
   config: ExamConfig | undefined;
   validation: ConfigValidationResult;
   handleUpdateConfig: (config: ExamConfig) => Promise<void>;
-  handleSaveConfig: () => Promise<void>;
-  handleNavigateToBuilder: () => void;
+  handleSaveConfig: () => Promise<boolean>;
+  handleNavigateToBuilder: () => Promise<void>;
   handleCancel: () => void;
   reload: () => Promise<void>;
 }
@@ -98,20 +98,20 @@ export function useConfigRouteController(
 
   const handleSaveConfig = useCallback(async () => {
     if (!examId || !config) {
-      return;
+      return false;
     }
 
     const entity = await examRepository.getExamById(examId);
     const versionId = entity?.currentDraftVersionId ?? entity?.currentPublishedVersionId;
     if (!versionId) {
       setError('Current draft version not found');
-      return;
+      return false;
     }
 
     const version = await examRepository.getVersionById(versionId);
     if (!version) {
       setError('Current draft version not found');
-      return;
+      return false;
     }
 
     const nextContent = hydrateExamState({
@@ -122,18 +122,23 @@ export function useConfigRouteController(
     const result = await examLifecycleService.saveDraft(examId, nextContent, 'System');
     if (!result.success) {
       setError(result.error ?? 'Failed to save draft');
-      return;
+      return false;
     }
 
     await loadExam();
+    return true;
   }, [examId, config, loadExam]);
 
-  const handleNavigateToBuilder = useCallback(() => {
+  const handleNavigateToBuilder = useCallback(async () => {
     if (!examId) {
       return;
     }
+    const saved = await handleSaveConfig();
+    if (!saved) {
+      return;
+    }
     navigate(`/builder/${examId}/builder`);
-  }, [examId, navigate]);
+  }, [examId, handleSaveConfig, navigate]);
 
   const handleCancel = useCallback(() => {
     navigate('/admin');

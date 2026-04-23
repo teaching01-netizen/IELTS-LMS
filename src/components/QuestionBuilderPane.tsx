@@ -28,6 +28,16 @@ interface BlockWithNumbers {
   endNum: number;
 }
 
+const INLINE_ADD_SUPPORTED_BLOCK_TYPES = new Set<QuestionType>([
+  'TFNG',
+  'CLOZE',
+  'MATCHING',
+  'MULTI_MCQ',
+  'SINGLE_MCQ',
+  'SHORT_ANSWER',
+  'SENTENCE_COMPLETION',
+]);
+
 export function QuestionBuilderPane({
   blocks,
   title,
@@ -576,15 +586,17 @@ export function QuestionBuilderPane({
         className={`cursor-pointer transition-all ${isSelected ? 'ring-2 ring-green-500 ring-offset-2' : 'hover:ring-2 hover:ring-gray-300 hover:ring-offset-1'}`}
       >
         {blockContent}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            handleAddQuestionToBlock(block.id);
-          }}
-          className="mt-3 w-full bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-2 rounded-sm text-xs font-medium flex items-center justify-center gap-1 transition-colors"
-        >
-          <Plus size={12} /> Add Question
-        </button>
+        {INLINE_ADD_SUPPORTED_BLOCK_TYPES.has(block.type) ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleAddQuestionToBlock(block.id);
+            }}
+            className="mt-3 w-full bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-2 rounded-sm text-xs font-medium flex items-center justify-center gap-1 transition-colors"
+          >
+            <Plus size={12} /> Add Question
+          </button>
+        ) : null}
       </div>
     );
   };
@@ -631,7 +643,9 @@ export function QuestionBuilderPane({
           </div>
         ) : (
           <div className="space-y-6">
-            {blocksWithNumbers.map(item => renderBlock(item))}
+            {blocksWithNumbers.map((item) => (
+              <React.Fragment key={item.block.id}>{renderBlock(item)}</React.Fragment>
+            ))}
           </div>
         )}
       </div>

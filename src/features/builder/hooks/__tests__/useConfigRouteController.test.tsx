@@ -150,4 +150,67 @@ describe('useConfigRouteController', () => {
 
     expect(result.current.error).toContain('Draft has been modified');
   });
+
+  it('saves config before navigating to the builder', async () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+    const currentState = createInitialExamState('Mock IELTS Exam', 'Academic');
+    currentState.config = config;
+
+    mockGetExamById.mockResolvedValue({
+      id: 'exam-1',
+      currentDraftVersionId: 'ver-1',
+    });
+    mockGetVersionById.mockResolvedValue({
+      id: 'ver-1',
+      configSnapshot: config,
+      contentSnapshot: currentState,
+    });
+    mockSaveDraft.mockResolvedValue({ success: true });
+
+    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.handleNavigateToBuilder();
+    });
+
+    expect(mockSaveDraft).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('/builder/exam-1/builder');
+    expect(mockSaveDraft.mock.invocationCallOrder[0]).toBeLessThan(
+      mockNavigate.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('blocks navigation when config save fails', async () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+    const currentState = createInitialExamState('Mock IELTS Exam', 'Academic');
+    currentState.config = config;
+
+    mockGetExamById.mockResolvedValue({
+      id: 'exam-1',
+      currentDraftVersionId: 'ver-1',
+    });
+    mockGetVersionById.mockResolvedValue({
+      id: 'ver-1',
+      configSnapshot: config,
+      contentSnapshot: currentState,
+    });
+    mockSaveDraft.mockResolvedValue({ success: false, error: 'Revision mismatch' });
+
+    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.handleNavigateToBuilder();
+    });
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(result.current.error).toContain('Revision mismatch');
+  });
 });

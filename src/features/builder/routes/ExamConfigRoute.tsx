@@ -98,7 +98,9 @@ export function ExamConfigRoute() {
                 Save Draft
               </button>
               <button
-                onClick={controller.handleNavigateToBuilder}
+                onClick={() => {
+                  void controller.handleNavigateToBuilder();
+                }}
                 className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md"
                 title="Proceed to the builder phase to add exam content."
               >
