@@ -213,4 +213,47 @@ describe('useConfigRouteController', () => {
     expect(mockNavigate).not.toHaveBeenCalled();
     expect(result.current.error).toContain('Revision mismatch');
   });
+
+  it('asks before canceling with unsaved changes', async () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+    const currentState = createInitialExamState('Mock IELTS Exam', 'Academic');
+    currentState.config = config;
+
+    mockGetExamById.mockResolvedValue({
+      id: 'exam-1',
+      currentDraftVersionId: 'ver-1',
+    });
+    mockGetVersionById.mockResolvedValue({
+      id: 'ver-1',
+      configSnapshot: config,
+      contentSnapshot: currentState,
+    });
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.handleUpdateConfig({
+        ...config,
+        general: {
+          ...config.general,
+          title: 'Edited title',
+        },
+      });
+    });
+
+    await act(async () => {
+      result.current.handleCancel();
+    });
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    confirmSpy.mockRestore();
+  });
 });

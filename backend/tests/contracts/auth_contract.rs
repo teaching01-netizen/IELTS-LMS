@@ -5,11 +5,19 @@ use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
 };
+use chrono::{Duration, TimeZone, Utc};
+use serde_json::json;
 use tower::ServiceExt;
 
 use ielts_backend_api::{router::build_router, state::AppState};
-use ielts_backend_domain::auth::{LoginRequest, PasswordResetRequest};
+use ielts_backend_application::{builder::BuilderService, scheduling::SchedulingService};
+use ielts_backend_domain::{
+    auth::{LoginRequest, PasswordResetRequest, StudentEntryRequest},
+    exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
+    schedule::CreateScheduleRequest,
+};
 use ielts_backend_infrastructure::config::AppConfig;
+use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 
 const AUTH_MIGRATIONS: &[&str] = &[
     "0001_roles.sql",
@@ -23,6 +31,185 @@ const AUTH_MIGRATIONS: &[&str] = &[
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
 ];
+
+#[tokio::test]
+async fn student_entry_locks_identity_on_student_name() {
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let schedule = seed_schedule_with_slug(database.pool(), "auth-student-entry-name-lock").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let schedule_id = schedule.id.clone();
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/student/entry")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.10")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentEntryRequest {
+                        schedule_id: schedule_id.clone(),
+                        wcode: "W123456".to_owned(),
+                        email: "alice@example.com".to_owned(),
+                        student_name: "Alice Candidate".to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/student/entry")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.10")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentEntryRequest {
+                        schedule_id: schedule_id.clone(),
+                        wcode: "W123456".to_owned(),
+                        email: "alice@example.com".to_owned(),
+                        student_name: "Mallory Candidate".to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(second.status(), StatusCode::CONFLICT);
+    let json = json_body(second).await;
+    assert_eq!(json["error"]["code"], "CONFLICT");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn student_entry_locks_identity_on_email_once_claimed() {
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let schedule = seed_schedule_with_slug(database.pool(), "auth-student-entry-email-lock").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let schedule_id = schedule.id.clone();
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/student/entry")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.11")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentEntryRequest {
+                        schedule_id: schedule_id.clone(),
+                        wcode: "W123456".to_owned(),
+                        email: "alice@example.com".to_owned(),
+                        student_name: "Alice Candidate".to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/student/entry")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.11")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentEntryRequest {
+                        schedule_id: schedule_id.clone(),
+                        wcode: "W123456".to_owned(),
+                        email: "mallory@example.com".to_owned(),
+                        student_name: "Alice Candidate".to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(second.status(), StatusCode::CONFLICT);
+    let json = json_body(second).await;
+    assert_eq!(json["error"]["code"], "CONFLICT");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn student_entry_is_rate_limited_per_ip() {
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let schedule = seed_schedule_with_slug(database.pool(), "auth-student-entry-rate-limit").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig {
+            rate_limit_student_entry_per_ip: 1,
+            rate_limit_student_entry_per_ip_window_secs: 60,
+            rate_limit_student_entry_per_schedule: 10_000,
+            ..AppConfig::default()
+        },
+        database.pool().clone(),
+    ));
+
+    let schedule_id = schedule.id.clone();
+    let request = StudentEntryRequest {
+        schedule_id: schedule_id.clone(),
+        wcode: "W123456".to_owned(),
+        email: "alice@example.com".to_owned(),
+        student_name: "Alice Candidate".to_owned(),
+    };
+
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/student/entry")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.12")
+                .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/student/entry")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.12")
+                .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    let json = json_body(second).await;
+    assert_eq!(json["error"]["code"], "RATE_LIMIT_EXCEEDED");
+
+    database.shutdown().await;
+}
 
 #[tokio::test]
 async fn login_returns_session_and_sets_secure_cookie() {
@@ -690,4 +877,92 @@ fn extract_set_cookie(
                 Some(value.to_owned())
             }
         })
+}
+
+async fn seed_schedule_with_slug(
+    pool: &sqlx::MySqlPool,
+    slug: &str,
+) -> ielts_backend_domain::schedule::ExamSchedule {
+    let actor = ActorContext::new(uuid::Uuid::new_v4().to_string(), ActorRole::Admin);
+    let builder_service = BuilderService::new(pool.clone());
+    let exam = builder_service
+        .create_exam(
+            &actor,
+            CreateExamRequest {
+                slug: slug.to_owned(),
+                title: format!("Auth Contract Exam ({slug})"),
+                exam_type: ExamType::Academic.as_str().to_owned(),
+                visibility: Visibility::Organization.as_str().to_owned(),
+                organization_id: Some("org-1".to_owned()),
+            },
+        )
+        .await
+        .expect("seed exam");
+    let exam_id = exam.id.clone();
+
+    builder_service
+        .save_draft(
+            &actor,
+            exam_id.clone(),
+            SaveDraftRequest {
+                content_snapshot: json!({
+                    "reading": {"passages": [{"id": "reading-1", "blocks": [{"type": "TFNG", "questions": [{"id": "r1"}]}]}]},
+                    "listening": {"parts": [{"id": "listening-1", "blocks": [{"type": "TFNG", "questions": [{"id": "q1"}]}]}]},
+                    "writing": {"tasks": [{"id": "writing-1"}]},
+                    "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
+                }),
+                config_snapshot: json!({
+                    "sections": {
+                        "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5},
+                        "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0},
+                        "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 10},
+                        "speaking": {"enabled": true, "label": "Speaking", "order": 4, "duration": 15, "gapAfterMinutes": 0}
+                    }
+                }),
+                revision: exam.revision,
+            },
+        )
+        .await
+        .expect("save draft");
+
+    let exam_after_draft = builder_service
+        .get_exam(
+            &actor,
+            exam_id.clone(),
+        )
+        .await
+        .expect("exam after draft");
+
+    let published_version = builder_service
+        .publish_exam(
+            &actor,
+            exam_id.clone(),
+            PublishExamRequest {
+                publish_notes: Some("ready".to_owned()),
+                revision: exam_after_draft.revision,
+            },
+        )
+        .await
+        .expect("publish exam");
+
+    let scheduling_service = SchedulingService::new(pool.clone());
+    let start_time = Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap();
+    let end_time = start_time + Duration::minutes(180);
+
+    scheduling_service
+        .create_schedule(
+            &actor,
+            CreateScheduleRequest {
+                exam_id,
+                published_version_id: published_version.id,
+                cohort_name: "Auth Contract".to_owned(),
+                institution: Some("IELTS Centre".to_owned()),
+                start_time,
+                end_time,
+                auto_start: false,
+                auto_stop: false,
+            },
+        )
+        .await
+        .expect("create schedule")
 }

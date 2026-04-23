@@ -31,7 +31,7 @@ import {
   cloneListeningPartWithNewIds,
   cloneReadingPassageWithNewIds,
 } from '../../../utils/cloneExamContent';
-import { reconcileBuilderState } from '../utils/builderStateRecovery';
+import { getBuilderStateRecoveryIssue, reconcileBuilderState } from '../utils/builderStateRecovery';
 
 const nowLabel = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -218,6 +218,11 @@ export function BuilderRoot() {
     const rawState = historyState ?? state;
     return rawState ? reconcileBuilderState(rawState) : null;
   }, [historyState, state]);
+  const builderRecoveryIssue = useMemo(
+    () => (currentState ? getBuilderStateRecoveryIssue(currentState) : null),
+    [currentState],
+  );
+  const canInteractWithBuilder = !!currentState && !builderRecoveryIssue;
 
   useEffect(() => {
     currentStateRef.current = currentState;
@@ -498,7 +503,7 @@ export function BuilderRoot() {
   };
 
   const commands = useMemo<CommandPaletteCommand[]>(() => {
-    if (!currentState) {
+    if (!currentState || builderRecoveryIssue) {
       return [];
     }
 
@@ -580,6 +585,7 @@ export function BuilderRoot() {
       },
     ];
   }, [
+    builderRecoveryIssue,
     currentState,
     handleRedo,
     history.redoStackLabels,
@@ -590,39 +596,39 @@ export function BuilderRoot() {
   useKeyboardShortcuts([
     {
       combo: 'mod+s',
-      enabled: !!currentState,
+      enabled: canInteractWithBuilder,
       handler: () => {
         void saveDraftNow();
       },
     },
     {
       combo: 'mod+z',
-      enabled: !!currentState,
+      enabled: canInteractWithBuilder,
       handler: handleUndo,
     },
     {
       combo: 'mod+shift+z',
-      enabled: !!currentState,
+      enabled: canInteractWithBuilder,
       handler: handleRedo,
     },
     {
       combo: 'mod+k',
-      enabled: !!currentState,
+      enabled: canInteractWithBuilder,
       handler: () => setIsPaletteOpen(true),
     },
     {
       combo: 'mod+f',
-      enabled: !!currentState,
+      enabled: canInteractWithBuilder,
       handler: () => setIsPaletteOpen(true),
     },
     {
       combo: 'mod+n',
-      enabled: !!currentState,
+      enabled: canInteractWithBuilder,
       handler: () => window.dispatchEvent(new Event('builder:add-question-block')),
     },
     {
       combo: 'mod+d',
-      enabled: !!currentState,
+      enabled: canInteractWithBuilder,
       handler: duplicateActiveLocation,
     },
   ]);
@@ -649,6 +655,17 @@ export function BuilderRoot() {
       <ErrorSurface
         title="Exam Not Found"
         description="The requested exam could not be loaded."
+        actionLabel="Return to Admin"
+        onAction={handleReturnToAdmin}
+      />
+    );
+  }
+
+  if (builderRecoveryIssue) {
+    return (
+      <ErrorSurface
+        title="Builder configuration unavailable"
+        description={builderRecoveryIssue}
         actionLabel="Return to Admin"
         onAction={handleReturnToAdmin}
       />

@@ -19,6 +19,9 @@ const STORAGE_KEY_ATTEMPTS = 'ielts_student_attempts_v1';
 const STORAGE_KEY_PENDING_MUTATIONS = 'ielts_student_attempt_pending_mutations_v1';
 const STORAGE_KEY_HEARTBEAT_EVENTS = 'ielts_student_attempt_heartbeat_events_v1';
 const STORAGE_KEY_ATTEMPT_CREDENTIALS = 'ielts_student_attempt_credentials_v1';
+const MAX_HEARTBEAT_EVENTS_PER_ATTEMPT = 200;
+const MAX_HEARTBEAT_FLUSH_EVENTS = 50;
+const MUTATION_BATCH_CHUNK_SIZE = 100;
 
 interface PendingAttemptMutationRecord {
   attemptId: string;
@@ -348,6 +351,8 @@ export interface IStudentAttemptRepository {
   clearPendingMutations(attemptId: string): Promise<void>;
   saveHeartbeatEvent(event: StudentHeartbeatEvent): Promise<void>;
   getHeartbeatEvents(attemptId: string): Promise<StudentHeartbeatEvent[]>;
+  deleteHeartbeatEvent(attemptId: string, eventId: string): Promise<void>;
+  flushHeartbeatEvents(attemptId: string): Promise<boolean>;
 }
 
 class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
@@ -518,7 +523,17 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
   async saveHeartbeatEvent(event: StudentHeartbeatEvent): Promise<void> {
     const events = this.getItem<StudentHeartbeatEvent>(STORAGE_KEY_HEARTBEAT_EVENTS);
     events.push(event);
-    this.setItem(STORAGE_KEY_HEARTBEAT_EVENTS, events);
+    const attemptEvents = events
+      .filter((candidate) => candidate.attemptId === event.attemptId)
+      .sort(
+        (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
+      );
+    const pruned =
+      attemptEvents.length > MAX_HEARTBEAT_EVENTS_PER_ATTEMPT
+        ? attemptEvents.slice(attemptEvents.length - MAX_HEARTBEAT_EVENTS_PER_ATTEMPT)
+        : attemptEvents;
+    const other = events.filter((candidate) => candidate.attemptId !== event.attemptId);
+    this.setItem(STORAGE_KEY_HEARTBEAT_EVENTS, [...other, ...pruned]);
   }
 
   async getHeartbeatEvents(attemptId: string): Promise<StudentHeartbeatEvent[]> {
@@ -526,6 +541,18 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     return events
       .filter((event) => event.attemptId === attemptId)
       .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+  }
+
+  async deleteHeartbeatEvent(attemptId: string, eventId: string): Promise<void> {
+    const events = this.getItem<StudentHeartbeatEvent>(STORAGE_KEY_HEARTBEAT_EVENTS);
+    this.setItem(
+      STORAGE_KEY_HEARTBEAT_EVENTS,
+      events.filter((event) => !(event.attemptId === attemptId && event.id === eventId)),
+    );
+  }
+
+  async flushHeartbeatEvents(_attemptId: string): Promise<boolean> {
+    return false;
   }
 }
 
@@ -630,37 +657,46 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 
     const clientSessionId = ensureClientSessionIdForAttempt(attempt);
     const watermarkKey = mutationWatermarkKey(attempt.id, clientSessionId);
-    const startingSeq = mutationSequenceWatermarks.get(watermarkKey) ?? 0;
+    let nextSeq = mutationSequenceWatermarks.get(watermarkKey) ?? 0;
+    let remainingMutations = [...pendingMutations];
     try {
-      const response = await this.postWithAttemptAuth<BackendMutationBatchResponse>(
-        attempt,
-        `/v1/student/sessions/${attempt.scheduleId}/mutations:batch`,
-        {
-          attemptId: attempt.id,
-          studentKey: attempt.studentKey,
-          clientSessionId,
-          mutations: pendingMutations.map((mutation, index) => ({
-            id: mutation.id,
-            seq: startingSeq + index + 1,
-            timestamp: mutation.timestamp,
-            mutationType: mutation.type,
-            payload: mutation.payload,
-          })),
-        },
-        undefined,
-      );
+      while (remainingMutations.length > 0) {
+        const chunk = remainingMutations.slice(0, MUTATION_BATCH_CHUNK_SIZE);
+        const response = await this.postWithAttemptAuth<BackendMutationBatchResponse>(
+          attempt,
+          `/v1/student/sessions/${attempt.scheduleId}/mutations:batch`,
+          {
+            attemptId: attempt.id,
+            studentKey: attempt.studentKey,
+            clientSessionId,
+            mutations: chunk.map((mutation, index) => ({
+              id: mutation.id,
+              seq: nextSeq + index + 1,
+              timestamp: mutation.timestamp,
+              mutationType: mutation.type,
+              payload: mutation.payload,
+            })),
+          },
+          undefined,
+        );
 
-      mutationSequenceWatermarks.set(watermarkKey, response.serverAcceptedThroughSeq);
-      storeAttemptCredential(attempt, response.refreshedAttemptCredential);
-      await this.cache.saveAttempt(
-        mergeStudentAttemptRecovery(mapBackendStudentAttempt(response.attempt), {
-          lastLocalMutationAt: attempt.recovery.lastLocalMutationAt,
-          lastPersistedAt: attempt.recovery.lastPersistedAt,
-          pendingMutationCount: pendingMutations.length,
-          serverAcceptedThroughSeq: response.serverAcceptedThroughSeq,
-          syncState: attempt.recovery.syncState,
-        }),
-      );
+        nextSeq = response.serverAcceptedThroughSeq;
+        mutationSequenceWatermarks.set(watermarkKey, response.serverAcceptedThroughSeq);
+        storeAttemptCredential(attempt, response.refreshedAttemptCredential);
+
+        remainingMutations = remainingMutations.slice(chunk.length);
+        await this.cache.savePendingMutations(attempt.id, remainingMutations);
+
+        await this.cache.saveAttempt(
+          mergeStudentAttemptRecovery(mapBackendStudentAttempt(response.attempt), {
+            lastLocalMutationAt: attempt.recovery.lastLocalMutationAt,
+            lastPersistedAt: attempt.recovery.lastPersistedAt,
+            pendingMutationCount: remainingMutations.length,
+            serverAcceptedThroughSeq: response.serverAcceptedThroughSeq,
+            syncState: attempt.recovery.syncState,
+          }),
+        );
+      }
     } catch (error) {
       const statusCode = (error as { statusCode?: number }).statusCode;
       const message = error instanceof Error ? error.message : '';
@@ -768,26 +804,79 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
       return;
     }
 
-    const response = await this.postWithAttemptAuth<BackendHeartbeatResponse>(
-      attempt,
-      `/v1/student/sessions/${event.scheduleId}/heartbeat`,
-      {
-        attemptId: event.attemptId,
-        studentKey: attempt.studentKey,
-        clientSessionId: ensureClientSessionIdForAttempt(attempt),
-        eventType: event.type,
-        payload: event.payload,
-        clientTimestamp: event.timestamp,
-      },
-      undefined,
-    );
+    try {
+      const response = await this.postWithAttemptAuth<BackendHeartbeatResponse>(
+        attempt,
+        `/v1/student/sessions/${event.scheduleId}/heartbeat`,
+        {
+          attemptId: event.attemptId,
+          studentKey: attempt.studentKey,
+          clientSessionId: ensureClientSessionIdForAttempt(attempt),
+          eventType: event.type,
+          payload: event.payload,
+          clientTimestamp: event.timestamp,
+        },
+        undefined,
+      );
 
-    storeAttemptCredential(attempt, response.refreshedAttemptCredential);
-    await this.cacheAttempt(mapBackendStudentAttempt(response.attempt));
+      storeAttemptCredential(attempt, response.refreshedAttemptCredential);
+      await this.cacheAttempt(mapBackendStudentAttempt(response.attempt));
+      await this.cache.deleteHeartbeatEvent(event.attemptId, event.id);
+    } catch {
+      // Keep the event in storage for replay on reconnect.
+    }
   }
 
   async getHeartbeatEvents(attemptId: string): Promise<StudentHeartbeatEvent[]> {
     return this.cache.getHeartbeatEvents(attemptId);
+  }
+
+  async deleteHeartbeatEvent(attemptId: string, eventId: string): Promise<void> {
+    await this.cache.deleteHeartbeatEvent(attemptId, eventId);
+  }
+
+  async flushHeartbeatEvents(attemptId: string): Promise<boolean> {
+    const attempts = await this.cache.getAllAttempts();
+    const attempt = attempts.find((candidate) => candidate.id === attemptId);
+    if (!attempt) {
+      return false;
+    }
+
+    if (!(await this.ensureAttemptCredential(attempt))) {
+      return false;
+    }
+
+    const events = await this.cache.getHeartbeatEvents(attemptId);
+    if (events.length === 0) {
+      return true;
+    }
+
+    const toFlush = events.slice(0, MAX_HEARTBEAT_FLUSH_EVENTS);
+    for (const event of toFlush) {
+      try {
+        const response = await this.postWithAttemptAuth<BackendHeartbeatResponse>(
+          attempt,
+          `/v1/student/sessions/${event.scheduleId}/heartbeat`,
+          {
+            attemptId: event.attemptId,
+            studentKey: attempt.studentKey,
+            clientSessionId: ensureClientSessionIdForAttempt(attempt),
+            eventType: event.type,
+            payload: event.payload,
+            clientTimestamp: event.timestamp,
+          },
+          undefined,
+        );
+
+        storeAttemptCredential(attempt, response.refreshedAttemptCredential);
+        await this.cacheAttempt(mapBackendStudentAttempt(response.attempt));
+        await this.cache.deleteHeartbeatEvent(event.attemptId, event.id);
+      } catch {
+        return false;
+      }
+    }
+
+    return true;
   }
 }
 

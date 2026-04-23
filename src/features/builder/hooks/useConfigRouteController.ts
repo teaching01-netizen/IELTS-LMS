@@ -35,6 +35,7 @@ export function useConfigRouteController(
   const [config, setConfig] = useState<ExamConfig | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
 
   const validation: ConfigValidationResult = {
     isValid: true,
@@ -70,6 +71,7 @@ export function useConfigRouteController(
       const currentVersion = await examRepository.getVersionById(versionId);
       if (currentVersion) {
         setConfig(currentVersion.configSnapshot);
+        setIsDirty(false);
       } else {
         setError('Current version not found');
       }
@@ -92,6 +94,7 @@ export function useConfigRouteController(
 
       const syncedConfig = syncConfigWithStandards(nextConfig);
       setConfig(syncedConfig);
+      setIsDirty(true);
     },
     [examId],
   );
@@ -125,6 +128,7 @@ export function useConfigRouteController(
       return false;
     }
 
+    setIsDirty(false);
     await loadExam();
     return true;
   }, [examId, config, loadExam]);
@@ -141,8 +145,11 @@ export function useConfigRouteController(
   }, [examId, handleSaveConfig, navigate]);
 
   const handleCancel = useCallback(() => {
+    if (isDirty && !window.confirm('You have unsaved changes. Leave without saving?')) {
+      return;
+    }
     navigate('/admin');
-  }, [navigate]);
+  }, [isDirty, navigate]);
 
   return {
     error,

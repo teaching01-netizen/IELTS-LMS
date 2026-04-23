@@ -272,6 +272,52 @@ pub async fn apply_mutation_batch(
             "Attempt credential does not match the schedule.",
         ));
     }
+
+    if req.mutations.len() > state.config.max_mutations_per_batch {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            &format!(
+                "Mutation batch exceeds the maximum of {} mutations.",
+                state.config.max_mutations_per_batch
+            ),
+        ));
+    }
+
+    for mutation in &req.mutations {
+        match mutation.mutation_type.as_str() {
+            "writing_answer" => {
+                if let Some(value) = mutation.payload.get("value").and_then(Value::as_str) {
+                    if value.chars().count() > state.config.max_writing_answer_chars {
+                        return Err(ApiError::new(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            "VALIDATION_ERROR",
+                            &format!(
+                                "Writing answers must be at most {} characters.",
+                                state.config.max_writing_answer_chars
+                            ),
+                        ));
+                    }
+                }
+            }
+            "answer" => {
+                if let Some(value) = mutation.payload.get("value").and_then(Value::as_str) {
+                    if value.chars().count() > state.config.max_text_answer_chars {
+                        return Err(ApiError::new(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            "VALIDATION_ERROR",
+                            &format!(
+                                "Text answers must be at most {} characters.",
+                                state.config.max_text_answer_chars
+                            ),
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     req.attempt_id = attempt_id.clone();
     req.client_session_id = claims_client_session_id;
     req.student_key = load_attempt_student_key(&state, &attempt_id)

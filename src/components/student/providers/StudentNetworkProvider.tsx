@@ -154,6 +154,7 @@ export function StudentNetworkProvider({
         return;
       }
 
+      await attemptActions.flushHeartbeatEvents().catch(() => {});
       runtimeActions.setBlockingReason(null);
       runtimeActions.setAttemptSyncState('saved');
     } finally {

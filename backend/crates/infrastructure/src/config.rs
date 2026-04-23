@@ -29,6 +29,10 @@ pub struct AppConfig {
     pub attempt_token_ttl_minutes: i64,
     pub websocket_connection_cap: usize,
     pub websocket_connections_per_user_cap: usize,
+    pub websocket_connections_per_schedule_cap: usize,
+    pub websocket_outbound_queue_cap: usize,
+    pub websocket_slow_client_disconnect_ms: u64,
+    pub websocket_write_timeout_ms: u64,
     // Rate limiting configurations
     pub rate_limit_login_per_ip: u32,
     pub rate_limit_login_per_ip_window_secs: u64,
@@ -36,6 +40,10 @@ pub struct AppConfig {
     pub rate_limit_login_per_account_window_secs: u64,
     pub rate_limit_password_reset_per_ip: u32,
     pub rate_limit_password_reset_per_ip_window_secs: u64,
+    pub rate_limit_student_entry_per_ip: u32,
+    pub rate_limit_student_entry_per_ip_window_secs: u64,
+    pub rate_limit_student_entry_per_schedule: u32,
+    pub rate_limit_student_entry_per_schedule_window_secs: u64,
     pub rate_limit_student_bootstrap_per_user: u32,
     pub rate_limit_student_bootstrap_per_user_window_secs: u64,
     pub rate_limit_mutation_per_attempt: u32,
@@ -48,6 +56,10 @@ pub struct AppConfig {
     pub rate_limit_submit_per_attempt_window_secs: u64,
     pub rate_limit_export_per_user: u32,
     pub rate_limit_export_per_user_window_secs: u64,
+    // Delivery request guardrails
+    pub max_mutations_per_batch: usize,
+    pub max_writing_answer_chars: usize,
+    pub max_text_answer_chars: usize,
     // Master key credentials
     pub master_key_enabled: bool,
     pub master_key_username: String,
@@ -162,6 +174,22 @@ impl AppConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.websocket_connections_per_user_cap),
+            websocket_connections_per_schedule_cap: env::var("WEBSOCKET_CONNECTIONS_PER_SCHEDULE_CAP")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.websocket_connections_per_schedule_cap),
+            websocket_outbound_queue_cap: env::var("WEBSOCKET_OUTBOUND_QUEUE_CAP")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.websocket_outbound_queue_cap),
+            websocket_slow_client_disconnect_ms: env::var("WEBSOCKET_SLOW_CLIENT_DISCONNECT_MS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.websocket_slow_client_disconnect_ms),
+            websocket_write_timeout_ms: env::var("WEBSOCKET_WRITE_TIMEOUT_MS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.websocket_write_timeout_ms),
             // Rate limiting env vars
             rate_limit_login_per_ip: env::var("RATE_LIMIT_LOGIN_PER_IP")
                 .ok()
@@ -187,6 +215,26 @@ impl AppConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_password_reset_per_ip_window_secs),
+            rate_limit_student_entry_per_ip: env::var("RATE_LIMIT_STUDENT_ENTRY_PER_IP")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.rate_limit_student_entry_per_ip),
+            rate_limit_student_entry_per_ip_window_secs: env::var(
+                "RATE_LIMIT_STUDENT_ENTRY_PER_IP_WINDOW_SECS",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.rate_limit_student_entry_per_ip_window_secs),
+            rate_limit_student_entry_per_schedule: env::var("RATE_LIMIT_STUDENT_ENTRY_PER_SCHEDULE")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.rate_limit_student_entry_per_schedule),
+            rate_limit_student_entry_per_schedule_window_secs: env::var(
+                "RATE_LIMIT_STUDENT_ENTRY_PER_SCHEDULE_WINDOW_SECS",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.rate_limit_student_entry_per_schedule_window_secs),
             rate_limit_student_bootstrap_per_user: env::var("RATE_LIMIT_STUDENT_BOOTSTRAP_PER_USER")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -235,6 +283,18 @@ impl AppConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_export_per_user_window_secs),
+            max_mutations_per_batch: env::var("MAX_MUTATIONS_PER_BATCH")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.max_mutations_per_batch),
+            max_writing_answer_chars: env::var("MAX_WRITING_ANSWER_CHARS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.max_writing_answer_chars),
+            max_text_answer_chars: env::var("MAX_TEXT_ANSWER_CHARS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.max_text_answer_chars),
             master_key_enabled: env::var("MASTER_KEY_ENABLED")
                 .ok()
                 .and_then(|value| parse_bool(&value))
@@ -290,6 +350,10 @@ impl Default for AppConfig {
             attempt_token_ttl_minutes: 15,
             websocket_connection_cap: 200,
             websocket_connections_per_user_cap: 5,
+            websocket_connections_per_schedule_cap: 100,
+            websocket_outbound_queue_cap: 16,
+            websocket_slow_client_disconnect_ms: 200,
+            websocket_write_timeout_ms: 200,
             // Rate limiting defaults based on spec recommendations
             rate_limit_login_per_ip: 10,
             rate_limit_login_per_ip_window_secs: 60,
@@ -297,6 +361,10 @@ impl Default for AppConfig {
             rate_limit_login_per_account_window_secs: 60,
             rate_limit_password_reset_per_ip: 3,
             rate_limit_password_reset_per_ip_window_secs: 300,
+            rate_limit_student_entry_per_ip: 30,
+            rate_limit_student_entry_per_ip_window_secs: 60,
+            rate_limit_student_entry_per_schedule: 600,
+            rate_limit_student_entry_per_schedule_window_secs: 600,
             rate_limit_student_bootstrap_per_user: 5,
             rate_limit_student_bootstrap_per_user_window_secs: 60,
             rate_limit_mutation_per_attempt: 100,
@@ -309,6 +377,9 @@ impl Default for AppConfig {
             rate_limit_submit_per_attempt_window_secs: 300,
             rate_limit_export_per_user: 3,
             rate_limit_export_per_user_window_secs: 300,
+            max_mutations_per_batch: 200,
+            max_writing_answer_chars: 50_000,
+            max_text_answer_chars: 512,
             master_key_enabled: false,
             master_key_username: "master".to_owned(),
             master_key_password: "".to_owned(),

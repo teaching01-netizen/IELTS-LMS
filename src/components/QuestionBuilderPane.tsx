@@ -28,6 +28,8 @@ interface BlockWithNumbers {
   endNum: number;
 }
 
+type UpdateBlocks = React.Dispatch<React.SetStateAction<QuestionBlock[]>>;
+
 const INLINE_ADD_SUPPORTED_BLOCK_TYPES = new Set<QuestionType>([
   'TFNG',
   'CLOZE',
@@ -47,7 +49,7 @@ export function QuestionBuilderPane({
 }: {
   blocks: QuestionBlock[];
   title: string;
-  updateBlocks: (blocks: QuestionBlock[]) => void;
+  updateBlocks: UpdateBlocks;
   startNumber?: number;
   errors?: Array<{ blockId: string; errors: Array<{ field: string; message: string }> }>;
 }) {
@@ -81,31 +83,36 @@ export function QuestionBuilderPane({
   }
 
   const updateBlock = (updatedBlock: QuestionBlock) => {
-    const newBlocks = blocks.map(b => b.id === updatedBlock.id ? updatedBlock : b);
-    updateBlocks(newBlocks);
+    updateBlocks((currentBlocks) =>
+      currentBlocks.map((block) => (block.id === updatedBlock.id ? updatedBlock : block)),
+    );
   };
 
   const deleteBlock = (blockId: string) => {
-    const newBlocks = blocks.filter(b => b.id !== blockId);
-    updateBlocks(newBlocks);
+    if (selectedBlockId === blockId) {
+      setSelectedBlockId(null);
+    }
+    updateBlocks((currentBlocks) => currentBlocks.filter((block) => block.id !== blockId));
   };
 
   const moveBlock = (blockId: string, direction: 'up' | 'down') => {
-    const index = blocks.findIndex(b => b.id === blockId);
-    if (index < 0) return;
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === blocks.length - 1) return;
+    updateBlocks((currentBlocks) => {
+      const index = currentBlocks.findIndex((block) => block.id === blockId);
+      if (index < 0) return currentBlocks;
+      if (direction === 'up' && index === 0) return currentBlocks;
+      if (direction === 'down' && index === currentBlocks.length - 1) return currentBlocks;
 
-    const newBlocks = [...blocks];
-    const swapIndex = direction === 'up' ? index - 1 : index + 1;
-    const currentBlock = newBlocks[index];
-    const swapBlock = newBlocks[swapIndex];
-    if (!currentBlock || !swapBlock) {
-      return;
-    }
-    newBlocks[index] = swapBlock;
-    newBlocks[swapIndex] = currentBlock;
-    updateBlocks(newBlocks);
+      const newBlocks = [...currentBlocks];
+      const swapIndex = direction === 'up' ? index - 1 : index + 1;
+      const currentBlock = newBlocks[index];
+      const swapBlock = newBlocks[swapIndex];
+      if (!currentBlock || !swapBlock) {
+        return currentBlocks;
+      }
+      newBlocks[index] = swapBlock;
+      newBlocks[swapIndex] = currentBlock;
+      return newBlocks;
+    });
   };
 
   const handleSelectQuestion = (item: QuestionBankItem) => {
@@ -114,7 +121,7 @@ export function QuestionBuilderPane({
 
   const handleAddQuestionFromBank = (item: QuestionBankItem) => {
     const newBlock = cloneQuestionBlockWithNewIds(item.block);
-    updateBlocks([...blocks, newBlock]);
+    updateBlocks((currentBlocks) => [...currentBlocks, newBlock]);
     questionBankService.incrementUsageCount(item.id);
     setSelectedQuestionItem(null);
     setShowQuestionBank(false);
@@ -122,7 +129,7 @@ export function QuestionBuilderPane({
 
   const handleAddQuestionFromDetail = (item: QuestionBankItem) => {
     const newBlock = cloneQuestionBlockWithNewIds(item.block);
-    updateBlocks([...blocks, newBlock]);
+    updateBlocks((currentBlocks) => [...currentBlocks, newBlock]);
     questionBankService.incrementUsageCount(item.id);
     setSelectedQuestionItem(null);
   };
@@ -134,7 +141,11 @@ export function QuestionBuilderPane({
     }
 
     const block = blocks.find(b => b.id === selectedBlockId);
-    if (!block) return;
+    if (!block) {
+      setSelectedBlockId(null);
+      alert('Please select a question block first by clicking on it.');
+      return;
+    }
 
     const metadata = {
       difficulty: 'medium' as const,
@@ -152,58 +163,74 @@ export function QuestionBuilderPane({
   };
 
   const handleAddQuestionToBlock = (blockId: string) => {
-    const block = blocks.find(b => b.id === blockId);
-    if (!block) return;
+    updateBlocks((currentBlocks) => {
+      const currentBlock = currentBlocks.find((block) => block.id === blockId);
+      if (!currentBlock) {
+        return currentBlocks;
+      }
 
-    let newBlock;
-    switch (block.type) {
-      case 'TFNG':
-        newBlock = {
-          ...block,
-          questions: [...(block as TFNGBlockType).questions, { id: createId('q'), statement: '', correctAnswer: 'T' as const }]
-        };
-        break;
-      case 'CLOZE':
-        newBlock = {
-          ...block,
-          questions: [...(block as ClozeBlockType).questions, { id: createId('q'), prompt: 'The ____ is important.', correctAnswer: '' }]
-        };
-        break;
-      case 'MATCHING':
-        newBlock = {
-          ...block,
-          headings: [...(block as MatchingBlockType).headings, { id: createId('h'), text: 'New Heading' }]
-        };
-        break;
-      case 'MULTI_MCQ':
-        newBlock = {
-          ...block,
-          options: [...(block as MultiMCQBlockType).options, { id: createId('opt'), text: 'New Option', isCorrect: false }]
-        };
-        break;
-      case 'SINGLE_MCQ':
-        newBlock = {
-          ...block,
-          options: [...(block as SingleMCQBlockType).options, { id: createId('opt'), text: 'New Option', isCorrect: false }]
-        };
-        break;
-      case 'SHORT_ANSWER':
-        newBlock = {
-          ...block,
-          questions: [...(block as ShortAnswerBlockType).questions, { id: createId('q'), prompt: '', correctAnswer: '', answerRule: 'ONE_WORD' as const }]
-        };
-        break;
-      case 'SENTENCE_COMPLETION':
-        newBlock = {
-          ...block,
-          questions: [...(block as SentenceCompletionBlockType).questions, { id: createId('q'), sentence: '', blanks: [], answerRule: 'ONE_WORD' as const }]
-        };
-        break;
-      default:
-        return;
-    }
+      let nextBlock: QuestionBlock | null = null;
+      switch (currentBlock.type) {
+        case 'TFNG':
+          nextBlock = {
+            ...currentBlock,
+            questions: [
+              ...(currentBlock as TFNGBlockType).questions,
+              { id: createId('q'), statement: '', correctAnswer: 'T' as const },
+            ],
+          };
+          break;
+        case 'CLOZE':
+          nextBlock = {
+            ...currentBlock,
+            questions: [
+              ...(currentBlock as ClozeBlockType).questions,
+              { id: createId('q'), prompt: 'The ____ is important.', correctAnswer: '' },
+            ],
+          };
+          break;
+        case 'MATCHING':
+          nextBlock = {
+            ...currentBlock,
+            headings: [...(currentBlock as MatchingBlockType).headings, { id: createId('h'), text: 'New Heading' }],
+          };
+          break;
+        case 'MULTI_MCQ':
+          nextBlock = {
+            ...currentBlock,
+            options: [...(currentBlock as MultiMCQBlockType).options, { id: createId('opt'), text: 'New Option', isCorrect: false }],
+          };
+          break;
+        case 'SINGLE_MCQ':
+          nextBlock = {
+            ...currentBlock,
+            options: [...(currentBlock as SingleMCQBlockType).options, { id: createId('opt'), text: 'New Option', isCorrect: false }],
+          };
+          break;
+        case 'SHORT_ANSWER':
+          nextBlock = {
+            ...currentBlock,
+            questions: [
+              ...(currentBlock as ShortAnswerBlockType).questions,
+              { id: createId('q'), prompt: '', correctAnswer: '', answerRule: 'ONE_WORD' as const },
+            ],
+          };
+          break;
+        case 'SENTENCE_COMPLETION':
+          nextBlock = {
+            ...currentBlock,
+            questions: [
+              ...(currentBlock as SentenceCompletionBlockType).questions,
+              { id: createId('q'), sentence: '', blanks: [], answerRule: 'ONE_WORD' as const },
+            ],
+          };
+          break;
+        default:
+          return currentBlocks;
+      }
 
-    updateBlock(newBlock);
+      return currentBlocks.map((block) => (block.id === blockId && nextBlock ? nextBlock : block));
+    });
   };
 
   const addBlock = (type: QuestionType) => {
@@ -347,7 +374,7 @@ export function QuestionBuilderPane({
         return;
     }
 
-    updateBlocks([...blocks, newBlock]);
+    updateBlocks((currentBlocks) => [...currentBlocks, newBlock]);
     setShowAddModal(false);
   };
 

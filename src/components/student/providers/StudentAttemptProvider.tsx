@@ -57,6 +57,7 @@ interface StudentAttemptActions {
   submitAttempt: () => Promise<boolean>;
   setDeviceFingerprintHash: (hash: string) => Promise<void>;
   flushPending: () => Promise<boolean>;
+  flushHeartbeatEvents: () => Promise<void>;
 }
 
 interface StudentAttemptContextValue {
@@ -762,6 +763,15 @@ export function StudentAttemptProvider({
     );
   }, [applyPatch]);
 
+  const flushHeartbeatEvents = useCallback(async () => {
+    const currentAttempt = attemptRef.current;
+    if (!currentAttempt) {
+      return;
+    }
+
+    await studentAttemptRepository.flushHeartbeatEvents(currentAttempt.id);
+  }, []);
+
   const value = useMemo<StudentAttemptContextValue>(() => ({
     state: {
       attempt,
@@ -783,6 +793,7 @@ export function StudentAttemptProvider({
       submitAttempt,
       setDeviceFingerprintHash,
       flushPending,
+      flushHeartbeatEvents,
     },
   }), [
     acknowledgeProctorWarning,
@@ -799,6 +810,7 @@ export function StudentAttemptProvider({
     recordPreCheckResult,
     submitAttempt,
     setDeviceFingerprintHash,
+    flushHeartbeatEvents,
   ]);
 
   return (

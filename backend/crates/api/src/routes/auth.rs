@@ -16,6 +16,7 @@ use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 use uuid::Uuid;
 
 use ielts_backend_infrastructure::rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult};
+use sqlx::FromRow;
 
 use crate::{
     http::{
@@ -266,7 +267,8 @@ pub async fn student_entry(
         )
     })?;
 
-    if req.wcode.trim().is_empty() {
+    let normalized_wcode = req.wcode.trim().to_ascii_uppercase();
+    if normalized_wcode.is_empty() {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "VALIDATION_ERROR",
@@ -290,12 +292,109 @@ pub async fn student_entry(
         ));
     }
 
+    // Rate limit student entry (unauthenticated)
+    let ip_key = ip_address(&headers)
+        .and_then(|value| value.parse::<std::net::IpAddr>().ok())
+        .map(RateLimitKey::Ip)
+        .unwrap_or_else(|| RateLimitKey::Custom("student_entry:unknown_ip".to_owned()));
+    let ip_config = RateLimitConfig::new(
+        state.config.rate_limit_student_entry_per_ip,
+        state.config.rate_limit_student_entry_per_ip_window_secs,
+    );
+    match state.rate_limiter.check_with_config(&ip_key, &ip_config).await {
+        RateLimitResult::Allowed { .. } => {}
+        RateLimitResult::Denied { retry_after } => {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "RATE_LIMIT_EXCEEDED",
+                &format!(
+                    "Too many check-in attempts. Retry after {} seconds.",
+                    retry_after.as_secs()
+                ),
+            ));
+        }
+    }
+
+    let schedule_key = RateLimitKey::Custom(format!("student_entry:schedule:{schedule_id}"));
+    let schedule_config = RateLimitConfig::new(
+        state.config.rate_limit_student_entry_per_schedule,
+        state.config.rate_limit_student_entry_per_schedule_window_secs,
+    );
+    match state
+        .rate_limiter
+        .check_with_config(&schedule_key, &schedule_config)
+        .await
+    {
+        RateLimitResult::Allowed { .. } => {}
+        RateLimitResult::Denied { retry_after } => {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "RATE_LIMIT_EXCEEDED",
+                &format!(
+                    "Too many check-ins for this schedule. Retry after {} seconds.",
+                    retry_after.as_secs()
+                ),
+            ));
+        }
+    }
+
+    #[derive(Debug, Clone, FromRow)]
+    struct RegistrationIdentityRow {
+        student_name: String,
+        student_email: Option<String>,
+    }
+
+    let existing_registration =
+        sqlx::query_as::<_, RegistrationIdentityRow>(
+            r#"
+            SELECT student_name, student_email
+            FROM schedule_registrations
+            WHERE schedule_id = ? AND wcode = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(schedule_id.to_string())
+        .bind(&normalized_wcode)
+        .fetch_optional(&state.db_pool())
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?;
+
+    let normalized_name = req.student_name.trim();
+    let normalized_email = req.email.trim().to_ascii_lowercase();
+    if let Some(existing) = existing_registration.as_ref() {
+        if existing.student_name.trim() != normalized_name {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "CONFLICT",
+                "Student identity is locked for this access code.",
+            ));
+        }
+        let stored_email = existing
+            .student_email
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        if !stored_email.is_empty() && stored_email != normalized_email {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "CONFLICT",
+                "Student identity is locked for this access code.",
+            ));
+        }
+    }
+
     let auth_service = AuthService::new(state.db_pool(), state.config.clone());
+    let authoritative_name = existing_registration
+        .as_ref()
+        .map(|value| value.student_name.clone())
+        .unwrap_or_else(|| normalized_name.to_owned());
     let issued = auth_service
         .student_entry(
             schedule_id,
-            req.wcode.clone(),
-            req.student_name.clone(),
+            normalized_wcode.clone(),
+            authoritative_name,
             user_agent(&headers),
             ip_address(&headers),
         )
@@ -317,9 +416,9 @@ pub async fn student_entry(
         .create_student_registration(
             &ctx,
             schedule_id,
-            req.wcode,
-            req.email,
-            req.student_name,
+            normalized_wcode,
+            req.email.trim().to_owned(),
+            normalized_name.to_owned(),
             user_id,
         )
         .await?;

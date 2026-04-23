@@ -264,7 +264,7 @@ describe('studentAttemptRepository backend mode', () => {
         ],
       }),
     );
-    expect(await studentAttemptRepository.getPendingMutations(attempt.id)).toEqual(mutations);
+    expect(await studentAttemptRepository.getPendingMutations(attempt.id)).toEqual([]);
 
     await studentAttemptRepository.clearPendingMutations(attempt.id);
     const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
@@ -667,12 +667,7 @@ describe('studentAttemptRepository backend mode', () => {
       expect.objectContaining({ method: 'POST' }),
     );
     const storedEvents = await studentAttemptRepository.getHeartbeatEvents(attempt.id);
-    expect(storedEvents).toEqual([
-      expect.objectContaining({
-        id: 'heartbeat-1',
-        type: 'heartbeat',
-      }),
-    ]);
+    expect(storedEvents).toEqual([]);
   });
 
   it('surfaces backend bootstrap failures instead of silently creating a local attempt', async () => {

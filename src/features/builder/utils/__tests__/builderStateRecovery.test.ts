@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialExamState } from '../../../../services/examAdapterService';
-import { reconcileBuilderState } from '../builderStateRecovery';
+import { getBuilderStateRecoveryIssue, reconcileBuilderState } from '../builderStateRecovery';
 
 describe('reconcileBuilderState', () => {
   it('switches to the first enabled module when the active one is disabled', () => {
@@ -16,7 +16,7 @@ describe('reconcileBuilderState', () => {
     expect(recovered.activeModule).toBe('writing');
   });
 
-  it('falls back to reading when no modules are enabled', () => {
+  it('does not fall back to reading when no modules are enabled', () => {
     const state = createInitialExamState('Exam', 'Academic');
     state.config.sections.reading.enabled = false;
     state.config.sections.listening.enabled = false;
@@ -26,6 +26,9 @@ describe('reconcileBuilderState', () => {
 
     const recovered = reconcileBuilderState(state);
 
-    expect(recovered.activeModule).toBe('reading');
+    expect(recovered.activeModule).toBe('speaking');
+    expect(getBuilderStateRecoveryIssue(recovered)).toBe(
+      'No builder modules are enabled in the current configuration.',
+    );
   });
 });

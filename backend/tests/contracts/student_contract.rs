@@ -201,6 +201,7 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
     ));
     let (bootstrap, client_session_id) =
         bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
     let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
     let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
         .as_str()
@@ -269,6 +270,7 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
     ));
     let (bootstrap, client_session_id) =
         bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
     let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
     let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
         .as_str()
@@ -767,6 +769,7 @@ async fn bootstrap_hydrates_existing_attempt_after_crash_reconnect() {
 
     let (bootstrap, client_session_id) =
         bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
     let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
     let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
         .as_str()
@@ -827,6 +830,7 @@ async fn mutation_batch_persists_writing_answers_separately_and_tracks_current_q
     ));
     let (bootstrap, client_session_id) =
         bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "writing").await;
     let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
     let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
         .as_str()
@@ -853,14 +857,7 @@ async fn mutation_batch_persists_writing_answers_separately_and_tracks_current_q
                                 seq: 1,
                                 timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
                                 mutation_type: "writing_answer".to_owned(),
-                                payload: json!({"taskId": "task-1", "value": "Draft 1"}),
-                            },
-                            ielts_backend_domain::attempt::MutationEnvelope {
-                                id: "mutation-2".to_owned(),
-                                seq: 2,
-                                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 5).unwrap(),
-                                mutation_type: "answer".to_owned(),
-                                payload: json!({"questionId": "q1", "value": "A"}),
+                                payload: json!({"taskId": "task1", "value": "Draft 1"}),
                             },
                         ],
                     })
@@ -873,9 +870,336 @@ async fn mutation_batch_persists_writing_answers_separately_and_tracks_current_q
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = json_body(response).await;
-    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task-1"], "Draft 1");
-    assert_eq!(json["data"]["attempt"]["answers"]["q1"], "A");
-    assert_eq!(json["data"]["attempt"]["currentQuestionId"], "q1");
+    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"], "Draft 1");
+    assert_eq!(json["data"]["attempt"]["answers"], json!({}));
+    assert_eq!(json["data"]["attempt"]["currentQuestionId"], "task1");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn mutation_batch_rejects_objective_mutations_outside_the_current_section() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "reading").await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // q1 is a listening question in the seeded content snapshot.
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id,
+                        student_key: student_key.clone(),
+                        client_session_id,
+                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
+                            id: "mutation-1".to_owned(),
+                            seq: 1,
+                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
+                            mutation_type: "answer".to_owned(),
+                            payload: json!({"questionId": "q1", "value": "A"}),
+                        }],
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let json = json_body(response).await;
+    assert_eq!(json["error"]["code"], "CONFLICT");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn mutation_batch_rejects_objective_mutations_when_proctor_paused_attempt() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    sqlx::query("UPDATE student_attempts SET proctor_status = 'paused' WHERE id = ?")
+        .bind(&attempt_id)
+        .execute(database.pool())
+        .await
+        .unwrap();
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id,
+                        student_key: student_key.clone(),
+                        client_session_id,
+                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
+                            id: "mutation-1".to_owned(),
+                            seq: 1,
+                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
+                            mutation_type: "answer".to_owned(),
+                            payload: json!({"questionId": "q1", "value": "A"}),
+                        }],
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let json = json_body(response).await;
+    assert_eq!(json["error"]["code"], "CONFLICT");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn violation_snapshot_is_append_only_and_client_cannot_erase_entries() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let first = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id: attempt_id.clone(),
+                        student_key: student_key.clone(),
+                        client_session_id: client_session_id.clone(),
+                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
+                            id: "mutation-1".to_owned(),
+                            seq: 1,
+                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
+                            mutation_type: "violation".to_owned(),
+                            payload: json!({
+                                "violations": [{
+                                    "id": "v1",
+                                    "timestamp": "2026-01-10T09:05:00Z",
+                                    "type": "TEST_VIOLATION"
+                                }]
+                            }),
+                        }],
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id,
+                        student_key: student_key.clone(),
+                        client_session_id,
+                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
+                            id: "mutation-2".to_owned(),
+                            seq: 2,
+                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 5).unwrap(),
+                            mutation_type: "violation".to_owned(),
+                            payload: json!({
+                                "violations": []
+                            }),
+                        }],
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let json = json_body(second).await;
+    assert_eq!(json["data"]["attempt"]["violationsSnapshot"].as_array().unwrap().len(), 1);
+    assert_eq!(json["data"]["attempt"]["violationsSnapshot"][0]["id"], "v1");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn position_mutation_is_telemetry_only_and_does_not_change_authoritative_state() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id,
+                        student_key: student_key.clone(),
+                        client_session_id,
+                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
+                            id: "mutation-1".to_owned(),
+                            seq: 1,
+                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
+                            mutation_type: "position".to_owned(),
+                            payload: json!({
+                                "phase": "post-exam",
+                                "currentModule": "writing",
+                                "currentQuestionId": "task1"
+                            }),
+                        }],
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+    assert_eq!(json["data"]["attempt"]["phase"], "exam");
+    assert_eq!(json["data"]["attempt"]["currentModule"], "listening");
+    assert_eq!(json["data"]["attempt"]["currentQuestionId"], serde_json::Value::Null);
+    assert_eq!(json["data"]["attempt"]["recovery"]["clientPosition"]["phase"], "post-exam");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn oversized_mutation_batch_is_rejected_fast() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let mutations: Vec<ielts_backend_domain::attempt::MutationEnvelope> = (0..201)
+        .map(|index| ielts_backend_domain::attempt::MutationEnvelope {
+            id: format!("mutation-{}", index + 1),
+            seq: (index + 1) as i64,
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
+            mutation_type: "violation".to_owned(),
+            payload: json!({"violations": []}),
+        })
+        .collect();
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id,
+                        student_key: student_key.clone(),
+                        client_session_id,
+                        mutations,
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
     database.shutdown().await;
 }
@@ -1065,8 +1389,8 @@ async fn seed_schedule_with_slug(
             exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
-                    "reading": {"passages": [{"id": "reading-1"}]},
-                    "listening": {"parts": [{"id": "listening-1"}]},
+                    "reading": {"passages": [{"id": "reading-1", "blocks": [{"type": "TFNG", "questions": [{"id": "r1"}]}]}]},
+                    "listening": {"parts": [{"id": "listening-1", "blocks": [{"type": "TFNG", "questions": [{"id": "q1"}]}]}]},
                     "writing": {"tasks": [{"id": "writing-1"}]},
                     "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
                 }),
@@ -1138,4 +1462,24 @@ fn student_key(schedule_id: Uuid, candidate_id: &str) -> String {
 
 fn contract_actor() -> ActorContext {
     ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin)
+}
+
+async fn start_runtime(pool: &sqlx::MySqlPool, schedule_id: Uuid, section_key: &str) {
+    sqlx::query(
+        r#"
+        UPDATE exam_session_runtimes
+        SET
+            status = 'live',
+            current_section_key = ?,
+            waiting_for_next_section = false,
+            actual_start_at = COALESCE(actual_start_at, NOW()),
+            updated_at = NOW()
+        WHERE schedule_id = ?
+        "#,
+    )
+    .bind(section_key)
+    .bind(schedule_id.to_string())
+    .execute(pool)
+    .await
+    .unwrap();
 }

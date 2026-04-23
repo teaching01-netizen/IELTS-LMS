@@ -63,43 +63,7 @@ export function PresenceIndicator({ proctorPresence, currentProctorId, currentPr
 
   const isCurrentUserPresent = activeProctors.some(p => p.proctorId === currentProctorId);
 
-  return (
-    <div className="flex items-center gap-2">
-      {activeProctors.length > 0 && (
-        <div className="flex -space-x-2">
-          {activeProctors.slice(0, 5).map(proctor => (
-            <div
-              key={proctor.proctorId}
-              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 ${
-                proctor.proctorId === currentProctorId
-                  ? 'bg-blue-600 text-white border-white'
-                  : 'bg-gray-200 text-gray-700 border-white'
-              }`}
-              title={`${proctor.proctorName} - Last seen ${formatTime(proctor.lastHeartbeat)}`}
-            >
-              {getInitials(proctor.proctorName)}
-            </div>
-          ))}
-          {activeProctors.length > 5 && (
-            <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-gray-300 text-gray-700 border-2 border-white">
-              +{activeProctors.length - 5}
-            </div>
-          )}
-        </div>
-      )}
-
-      {!isCurrentUserPresent && onJoin ? (
-        <button
-          type="button"
-          onClick={onJoin}
-          className="flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded-md text-xs font-medium hover:bg-blue-200 transition-colors"
-          title="Join session"
-        >
-          Join
-        </button>
-      ) : null}
-    </div>
-  );
+  return null;
 }
 
 interface CollisionWarningProps {

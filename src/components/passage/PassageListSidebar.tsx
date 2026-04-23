@@ -2,6 +2,7 @@ import React from 'react';
 import { GripVertical, Plus, Trash2, Edit, BookOpen } from 'lucide-react';
 import { Passage } from '../../types';
 import { Button } from '../ui/Button';
+import { countWords } from '../../utils/builderEnhancements';
 
 interface PassageListSidebarProps {
   passages: Passage[];
@@ -120,7 +121,7 @@ function PassageCard({
   onDrop,
   onDragEnd
 }: PassageCardProps) {
-  const wordCount = passage.wordCount || passage.content.split(/\s+/).length;
+  const wordCount = passage.wordCount ?? countWords(passage.content);
 
   return (
     <div

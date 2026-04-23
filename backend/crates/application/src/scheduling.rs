@@ -125,6 +125,10 @@ impl SchedulingService {
                 student_email = ?,
                 student_name = ?,
                 student_id = ?,
+                access_state = CASE
+                    WHEN access_state = 'invited' THEN 'checked_in'
+                    ELSE access_state
+                END,
                 user_id = ?,
                 actor_id = ?,
                 updated_at = NOW(),
@@ -863,6 +867,27 @@ impl SchedulingService {
                 || row.actor_id.as_deref() == Some(user_id_str.as_str());
 
             if same_user {
+                let existing_name = row.student_name.trim();
+                let requested_name = student_name.trim();
+                if !existing_name.is_empty() && existing_name != requested_name {
+                    return Err(SchedulingError::Conflict(
+                        "Student name is locked for this registration.".to_owned(),
+                    ));
+                }
+
+                let existing_email = row
+                    .student_email
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_ascii_lowercase();
+                let requested_email = email.trim().to_ascii_lowercase();
+                if !existing_email.is_empty() && existing_email != requested_email {
+                    return Err(SchedulingError::Conflict(
+                        "Email is locked for this registration.".to_owned(),
+                    ));
+                }
+
                 let updated = self
                     .update_registration_contact(
                         schedule_id,
@@ -890,7 +915,7 @@ impl SchedulingService {
                 id, schedule_id, user_id, actor_id, wcode, student_key, student_id, student_name, student_email,
                 access_state, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'invited', NOW(), NOW())
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', NOW(), NOW())
             "#
         )
         .bind(registration_id.to_string())
@@ -906,25 +931,13 @@ impl SchedulingService {
         .await;
 
         match inserted {
-            Ok(_) => Ok(ScheduleRegistration {
-                id: registration_id,
-                schedule_id,
-                wcode: wcode.clone(),
-                email: email.clone(),
-                student_key,
-                actor_id: Some(user_id_str),
-                student_id: wcode,
-                student_name,
-                access_state: "invited".to_string(),
-                allowed_from: None,
-                allowed_until: None,
-                extra_time_minutes: 0,
-                seat_label: None,
-                metadata: None,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-                revision: 0,
-            }),
+            Ok(_) => {
+                let row = self
+                    .load_registration_by_wcode(schedule_id, &wcode)
+                    .await?
+                    .ok_or(SchedulingError::NotFound)?;
+                Ok(row.into_domain())
+            }
             Err(err) if is_mysql_duplicate_key(&err) => {
                 // Raced with another request. If it's ours, treat as idempotent.
                 let Some(row) = self.load_registration_by_wcode(schedule_id, &wcode).await? else {
@@ -938,6 +951,27 @@ impl SchedulingService {
                     || row.actor_id.as_deref() == Some(user_id_str.as_str());
 
                 if same_user {
+                    let existing_name = row.student_name.trim();
+                    let requested_name = student_name.trim();
+                    if !existing_name.is_empty() && existing_name != requested_name {
+                        return Err(SchedulingError::Conflict(
+                            "Student name is locked for this registration.".to_owned(),
+                        ));
+                    }
+
+                    let existing_email = row
+                        .student_email
+                        .as_deref()
+                        .unwrap_or_default()
+                        .trim()
+                        .to_ascii_lowercase();
+                    let requested_email = email.trim().to_ascii_lowercase();
+                    if !existing_email.is_empty() && existing_email != requested_email {
+                        return Err(SchedulingError::Conflict(
+                            "Email is locked for this registration.".to_owned(),
+                        ));
+                    }
+
                     let updated = self
                         .update_registration_contact(
                             schedule_id,

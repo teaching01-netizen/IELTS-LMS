@@ -336,14 +336,22 @@ impl DeliveryService {
         }
 
         let runtime_gate = sqlx::query_as::<_, RuntimeGateRow>(
-            "SELECT status, actual_end_at FROM exam_session_runtimes WHERE schedule_id = ?",
+            "SELECT status, actual_end_at, current_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ?",
         )
         .bind(schedule_id.to_string())
         .fetch_optional(tx.as_mut())
         .await?;
-        let now = Utc::now();
+        let proctor_status: Option<String> = sqlx::query_scalar(
+            "SELECT proctor_status FROM student_attempts WHERE id = ?",
+        )
+        .bind(&req.attempt_id)
+        .fetch_optional(tx.as_mut())
+        .await?;
         let objective_mutations_allowed =
-            objective_mutations_allowed(runtime_gate.as_ref(), now);
+            objective_mutations_allowed(runtime_gate.as_ref(), proctor_status.as_deref());
+        let active_section_key = runtime_gate
+            .as_ref()
+            .and_then(|gate| gate.current_section_key.as_deref());
 
         let version = self.load_version(attempt.published_version_id.clone()).await?;
         let answer_schema = build_answer_schema(&version.content_snapshot)?;
@@ -363,9 +371,22 @@ impl DeliveryService {
         let mut writing_answers = attempt.writing_answers.clone();
         let mut flags = attempt.flags.clone();
         let mut violations_snapshot = attempt.violations_snapshot.clone();
-        let mut phase = attempt.phase.clone();
-        let mut current_module = attempt.current_module.clone();
+        let has_precheck = attempt
+            .integrity
+            .get("preCheck")
+            .and_then(|value| value.get("completedAt"))
+            .and_then(Value::as_str)
+            .is_some();
+        let mut phase = derive_authoritative_phase(
+            runtime_gate.as_ref(),
+            has_precheck,
+            attempt.submitted_at.is_some(),
+        );
+        let mut current_module = active_section_key
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| attempt.current_module.clone());
         let mut current_question_id = attempt.current_question_id.clone();
+        let mut recovery = attempt.recovery.clone();
 
         for mutation in &req.mutations {
             apply_mutation(
@@ -373,6 +394,7 @@ impl DeliveryService {
                 &answer_schema,
                 &writing_task_ids,
                 objective_mutations_allowed,
+                active_section_key,
                 &mut answers,
                 &mut writing_answers,
                 &mut flags,
@@ -380,6 +402,7 @@ impl DeliveryService {
                 &mut phase,
                 &mut current_module,
                 &mut current_question_id,
+                &mut recovery,
             )?;
         }
 
@@ -391,7 +414,7 @@ impl DeliveryService {
             .unwrap_or(existing_max_seq);
         let now = Utc::now();
         let recovery = merge_recovery(
-            attempt.recovery.clone(),
+            recovery,
             json!({
                 "lastPersistedAt": now,
                 "pendingMutationCount": 0,
@@ -1449,24 +1472,53 @@ fn validate_contiguous_sequences(
     Ok(())
 }
 
-const POST_END_OBJECTIVE_MUTATION_GRACE_SECONDS: i64 = 120;
-
 #[derive(sqlx::FromRow)]
 struct RuntimeGateRow {
     status: String,
     actual_end_at: Option<DateTime<Utc>>,
+    current_section_key: Option<String>,
+    waiting_for_next_section: bool,
 }
 
-fn objective_mutations_allowed(runtime: Option<&RuntimeGateRow>, now: DateTime<Utc>) -> bool {
+fn objective_mutations_allowed(runtime: Option<&RuntimeGateRow>, proctor_status: Option<&str>) -> bool {
+    let proctor_blocked = matches!(proctor_status, Some("paused" | "terminated"));
+    if proctor_blocked {
+        return false;
+    }
     let Some(runtime) = runtime else {
         return false;
     };
+    if runtime.waiting_for_next_section {
+        return false;
+    }
+    if runtime
+        .current_section_key
+        .as_deref()
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true)
+    {
+        return false;
+    }
     match runtime.status.as_str() {
         "live" | "paused" => true,
-        "completed" => runtime.actual_end_at.is_some_and(|end| {
-            now <= end + chrono::Duration::seconds(POST_END_OBJECTIVE_MUTATION_GRACE_SECONDS)
-        }),
         _ => false,
+    }
+}
+
+fn derive_authoritative_phase(
+    runtime_gate: Option<&RuntimeGateRow>,
+    has_precheck: bool,
+    submitted: bool,
+) -> String {
+    if submitted {
+        return "post-exam".to_owned();
+    }
+
+    match runtime_gate.map(|gate| gate.status.as_str()) {
+        Some("live" | "paused") => "exam".to_owned(),
+        Some("completed" | "cancelled") => "post-exam".to_owned(),
+        _ if has_precheck => "lobby".to_owned(),
+        _ => "pre-check".to_owned(),
     }
 }
 
@@ -1482,6 +1534,7 @@ enum AnswerConstraint {
 #[derive(Debug, Clone)]
 struct AnswerSchema {
     constraints: HashMap<String, AnswerConstraint>,
+    sections: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1567,6 +1620,7 @@ fn build_writing_task_ids(config_snapshot: &Value) -> HashSet<String> {
 
 fn build_answer_schema(content_snapshot: &Value) -> Result<AnswerSchema, DeliveryError> {
     let mut constraints: HashMap<String, AnswerConstraint> = HashMap::new();
+    let mut sections: HashMap<String, String> = HashMap::new();
 
     if let Some(passages) = content_snapshot
         .get("reading")
@@ -1576,7 +1630,7 @@ fn build_answer_schema(content_snapshot: &Value) -> Result<AnswerSchema, Deliver
         for passage in passages {
             if let Some(blocks) = passage.get("blocks").and_then(Value::as_array) {
                 for block in blocks {
-                    index_block(block, &mut constraints)?;
+                    index_block(block, "reading", &mut constraints, &mut sections)?;
                 }
             }
         }
@@ -1590,18 +1644,20 @@ fn build_answer_schema(content_snapshot: &Value) -> Result<AnswerSchema, Deliver
         for part in parts {
             if let Some(blocks) = part.get("blocks").and_then(Value::as_array) {
                 for block in blocks {
-                    index_block(block, &mut constraints)?;
+                    index_block(block, "listening", &mut constraints, &mut sections)?;
                 }
             }
         }
     }
 
-    Ok(AnswerSchema { constraints })
+    Ok(AnswerSchema { constraints, sections })
 }
 
 fn index_block(
     block: &Value,
+    section_key: &str,
     constraints: &mut HashMap<String, AnswerConstraint>,
+    sections: &mut HashMap<String, String>,
 ) -> Result<(), DeliveryError> {
     let Some(block_type) = block.get("type").and_then(Value::as_str) else {
         return Ok(());
@@ -1647,6 +1703,7 @@ fn index_block(
                     _ => AnswerConstraint::Text,
                 };
                 constraints.insert(id.to_owned(), constraint);
+                register_section(sections, id, section_key)?;
             }
         }
         "SENTENCE_COMPLETION" | "NOTE_COMPLETION" => {
@@ -1666,6 +1723,7 @@ fn index_block(
                     id.to_owned(),
                     AnswerConstraint::ArrayText { max_len },
                 );
+                register_section(sections, id, section_key)?;
             }
         }
         "MULTI_MCQ" => {
@@ -1682,6 +1740,7 @@ fn index_block(
                     }
                 }
             }
+            register_section(sections, &block_id, section_key)?;
             constraints.insert(
                 block_id,
                 AnswerConstraint::MultiChoice {
@@ -1700,6 +1759,7 @@ fn index_block(
                     }
                 }
             }
+            register_section(sections, &block_id, section_key)?;
             constraints.insert(block_id, AnswerConstraint::Enum(allowed));
         }
         "DIAGRAM_LABELING" => {
@@ -1709,6 +1769,7 @@ fn index_block(
                 .and_then(Value::as_array)
                 .map(|value| value.len())
                 .unwrap_or(0);
+            register_section(sections, &block_id, section_key)?;
             constraints.insert(block_id, AnswerConstraint::ArrayText { max_len });
         }
         "FLOW_CHART" => {
@@ -1718,6 +1779,7 @@ fn index_block(
                 .and_then(Value::as_array)
                 .map(|value| value.len())
                 .unwrap_or(0);
+            register_section(sections, &block_id, section_key)?;
             constraints.insert(block_id, AnswerConstraint::ArrayText { max_len });
         }
         "TABLE_COMPLETION" => {
@@ -1727,6 +1789,7 @@ fn index_block(
                 .and_then(Value::as_array)
                 .map(|value| value.len())
                 .unwrap_or(0);
+            register_section(sections, &block_id, section_key)?;
             constraints.insert(block_id, AnswerConstraint::ArrayText { max_len });
         }
         "CLASSIFICATION" => {
@@ -1742,6 +1805,7 @@ fn index_block(
                     allowed.insert(category.to_owned());
                 }
             }
+            register_section(sections, &block_id, section_key)?;
             constraints.insert(
                 block_id,
                 AnswerConstraint::EnumArray { allowed, max_len },
@@ -1760,6 +1824,7 @@ fn index_block(
                     allowed.insert(option.to_owned());
                 }
             }
+            register_section(sections, &block_id, section_key)?;
             constraints.insert(
                 block_id,
                 AnswerConstraint::EnumArray { allowed, max_len },
@@ -1769,6 +1834,24 @@ fn index_block(
     }
 
     Ok(())
+}
+
+fn register_section(
+    sections: &mut HashMap<String, String>,
+    key: &str,
+    section_key: &str,
+) -> Result<(), DeliveryError> {
+    let Some(existing) = sections.insert(key.to_owned(), section_key.to_owned()) else {
+        return Ok(());
+    };
+
+    if existing == section_key {
+        return Ok(());
+    }
+
+    Err(DeliveryError::Validation(
+        "Question identifiers must be unique across sections.".to_owned(),
+    ))
 }
 
 fn validate_answer_value(constraint: &AnswerConstraint, value: &Value) -> Result<(), DeliveryError> {
@@ -1886,13 +1969,15 @@ fn apply_mutation(
     answer_schema: &AnswerSchema,
     writing_task_ids: &HashSet<String>,
     objective_mutations_allowed: bool,
+    active_section_key: Option<&str>,
     answers: &mut Value,
     writing_answers: &mut Value,
     flags: &mut Value,
     violations_snapshot: &mut Value,
-    phase: &mut String,
-    current_module: &mut String,
+    _phase: &mut String,
+    _current_module: &mut String,
     current_question_id: &mut Option<String>,
+    recovery: &mut Value,
 ) -> Result<(), DeliveryError> {
     match mutation.mutation_type.as_str() {
         "answer" => {
@@ -1902,6 +1987,7 @@ fn apply_mutation(
                     "This session can no longer accept answer mutations.".to_owned(),
                 ));
             }
+            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let value = mutation
                 .payload
                 .get("value")
@@ -1929,6 +2015,12 @@ fn apply_mutation(
             if !objective_mutations_allowed {
                 return Err(DeliveryError::Conflict(
                     "This session can no longer accept writing mutations.".to_owned(),
+                ));
+            }
+            if active_section_key.is_some_and(|value| value != "writing") {
+                return Err(DeliveryError::Conflict(
+                    "This session can no longer accept writing mutations for the current section."
+                        .to_owned(),
                 ));
             }
             if !writing_task_ids.contains(&task_id) {
@@ -1968,6 +2060,7 @@ fn apply_mutation(
                     "Mutation references an unknown `questionId`.".to_owned(),
                 ));
             }
+            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let value = mutation
                 .payload
                 .get("value")
@@ -1988,8 +2081,7 @@ fn apply_mutation(
             ));
         }
         "position" => {
-            // These mutations keep proctor state in sync. Allow them even if objective
-            // mutations are no longer accepted.
+            // Client position is telemetry only. Never treat it as authoritative state.
             let next_phase = required_string(&mutation.payload, "phase")?;
             match next_phase.as_str() {
                 "pre-check" | "lobby" | "exam" | "post-exam" => {}
@@ -2032,16 +2124,27 @@ fn apply_mutation(
                     ));
                 }
             }
-
-            *phase = next_phase;
-            *current_module = next_module;
-            *current_question_id = parsed_question_id;
+            *recovery = merge_recovery(
+                std::mem::take(recovery),
+                json!({
+                    "clientPosition": {
+                        "phase": next_phase,
+                        "currentModule": next_module,
+                        "currentQuestionId": parsed_question_id,
+                        "at": mutation.timestamp,
+                    }
+                }),
+            );
         }
         "violation" => {
             // Payloads vary; apply only when the client includes an authoritative snapshot.
             if let Some(snapshot) = mutation.payload.get("violations") {
                 if snapshot.is_array() {
-                    *violations_snapshot = snapshot.clone();
+                    *violations_snapshot = merge_violations_snapshot(
+                        violations_snapshot,
+                        snapshot,
+                        500,
+                    )?;
                 } else {
                     return Err(DeliveryError::Validation(
                         "`violations` must be an array when present.".to_owned(),
@@ -2091,6 +2194,72 @@ fn required_string(payload: &Value, field: &str) -> Result<String, DeliveryError
 fn set_value(mut object: Map<String, Value>, key: String, value: Value) -> Map<String, Value> {
     object.insert(key, value);
     object
+}
+
+fn enforce_section_membership(
+    active_section_key: Option<&str>,
+    question_id: &str,
+    answer_schema: &AnswerSchema,
+) -> Result<(), DeliveryError> {
+    let Some(active_section_key) = active_section_key else {
+        return Err(DeliveryError::Conflict(
+            "This session can no longer accept objective mutations.".to_owned(),
+        ));
+    };
+    let expected = answer_schema
+        .sections
+        .get(question_id)
+        .map(String::as_str)
+        .ok_or_else(|| {
+            DeliveryError::Validation(
+                "Mutation references an unknown `questionId`.".to_owned(),
+            )
+        })?;
+    if expected != active_section_key {
+        return Err(DeliveryError::Conflict(
+            "Mutation does not belong to the current section.".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn merge_violations_snapshot(
+    existing_snapshot: &Value,
+    incoming_snapshot: &Value,
+    cap: usize,
+) -> Result<Value, DeliveryError> {
+    let existing = existing_snapshot.as_array().cloned().unwrap_or_default();
+    let incoming = incoming_snapshot.as_array().cloned().unwrap_or_default();
+
+    let mut merged: HashMap<String, Value> = HashMap::new();
+    for violation in existing.into_iter().chain(incoming) {
+        let Some(id) = violation.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if id.trim().is_empty() {
+            continue;
+        }
+        merged.insert(id.to_owned(), violation);
+    }
+
+    let mut values: Vec<Value> = merged.into_values().collect();
+    values.sort_by_key(|value| violation_timestamp_key(value));
+
+    if values.len() > cap {
+        values = values.into_iter().rev().take(cap).collect();
+        values.sort_by_key(|value| violation_timestamp_key(value));
+    }
+
+    Ok(Value::Array(values))
+}
+
+fn violation_timestamp_key(value: &Value) -> i128 {
+    let Some(raw) = value.get("timestamp").and_then(Value::as_str) else {
+        return 0;
+    };
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|parsed| parsed.timestamp_millis() as i128)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -2152,6 +2321,7 @@ mod tests {
                         .collect(),
                 ),
             )]),
+            sections: HashMap::from_iter([("q1".to_owned(), "reading".to_owned())]),
         };
         let writing_task_ids: HashSet<String> =
             ["task-1".to_owned()].into_iter().collect();
@@ -2163,6 +2333,7 @@ mod tests {
         let mut phase = "exam".to_owned();
         let mut current_module = "reading".to_owned();
         let mut current_question_id = None;
+        let mut recovery = json!({});
 
         apply_mutation(
             &MutationEnvelope {
@@ -2175,6 +2346,7 @@ mod tests {
             &answer_schema,
             &writing_task_ids,
             true,
+            Some("reading"),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -2182,6 +2354,7 @@ mod tests {
             &mut phase,
             &mut current_module,
             &mut current_question_id,
+            &mut recovery,
         )
         .expect("apply answer");
 
@@ -2200,6 +2373,7 @@ mod tests {
             &answer_schema,
             &writing_task_ids,
             true,
+            Some("writing"),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -2207,6 +2381,7 @@ mod tests {
             &mut phase,
             &mut current_module,
             &mut current_question_id,
+            &mut recovery,
         )
         .expect("apply writing answer");
 
@@ -2225,6 +2400,7 @@ mod tests {
             &answer_schema,
             &writing_task_ids,
             true,
+            Some("reading"),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -2232,6 +2408,7 @@ mod tests {
             &mut phase,
             &mut current_module,
             &mut current_question_id,
+            &mut recovery,
         )
         .expect("apply flag");
 
@@ -2257,9 +2434,10 @@ mod tests {
     }
 
     #[test]
-    fn apply_mutation_updates_position_fields() {
+    fn apply_mutation_records_position_as_telemetry() {
         let answer_schema = AnswerSchema {
             constraints: HashMap::from_iter([("q1".to_owned(), AnswerConstraint::Text)]),
+            sections: HashMap::from_iter([("q1".to_owned(), "reading".to_owned())]),
         };
         let writing_task_ids: HashSet<String> =
             ["task1".to_owned()].into_iter().collect();
@@ -2270,6 +2448,7 @@ mod tests {
         let mut phase = "pre-check".to_owned();
         let mut current_module = "listening".to_owned();
         let mut current_question_id = None;
+        let mut recovery = json!({});
 
         apply_mutation(
             &MutationEnvelope {
@@ -2282,6 +2461,7 @@ mod tests {
             &answer_schema,
             &writing_task_ids,
             false,
+            None,
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -2289,12 +2469,16 @@ mod tests {
             &mut phase,
             &mut current_module,
             &mut current_question_id,
+            &mut recovery,
         )
         .expect("apply position");
 
-        assert_eq!(phase, "exam");
-        assert_eq!(current_module, "reading");
-        assert_eq!(current_question_id.as_deref(), Some("q1"));
+        assert_eq!(phase, "pre-check");
+        assert_eq!(current_module, "listening");
+        assert_eq!(current_question_id, None);
+        assert_eq!(recovery["clientPosition"]["phase"], "exam");
+        assert_eq!(recovery["clientPosition"]["currentModule"], "reading");
+        assert_eq!(recovery["clientPosition"]["currentQuestionId"], "q1");
     }
 
     #[test]
@@ -2321,6 +2505,7 @@ mod tests {
                     },
                 ),
             ]),
+            sections: HashMap::new(),
         };
 
         let answers = json!({

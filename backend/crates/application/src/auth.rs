@@ -718,6 +718,32 @@ impl AuthService {
         internal_email: &str,
         display_name: &str,
     ) -> Result<String, AuthError> {
+        if let Some(existing) = sqlx::query_scalar::<_, String>("SELECT id FROM users WHERE email = ?")
+            .bind(internal_email)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(AuthError::from)?
+        {
+            // Preserve display_name once claimed to prevent shared-Wcode identity tampering.
+            sqlx::query(
+                r#"
+                UPDATE users
+                SET
+                    role = 'student',
+                    state = 'active',
+                    failed_login_count = 0,
+                    locked_until = NULL,
+                    last_login_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = ?
+                "#,
+            )
+            .bind(&existing)
+            .execute(&self.pool)
+            .await?;
+            return Ok(existing);
+        }
+
         let user_id = Uuid::new_v4().to_string();
         sqlx::query(
             r#"
@@ -734,14 +760,6 @@ impl AuthService {
                 updated_at
             )
             VALUES (?, ?, ?, 'student', 'active', 0, NULL, NOW(), NOW(), NOW())
-            ON DUPLICATE KEY UPDATE
-                display_name = VALUES(display_name),
-                role = 'student',
-                state = 'active',
-                failed_login_count = 0,
-                locked_until = NULL,
-                last_login_at = NOW(),
-                updated_at = NOW()
             "#,
         )
         .bind(&user_id)
@@ -750,11 +768,7 @@ impl AuthService {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query_scalar("SELECT id FROM users WHERE email = ?")
-            .bind(internal_email)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(AuthError::from)
+        Ok(user_id)
     }
 
     async fn create_session(

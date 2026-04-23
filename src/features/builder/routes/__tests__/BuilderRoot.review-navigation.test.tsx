@@ -1,12 +1,13 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createInitialExamState } from '../../../../services/examAdapterService';
 import { BuilderRoot } from '../BuilderRoot';
 
 const mockNavigate = vi.fn();
 const mockHandleUpdateExamContent = vi.fn().mockResolvedValue(undefined);
-const controllerState = createInitialExamState('Mock IELTS Exam', 'Academic');
+const createControllerState = () => createInitialExamState('Mock IELTS Exam', 'Academic');
+let controllerState = createControllerState();
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -129,6 +130,7 @@ vi.mock('@components/scoring/GradingWorkspace', () => ({
 describe('BuilderRoot review navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    controllerState = createControllerState();
   });
 
   it('flushes the latest draft before navigating to review', async () => {
@@ -194,5 +196,26 @@ describe('BuilderRoot review navigation', () => {
         title: 'Edited Mock IELTS Exam',
       }),
     );
+  });
+
+  it('shows a recovery screen when no builder modules are enabled', async () => {
+    controllerState.config.sections.reading.enabled = false;
+    controllerState.config.sections.listening.enabled = false;
+    controllerState.config.sections.writing.enabled = false;
+    controllerState.config.sections.speaking.enabled = false;
+    controllerState.activeModule = 'speaking';
+
+    render(<BuilderRoot />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.getByRole('heading', { name: /builder configuration unavailable/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/no builder modules are enabled in the current configuration/i),
+    ).toBeInTheDocument();
   });
 });

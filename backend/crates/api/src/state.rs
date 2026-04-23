@@ -24,10 +24,10 @@ impl AppState {
         let rate_limiter = RateLimiter::new(RateLimitConfig::new(1000, 60)); // Default permissive limit
 
         Self {
+            live_updates: LiveUpdateHub::with_config(&config),
             config,
             pool: DatabasePool::placeholder(),
             live_mode_enabled,
-            live_updates: LiveUpdateHub::new(),
             telemetry: Telemetry::new(),
             rate_limiter,
         }
@@ -38,10 +38,10 @@ impl AppState {
         let rate_limiter = RateLimiter::new(RateLimitConfig::new(1000, 60)); // Default permissive limit
 
         Self {
+            live_updates: LiveUpdateHub::with_config(&config),
             config,
             pool: DatabasePool::new(pool),
             live_mode_enabled,
-            live_updates: LiveUpdateHub::new(),
             telemetry: Telemetry::new(),
             rate_limiter,
         }

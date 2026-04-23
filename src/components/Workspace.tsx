@@ -12,6 +12,7 @@ import { PassageMetadataEditor } from './passage/PassageMetadataEditor';
 import { passageLibraryService } from '../services/passageLibraryService';
 import { createId } from '../utils/idUtils';
 import { TIMING } from '../constants/uiConstants';
+import { countWords } from '../utils/builderEnhancements';
 
 function WorkspaceSkeleton({ progress }: { progress: number }) {
   return (
@@ -120,21 +121,21 @@ export function Workspace({
     return <SpeakingWorkspace state={state} setState={(next) => void setState(next)} />;
   }
 
-  const buildNewPassage = (): Passage => ({
-    id: createId('passage'),
-    title: `Passage ${state.reading.passages.length + 1}`,
-    content: '',
-    blocks: [],
-    wordCount: 0,
-  });
-
   const handlePassageAdd = () => {
-    const newPassage = buildNewPassage();
-    const newPassages = [...state.reading.passages, newPassage];
-    void setState({
-      ...state,
-      reading: { ...state.reading, passages: newPassages },
-      activePassageId: newPassage.id,
+    void setState((previous) => {
+      const newPassage: Passage = {
+        id: createId('passage'),
+        title: `Passage ${previous.reading.passages.length + 1}`,
+        content: '',
+        blocks: [],
+        wordCount: 0,
+      };
+
+      return {
+        ...previous,
+        reading: { ...previous.reading, passages: [...previous.reading.passages, newPassage] },
+        activePassageId: newPassage.id,
+      };
     });
   };
 
@@ -169,11 +170,23 @@ export function Workspace({
     return null;
   }
 
-  const updateBlocks = (blocks: typeof activePassage.blocks) => {
-    const newPassages = state.reading.passages.map((passage) =>
-      passage.id === activePassage.id ? { ...passage, blocks } : passage,
-    );
-    void setState({ ...state, reading: { ...state.reading, passages: newPassages } });
+  const updateBlocks = (nextBlocks: React.SetStateAction<typeof activePassage.blocks>) => {
+    void setState((previous) => {
+      const previousActivePassage = previous.reading.passages.find(
+        (passage) => passage.id === previous.activePassageId,
+      );
+      if (!previousActivePassage) {
+        return previous;
+      }
+
+      const resolvedBlocks =
+        typeof nextBlocks === 'function' ? nextBlocks(previousActivePassage.blocks) : nextBlocks;
+
+      const newPassages = previous.reading.passages.map((passage) =>
+        passage.id === previousActivePassage.id ? { ...passage, blocks: resolvedBlocks } : passage,
+      );
+      return { ...previous, reading: { ...previous.reading, passages: newPassages } };
+    });
   };
 
   const handlePassageSelect = (passageId: string) => {
@@ -236,7 +249,7 @@ export function Workspace({
       source: 'Custom',
       topic: 'General',
       tags: [],
-      wordCount: passage.wordCount || passage.content.split(/\s+/).length,
+      wordCount: passage.wordCount ?? countWords(passage.content),
       estimatedTimeMinutes: 20,
       author: 'Unknown'
     };
