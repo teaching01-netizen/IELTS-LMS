@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { QuestionBlock, MultiMCQBlock as MultiMCQBlockType } from '../../types';
 import { MoreVertical, Plus, Trash2, GripVertical, ArrowUp, ArrowDown, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
+import { handleBoldHotkey } from '../../utils/boldMarkdown';
 
 interface Props {
   block: QuestionBlock;
@@ -74,6 +75,7 @@ export const MultiSelectMCQBlock: React.FC<Props> = ({ block, startNum, endNum, 
             type="text" 
             value={mcqBlock.instruction} 
             onChange={(e) => updateBlock({ ...mcqBlock, instruction: e.target.value })}
+            onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...mcqBlock, instruction: nextValue }))}
             className={`w-full text-sm font-medium text-gray-800 outline-none border-b ${getFieldError('instruction') ? 'border-red-500 bg-red-50' : 'border-transparent hover:border-gray-200 focus:border-blue-700'} bg-transparent transition-colors px-1 py-0.5 rounded-sm mb-3`}
             placeholder="Instruction text..."
           />
@@ -88,6 +90,7 @@ export const MultiSelectMCQBlock: React.FC<Props> = ({ block, startNum, endNum, 
             type="text" 
             value={mcqBlock.stem} 
             onChange={(e) => updateBlock({ ...mcqBlock, stem: e.target.value })}
+            onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...mcqBlock, stem: nextValue }))}
             className={`w-full text-sm text-gray-800 outline-none border rounded-sm p-2 ${getFieldError('stem') ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:border-blue-700 focus:ring-1 focus:ring-blue-700'} transition-colors`}
             placeholder="Enter the question stem..."
           />
@@ -136,6 +139,7 @@ export const MultiSelectMCQBlock: React.FC<Props> = ({ block, startNum, endNum, 
                 type="text" 
                 value={o.text} 
                 onChange={(e) => updateOption(o.id, 'text', e.target.value)}
+                onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateOption(o.id, 'text', nextValue))}
                 className={`flex-1 bg-transparent outline-none text-sm px-2 py-1 text-gray-800 placeholder:text-gray-400 focus:ring-1 focus:ring-blue-700 rounded-sm ${getFieldError(`options[${i}].text`) ? 'border border-red-500' : ''}`}
                 placeholder="Option text..." 
               />

@@ -2,6 +2,7 @@ import React from 'react';
 import { MatchingFeaturesBlock as MatchingFeaturesBlockType } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
+import { handleBoldHotkey } from '../../utils/boldMarkdown';
 
 interface MatchingFeaturesBlockProps {
   block: MatchingFeaturesBlockType;
@@ -63,7 +64,14 @@ export function MatchingFeaturesBlock({ block, startNum, endNum, updateBlock, de
 
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-2">Instruction</label>
-        <textarea value={block.instruction} onChange={(e) => updateInstruction(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={2} placeholder="Enter instruction..." />
+        <textarea
+          value={block.instruction}
+          onChange={(e) => updateInstruction(e.target.value)}
+          onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateInstruction(nextValue))}
+          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          rows={2}
+          placeholder="Enter instruction..."
+        />
       </div>
 
       <div className="mb-4">
@@ -77,7 +85,11 @@ export function MatchingFeaturesBlock({ block, startNum, endNum, updateBlock, de
               const newOptions = [...block.options];
               newOptions[index] = e.target.value;
               updateOptions(newOptions);
-            }} className="w-32 border border-gray-300 rounded px-2 py-1 text-sm" placeholder={`Option ${index + 1}`} />
+            }} onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => {
+              const newOptions = [...block.options];
+              newOptions[index] = nextValue;
+              updateOptions(newOptions);
+            })} className="w-32 border border-gray-300 rounded px-2 py-1 text-sm" placeholder={`Option ${index + 1}`} />
           ))}
         </div>
       </div>
@@ -91,7 +103,14 @@ export function MatchingFeaturesBlock({ block, startNum, endNum, updateBlock, de
           {block.features.map((feature, index) => (
             <div key={feature.id} className="border rounded-md p-3 flex items-center gap-3">
               <span className="text-sm font-medium text-gray-700 w-16">{startNum + index}.</span>
-              <input type="text" value={feature.text} onChange={(e) => updateFeature(feature.id, { text: e.target.value })} className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Feature statement..." />
+              <input
+                type="text"
+                value={feature.text}
+                onChange={(e) => updateFeature(feature.id, { text: e.target.value })}
+                onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateFeature(feature.id, { text: nextValue }))}
+                className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
+                placeholder="Feature statement..."
+              />
               <select value={feature.correctMatch} onChange={(e) => updateFeature(feature.id, { correctMatch: e.target.value })} className="w-32 border border-gray-300 rounded px-2 py-1 text-sm">
                 {block.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
               </select>

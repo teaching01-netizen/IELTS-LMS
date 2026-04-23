@@ -5,6 +5,7 @@ import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight, ArrowLeft,
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
+import { FormattedText } from './FormattedText';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -289,7 +290,7 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
                     <h3 className="font-bold text-gray-900 mb-1 md:mb-2 text-base md:text-lg">
                       Questions {blockStartQ}–{blockEndQ}
                     </h3>
-                    <p className="text-gray-900 text-sm md:text-base">{block.instruction}</p>
+                    <FormattedText as="p" className="text-gray-900 text-sm md:text-base" text={block.instruction} />
                   </div>
                   
                   <div className="space-y-8">

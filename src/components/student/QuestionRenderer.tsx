@@ -24,6 +24,8 @@ import {
   TFNGQuestion,
 } from '../../types';
 import { ProtectedInput } from './ProtectedInput';
+import { FormattedText } from './FormattedText';
+import { stripBoldMarkdown } from '../../utils/boldMarkdown';
 
 interface QuestionRendererProps {
   question:
@@ -144,7 +146,7 @@ export function QuestionRenderer({
         />
         {renderFlagButton(slotId)}
       </div>
-      {extraCopy ? <p className="mt-2 pl-11 text-sm text-gray-600">{extraCopy}</p> : null}
+      {extraCopy ? <FormattedText as="p" className="mt-2 pl-11 text-sm text-gray-600" text={extraCopy} /> : null}
     </div>
   );
 
@@ -161,7 +163,7 @@ export function QuestionRenderer({
           <div className="mt-0.5 flex h-[24px] min-w-[24px] items-center justify-center border-2 border-blue-500 text-sm font-bold text-blue-600">
             {number}
           </div>
-          <span className="leading-relaxed text-gray-900">{q.statement}</span>
+          <FormattedText as="span" className="leading-relaxed text-gray-900" text={q.statement} />
         </legend>
         <div className="ml-9 flex flex-col gap-3">
           {options.map((option) => (
@@ -187,7 +189,7 @@ export function QuestionRenderer({
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
           <span className="min-w-[24px] font-bold text-gray-900">{number}.</span>
-          <span className="text-gray-800">{q.prompt}</span>
+          <FormattedText as="span" className="text-gray-800" text={q.prompt} />
         </div>
         <div className="ml-9 mt-2">
           <ProtectedInput
@@ -224,7 +226,7 @@ export function QuestionRenderer({
             const roman = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'][index];
             return (
               <option key={heading.id} value={roman}>
-                {roman}. {heading.text}
+                {roman}. {stripBoldMarkdown(heading.text)}
               </option>
             );
           })}
@@ -251,7 +253,11 @@ export function QuestionRenderer({
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3">
           <span className="min-w-[24px] font-bold text-gray-900">{blockNum}.</span>
-          <span className="text-gray-800">{mcqBlock.stem || 'Select the correct options:'}</span>
+          <FormattedText
+            as="span"
+            className="text-gray-800"
+            text={mcqBlock.stem || 'Select the correct options:'}
+          />
         </legend>
         <div className="ml-9 space-y-3">
           {mcqBlock.options?.map((option, index) => {
@@ -276,7 +282,7 @@ export function QuestionRenderer({
                   disabled={isDisabled}
                   onChange={() => toggleOption(option.id)}
                   className="peer sr-only"
-                  aria-label={`Option ${letter}. ${option.text}`}
+                  aria-label={`Option ${letter}. ${stripBoldMarkdown(option.text)}`}
                 />
                 <div
                   className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border ${
@@ -287,7 +293,7 @@ export function QuestionRenderer({
                 </div>
                 <div className="flex gap-2">
                   <span className="font-bold text-gray-700">{letter}.</span>
-                  <span className="text-gray-800">{option.text}</span>
+                  <FormattedText as="span" className="text-gray-800" text={option.text} />
                 </div>
               </label>
             );
@@ -314,7 +320,9 @@ export function QuestionRenderer({
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
           <span className="min-w-[24px] font-bold text-gray-900">{num}.</span>
-          <span className="text-gray-800">Label {q.label}</span>
+          <span className="text-gray-800">
+            Label <FormattedText as="span" className="text-gray-800" text={q.label} />
+          </span>
         </div>
         <div className="ml-9 mt-2">
           <ProtectedInput
@@ -338,7 +346,11 @@ export function QuestionRenderer({
     <fieldset className="flex flex-col gap-4">
       <legend className="flex gap-3">
         <span className="min-w-[24px] font-bold text-gray-900">{blockNum}.</span>
-        <span className="text-gray-800">{mcqBlock.stem || 'Select the correct option:'}</span>
+        <FormattedText
+          as="span"
+          className="text-gray-800"
+          text={mcqBlock.stem || 'Select the correct option:'}
+        />
       </legend>
       <div className="ml-9 space-y-3">
         {mcqBlock.options?.map((option, index) => {
@@ -354,7 +366,7 @@ export function QuestionRenderer({
               />
               <div className="flex gap-2">
                 <span className="font-bold text-gray-700">{letter}.</span>
-                <span className="text-gray-800">{option.text}</span>
+                <FormattedText as="span" className="text-gray-800" text={option.text} />
               </div>
             </label>
           );
@@ -369,7 +381,7 @@ export function QuestionRenderer({
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
           <span className="min-w-[24px] font-bold text-gray-900">{num}.</span>
-          <span className="text-gray-800">{q.prompt}</span>
+          <FormattedText as="span" className="text-gray-800" text={q.prompt} />
         </div>
         <div className="ml-9 mt-2">
           <ProtectedInput
@@ -399,7 +411,7 @@ export function QuestionRenderer({
         <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
           {parts.map((part, index) => (
             <React.Fragment key={`${q.id}-${index}`}>
-              <span>{part}</span>
+              <FormattedText as="span" text={part} />
               {index < blanks ? (
                 <span
                   id={`question-${getSlotId(index, `${q.id}:${index}`)}`}
@@ -442,7 +454,7 @@ export function QuestionRenderer({
         <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
           {parts.map((part, index) => (
             <React.Fragment key={`${noteQuestion.id}-${index}`}>
-              <span>{part}</span>
+              <FormattedText as="span" text={part} />
               {index < blanks ? (
                 <span
                   id={`question-${getSlotId(index, `${noteQuestion.id}:${index}`)}`}
@@ -545,7 +557,7 @@ export function QuestionRenderer({
             <tr>
               {tableBlock.headers.map((header, index) => (
                 <th key={`${header}-${index}`} className="border border-gray-200 px-3 py-2 text-left font-semibold text-gray-900">
-                  {header}
+                  <FormattedText as="span" className="text-gray-900" text={header} />
                 </th>
               ))}
             </tr>
@@ -559,7 +571,7 @@ export function QuestionRenderer({
                   if (!slot) {
                     return (
                       <td key={`cell-${rowIndex}-${cellIndex}`} className="border border-gray-200 px-3 py-2 text-gray-800">
-                        {cellValue}
+                        <FormattedText as="span" className="text-gray-800" text={cellValue} />
                       </td>
                     );
                   }
@@ -600,7 +612,7 @@ export function QuestionRenderer({
       <div className="flex flex-wrap gap-2">
         {classificationBlock.categories.map((category) => (
           <span key={category} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-            {category}
+            <FormattedText as="span" className="text-blue-700" text={category} />
           </span>
         ))}
       </div>
@@ -612,7 +624,7 @@ export function QuestionRenderer({
               <div className="flex flex-col gap-3 md:flex-row md:items-center">
                 <div className="flex items-start gap-3 md:flex-1">
                   <span className="min-w-[32px] font-bold text-gray-900">{number + index}.</span>
-                  <span className="text-gray-800">{item.text}</span>
+                  <FormattedText as="span" className="text-gray-800" text={item.text} />
                 </div>
                 <div className="flex items-center gap-3">
                   <select
@@ -624,7 +636,7 @@ export function QuestionRenderer({
                     <option value="">Choose category…</option>
                     {classificationBlock.categories.map((category) => (
                       <option key={category} value={category}>
-                        {category}
+                        {stripBoldMarkdown(category)}
                       </option>
                     ))}
                   </select>
@@ -643,7 +655,7 @@ export function QuestionRenderer({
       <div className="flex flex-wrap gap-2">
         {matchingFeaturesBlock.options.map((option) => (
           <span key={option} className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
-            {option}
+            <FormattedText as="span" className="text-gray-700" text={option} />
           </span>
         ))}
       </div>
@@ -655,7 +667,7 @@ export function QuestionRenderer({
               <div className="flex flex-col gap-3 md:flex-row md:items-center">
                 <div className="flex items-start gap-3 md:flex-1">
                   <span className="min-w-[32px] font-bold text-gray-900">{number + index}.</span>
-                  <span className="text-gray-800">{feature.text}</span>
+                  <FormattedText as="span" className="text-gray-800" text={feature.text} />
                 </div>
                 <div className="flex items-center gap-3">
                   <select
@@ -667,7 +679,7 @@ export function QuestionRenderer({
                     <option value="">Choose match…</option>
                     {matchingFeaturesBlock.options.map((option) => (
                       <option key={option} value={option}>
-                        {option}
+                        {stripBoldMarkdown(option)}
                       </option>
                     ))}
                   </select>

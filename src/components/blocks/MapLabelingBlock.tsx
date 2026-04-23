@@ -3,6 +3,7 @@ import { QuestionBlock, MapBlock as MapBlockType } from '../../types';
 import { MoreVertical, Plus, Trash2, GripVertical, Image as ImageIcon, ArrowUp, ArrowDown, AlertCircle, Link as LinkIcon } from 'lucide-react';
 import { MIN_HEIGHTS } from '../../constants/uiConstants';
 import { createId } from '../../utils/idUtils';
+import { handleBoldHotkey } from '../../utils/boldMarkdown';
 
 interface Props {
   block: QuestionBlock;
@@ -91,6 +92,7 @@ export const MapLabelingBlock: React.FC<Props> = ({ block, startNum, endNum, upd
             type="text" 
             value={mapBlock.instruction} 
             onChange={(e) => updateBlock({ ...mapBlock, instruction: e.target.value })}
+            onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...mapBlock, instruction: nextValue }))}
             className={`w-full text-sm font-medium text-gray-800 outline-none border-b ${getFieldError('instruction') ? 'border-red-500 bg-red-50' : 'border-transparent hover:border-gray-200 focus:border-blue-700'} bg-transparent transition-colors px-1 py-0.5 rounded-sm mb-3`}
             placeholder="Label the map below."
           />
@@ -193,6 +195,7 @@ export const MapLabelingBlock: React.FC<Props> = ({ block, startNum, endNum, upd
                       type="text" 
                       value={q.label} 
                       onChange={(e) => updateHotspot(q.id, 'label', e.target.value)}
+                      onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateHotspot(q.id, 'label', nextValue))}
                       className={`w-full border rounded-sm px-2 py-1 text-xs focus:ring-1 focus:ring-blue-700 outline-none transition-colors text-gray-800 ${getFieldError(`questions[${i}].label`) ? 'border-red-500' : 'border-gray-100'}`}
                       placeholder="Location A"
                     />

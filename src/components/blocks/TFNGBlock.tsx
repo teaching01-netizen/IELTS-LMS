@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { QuestionBlock, TFNGBlock as TFNGBlockType, TFNGMode } from '../../types';
 import { MoreVertical, Plus, Trash2, GripVertical, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
+import { handleBoldHotkey } from '../../utils/boldMarkdown';
 
 interface Props {
   block: QuestionBlock;
@@ -107,6 +108,7 @@ export const TFNGBlock: React.FC<Props> = ({ block, startNum, endNum, updateBloc
               type="text" 
               value={tfngBlock.instruction} 
               onChange={(e) => updateBlock({ ...tfngBlock, instruction: e.target.value })}
+              onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...tfngBlock, instruction: nextValue }))}
               className={`w-full text-sm font-medium text-gray-800 outline-none border-b ${getFieldError('instruction') ? 'border-red-500 bg-red-50' : 'border-transparent hover:border-gray-200 focus:border-blue-700'} bg-transparent transition-colors px-1 py-0.5 rounded-sm`}
               placeholder={mode === 'TFNG' ? 'Do the following statements agree with the information given?' : 'Do the following statements agree with the writer\'s views?'}
             />
@@ -137,6 +139,7 @@ export const TFNGBlock: React.FC<Props> = ({ block, startNum, endNum, updateBloc
                       type="text" 
                       value={q.statement} 
                       onChange={(e) => updateQuestion(q.id, 'statement', e.target.value)}
+                      onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateQuestion(q.id, 'statement', nextValue))}
                       className={`w-full bg-transparent outline-none focus:ring-1 focus:ring-blue-700 rounded-sm px-2 py-1 text-gray-800 placeholder:text-gray-400 ${getFieldError(`questions[${i}].statement`) ? 'border border-red-500 bg-red-50' : ''}`}
                       placeholder="Type statement..." 
                     />

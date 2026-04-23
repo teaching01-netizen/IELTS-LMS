@@ -3,6 +3,7 @@ import { SentenceCompletionBlock as SentenceCompletionBlockType, AnswerRule } fr
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { countBlankPlaceholders } from '../../utils/blankPlaceholders';
+import { handleBoldHotkey } from '../../utils/boldMarkdown';
 
 interface SentenceCompletionBlockProps {
   block: SentenceCompletionBlockType;
@@ -129,6 +130,7 @@ export function SentenceCompletionBlock({ block, startNum, endNum, updateBlock, 
         <textarea
           value={block.instruction}
           onChange={(e) => updateInstruction(e.target.value)}
+          onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateInstruction(nextValue))}
           className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           rows={2}
           placeholder="Enter instruction for this question..."
@@ -182,6 +184,7 @@ export function SentenceCompletionBlock({ block, startNum, endNum, updateBlock, 
                   <textarea
                     value={question.sentence}
                     onChange={(e) => updateQuestion(question.id, { sentence: e.target.value })}
+                    onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateQuestion(question.id, { sentence: nextValue }))}
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     rows={2}
                     placeholder="Enter sentence with ____ for blanks..."
