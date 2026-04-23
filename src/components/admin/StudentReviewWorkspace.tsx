@@ -471,14 +471,6 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     );
   };
 
-  if (loading || !submission) {
-    return (
-      <div className="h-full bg-gray-50">
-        <SectionLoadingSkeleton message="Loading review workspace..." />
-      </div>
-    );
-  }
-
   const currentSectionSubmission = getSectionSubmission(activeSection);
   const objectiveAnswerMap = currentSectionSubmission
     ? extractObjectiveAnswerMap(currentSectionSubmission.answers)
@@ -547,18 +539,13 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       return results;
     }
 
-    writingTasks.forEach((task, index) => {
+    writingTasks.forEach((task) => {
       const slot = task.taskId === 'task2' ? 'task2' : 'task1';
       const rubric = (reviewDraft.sectionDrafts as any)?.writing?.[task.taskId];
       const taskText = getWritingResponseText(task.taskId);
       results[slot] = {
         taskId: task.taskId,
-        taskLabel:
-          task.taskId === 'task1'
-            ? 'Task 1'
-            : task.taskId === 'task2'
-              ? 'Task 2'
-              : task.taskLabel || `Task ${index + 1}`,
+        taskLabel: task.taskId === 'task1' ? 'Task 1' : 'Task 2',
         prompt: getWritingPrompt(task.taskId),
         studentText: taskText,
         wordCount: taskText.trim() ? taskText.trim().split(/\s+/).filter(Boolean).length : 0,
@@ -585,6 +572,14 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
     return results;
   }, [getWritingPrompt, getWritingResponseText, reviewDraft, writingTasks]);
+
+  if (loading || !submission) {
+    return (
+      <div className="h-full bg-gray-50">
+        <SectionLoadingSkeleton message="Loading review workspace..." />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-gray-50">

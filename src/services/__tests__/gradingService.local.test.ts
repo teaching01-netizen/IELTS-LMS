@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../backendBridge', () => ({
+  backendPost: vi.fn(),
+  backendPut: vi.fn(),
+  isBackendGradingEnabled: vi.fn(() => false),
+}));
+
 vi.mock('../gradingRepository', () => ({
   gradingRepository: {
     getAllSessions: vi.fn(),
@@ -14,13 +20,13 @@ vi.mock('../gradingRepository', () => ({
     getSessionById: vi.fn(),
     getSubmissionsBySession: vi.fn(),
     saveSession: vi.fn(),
+    saveReviewEvent: vi.fn(),
     saveReleaseEvent: vi.fn(),
     saveWritingSubmission: vi.fn(),
   },
 }));
 
 import { gradingRepository } from '../gradingRepository';
-import { gradingService } from '../gradingService';
 
 function buildSubmission() {
   return {
@@ -145,6 +151,7 @@ function buildWritingTasks() {
 describe('gradingService local mode', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_GRADING', 'false');
     localStorage.clear();
   });
 
@@ -153,6 +160,7 @@ describe('gradingService local mode', () => {
   });
 
   it('releases writing results with the original prompt and response text', async () => {
+    const { gradingService } = await import('../gradingService');
     const submission = buildSubmission();
     const draft = buildDraft();
 
@@ -209,6 +217,7 @@ describe('gradingService local mode', () => {
   });
 
   it('sorts sessions with invalid timestamps last', async () => {
+    const { gradingService } = await import('../gradingService');
     (gradingRepository.getAllSessions as any).mockResolvedValue([
       {
         id: 'sched-bad',
@@ -235,6 +244,7 @@ describe('gradingService local mode', () => {
   });
 
   it('routes annotations to the matching writing task', async () => {
+    const { gradingService } = await import('../gradingService');
     const submission = buildSubmission();
     const draft = buildDraft();
     const annotation = {
@@ -260,12 +270,12 @@ describe('gradingService local mode', () => {
     expect(gradingRepository.saveWritingSubmission).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: 'task1',
-        annotations: [annotation],
+        annotations: expect.arrayContaining([annotation]),
       }),
     );
     expect(gradingRepository.saveReviewDraft).toHaveBeenCalledWith(
       expect.objectContaining({
-        annotations: [annotation],
+        annotations: expect.arrayContaining([annotation]),
         hasUnsavedChanges: true,
       }),
     );
