@@ -8,6 +8,7 @@
 import {
   ExamEntity,
   ExamVersion,
+  ExamVersionSummary,
   ExamEvent,
   ExamSchedule,
   ExamSessionRuntime,
@@ -31,6 +32,7 @@ import {
   mapBackendExamEntity,
   mapBackendExamEvent,
   mapBackendExamVersion,
+  mapBackendExamVersionSummary,
   mapBackendRuntime,
   mapBackendSchedule,
 } from './backendBridge';
@@ -48,6 +50,7 @@ export interface IExamRepository {
   
   // Exam Version operations
   getAllVersions(examId: string): Promise<ExamVersion[]>;
+  getVersionSummaries(examId: string): Promise<ExamVersionSummary[]>;
   getVersionById(id: string): Promise<ExamVersion | null>;
   saveVersion(version: ExamVersion): Promise<void>;
   
@@ -132,6 +135,11 @@ export class BackendExamRepository implements IExamRepository {
   async getAllVersions(examId: string): Promise<ExamVersion[]> {
     const versions = await backendGet<any[]>(`/v1/exams/${examId}/versions`);
     return versions.map(mapBackendExamVersion);
+  }
+
+  async getVersionSummaries(examId: string): Promise<ExamVersionSummary[]> {
+    const versions = await backendGet<any[]>(`/v1/exams/${examId}/versions/summary`);
+    return versions.map(mapBackendExamVersionSummary);
   }
 
   async getVersionById(id: string): Promise<ExamVersion | null> {

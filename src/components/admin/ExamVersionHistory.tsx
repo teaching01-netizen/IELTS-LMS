@@ -7,6 +7,8 @@ import { ExamVersionHistoryProps } from '../../features/admin/contracts';
 import { normalizeWritingTaskContents } from '../../utils/writingTaskUtils';
 import { useVersionHistory } from './hooks/useVersionHistory';
 import { hydrateExamState } from '../../services/examAdapterService';
+import { examRepository } from '../../services/examRepository';
+import type { ExamVersion } from '../../types/domain';
 
 export function ExamVersionHistory({
   exam,
@@ -19,6 +21,9 @@ export function ExamVersionHistory({
 }: ExamVersionHistoryProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const [loadedVersionsById, setLoadedVersionsById] = useState<Record<string, ExamVersion>>({});
+  const [loadingVersionsById, setLoadingVersionsById] = useState<Record<string, boolean>>({});
+  const [loadErrorsById, setLoadErrorsById] = useState<Record<string, string | undefined>>({});
 
   // Version label formatting function
   const getVersionLabel = (version: any): string => {
@@ -113,6 +118,39 @@ export function ExamVersionHistory({
   });
 
   const sortedVersions = sortVersionsByNumber(versions);
+
+  const ensureVersionLoaded = async (versionId: string) => {
+    if (loadedVersionsById[versionId] || loadingVersionsById[versionId]) {
+      return;
+    }
+
+    setLoadingVersionsById((current) => ({ ...current, [versionId]: true }));
+    setLoadErrorsById((current) => ({ ...current, [versionId]: undefined }));
+
+    try {
+      const version = await examRepository.getVersionById(versionId);
+      if (version) {
+        setLoadedVersionsById((current) => ({ ...current, [versionId]: version }));
+      } else {
+        setLoadErrorsById((current) => ({ ...current, [versionId]: 'Version not found' }));
+      }
+    } catch (error) {
+      setLoadErrorsById((current) => ({
+        ...current,
+        [versionId]: error instanceof Error ? error.message : 'Failed to load version details',
+      }));
+    } finally {
+      setLoadingVersionsById((current) => ({ ...current, [versionId]: false }));
+    }
+  };
+
+  const toggleSelectedVersion = (versionId: string) => {
+    const nextSelectedId = selectedVersionId === versionId ? null : versionId;
+    setSelectedVersionId(nextSelectedId);
+    if (nextSelectedId) {
+      void ensureVersionLoaded(nextSelectedId);
+    }
+  };
 
   // Focus trap for clone modal
   useEffect(() => {
@@ -211,22 +249,26 @@ export function ExamVersionHistory({
 
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
           {sortedVersions.map((version, index) => {
-            const hydratedContent = hydrateExamState(version.contentSnapshot);
             const isCurrentDraft = version.id === exam.currentDraftVersionId;
             const isCurrentPublished = version.id === exam.currentPublishedVersionId;
             const isSelected = selectedVersionId === version.id;
             const isCompareTarget = compareVersionId === version.id;
+            const loadedVersion = loadedVersionsById[version.id];
+            const isLoadingDetails = !!loadingVersionsById[version.id];
+            const loadError = loadErrorsById[version.id];
+            const hydratedContent =
+              isSelected && loadedVersion ? hydrateExamState(loadedVersion.contentSnapshot) : null;
             const children = getVersionChildren(version.id);
 
             return (
               <div key={version.id} className="border-b border-gray-50 last:border-0">
                 <div 
                   className={`p-4 cursor-pointer transition-all ${isSelected ? 'bg-blue-50/50' : 'hover:bg-gray-50'}`}
-                  onClick={() => setSelectedVersionId(isSelected ? null : version.id)}
+                  onClick={() => toggleSelectedVersion(version.id)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      setSelectedVersionId(isSelected ? null : version.id);
+                      toggleSelectedVersion(version.id);
                     }
                   }}
                   tabIndex={0}
@@ -241,13 +283,13 @@ export function ExamVersionHistory({
                         className="mt-1 p-1 rounded hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSelectedVersionId(isSelected ? null : version.id);
+                          toggleSelectedVersion(version.id);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
                             e.stopPropagation();
-                            setSelectedVersionId(isSelected ? null : version.id);
+                            toggleSelectedVersion(version.id);
                           }
                         }}
                         aria-label={isSelected ? 'Collapse version details' : 'Expand version details'}
@@ -350,6 +392,20 @@ export function ExamVersionHistory({
                   {/* Expanded Version Details */}
                   {isSelected && (
                     <div id={`version-details-${version.id}`} className="mt-4 pt-4 border-t border-gray-100 pl-7 space-y-3">
+                      {isLoadingDetails && (
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <span className="sr-only">Loading version details…</span>
+                          <div className="h-4 w-48 bg-gray-200 rounded animate-pulse" aria-hidden="true" />
+                          <div className="mt-2 h-3 w-72 bg-gray-200 rounded animate-pulse" aria-hidden="true" />
+                        </div>
+                      )}
+
+                      {loadError && (
+                        <div className="bg-red-50 border border-red-100 rounded-lg p-3 text-sm text-red-700">
+                          {loadError}
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-2 gap-4 text-xs">
                         <div>
                           <span className="text-gray-500">Created:</span>
@@ -383,32 +439,34 @@ export function ExamVersionHistory({
                       )}
 
                       {/* Content Stats */}
-                      <div className="bg-gray-50 rounded-lg p-3">
-                        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Content Summary</div>
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Reading Passages:</span>
-                            <span className="text-gray-900 font-medium">{hydratedContent.reading.passages.length}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Listening Parts:</span>
-                            <span className="text-gray-900 font-medium">{hydratedContent.listening.parts.length}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Writing Prompts:</span>
-                            <span className="text-gray-900 font-medium">
-                              {normalizeWritingTaskContents(
-                                hydratedContent.writing,
-                                hydratedContent.config.sections.writing.tasks,
-                              ).filter((task) => task.prompt.trim().length > 0).length}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Speaking Topics:</span>
-                            <span className="text-gray-900 font-medium">{hydratedContent.speaking.part1Topics.length}</span>
+                      {hydratedContent && (
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Content Summary</div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Reading Passages:</span>
+                              <span className="text-gray-900 font-medium">{hydratedContent.reading.passages.length}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Listening Parts:</span>
+                              <span className="text-gray-900 font-medium">{hydratedContent.listening.parts.length}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Writing Prompts:</span>
+                              <span className="text-gray-900 font-medium">
+                                {normalizeWritingTaskContents(
+                                  hydratedContent.writing,
+                                  hydratedContent.config.sections.writing.tasks,
+                                ).filter((task) => task.prompt.trim().length > 0).length}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Speaking Topics:</span>
+                              <span className="text-gray-900 font-medium">{hydratedContent.speaking.part1Topics.length}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
                 </div>

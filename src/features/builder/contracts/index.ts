@@ -6,7 +6,7 @@
  */
 
 import { ExamState } from '../../../types';
-import { ExamEntity, ExamVersion } from '../../../types/domain';
+import { ExamEntity, ExamVersionSummary } from '../../../types/domain';
 
 /**
  * Props passed to BuilderRoot from parent (router)
@@ -38,7 +38,7 @@ export interface BuilderStateCallbacks {
  * Version management callbacks
  */
 export interface BuilderVersionCallbacks {
-  versions: ExamVersion[];
+  versions: ExamVersionSummary[];
   publishReadiness: {
     isValid: boolean;
     errorCount: number;

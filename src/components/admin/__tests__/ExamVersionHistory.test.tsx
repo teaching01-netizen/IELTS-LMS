@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ExamVersionHistory } from '../ExamVersionHistory';
 import type { ExamVersionHistoryProps } from '../../../features/admin/contracts';
-import type { ExamEntity, ExamVersion, ExamEvent } from '../../../types/domain';
+import type { ExamEntity, ExamEvent, ExamVersionSummary } from '../../../types/domain';
 
 describe('ExamVersionHistory', () => {
   const mockExam: ExamEntity = {
@@ -24,25 +24,12 @@ describe('ExamVersionHistory', () => {
     schemaVersion: 3
   };
 
-  const mockVersions: ExamVersion[] = [
+  const mockVersions: ExamVersionSummary[] = [
     {
       id: 'version-3',
       examId: 'exam-1',
       versionNumber: 3,
       parentVersionId: 'version-2',
-      contentSnapshot: {
-        title: 'Test Exam',
-        type: 'Academic',
-        activeModule: 'reading',
-        activePassageId: 'passage-1',
-        activeListeningPartId: 'part-1',
-        config: {} as any,
-        reading: { passages: [] },
-        listening: { parts: [] },
-        writing: { task1Prompt: '', task2Prompt: '' },
-        speaking: { part1Topics: [], cueCard: '', part3Discussion: [] }
-      },
-      configSnapshot: {} as any,
       createdBy: 'test-user',
       createdAt: '2026-01-15T00:00:00Z',
       isDraft: true,
@@ -53,19 +40,6 @@ describe('ExamVersionHistory', () => {
       examId: 'exam-1',
       versionNumber: 2,
       parentVersionId: 'version-1',
-      contentSnapshot: {
-        title: 'Test Exam',
-        type: 'Academic',
-        activeModule: 'reading',
-        activePassageId: 'passage-1',
-        activeListeningPartId: 'part-1',
-        config: {} as any,
-        reading: { passages: [] },
-        listening: { parts: [] },
-        writing: { task1Prompt: '', task2Prompt: '' },
-        speaking: { part1Topics: [], cueCard: '', part3Discussion: [] }
-      },
-      configSnapshot: {} as any,
       createdBy: 'test-user',
       createdAt: '2026-01-10T00:00:00Z',
       isDraft: false,

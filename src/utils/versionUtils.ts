@@ -66,10 +66,15 @@ export function getRelativeTime(isoString: string): string {
   return date.toLocaleDateString();
 }
 
+type VersionStatusLike = {
+  isPublished: boolean;
+  isDraft: boolean;
+};
+
 /**
  * Get version status badge color
  */
-export function getVersionStatusColor(version: ExamVersion): string {
+export function getVersionStatusColor(version: VersionStatusLike): string {
   if (version.isPublished) return 'bg-green-100 text-green-800';
   if (version.isDraft) return 'bg-blue-100 text-blue-800';
   return 'bg-gray-100 text-gray-800';
@@ -78,7 +83,7 @@ export function getVersionStatusColor(version: ExamVersion): string {
 /**
  * Get version status label
  */
-export function getVersionStatusLabel(version: ExamVersion): string {
+export function getVersionStatusLabel(version: VersionStatusLike): string {
   if (version.isPublished) return 'Published';
   if (version.isDraft) return 'Draft';
   return 'Archived';
@@ -87,28 +92,34 @@ export function getVersionStatusLabel(version: ExamVersion): string {
 /**
  * Check if a version is the current published version
  */
-export function isCurrentPublishedVersion(version: ExamVersion, exam: { currentPublishedVersionId: string | null }): boolean {
+export function isCurrentPublishedVersion(
+  version: { id: string },
+  exam: { currentPublishedVersionId: string | null },
+): boolean {
   return version.id === exam.currentPublishedVersionId;
 }
 
 /**
  * Check if a version is the current draft version
  */
-export function isCurrentDraftVersion(version: ExamVersion, exam: { currentDraftVersionId: string | null }): boolean {
+export function isCurrentDraftVersion(
+  version: { id: string },
+  exam: { currentDraftVersionId: string | null },
+): boolean {
   return version.id === exam.currentDraftVersionId;
 }
 
 /**
  * Sort versions by version number (descending)
  */
-export function sortVersionsByNumber(versions: ExamVersion[]): ExamVersion[] {
+export function sortVersionsByNumber<T extends { versionNumber: number }>(versions: T[]): T[] {
   return [...versions].sort((a, b) => b.versionNumber - a.versionNumber);
 }
 
 /**
  * Sort versions by creation date (descending)
  */
-export function sortVersionsByDate(versions: ExamVersion[]): ExamVersion[] {
+export function sortVersionsByDate<T extends { createdAt: string }>(versions: T[]): T[] {
   return [...versions].sort((a, b) => 
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );

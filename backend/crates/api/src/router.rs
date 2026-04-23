@@ -53,7 +53,8 @@ pub fn build_router(state: AppState) -> Router {
                 .route("/:id/publish", post(exams::publish_exam))
                 .route("/:id/events", get(exams::list_events))
                 .route("/:id/validation", get(exams::get_validation))
-                .route("/:id/versions", get(exams::list_versions)),
+                .route("/:id/versions", get(exams::list_versions))
+                .route("/:id/versions/summary", get(exams::list_version_summaries)),
         )
         .nest(
             "/api/v1/versions",

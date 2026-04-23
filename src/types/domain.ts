@@ -107,6 +107,13 @@ export interface ExamEntity {
  * Immutable snapshot of an exam version
  * Editing a published exam creates a new version, never mutates an existing one
  */
+export interface ExamVersionValidationSnapshot {
+  isValid: boolean;
+  errorCount: number;
+  warningCount: number;
+  lastValidatedAt: string;
+}
+
 export interface ExamVersion {
   id: string;
   examId: string;
@@ -116,12 +123,7 @@ export interface ExamVersion {
   // Immutable snapshots
   contentSnapshot: ExamState;
   configSnapshot: ExamConfig;
-  validationSnapshot?: {
-    isValid: boolean;
-    errorCount: number;
-    warningCount: number;
-    lastValidatedAt: string;
-  } | undefined;
+  validationSnapshot?: ExamVersionValidationSnapshot | undefined;
   
   // Metadata
   createdBy: string;
@@ -129,6 +131,23 @@ export interface ExamVersion {
   publishNotes?: string | undefined;
   
   // Version state
+  isDraft: boolean;
+  isPublished: boolean;
+}
+
+/**
+ * Summary representation of an exam version for list views.
+ * Excludes heavy immutable snapshots; fetch full version details by ID when needed.
+ */
+export interface ExamVersionSummary {
+  id: string;
+  examId: string;
+  versionNumber: number;
+  parentVersionId: string | null;
+  validationSnapshot?: ExamVersionValidationSnapshot | undefined;
+  createdBy: string;
+  createdAt: string;
+  publishNotes?: string | undefined;
   isDraft: boolean;
   isPublished: boolean;
 }
