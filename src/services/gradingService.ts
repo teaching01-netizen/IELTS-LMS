@@ -121,7 +121,7 @@ export class GradingService {
       }
       
       // Sort by start time (most recent first)
-      sessions.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+      sessions.sort((a, b) => this.compareTimestampsDesc(a.startTime, b.startTime));
       
       return { success: true, data: sessions };
     } catch (error) {
@@ -166,7 +166,7 @@ export class GradingService {
       }
       
       // Sort by submission time (most recent first)
-      submissions.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+      submissions.sort((a, b) => this.compareTimestampsDesc(a.submittedAt, b.submittedAt));
       
       return { success: true, data: submissions };
     } catch (error) {
@@ -450,16 +450,20 @@ export class GradingService {
     teacherName: string
   ): Promise<GradingServiceResult<WritingAnnotation>> {
     try {
-      // Save annotation to writing submission
-      const writingSubmission = await gradingRepository.getWritingSubmissionById(
-        annotation.id.replace('wrt-', '').substring(0, annotation.id.length - 12)
-      );
-      
-      if (writingSubmission) {
-        writingSubmission.annotations.push(annotation);
-        await gradingRepository.saveWritingSubmission(writingSubmission);
+      // Save annotation to the matching writing task for this submission.
+      const writingSubmission = (await gradingRepository.getWritingSubmissionsBySubmissionId(submissionId))
+        .find((task) => task.taskId === annotation.taskId);
+
+      if (!writingSubmission) {
+        return {
+          success: false,
+          error: `Writing task ${annotation.taskId} not found for submission ${submissionId}`,
+        };
       }
       
+      writingSubmission.annotations.push(annotation);
+      await gradingRepository.saveWritingSubmission(writingSubmission);
+
       // Update draft
       const draft = await gradingRepository.getReviewDraftBySubmission(submissionId);
       if (draft) {
@@ -737,6 +741,7 @@ export class GradingService {
       if (!submission) {
         return { success: false, error: 'Submission not found' };
       }
+      const writingTasks = await gradingRepository.getWritingSubmissionsBySubmissionId(submissionId);
       const latestResult = await this.getLatestStudentResult(submissionId);
       const now = new Date().toISOString();
       const result: StudentResult = latestResult && latestResult.releaseStatus === 'ready_to_release'
@@ -747,14 +752,7 @@ export class GradingService {
             releasedBy: teacherId,
             overallBand: this.calculateOverallBand(draft),
             sectionBands: this.calculateSectionBands(draft),
-            writingResults: {
-              task1: draft.sectionDrafts.writing?.task1
-                ? this.buildWritingResult(draft.sectionDrafts.writing.task1, 'task1', draft)
-                : undefined,
-              task2: draft.sectionDrafts.writing?.task2
-                ? this.buildWritingResult(draft.sectionDrafts.writing.task2, 'task2', draft)
-                : undefined,
-            },
+            writingResults: this.buildWritingResults(draft, writingTasks),
             teacherSummary: draft.teacherSummary || {
               strengths: [],
               improvementPriorities: [],
@@ -772,14 +770,7 @@ export class GradingService {
             releasedBy: teacherId,
             overallBand: this.calculateOverallBand(draft),
             sectionBands: this.calculateSectionBands(draft),
-            writingResults: {
-              task1: draft.sectionDrafts.writing?.task1
-                ? this.buildWritingResult(draft.sectionDrafts.writing.task1, 'task1', draft)
-                : undefined,
-              task2: draft.sectionDrafts.writing?.task2
-                ? this.buildWritingResult(draft.sectionDrafts.writing.task2, 'task2', draft)
-                : undefined,
-            },
+            writingResults: this.buildWritingResults(draft, writingTasks),
             teacherSummary: draft.teacherSummary || {
               strengths: [],
               improvementPriorities: [],
@@ -853,6 +844,7 @@ export class GradingService {
       if (!submission) {
         return { success: false, error: 'Submission not found' };
       }
+      const writingTasks = await gradingRepository.getWritingSubmissionsBySubmissionId(submissionId);
 
       const latestResult = await this.getLatestStudentResult(submissionId);
       const now = new Date().toISOString();
@@ -865,14 +857,7 @@ export class GradingService {
             scheduledReleaseDate: releaseDate,
             overallBand: this.calculateOverallBand(draft),
             sectionBands: this.calculateSectionBands(draft),
-            writingResults: {
-              task1: draft.sectionDrafts.writing?.task1
-                ? this.buildWritingResult(draft.sectionDrafts.writing.task1, 'task1', draft)
-                : undefined,
-              task2: draft.sectionDrafts.writing?.task2
-                ? this.buildWritingResult(draft.sectionDrafts.writing.task2, 'task2', draft)
-                : undefined,
-            },
+            writingResults: this.buildWritingResults(draft, writingTasks),
             teacherSummary: draft.teacherSummary || {
               strengths: [],
               improvementPriorities: [],
@@ -889,14 +874,7 @@ export class GradingService {
             scheduledReleaseDate: releaseDate,
             overallBand: this.calculateOverallBand(draft),
             sectionBands: this.calculateSectionBands(draft),
-            writingResults: {
-              task1: draft.sectionDrafts.writing?.task1
-                ? this.buildWritingResult(draft.sectionDrafts.writing.task1, 'task1', draft)
-                : undefined,
-              task2: draft.sectionDrafts.writing?.task2
-                ? this.buildWritingResult(draft.sectionDrafts.writing.task2, 'task2', draft)
-                : undefined,
-            },
+            writingResults: this.buildWritingResults(draft, writingTasks),
             teacherSummary: draft.teacherSummary || {
               strengths: [],
               improvementPriorities: [],
@@ -1050,29 +1028,64 @@ export class GradingService {
     return Math.round(((task1Band + task2Band) / 2) * 2) / 2;
   }
   
+  private compareTimestampsDesc(left: string | undefined, right: string | undefined): number {
+    return this.parseTimestamp(right) - this.parseTimestamp(left);
+  }
+
+  private parseTimestamp(value: string | undefined): number {
+    if (!value) return 0;
+    const timestamp = new Date(value).getTime();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+
+  private buildWritingResults(
+    draft: ReviewDraft,
+    writingTasks: WritingTaskSubmission[],
+  ): StudentResult['writingResults'] {
+    const results: StudentResult['writingResults'] = {};
+
+    for (const task of writingTasks) {
+      results[task.taskId as 'task1' | 'task2'] = this.buildWritingResult(task, draft);
+    }
+
+    return results;
+  }
+
   /**
    * Build writing result from rubric assessment
    */
-  private buildWritingResult(rubric: RubricAssessment, taskId: string, draft: ReviewDraft): import('../types/grading').WritingResult {
+  private buildWritingResult(
+    task: WritingTaskSubmission,
+    draft: ReviewDraft,
+  ): import('../types/grading').WritingResult {
+    const rubric = draft.sectionDrafts.writing?.[task.taskId as 'task1' | 'task2'];
+    const studentVisibleAnnotations = draft.annotations.filter(
+      (annotation) =>
+        annotation.taskId === task.taskId && annotation.visibility === 'student_visible',
+    );
+    const studentVisibleDrawings = draft.drawings.filter(
+      (drawing) => drawing.taskId === task.taskId && drawing.visibility === 'student_visible',
+    );
+
     return {
-      taskId,
-      taskLabel: taskId === 'task1' ? 'Task 1' : 'Task 2',
-      prompt: '', // Would need to get from writing submission
-      studentText: '', // Would need to get from writing submission
-      wordCount: rubric.wordCount || 0,
+      taskId: task.taskId,
+      taskLabel: task.taskLabel || (task.taskId === 'task1' ? 'Task 1' : 'Task 2'),
+      prompt: task.prompt,
+      studentText: task.studentText,
+      wordCount: task.wordCount,
       rubricScores: {
-        taskResponse: rubric.taskResponseBand || 0,
-        coherence: rubric.coherenceBand || 0,
-        lexical: rubric.lexicalBand || 0,
-        grammar: rubric.grammarBand || 0
+        taskResponse: rubric?.taskResponseBand || 0,
+        coherence: rubric?.coherenceBand || 0,
+        lexical: rubric?.lexicalBand || 0,
+        grammar: rubric?.grammarBand || 0
       },
-      annotations: draft.annotations.filter(a => a.taskId === taskId && a.visibility === 'student_visible'),
-      drawings: draft.drawings.filter(d => d.taskId === taskId && d.visibility === 'student_visible'),
+      annotations: studentVisibleAnnotations,
+      drawings: studentVisibleDrawings,
       criterionFeedback: {
-        taskResponse: rubric.taskResponseNotes,
-        coherence: rubric.coherenceNotes,
-        lexical: rubric.lexicalNotes,
-        grammar: rubric.grammarNotes
+        taskResponse: rubric?.taskResponseNotes,
+        coherence: rubric?.coherenceNotes,
+        lexical: rubric?.lexicalNotes,
+        grammar: rubric?.grammarNotes
       }
     };
   }
@@ -1107,8 +1120,7 @@ export class GradingService {
     }
 
     return results.sort(
-      (left, right) =>
-        new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+      (left, right) => this.compareTimestampsDesc(left.updatedAt, right.updatedAt),
     )[0] ?? null;
   }
   

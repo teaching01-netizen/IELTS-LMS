@@ -347,12 +347,15 @@ impl GradingService {
         )?;
 
         let existing = self.get_review_draft(submission_id).await?;
-        if let Some(revision) = req.revision {
-            if revision != existing.revision {
-                return Err(GradingError::Conflict(
-                    "Review draft has been modified by another grader.".to_owned(),
-                ));
-            }
+        let revision = req.revision.ok_or_else(|| {
+            GradingError::Validation(
+                "Review draft revision is required for optimistic locking.".to_owned(),
+            )
+        })?;
+        if revision != existing.revision {
+            return Err(GradingError::Conflict(
+                "Review draft has been modified by another grader.".to_owned(),
+            ));
         }
 
         let next_release_status = req
@@ -498,10 +501,22 @@ impl GradingService {
         )?;
 
         let draft = self.get_review_draft(submission_id).await?;
+        if draft.release_status != ReleaseStatus::ReadyToRelease {
+            return Err(GradingError::Conflict(format!(
+                "Cannot release result from {:?} state.",
+                draft.release_status
+            )));
+        }
         let section_bands = build_section_bands(&draft.section_drafts);
         let overall_band = average_band(&section_bands);
         let now = Utc::now();
         let actor_id_str = ctx.actor_id.to_string();
+        let writing_tasks = sqlx::query_as::<_, WritingTaskSubmission>(
+            "SELECT * FROM writing_task_submissions WHERE submission_id = ? ORDER BY task_id ASC",
+        )
+        .bind(&submission_id_db)
+        .fetch_all(&self.pool)
+        .await?;
 
         let existing = sqlx::query_as::<_, StudentResult>(
             "SELECT * FROM student_results WHERE submission_id = ? ORDER BY updated_at DESC LIMIT 1",
@@ -520,6 +535,7 @@ impl GradingService {
                     released_by = ?,
                     overall_band = ?,
                     section_bands = ?,
+                    writing_results = ?,
                     teacher_summary = ?,
                     version = version + 1,
                     revision_reason = ?,
@@ -530,6 +546,7 @@ impl GradingService {
             .bind(&actor_id_str)
             .bind(overall_band)
             .bind(&section_bands)
+            .bind(build_writing_results(&draft, &writing_tasks))
             .bind(draft.teacher_summary.clone())
             .bind(revision_reason.clone())
             .bind(&existing.id)
@@ -549,7 +566,7 @@ impl GradingService {
                     released_by, overall_band, section_bands, writing_results,
                     teacher_summary, version, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, 'released', NOW(), ?, ?, ?, JSON_OBJECT(), ?, 1, NOW(), NOW())
+                VALUES (?, ?, ?, ?, 'released', NOW(), ?, ?, ?, ?, ?, 1, NOW(), NOW())
                 "#,
             )
             .bind(result_id)
@@ -559,6 +576,7 @@ impl GradingService {
             .bind(&actor_id_str)
             .bind(overall_band)
             .bind(&section_bands)
+            .bind(build_writing_results(&draft, &writing_tasks))
             .bind(draft.teacher_summary.clone())
             .execute(&self.pool)
             .await?;
@@ -570,7 +588,7 @@ impl GradingService {
         };
 
         sqlx::query(
-            "UPDATE review_drafts SET release_status = 'released', updated_at = NOW() WHERE submission_id = ?",
+            "UPDATE review_drafts SET release_status = 'released', has_unsaved_changes = false, updated_at = NOW(), revision = revision + 1 WHERE submission_id = ?",
         )
         .bind(&submission_id_db)
         .execute(&self.pool)
@@ -644,10 +662,22 @@ impl GradingService {
         )?;
 
         let draft = self.get_review_draft(submission_id).await?;
+        if draft.release_status != ReleaseStatus::ReadyToRelease {
+            return Err(GradingError::Conflict(format!(
+                "Cannot schedule release from {:?} state.",
+                draft.release_status
+            )));
+        }
         let section_bands = build_section_bands(&draft.section_drafts);
         let overall_band = average_band(&section_bands);
         let now = Utc::now();
         let actor_id_str = ctx.actor_id.to_string();
+        let writing_tasks = sqlx::query_as::<_, WritingTaskSubmission>(
+            "SELECT * FROM writing_task_submissions WHERE submission_id = ? ORDER BY task_id ASC",
+        )
+        .bind(&submission_id_db)
+        .fetch_all(&self.pool)
+        .await?;
 
         let existing = sqlx::query_as::<_, StudentResult>(
             "SELECT * FROM student_results WHERE submission_id = ? ORDER BY updated_at DESC LIMIT 1",
@@ -666,6 +696,7 @@ impl GradingService {
                     scheduled_release_date = ?,
                     overall_band = ?,
                     section_bands = ?,
+                    writing_results = ?,
                     teacher_summary = ?,
                     updated_at = NOW()
                 WHERE id = ?
@@ -674,6 +705,7 @@ impl GradingService {
             .bind(req.release_at)
             .bind(overall_band)
             .bind(&section_bands)
+            .bind(build_writing_results(&draft, &writing_tasks))
             .bind(draft.teacher_summary.clone())
             .bind(existing.id)
             .execute(&self.pool)
@@ -687,7 +719,7 @@ impl GradingService {
                     scheduled_release_date, overall_band, section_bands, writing_results,
                     teacher_summary, version, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, 'ready_to_release', ?, ?, ?, JSON_OBJECT(), ?, 1, NOW(), NOW())
+                VALUES (?, ?, ?, ?, 'ready_to_release', ?, ?, ?, ?, ?, 1, NOW(), NOW())
                 "#,
             )
             .bind(result_id)
@@ -697,13 +729,14 @@ impl GradingService {
             .bind(req.release_at)
             .bind(overall_band)
             .bind(&section_bands)
+            .bind(build_writing_results(&draft, &writing_tasks))
             .bind(draft.teacher_summary.clone())
             .execute(&self.pool)
             .await?;
         }
 
         sqlx::query(
-            "UPDATE review_drafts SET release_status = 'ready_to_release', has_unsaved_changes = false, updated_at = NOW() WHERE submission_id = ?",
+            "UPDATE review_drafts SET release_status = 'ready_to_release', has_unsaved_changes = false, updated_at = NOW(), revision = revision + 1 WHERE submission_id = ?",
         )
         .bind(&submission_id_db)
         .execute(&self.pool)
@@ -851,10 +884,12 @@ impl GradingService {
         self.ensure_materialized_state().await?;
         let submission_id_db = submission_id.to_string();
         let actor_id_str = ctx.actor_id.to_string();
+        let current_draft = self.get_review_draft(submission_id).await?;
+        Self::ensure_valid_release_transition(&current_draft.release_status, &release_status)?;
         sqlx::query(
             r#"
             UPDATE review_drafts
-            SET release_status = ?, updated_at = NOW(), revision = revision + 1
+            SET release_status = ?, has_unsaved_changes = false, updated_at = NOW(), revision = revision + 1
             WHERE submission_id = ?
             "#,
         )
@@ -887,6 +922,29 @@ impl GradingService {
         .await?;
 
         Ok(draft)
+    }
+
+    fn ensure_valid_release_transition(
+        current: &ReleaseStatus,
+        next: &ReleaseStatus,
+    ) -> Result<(), GradingError> {
+        let allowed = matches!(
+            (current, next),
+            (ReleaseStatus::Draft, ReleaseStatus::GradingComplete)
+                | (ReleaseStatus::Reopened, ReleaseStatus::GradingComplete)
+                | (ReleaseStatus::GradingComplete, ReleaseStatus::ReadyToRelease)
+                | (ReleaseStatus::ReadyToRelease, ReleaseStatus::Reopened)
+                | (ReleaseStatus::Released, ReleaseStatus::Reopened)
+        );
+
+        if allowed {
+            Ok(())
+        } else {
+            Err(GradingError::Conflict(format!(
+                "Invalid release transition from {:?} to {:?}.",
+                current, next
+            )))
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1507,4 +1565,94 @@ fn average_band(section_bands: &Value) -> f64 {
     } else {
         values.iter().sum::<f64>() / values.len() as f64
     }
+}
+
+fn build_writing_results(draft: &ReviewDraft, writing_tasks: &[WritingTaskSubmission]) -> Value {
+    let mut results = Map::new();
+
+    for task in writing_tasks {
+        results.insert(task.task_id.clone(), build_writing_result(draft, task));
+    }
+
+    Value::Object(results)
+}
+
+fn build_writing_result(draft: &ReviewDraft, task: &WritingTaskSubmission) -> Value {
+    let rubric = draft
+        .section_drafts
+        .get("writing")
+        .and_then(Value::as_object)
+        .and_then(|writing| writing.get(&task.task_id));
+    let annotations = draft
+        .annotations
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter(|annotation| {
+                    annotation.get("taskId").and_then(Value::as_str) == Some(task.task_id.as_str())
+                        && annotation.get("visibility").and_then(Value::as_str)
+                            == Some("student_visible")
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let drawings = draft
+        .drawings
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter(|drawing| {
+                    drawing.get("taskId").and_then(Value::as_str) == Some(task.task_id.as_str())
+                        && drawing.get("visibility").and_then(Value::as_str)
+                            == Some("student_visible")
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    json!({
+        "taskId": &task.task_id,
+        "taskLabel": &task.task_label,
+        "prompt": &task.prompt,
+        "studentText": &task.student_text,
+        "wordCount": task.word_count,
+        "rubricScores": {
+            "taskResponse": rubric
+                .and_then(|value| value.get("taskResponseBand"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
+            "coherence": rubric
+                .and_then(|value| value.get("coherenceBand"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
+            "lexical": rubric
+                .and_then(|value| value.get("lexicalBand"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
+            "grammar": rubric
+                .and_then(|value| value.get("grammarBand"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+        },
+        "annotations": annotations,
+        "drawings": drawings,
+        "criterionFeedback": {
+            "taskResponse": rubric
+                .and_then(|value| value.get("taskResponseNotes"))
+                .and_then(Value::as_str),
+            "coherence": rubric
+                .and_then(|value| value.get("coherenceNotes"))
+                .and_then(Value::as_str),
+            "lexical": rubric
+                .and_then(|value| value.get("lexicalNotes"))
+                .and_then(Value::as_str),
+            "grammar": rubric
+                .and_then(|value| value.get("grammarNotes"))
+                .and_then(Value::as_str)
+        }
+    })
 }

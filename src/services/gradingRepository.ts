@@ -11,6 +11,10 @@ import type {
 } from '../types/grading';
 
 const reviewDraftRevisions = new Map<string, number>();
+const reviewDraftSubmissionIds = new Map<string, string>();
+const sectionSubmissionIds = new Map<string, string>();
+const writingSubmissionIds = new Map<string, string>();
+const studentResultSubmissionIds = new Map<string, string>();
 const writingTaskSectionIndex = new Map<string, string>();
 
 function normalizeTeacherSummary(value: unknown): NonNullable<ReviewDraft['teacherSummary']> {
@@ -74,6 +78,29 @@ export function getReviewDraftRevision(id: string): number | undefined {
   return reviewDraftRevisions.get(id);
 }
 
+function rememberReviewDraftSubmission(id: string, submissionId: string): void {
+  reviewDraftSubmissionIds.set(id, submissionId);
+}
+
+function rememberSectionSubmission(id: string, submissionId: string): void {
+  sectionSubmissionIds.set(id, submissionId);
+}
+
+function rememberWritingSubmission(id: string, submissionId: string): void {
+  writingSubmissionIds.set(id, submissionId);
+}
+
+function rememberStudentResultSubmission(id: string, submissionId: string): void {
+  studentResultSubmissionIds.set(id, submissionId);
+}
+
+function forgetReviewDraft(id: string): string | undefined {
+  const submissionId = reviewDraftSubmissionIds.get(id);
+  reviewDraftSubmissionIds.delete(id);
+  reviewDraftRevisions.delete(id);
+  return submissionId;
+}
+
 export interface IGradingRepository {
   getAllSessions(): Promise<GradingSession[]>;
   getSessionById(id: string): Promise<GradingSession | null>;
@@ -120,6 +147,32 @@ export interface IGradingRepository {
 
 class BackendGradingRepository implements IGradingRepository {
   private readonly submissionBundleCache = new Map<string, Promise<any>>();
+
+  private invalidateSubmissionBundleCache(submissionId: string): void {
+    this.submissionBundleCache.delete(submissionId);
+  }
+
+  private invalidateReviewDraftCache(draftId: string): void {
+    const submissionId = reviewDraftSubmissionIds.get(draftId);
+    if (submissionId) {
+      this.invalidateSubmissionBundleCache(submissionId);
+    }
+  }
+
+  private invalidateBySectionSubmissionId(sectionSubmissionId: string): void {
+    this.invalidateSubmissionBundleCache(sectionSubmissionId);
+  }
+
+  private invalidateByWritingSubmissionId(writingSubmissionId: string): void {
+    this.invalidateSubmissionBundleCache(writingSubmissionId);
+  }
+
+  private invalidateByStudentResultId(resultId: string): void {
+    const submissionId = studentResultSubmissionIds.get(resultId);
+    if (submissionId) {
+      this.invalidateSubmissionBundleCache(submissionId);
+    }
+  }
 
   private mapSession(payload: any): GradingSession {
     return {
@@ -173,6 +226,7 @@ class BackendGradingRepository implements IGradingRepository {
   }
 
   private mapSection(payload: any): SectionSubmission {
+    rememberSectionSubmission(payload.id, payload.submissionId);
     return {
       id: payload.id,
       submissionId: payload.submissionId,
@@ -192,6 +246,7 @@ class BackendGradingRepository implements IGradingRepository {
     if (typeof payload.sectionSubmissionId === 'string') {
       writingTaskSectionIndex.set(payload.id, payload.sectionSubmissionId);
     }
+    rememberWritingSubmission(payload.id, payload.submissionId);
 
     return {
       id: payload.id,
@@ -216,6 +271,7 @@ class BackendGradingRepository implements IGradingRepository {
 
   private mapReviewDraft(payload: any): ReviewDraft {
     rememberReviewDraftRevision(payload.id, payload.revision);
+    rememberReviewDraftSubmission(payload.id, payload.submissionId);
 
     return {
       id: payload.id,
@@ -239,6 +295,7 @@ class BackendGradingRepository implements IGradingRepository {
   }
 
   private mapStudentResult(payload: any): StudentResult {
+    rememberStudentResultSubmission(payload.id, payload.submissionId);
     return {
       id: payload.id,
       submissionId: payload.submissionId,
@@ -356,9 +413,14 @@ class BackendGradingRepository implements IGradingRepository {
     );
   }
 
-  async saveSubmission(_submission: StudentSubmission): Promise<void> {}
+  async saveSubmission(submission: StudentSubmission): Promise<void> {
+    this.invalidateSubmissionBundleCache(submission.id);
+    this.invalidateSubmissionBundleCache(submission.submissionId);
+  }
 
-  async deleteSubmission(_id: string): Promise<void> {}
+  async deleteSubmission(id: string): Promise<void> {
+    this.invalidateSubmissionBundleCache(id);
+  }
 
   async getAllSectionSubmissions(): Promise<SectionSubmission[]> {
     const submissions = await this.getAllSubmissions();
@@ -377,9 +439,17 @@ class BackendGradingRepository implements IGradingRepository {
     return (bundle.sections ?? []).map((section: any) => this.mapSection(section));
   }
 
-  async saveSectionSubmission(_section: SectionSubmission): Promise<void> {}
+  async saveSectionSubmission(section: SectionSubmission): Promise<void> {
+    rememberSectionSubmission(section.id, section.submissionId);
+    this.invalidateSubmissionBundleCache(section.submissionId);
+  }
 
-  async deleteSectionSubmission(_id: string): Promise<void> {}
+  async deleteSectionSubmission(id: string): Promise<void> {
+    const submissionId = sectionSubmissionIds.get(id);
+    if (submissionId) {
+      this.invalidateSubmissionBundleCache(submissionId);
+    }
+  }
 
   async getAllWritingSubmissions(): Promise<WritingTaskSubmission[]> {
     const submissions = await this.getAllSubmissions();
@@ -405,9 +475,17 @@ class BackendGradingRepository implements IGradingRepository {
     return (bundle.writingTasks ?? []).map((writing: any) => this.mapWritingTask(writing));
   }
 
-  async saveWritingSubmission(_writing: WritingTaskSubmission): Promise<void> {}
+  async saveWritingSubmission(writing: WritingTaskSubmission): Promise<void> {
+    rememberWritingSubmission(writing.id, writing.submissionId);
+    this.invalidateSubmissionBundleCache(writing.submissionId);
+  }
 
-  async deleteWritingSubmission(_id: string): Promise<void> {}
+  async deleteWritingSubmission(id: string): Promise<void> {
+    const submissionId = writingSubmissionIds.get(id);
+    if (submissionId) {
+      this.invalidateSubmissionBundleCache(submissionId);
+    }
+  }
 
   async getAllReviewDrafts(): Promise<ReviewDraft[]> {
     const submissions = await this.getAllSubmissions();
@@ -448,9 +526,16 @@ class BackendGradingRepository implements IGradingRepository {
   async saveReviewDraft(draft: ReviewDraft): Promise<void> {
     const revision = (draft as unknown as { revision?: unknown }).revision;
     rememberReviewDraftRevision(draft.id, typeof revision === 'number' ? revision : undefined);
+    rememberReviewDraftSubmission(draft.id, draft.submissionId);
+    this.invalidateSubmissionBundleCache(draft.submissionId);
   }
 
-  async deleteReviewDraft(_id: string): Promise<void> {}
+  async deleteReviewDraft(id: string): Promise<void> {
+    const submissionId = forgetReviewDraft(id);
+    if (submissionId) {
+      this.invalidateSubmissionBundleCache(submissionId);
+    }
+  }
 
   async getReviewEvents(_submissionId: string, _limit = 100): Promise<ReviewEvent[]> {
     return [];
@@ -481,9 +566,14 @@ class BackendGradingRepository implements IGradingRepository {
     return (await this.getAllStudentResults()).filter((result) => result.studentId === studentId);
   }
 
-  async saveStudentResult(_result: StudentResult): Promise<void> {}
+  async saveStudentResult(result: StudentResult): Promise<void> {
+    rememberStudentResultSubmission(result.id, result.submissionId);
+    this.invalidateSubmissionBundleCache(result.submissionId);
+  }
 
-  async deleteStudentResult(_id: string): Promise<void> {}
+  async deleteStudentResult(id: string): Promise<void> {
+    this.invalidateByStudentResultId(id);
+  }
 
   async getReleaseEvents(resultId: string, limit = 100): Promise<ReleaseEvent[]> {
     return (await backendGet<any[]>(`/v1/results/${resultId}/events`))
