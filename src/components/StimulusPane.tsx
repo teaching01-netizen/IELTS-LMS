@@ -45,31 +45,36 @@ export function StimulusPane({
     }
   }, [passage.content]);
 
-  const updatePassage = (partial: Partial<Passage>) => {
-    const nextPassage = {
-      ...passage,
-      ...partial,
-    };
-    const nextMetrics = getPassageMetrics(nextPassage.content, passageWordCount);
-    const newPassages = state.reading.passages.map((item) =>
-      item.id === passage.id
-        ? {
-            ...nextPassage,
-            wordCount: nextMetrics.words,
-          }
-        : item,
-    );
+  const updatePassage = (updater: (current: Passage) => Passage) => {
+    void setState((previous) => {
+      const currentPassage = previous.reading.passages.find((item) => item.id === passage.id);
+      if (!currentPassage) {
+        return previous;
+      }
 
-    void setState({
-      ...state,
-      reading: { ...state.reading, passages: newPassages },
+      const nextPassage = updater(currentPassage);
+      const nextMetrics = getPassageMetrics(nextPassage.content, passageWordCount);
+      const newPassages = previous.reading.passages.map((item) =>
+        item.id === currentPassage.id
+          ? {
+              ...nextPassage,
+              wordCount: nextMetrics.words,
+            }
+          : item,
+      );
+
+      return {
+        ...previous,
+        reading: { ...previous.reading, passages: newPassages },
+      };
     });
   };
 
   const syncEditor = () => {
-    updatePassage({
+    updatePassage((current) => ({
+      ...current,
       content: editorRef.current?.innerHTML ?? '',
-    });
+    }));
   };
 
   const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
@@ -140,7 +145,10 @@ export function StimulusPane({
       index += 1;
     });
 
-    updatePassage({ content: root.innerHTML });
+    updatePassage((current) => ({
+      ...current,
+      content: root.innerHTML,
+    }));
   };
 
   const handleInsertLink = () => {
@@ -151,9 +159,10 @@ export function StimulusPane({
   };
 
   const handleSaveImage = (image: StimulusImageAsset) => {
-    updatePassage({
-      images: [...(passage.images ?? []), image],
-    });
+    updatePassage((current) => ({
+      ...current,
+      images: [...(current.images ?? []), image],
+    }));
     setIsImageEditorOpen(false);
   };
 
