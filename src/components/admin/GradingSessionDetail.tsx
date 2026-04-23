@@ -1,8 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Filter, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight } from 'lucide-react';
-import { StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus } from '../../types/grading';
+import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus } from '../../types/grading';
 import { gradingService } from '../../services/gradingService';
+import { gradingRepository } from '../../services/gradingRepository';
+import { examRepository } from '../../services/examRepository';
 import { TableLoadingSkeleton } from '@components/ui';
+import { GradingExportButtons } from './GradingExportButtons';
+import {
+  buildCsvContent,
+  buildCsvFilename,
+  buildObjectiveExportRows,
+  buildWritingExportRows,
+  downloadCsvFile,
+  LISTENING_EXPORT_COLUMNS,
+  READING_EXPORT_COLUMNS,
+  WRITING_EXPORT_COLUMNS,
+  type GradingExportSection,
+} from './gradingReviewUtils';
+import type { ExamState } from '../../types';
 
 interface GradingSessionDetailProps {
   sessionId: string;
@@ -11,8 +26,11 @@ interface GradingSessionDetailProps {
 }
 
 export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: GradingSessionDetailProps) {
+  const [session, setSession] = useState<GradingSession | null>(null);
   const [submissions, setSubmissions] = useState<StudentSubmission[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exportingSection, setExportingSection] = useState<GradingExportSection | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [filters, setFilters] = useState<SessionDetailFilters>({});
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -22,7 +40,12 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
 
   const loadSubmissions = async () => {
     setLoading(true);
-    const result = await gradingService.getSessionStudentSubmissions(sessionId, { ...filters, searchQuery });
+    const [sessionResult, result] = await Promise.all([
+      gradingRepository.getSessionById(sessionId),
+      gradingService.getSessionStudentSubmissions(sessionId, { ...filters, searchQuery }),
+    ]);
+
+    setSession(sessionResult);
     if (result.success && result.data) {
       setSubmissions(result.data);
     }
@@ -98,6 +121,81 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     return 'Just now';
   };
 
+  const resolveExamState = async (publishedVersionId?: string): Promise<ExamState | null> => {
+    if (!publishedVersionId) {
+      return null;
+    }
+
+    const version = await examRepository.getVersionById(publishedVersionId);
+    return (version?.contentSnapshot as ExamState | undefined) ?? null;
+  };
+
+  const handleExportSection = async (section: GradingExportSection) => {
+    setExportError(null);
+    setExportingSection(section);
+
+    try {
+      const [fullSession, fullSubmissions] = await Promise.all([
+        session ?? gradingRepository.getSessionById(sessionId),
+        gradingRepository.getSubmissionsBySession(sessionId),
+      ]);
+
+      if (!fullSession) {
+        throw new Error('Could not load grading session metadata.');
+      }
+
+      const examState = section === 'writing' ? null : await resolveExamState(fullSession.publishedVersionId);
+      const bundles = await Promise.all(
+        fullSubmissions.map(async (submission) => ({
+          submission,
+          sections: await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id),
+          writing: await gradingRepository.getWritingSubmissionsBySubmissionId(submission.id),
+        })),
+      );
+
+      const sessionContext = {
+        sessionId: fullSession.id,
+        examTitle: fullSession.examTitle,
+      };
+
+      const rows =
+        section === 'writing'
+          ? bundles.flatMap(({ submission, writing }) =>
+              buildWritingExportRows(sessionContext, submission, writing),
+            )
+          : bundles.flatMap(({ submission, sections }) => {
+              const sectionSubmission = sections.find((item) => item.section === section);
+              if (!sectionSubmission) {
+                return [];
+              }
+
+              return buildObjectiveExportRows({
+                session: sessionContext,
+                submission,
+                sectionSubmission,
+                examState,
+                moduleType: section,
+              });
+            });
+
+      const columns =
+        section === 'writing'
+          ? WRITING_EXPORT_COLUMNS
+          : section === 'reading'
+            ? READING_EXPORT_COLUMNS
+            : LISTENING_EXPORT_COLUMNS;
+
+      downloadCsvFile(
+        buildCsvFilename(fullSession.examTitle, section, fullSession.cohortName),
+        buildCsvContent(columns, rows),
+      );
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'Failed to export section CSV.');
+    } finally {
+      setExportingSection(null);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -109,11 +207,15 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           <ArrowLeft size={20} className="text-gray-600" />
         </button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-gray-900">Session Students</h1>
-          <p className="text-sm text-gray-500 mt-1">{submissions.length} students in this session</p>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {session?.examTitle || 'Session Students'}
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {session?.cohortName || 'Grading session'} • {submissions.length} students in this session
+          </p>
         </div>
         
-        <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
             <input 
@@ -128,8 +230,20 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             <Filter size={16} />
             <span className="hidden sm:inline">Filter</span>
           </button>
+          <GradingExportButtons
+            exportingSection={exportingSection}
+            onExportReading={() => void handleExportSection('reading')}
+            onExportListening={() => void handleExportSection('listening')}
+            onExportWriting={() => void handleExportSection('writing')}
+          />
         </div>
       </div>
+
+      {exportError ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {exportError}
+        </div>
+      ) : null}
 
       {/* Quick Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
