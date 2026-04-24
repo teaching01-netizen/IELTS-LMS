@@ -7,7 +7,7 @@ import { studentAttemptRepository } from '../../../../services/studentAttemptRep
 import type { ExamState } from '../../../../types';
 import type { StudentAttempt, StudentAttemptMutation } from '../../../../types/studentAttempt';
 import { StudentAttemptProvider, useStudentAttempt } from '../StudentAttemptProvider';
-import { StudentRuntimeProvider } from '../StudentRuntimeProvider';
+import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
 
 function createExamState(): ExamState {
   return {
@@ -190,6 +190,48 @@ describe('StudentAttemptProvider', () => {
     });
 
     expect(result.current.state.lastPersistedAt).not.toBeNull();
+  });
+
+  it('replays pending writing drafts into the runtime state on mount', async () => {
+    const attemptSnapshot: StudentAttempt = {
+      ...createAttemptSnapshot(),
+      currentModule: 'writing',
+      currentQuestionId: 'task1',
+      writingAnswers: {},
+    };
+
+    const pendingMutation: StudentAttemptMutation = {
+      id: 'mutation-1',
+      attemptId: attemptSnapshot.id,
+      scheduleId: attemptSnapshot.scheduleId,
+      timestamp: '2026-01-01T00:00:00.000Z',
+      type: 'writing_answer',
+      payload: {
+        taskId: 'task1',
+        value: '<p>Draft</p>',
+        module: 'writing',
+      },
+    };
+
+    vi.mocked(studentAttemptRepository.getPendingMutations).mockResolvedValue([pendingMutation]);
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const { result } = renderHook(
+      () => ({
+        attempt: useStudentAttempt(),
+        runtime: useStudentRuntime(),
+      }),
+      { wrapper: createWrapper(attemptSnapshot) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.attempt.state.pendingMutationCount).toBe(1);
+    });
+
+    expect(result.current.runtime.state.writingAnswers['task1']).toBe('<p>Draft</p>');
   });
 
   it('preserves explicit sync state patches for network transitions', async () => {

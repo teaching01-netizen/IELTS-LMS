@@ -32,7 +32,7 @@ export function StudentAppWrapper({
       state={state}
       onExit={onExit}
       attemptSnapshot={attemptSnapshot}
-      runtimeBacked={Boolean(runtimeSnapshot)}
+      runtimeBacked={Boolean(runtimeSnapshot || onRuntimeRefresh)}
       runtimeSnapshot={runtimeSnapshot}
     >
       <StudentAttemptProvider scheduleId={scheduleId} attemptSnapshot={attemptSnapshot}>

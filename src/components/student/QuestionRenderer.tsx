@@ -73,17 +73,6 @@ export function QuestionRenderer({
 }: QuestionRendererProps) {
   const stringArrayAnswer = Array.isArray(answer) ? answer : [];
 
-  const formatAnswerRule = (rule: 'ONE_WORD' | 'TWO_WORDS' | 'THREE_WORDS'): string => {
-    switch (rule) {
-      case 'ONE_WORD':
-        return 'one word only';
-      case 'TWO_WORDS':
-        return 'no more than two words';
-      case 'THREE_WORDS':
-        return 'no more than three words';
-    }
-  };
-
   const getSlotId = (index: number, fallback: string) => slotIds[index] ?? fallback;
   const getSlotClassName = (slotId: string) => {
     const activeClass = currentQuestionId === slotId ? 'ring-2 ring-blue-500 ring-offset-2' : '';
@@ -451,9 +440,6 @@ export function QuestionRenderer({
             </React.Fragment>
           ))}
         </div>
-        <p className="pl-1 text-sm text-gray-500">
-          Limit: {formatAnswerRule(q.answerRule)}
-        </p>
       </div>
     );
   };
@@ -494,9 +480,6 @@ export function QuestionRenderer({
             </React.Fragment>
           ))}
         </div>
-        <p className="pl-1 text-sm text-gray-500">
-          Limit: {formatAnswerRule(noteQuestion.answerRule)}
-        </p>
       </div>
     );
   };

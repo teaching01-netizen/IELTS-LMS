@@ -149,6 +149,7 @@ describe('student question experience', () => {
 
     expect(screen.queryByText(/not yet implemented/i)).not.toBeInTheDocument();
     expect(screen.getAllByRole('textbox')).toHaveLength(2);
+    expect(screen.queryByText(/limit:/i)).not.toBeInTheDocument();
   });
 
   it('opens the question navigator from the header when the control is available', () => {

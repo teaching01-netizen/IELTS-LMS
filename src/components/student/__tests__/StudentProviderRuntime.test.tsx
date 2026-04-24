@@ -154,6 +154,31 @@ describe('Student Provider Runtime Integration', () => {
     expect(screen.queryByText(/pre-check/i)).not.toBeInTheDocument();
   });
 
+  it('always shows syscheck before the waiting room when entering a scheduled exam', () => {
+    const preCheckPendingAttempt: StudentAttempt = {
+      ...attemptSnapshot,
+      phase: 'lobby',
+      integrity: {
+        ...attemptSnapshot.integrity,
+        preCheck: null,
+      },
+    };
+
+    render(
+      <StudentAppWrapper
+        state={state}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={preCheckPendingAttempt}
+        onRuntimeRefresh={async () => {}}
+        runtimeSnapshot={null}
+      />,
+    );
+
+    expect(screen.getByText(/System Compatibility Check/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /start exam/i })).not.toBeInTheDocument();
+  });
+
   it('syncs navigation provider with runtime currentSectionKey', () => {
     runtimeSnapshot.currentSectionKey = 'writing';
     runtimeSnapshot.activeSectionKey = 'writing';
@@ -215,6 +240,8 @@ describe('Student Provider Runtime Integration', () => {
       <StudentAppWrapper
         state={state}
         onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
         runtimeSnapshot={runtimeSnapshot}
       />
     );
@@ -232,6 +259,8 @@ describe('Student Provider Runtime Integration', () => {
       <StudentAppWrapper
         state={state}
         onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
         runtimeSnapshot={runtimeSnapshot}
       />
     );
@@ -261,6 +290,8 @@ describe('Student Provider Runtime Integration', () => {
       <StudentAppWrapper
         state={state}
         onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
         runtimeSnapshot={runtimeSnapshot}
       />
     );

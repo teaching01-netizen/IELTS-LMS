@@ -652,6 +652,10 @@ export function StudentRuntimeProvider({
       return;
     }
 
+    if (!runtimeSnapshot) {
+      return;
+    }
+
     const nextModule =
       runtimeSnapshot?.currentSectionKey ?? enabledModules[0] ?? runtimeState.currentModule;
     dispatch({

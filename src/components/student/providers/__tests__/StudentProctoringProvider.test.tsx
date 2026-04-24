@@ -204,6 +204,75 @@ function renderHarness(config: ExamConfig = mockConfig) {
   return harness;
 }
 
+function renderRuntimeBackedPreCheckHarness(config: ExamConfig = mockConfig) {
+  const attemptSnapshot: StudentAttempt = {
+    id: 'attempt-1',
+    scheduleId: 'sched-1',
+    studentKey: 'student-sched-1-alice',
+    examId: 'exam-1',
+    examTitle: 'Test Exam',
+    candidateId: 'alice',
+    candidateName: 'Alice Roe',
+    candidateEmail: 'alice@example.com',
+    phase: 'exam',
+    currentModule: 'listening',
+    currentQuestionId: null,
+    answers: {},
+    writingAnswers: {},
+    flags: {},
+    violations: [],
+    proctorStatus: 'active',
+    proctorNote: null,
+    proctorUpdatedAt: null,
+    proctorUpdatedBy: null,
+    lastWarningId: null,
+    lastAcknowledgedWarningId: null,
+    integrity: {
+      preCheck: null,
+      deviceFingerprintHash: null,
+      lastDisconnectAt: null,
+      lastReconnectAt: null,
+      lastHeartbeatAt: null,
+      lastHeartbeatStatus: 'idle',
+    },
+    recovery: {
+      lastRecoveredAt: null,
+      lastLocalMutationAt: null,
+      lastPersistedAt: null,
+      pendingMutationCount: 0,
+      syncState: 'saved',
+    },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <StudentRuntimeProvider
+      state={mockExamState}
+      onExit={vi.fn()}
+      attemptSnapshot={attemptSnapshot}
+      runtimeBacked
+    >
+      <StudentAttemptProvider
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+      >
+        <ProctoringProvider config={config} scheduleId={attemptSnapshot.scheduleId}>
+          {children}
+        </ProctoringProvider>
+      </StudentAttemptProvider>
+    </StudentRuntimeProvider>
+  );
+
+  return renderHook(
+    () => ({
+      proctoring: useProctoring(),
+      runtime: useStudentRuntime(),
+    }),
+    { wrapper },
+  );
+}
+
 describe('StudentProctoringProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -402,6 +471,47 @@ describe('StudentProctoringProvider', () => {
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(true);
+  });
+
+  it('activates anti-cheat after runtime-backed pre-check completes (late entry)', async () => {
+    const harness = renderRuntimeBackedPreCheckHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'warn' },
+    });
+
+    expect(harness.result.current.runtime.state.phase).toBe('pre-check');
+
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(false);
+
+    act(() => {
+      harness.result.current.runtime.actions.setPhase('exam');
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
     });
 
     expect(

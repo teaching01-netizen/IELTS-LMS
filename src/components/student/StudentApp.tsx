@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   countAnsweredQuestions,
   countQuestionSlots,
+  getStudentQuestionsForModule,
 } from '@services/examAdapterService';
 import { AlertTriangle, X } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -127,6 +128,9 @@ export function StudentApp() {
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
   const { setShowTimeExtensionRequest } = uiActions;
   const autoSubmitFingerprintRef = useRef<string | null>(null);
+  const runtimeStateRef = useRef(runtimeState);
+  const moduleSubmitInFlightRef = useRef<Promise<void> | null>(null);
+  const moduleSubmitFingerprintRef = useRef<string | null>(null);
   const priorTimeRemainingRef = useRef<number | null>(null);
   const runtimeFinalSubmitRef = useRef<string | null>(null);
   const finalSubmitInFlightRef = useRef<Promise<void> | null>(null);
@@ -167,6 +171,65 @@ export function StudentApp() {
   }, [attemptState.attempt]);
 
   const droppedMutations = attemptState.attempt?.recovery.lastDroppedMutations ?? null;
+
+  useEffect(() => {
+    runtimeStateRef.current = runtimeState;
+  }, [runtimeState]);
+
+  const flushAndSubmitCurrentModuleWithRetry = useMemo(() => {
+    return async (fingerprint: string) => {
+      if (
+        moduleSubmitInFlightRef.current &&
+        moduleSubmitFingerprintRef.current === fingerprint
+      ) {
+        await moduleSubmitInFlightRef.current;
+        return;
+      }
+
+      const moduleKey = runtimeStateRef.current.currentModule;
+      moduleSubmitFingerprintRef.current = fingerprint;
+
+      const promise = (async () => {
+        let attemptIndex = 0;
+
+        while (true) {
+          const latestState = runtimeStateRef.current;
+          if (latestState.phase !== 'exam') {
+            return;
+          }
+
+          if (latestState.currentModule !== moduleKey) {
+            return;
+          }
+
+          const flushed = await attemptActions.flushPending();
+          if (flushed) {
+            runtimeActions.setBlockingReason(null);
+            runtimeActions.submitModule();
+            return;
+          }
+
+          runtimeActions.setBlockingReason(navigator.onLine ? 'syncing_reconnect' : 'offline');
+
+          const backoffMs = Math.min(30_000, 1_000 * 2 ** attemptIndex);
+          attemptIndex += 1;
+
+          await new Promise<void>((resolve) => {
+            window.setTimeout(() => resolve(), backoffMs);
+          });
+        }
+      })();
+
+      moduleSubmitInFlightRef.current = promise;
+      try {
+        await promise;
+      } finally {
+        if (moduleSubmitInFlightRef.current === promise) {
+          moduleSubmitInFlightRef.current = null;
+        }
+      }
+    };
+  }, [attemptActions, runtimeActions]);
 
   useEffect(() => {
     if (!latestPendingWarning) {
@@ -389,11 +452,11 @@ export function StudentApp() {
         return;
       }
 
+      const reachedZero = runtimeState.displayTimeRemaining === 0;
       const transitionedToZero =
-        runtimeState.displayTimeRemaining === 0 &&
-        typeof priorTimeRemaining === 'number' &&
-        priorTimeRemaining > 0;
-      if (!transitionedToZero) {
+        reachedZero && typeof priorTimeRemaining === 'number' && priorTimeRemaining > 0;
+      const loadedAtZero = reachedZero && priorTimeRemaining === null;
+      if (!transitionedToZero && !loadedAtZero) {
         return;
       }
     } else if (runtimeState.displayTimeRemaining !== 0) {
@@ -406,19 +469,11 @@ export function StudentApp() {
     }
 
     autoSubmitFingerprintRef.current = fingerprint;
-    void (async () => {
-      const flushed = await attemptActions.flushPending();
-      if (!flushed) {
-        runtimeActions.setBlockingReason(navigator.onLine ? 'syncing_reconnect' : 'offline');
-        return;
-      }
-
-      runtimeActions.setBlockingReason(null);
-      runtimeActions.submitModule();
-    })();
+    void flushAndSubmitCurrentModuleWithRetry(fingerprint);
   }, [
     attemptActions,
     examState.config.progression.autoSubmit,
+    flushAndSubmitCurrentModuleWithRetry,
     runtimeActions,
     runtimeState.blocking.active,
     runtimeState.currentModule,
@@ -449,14 +504,8 @@ export function StudentApp() {
 
   const performModuleSubmit = async () => {
     if (runtimeState.runtimeBacked) {
-      const flushed = await attemptActions.flushPending();
-      if (!flushed) {
-        runtimeActions.setBlockingReason(navigator.onLine ? 'syncing_reconnect' : 'offline');
-        return;
-      }
-
-      runtimeActions.setBlockingReason(null);
-      runtimeActions.submitModule();
+      const fingerprint = `manual:${runtimeState.currentModule}`;
+      await flushAndSubmitCurrentModuleWithRetry(fingerprint);
       return;
     }
 
@@ -643,7 +692,6 @@ export function StudentApp() {
             onExit={onExit}
           />
         </main>
-        {blockingOverlay}
         {finalSubmitOverlay}
       </div>
     );
@@ -665,6 +713,72 @@ export function StudentApp() {
 
   if (runtimeState.phase === 'post-exam') {
     const isProctorTerminated = runtimeState.proctorStatus === 'terminated';
+    const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+    const enabled = examState.config.sections;
+
+    const readingQuestions = getStudentQuestionsForModule(examState, 'reading');
+    const readingTotal = countQuestionSlots(readingQuestions);
+    const readingAnswered = countAnsweredQuestions(readingQuestions, runtimeState.answers);
+    const readingUnanswered = Math.max(0, readingTotal - readingAnswered);
+
+    const listeningQuestions = getStudentQuestionsForModule(examState, 'listening');
+    const listeningTotal = countQuestionSlots(listeningQuestions);
+    const listeningAnswered = countAnsweredQuestions(listeningQuestions, runtimeState.answers);
+    const listeningUnanswered = Math.max(0, listeningTotal - listeningAnswered);
+
+    const writingTasks = enabled.writing.tasks ?? [];
+    const writingAnswered = writingTasks.reduce((count, task) => {
+      const text = stripHtml(runtimeState.writingAnswers[task.id] ?? '');
+      return count + (text ? 1 : 0);
+    }, 0);
+    const writingTotal = writingTasks.length;
+    const writingUnanswered = Math.max(0, writingTotal - writingAnswered);
+
+    const speakingParts = enabled.speaking.parts ?? [];
+    const speakingTotal = speakingParts.length;
+    const speakingAnswered = isProctorTerminated ? 0 : speakingTotal;
+    const speakingUnanswered = Math.max(0, speakingTotal - speakingAnswered);
+
+    const sectionSummaries = [
+      enabled.listening.enabled
+        ? {
+            key: 'listening',
+            label: 'Listening',
+            answered: listeningAnswered,
+            unanswered: listeningUnanswered,
+          }
+        : null,
+      enabled.reading.enabled
+        ? {
+            key: 'reading',
+            label: 'Reading',
+            answered: readingAnswered,
+            unanswered: readingUnanswered,
+          }
+        : null,
+      enabled.writing.enabled
+        ? {
+            key: 'writing',
+            label: 'Writing',
+            answered: writingAnswered,
+            unanswered: writingUnanswered,
+          }
+        : null,
+      enabled.speaking.enabled
+        ? {
+            key: 'speaking',
+            label: 'Speaking',
+            answered: speakingAnswered,
+            unanswered: speakingUnanswered,
+          }
+        : null,
+    ].filter(Boolean) as Array<{
+      key: string;
+      label: string;
+      answered: number;
+      unanswered: number;
+    }>;
+
     return (
       <div className="flex flex-col items-center justify-center h-full w-full bg-gray-50 p-4 font-sans text-gray-900">
         <a href="#main-content" className="skip-link">
@@ -687,6 +801,27 @@ export function StudentApp() {
                 Congratulations! You have completed all modules of the IELTS examination.
               </p>
             )}
+
+            {sectionSummaries.length > 0 ? (
+              <div className="mb-8 text-left">
+                <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500 mb-3">
+                  Section Summary
+                </p>
+                <div className="space-y-2">
+                  {sectionSummaries.map((section) => (
+                    <div
+                      key={section.key}
+                      className="flex items-center justify-between rounded-sm border border-gray-200 bg-gray-50 px-4 py-3"
+                    >
+                      <div className="font-bold text-gray-900">{section.label}</div>
+                      <div className="text-sm font-semibold text-gray-700">
+                        {section.answered} answered • {section.unanswered} unanswered
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <Button onClick={onExit}>Exit Exam Platform</Button>
           </div>
         </main>

@@ -459,6 +459,77 @@ export function StudentAttemptProvider({
       pendingMutationsRef.current = pendingMutations;
       setPendingMutationCount(pendingMutations.length);
 
+      if (pendingMutations.length > 0) {
+        const replayAnswers: Record<string, StudentAnswerValue> = {};
+        const replayWritingAnswers: Record<string, string> = {};
+        const replayFlags: Record<string, boolean> = {};
+
+        for (const mutation of pendingMutations) {
+          if (mutation.type === 'answer') {
+            const questionId = mutation.payload['questionId'];
+            if (typeof questionId !== 'string' || questionId.trim() === '') {
+              continue;
+            }
+            replayAnswers[questionId] = mutation.payload['value'] as StudentAnswerValue;
+            continue;
+          }
+
+          if (mutation.type === 'writing_answer') {
+            const taskId = mutation.payload['taskId'];
+            if (typeof taskId !== 'string' || taskId.trim() === '') {
+              continue;
+            }
+            const value = mutation.payload['value'];
+            if (typeof value !== 'string') {
+              continue;
+            }
+            replayWritingAnswers[taskId] = value;
+            continue;
+          }
+
+          if (mutation.type === 'flag') {
+            const questionId = mutation.payload['questionId'];
+            if (typeof questionId !== 'string' || questionId.trim() === '') {
+              continue;
+            }
+            const value = mutation.payload['value'];
+            if (typeof value !== 'boolean') {
+              continue;
+            }
+            replayFlags[questionId] = value;
+          }
+        }
+
+        for (const [questionId, value] of Object.entries(replayAnswers)) {
+          runtimeActions.setAnswer(questionId, value as any);
+        }
+
+        for (const [taskId, value] of Object.entries(replayWritingAnswers)) {
+          runtimeActions.setWritingAnswer(taskId, value);
+        }
+
+        for (const [questionId, flagged] of Object.entries(replayFlags)) {
+          if (runtimeState.flags[questionId] === flagged) {
+            continue;
+          }
+          runtimeActions.toggleFlag(questionId);
+        }
+
+        const currentAttempt = attemptRef.current ?? attemptSnapshot;
+        const replayedAttempt = mergeAttempt(currentAttempt, {
+          answers: replayAnswers,
+          writingAnswers: replayWritingAnswers,
+          flags: replayFlags,
+          recovery: {
+            pendingMutationCount: pendingMutations.length,
+            syncState: navigator.onLine ? currentAttempt.recovery.syncState : 'offline',
+          },
+        });
+
+        syncAttemptState(replayedAttempt);
+        observedRef.current = createObservedSnapshot(replayedAttempt);
+      }
+
       if (pendingMutations.length > 0 && navigator.onLine) {
         await flushPending();
       }
