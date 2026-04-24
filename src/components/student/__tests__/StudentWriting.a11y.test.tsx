@@ -1,5 +1,5 @@
 import React from 'react';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { createDefaultConfig } from '../../../constants/examDefaults';
 import type { ExamState } from '../../../types';
@@ -58,5 +58,25 @@ describe('StudentWriting a11y', () => {
       throw new Error('Expected writing editor to render');
     }
     expect(editor.getAttribute('class')).toMatch(/focus-visible/);
+  });
+
+  it('shows builder-authored HTML prompts as plain text in the writing exam', () => {
+    const state = createExamState();
+    state.writing.task1Prompt = '<p>Describe the chart <strong>in detail</strong>.</p>';
+
+    const { container } = render(
+      <StudentWriting
+        state={state}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText(/Describe the chart in detail\./)).toBeInTheDocument();
+    expect(container).not.toHaveTextContent('<p>');
+    expect(container).not.toHaveTextContent('<strong>');
   });
 });

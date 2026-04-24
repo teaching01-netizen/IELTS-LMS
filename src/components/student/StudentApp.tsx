@@ -962,6 +962,7 @@ export function StudentApp() {
             currentQuestionId={runtimeState.currentQuestionId}
             onNavigate={runtimeActions.setCurrentQuestionId}
             timeRemaining={runtimeState.displayTimeRemaining}
+            security={examState.config.security}
           />
         ) : null}
         {runtimeState.currentModule === 'speaking' ? (

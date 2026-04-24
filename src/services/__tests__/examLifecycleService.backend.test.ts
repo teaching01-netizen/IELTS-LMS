@@ -271,4 +271,143 @@ describe('ExamLifecycleService backend mode', () => {
       ),
     ).toBe(true);
   });
+
+  it('rechecks the latest exam revision immediately before publishing', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_BUILDER', 'true');
+    const state = buildState();
+
+    const examPayload = {
+      id: '11111111-1111-1111-1111-111111111111',
+      slug: 'backend-backed-exam',
+      title: 'Backend-backed Exam',
+      examType: 'Academic',
+      status: 'draft',
+      visibility: 'organization',
+      ownerId: 'owner-1',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      currentDraftVersionId: 'ver-latest',
+      currentPublishedVersionId: null,
+      schemaVersion: 3,
+    };
+    const versionPayload = {
+      id: 'ver-latest',
+      examId: '11111111-1111-1111-1111-111111111111',
+      versionNumber: 3,
+      parentVersionId: 'ver-2',
+      contentSnapshot: state,
+      configSnapshot: state.config,
+      createdBy: 'owner-1',
+      createdAt: '2026-01-01T00:00:03.000Z',
+      isDraft: true,
+      isPublished: false,
+      revision: 0,
+    };
+
+    const fetchMock = vi
+      .fn()
+      // backend validation succeeds against the currently saved draft
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              canPublish: true,
+              errors: [],
+              warnings: [],
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      // validation enrichment sees revision 5
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              ...examPayload,
+              revision: 5,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: versionPayload,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      // publish must re-check and use this newer revision
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              ...examPayload,
+              updatedAt: '2026-01-01T00:00:04.000Z',
+              revision: 6,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              ...versionPayload,
+              isDraft: false,
+              isPublished: true,
+              publishNotes: 'publish latest',
+              createdAt: '2026-01-01T00:00:05.000Z',
+              revision: 1,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              ...examPayload,
+              status: 'published',
+              currentDraftVersionId: null,
+              currentPublishedVersionId: 'ver-latest',
+              publishedAt: '2026-01-01T00:00:05.000Z',
+              updatedAt: '2026-01-01T00:00:05.000Z',
+              revision: 7,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+    global.fetch = fetchMock as typeof fetch;
+
+    const service = new ExamLifecycleService(examRepository);
+    const result = await service.publishExam(
+      '11111111-1111-1111-1111-111111111111',
+      'owner-1',
+      'publish latest',
+    );
+
+    expect(result.success).toBe(true);
+    const publishCall = fetchMock.mock.calls.find(
+      (call) =>
+        call[0] === '/api/v1/exams/11111111-1111-1111-1111-111111111111/publish' &&
+        (call[1] as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(publishCall).toBeDefined();
+    expect(JSON.parse((publishCall?.[1] as RequestInit).body as string)).toMatchObject({
+      publishNotes: 'publish latest',
+      revision: 6,
+    });
+  });
 });

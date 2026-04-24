@@ -91,6 +91,15 @@ export class ExamLifecycleService {
 
     return getExamRevision(examId) ?? null;
   }
+
+  private async refreshBackendExamRevision(examId: string): Promise<number | null> {
+    const exam = await this.repository.getExamById(examId);
+    if (!exam) {
+      return null;
+    }
+
+    return getExamRevision(examId) ?? null;
+  }
   
   /**
    * Create a new exam
@@ -465,7 +474,7 @@ export class ExamLifecycleService {
       }
 
       try {
-        const revision = await this.ensureBackendExamRevision(examId);
+        const revision = await this.refreshBackendExamRevision(examId);
         if (revision === null) {
           return { success: false, error: 'Exam not found' };
         }

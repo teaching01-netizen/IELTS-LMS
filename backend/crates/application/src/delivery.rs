@@ -2591,6 +2591,88 @@ mod tests {
     }
 
     #[test]
+    fn apply_mutation_accepts_reading_slot_ids_for_position_and_flags() {
+        let answer_schema = AnswerSchema {
+            constraints: HashMap::from_iter([(
+                "sentence-1".to_owned(),
+                AnswerConstraint::ArrayText { max_len: 1 },
+            )]),
+            sections: HashMap::from_iter([
+                ("sentence-1".to_owned(), "reading".to_owned()),
+                ("sentence-1:blank-1".to_owned(), "reading".to_owned()),
+            ]),
+        };
+        let writing_task_ids: HashSet<String> = HashSet::new();
+        let mut answers = json!({});
+        let mut writing_answers = json!({});
+        let mut flags = json!({});
+        let mut violations_snapshot = json!([]);
+        let mut phase = "exam".to_owned();
+        let mut current_module = "reading".to_owned();
+        let mut current_question_id = Some("sentence-1:blank-1".to_owned());
+        let mut recovery = json!({});
+
+        apply_mutation(
+            &MutationEnvelope {
+                id: "m-pos-slot".to_owned(),
+                seq: 1,
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+                mutation_type: "position".to_owned(),
+                payload: json!({
+                    "phase": "exam",
+                    "currentModule": "reading",
+                    "currentQuestionId": "sentence-1:blank-1"
+                }),
+            },
+            &answer_schema,
+            &writing_task_ids,
+            ObjectiveMutationGate::allow(),
+            Some("reading"),
+            &mut answers,
+            &mut writing_answers,
+            &mut flags,
+            &mut violations_snapshot,
+            &mut phase,
+            &mut current_module,
+            &mut current_question_id,
+            &mut recovery,
+        )
+        .expect("slot position should be accepted");
+
+        apply_mutation(
+            &MutationEnvelope {
+                id: "m-flag-slot".to_owned(),
+                seq: 2,
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 1).unwrap(),
+                mutation_type: "flag".to_owned(),
+                payload: json!({
+                    "questionId": "sentence-1:blank-1",
+                    "value": true
+                }),
+            },
+            &answer_schema,
+            &writing_task_ids,
+            ObjectiveMutationGate::allow(),
+            Some("reading"),
+            &mut answers,
+            &mut writing_answers,
+            &mut flags,
+            &mut violations_snapshot,
+            &mut phase,
+            &mut current_module,
+            &mut current_question_id,
+            &mut recovery,
+        )
+        .expect("slot flag should be accepted");
+
+        assert_eq!(
+            recovery["clientPosition"]["currentQuestionId"],
+            "sentence-1:blank-1",
+        );
+        assert_eq!(flags["sentence-1:blank-1"], true);
+    }
+
+    #[test]
     fn compute_answer_completion_counts_required_slots_across_constraint_types() {
         let schema = AnswerSchema {
             constraints: HashMap::from_iter([

@@ -5,6 +5,7 @@ import { getWritingTaskContent } from '../../utils/writingTaskUtils';
 import { MIN_HEIGHTS, CHAR_HEIGHT_PX, WRITING } from '../../constants/uiConstants';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
+import { htmlToPlainText } from '../../utils/htmlText';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 
 interface StudentWritingProps {
@@ -158,6 +159,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
 
   const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
   const currentPrompt = currentTaskContent?.prompt ?? '';
+  const currentPromptText = htmlToPlainText(currentPrompt);
   const minWords = currentTask.minWords || 150;
   const currentChart = currentTaskContent?.chart;
 
@@ -297,7 +299,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
             )}
             
             <div className="prose prose-sm md:prose-lg max-w-none text-gray-900 whitespace-pre-wrap leading-relaxed">
-              {currentPrompt}
+              {currentPromptText}
             </div>
           </div>
           
