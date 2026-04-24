@@ -142,7 +142,7 @@ describe('StudentReviewWorkspace objective answers', () => {
       />,
     );
 
-    expect(await screen.findByText('Objective Answers')).toBeInTheDocument();
+    expect(await screen.findByText('Traceback View')).toBeInTheDocument();
     expect(await screen.findByText(answerValue)).toBeInTheDocument();
   });
 
