@@ -24,6 +24,7 @@ export function reconcileBuilderState(state: ExamState): ExamState {
   if (!fallbackModule) {
     return state;
   }
+
   return {
     ...state,
     activeModule: fallbackModule,

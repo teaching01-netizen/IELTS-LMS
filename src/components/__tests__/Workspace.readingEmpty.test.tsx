@@ -54,4 +54,43 @@ describe('Workspace (reading)', () => {
 
     vi.useRealTimers();
   });
+
+  it('keeps the latest passage state through rapid add and delete interactions', async () => {
+    vi.useFakeTimers();
+
+    const state = createInitialExamState('Exam', 'Academic');
+    state.activeModule = 'reading';
+
+    function Harness() {
+      const [examState, setExamState] = useState(state);
+      return <Workspace state={examState} setState={setExamState} />;
+    }
+
+    const { container } = render(<Harness />);
+
+    await act(async () => {
+      vi.runAllTimers();
+    });
+
+    const addPassageButton = screen.getByRole('button', { name: /add passage/i });
+    const editor = container.querySelector('[contenteditable="true"]') as HTMLElement;
+
+    await act(async () => {
+      fireEvent.click(addPassageButton);
+      editor.innerHTML = '<p>Updated passage text</p>';
+      fireEvent.input(editor);
+    });
+
+    expect(screen.getByText(/Passage 2/i)).toBeInTheDocument();
+
+    const deleteButtons = screen.getAllByTitle('Delete passage');
+
+    await act(async () => {
+      fireEvent.click(deleteButtons[1]);
+    });
+
+    expect(screen.queryByText(/Passage 2/i)).toBeNull();
+
+    vi.useRealTimers();
+  });
 });

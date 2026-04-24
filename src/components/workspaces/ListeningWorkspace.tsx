@@ -5,6 +5,7 @@ import { Play, Square, Rewind, FastForward, Volume2, MapPin, Plus, Trash2, Link 
 import { normalizeAudioUrl } from '../../utils/audioUrl';
 import { createId } from '../../utils/idUtils';
 import { getBlockQuestionCount as getBlockQuestionCountFromUtils } from '../../utils/examUtils';
+import { ListeningPartListSidebar } from '../listening/ListeningPartListSidebar';
 
 interface ListeningWorkspaceProps {
   state: ExamState;
@@ -19,6 +20,10 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
   const [volume, setVolume] = useState(80);
   const [editingPinId, setEditingPinId] = useState<string | null>(null);
   const [audioInputMode, setAudioInputMode] = useState<'googleDrive' | 'direct'>('googleDrive');
+  const [isPartListCollapsed, setIsPartListCollapsed] = useState(() => {
+    const saved = localStorage.getItem('listening-part-list-collapsed');
+    return saved === 'true';
+  });
   const [isQuestionBuilderCollapsed, setIsQuestionBuilderCollapsed] = useState(() => {
     const saved = localStorage.getItem('listening-question-builder-collapsed');
     return saved === 'true';
@@ -40,11 +45,81 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
   }, [isQuestionBuilderCollapsed]);
 
   useEffect(() => {
+    localStorage.setItem('listening-part-list-collapsed', isPartListCollapsed.toString());
+  }, [isPartListCollapsed]);
+
+  useEffect(() => {
     localStorage.setItem('listening-question-focus-mode', isQuestionFocusMode.toString());
   }, [isQuestionFocusMode]);
 
   const activePart = state.listening.parts.find(p => p.id === state.activeListeningPartId);
-  if (!activePart) return null;
+  const handlePartSelect = (partId: string) => {
+    setState({ ...state, activeListeningPartId: partId });
+  };
+
+  const handlePartAdd = () => {
+    const newPart: ListeningPart = {
+      id: createId('listening_part'),
+      title: `Part ${state.listening.parts.length + 1}`,
+      pins: [],
+      blocks: [],
+    };
+    setState({
+      ...state,
+      listening: { ...state.listening, parts: [...state.listening.parts, newPart] },
+      activeListeningPartId: newPart.id,
+    });
+  };
+
+  const handlePartDelete = (partId: string) => {
+    const newParts = state.listening.parts.filter((part) => part.id !== partId);
+    const newActiveId =
+      state.activeListeningPartId === partId ? (newParts[0]?.id ?? '') : state.activeListeningPartId;
+    setState({ ...state, listening: { ...state.listening, parts: newParts }, activeListeningPartId: newActiveId });
+  };
+
+  const handlePartReorder = (fromIndex: number, toIndex: number) => {
+    const newParts = [...state.listening.parts];
+    const [removed] = newParts.splice(fromIndex, 1);
+    if (removed) {
+      newParts.splice(toIndex, 0, removed);
+      setState({ ...state, listening: { ...state.listening, parts: newParts } });
+    }
+  };
+
+  const handlePartRename = (partId: string, nextTitle: string) => {
+    const newParts = state.listening.parts.map((part) => (part.id === partId ? { ...part, title: nextTitle } : part));
+    setState({ ...state, listening: { ...state.listening, parts: newParts } });
+  };
+
+  if (!activePart) {
+    if (state.listening.parts.length === 0) {
+      return (
+        <div className="flex-1 flex items-center justify-center bg-gray-50 p-8">
+          <div className="max-w-md w-full bg-white border border-gray-100 rounded-2xl shadow-sm p-6 space-y-3">
+            <h2 className="text-lg font-bold text-gray-900">Listening</h2>
+            <p className="text-sm text-gray-600">
+              No parts exist for this exam. Add a part to continue building the listening module.
+            </p>
+            <button
+              type="button"
+              onClick={handlePartAdd}
+              className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
+              aria-label="Add part"
+            >
+              Add Part
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    const fallbackPartId = state.listening.parts[0]?.id;
+    if (fallbackPartId) {
+      setState({ ...state, activeListeningPartId: fallbackPartId });
+    }
+    return null;
+  }
 
   const getBlockQuestionCount = (block: QuestionBlock): number => {
     switch (block.type) {
@@ -212,7 +287,46 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
         )}
       </button>
 
-      <div className={`flex-shrink-0 flex flex-col bg-white overflow-hidden border-r border-gray-200 transition-all duration-300 ease-in-out ${isQuestionFocusMode ? 'w-0 overflow-hidden' : 'flex-1'}`}>
+      {/* Parts Sidebar (Listening) */}
+      <div
+        className={`flex-shrink-0 transition-all duration-300 ease-in-out ${isQuestionFocusMode || isPartListCollapsed ? 'w-0 overflow-hidden' : 'w-64'}`}
+      >
+        <ListeningPartListSidebar
+          parts={state.listening.parts}
+          activePartId={state.activeListeningPartId}
+          onPartSelect={handlePartSelect}
+          onPartAdd={handlePartAdd}
+          onPartDelete={handlePartDelete}
+          onPartReorder={handlePartReorder}
+          onPartRename={handlePartRename}
+        />
+      </div>
+
+      {!isQuestionFocusMode && !isPartListCollapsed && (
+        <>
+          <button
+            onClick={() => setIsPartListCollapsed(true)}
+            className="absolute left-64 top-1/2 -translate-y-1/2 z-20 bg-white border border-gray-200 shadow-sm hover:bg-gray-50 hover:border-blue-300 transition-all duration-200 rounded-r-md p-1 group"
+            style={{ left: '16rem' }}
+            aria-label="Collapse parts list"
+          >
+            <ChevronLeft size={16} className="text-gray-600 group-hover:text-blue-600 transition-colors" />
+          </button>
+          <div className="w-px bg-gray-200" />
+        </>
+      )}
+
+      {isPartListCollapsed && !isQuestionFocusMode && (
+        <button
+          onClick={() => setIsPartListCollapsed(false)}
+          className="absolute left-0 top-1/2 -translate-y-1/2 z-20 bg-white border border-gray-200 shadow-sm hover:bg-gray-50 hover:border-blue-300 transition-all duration-200 rounded-r-md p-1 group"
+          aria-label="Expand parts list"
+        >
+          <ChevronRight size={16} className="text-gray-600 group-hover:text-blue-600 transition-colors" />
+        </button>
+      )}
+
+      <div className={`flex-shrink-0 flex flex-col bg-white overflow-hidden border-r border-gray-200 transition-all duration-300 ease-in-out ${isQuestionFocusMode ? 'w-0 overflow-hidden' : 'flex-1 min-w-0'}`}>
         <div className="h-12 border-b border-gray-200 flex items-center px-6 bg-gray-50 flex-shrink-0">
           <h2 className="font-medium text-gray-800">Audio Workspace: {activePart.title}</h2>
         </div>
