@@ -259,6 +259,128 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
 }
 
 #[tokio::test]
+async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_answers() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap_phone, client_session_id_phone) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        "phone-client-1",
+    )
+    .await;
+    let (bootstrap_computer, client_session_id_computer) =
+        bootstrap_attempt_with_client_session_id(
+            &app,
+            &auth,
+            schedule_id,
+            "alice",
+            &student_key,
+            "computer-client-1",
+        )
+        .await;
+    start_runtime(database.pool(), schedule_id, "reading").await;
+
+    let attempt_id = bootstrap_phone["data"]["attempt"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        bootstrap_computer["data"]["attempt"]["id"],
+        attempt_id
+    );
+    let attempt_token_phone = bootstrap_phone["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token_computer = bootstrap_computer["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let first = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_phone)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id: attempt_id.clone(),
+                        student_key: student_key.clone(),
+                        client_session_id: client_session_id_phone,
+                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
+                            id: "mutation-1".to_owned(),
+                            seq: 1,
+                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
+                            mutation_type: "answer".to_owned(),
+                            payload: json!({"questionId": "q1", "value": "A"}),
+                        }],
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_computer)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentMutationBatchRequest {
+                        attempt_id: attempt_id.clone(),
+                        student_key: student_key.clone(),
+                        client_session_id: client_session_id_computer,
+                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
+                            id: "mutation-2".to_owned(),
+                            seq: 1,
+                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 5).unwrap(),
+                            mutation_type: "answer".to_owned(),
+                            payload: json!({"questionId": "q2", "value": "B"}),
+                        }],
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(second.status(), StatusCode::OK);
+
+    let answers: serde_json::Value = sqlx::query_scalar(
+        "SELECT answers FROM student_attempts WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(answers["q1"], "A");
+    assert_eq!(answers["q2"], "B");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
 async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
@@ -1384,6 +1506,25 @@ async fn bootstrap_attempt(
     student_key: &str,
 ) -> (serde_json::Value, String) {
     let client_session_id = Uuid::new_v4().to_string();
+    bootstrap_attempt_with_client_session_id(
+        app,
+        auth,
+        schedule_id,
+        candidate_id,
+        student_key,
+        &client_session_id,
+    )
+    .await
+}
+
+async fn bootstrap_attempt_with_client_session_id(
+    app: &axum::Router,
+    auth: &mysql::TestAuthContext,
+    schedule_id: Uuid,
+    candidate_id: &str,
+    student_key: &str,
+    client_session_id: &str,
+) -> (serde_json::Value, String) {
 
     // First do precheck to set up integrity with client_session_id
     let precheck_response = app
@@ -1401,7 +1542,7 @@ async fn bootstrap_attempt(
                         candidate_email: format!("{candidate_id}@example.com"),
                         email: Some(format!("{candidate_id}@example.com")),
                         wcode: Some("W123456".to_owned()),
-                        client_session_id: client_session_id.clone(),
+                        client_session_id: client_session_id.to_owned(),
                         pre_check: json!({
                             "completedAt": "2026-01-10T08:50:00Z",
                             "browserFamily": "chrome",
@@ -1433,7 +1574,7 @@ async fn bootstrap_attempt(
                         candidate_email: format!("{candidate_id}@example.com"),
                         email: Some(format!("{candidate_id}@example.com")),
                         wcode: Some("W123456".to_owned()),
-                        client_session_id: client_session_id.clone(),
+                        client_session_id: client_session_id.to_owned(),
                     })
                     .unwrap(),
                 ))
@@ -1442,7 +1583,7 @@ async fn bootstrap_attempt(
         .await
         .unwrap();
 
-    (json_body(response).await, client_session_id)
+    (json_body(response).await, client_session_id.to_owned())
 }
 
 async fn create_student_auth(

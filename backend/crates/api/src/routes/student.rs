@@ -284,6 +284,11 @@ pub async fn apply_mutation_batch(
         ));
     }
 
+    let contains_violation = req
+        .mutations
+        .iter()
+        .any(|mutation| mutation.mutation_type.as_str() == "violation");
+
     for mutation in &req.mutations {
         match mutation.mutation_type.as_str() {
             "writing_answer" => {
@@ -339,6 +344,17 @@ pub async fn apply_mutation_batch(
     state
         .telemetry
         .observe_answer_commit("mutation_batch", duration);
+
+    if contains_violation {
+        state
+            .live_updates
+            .publish(ielts_backend_domain::schedule::LiveUpdateEvent {
+                kind: "schedule_roster".to_owned(),
+                id: schedule_id.to_string(),
+                revision: 0,
+                event: "violation_snapshot_changed".to_owned(),
+            });
+    }
     Ok(ApiResponse::success_with_request_id(result, request_id.0))
 }
 
@@ -383,11 +399,28 @@ pub async fn record_heartbeat(
         .await?;
     let service = DeliveryService::new(state.db_pool());
     let started = Instant::now();
+    let event_type = req.event_type.clone();
     let attempt = service.record_heartbeat(schedule_id, req).await?;
     let auth_service = AuthService::new(state.db_pool(), state.config.clone());
     state
         .telemetry
         .observe_db_operation("delivery.record_heartbeat", started.elapsed());
+    if event_type != "heartbeat" {
+        let event = match event_type.as_str() {
+            "disconnect" => "network_disconnected",
+            "reconnect" => "network_reconnected",
+            "lost" => "heartbeat_lost",
+            _ => "student_network",
+        };
+        state
+            .live_updates
+            .publish(ielts_backend_domain::schedule::LiveUpdateEvent {
+                kind: "schedule_alert".to_owned(),
+                id: schedule_id.to_string(),
+                revision: 0,
+                event: event.to_owned(),
+            });
+    }
     Ok(ApiResponse::success_with_request_id(
         StudentHeartbeatResponse {
             attempt,
@@ -546,6 +579,28 @@ pub async fn record_audit(
                 .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?;
             }
         }
+    }
+
+    let publish_alert = matches!(
+        req.action_type.as_str(),
+        "HEARTBEAT_LOST"
+            | "DEVICE_CONTINUITY_FAILED"
+            | "NETWORK_DISCONNECTED"
+            | "AUTO_ACTION"
+            | "STUDENT_WARN"
+            | "STUDENT_PAUSE"
+            | "STUDENT_TERMINATE"
+            | "VIOLATION_DETECTED"
+    );
+    if publish_alert {
+        state
+            .live_updates
+            .publish(ielts_backend_domain::schedule::LiveUpdateEvent {
+                kind: "schedule_alert".to_owned(),
+                id: schedule_id.to_string(),
+                revision: 0,
+                event: "alert_changed".to_owned(),
+            });
     }
 
     Ok(ApiResponse::success_with_request_id((), request_id.0))

@@ -154,6 +154,31 @@ describe('Student Provider Runtime Integration', () => {
     expect(screen.queryByText(/pre-check/i)).not.toBeInTheDocument();
   });
 
+  it('always shows syscheck before the waiting room when entering a scheduled exam', () => {
+    const preCheckPendingAttempt: StudentAttempt = {
+      ...attemptSnapshot,
+      phase: 'lobby',
+      integrity: {
+        ...attemptSnapshot.integrity,
+        preCheck: null,
+      },
+    };
+
+    render(
+      <StudentAppWrapper
+        state={state}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={preCheckPendingAttempt}
+        onRuntimeRefresh={async () => {}}
+        runtimeSnapshot={null}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: /system checking/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /start exam/i })).not.toBeInTheDocument();
+  });
+
   it('syncs navigation provider with runtime currentSectionKey', () => {
     runtimeSnapshot.currentSectionKey = 'writing';
     runtimeSnapshot.activeSectionKey = 'writing';
@@ -215,6 +240,8 @@ describe('Student Provider Runtime Integration', () => {
       <StudentAppWrapper
         state={state}
         onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
         runtimeSnapshot={runtimeSnapshot}
       />
     );
@@ -232,6 +259,8 @@ describe('Student Provider Runtime Integration', () => {
       <StudentAppWrapper
         state={state}
         onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
         runtimeSnapshot={runtimeSnapshot}
       />
     );
@@ -250,7 +279,7 @@ describe('Student Provider Runtime Integration', () => {
     );
 
     // Should show pre-check screen when not runtime-backed
-    expect(screen.getByText(/system compatibility check/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /system checking/i })).toBeInTheDocument();
   });
 
   it('handles runtime not_started status by showing blocking overlay', () => {
@@ -261,6 +290,8 @@ describe('Student Provider Runtime Integration', () => {
       <StudentAppWrapper
         state={state}
         onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
         runtimeSnapshot={runtimeSnapshot}
       />
     );
@@ -361,7 +392,7 @@ describe('Student Provider Runtime Integration', () => {
 
     // Should not crash when runtimeSnapshot is null
     // This is a regression test for error handling
-    expect(screen.getByText(/system compatibility check/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /system checking/i })).toBeInTheDocument();
   });
 
   it('handles partial runtime snapshot data gracefully', () => {
@@ -393,7 +424,7 @@ describe('Student Provider Runtime Integration', () => {
       />
     );
 
-    expect(screen.queryByText(/system compatibility check/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /system checking/i })).not.toBeInTheDocument();
   });
 
   it('hydrates runtime UI state from attempt snapshot when runtime and attempt are both present', () => {
@@ -410,6 +441,6 @@ describe('Student Provider Runtime Integration', () => {
       />
     );
 
-    expect(screen.queryByText(/system compatibility check/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /system checking/i })).not.toBeInTheDocument();
   });
 });

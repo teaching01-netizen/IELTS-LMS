@@ -20,6 +20,8 @@ const STORAGE_KEY_ATTEMPTS = 'ielts_student_attempts_v1';
 const STORAGE_KEY_PENDING_MUTATIONS = 'ielts_student_attempt_pending_mutations_v1';
 const STORAGE_KEY_HEARTBEAT_EVENTS = 'ielts_student_attempt_heartbeat_events_v1';
 const STORAGE_KEY_ATTEMPT_CREDENTIALS = 'ielts_student_attempt_credentials_v1';
+const STORAGE_KEY_CLIENT_SESSION_PREFIX = 'ielts-student-client-session:v1:';
+const STORAGE_KEY_MUTATION_WATERMARK_PREFIX = 'ielts-student-mutation-watermark:v1:';
 const MAX_HEARTBEAT_EVENTS_PER_ATTEMPT = 200;
 const MAX_HEARTBEAT_FLUSH_EVENTS = 50;
 const MUTATION_BATCH_CHUNK_SIZE = 100;
@@ -55,6 +57,17 @@ interface BackendStudentAttempt {
   writingAnswers?: StudentAttempt['writingAnswers'] | null | undefined;
   flags?: StudentAttempt['flags'] | null | undefined;
   violationsSnapshot?: StudentAttempt['violations'] | null | undefined;
+  finalSubmission?:
+    | {
+        submissionId?: string | null | undefined;
+        submittedAt?: string | null | undefined;
+        answers?: StudentAttempt['answers'] | null | undefined;
+        writingAnswers?: StudentAttempt['writingAnswers'] | null | undefined;
+        flags?: StudentAttempt['flags'] | null | undefined;
+      }
+    | null
+    | undefined;
+  submittedAt?: string | null | undefined;
   integrity?: Partial<StudentAttempt['integrity']> | null | undefined;
   recovery?: Partial<StudentAttempt['recovery']> | null | undefined;
   createdAt: string;
@@ -116,32 +129,129 @@ function generateUuid(): string {
   return `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`;
 }
 
-function getAttemptCredentialStorage(): StoredAttemptCredential[] {
-  if (typeof window === 'undefined') {
-    return [];
+function getBrowserStorage(type: 'localStorage' | 'sessionStorage'): Storage | null {
+  try {
+    const owner =
+      typeof window !== 'undefined'
+        ? (window as any)
+        : typeof globalThis !== 'undefined'
+          ? (globalThis as any)
+          : null;
+    const storage = owner?.[type] as Storage | undefined;
+    return storage ?? null;
+  } catch {
+    return null;
   }
+}
 
-  const raw = window.sessionStorage.getItem(STORAGE_KEY_ATTEMPT_CREDENTIALS);
+function parseAttemptCredentialStorage(raw: string | null): StoredAttemptCredential[] {
   if (!raw) {
     return [];
   }
 
   try {
-    return JSON.parse(raw) as StoredAttemptCredential[];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((candidate): candidate is StoredAttemptCredential => {
+      if (!candidate || typeof candidate !== 'object') {
+        return false;
+      }
+      const record = candidate as Partial<StoredAttemptCredential>;
+      return (
+        typeof record.attemptId === 'string' &&
+        typeof record.scheduleId === 'string' &&
+        typeof record.attemptToken === 'string' &&
+        typeof record.expiresAt === 'string'
+      );
+    });
   } catch {
     return [];
   }
 }
 
-function setAttemptCredentialStorage(credentials: StoredAttemptCredential[]): void {
-  if (typeof window === 'undefined') {
-    return;
+function mergeAttemptCredentials(
+  localCredentials: StoredAttemptCredential[],
+  sessionCredentials: StoredAttemptCredential[],
+): StoredAttemptCredential[] {
+  const merged = new Map<string, StoredAttemptCredential>();
+
+  const upsert = (credential: StoredAttemptCredential) => {
+    const key = `${credential.scheduleId}:${credential.attemptId}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, credential);
+      return;
+    }
+
+    const existingExpires = Date.parse(existing.expiresAt);
+    const candidateExpires = Date.parse(credential.expiresAt);
+    if (!Number.isFinite(existingExpires) || candidateExpires > existingExpires) {
+      merged.set(key, credential);
+      return;
+    }
+
+    // If expiry timestamps are equal/unparseable, prefer the newer token payload.
+    if (existing.expiresAt === credential.expiresAt) {
+      merged.set(key, credential);
+    }
+  };
+
+  for (const credential of localCredentials) {
+    upsert(credential);
+  }
+  for (const credential of sessionCredentials) {
+    upsert(credential);
   }
 
-  window.sessionStorage.setItem(
-    STORAGE_KEY_ATTEMPT_CREDENTIALS,
-    JSON.stringify(credentials),
+  return [...merged.values()];
+}
+
+function getAttemptCredentialStorage(): StoredAttemptCredential[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  const local = getBrowserStorage('localStorage');
+  const session = getBrowserStorage('sessionStorage');
+
+  const localCredentials = parseAttemptCredentialStorage(
+    local?.getItem(STORAGE_KEY_ATTEMPT_CREDENTIALS) ?? null,
   );
+  const sessionCredentials = parseAttemptCredentialStorage(
+    session?.getItem(STORAGE_KEY_ATTEMPT_CREDENTIALS) ?? null,
+  );
+
+  const merged = mergeAttemptCredentials(localCredentials, sessionCredentials);
+  return merged;
+}
+
+function setAttemptCredentialStorage(credentials: StoredAttemptCredential[]): void {
+  const local = getBrowserStorage('localStorage');
+  const session = getBrowserStorage('sessionStorage');
+  const payload = JSON.stringify(credentials);
+
+  try {
+    local?.setItem(STORAGE_KEY_ATTEMPT_CREDENTIALS, payload);
+  } catch {
+    // ignore
+  }
+
+  try {
+    session?.setItem(STORAGE_KEY_ATTEMPT_CREDENTIALS, payload);
+  } catch {
+    // ignore
+  }
+}
+
+function clearAttemptCredential(attempt: Pick<StudentAttempt, 'id' | 'scheduleId'>): void {
+  const credentials = getAttemptCredentialStorage().filter(
+    (candidate) =>
+      !(candidate.attemptId === attempt.id && candidate.scheduleId === attempt.scheduleId),
+  );
+  setAttemptCredentialStorage(credentials);
 }
 
 function storeAttemptCredential(
@@ -168,12 +278,13 @@ function storeAttemptCredential(
 function loadAttemptCredential(
   attempt: Pick<StudentAttempt, 'id' | 'scheduleId'>,
 ): StoredAttemptCredential | null {
-  return (
+  const credential =
     getAttemptCredentialStorage().find(
       (candidate) =>
         candidate.attemptId === attempt.id && candidate.scheduleId === attempt.scheduleId,
-    ) ?? null
-  );
+    ) ?? null;
+
+  return credential;
 }
 
 function buildAttemptAuthorizationHeader(
@@ -240,53 +351,98 @@ function backendConflictReason(error: unknown): string | null {
 }
 
 function getClientSessionStorageKey(scheduleId: string, studentKey: string): string {
-  return `ielts-student-client-session:${scheduleId}:${studentKey}`;
+  return `${STORAGE_KEY_CLIENT_SESSION_PREFIX}${scheduleId}:${studentKey}`;
+}
+
+function getMutationWatermarkStorageKey(attemptId: string, clientSessionId: string): string {
+  return `${STORAGE_KEY_MUTATION_WATERMARK_PREFIX}${attemptId}:${clientSessionId}`;
+}
+
+function readStoredMutationSequenceWatermark(
+  attemptId: string,
+  clientSessionId: string,
+): number | null {
+  const session = getBrowserStorage('sessionStorage');
+  if (!session) {
+    return null;
+  }
+
+  const raw = session.getItem(getMutationWatermarkStorageKey(attemptId, clientSessionId));
+  if (raw == null) {
+    return null;
+  }
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function storeMutationSequenceWatermark(
+  attemptId: string,
+  clientSessionId: string,
+  watermark: number,
+): void {
+  mutationSequenceWatermarks.set(mutationWatermarkKey(attemptId, clientSessionId), watermark);
+
+  const session = getBrowserStorage('sessionStorage');
+  if (!session) {
+    return;
+  }
+
+  try {
+    session.setItem(getMutationWatermarkStorageKey(attemptId, clientSessionId), String(watermark));
+  } catch {
+    // ignore
+  }
+}
+
+function readOrPrimeMutationSequenceWatermark(attemptId: string, clientSessionId: string): number {
+  const key = mutationWatermarkKey(attemptId, clientSessionId);
+  const cached = mutationSequenceWatermarks.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const stored = readStoredMutationSequenceWatermark(attemptId, clientSessionId);
+  if (stored !== null) {
+    mutationSequenceWatermarks.set(key, stored);
+    return stored;
+  }
+
+  return 0;
 }
 
 function ensureClientSessionId(
   scheduleId: string,
   studentKey: string,
-  preferredId?: string | null,
 ): string {
-  if (typeof window === 'undefined') {
+  const session = getBrowserStorage('sessionStorage');
+  if (!session) {
     return generateUuid();
   }
 
   const storageKey = getClientSessionStorageKey(scheduleId, studentKey);
-  const stored = window.sessionStorage.getItem(storageKey);
-  const normalizedPreferred = preferredId?.trim() ?? '';
-  if (stored && normalizedPreferred && stored !== normalizedPreferred) {
-    // If the backend has recorded a clientSessionId for this attempt, treat it as authoritative
-    // and override any stale/mismatched sessionStorage value to prevent mutation sequence drift.
-    window.sessionStorage.setItem(storageKey, normalizedPreferred);
-    return normalizedPreferred;
-  }
-
+  const stored = session.getItem(storageKey);
   if (stored) {
     return stored;
   }
 
-  if (normalizedPreferred) {
-    window.sessionStorage.setItem(storageKey, normalizedPreferred);
-    return normalizedPreferred;
-  }
-
   const generated = generateUuid();
-  window.sessionStorage.setItem(storageKey, generated);
+  try {
+    session.setItem(storageKey, generated);
+  } catch {
+    // ignore
+  }
   return generated;
 }
 
 export function ensureClientSessionIdForAttempt(attempt: StudentAttempt): string {
-  return ensureClientSessionId(
-    attempt.scheduleId,
-    attempt.studentKey,
-    attempt.recovery.clientSessionId ?? attempt.integrity.clientSessionId,
-  );
+  return ensureClientSessionId(attempt.scheduleId, attempt.studentKey);
 }
 
 export async function refreshAttemptCredentialForAttempt(attempt: StudentAttempt): Promise<boolean> {
   const clientSessionId = ensureClientSessionIdForAttempt(attempt);
   const query = new URLSearchParams({
+    candidateId: attempt.candidateId,
     refreshAttemptCredential: 'true',
     clientSessionId,
   });
@@ -311,6 +467,12 @@ function mutationWatermarkKey(attemptId: string, clientSessionId: string): strin
 export function mapBackendStudentAttempt(payload: BackendStudentAttempt): StudentAttempt {
   rememberAttemptSchedule(payload.id, payload.scheduleId);
 
+  // Backend may omit `answers`/`writingAnswers`/`flags` after submission and only return them
+  // nested under `finalSubmission`. The UI still needs these values for completion summary.
+  const answers = payload.answers ?? payload.finalSubmission?.answers ?? {};
+  const writingAnswers = payload.writingAnswers ?? payload.finalSubmission?.writingAnswers ?? {};
+  const flags = payload.flags ?? payload.finalSubmission?.flags ?? {};
+
   return normalizeStudentAttempt({
     id: payload.id,
     scheduleId: payload.scheduleId,
@@ -323,10 +485,11 @@ export function mapBackendStudentAttempt(payload: BackendStudentAttempt): Studen
     phase: payload.phase,
     currentModule: payload.currentModule,
     currentQuestionId: payload.currentQuestionId ?? null,
-    answers: payload.answers ?? {},
-    writingAnswers: payload.writingAnswers ?? {},
-    flags: payload.flags ?? {},
+    answers,
+    writingAnswers,
+    flags,
     violations: payload.violationsSnapshot ?? [],
+    submittedAt: payload.submittedAt ?? null,
     proctorStatus: 'active',
     proctorNote: null,
     proctorUpdatedAt: null,
@@ -365,15 +528,14 @@ export function mapBackendStudentAttempt(payload: BackendStudentAttempt): Studen
 
 function primeMutationSequenceWatermark(attempt: StudentAttempt): void {
   const backendSeq = attempt.recovery.serverAcceptedThroughSeq ?? 0;
-  const clientSessionId = attempt.recovery.clientSessionId ?? attempt.integrity.clientSessionId;
+  const clientSessionId = ensureClientSessionIdForAttempt(attempt);
   if (!clientSessionId) {
     return;
   }
 
-  const key = mutationWatermarkKey(attempt.id, clientSessionId);
-  const current = mutationSequenceWatermarks.get(key);
-  if (current === undefined || backendSeq > current) {
-    mutationSequenceWatermarks.set(key, backendSeq);
+  const current = readOrPrimeMutationSequenceWatermark(attempt.id, clientSessionId);
+  if (backendSeq > current) {
+    storeMutationSequenceWatermark(attempt.id, clientSessionId, backendSeq);
   }
 }
 
@@ -717,7 +879,11 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         );
 
         nextSeq = response.serverAcceptedThroughSeq;
-        mutationSequenceWatermarks.set(args.watermarkKey, response.serverAcceptedThroughSeq);
+        storeMutationSequenceWatermark(
+          currentAttempt.id,
+          args.clientSessionId,
+          response.serverAcceptedThroughSeq,
+        );
         storeAttemptCredential(currentAttempt, response.refreshedAttemptCredential);
 
         remainingMutations = remainingMutations.slice(chunk.length);
@@ -789,7 +955,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 
     const clientSessionId = ensureClientSessionIdForAttempt(currentAttempt);
     const watermarkKey = mutationWatermarkKey(currentAttempt.id, clientSessionId);
-    const startSeq = mutationSequenceWatermarks.get(watermarkKey) ?? 0;
+    const startSeq = readOrPrimeMutationSequenceWatermark(currentAttempt.id, clientSessionId);
 
     const first = await this.flushMutationQueue({
       attempt: currentAttempt,
@@ -813,6 +979,13 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
       // Treat sequence mismatch as "server already accepted these mutations" and resync.
       await this.cache.clearPendingMutations(currentAttempt.id);
       mutationSequenceWatermarks.delete(watermarkKey);
+      try {
+        getBrowserStorage('sessionStorage')?.removeItem(
+          getMutationWatermarkStorageKey(currentAttempt.id, clientSessionId),
+        );
+      } catch {
+        // ignore
+      }
 
       const session = await backendGet<BackendStudentSessionContext>(
         `/v1/student/sessions/${currentAttempt.scheduleId}`,
@@ -931,14 +1104,11 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     );
 
     const submittedAttempt = mapBackendStudentAttempt(response.attempt);
-    storeAttemptCredential(attempt, response.refreshedAttemptCredential);
+    clearAttemptCredential(attempt);
     await this.cache.saveAttempt(submittedAttempt);
     await this.cache.clearPendingMutations(attempt.id);
     const clientSessionId = ensureClientSessionIdForAttempt(attempt);
-    mutationSequenceWatermarks.set(
-      mutationWatermarkKey(attempt.id, clientSessionId),
-      Number.MAX_SAFE_INTEGER,
-    );
+    storeMutationSequenceWatermark(attempt.id, clientSessionId, Number.MAX_SAFE_INTEGER);
     return submittedAttempt;
   }
 
@@ -950,7 +1120,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         candidateId: seed.candidateId,
         candidateName: seed.candidateName,
         candidateEmail: seed.candidateEmail,
-        clientSessionId: ensureClientSessionId(seed.scheduleId, seed.studentKey, null),
+        clientSessionId: ensureClientSessionId(seed.scheduleId, seed.studentKey),
       },
     );
 

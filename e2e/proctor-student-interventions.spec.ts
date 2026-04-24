@@ -19,7 +19,7 @@ test.describe('Individual Student Interventions', () => {
       `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
     );
 
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await studentPage.getByRole('button', { name: 'Continue' }).click();
@@ -50,7 +50,7 @@ test.describe('Individual Student Interventions', () => {
       `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
     );
 
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await studentPage.getByRole('button', { name: 'Continue' }).click();
@@ -82,7 +82,7 @@ test.describe('Individual Student Interventions', () => {
       `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
     );
 
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await studentPage.getByRole('button', { name: 'Continue' }).click();
@@ -117,7 +117,7 @@ test.describe('Individual Student Interventions', () => {
       `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
     );
 
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await studentPage.getByRole('button', { name: 'Continue' }).click();
@@ -199,7 +199,7 @@ test.describe('Individual Student Interventions', () => {
       `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
     );
 
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await studentPage.getByRole('button', { name: 'Continue' }).click();

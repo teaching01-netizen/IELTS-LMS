@@ -124,10 +124,6 @@ export const flattenListeningQuestions = (parts: ListeningPart[]): Array<{ partI
 const validateTFNGBlock = (block: TFNGBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
   
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
-  
   if (block.questions.length === 0) {
     errors.push({ blockId: block.id, field: 'questions', message: 'At least one question is required', type: 'error' });
   }
@@ -147,10 +143,6 @@ const validateTFNGBlock = (block: TFNGBlock): ValidationError[] => {
 const validateClozeBlock = (block: ClozeBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
   
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
-  
   if (block.questions.length === 0) {
     errors.push({ blockId: block.id, field: 'questions', message: 'At least one question is required', type: 'error' });
   }
@@ -169,10 +161,6 @@ const validateClozeBlock = (block: ClozeBlock): ValidationError[] => {
 
 const validateMatchingBlock = (block: MatchingBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
-  
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
   
   if (block.headings.length === 0) {
     errors.push({ blockId: block.id, field: 'headings', message: 'At least one heading is required', type: 'error' });
@@ -237,10 +225,6 @@ const validateMapBlock = (block: MapBlock): ValidationError[] => {
     errors.push({ blockId: block.id, field: 'assetUrl', message: 'Image URL is invalid', type: 'error' });
   }
   
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
-  
   if (block.questions.length === 0) {
     errors.push({ blockId: block.id, field: 'questions', message: 'At least one hotspot is required', type: 'error' });
   }
@@ -262,10 +246,6 @@ const validateMapBlock = (block: MapBlock): ValidationError[] => {
 
 const validateMultiMCQBlock = (block: MultiMCQBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
-  
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
   
   if (!block.stem.trim()) {
     errors.push({ blockId: block.id, field: 'stem', message: 'Question stem is required', type: 'error' });
@@ -301,10 +281,6 @@ const validateMultiMCQBlock = (block: MultiMCQBlock): ValidationError[] => {
 const validateSingleMCQBlock = (block: SingleMCQBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
   
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
-  
   if (!block.stem.trim()) {
     errors.push({ blockId: block.id, field: 'stem', message: 'Question stem is required', type: 'error' });
   }
@@ -335,10 +311,6 @@ const validateSingleMCQBlock = (block: SingleMCQBlock): ValidationError[] => {
 const validateShortAnswerBlock = (block: ShortAnswerBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
   
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
-  
   if (block.questions.length === 0) {
     errors.push({ blockId: block.id, field: 'questions', message: 'At least one question is required', type: 'error' });
   }
@@ -357,10 +329,6 @@ const validateShortAnswerBlock = (block: ShortAnswerBlock): ValidationError[] =>
 
 const validateSentenceCompletionBlock = (block: SentenceCompletionBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
-  
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
   
   if (block.questions.length === 0) {
     errors.push({ blockId: block.id, field: 'questions', message: 'At least one sentence is required', type: 'error' });
@@ -386,10 +354,6 @@ const validateSentenceCompletionBlock = (block: SentenceCompletionBlock): Valida
 const validateDiagramLabelingBlock = (block: DiagramLabelingBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
   
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
-  
   if (!block.imageUrl.trim()) {
     errors.push({ blockId: block.id, field: 'imageUrl', message: 'Diagram image URL is required', type: 'error' });
   } else if (!isValidUrl(block.imageUrl)) {
@@ -412,10 +376,6 @@ const validateDiagramLabelingBlock = (block: DiagramLabelingBlock): ValidationEr
 const validateFlowChartBlock = (block: FlowChartBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
   
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
-  
   if (block.steps.length === 0) {
     errors.push({ blockId: block.id, field: 'steps', message: 'At least one step is required', type: 'error' });
   }
@@ -434,10 +394,6 @@ const validateFlowChartBlock = (block: FlowChartBlock): ValidationError[] => {
 
 const validateTableCompletionBlock = (block: TableCompletionBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
-  
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
   
   if (block.headers.length === 0) {
     errors.push({ blockId: block.id, field: 'headers', message: 'At least one header is required', type: 'error' });
@@ -463,10 +419,6 @@ const validateTableCompletionBlock = (block: TableCompletionBlock): ValidationEr
 const validateNoteCompletionBlock = (block: NoteCompletionBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
   
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
-  
   if (block.questions.length === 0) {
     errors.push({ blockId: block.id, field: 'questions', message: 'At least one note is required', type: 'error' });
   }
@@ -491,10 +443,6 @@ const validateNoteCompletionBlock = (block: NoteCompletionBlock): ValidationErro
 const validateClassificationBlock = (block: ClassificationBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
   
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
-  
   if (block.categories.length < 2) {
     errors.push({ blockId: block.id, field: 'categories', message: 'At least 2 categories are required', type: 'error' });
   }
@@ -517,10 +465,6 @@ const validateClassificationBlock = (block: ClassificationBlock): ValidationErro
 
 const validateMatchingFeaturesBlock = (block: MatchingFeaturesBlock): ValidationError[] => {
   const errors: ValidationError[] = [];
-  
-  if (!block.instruction.trim()) {
-    errors.push({ blockId: block.id, field: 'instruction', message: 'Instruction is required', type: 'error' });
-  }
   
   if (block.features.length === 0) {
     errors.push({ blockId: block.id, field: 'features', message: 'At least one feature is required', type: 'error' });

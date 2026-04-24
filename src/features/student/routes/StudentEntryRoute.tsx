@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuthSession } from '../../auth/authSession';
+import { studentAttemptRepository } from '@services/studentAttemptRepository';
 
 interface EntryFormData {
   wcode: string;
@@ -50,6 +51,34 @@ function storeCandidateProfile(
   );
 }
 
+function loadCandidateProfile(
+  scheduleId: string,
+  wcode: string,
+): { studentName: string; email: string } | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(`${PROFILE_STORAGE_PREFIX}${scheduleId}:${wcode}`);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { studentName?: unknown; email?: unknown };
+    const studentName = typeof parsed.studentName === 'string' ? parsed.studentName.trim() : '';
+    const email = typeof parsed.email === 'string' ? parsed.email.trim() : '';
+
+    if (!studentName || !email) {
+      return null;
+    }
+
+    return { studentName, email };
+  } catch {
+    return null;
+  }
+}
+
 export function StudentEntryRoute() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
   const navigate = useNavigate();
@@ -71,12 +100,51 @@ export function StudentEntryRoute() {
 
   const [formData, setFormData] = useState<EntryFormData>({
     wcode: initialWcode,
-    email: '',
-    studentName: '',
+    email:
+      scheduleId && validateWcode(initialWcode)
+        ? loadCandidateProfile(scheduleId, initialWcode)?.email ?? ''
+        : '',
+    studentName:
+      scheduleId && validateWcode(initialWcode)
+        ? loadCandidateProfile(scheduleId, initialWcode)?.studentName ?? ''
+        : '',
   });
   const [errors, setErrors] = useState<Partial<Record<keyof EntryFormData, string>>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!scheduleId) {
+      return;
+    }
+
+    const normalizedWcode = initialWcode.trim().toUpperCase();
+    if (!normalizedWcode || !validateWcode(normalizedWcode)) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const attempts = await studentAttemptRepository.getAttemptsByScheduleId(scheduleId);
+        const activeAttempt = attempts.find(
+          (candidate) =>
+            candidate.phase !== 'post-exam' &&
+            candidate.candidateId.trim().toUpperCase() === normalizedWcode,
+        );
+
+        if (activeAttempt && !cancelled) {
+          navigate(`/student/${scheduleId}/${normalizedWcode}`, { replace: true });
+        }
+      } catch {
+        // Fall back to manual check-in.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialWcode, navigate, scheduleId]);
 
   const handleInputChange = (field: keyof EntryFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));

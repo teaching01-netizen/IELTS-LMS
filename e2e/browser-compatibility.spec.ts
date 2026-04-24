@@ -12,7 +12,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -29,7 +29,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -46,7 +46,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -72,7 +72,7 @@ test.describe('Browser Compatibility', () => {
       await page.getByRole('button', { name: 'Acknowledge' }).click();
     }
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -114,7 +114,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -139,7 +139,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -159,7 +159,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -176,7 +176,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -198,7 +198,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -216,7 +216,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -231,7 +231,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -250,7 +250,7 @@ test.describe('Browser Compatibility', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();

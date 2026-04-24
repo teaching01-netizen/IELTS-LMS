@@ -35,6 +35,7 @@ export default defineConfig(({mode}) => {
         '/api': {
           target: backendApiUrl,
           changeOrigin: true,
+          ws: true,
         },
       },
     },

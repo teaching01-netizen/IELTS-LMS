@@ -1,6 +1,6 @@
 import React from 'react';
-import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { createDefaultConfig } from '../../../constants/examDefaults';
 import type { ExamState } from '../../../types';
 import { StudentWriting } from '../StudentWriting';
@@ -58,5 +58,85 @@ describe('StudentWriting a11y', () => {
       throw new Error('Expected writing editor to render');
     }
     expect(editor.getAttribute('class')).toMatch(/focus-visible/);
+  });
+
+  it('shows builder-authored HTML prompts as plain text in the writing exam', () => {
+    const state = createExamState();
+    state.writing.task1Prompt = '<p>Describe the chart <strong>in detail</strong>.</p>';
+
+    const { container } = render(
+      <StudentWriting
+        state={state}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText(/Describe the chart in detail\./)).toBeInTheDocument();
+    expect(container).not.toHaveTextContent('<p>');
+    expect(container).not.toHaveTextContent('<strong>');
+  });
+
+  it('renders writing task navigation and review inside a footer', () => {
+    const state = createExamState();
+    state.config.sections.writing.tasks = [
+      {
+        id: 'task1',
+        label: 'Task 1',
+        taskType: 'task1',
+        minWords: 150,
+        recommendedTime: 20,
+      },
+      {
+        id: 'task2',
+        label: 'Task 2',
+        taskType: 'task2',
+        minWords: 250,
+        recommendedTime: 40,
+      },
+    ];
+    const onNavigate = vi.fn();
+
+    render(
+      <StudentWriting
+        state={state}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const footer = screen.getByRole('contentinfo', {
+      name: /writing task navigation and submission/i,
+    });
+
+    expect(within(footer).getByRole('button', { name: 'Task 1' })).toBeInTheDocument();
+    fireEvent.click(within(footer).getByRole('button', { name: 'Task 2' }));
+    expect(onNavigate).toHaveBeenCalledWith('task2');
+    expect(within(footer).getByRole('button', { name: /review & submit/i })).toBeInTheDocument();
+  });
+
+  it('opens the review modal from the writing footer', () => {
+    const state = createExamState();
+
+    render(
+      <StudentWriting
+        state={state}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /review & submit/i }));
+
+    expect(screen.getByRole('heading', { name: /review your responses/i })).toBeInTheDocument();
   });
 });

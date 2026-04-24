@@ -204,11 +204,86 @@ function renderHarness(config: ExamConfig = mockConfig) {
   return harness;
 }
 
+function renderRuntimeBackedPreCheckHarness(config: ExamConfig = mockConfig) {
+  const attemptSnapshot: StudentAttempt = {
+    id: 'attempt-1',
+    scheduleId: 'sched-1',
+    studentKey: 'student-sched-1-alice',
+    examId: 'exam-1',
+    examTitle: 'Test Exam',
+    candidateId: 'alice',
+    candidateName: 'Alice Roe',
+    candidateEmail: 'alice@example.com',
+    phase: 'exam',
+    currentModule: 'listening',
+    currentQuestionId: null,
+    answers: {},
+    writingAnswers: {},
+    flags: {},
+    violations: [],
+    proctorStatus: 'active',
+    proctorNote: null,
+    proctorUpdatedAt: null,
+    proctorUpdatedBy: null,
+    lastWarningId: null,
+    lastAcknowledgedWarningId: null,
+    integrity: {
+      preCheck: null,
+      deviceFingerprintHash: null,
+      lastDisconnectAt: null,
+      lastReconnectAt: null,
+      lastHeartbeatAt: null,
+      lastHeartbeatStatus: 'idle',
+    },
+    recovery: {
+      lastRecoveredAt: null,
+      lastLocalMutationAt: null,
+      lastPersistedAt: null,
+      pendingMutationCount: 0,
+      syncState: 'saved',
+    },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <StudentRuntimeProvider
+      state={mockExamState}
+      onExit={vi.fn()}
+      attemptSnapshot={attemptSnapshot}
+      runtimeBacked
+    >
+      <StudentAttemptProvider
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+      >
+        <ProctoringProvider config={config} scheduleId={attemptSnapshot.scheduleId}>
+          {children}
+        </ProctoringProvider>
+      </StudentAttemptProvider>
+    </StudentRuntimeProvider>
+  );
+
+  return renderHook(
+    () => ({
+      proctoring: useProctoring(),
+      runtime: useStudentRuntime(),
+    }),
+    { wrapper },
+  );
+}
+
 describe('StudentProctoringProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     sessionStorage.clear();
+
+    Object.defineProperty(navigator, 'userAgent', {
+      value:
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      configurable: true,
+    });
 
     Object.defineProperty(document, 'fullscreenElement', {
       writable: true,
@@ -409,6 +484,83 @@ describe('StudentProctoringProvider', () => {
     ).toBe(true);
   });
 
+  it('does not log an iPad tab-switch warning when the writing editor causes window blur while typing', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value:
+        'Mozilla/5.0 (iPad; CPU OS 16_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Mobile/15E148 Safari/604.1',
+      configurable: true,
+    });
+
+    const harness = renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'warn' },
+    });
+    const editor = document.createElement('div');
+    editor.contentEditable = 'true';
+    editor.tabIndex = 0;
+    Object.defineProperty(editor, 'isContentEditable', {
+      value: true,
+      configurable: true,
+    });
+    document.body.appendChild(editor);
+
+    act(() => {
+      editor.focus();
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(false);
+
+    editor.remove();
+  });
+
+  it('activates anti-cheat after runtime-backed pre-check completes (late entry)', async () => {
+    const harness = renderRuntimeBackedPreCheckHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'warn' },
+    });
+
+    expect(harness.result.current.runtime.state.phase).toBe('pre-check');
+
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(false);
+
+    act(() => {
+      harness.result.current.runtime.actions.setPhase('exam');
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(true);
+  });
+
   it('terminates the exam when tab-switch policy is terminate', async () => {
     const harness = renderHarness({
       ...mockConfig,
@@ -465,6 +617,250 @@ describe('StudentProctoringProvider', () => {
     });
 
     expect(requestFullscreen).toHaveBeenCalled();
+  });
+
+  it('attempts fullscreen re-entry on iPad from a user gesture (tap) when fullscreen is lost', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value:
+        'Mozilla/5.0 (iPad; CPU OS 16_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Mobile/15E148 Safari/604.1',
+      configurable: true,
+    });
+
+    const webkitRequestFullscreen = vi.fn();
+    Object.defineProperty(document.documentElement, 'webkitRequestFullscreen', {
+      value: webkitRequestFullscreen,
+      configurable: true,
+    });
+
+    renderHarness();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    webkitRequestFullscreen.mockClear();
+
+    act(() => {
+      Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
+      document.dispatchEvent(new Event('pointerup'));
+    });
+
+    expect(webkitRequestFullscreen).toHaveBeenCalled();
+  });
+
+  it('treats desktop-class iPadOS WebKit as iPad for gesture fullscreen re-entry', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value:
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.0.0 Safari/604.1',
+      configurable: true,
+    });
+    Object.defineProperty(navigator, 'maxTouchPoints', {
+      value: 5,
+      configurable: true,
+    });
+
+    const webkitRequestFullscreen = vi.fn();
+    Object.defineProperty(document.documentElement, 'webkitRequestFullscreen', {
+      value: webkitRequestFullscreen,
+      configurable: true,
+    });
+
+    renderHarness();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    webkitRequestFullscreen.mockClear();
+
+    act(() => {
+      Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
+      document.dispatchEvent(new Event('touchend'));
+    });
+
+    expect(webkitRequestFullscreen).toHaveBeenCalled();
+  });
+
+  it('defers fullscreen-exit handling on iPad while the viewport settles after scroll', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value:
+        'Mozilla/5.0 (iPad; CPU OS 16_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Mobile/15E148 Safari/604.1',
+      configurable: true,
+    });
+
+    const visualViewportTarget = new EventTarget();
+    Object.defineProperty(window, 'visualViewport', {
+      value: {
+        height: 900,
+        addEventListener: visualViewportTarget.addEventListener.bind(visualViewportTarget),
+        removeEventListener: visualViewportTarget.removeEventListener.bind(visualViewportTarget),
+      },
+      configurable: true,
+    });
+
+    const webkitRequestFullscreen = vi.fn();
+    Object.defineProperty(document.documentElement, 'webkitRequestFullscreen', {
+      value: webkitRequestFullscreen,
+      configurable: true,
+    });
+
+    const harness = renderHarness();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    webkitRequestFullscreen.mockClear();
+
+    act(() => {
+      Object.defineProperty(window, 'visualViewport', {
+        value: {
+          height: 860,
+          addEventListener: visualViewportTarget.addEventListener.bind(visualViewportTarget),
+          removeEventListener: visualViewportTarget.removeEventListener.bind(visualViewportTarget),
+        },
+        configurable: true,
+      });
+      visualViewportTarget.dispatchEvent(new Event('resize'));
+      Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
+      document.dispatchEvent(new Event('fullscreenchange'));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+
+    expect(webkitRequestFullscreen).not.toHaveBeenCalled();
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'FULLSCREEN_EXIT'),
+    ).toBe(false);
+  });
+
+  it('records one fullscreen violation when iPad fullscreen remains lost after the defer window', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value:
+        'Mozilla/5.0 (iPad; CPU OS 16_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Mobile/15E148 Safari/604.1',
+      configurable: true,
+    });
+
+    const webkitRequestFullscreen = vi.fn();
+    Object.defineProperty(document.documentElement, 'webkitRequestFullscreen', {
+      value: webkitRequestFullscreen,
+      configurable: true,
+    });
+
+    const harness = renderHarness();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    webkitRequestFullscreen.mockClear();
+    const input = document.createElement('textarea');
+    document.body.appendChild(input);
+
+    act(() => {
+      input.focus();
+      Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
+      document.dispatchEvent(new Event('fullscreenchange'));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_500);
+      await Promise.resolve();
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.filter((violation) => violation.type === 'FULLSCREEN_EXIT'),
+    ).toHaveLength(1);
+  });
+
+  it('defers fullscreen-exit handling on iPad while typing, avoiding false violations', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value:
+        'Mozilla/5.0 (iPad; CPU OS 16_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Mobile/15E148 Safari/604.1',
+      configurable: true,
+    });
+
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(document.documentElement, 'requestFullscreen', {
+      value: requestFullscreen,
+      configurable: true,
+    });
+
+    const harness = renderHarness();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    requestFullscreen.mockClear();
+    const input = document.createElement('textarea');
+    document.body.appendChild(input);
+
+    act(() => {
+      input.focus();
+      Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
+      document.dispatchEvent(new Event('fullscreenchange'));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: document.documentElement,
+        configurable: true,
+      });
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(requestFullscreen).not.toHaveBeenCalled();
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'FULLSCREEN_EXIT'),
+    ).toBe(false);
+  });
+
+  it('resumes fullscreen-exit enforcement after the input blurs on iPad', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value:
+        'Mozilla/5.0 (iPad; CPU OS 16_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Mobile/15E148 Safari/604.1',
+      configurable: true,
+    });
+
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+    const webkitRequestFullscreen = vi.fn();
+    Object.defineProperty(document.documentElement, 'requestFullscreen', {
+      value: requestFullscreen,
+      configurable: true,
+    });
+    Object.defineProperty(document.documentElement, 'webkitRequestFullscreen', {
+      value: webkitRequestFullscreen,
+      configurable: true,
+    });
+
+    const harness = renderHarness();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    requestFullscreen.mockClear();
+    webkitRequestFullscreen.mockClear();
+    const input = document.createElement('textarea');
+    document.body.appendChild(input);
+
+    act(() => {
+      input.focus();
+      Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
+      document.dispatchEvent(new Event('fullscreenchange'));
+    });
+
+    expect(requestFullscreen).not.toHaveBeenCalled();
+    expect(webkitRequestFullscreen).not.toHaveBeenCalled();
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'FULLSCREEN_EXIT'),
+    ).toBe(false);
+
+    await act(async () => {
+      input.blur();
+      await Promise.resolve();
+    });
+
+    expect(webkitRequestFullscreen).toHaveBeenCalled();
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'FULLSCREEN_EXIT'),
+    ).toBe(true);
   });
 
   it('requests fullscreen when the exam starts and fullscreen is required', async () => {

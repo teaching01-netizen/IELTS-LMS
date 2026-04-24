@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAsyncPolling } from '@app/hooks/useAsyncPolling';
+import { useLiveUpdates, type LiveUpdateEvent } from '@app/hooks/useLiveUpdates';
 import { useAuthSession } from '../../auth/authSession';
 import { hydrateExamState } from '@services/examAdapterService';
 import {
@@ -141,6 +142,36 @@ export function useStudentSessionRouteData(
       setAttemptSnapshot(nextAttempt);
     }
   }, [candidateId, scheduleId]);
+
+  const handleLiveUpdate = useCallback(
+    (event: LiveUpdateEvent) => {
+      if (!scheduleId) {
+        return;
+      }
+      if (event.kind === 'schedule_runtime') {
+        if (event.id !== scheduleId) return;
+      } else if (event.kind === 'attempt') {
+        if (!attemptSnapshot?.id || event.id !== attemptSnapshot.id) return;
+      } else {
+        return;
+      }
+      void refreshBackendSessionSnapshot();
+    },
+    [attemptSnapshot?.id, refreshBackendSessionSnapshot, scheduleId],
+  );
+
+  useLiveUpdates({
+    ...(scheduleId ? { scheduleId } : {}),
+    ...(attemptSnapshot?.id ? { attemptId: attemptSnapshot.id } : {}),
+    enabled: Boolean(
+      scheduleId &&
+        candidateId &&
+        isWcodeCandidateId(candidateId) &&
+        authStatus === 'authenticated' &&
+        !error,
+    ),
+    onEvent: handleLiveUpdate,
+  });
 
   const loadStudentData = useCallback(async () => {
     if (!scheduleId) {

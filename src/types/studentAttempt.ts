@@ -69,6 +69,7 @@ export interface StudentAttempt {
   proctorUpdatedBy: string | null;
   lastWarningId: string | null;
   lastAcknowledgedWarningId: string | null;
+  submittedAt?: string | null;
   integrity: {
     preCheck: StudentPreCheckResult | null;
     deviceFingerprintHash: string | null;

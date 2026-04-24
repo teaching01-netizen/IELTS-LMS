@@ -145,4 +145,82 @@ describe('StudentReviewWorkspace objective answers', () => {
     expect(await screen.findByText('Objective Answers')).toBeInTheDocument();
     expect(await screen.findByText(answerValue)).toBeInTheDocument();
   });
+
+  test('does not crash when teacherSummary fields are missing', async () => {
+    const { createInitialExamState } = await import('../../../services/examAdapterService');
+    const { gradingRepository } = await import('../../../services/gradingRepository');
+    const { examRepository } = await import('../../../services/examRepository');
+    const { StudentReviewWorkspace } = await import('../StudentReviewWorkspace');
+
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages = [];
+
+    (gradingRepository.getSubmissionById as any).mockResolvedValue({
+      id: 'sub-2',
+      submissionId: 'sub-2',
+      scheduleId: 'sched-2',
+      examId: 'exam-2',
+      publishedVersionId: 'ver-2',
+      studentId: 'stu-2',
+      studentName: 'Bob',
+      studentEmail: 'bob@example.com',
+      cohortName: 'Cohort',
+      submittedAt: new Date().toISOString(),
+      timeSpentSeconds: 0,
+      gradingStatus: 'in_progress',
+      assignedTeacherId: undefined,
+      assignedTeacherName: undefined,
+      isFlagged: false,
+      flagReason: undefined,
+      isOverdue: false,
+      dueDate: undefined,
+      sectionStatuses: {
+        listening: 'pending',
+        reading: 'pending',
+        writing: 'pending',
+        speaking: 'pending',
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    (gradingRepository.getSectionSubmissionsBySubmissionId as any).mockResolvedValue([]);
+    (gradingRepository.getWritingSubmissionsBySubmissionId as any).mockResolvedValue([]);
+    (gradingRepository.getReviewDraftBySubmission as any).mockResolvedValue({
+      id: 'draft-2',
+      submissionId: 'sub-2',
+      studentId: 'stu-2',
+      teacherId: 't-1',
+      releaseStatus: 'draft',
+      sectionDrafts: {},
+      annotations: [],
+      drawings: [],
+      overallFeedback: undefined,
+      studentVisibleNotes: undefined,
+      internalNotes: undefined,
+      teacherSummary: {} as any,
+      checklist: {},
+      hasUnsavedChanges: false,
+      lastAutoSaveAt: undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    (examRepository.getVersionById as any).mockResolvedValue({
+      id: 'ver-2',
+      contentSnapshot: examState,
+    });
+
+    render(
+      <StudentReviewWorkspace
+        submissionId="sub-2"
+        onBack={() => {}}
+        currentTeacherId="t-1"
+        currentTeacherName="Teacher"
+      />,
+    );
+
+    expect(await screen.findByText('Teacher Summary')).toBeInTheDocument();
+    expect(await screen.findByText('Strengths')).toBeInTheDocument();
+  });
 });

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckSquare, ChevronLeft, FastForward, Filter, LayoutGrid, List, Pause, Play, Square, StopCircle, Timer, X } from 'lucide-react';
+import { AlertTriangle, CheckSquare, ChevronLeft, Filter, LayoutGrid, List, Pause, Play, Square, StopCircle, Timer, X } from 'lucide-react';
 import type { AuditActionType, ExamGroup, ModuleType, ProctorAlert, SessionAuditLog, SessionNote, StudentSession, StudentStatus } from '../../types';
 import type { ExamSchedule, ExamSessionRuntime } from '../../types/domain';
 import { ConfirmModal } from '../ConfirmModal';
@@ -62,11 +62,11 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   onStartScheduledSession,
   onPauseCohort,
   onResumeCohort,
-  onEndSectionNow,
+  onEndSectionNow: _onEndSectionNow,
   onExtendCurrentSection,
   onCompleteExam,
 }: ProctorDashboardProps) {
-  type CohortControlAction = 'start' | 'pause' | 'resume' | 'end_section' | 'extend_5' | 'extend_10' | 'complete';
+  type CohortControlAction = 'start' | 'pause' | 'resume' | 'extend_5' | 'extend_10' | 'complete';
 
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
@@ -77,7 +77,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const [listDensity, setListDensity] = useState<'compact' | 'comfortable'>('compact');
   const [drawerTab, setDrawerTab] = useState<StudentDrawerTab>('timeline');
   const [pendingCohortAction, setPendingCohortAction] = useState<CohortControlAction | null>(null);
-  const [confirmAction, setConfirmAction] = useState<Extract<CohortControlAction, 'end_section' | 'complete'> | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'complete' | null>(null);
   const [confirmDisciplineAction, setConfirmDisciplineAction] = useState<
     | null
     | { scope: 'single'; studentId: string; studentName: string; action: 'pause' | 'terminate' }
@@ -695,23 +695,6 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
               {pendingCohortAction === 'resume' ? 'Resuming…' : 'Resume Cohort'}
             </button>
             <button
-              onClick={() => setConfirmAction('end_section')}
-              disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') || controlsBusy}
-              title={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') || controlsBusy ? getSectionControlDisabledReason() : undefined}
-              aria-busy={pendingCohortAction === 'end_section'}
-              className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:text-slate-400"
-            >
-              {pendingCohortAction === 'end_section' ? (
-                <>
-                  <LoadingMark size="sm" className="bg-slate-200" />
-                  <SrLoadingText>Ending…</SrLoadingText>
-                </>
-              ) : (
-                <FastForward size={14} />
-              )}
-              {pendingCohortAction === 'end_section' ? 'Ending…' : 'End Section'}
-            </button>
-            <button
               onClick={() =>
                 void runCohortAction('extend_5', {
                   label: 'Extend section',
@@ -792,25 +775,6 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
           </div>
         ) : null}
       </section>
-
-      <ConfirmModal
-        isOpen={confirmAction === 'end_section'}
-        onClose={() => setConfirmAction(null)}
-        title="End section now?"
-        description="This will immediately end the current section for the entire cohort and advance the runtime. This can impact candidates currently working."
-        confirmLabel="End section"
-        tone="warning"
-        onConfirm={async () => {
-          return await runCohortAction('end_section', {
-            label: 'End section',
-            successMessage: 'Current section ended for the cohort.',
-            fn: async () => {
-              if (!selectedScheduleId) return;
-              await onEndSectionNow(selectedScheduleId);
-            },
-          });
-        }}
-      />
 
       <ConfirmModal
         isOpen={confirmAction === 'complete'}

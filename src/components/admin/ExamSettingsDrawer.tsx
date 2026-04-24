@@ -1146,8 +1146,8 @@ function ExamSettingsDrawerComponent({
                 <div className="space-y-4 bg-white border border-gray-100 p-4 rounded-xl shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Auto-submit on time up</p>
-                      <p className="text-[10px] text-gray-500">Automatically move to the next section or finish the exam</p>
+                      <p className="text-sm font-semibold text-gray-900">Auto-advance on time up</p>
+                      <p className="text-[10px] text-gray-500">Server automatically advances the cohort when a section timer reaches 0</p>
                     </div>
                     <input 
                       type="checkbox" 
@@ -1266,18 +1266,19 @@ function ExamSettingsDrawerComponent({
                   <Shield size={16} className="text-blue-500" /> Proctoring Control
                 </h3>
                 <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
-                  <div className="p-4 border-b border-gray-50 flex items-center justify-between">
+                  <label className="p-4 border-b border-gray-50 flex items-center justify-between cursor-pointer">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Require Fullscreen</p>
-                      <p className="text-[10px] text-gray-500">Lock the browser window during the exam</p>
+                      <p className="text-sm font-semibold text-gray-900">Fullscreen Warning</p>
+                      <p className="text-[10px] text-gray-500">Require fullscreen and warn if candidates exit it</p>
                     </div>
                     <input 
                       type="checkbox" 
+                      aria-label="Fullscreen Warning"
                       checked={config.security.requireFullscreen}
                       onChange={(e) => updateConfig('security', { requireFullscreen: e.target.checked })}
                       className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
-                  </div>
+                  </label>
                   <div className="p-4 border-b border-gray-50 flex items-center justify-between">
                     <div>
                       <p className="text-sm font-semibold text-gray-900">Tab Switch Rule</p>
@@ -1371,18 +1372,19 @@ function ExamSettingsDrawerComponent({
                       className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
                   </div>
-                  <div className="p-4 flex items-center justify-between">
+                  <label className="p-4 flex items-center justify-between cursor-pointer">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Prevent Translation</p>
-                      <p className="text-[10px] text-gray-500">Best-effort; does not block extensions/OCR</p>
+                      <p className="text-sm font-semibold text-gray-900">Translation Warning</p>
+                      <p className="text-[10px] text-gray-500">Block page translation markers and warn when translation is detected</p>
                     </div>
                     <input 
                       type="checkbox" 
+                      aria-label="Translation Warning"
                       checked={config.security.preventTranslation !== false}
                       onChange={(e) => updateConfig('security', { preventTranslation: e.target.checked })}
                       className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
-                  </div>
+                  </label>
                 </div>
               </section>
 

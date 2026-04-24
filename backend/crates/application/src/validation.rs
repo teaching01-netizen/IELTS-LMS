@@ -77,6 +77,19 @@ fn capitalize(s: &str) -> String {
     }
 }
 
+fn question_block_field_prefix(
+    module: &str,
+    container_field: &str,
+    container_idx: usize,
+    blocks_field: &str,
+    block_idx: usize,
+) -> String {
+    format!(
+        "content.{}.{}[{}].{}[{}]",
+        module, container_field, container_idx, blocks_field, block_idx
+    )
+}
+
 fn validate_config(config: &serde_json::Value, result: &mut ValidationResult) {
     let Some(config_obj) = config.as_object() else {
         result.add_error("config", "Configuration is missing or invalid");
@@ -365,7 +378,7 @@ fn validate_passage(passage: &serde_json::Value, idx: usize, result: &mut Valida
             let mut question_count = 0;
             for (block_idx, block) in blocks.iter().enumerate() {
                 let block_questions =
-                    validate_question_block(block, idx, block_idx, "reading", result);
+                    validate_question_block(block, idx, block_idx, "reading", "passages", blocks_field, result);
                 question_count += block_questions;
             }
             question_count
@@ -375,36 +388,24 @@ fn validate_passage(passage: &serde_json::Value, idx: usize, result: &mut Valida
 
 fn validate_question_block(
     block: &serde_json::Value,
-    passage_idx: usize,
+    container_idx: usize,
     block_idx: usize,
     module: &str,
+    container_field: &str,
+    blocks_field: &str,
     result: &mut ValidationResult,
 ) -> i32 {
+    let field_prefix = question_block_field_prefix(
+        module,
+        container_field,
+        container_idx,
+        blocks_field,
+        block_idx,
+    );
     let Some(block_obj) = block.as_object() else {
-        result.add_error(
-            format!(
-                "content.{}.passages[{}].questionBlocks[{}]",
-                module, passage_idx, block_idx
-            ),
-            "Invalid question block structure",
-        );
+        result.add_error(field_prefix, "Invalid question block structure");
         return 0;
     };
-
-    if block_obj
-        .get("instruction")
-        .and_then(|i| i.as_str())
-        .map(|s| s.trim().is_empty())
-        .unwrap_or(true)
-    {
-        result.add_error(
-            format!(
-                "content.{}.passages[{}].questionBlocks[{}].instruction",
-                module, passage_idx, block_idx
-            ),
-            "Question block instruction is required",
-        );
-    }
 
     let block_type = block_obj
         .get("type")
@@ -412,34 +413,31 @@ fn validate_question_block(
         .unwrap_or("unknown");
 
     match block_type {
-        "SINGLE_MCQ" => validate_single_mcq(block_obj, passage_idx, block_idx, module, result),
-        "SHORT_ANSWER" => validate_short_answer(block_obj, passage_idx, block_idx, module, result),
+        "SINGLE_MCQ" => validate_single_mcq(block_obj, &field_prefix, result),
+        "SHORT_ANSWER" => validate_short_answer(block_obj, &field_prefix, result),
         "SENTENCE_COMPLETION" => {
-            validate_sentence_completion(block_obj, passage_idx, block_idx, module, result)
+            validate_sentence_completion(block_obj, &field_prefix, result)
         }
         "DIAGRAM_LABELING" => {
-            validate_diagram_labeling(block_obj, passage_idx, block_idx, module, result)
+            validate_diagram_labeling(block_obj, &field_prefix, result)
         }
-        "FLOW_CHART" => validate_flow_chart(block_obj, passage_idx, block_idx, module, result),
+        "FLOW_CHART" => validate_flow_chart(block_obj, &field_prefix, result),
         "TABLE_COMPLETION" => {
-            validate_table_completion(block_obj, passage_idx, block_idx, module, result)
+            validate_table_completion(block_obj, &field_prefix, result)
         }
         "NOTE_COMPLETION" => {
-            validate_note_completion(block_obj, passage_idx, block_idx, module, result)
+            validate_note_completion(block_obj, &field_prefix, result)
         }
         "CLASSIFICATION" => {
-            validate_classification(block_obj, passage_idx, block_idx, module, result)
+            validate_classification(block_obj, &field_prefix, result)
         }
         "MATCHING_FEATURES" => {
-            validate_matching_features(block_obj, passage_idx, block_idx, module, result)
+            validate_matching_features(block_obj, &field_prefix, result)
         }
         "TFNG" | "CLOZE" | "MATCHING" | "MAP" | "MULTI_MCQ" => count_questions_in_block(block_obj),
         _ => {
             result.add_warning(
-                format!(
-                    "content.{}.passages[{}].questionBlocks[{}].type",
-                    module, passage_idx, block_idx
-                ),
+                format!("{}.type", field_prefix),
                 format!("Unknown question type: {}", block_type),
             );
             0
@@ -449,16 +447,9 @@ fn validate_question_block(
 
 fn validate_single_mcq(
     block: &serde_json::Map<String, serde_json::Value>,
-    passage_idx: usize,
-    block_idx: usize,
-    module: &str,
+    field_prefix: &str,
     result: &mut ValidationResult,
 ) -> i32 {
-    let field_prefix = format!(
-        "content.{}.passages[{}].questionBlocks[{}]",
-        module, passage_idx, block_idx
-    );
-
     if block
         .get("stem")
         .and_then(|s| s.as_str())
@@ -532,16 +523,9 @@ fn validate_single_mcq(
 
 fn validate_short_answer(
     block: &serde_json::Map<String, serde_json::Value>,
-    passage_idx: usize,
-    block_idx: usize,
-    module: &str,
+    field_prefix: &str,
     result: &mut ValidationResult,
 ) -> i32 {
-    let field_prefix = format!(
-        "content.{}.passages[{}].questionBlocks[{}]",
-        module, passage_idx, block_idx
-    );
-
     let questions = block.get("questions").and_then(|q| q.as_array());
     match questions {
         None => {
@@ -595,16 +579,9 @@ fn validate_short_answer(
 
 fn validate_sentence_completion(
     block: &serde_json::Map<String, serde_json::Value>,
-    passage_idx: usize,
-    block_idx: usize,
-    module: &str,
+    field_prefix: &str,
     result: &mut ValidationResult,
 ) -> i32 {
-    let field_prefix = format!(
-        "content.{}.passages[{}].questionBlocks[{}]",
-        module, passage_idx, block_idx
-    );
-
     let questions = block.get("questions").and_then(|q| q.as_array());
     match questions {
         None => {
@@ -683,16 +660,9 @@ fn validate_sentence_completion(
 
 fn validate_diagram_labeling(
     block: &serde_json::Map<String, serde_json::Value>,
-    passage_idx: usize,
-    block_idx: usize,
-    module: &str,
+    field_prefix: &str,
     result: &mut ValidationResult,
 ) -> i32 {
-    let field_prefix = format!(
-        "content.{}.passages[{}].questionBlocks[{}]",
-        module, passage_idx, block_idx
-    );
-
     if block
         .get("imageUrl")
         .and_then(|u| u.as_str())
@@ -743,16 +713,9 @@ fn validate_diagram_labeling(
 
 fn validate_flow_chart(
     block: &serde_json::Map<String, serde_json::Value>,
-    passage_idx: usize,
-    block_idx: usize,
-    module: &str,
+    field_prefix: &str,
     result: &mut ValidationResult,
 ) -> i32 {
-    let field_prefix = format!(
-        "content.{}.passages[{}].questionBlocks[{}]",
-        module, passage_idx, block_idx
-    );
-
     let steps = block.get("steps").and_then(|s| s.as_array());
     match steps {
         None => {
@@ -803,16 +766,9 @@ fn validate_flow_chart(
 
 fn validate_table_completion(
     block: &serde_json::Map<String, serde_json::Value>,
-    passage_idx: usize,
-    block_idx: usize,
-    module: &str,
+    field_prefix: &str,
     result: &mut ValidationResult,
 ) -> i32 {
-    let field_prefix = format!(
-        "content.{}.passages[{}].questionBlocks[{}]",
-        module, passage_idx, block_idx
-    );
-
     let headers = block.get("headers").and_then(|h| h.as_array());
     match headers {
         None => {
@@ -889,16 +845,9 @@ fn validate_table_completion(
 
 fn validate_note_completion(
     block: &serde_json::Map<String, serde_json::Value>,
-    passage_idx: usize,
-    block_idx: usize,
-    module: &str,
+    field_prefix: &str,
     result: &mut ValidationResult,
 ) -> i32 {
-    let field_prefix = format!(
-        "content.{}.passages[{}].questionBlocks[{}]",
-        module, passage_idx, block_idx
-    );
-
     let questions = block.get("questions").and_then(|q| q.as_array());
     match questions {
         None => {
@@ -974,16 +923,9 @@ fn validate_note_completion(
 
 fn validate_classification(
     block: &serde_json::Map<String, serde_json::Value>,
-    passage_idx: usize,
-    block_idx: usize,
-    module: &str,
+    field_prefix: &str,
     result: &mut ValidationResult,
 ) -> i32 {
-    let field_prefix = format!(
-        "content.{}.passages[{}].questionBlocks[{}]",
-        module, passage_idx, block_idx
-    );
-
     let categories = block.get("categories").and_then(|c| c.as_array());
     let category_set: HashSet<String> = categories
         .map(|cs| {
@@ -1074,16 +1016,9 @@ fn validate_classification(
 
 fn validate_matching_features(
     block: &serde_json::Map<String, serde_json::Value>,
-    passage_idx: usize,
-    block_idx: usize,
-    module: &str,
+    field_prefix: &str,
     result: &mut ValidationResult,
 ) -> i32 {
-    let field_prefix = format!(
-        "content.{}.passages[{}].questionBlocks[{}]",
-        module, passage_idx, block_idx
-    );
-
     let options = block.get("options").and_then(|o| o.as_array());
     let option_set: HashSet<String> = options
         .map(|os| {
@@ -1296,7 +1231,7 @@ fn validate_listening_part(
             let mut question_count = 0;
             for (block_idx, block) in blocks.iter().enumerate() {
                 let block_questions =
-                    validate_question_block(block, idx, block_idx, "listening", result);
+                    validate_question_block(block, idx, block_idx, "listening", "parts", blocks_field, result);
                 question_count += block_questions;
             }
             question_count
@@ -1365,6 +1300,135 @@ fn validate_speaking_content(
         result.add_error(
             "content.speaking.part3Discussion",
             "Speaking Part 3 discussion topics are required",
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn listening_blocks_empty_instruction_reports_parts_blocks_path() {
+        let content = json!({
+            "listening": {
+                "parts": [{
+                    "id": "part-1",
+                    "title": "Part 1",
+                    "blocks": [{
+                        "id": "block-1",
+                        "type": "TFNG",
+                        "instruction": "",
+                        "questions": [{"id": "q-1"}]
+                    }]
+                }]
+            }
+        });
+
+        let config = json!({
+            "sections": {
+                "listening": {
+                    "enabled": true,
+                    "bandScoreTable": {
+                        "1": 1.0, "2": 2.0, "3": 3.0, "4": 4.0, "5": 5.0,
+                        "6": 6.0, "7": 7.0, "8": 8.0, "9": 9.0, "10": 10.0
+                    }
+                },
+                "reading": {"enabled": false},
+                "writing": {"enabled": false},
+                "speaking": {"enabled": false}
+            }
+        });
+
+        let result = validate_exam_content(&content, &config);
+
+        assert!(
+            result.errors.is_empty(),
+            "expected empty-instruction to be allowed for listening blocks, got errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn listening_question_blocks_empty_instruction_is_allowed() {
+        let content = json!({
+            "listening": {
+                "parts": [{
+                    "id": "part-1",
+                    "title": "Part 1",
+                    "questionBlocks": [{
+                        "id": "block-1",
+                        "type": "TFNG",
+                        "instruction": "",
+                        "questions": [{"id": "q-1"}]
+                    }]
+                }]
+            }
+        });
+
+        let config = json!({
+            "sections": {
+                "listening": {
+                    "enabled": true,
+                    "bandScoreTable": {
+                        "1": 1.0, "2": 2.0, "3": 3.0, "4": 4.0, "5": 5.0,
+                        "6": 6.0, "7": 7.0, "8": 8.0, "9": 9.0, "10": 10.0
+                    }
+                },
+                "reading": {"enabled": false},
+                "writing": {"enabled": false},
+                "speaking": {"enabled": false}
+            }
+        });
+
+        let result = validate_exam_content(&content, &config);
+
+        assert!(
+            result.errors.is_empty(),
+            "expected empty-instruction to be allowed for listening questionBlocks, got errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn reading_blocks_empty_instruction_is_allowed() {
+        let content = json!({
+            "reading": {
+                "passages": [{
+                    "id": "passage-1",
+                    "title": "Passage 1",
+                    "blocks": [{
+                        "id": "block-1",
+                        "type": "TFNG",
+                        "instruction": "",
+                        "questions": [{"id": "q-1"}]
+                    }]
+                }]
+            }
+        });
+
+        let config = json!({
+            "sections": {
+                "reading": {
+                    "enabled": true,
+                    "bandScoreTable": {
+                        "1": 1.0, "2": 2.0, "3": 3.0, "4": 4.0, "5": 5.0,
+                        "6": 6.0, "7": 7.0, "8": 8.0, "9": 9.0, "10": 10.0
+                    }
+                },
+                "listening": {"enabled": false},
+                "writing": {"enabled": false},
+                "speaking": {"enabled": false}
+            }
+        });
+
+        let result = validate_exam_content(&content, &config);
+
+        assert!(
+            result.errors.is_empty(),
+            "expected empty-instruction to be allowed for reading blocks, got errors: {:?}",
+            result.errors
         );
     }
 }

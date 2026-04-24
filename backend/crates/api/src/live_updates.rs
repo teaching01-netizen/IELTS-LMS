@@ -163,6 +163,20 @@ mod tests {
     }
 
     #[test]
+    fn default_schedule_capacity_supports_six_hundred_connections() {
+        let hub = LiveUpdateHub::new();
+
+        assert!(!hub.is_schedule_at_capacity("schedule-1"));
+        for index in 0..599 {
+            hub.subscribe_to_schedule("schedule-1", &format!("user-{index}"));
+        }
+        assert!(!hub.is_schedule_at_capacity("schedule-1"));
+
+        hub.subscribe_to_schedule("schedule-1", "user-599");
+        assert!(hub.is_schedule_at_capacity("schedule-1"));
+    }
+
+    #[test]
     fn connection_caps_respect_config() {
         let mut config = AppConfig::default();
         config.websocket_connection_cap = 1;

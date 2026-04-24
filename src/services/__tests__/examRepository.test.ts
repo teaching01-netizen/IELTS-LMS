@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { examRepository } from '../examRepository';
+import { rememberScheduleRevision } from '../backendBridge';
 
 describe('examRepository backend API', () => {
   const originalFetch = global.fetch;
@@ -136,6 +137,78 @@ describe('examRepository backend API', () => {
         examId: 'exam-1',
         cohortName: 'Cohort A',
         publishedVersionId: 'ver-1',
+      }),
+    );
+  });
+
+  it('updates schedules with publishedVersionId through the backend API', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_SCHEDULING', 'true');
+    rememberScheduleRevision('sched-local', 2);
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            id: 'sched-local',
+            examId: 'exam-1',
+            examTitle: 'Mock Exam',
+            publishedVersionId: 'ver-2',
+            cohortName: 'Cohort A (Updated)',
+            institution: 'Center',
+            startTime: '2026-01-02T09:00:00.000Z',
+            endTime: '2026-01-02T12:00:00.000Z',
+            plannedDurationMinutes: 180,
+            deliveryMode: 'proctor_start',
+            recurrenceType: 'none',
+            recurrenceInterval: 1,
+            autoStart: false,
+            autoStop: false,
+            status: 'scheduled',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            createdBy: 'admin-1',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            revision: 3,
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    await examRepository.saveSchedule({
+      id: 'sched-local',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      publishedVersionId: 'ver-2',
+      cohortName: 'Cohort A (Updated)',
+      institution: 'Center',
+      startTime: '2026-01-02T09:00:00.000Z',
+      endTime: '2026-01-02T12:00:00.000Z',
+      plannedDurationMinutes: 180,
+      deliveryMode: 'proctor_start',
+      autoStart: false,
+      autoStop: false,
+      status: 'scheduled',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      createdBy: 'Admin',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/schedules/sched-local',
+      expect.objectContaining({
+        method: 'PATCH',
+      }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(
+      expect.objectContaining({
+        publishedVersionId: 'ver-2',
+        cohortName: 'Cohort A (Updated)',
+        revision: 2,
       }),
     );
   });

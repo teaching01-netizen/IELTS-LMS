@@ -192,6 +192,19 @@
     display: none; /* Chrome, Safari, Opera */
   }
 
+  html.student-exam-active,
+  body.student-exam-active {
+    height: var(--student-viewport-height, 100dvh);
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .student-exam-shell {
+    min-height: 0;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
   /* Accessibility: Live region announcements */
   .sr-only {
     position: absolute;

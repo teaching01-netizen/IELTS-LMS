@@ -1,6 +1,6 @@
 use chrono::Utc;
 use ielts_backend_domain::exam::{
-    CreateExamRequest, ExamEntity, ExamEvent, ExamEventAction, ExamStatus, ExamValidationSummary,
+    CreateExamRequest, ExamEntity, ExamEvent, ExamEventAction, ExamValidationSummary,
     ExamVersion, ExamVersionSummary, PublishExamRequest, SaveDraftRequest, UpdateExamRequest,
     ValidationIssue,
 };
@@ -82,6 +82,50 @@ impl BuilderService {
         delete_versions.build().execute(&mut **tx).await?;
 
         Ok(())
+    }
+
+    fn collect_publish_blocking_errors(
+        exam: &ExamEntity,
+        draft_version: &ExamVersion,
+    ) -> Vec<ValidationIssue> {
+        let mut errors = Vec::new();
+
+        if exam.title.trim().is_empty() {
+            errors.push(ValidationIssue {
+                field: "title".to_owned(),
+                message: "Exam title is required.".to_owned(),
+            });
+        }
+
+        let content = &draft_version.content_snapshot;
+        let config = &draft_version.config_snapshot;
+
+        if content.is_null() {
+            errors.push(ValidationIssue {
+                field: "contentSnapshot".to_owned(),
+                message: "Draft content is missing. Save a draft before publishing.".to_owned(),
+            });
+        }
+
+        if config.is_null() {
+            errors.push(ValidationIssue {
+                field: "configSnapshot".to_owned(),
+                message: "Draft configuration is missing. Save a draft before publishing."
+                    .to_owned(),
+            });
+        }
+
+        if !content.is_null() && !config.is_null() {
+            let validation_result = validate_exam_content(content, config);
+            for error in validation_result.errors {
+                errors.push(ValidationIssue {
+                    field: error.field,
+                    message: error.message,
+                });
+            }
+        }
+
+        errors
     }
 
     pub async fn create_exam(
@@ -384,7 +428,31 @@ impl BuilderService {
             ));
         }
 
-        let draft_version_id = exam.current_draft_version_id.unwrap();
+        let draft_version_id = exam.current_draft_version_id.clone().unwrap();
+        let draft_version = sqlx::query_as::<_, ExamVersion>(
+            "SELECT * FROM exam_versions WHERE id = ? AND exam_id = ? FOR UPDATE",
+        )
+        .bind(&draft_version_id)
+        .bind(&exam_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| {
+            BuilderError::Validation(
+                "Cannot publish exam without the current draft version".to_string(),
+            )
+        })?;
+
+        let blocking_errors = Self::collect_publish_blocking_errors(&exam, &draft_version);
+        if !blocking_errors.is_empty() {
+            let details = blocking_errors
+                .iter()
+                .map(|issue| format!("{}: {}", issue.field, issue.message))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(BuilderError::Validation(format!(
+                "Exam content is not ready for publication: {details}"
+            )));
+        }
 
         // Update the draft version to published
         sqlx::query(

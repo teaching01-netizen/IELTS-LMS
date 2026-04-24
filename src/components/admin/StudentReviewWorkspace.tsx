@@ -931,7 +931,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                     rows={2}
                     placeholder="List strengths (one per line)"
-                    value={reviewDraft?.teacherSummary?.strengths.join('\n') || ''}
+                    value={reviewDraft?.teacherSummary?.strengths?.join('\n') || ''}
                     onChange={(e) => {
                       if (reviewDraft) {
                         setReviewDraft({
@@ -954,7 +954,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                     rows={2}
                     placeholder="List priorities (one per line)"
-                    value={reviewDraft?.teacherSummary?.improvementPriorities.join('\n') || ''}
+                    value={reviewDraft?.teacherSummary?.improvementPriorities?.join('\n') || ''}
                     onChange={(e) => {
                       if (reviewDraft) {
                         setReviewDraft({
@@ -977,7 +977,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                     rows={2}
                     placeholder="List practice tasks (one per line)"
-                    value={reviewDraft?.teacherSummary?.recommendedPractice.join('\n') || ''}
+                    value={reviewDraft?.teacherSummary?.recommendedPractice?.join('\n') || ''}
                     onChange={(e) => {
                       if (reviewDraft) {
                         setReviewDraft({

@@ -24,6 +24,7 @@ use crate::{
     state::AppState,
 };
 use ielts_backend_application::auth::AuthService;
+use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::schedule::LiveUpdateEvent;
 
 #[derive(Debug)]
@@ -59,6 +60,7 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct LiveUpdatesQuery {
     pub schedule_id: Option<String>,
+    pub attempt_id: Option<String>,
 }
 
 pub async fn websocket_live(
@@ -99,6 +101,8 @@ pub async fn websocket_live(
         "" | "live" => None,
         other => Some(other.to_owned()),
     });
+    let attempt_id = query.attempt_id;
+    let user_role = session.user.role.clone();
 
     // Check per-user connection cap
     if !state.live_updates.can_user_connect(&session.user.id) {
@@ -122,7 +126,16 @@ pub async fn websocket_live(
 
     ws.write_buffer_size(0)
         .max_write_buffer_size(64 * 1024)
-        .on_upgrade(move |socket| handle_socket(socket, state, schedule_id, session.user.id))
+        .on_upgrade(move |socket| {
+            handle_socket(
+                socket,
+                state,
+                schedule_id,
+                attempt_id,
+                session.user.id,
+                user_role,
+            )
+        })
 }
 
 fn extract_ws_session_token(headers: &axum::http::HeaderMap, cookie_name: &str) -> Option<String> {
@@ -135,7 +148,9 @@ async fn handle_socket(
     mut socket: WebSocket,
     state: AppState,
     schedule_id: Option<String>,
+    attempt_id: Option<String>,
     user_id: String,
+    user_role: UserRole,
 ) {
     let queue_cap = state.config.websocket_outbound_queue_cap.max(1);
     let slow_client_disconnect =
@@ -168,6 +183,7 @@ async fn handle_socket(
     let connected_message = json!({
         "type": "connected",
         "scheduleId": schedule_id,
+        "attemptId": attempt_id,
     });
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
@@ -313,8 +329,27 @@ async fn handle_socket(
             update = subscription.recv() => {
                 match update {
                     Ok(event) => {
-                        if schedule_id.as_deref().is_some_and(|value| value != event.id) {
-                            continue;
+                        if user_role == UserRole::Student {
+                            let matches = match event.kind.as_str() {
+                                "schedule_runtime" => schedule_id.as_deref().is_some_and(|value| value == event.id),
+                                "attempt" => attempt_id.as_deref().is_some_and(|value| value == event.id),
+                                _ => false,
+                            };
+                            if !matches {
+                                continue;
+                            }
+                        } else {
+                            // By default, staff connections don't receive attempt-scoped events
+                            // unless they explicitly subscribe with attemptId.
+                            if event.kind == "attempt" && attempt_id.is_none() {
+                                continue;
+                            }
+
+                            let schedule_match = schedule_id.as_deref().is_some_and(|value| value == event.id);
+                            let attempt_match = attempt_id.as_deref().is_some_and(|value| value == event.id);
+                            if (schedule_id.is_some() || attempt_id.is_some()) && !(schedule_match || attempt_match) {
+                                continue;
+                            }
                         }
 
                         match outbound_tx.try_send(OutboundItem::Event(event)) {

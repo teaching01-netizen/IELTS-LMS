@@ -17,6 +17,7 @@ interface StudentFooterProps {
   flags?: Record<string, boolean>;
   onToggleFlag?: (id: string) => void;
   onSubmit: () => void;
+  showSubmitButton?: boolean | undefined;
 }
 
 export function StudentFooter({
@@ -26,6 +27,7 @@ export function StudentFooter({
   answers,
   flags = {},
   onSubmit,
+  showSubmitButton = true,
 }: StudentFooterProps) {
   const groupedQuestions = questions.reduce<Record<string, StudentQuestionDescriptor[]>>(
     (groups, question) => {
@@ -66,14 +68,16 @@ export function StudentFooter({
               {answeredCount}/{totalQuestions}
             </span>
           </div>
-          <Button
-            variant={hasUnanswered ? 'warning' : 'primary'}
-            size="sm"
-            className="min-w-[60px] md:min-w-[80px] shadow-md flex-shrink-0"
-            onClick={onSubmit}
-          >
-            Finish
-          </Button>
+          {showSubmitButton ? (
+            <Button
+              variant={hasUnanswered ? 'warning' : 'primary'}
+              size="sm"
+              className="min-w-[60px] md:min-w-[80px] shadow-md flex-shrink-0"
+              onClick={onSubmit}
+            >
+              Finish
+            </Button>
+          ) : null}
         </div>
       </div>
 

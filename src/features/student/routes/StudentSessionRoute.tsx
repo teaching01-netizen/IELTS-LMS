@@ -81,6 +81,7 @@ export function StudentSessionRoute() {
       attemptSnapshot={attemptSnapshot}
       onRuntimeRefresh={refreshRuntime}
       runtimeSnapshot={runtimeSnapshot}
+      showSubmitControls={false}
     />
   );
 }

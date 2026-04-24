@@ -31,11 +31,6 @@ export interface ValidationError {
 export function validateQuestionBlock(block: QuestionBlock): ValidationError[] {
   const errors: ValidationError[] = [];
 
-  // Validate instruction
-  if (!block.instruction || block.instruction.trim() === '') {
-    errors.push({ field: 'instruction', message: 'Instruction is required' });
-  }
-
   // Type-specific validation
   switch (block.type) {
     case 'SINGLE_MCQ':
