@@ -93,7 +93,11 @@ function formatRuntimeTime(seconds: number) {
   return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
-export function StudentApp() {
+interface StudentAppProps {
+  showSubmitControls?: boolean | undefined;
+}
+
+export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
   const { state: uiState, actions: uiActions } = useStudentUI();
@@ -884,6 +888,7 @@ export function StudentApp() {
             onNavigate={runtimeActions.setCurrentQuestionId}
             timeRemaining={runtimeState.displayTimeRemaining}
             security={examState.config.security}
+            showSubmitButton={showSubmitControls}
           />
         ) : null}
         {runtimeState.currentModule === 'speaking' ? (
@@ -909,6 +914,7 @@ export function StudentApp() {
           flags={runtimeState.flags}
           onToggleFlag={handleFlagToggle}
           onSubmit={handleModuleSubmit}
+          showSubmitButton={showSubmitControls}
         />
       ) : null}
 

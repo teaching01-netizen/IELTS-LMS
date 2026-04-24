@@ -6,12 +6,14 @@ import {
   clampInt,
   csrfHeader,
   ensureProdRunAllowed,
+  ensureStudentRegistrations,
   getStudentSession,
   jsonHeaders,
   loginControlStaff,
   readJson,
   resolveBaseUrl,
   resolveScheduleId,
+  shouldAutoRegisterStudents,
   uuidV4,
 } from './prod-load-helpers.js';
 
@@ -71,6 +73,9 @@ export const options = {
 
 export function setup() {
   ensureProdRunAllowed();
+  if (shouldAutoRegisterStudents()) {
+    ensureStudentRegistrations(baseUrl, scheduleId, creds, students, true);
+  }
   return {
     baseUrl,
     scheduleId,

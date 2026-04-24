@@ -50,6 +50,9 @@ Set `K6_CONFIRM_PROD=true` before running any scenario. The scripts refuse to ru
 
 - `K6_BASE_URL` defaults to `prod-target.json.baseURL`
 - `K6_SCHEDULE_ID` defaults to `prod-target.json.scheduleId`
+- `K6_REGISTER_URL` can be set to a student registration link like `/student/<scheduleId>/register`; the scripts derive both base URL and schedule ID from it
+- when `K6_REGISTER_URL` is present, the scripts auto-register the selected student slice before the load test starts
+- set `K6_AUTO_REGISTER=false` to disable that bootstrap step
 - `K6_TARGET_PATH` defaults to `e2e/prod-data/prod-target.json`
 - `K6_CREDS_PATH` defaults to `e2e/prod-data/prod-creds.json`
 - `K6_STUDENTS` controls the student count for each run

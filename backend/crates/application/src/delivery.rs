@@ -1747,17 +1747,15 @@ fn index_block(
             let Some(questions) = block.get("questions").and_then(Value::as_array) else {
                 return Ok(());
             };
-            let mut allowed_heading_ids: Option<HashSet<String>> = None;
+            let mut allowed_heading_values: Option<HashSet<String>> = None;
             if block_type == "MATCHING" {
                 if let Some(headings) = block.get("headings").and_then(Value::as_array) {
-                    let mut ids = HashSet::new();
-                    for heading in headings {
-                        if let Some(id) = heading.get("id").and_then(Value::as_str) {
-                            ids.insert(id.to_owned());
-                        }
+                    let mut values = HashSet::new();
+                    for (index, _heading) in headings.iter().enumerate() {
+                        values.insert(matching_heading_value(index));
                     }
-                    if !ids.is_empty() {
-                        allowed_heading_ids = Some(ids);
+                    if !values.is_empty() {
+                        allowed_heading_values = Some(values);
                     }
                 }
             }
@@ -1774,7 +1772,7 @@ fn index_block(
                         };
                         AnswerConstraint::Enum(allowed)
                     }
-                    "MATCHING" => allowed_heading_ids
+                    "MATCHING" => allowed_heading_values
                         .clone()
                         .map(AnswerConstraint::Enum)
                         .unwrap_or(AnswerConstraint::Text),
@@ -1968,6 +1966,24 @@ fn index_block(
     }
 
     Ok(())
+}
+
+fn matching_heading_value(index: usize) -> String {
+    match index {
+        0 => "i".to_owned(),
+        1 => "ii".to_owned(),
+        2 => "iii".to_owned(),
+        3 => "iv".to_owned(),
+        4 => "v".to_owned(),
+        5 => "vi".to_owned(),
+        6 => "vii".to_owned(),
+        7 => "viii".to_owned(),
+        8 => "ix".to_owned(),
+        9 => "x".to_owned(),
+        10 => "xi".to_owned(),
+        11 => "xii".to_owned(),
+        _ => index.to_string(),
+    }
 }
 
 fn register_section(
@@ -2763,6 +2779,45 @@ mod tests {
             schema.sections.get("diagram-block:label-1").map(String::as_str),
             Some("reading"),
         );
+    }
+
+    #[test]
+    fn build_answer_schema_uses_roman_values_for_matching_headings() {
+        let schema = build_answer_schema(&json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [
+                        {
+                            "id": "matching-block",
+                            "type": "MATCHING",
+                            "headings": [
+                                { "id": "heading-a", "text": "A" },
+                                { "id": "heading-b", "text": "B" },
+                                { "id": "heading-c", "text": "C" }
+                            ],
+                            "questions": [
+                                { "id": "q1", "paragraphLabel": "A" }
+                            ]
+                        }
+                    ]
+                }]
+            }
+        }))
+        .expect("schema");
+
+        let constraint = schema
+            .constraints
+            .get("q1")
+            .expect("matching question constraint");
+        match constraint {
+            AnswerConstraint::Enum(allowed) => {
+                assert!(allowed.contains("i"));
+                assert!(allowed.contains("ii"));
+                assert!(allowed.contains("iii"));
+                assert!(!allowed.contains("heading-a"));
+            }
+            other => panic!("expected enum constraint, found {other:?}"),
+        }
     }
 
     #[test]

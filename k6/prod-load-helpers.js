@@ -40,11 +40,36 @@ export function computeJitterSeconds(runId, wcode, maxSeconds) {
 }
 
 export function resolveBaseUrl(target) {
-  return __ENV.K6_BASE_URL || target.baseURL;
+  if (__ENV.K6_BASE_URL) return __ENV.K6_BASE_URL;
+  const scheduleUrl = __ENV.K6_REGISTER_URL || __ENV.K6_SCHEDULE_URL || __ENV.K6_EXAM_URL || __ENV.K6_ENTRY_URL;
+  if (scheduleUrl) {
+    const match = String(scheduleUrl).match(/^(https?:\/\/[^/]+)\//i);
+    if (match) return match[1];
+  }
+  return target.baseURL;
+}
+
+function parseScheduleIdFromUrl(url) {
+  if (!url) return '';
+  const value = String(url);
+  const patterns = [
+    /\/student\/([0-9a-fA-F-]{36})\/register(?:[/?#].*)?$/i,
+    /\/schedules\/([0-9a-fA-F-]{36})(?:[/?#].*)?$/i,
+    /\/schedule\/([0-9a-fA-F-]{36})(?:[/?#].*)?$/i,
+    /\/exam\/([0-9a-fA-F-]{36})(?:[/?#].*)?$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match) return match[1];
+  }
+  return '';
 }
 
 export function resolveScheduleId(target) {
   if (__ENV.K6_SCHEDULE_ID) return __ENV.K6_SCHEDULE_ID;
+  const scheduleUrl = __ENV.K6_REGISTER_URL || __ENV.K6_SCHEDULE_URL || __ENV.K6_EXAM_URL || __ENV.K6_ENTRY_URL;
+  const parsed = parseScheduleIdFromUrl(scheduleUrl);
+  if (parsed) return parsed;
   const runtimePath = __ENV.K6_RUNTIME_PATH || '../e2e/.generated/prod-runtime.json';
   try {
     const runtime = readJson(runtimePath);
@@ -57,6 +82,10 @@ export function resolveScheduleId(target) {
 
 export function jsonHeaders(extra) {
   return Object.assign({ 'content-type': 'application/json' }, extra || {});
+}
+
+function bodyPreview(resp) {
+  return String((resp && resp.body) || '').slice(0, 200);
 }
 
 export function cookieValue(jar, baseUrl, candidates) {
@@ -162,6 +191,46 @@ export function loginControlStaff(baseUrl, scheduleId, creds, preferEditor = tru
   return { jar, selectedStaffEmail };
 }
 
+export function ensureStudentRegistrations(baseUrl, scheduleId, creds, students, preferEditor = true) {
+  const { jar, selectedStaffEmail } = loginControlStaff(baseUrl, scheduleId, creds, preferEditor);
+  const registrations = [];
+
+  for (const student of students) {
+    const resp = http.post(
+      `${baseUrl}/api/v1/schedules/${scheduleId}/register`,
+      JSON.stringify({
+        wcode: student.wcode,
+        email: student.email,
+        studentName: student.fullName,
+      }),
+      {
+        jar,
+        headers: jsonHeaders(csrfHeader(jar, baseUrl)),
+        tags: { name: 'schedule_register' },
+      },
+    );
+
+    if (resp.status !== 200) {
+      throw new Error(
+        `Student registration failed (${student.wcode}): status=${resp.status} body=${bodyPreview(resp)}`,
+      );
+    }
+
+    registrations.push({
+      wcode: student.wcode,
+      email: student.email,
+      studentName: student.fullName,
+    });
+  }
+
+  return { selectedStaffEmail, registrations };
+}
+
+export function shouldAutoRegisterStudents() {
+  if (__ENV.K6_AUTO_REGISTER === 'false') return false;
+  return Boolean(__ENV.K6_REGISTER_URL || __ENV.K6_SCHEDULE_URL || __ENV.K6_EXAM_URL || __ENV.K6_ENTRY_URL);
+}
+
 export function ensureProdRunAllowed() {
   if (__ENV.K6_CONFIRM_PROD !== 'true') {
     throw new Error('Set K6_CONFIRM_PROD=true to run this load test against production.');
@@ -194,7 +263,7 @@ export function bootstrapStudentSession(baseUrl, scheduleId, student, jar, clien
   );
   if (entryResp.status !== 200) {
     throw new Error(
-      `Student entry failed (${student.wcode}): status=${entryResp.status} body=${entryResp.body.slice(0, 200)}`,
+      `Student entry failed (${student.wcode}): status=${entryResp.status} body=${bodyPreview(entryResp)}`,
     );
   }
 
@@ -213,7 +282,7 @@ export function bootstrapStudentSession(baseUrl, scheduleId, student, jar, clien
   );
   if (bootstrapResp.status !== 200) {
     throw new Error(
-      `Bootstrap failed (${student.wcode}): status=${bootstrapResp.status} body=${bootstrapResp.body.slice(0, 200)}`,
+      `Bootstrap failed (${student.wcode}): status=${bootstrapResp.status} body=${bodyPreview(bootstrapResp)}`,
     );
   }
 
@@ -251,7 +320,7 @@ export function bootstrapStudentSession(baseUrl, scheduleId, student, jar, clien
   );
   if (precheckResp.status !== 200) {
     throw new Error(
-      `Precheck failed (${student.wcode}): status=${precheckResp.status} body=${precheckResp.body.slice(0, 200)}`,
+      `Precheck failed (${student.wcode}): status=${precheckResp.status} body=${bodyPreview(precheckResp)}`,
     );
   }
 

@@ -23,9 +23,10 @@ interface StudentWritingProps {
   } | undefined;
   sessionId?: string | undefined;
   studentId?: string | undefined;
+  showSubmitButton?: boolean | undefined;
 }
 
-export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmit, currentQuestionId, onNavigate, timeRemaining, onTimeExpired, security = { preventAutofill: false, preventAutocorrect: false }, sessionId, studentId }: StudentWritingProps) {
+export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmit, currentQuestionId, onNavigate, timeRemaining, onTimeExpired, security = { preventAutofill: false, preventAutocorrect: false }, sessionId, studentId, showSubmitButton = true }: StudentWritingProps) {
   const attemptContext = useOptionalStudentAttempt();
   const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
   const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
@@ -397,12 +398,14 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
               {task.label}
             </button>
           ))}
-          <button
-            onClick={handleSubmitClick}
-            className="min-w-[132px] md:min-w-[156px] px-4 md:px-6 py-1.5 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-sm text-xs md:text-sm font-bold transition-colors shadow-md flex-shrink-0"
-          >
-            Review & Submit
-          </button>
+          {showSubmitButton ? (
+            <button
+              onClick={handleSubmitClick}
+              className="min-w-[132px] md:min-w-[156px] px-4 md:px-6 py-1.5 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-sm text-xs md:text-sm font-bold transition-colors shadow-md flex-shrink-0"
+            >
+              Review & Submit
+            </button>
+          ) : null}
         </div>
       </footer>
 

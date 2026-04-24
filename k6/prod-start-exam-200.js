@@ -7,17 +7,20 @@ import {
   clampInt,
   csrfHeader,
   ensureProdRunAllowed,
+  ensureStudentRegistrations,
   getStudentSession,
   jsonHeaders,
   loginControlStaff,
   readJson,
   resolveBaseUrl,
   resolveScheduleId,
+  shouldAutoRegisterStudents,
   uuidV4,
 } from './prod-load-helpers.js';
 
 const EXPECT_2XX_OR_409 = http.expectedStatuses({ min: 200, max: 299 }, 409);
 const DEBUG = __ENV.K6_DEBUG === 'true';
+const bodyPreview = (resp) => String((resp && resp.body) || '').slice(0, 200);
 
 const startExamPropagationMs = new Trend('start_exam_propagation_ms', true);
 const startExamLatencyFailures = new Counter('start_exam_latency_failures');
@@ -65,6 +68,9 @@ export const options = {
 
 export function setup() {
   ensureProdRunAllowed();
+  if (shouldAutoRegisterStudents()) {
+    ensureStudentRegistrations(baseUrl, scheduleId, creds, students, true);
+  }
   return {
     baseUrl,
     scheduleId,
@@ -90,7 +96,7 @@ export function controlFlow(data) {
   );
   check(joinResp, { 'proctor presence join 200': (r) => r.status === 200 }) ||
     fail(
-      `Presence join failed (staff=${selectedStaffEmail || 'unknown'}): status=${joinResp.status} body=${joinResp.body.slice(0, 200)}`,
+      `Presence join failed (staff=${selectedStaffEmail || 'unknown'}): status=${joinResp.status} body=${bodyPreview(joinResp)}`,
     );
 
   const expectedEmails = new Set(data.students.map((s) => s.email));
@@ -135,7 +141,7 @@ export function controlFlow(data) {
   );
   check(startResp, {
     'runtime start 200/409 ok': (r) => r.status === 200 || r.status === 409,
-  }) || fail(`Start runtime failed: status=${startResp.status} body=${startResp.body.slice(0, 200)}`);
+  }) || fail(`Start runtime failed: status=${startResp.status} body=${bodyPreview(startResp)}`);
 
   const liveStartedAt = Date.now();
   while (Date.now() - liveStartedAt < liveWaitTimeoutSeconds * 1000) {

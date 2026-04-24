@@ -8,6 +8,7 @@ import {
   computeJitterSeconds,
   csrfHeader,
   ensureProdRunAllowed,
+  ensureStudentRegistrations,
   getStudentSession,
   jsonHeaders,
   loginControlStaff,
@@ -18,6 +19,7 @@ import {
   resolveScheduleId,
   sendHeartbeat,
   sendMutationBatch,
+  shouldAutoRegisterStudents,
   submitAttempt,
   uuidV4,
 } from './prod-load-helpers.js';
@@ -71,6 +73,9 @@ export const options = {
 
 export function setup() {
   ensureProdRunAllowed();
+  if (shouldAutoRegisterStudents()) {
+    ensureStudentRegistrations(baseUrl, scheduleId, creds, students, true);
+  }
   return {
     baseUrl,
     scheduleId,

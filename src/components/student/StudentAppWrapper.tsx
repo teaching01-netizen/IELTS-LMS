@@ -17,6 +17,7 @@ interface StudentAppWrapperProps {
   attemptSnapshot?: StudentAttempt | null;
   onRuntimeRefresh?: (() => Promise<void>) | undefined;
   runtimeSnapshot?: ExamSessionRuntime | null;
+  showSubmitControls?: boolean | undefined;
 }
 
 export function StudentAppWrapper({
@@ -26,6 +27,7 @@ export function StudentAppWrapper({
   attemptSnapshot = null,
   onRuntimeRefresh,
   runtimeSnapshot = null,
+  showSubmitControls = true,
 }: StudentAppWrapperProps) {
   return (
     <StudentRuntimeProvider
@@ -44,7 +46,7 @@ export function StudentAppWrapper({
           <ProctoringProvider config={state.config} scheduleId={scheduleId}>
             <StudentUIProvider>
               <KeyboardProvider>
-                <StudentApp />
+                <StudentApp showSubmitControls={showSubmitControls} />
               </KeyboardProvider>
             </StudentUIProvider>
           </ProctoringProvider>
