@@ -1,5 +1,6 @@
 export { Alert } from './Alert';
 export { Badge } from './Badge';
+export { Banner } from './Banner';
 export { Button } from './Button';
 export { ErrorSurface } from './ErrorSurface';
 export { Input } from './Input';

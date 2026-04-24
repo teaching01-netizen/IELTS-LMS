@@ -1,7 +1,7 @@
 import React from 'react';
 import { useParams } from 'react-router-dom';
-import { ScheduleSessionModal } from '../../../components/admin/ScheduleSessionModal';
-import { ExamVersionHistory } from '../../../components/admin/ExamVersionHistory';
+import { ScheduleSessionModal } from '@components/admin/ScheduleSessionModal';
+import { ExamVersionHistory } from '@components/admin/ExamVersionHistory';
 import { PublishActions } from '../components/PublishActions';
 import { ValidationSummary } from '../components/ValidationSummary';
 import { useReviewRouteController } from '../hooks/useReviewRouteController';
@@ -31,6 +31,24 @@ export function ExamReviewRoute() {
   const currentPublishedVersion = controller.versions.find(
     (version) => version.id === controller.exam?.currentPublishedVersionId,
   );
+  const hasUnpublishedDraftChanges = (() => {
+    const draftId = controller.exam?.currentDraftVersionId ?? null;
+    if (!draftId || !currentPublishedVersion) {
+      return false;
+    }
+
+    // Preferred signal: published version should reference the draft it was created from.
+    if (currentPublishedVersion.parentVersionId) {
+      return currentPublishedVersion.parentVersionId !== draftId;
+    }
+
+    // Legacy safety: if we can't trust parent linkage, fall back to version number mismatch.
+    if (currentDraftVersion) {
+      return currentDraftVersion.versionNumber !== currentPublishedVersion.versionNumber;
+    }
+
+    return false;
+  })();
   const latestSchedule = [...controller.schedules]
     .sort((left, right) => new Date(right.startTime).getTime() - new Date(left.startTime).getTime())
     .find((schedule) => schedule.status === 'scheduled' || schedule.status === 'live' || schedule.status === 'completed');
@@ -88,6 +106,9 @@ export function ExamReviewRoute() {
                   onOpenSchedulingWorkflow={() => setShowScheduleModal(true)}
                   onUnpublish={controller.handleUnpublish}
                   publishSuccess={publishSuccess}
+                  hasUnpublishedDraftChanges={hasUnpublishedDraftChanges}
+                  draftVersionNumber={currentDraftVersion?.versionNumber}
+                  publishedVersionNumber={currentPublishedVersion?.versionNumber}
                   exam={{ title: controller.exam?.title || 'Untitled Exam' }}
                 />
               ) : (

@@ -79,6 +79,7 @@ export function normalizeStudentAttempt(attempt: StudentAttempt): StudentAttempt
       lastRecoveredAt: attempt.recovery?.lastRecoveredAt ?? null,
       lastLocalMutationAt: attempt.recovery?.lastLocalMutationAt ?? null,
       lastPersistedAt: attempt.recovery?.lastPersistedAt ?? null,
+      lastDroppedMutations: attempt.recovery?.lastDroppedMutations ?? null,
       pendingMutationCount: attempt.recovery?.pendingMutationCount ?? 0,
       serverAcceptedThroughSeq: attempt.recovery?.serverAcceptedThroughSeq ?? 0,
       clientSessionId: attempt.recovery?.clientSessionId ?? null,

@@ -23,7 +23,7 @@ import type {
   ExamEntity,
   ExamEvent,
   ExamSchedule,
-  ExamVersion,
+  ExamVersionSummary,
   VersionDiff,
 } from '../../../types/domain';
 import type { AdminContextValue } from '../routes/AdminContext';
@@ -171,8 +171,8 @@ export function useAdminRootController(): AdminRootController {
     [navigate],
   );
 
-  const handleGetVersions = useCallback(async (examId: string): Promise<ExamVersion[]> => {
-    return examRepository.getAllVersions(examId);
+  const handleGetVersions = useCallback(async (examId: string): Promise<ExamVersionSummary[]> => {
+    return examRepository.getVersionSummaries(examId);
   }, []);
 
   const handleGetEvents = useCallback(async (examId: string): Promise<ExamEvent[]> => {

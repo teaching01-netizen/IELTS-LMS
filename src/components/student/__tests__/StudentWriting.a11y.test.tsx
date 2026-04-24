@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { createDefaultConfig } from '../../../constants/examDefaults';
 import type { ExamState } from '../../../types';
@@ -41,7 +41,7 @@ function createExamState(): ExamState {
 }
 
 describe('StudentWriting a11y', () => {
-  it('adds aria-labels to writing toolbar icon buttons', () => {
+  it('renders an accessible writing editor', () => {
     const { container } = render(
       <StudentWriting
         state={createExamState()}
@@ -52,12 +52,6 @@ describe('StudentWriting a11y', () => {
         onNavigate={() => undefined}
       />,
     );
-
-    expect(screen.getByLabelText('Bold')).toBeInTheDocument();
-    expect(screen.getByLabelText('Italic')).toBeInTheDocument();
-    expect(screen.getByLabelText('Underline')).toBeInTheDocument();
-    expect(screen.getByLabelText('Undo')).toBeInTheDocument();
-    expect(screen.getByLabelText('Redo')).toBeInTheDocument();
 
     const editor = container.querySelector('[contenteditable="true"]');
     if (!editor) {

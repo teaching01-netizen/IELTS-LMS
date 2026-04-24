@@ -32,6 +32,7 @@ import {
   cloneReadingPassageWithNewIds,
 } from '../../../utils/cloneExamContent';
 import { getBuilderStateRecoveryIssue, reconcileBuilderState } from '../utils/builderStateRecovery';
+import { createAcademicSampleExamState } from '../../../utils/academicSampleExam';
 
 const nowLabel = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -390,6 +391,62 @@ export function BuilderRoot() {
     return true;
   };
 
+  const handleOpenPreview = () => {
+    if (!examId) {
+      return;
+    }
+
+    void (async () => {
+      const saved = await saveDraftNow();
+      if (!saved) {
+        return;
+      }
+
+      const module = currentStateRef.current?.activeModule ?? 'reading';
+      window.open(
+        `/builder/${examId}/preview?module=${module}`,
+        '_blank',
+        'noopener,noreferrer',
+      );
+    })();
+  };
+
+  const loadAcademicSampleExam = async () => {
+    const base = currentStateRef.current;
+    if (!base) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Replace all Listening/Reading/Writing content with an IELTS-style Academic sample exam?\n\nThis will overwrite the current draft content for this exam.',
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const seeded = createAcademicSampleExamState(base);
+      updateBuilderState(seeded, 'Loaded Academic sample exam');
+      const saved = await saveDraftNow();
+      if (!saved) {
+        return;
+      }
+      pushToast({
+        variant: 'success',
+        title: 'Sample loaded',
+        message: 'Academic sample exam content loaded (Listening/Reading/Writing).',
+        timestamp: nowLabel(),
+      });
+    } catch (error) {
+      pushToast({
+        variant: 'error',
+        title: 'Sample load failed',
+        message: error instanceof Error ? error.message : 'Unable to load sample exam.',
+        timestamp: nowLabel(),
+      });
+    }
+  };
+
   const handleNavigateToConfig = () => {
     if (!examId) return;
     void (async () => {
@@ -715,6 +772,10 @@ export function BuilderRoot() {
           onNavigateToConfig={handleNavigateToConfig}
           onNavigateToReview={() => {
             void handleNavigateToReview();
+          }}
+          onOpenPreview={handleOpenPreview}
+          onLoadSampleExam={() => {
+            void loadAcademicSampleExam();
           }}
           onSaveDraft={() => {
             void saveDraftNow();

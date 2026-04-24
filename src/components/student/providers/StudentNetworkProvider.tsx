@@ -60,6 +60,8 @@ export function StudentNetworkProvider({
   );
   const missedHeartbeatsRef = useRef(0);
   const heartbeatInFlightRef = useRef(false);
+  const recoveryEpochRef = useRef(0);
+  const onlineInFlightRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     setLastDisconnectAt(attemptState.attempt?.integrity.lastDisconnectAt ?? null);
@@ -70,8 +72,10 @@ export function StudentNetworkProvider({
   ]);
 
   const handleOffline = useCallback(async () => {
+    recoveryEpochRef.current += 1;
     const timestamp = new Date().toISOString();
     setIsOnline(false);
+    setIsRecovering(false);
     setLastDisconnectAt(timestamp);
     if (policy.pauseOnOffline) {
       runtimeActions.setBlockingReason('offline');
@@ -119,47 +123,86 @@ export function StudentNetworkProvider({
     return true;
   }, [attemptActions, attemptState.attempt, attemptState.attemptId, runtimeActions, scheduleId]);
 
-  const handleOnline = useCallback(async () => {
-    const timestamp = new Date().toISOString();
-    setIsOnline(true);
-    setIsRecovering(true);
-    setLastReconnectAt(timestamp);
-    runtimeActions.setBlockingReason('syncing_reconnect');
-    runtimeActions.setAttemptSyncState('syncing_reconnect');
-    await attemptActions.recordNetworkStatus('online', timestamp);
-    await attemptActions
-      .recordHeartbeat('reconnect', {
-        reason: 'browser_online',
-      })
-      .catch(() => {});
-    await saveStudentAuditEvent(scheduleId, 'NETWORK_RECONNECTED', {
-      timestamp,
-    }, attemptState.attemptId ?? undefined);
-
-    try {
-      if (onRefreshRuntime) {
-        await onRefreshRuntime();
-      }
-
-      const isSameDevice = policy.requireDeviceContinuityOnReconnect
-        ? await verifyDeviceContinuity()
-        : true;
-      if (!isSameDevice) {
-        return;
-      }
-
-      const flushed = await attemptActions.flushPending();
-      if (!flushed) {
-        runtimeActions.setBlockingReason('syncing_reconnect');
-        return;
-      }
-
-      await attemptActions.flushHeartbeatEvents().catch(() => {});
-      runtimeActions.setBlockingReason(null);
-      runtimeActions.setAttemptSyncState('saved');
-    } finally {
-      setIsRecovering(false);
+  const handleOnline = useCallback(() => {
+    if (onlineInFlightRef.current) {
+      return;
     }
+
+    recoveryEpochRef.current += 1;
+    const epoch = recoveryEpochRef.current;
+
+    const promise = (async () => {
+      const timestamp = new Date().toISOString();
+      setIsOnline(true);
+      setIsRecovering(true);
+      setLastReconnectAt(timestamp);
+      runtimeActions.setBlockingReason('syncing_reconnect');
+      runtimeActions.setAttemptSyncState('syncing_reconnect');
+      await attemptActions.recordNetworkStatus('online', timestamp);
+      if (epoch !== recoveryEpochRef.current) {
+        return;
+      }
+      await attemptActions
+        .recordHeartbeat('reconnect', {
+          reason: 'browser_online',
+        })
+        .catch(() => {});
+      if (epoch !== recoveryEpochRef.current) {
+        return;
+      }
+      await saveStudentAuditEvent(
+        scheduleId,
+        'NETWORK_RECONNECTED',
+        { timestamp },
+        attemptState.attemptId ?? undefined,
+      );
+
+      try {
+        if (onRefreshRuntime) {
+          await onRefreshRuntime();
+          if (epoch !== recoveryEpochRef.current) {
+            return;
+          }
+        }
+
+        const isSameDevice = policy.requireDeviceContinuityOnReconnect
+          ? await verifyDeviceContinuity()
+          : true;
+        if (epoch !== recoveryEpochRef.current) {
+          return;
+        }
+        if (!isSameDevice) {
+          return;
+        }
+
+        const flushed = await attemptActions.flushPending();
+        if (epoch !== recoveryEpochRef.current) {
+          return;
+        }
+        if (!flushed) {
+          runtimeActions.setBlockingReason('syncing_reconnect');
+          return;
+        }
+
+        await attemptActions.flushHeartbeatEvents().catch(() => {});
+        if (epoch !== recoveryEpochRef.current) {
+          return;
+        }
+        runtimeActions.setBlockingReason(null);
+        runtimeActions.setAttemptSyncState('saved');
+      } finally {
+        if (epoch === recoveryEpochRef.current) {
+          setIsRecovering(false);
+        }
+      }
+    })();
+
+    onlineInFlightRef.current = promise;
+    void promise.finally(() => {
+      if (onlineInFlightRef.current === promise) {
+        onlineInFlightRef.current = null;
+      }
+    });
   }, [
     attemptActions,
     attemptState.attemptId,
@@ -172,7 +215,7 @@ export function StudentNetworkProvider({
 
   useEffect(() => {
     const onlineListener = () => {
-      void handleOnline();
+      handleOnline();
     };
     const offlineListener = () => {
       void handleOffline();

@@ -613,7 +613,13 @@ pub async fn submit_student_session(
 impl From<DeliveryError> for ApiError {
     fn from(err: DeliveryError) -> Self {
         match err {
-            DeliveryError::Conflict(msg) => ApiError::new(StatusCode::CONFLICT, "CONFLICT", &msg),
+            DeliveryError::Conflict { message, reason } => {
+                let api = ApiError::new(StatusCode::CONFLICT, "CONFLICT", &message);
+                match reason {
+                    Some(reason) => api.with_details(json!({ "reason": reason.as_str() })),
+                    None => api,
+                }
+            }
             DeliveryError::NotFound => {
                 ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
             }

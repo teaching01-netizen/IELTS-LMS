@@ -2,6 +2,7 @@ import React from 'react';
 import { SingleMCQBlock as SingleMCQBlockType, MCQOption } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
+import { handleBoldHotkey } from '../../utils/boldMarkdown';
 
 interface SingleMCQBlockProps {
   block: SingleMCQBlockType;
@@ -92,6 +93,7 @@ export function SingleMCQBlock({ block, startNum, endNum, updateBlock, deleteBlo
         <textarea
           value={block.instruction}
           onChange={(e) => updateBlock({ ...block, instruction: e.target.value })}
+          onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...block, instruction: nextValue }))}
           className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           rows={2}
           placeholder="Enter instruction for this question..."
@@ -106,6 +108,7 @@ export function SingleMCQBlock({ block, startNum, endNum, updateBlock, deleteBlo
         <textarea
           value={block.stem}
           onChange={(e) => updateStem(e.target.value)}
+          onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateStem(nextValue))}
           className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           rows={3}
           placeholder="Enter the question stem..."
@@ -148,6 +151,7 @@ export function SingleMCQBlock({ block, startNum, endNum, updateBlock, deleteBlo
                     type="text"
                     value={option.text}
                     onChange={(e) => updateOption(option.id, { text: e.target.value })}
+                    onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateOption(option.id, { text: nextValue }))}
                     className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Option text..."
                   />

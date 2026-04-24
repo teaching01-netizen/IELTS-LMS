@@ -61,6 +61,11 @@ const ExamReviewRoute = lazy(() =>
     default: module.ExamReviewRoute,
   })),
 );
+const ExamPreviewRoute = lazy(() =>
+  import('../features/builder/routes/ExamPreviewRoute').then((module) => ({
+    default: module.ExamPreviewRoute,
+  })),
+);
 const ProctorRoot = lazy(() =>
   import('../features/proctor/routes/ProctorRoot').then((module) => ({
     default: module.ProctorRoot,
@@ -219,6 +224,14 @@ export const appRoutes = [
         element: withAuth((
           <Suspense fallback={<RouteLoadingFallback />}>
             <ExamReviewRoute />
+          </Suspense>
+        ), ['admin', 'builder']),
+      },
+      {
+        path: 'builder/:examId/preview',
+        element: withAuth((
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <ExamPreviewRoute />
           </Suspense>
         ), ['admin', 'builder']),
       },

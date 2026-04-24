@@ -27,8 +27,7 @@ export function AppLoadingSkeleton({ label }: AppLoadingSkeletonProps) {
             <div className="space-y-2 p-4">
               {[...Array(5)].map((_, index) => (
                 <div
-                  // eslint-disable-next-line react/no-array-index-key
-                  key={index}
+                  key={`row-${index}`}
                   className="h-12 bg-gray-100 rounded animate-pulse"
                   style={{ animationDelay: `${index * 0.1}s` }}
                 />
@@ -40,4 +39,3 @@ export function AppLoadingSkeleton({ label }: AppLoadingSkeletonProps) {
     </div>
   );
 }
-

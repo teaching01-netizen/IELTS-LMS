@@ -1,5 +1,5 @@
 import React from 'react';
-import { Save, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Save, ArrowLeft, ArrowRight, Eye } from 'lucide-react';
 import type { ExamState } from '../types';
 
 type ExamStateUpdate = ExamState | ((previous: ExamState) => ExamState);
@@ -10,6 +10,8 @@ interface HeaderProps {
   onReturnToAdmin: () => void;
   onNavigateToConfig: () => void;
   onNavigateToReview: () => void;
+  onOpenPreview?: (() => void) | undefined;
+  onLoadSampleExam?: (() => void) | undefined;
   onSaveDraft?: (() => void) | undefined;
   saveStatusLabel?: string | undefined;
 }
@@ -20,6 +22,8 @@ export function Header({
   onReturnToAdmin,
   onNavigateToConfig,
   onNavigateToReview,
+  onOpenPreview,
+  onLoadSampleExam,
   onSaveDraft,
   saveStatusLabel = 'All changes saved',
 }: HeaderProps) {
@@ -56,6 +60,17 @@ export function Header({
       </div>
       <div className="flex items-center gap-3">
         <span className="text-xs text-gray-500 font-medium">{saveStatusLabel}</span>
+        {onLoadSampleExam && (
+          <button
+            onClick={onLoadSampleExam}
+            className="px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-800 transition-colors"
+            aria-label="Load Academic sample exam"
+            title="Replaces Listening/Reading/Writing with an IELTS-style Academic sample."
+            type="button"
+          >
+            Load Sample
+          </button>
+        )}
         {onSaveDraft && (
           <button
             onClick={onSaveDraft}
@@ -65,6 +80,18 @@ export function Header({
             <Save size={18} />
           </button>
         )}
+        {onOpenPreview ? (
+          <button
+            onClick={onOpenPreview}
+            className="px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-800 transition-colors inline-flex items-center gap-2"
+            aria-label="Preview exam"
+            title="Open student preview in a new tab"
+            type="button"
+          >
+            <Eye size={16} />
+            Preview
+          </button>
+        ) : null}
         <button
           onClick={onReturnToAdmin}
           className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 shadow-sm"

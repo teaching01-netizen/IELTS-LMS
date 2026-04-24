@@ -315,6 +315,8 @@ const buildDefaultConfig = (
         order: 0,
         gapAfterMinutes: 0,
         partCount: 4,
+        audioPlaybackEnabled: true,
+        staffInstructions: '',
         bandScoreTable: { ...DEFAULT_LISTENING_BAND_TABLE },
         allowedQuestionTypes: [...ALL_QUESTION_TYPES]
       },

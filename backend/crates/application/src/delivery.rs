@@ -22,18 +22,69 @@ use uuid::{fmt::Hyphenated, Uuid};
 
 use crate::scheduling::SchedulingService;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryConflictReason {
+    ObjectiveLocked,
+    SectionMismatch,
+    AttemptProctorBlocked,
+    AttemptSubmitted,
+}
+
+impl DeliveryConflictReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeliveryConflictReason::ObjectiveLocked => "OBJECTIVE_LOCKED",
+            DeliveryConflictReason::SectionMismatch => "SECTION_MISMATCH",
+            DeliveryConflictReason::AttemptProctorBlocked => "ATTEMPT_PROCTOR_BLOCKED",
+            DeliveryConflictReason::AttemptSubmitted => "ATTEMPT_SUBMITTED",
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum DeliveryError {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
-    #[error("Conflict: {0}")]
-    Conflict(String),
+    #[error("Conflict: {message}")]
+    Conflict {
+        message: String,
+        reason: Option<DeliveryConflictReason>,
+    },
     #[error("Not found")]
     NotFound,
     #[error("Validation error: {0}")]
     Validation(String),
     #[error("Internal error: {0}")]
     Internal(String),
+}
+
+impl DeliveryError {
+    pub(crate) fn conflict(message: impl Into<String>) -> Self {
+        DeliveryError::Conflict {
+            message: message.into(),
+            reason: None,
+        }
+    }
+
+    pub(crate) fn conflict_reason(
+        reason: DeliveryConflictReason,
+        message: impl Into<String>,
+    ) -> Self {
+        DeliveryError::Conflict {
+            message: message.into(),
+            reason: Some(reason),
+        }
+    }
+
+    pub fn conflict_reason_code(&self) -> Option<&'static str> {
+        match self {
+            DeliveryError::Conflict {
+                reason: Some(reason),
+                ..
+            } => Some(reason.as_str()),
+            _ => None,
+        }
+    }
 }
 
 pub struct DeliveryService {
@@ -318,7 +369,8 @@ impl DeliveryService {
             return Ok(response);
         }
         if attempt.submitted_at.is_some() {
-            return Err(DeliveryError::Conflict(
+            return Err(DeliveryError::conflict_reason(
+                DeliveryConflictReason::AttemptSubmitted,
                 "Submitted attempts can no longer accept mutations.".to_owned(),
             ));
         }
@@ -330,7 +382,8 @@ impl DeliveryService {
         .fetch_optional(tx.as_mut())
         .await?;
         if schedule_status.as_deref() == Some("cancelled") {
-            return Err(DeliveryError::Conflict(
+            return Err(DeliveryError::conflict_reason(
+                DeliveryConflictReason::ObjectiveLocked,
                 "Cancelled schedules can no longer accept mutations.".to_owned(),
             ));
         }
@@ -347,8 +400,8 @@ impl DeliveryService {
         .bind(&req.attempt_id)
         .fetch_optional(tx.as_mut())
         .await?;
-        let objective_mutations_allowed =
-            objective_mutations_allowed(runtime_gate.as_ref(), proctor_status.as_deref());
+        let objective_mutation_gate =
+            objective_mutation_gate(runtime_gate.as_ref(), proctor_status.as_deref());
         let active_section_key = runtime_gate
             .as_ref()
             .and_then(|gate| gate.current_section_key.as_deref());
@@ -393,7 +446,7 @@ impl DeliveryService {
                 mutation,
                 &answer_schema,
                 &writing_task_ids,
-                objective_mutations_allowed,
+                objective_mutation_gate,
                 active_section_key,
                 &mut answers,
                 &mut writing_answers,
@@ -708,7 +761,7 @@ impl DeliveryService {
         }
 
         if !matches!(attempt.phase.as_str(), "exam" | "post-exam") {
-            return Err(DeliveryError::Conflict(
+            return Err(DeliveryError::conflict(
                 "Attempt cannot be submitted before the exam starts.".to_owned(),
             ));
         }
@@ -720,13 +773,13 @@ impl DeliveryService {
         .fetch_optional(tx.as_mut())
         .await?;
         if schedule_status.as_deref() == Some("cancelled") {
-            return Err(DeliveryError::Conflict(
+            return Err(DeliveryError::conflict(
                 "Cancelled schedules cannot accept submissions.".to_owned(),
             ));
         }
 
         let runtime_gate = sqlx::query_as::<_, RuntimeGateRow>(
-            "SELECT status, actual_end_at FROM exam_session_runtimes WHERE schedule_id = ?",
+            "SELECT status, actual_end_at, current_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ?",
         )
         .bind(schedule_id.to_string())
         .fetch_optional(tx.as_mut())
@@ -739,7 +792,7 @@ impl DeliveryService {
                 ));
             }
             Some("cancelled") => {
-                return Err(DeliveryError::Conflict(
+                return Err(DeliveryError::conflict(
                     "Cancelled schedules cannot accept submissions.".to_owned(),
                 ));
             }
@@ -1081,7 +1134,7 @@ impl DeliveryService {
                     Err(DeliveryError::Database(error))
                 }
                 crate::scheduling::SchedulingError::Conflict(message) => {
-                    Err(DeliveryError::Conflict(message))
+                    Err(DeliveryError::conflict(message))
                 }
                 crate::scheduling::SchedulingError::Validation(message) => {
                     Err(DeliveryError::Validation(message))
@@ -1206,7 +1259,7 @@ impl DeliveryService {
         };
 
         if record.request_hash != request_hash {
-            return Err(DeliveryError::Conflict(
+            return Err(DeliveryError::conflict(
                 "Idempotency-Key does not match the original request.".to_owned(),
             ));
         }
@@ -1275,7 +1328,7 @@ impl DeliveryService {
         };
 
         if record.request_hash != request_hash {
-            return Err(DeliveryError::Conflict(
+            return Err(DeliveryError::conflict(
                 "Idempotency-Key does not match the original request.".to_owned(),
             ));
         }
@@ -1455,7 +1508,7 @@ fn validate_contiguous_sequences(
         ));
     };
     if first != existing_max_seq + 1 {
-        return Err(DeliveryError::Conflict(
+        return Err(DeliveryError::conflict(
             "Mutation sequence must continue from the last accepted value.".to_owned(),
         ));
     }
@@ -1463,7 +1516,7 @@ fn validate_contiguous_sequences(
     for window in seqs.windows(2) {
         let [left, right] = window else { continue };
         if *right != *left + 1 {
-            return Err(DeliveryError::Conflict(
+            return Err(DeliveryError::conflict(
                 "Mutation sequence must be contiguous.".to_owned(),
             ));
         }
@@ -1480,16 +1533,40 @@ struct RuntimeGateRow {
     waiting_for_next_section: bool,
 }
 
-fn objective_mutations_allowed(runtime: Option<&RuntimeGateRow>, proctor_status: Option<&str>) -> bool {
-    let proctor_blocked = matches!(proctor_status, Some("paused" | "terminated"));
-    if proctor_blocked {
-        return false;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ObjectiveMutationGate {
+    allowed: bool,
+    reason: Option<DeliveryConflictReason>,
+}
+
+impl ObjectiveMutationGate {
+    fn allow() -> Self {
+        Self {
+            allowed: true,
+            reason: None,
+        }
+    }
+
+    fn block(reason: DeliveryConflictReason) -> Self {
+        Self {
+            allowed: false,
+            reason: Some(reason),
+        }
+    }
+}
+
+fn objective_mutation_gate(
+    runtime: Option<&RuntimeGateRow>,
+    proctor_status: Option<&str>,
+) -> ObjectiveMutationGate {
+    if matches!(proctor_status, Some("paused" | "terminated")) {
+        return ObjectiveMutationGate::block(DeliveryConflictReason::AttemptProctorBlocked);
     }
     let Some(runtime) = runtime else {
-        return false;
+        return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
     };
     if runtime.waiting_for_next_section {
-        return false;
+        return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
     }
     if runtime
         .current_section_key
@@ -1497,12 +1574,13 @@ fn objective_mutations_allowed(runtime: Option<&RuntimeGateRow>, proctor_status:
         .map(|value| value.trim().is_empty())
         .unwrap_or(true)
     {
-        return false;
+        return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
     }
-    match runtime.status.as_str() {
-        "live" | "paused" => true,
-        _ => false,
+    if runtime.status.as_str() != "live" {
+        return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
     }
+
+    ObjectiveMutationGate::allow()
 }
 
 fn derive_authoritative_phase(
@@ -1968,7 +2046,7 @@ fn apply_mutation(
     mutation: &MutationEnvelope,
     answer_schema: &AnswerSchema,
     writing_task_ids: &HashSet<String>,
-    objective_mutations_allowed: bool,
+    objective_mutation_gate: ObjectiveMutationGate,
     active_section_key: Option<&str>,
     answers: &mut Value,
     writing_answers: &mut Value,
@@ -1982,8 +2060,11 @@ fn apply_mutation(
     match mutation.mutation_type.as_str() {
         "answer" => {
             let question_id = required_string(&mutation.payload, "questionId")?;
-            if !objective_mutations_allowed {
-                return Err(DeliveryError::Conflict(
+            if !objective_mutation_gate.allowed {
+                return Err(DeliveryError::conflict_reason(
+                    objective_mutation_gate
+                        .reason
+                        .unwrap_or(DeliveryConflictReason::ObjectiveLocked),
                     "This session can no longer accept answer mutations.".to_owned(),
                 ));
             }
@@ -2012,13 +2093,17 @@ fn apply_mutation(
         }
         "writing_answer" => {
             let task_id = required_string(&mutation.payload, "taskId")?;
-            if !objective_mutations_allowed {
-                return Err(DeliveryError::Conflict(
+            if !objective_mutation_gate.allowed {
+                return Err(DeliveryError::conflict_reason(
+                    objective_mutation_gate
+                        .reason
+                        .unwrap_or(DeliveryConflictReason::ObjectiveLocked),
                     "This session can no longer accept writing mutations.".to_owned(),
                 ));
             }
             if active_section_key.is_some_and(|value| value != "writing") {
-                return Err(DeliveryError::Conflict(
+                return Err(DeliveryError::conflict_reason(
+                    DeliveryConflictReason::SectionMismatch,
                     "This session can no longer accept writing mutations for the current section."
                         .to_owned(),
                 ));
@@ -2050,8 +2135,11 @@ fn apply_mutation(
         }
         "flag" => {
             let question_id = required_string(&mutation.payload, "questionId")?;
-            if !objective_mutations_allowed {
-                return Err(DeliveryError::Conflict(
+            if !objective_mutation_gate.allowed {
+                return Err(DeliveryError::conflict_reason(
+                    objective_mutation_gate
+                        .reason
+                        .unwrap_or(DeliveryConflictReason::ObjectiveLocked),
                     "This session can no longer accept flag mutations.".to_owned(),
                 ));
             }
@@ -2202,7 +2290,8 @@ fn enforce_section_membership(
     answer_schema: &AnswerSchema,
 ) -> Result<(), DeliveryError> {
     let Some(active_section_key) = active_section_key else {
-        return Err(DeliveryError::Conflict(
+        return Err(DeliveryError::conflict_reason(
+            DeliveryConflictReason::ObjectiveLocked,
             "This session can no longer accept objective mutations.".to_owned(),
         ));
     };
@@ -2216,7 +2305,8 @@ fn enforce_section_membership(
             )
         })?;
     if expected != active_section_key {
-        return Err(DeliveryError::Conflict(
+        return Err(DeliveryError::conflict_reason(
+            DeliveryConflictReason::SectionMismatch,
             "Mutation does not belong to the current section.".to_owned(),
         ));
     }
@@ -2310,6 +2400,25 @@ mod tests {
     }
 
     #[test]
+    fn objective_mutations_reject_when_runtime_is_paused() {
+        let base = RuntimeGateRow {
+            status: "paused".to_owned(),
+            actual_end_at: None,
+            current_section_key: Some("reading".to_owned()),
+            waiting_for_next_section: false,
+        };
+        assert!(!objective_mutation_gate(Some(&base), None).allowed);
+
+        let live = RuntimeGateRow {
+            status: "live".to_owned(),
+            ..base
+        };
+        assert!(objective_mutation_gate(Some(&live), None).allowed);
+
+        assert!(!objective_mutation_gate(Some(&live), Some("paused")).allowed);
+    }
+
+    #[test]
     fn apply_mutation_tracks_current_question_and_separates_writing_answers() {
         let answer_schema = AnswerSchema {
             constraints: HashMap::from_iter([(
@@ -2345,7 +2454,7 @@ mod tests {
             },
             &answer_schema,
             &writing_task_ids,
-            true,
+            ObjectiveMutationGate::allow(),
             Some("reading"),
             &mut answers,
             &mut writing_answers,
@@ -2372,7 +2481,7 @@ mod tests {
             },
             &answer_schema,
             &writing_task_ids,
-            true,
+            ObjectiveMutationGate::allow(),
             Some("writing"),
             &mut answers,
             &mut writing_answers,
@@ -2399,7 +2508,7 @@ mod tests {
             },
             &answer_schema,
             &writing_task_ids,
-            true,
+            ObjectiveMutationGate::allow(),
             Some("reading"),
             &mut answers,
             &mut writing_answers,
@@ -2430,7 +2539,7 @@ mod tests {
         let mut b = base.clone();
         b.seq = 4;
         let err = validate_contiguous_sequences(1, &[a, b]).unwrap_err();
-        assert!(matches!(err, DeliveryError::Conflict(_)));
+        assert!(matches!(err, DeliveryError::Conflict { .. }));
     }
 
     #[test]
@@ -2460,7 +2569,7 @@ mod tests {
             },
             &answer_schema,
             &writing_task_ids,
-            false,
+            ObjectiveMutationGate::allow(),
             None,
             &mut answers,
             &mut writing_answers,

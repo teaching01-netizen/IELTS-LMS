@@ -21,7 +21,10 @@ export const routeManifest = {
   builder: {
     path: '/builder',
     children: {
-      root: '/builder/:examId',
+      config: '/builder/:examId',
+      builder: '/builder/:examId/builder',
+      review: '/builder/:examId/review',
+      preview: '/builder/:examId/preview',
     },
   },
   proctor: {

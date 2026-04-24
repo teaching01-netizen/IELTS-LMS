@@ -18,8 +18,7 @@ export function CollectionLoadingSkeleton({
       <div className="space-y-2">
         {[...Array(count)].map((_, index) => (
           <div
-            // eslint-disable-next-line react/no-array-index-key
-            key={index}
+            key={`item-${index}`}
             className="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between gap-4"
           >
             <div className="flex-1 min-w-0 space-y-2">
@@ -40,8 +39,7 @@ export function CollectionLoadingSkeleton({
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {[...Array(count)].map((_, index) => (
         <div
-          // eslint-disable-next-line react/no-array-index-key
-          key={index}
+          key={`item-${index}`}
           className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 space-y-3"
         >
           <div className="flex items-start justify-between">
@@ -62,4 +60,3 @@ export function CollectionLoadingSkeleton({
     </div>
   );
 }
-

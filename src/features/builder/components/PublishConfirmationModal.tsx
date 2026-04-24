@@ -6,6 +6,8 @@ import type { PublishReadiness } from '../../../types/domain';
 interface PublishConfirmationModalProps {
   isOpen: boolean;
   onClose: () => void;
+  mode?: 'publish' | 'republish';
+  requireSchedule?: boolean;
   onConfirm: () => Promise<void>;
   onSetSchedule: () => void;
   prerequisites: {
@@ -21,6 +23,8 @@ interface PublishConfirmationModalProps {
 export function PublishConfirmationModal({
   isOpen,
   onClose,
+  mode = 'publish',
+  requireSchedule = true,
   onConfirm,
   onSetSchedule,
   prerequisites,
@@ -90,17 +94,23 @@ export function PublishConfirmationModal({
     };
   }, [isOpen, onClose]);
 
-  const allPrerequisitesMet = prerequisites.validationPassed && prerequisites.contentReviewed && prerequisites.isScheduled;
+  const allPrerequisitesMet =
+    prerequisites.validationPassed &&
+    prerequisites.contentReviewed &&
+    (!requireSchedule || prerequisites.isScheduled);
+
+  const modalTitle = mode === 'republish' ? 'Republish Exam' : 'Publish Exam';
+  const confirmLabel = mode === 'republish' ? 'Confirm Republish' : 'Confirm Publish';
 
   return (
     <Dialog
       isOpen={isOpen}
       onClose={onClose}
-      title="Publish Exam"
+      title={modalTitle}
       size="sm"
       footer={
         <>
-          {!prerequisites.isScheduled && (
+          {requireSchedule && !prerequisites.isScheduled && (
             <button
               onClick={() => {
                 onClose();
@@ -125,7 +135,7 @@ export function PublishConfirmationModal({
             disabled={!allPrerequisitesMet}
             className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
           >
-            Confirm Publish
+            {confirmLabel}
           </button>
         </>
       }

@@ -20,6 +20,8 @@ export function SchedulingRoute() {
       };
     } | null
   )?.initialScheduleDraft;
+  const initialExamId = initialScheduleDraft?.examId;
+  const autoOpenCreate = initialScheduleDraft?.openCreateModal;
 
   return (
     <AdminScheduling
@@ -30,8 +32,8 @@ export function SchedulingRoute() {
       onUpdateSchedule={onUpdateSchedule}
       onDeleteSchedule={onDeleteSchedule}
       onStartScheduledSession={onStartScheduledSession}
-      initialExamId={initialScheduleDraft?.examId}
-      autoOpenCreate={initialScheduleDraft?.openCreateModal}
+      {...(initialExamId ? { initialExamId } : {})}
+      {...(autoOpenCreate !== undefined ? { autoOpenCreate } : {})}
     />
   );
 }

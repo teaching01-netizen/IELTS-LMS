@@ -13,6 +13,7 @@ import type {
   ExamSchedule,
   ExamSessionRuntime,
   ExamVersion,
+  ExamVersionSummary,
   SectionRuntimeState,
 } from '../types/domain';
 import type { ModuleType } from '../types';
@@ -60,6 +61,19 @@ type BackendExamVersion = {
   isDraft: boolean;
   isPublished: boolean;
   revision?: number | undefined;
+};
+
+type BackendExamVersionSummary = {
+  id: string;
+  examId: string;
+  versionNumber: number;
+  parentVersionId?: string | null | undefined;
+  validationSnapshot?: ExamVersion['validationSnapshot'] | null | undefined;
+  createdBy: string;
+  createdAt: string;
+  publishNotes?: string | null | undefined;
+  isDraft: boolean;
+  isPublished: boolean;
 };
 
 type BackendExamEvent = {
@@ -395,6 +409,21 @@ export function mapBackendExamVersion(payload: BackendExamVersion): ExamVersion 
     parentVersionId: payload.parentVersionId ?? null,
     contentSnapshot: payload.contentSnapshot,
     configSnapshot: payload.configSnapshot,
+    validationSnapshot: payload.validationSnapshot ?? undefined,
+    createdBy: payload.createdBy,
+    createdAt: payload.createdAt,
+    publishNotes: payload.publishNotes ?? undefined,
+    isDraft: payload.isDraft,
+    isPublished: payload.isPublished,
+  };
+}
+
+export function mapBackendExamVersionSummary(payload: BackendExamVersionSummary): ExamVersionSummary {
+  return {
+    id: payload.id,
+    examId: payload.examId,
+    versionNumber: payload.versionNumber,
+    parentVersionId: payload.parentVersionId ?? null,
     validationSnapshot: payload.validationSnapshot ?? undefined,
     createdBy: payload.createdBy,
     createdAt: payload.createdAt,

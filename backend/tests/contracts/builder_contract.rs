@@ -239,6 +239,119 @@ async fn patch_draft_creates_a_new_version_and_advances_the_exam_pointer() {
 }
 
 #[tokio::test]
+async fn patch_draft_prunes_old_draft_versions_to_three() {
+    let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
+    let seeded = seed_exam(database.pool()).await;
+    let auth = mysql::create_authenticated_user(
+        database.pool(),
+        UserRole::Builder,
+        "builder@example.com",
+        "Builder",
+    )
+    .await;
+    let app = build_router(app_state(database.pool().clone()));
+    let service = BuilderService::new(database.pool().clone());
+
+    let mut revision = seeded.revision;
+
+    for _ in 0..5 {
+        let response = app
+            .clone()
+            .oneshot(
+                auth.with_csrf(Request::builder())
+                    .method("PATCH")
+                    .uri(format!("/api/v1/exams/{}/draft", seeded.id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&SaveDraftRequest {
+                            content_snapshot: json!({
+                                "listening": {"parts": []},
+                                "reading": {"passages": []},
+                                "writing": {"tasks": []},
+                                "speaking": {"part1Topics": [], "cueCard": "", "part3Discussion": []}
+                            }),
+                            config_snapshot: json!({
+                                "general": {"title": seeded.title},
+                                "sections": {}
+                            }),
+                            revision,
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let exam_after = service
+            .get_exam(&contract_actor(), seeded.id.clone())
+            .await
+            .expect("exam after draft save");
+        revision = exam_after.revision;
+    }
+
+    let response = app
+        .clone()
+        .oneshot(
+            auth.with_auth(
+                Request::builder()
+                    .uri(format!("/api/v1/exams/{}/versions", seeded.id)),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let versions = json["data"].as_array().expect("versions array");
+
+    assert_eq!(json["success"], true);
+    assert_eq!(versions.len(), 3);
+
+    let mut version_numbers: Vec<i64> = versions
+        .iter()
+        .map(|version| version["versionNumber"].as_i64().expect("version number"))
+        .collect();
+    version_numbers.sort_unstable();
+    assert_eq!(version_numbers, vec![3, 4, 5]);
+
+    for version in versions {
+        assert_eq!(version["isDraft"], true);
+    }
+
+    let response = app
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!("/api/v1/exams/{}/events", seeded.id)))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let events = json["data"].as_array().expect("events array");
+
+    assert_eq!(json["success"], true);
+
+    let draft_saved_count = events
+        .iter()
+        .filter(|event| event["action"].as_str() == Some("draft_saved"))
+        .count();
+    assert_eq!(draft_saved_count, 3);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
 async fn get_validation_reports_publish_readiness_for_the_current_draft() {
     let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
     let seeded = seed_exam(database.pool()).await;

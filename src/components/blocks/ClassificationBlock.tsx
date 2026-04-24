@@ -2,6 +2,7 @@ import React from 'react';
 import { ClassificationBlock as ClassificationBlockType } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
+import { handleBoldHotkey } from '../../utils/boldMarkdown';
 
 interface ClassificationBlockProps {
   block: ClassificationBlockType;
@@ -68,7 +69,14 @@ export function ClassificationBlock({ block, startNum, endNum, updateBlock, dele
 
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 mb-2">Instruction</label>
-        <textarea value={block.instruction} onChange={(e) => updateInstruction(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={2} placeholder="Enter instruction..." />
+        <textarea
+          value={block.instruction}
+          onChange={(e) => updateInstruction(e.target.value)}
+          onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateInstruction(nextValue))}
+          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          rows={2}
+          placeholder="Enter instruction..."
+        />
       </div>
 
       <div className="mb-4">
@@ -83,7 +91,11 @@ export function ClassificationBlock({ block, startNum, endNum, updateBlock, dele
                 const newCategories = [...block.categories];
                 newCategories[index] = e.target.value;
                 updateCategories(newCategories);
-              }} className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm" placeholder={`Category ${index + 1}`} />
+              }} onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => {
+                const newCategories = [...block.categories];
+                newCategories[index] = nextValue;
+                updateCategories(newCategories);
+              })} className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm" placeholder={`Category ${index + 1}`} />
               {block.categories.length > 2 && <button onClick={() => removeCategory(index)} className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>}
             </div>
           ))}
@@ -99,7 +111,14 @@ export function ClassificationBlock({ block, startNum, endNum, updateBlock, dele
           {block.items.map((item, index) => (
             <div key={item.id} className="border rounded-md p-3 flex items-center gap-3">
               <span className="text-sm font-medium text-gray-700 w-16">{startNum + index}.</span>
-              <input type="text" value={item.text} onChange={(e) => updateItem(item.id, { text: e.target.value })} className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Item text..." />
+              <input
+                type="text"
+                value={item.text}
+                onChange={(e) => updateItem(item.id, { text: e.target.value })}
+                onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateItem(item.id, { text: nextValue }))}
+                className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
+                placeholder="Item text..."
+              />
               <select value={item.correctCategory} onChange={(e) => updateItem(item.id, { correctCategory: e.target.value })} className="w-32 border border-gray-300 rounded px-2 py-1 text-sm">
                 {block.categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
               </select>

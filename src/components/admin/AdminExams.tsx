@@ -4,7 +4,7 @@ import { Plus, Search, Filter, MoreHorizontal, Copy, CheckCircle, Archive, X, La
 import { StatusBadge } from '../ui/StatusBadge';
 import { Exam, ExamConfig } from '../../types';
 import { lazyLoad } from '../../app/performance/lazyLoad';
-import { ExamEntity, ExamVersion, ExamEvent, BulkOperationResult } from '../../types/domain';
+import { ExamEntity, ExamEvent, ExamVersionSummary, BulkOperationResult } from '../../types/domain';
 import { getExamStatsFromExam, ExamFilterOptions, ExamSortOptions, DEFAULT_FILTERS, DEFAULT_SORT, hasActiveFilters } from '../../utils/examStats';
 import { AdminExamsProps, ExamVersionHistoryProps } from '../../features/admin/contracts';
 import { ExamFiltersPanel } from './ExamFiltersPanel';
@@ -210,7 +210,7 @@ export function AdminExams({
   });
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [selectedExamForHistory, setSelectedExamForHistory] = useState<ExamEntity | null>(null);
-  const [examVersions, setExamVersions] = useState<ExamVersion[]>([]);
+  const [examVersions, setExamVersions] = useState<ExamVersionSummary[]>([]);
   const [examEvents, setExamEvents] = useState<ExamEvent[]>([]);
   
   // Phase 4: Filter, sort, and selection state

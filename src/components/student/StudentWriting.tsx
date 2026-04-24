@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ExamState } from '../../types';
-import { Bold, Italic, Underline, AlignLeft, AlignCenter, List, Undo, Redo, ArrowLeftRight, Check, X, AlertTriangle } from 'lucide-react';
+import { ArrowLeftRight, Check, X, AlertTriangle } from 'lucide-react';
 import { getWritingTaskContent } from '../../utils/writingTaskUtils';
 import { MIN_HEIGHTS, CHAR_HEIGHT_PX, WRITING } from '../../constants/uiConstants';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
@@ -34,6 +34,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
   const editorRef = useRef<HTMLDivElement>(null);
   const lastKeydownRef = useRef<number>(0);
   const previousValueRef = useRef<string>('');
+  const editorHasFocusRef = useRef(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
 
   const handleDrag = (e: React.MouseEvent | React.TouchEvent) => {
@@ -62,28 +63,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
   };
 
   const currentTask = writingConfig.tasks.find(t => t.id === activeTaskId) || writingConfig.tasks[0];
-  if (!currentTask) {
-    return null;
-  }
   const currentText = writingAnswers[activeTaskId] || '';
-  const currentTaskContent = currentTask
-    ? getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id)
-    : null;
-  const currentPrompt = currentTaskContent?.prompt ?? '';
-  const minWords = currentTask.minWords || 150;
-  const currentChart = currentTaskContent?.chart;
-
-  const wordCount = currentText.trim() === '' ? 0 : currentText.replace(/<[^>]*>/g, '').trim().split(/\s+/).length;
-
-  const isWordCountMet = wordCount >= minWords;
-  const isWordCountWarning = wordCount > 0 && wordCount < minWords && wordCount >= minWords * 0.9;
-
-  // Word count guidance
-  const optimalMin = currentTask.optimalMin || Math.ceil(minWords * 1.1);
-  const optimalMax = currentTask.optimalMax || Math.ceil(minWords * 1.5);
-  const isOptimal = wordCount >= optimalMin && wordCount <= optimalMax;
-  const isOverLength = currentTask.maxWords && wordCount > currentTask.maxWords;
-  const overLengthWarning = currentTask.maxWords && wordCount > currentTask.maxWords * 0.9;
 
   useEffect(() => {
     if (currentQuestionId && currentQuestionId !== activeTaskId) {
@@ -92,10 +72,14 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
   }, [activeTaskId, currentQuestionId]);
 
   useEffect(() => {
-    if (editorRef.current && currentText !== editorRef.current.innerHTML) {
-      editorRef.current.innerHTML = currentText;
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (editorHasFocusRef.current) return;
+    if (currentText !== editor.innerHTML) {
+      editor.innerHTML = currentText;
+      previousValueRef.current = editor.innerHTML;
     }
-  }, [currentText]);
+  }, [activeTaskId, currentText]);
 
   useEffect(() => {
     if (timeRemaining === 0) {
@@ -165,6 +149,27 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
     };
   }, [resolvedSessionId, resolvedStudentId]);
 
+  if (!currentTask) {
+    return null;
+  }
+
+  const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
+  const currentPrompt = currentTaskContent?.prompt ?? '';
+  const minWords = currentTask.minWords || 150;
+  const currentChart = currentTaskContent?.chart;
+
+  const wordCount = currentText.trim() === '' ? 0 : currentText.replace(/<[^>]*>/g, '').trim().split(/\s+/).length;
+
+  const isWordCountMet = wordCount >= minWords;
+  const isWordCountWarning = wordCount > 0 && wordCount < minWords && wordCount >= minWords * 0.9;
+
+  // Word count guidance
+  const optimalMin = currentTask.optimalMin || Math.ceil(minWords * 1.1);
+  const optimalMax = currentTask.optimalMax || Math.ceil(minWords * 1.5);
+  const isOptimal = wordCount >= optimalMin && wordCount <= optimalMax;
+  const isOverLength = currentTask.maxWords && wordCount > currentTask.maxWords;
+  const overLengthWarning = currentTask.maxWords && wordCount > currentTask.maxWords * 0.9;
+
   const resolvedTimeRemaining = timeRemaining ?? writingConfig.duration * 60;
 
   const formatTime = (seconds: number) => {
@@ -195,6 +200,33 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
     }
   };
 
+  const insertPlainTextAtCursor = (text: string) => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const textNode = document.createTextNode(text);
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.setEndAfter(textNode);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
+
+  const handleEditorPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const pasted = event.clipboardData?.getData('text/plain') ?? '';
+    if (!pasted) return;
+    insertPlainTextAtCursor(pasted);
+    handleEditorInput();
+  };
+
+  const handleEditorDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+  };
+
   const handleSubmitClick = () => {
     setShowReviewModal(true);
   };
@@ -221,7 +253,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
     return count >= task.minWords;
   });
 
-  return (
+	return (
     <div className="flex flex-col h-full w-full bg-white">
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative border-t border-gray-300">
         <div style={{ width: `${leftWidth}%` }} className="h-full flex flex-col relative min-w-[260px] md:min-w-[280px] lg:min-w-[300px]">
@@ -298,132 +330,51 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
           </div>
         </div>
 
-        <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
-          <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
-            <div className="border-b border-gray-200 p-2 md:p-3 flex items-center gap-1 bg-gray-50 overflow-x-auto no-scrollbar flex-shrink-0">
-              <button
-                onClick={() => handleFormat('bold')}
-                className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
-                title="Bold"
-                aria-label="Bold"
-              >
-                <Bold size={14} />
-              </button>
-              <button
-                onClick={() => handleFormat('italic')}
-                className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
-                title="Italic"
-                aria-label="Italic"
-              >
-                <Italic size={14} />
-              </button>
-              <button
-                onClick={() => handleFormat('underline')}
-                className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
-                title="Underline"
-                aria-label="Underline"
-              >
-                <Underline size={14} />
-              </button>
-              <div className="w-px h-5 md:h-6 bg-gray-200 mx-1 md:mx-2 flex-shrink-0"></div>
-              <button
-                onClick={() => handleFormat('justifyLeft')}
-                className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
-                title="Align Left"
-                aria-label="Align Left"
-              >
-                <AlignLeft size={14} />
-              </button>
-              <button
-                onClick={() => handleFormat('justifyCenter')}
-                className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
-                title="Align Center"
-                aria-label="Align Center"
-              >
-                <AlignCenter size={14} />
-              </button>
-              <div className="w-px h-5 md:h-6 bg-gray-200 mx-1 md:mx-2 flex-shrink-0"></div>
-              <button
-                onClick={() => handleFormat('insertUnorderedList')}
-                className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
-                title="Bullet List"
-                aria-label="Bullet List"
-              >
-                <List size={14} />
-              </button>
-              <div className="w-px h-5 md:h-6 bg-gray-200 mx-1 md:mx-2 flex-1"></div>
-              <button
-                onClick={() => handleFormat('undo')}
-                className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
-                title="Undo"
-                aria-label="Undo"
-              >
-                <Undo size={14} />
-              </button>
-              <button
-                onClick={() => handleFormat('redo')}
-                className="p-1.5 md:p-2 text-gray-400 hover:bg-white hover:text-gray-900 hover:shadow-sm rounded-lg transition-all flex-shrink-0"
-                title="Redo"
-                aria-label="Redo"
-              >
-                <Redo size={14} />
-              </button>
-            </div>
-
-            <div
-              ref={editorRef}
-              contentEditable
-              onInput={handleEditorInput}
-              className="flex-1 w-full p-4 md:p-6 lg:p-8 text-base md:text-lg leading-relaxed text-gray-800 placeholder:text-gray-200 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(currentText) }}
-              style={{ minHeight: MIN_HEIGHTS.WRITING_EDITOR }}
-              spellCheck={!security.preventAutocorrect}
-              autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
-              autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
-            />
+	        <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
+	          <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
+	            <div
+	              ref={editorRef}
+	              contentEditable
+	              onInput={handleEditorInput}
+                suppressContentEditableWarning
+                onFocus={() => {
+                  editorHasFocusRef.current = true;
+                }}
+                onBlur={() => {
+                  editorHasFocusRef.current = false;
+                  if (editorRef.current) {
+                    const sanitized = sanitizeHtml(editorRef.current.innerHTML);
+                    if (sanitized !== editorRef.current.innerHTML) {
+                      editorRef.current.innerHTML = sanitized;
+                    }
+                    onWritingChange(activeTaskId, editorRef.current.innerHTML);
+                  }
+                }}
+                onPaste={handleEditorPaste}
+                onDrop={handleEditorDrop}
+	              className="flex-1 w-full p-4 md:p-6 lg:p-8 text-base md:text-lg leading-relaxed text-gray-800 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+	              style={{ minHeight: MIN_HEIGHTS.WRITING_EDITOR }}
+	              spellCheck={!security.preventAutocorrect}
+	              autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
+	              autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
+	            />
             
-            <div className="border-t border-gray-200 p-3 md:p-5 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs md:text-sm flex-shrink-0">
-              <div className="flex gap-4 md:gap-8 w-full sm:w-auto">
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Word Count</span>
-                  <span className={`text-lg md:text-xl font-black ${
-                    isOptimal ? 'text-emerald-600' :
-                    isOverLength ? 'text-red-600' :
-                    isWordCountMet ? 'text-blue-600' :
-                    isWordCountWarning ? 'text-amber-500' : 'text-gray-900'
-                  }`}>
-                    {wordCount}
-                  </span>
-                </div>
-              </div>
-
-              <div className={`px-3 md:px-4 py-1.5 md:py-2 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${
-                isOptimal
-                  ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                  : isOverLength
-                    ? 'bg-red-100 text-red-700 border border-red-200 animate-pulse'
-                    : overLengthWarning
-                      ? 'bg-amber-100 text-amber-700 border border-amber-200'
-                      : isWordCountMet
-                        ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                        : isWordCountWarning
-                          ? 'bg-amber-100 text-amber-700 border border-amber-200 animate-pulse'
-                          : 'bg-gray-100 text-gray-400 border border-gray-200'
-              }`}>
-                {isOptimal
-                  ? `Optimal: ${optimalMin}-${optimalMax}`
-                  : isOverLength
-                    ? `Over limit: ${currentTask.maxWords} max`
-                    : overLengthWarning
-                      ? `Near limit: ${currentTask.maxWords} max`
-                      : isWordCountMet
-                        ? wordCount < optimalMin
-                          ? `${optimalMin - wordCount} to optimal`
-                          : 'Target Met'
-                        : `${minWords - wordCount} words remaining`}
-              </div>
-            </div>
-          </div>
+	            <div className="border-t border-gray-200 p-3 md:p-5 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs md:text-sm flex-shrink-0">
+	              <div className="flex gap-4 md:gap-8 w-full sm:w-auto">
+	                <div className="flex flex-col">
+	                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Word Count</span>
+	                  <span className={`text-lg md:text-xl font-black ${
+	                    isOptimal ? 'text-emerald-600' :
+	                    isOverLength ? 'text-red-600' :
+	                    isWordCountMet ? 'text-blue-600' :
+	                    isWordCountWarning ? 'text-amber-500' : 'text-gray-900'
+	                  }`}>
+	                    {wordCount}
+	                  </span>
+	                </div>
+	              </div>
+	            </div>
+	          </div>
 
         </div>
       </div>

@@ -380,7 +380,7 @@ describe('StudentProctoringProvider', () => {
     });
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(800);
+      await vi.advanceTimersByTimeAsync(100);
     });
 
     expect(
@@ -399,7 +399,7 @@ describe('StudentProctoringProvider', () => {
     });
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(800);
+      await vi.advanceTimersByTimeAsync(100);
     });
 
     expect(
@@ -419,7 +419,7 @@ describe('StudentProctoringProvider', () => {
     });
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(800);
+      await vi.advanceTimersByTimeAsync(100);
     });
 
     expect(harness.result.current.runtime.state.phase).toBe('post-exam');
@@ -438,7 +438,7 @@ describe('StudentProctoringProvider', () => {
     });
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(200);
     });
 
     expect(harness.result.current.runtime.state.phase).toBe('exam');

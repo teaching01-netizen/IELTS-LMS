@@ -40,7 +40,7 @@ export function useExam(id: string) {
 export function useExamVersions(examId: string) {
   return useQuery({
     queryKey: queryKeys.exams.versions(examId),
-    queryFn: () => examRepository.getAllVersions(examId),
+    queryFn: () => examRepository.getVersionSummaries(examId),
     enabled: !!examId,
     staleTime: 2 * 60 * 1000, // 2 minutes
   });

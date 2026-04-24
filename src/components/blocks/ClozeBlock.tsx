@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { QuestionBlock, ClozeBlock as ClozeBlockType, AnswerRule } from '../../types';
 import { MoreVertical, Plus, Trash2, GripVertical, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
+import { handleBoldHotkey } from '../../utils/boldMarkdown';
 
 interface Props {
   block: QuestionBlock;
@@ -77,6 +78,7 @@ export const ClozeBlock: React.FC<Props> = ({ block, startNum, endNum, updateBlo
             type="text" 
             value={clozeBlock.instruction} 
             onChange={(e) => updateBlock({ ...clozeBlock, instruction: e.target.value })}
+            onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...clozeBlock, instruction: nextValue }))}
             className={`w-full text-sm font-medium text-gray-800 outline-none border-b ${getFieldError('instruction') ? 'border-red-500 bg-red-50' : 'border-transparent hover:border-gray-200 focus:border-blue-700'} bg-transparent transition-colors px-1 py-0.5 rounded-sm mb-3`}
             placeholder="Complete the summary below. Choose NO MORE THAN TWO WORDS from the passage for each answer."
           />
@@ -106,6 +108,7 @@ export const ClozeBlock: React.FC<Props> = ({ block, startNum, endNum, updateBlo
                 <textarea 
                   value={q.prompt} 
                   onChange={(e) => updateQuestion(q.id, 'prompt', e.target.value)}
+                  onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateQuestion(q.id, 'prompt', nextValue))}
                   className="w-full bg-transparent outline-none text-sm resize-none mb-2 text-gray-800 placeholder:text-gray-400 focus:ring-1 focus:ring-blue-700 rounded-sm px-1" 
                   placeholder="Enter sentence with blank (e.g., The ____ is important.)" 
                   rows={2}

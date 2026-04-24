@@ -4,14 +4,19 @@ import { hydrateExamState } from '@services/examAdapterService';
 import { examLifecycleService } from '@services/examLifecycleService';
 import { examRepository } from '@services/examRepository';
 import type { ExamState } from '../../../types';
-import type { ExamEntity, ExamVersion, PublishReadiness, ExamSchedule } from '../../../types/domain';
+import type {
+  ExamEntity,
+  ExamSchedule,
+  ExamVersionSummary,
+  PublishReadiness,
+} from '../../../types/domain';
 
 export interface ReviewRouteController {
   error: string | null;
   exam: ExamEntity | undefined;
   isLoading: boolean;
   state: ExamState | null;
-  versions: ExamVersion[];
+  versions: ExamVersionSummary[];
   schedules: ExamSchedule[];
   publishReadiness: PublishReadiness | undefined;
   handlePublish: (notes?: string) => Promise<void>;
@@ -33,7 +38,7 @@ export function useReviewRouteController(
 
   const [state, setState] = useState<ExamState | null>(null);
   const [exam, setExam] = useState<ExamEntity | undefined>(undefined);
-  const [versions, setVersions] = useState<ExamVersion[]>([]);
+  const [versions, setVersions] = useState<ExamVersionSummary[]>([]);
   const [schedules, setSchedules] = useState<ExamSchedule[]>([]);
   const [publishReadiness, setPublishReadiness] = useState<PublishReadiness | undefined>(
     undefined,
@@ -61,7 +66,7 @@ export function useReviewRouteController(
         ? await examRepository.getVersionById(entity.currentDraftVersionId).then(v => v?.contentSnapshot ?? null)
         : null;
       const [allVersions, allSchedules, readiness] = await Promise.all([
-        examRepository.getAllVersions(examId),
+        examRepository.getVersionSummaries(examId),
         examRepository.getSchedulesByExam(examId),
         examLifecycleService.getPublishReadiness(examId),
       ]);

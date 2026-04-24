@@ -6,6 +6,28 @@
 import { AuthError, NetworkError, ServiceUnavailableError } from '../error/errorTypes';
 import { logError, logInfo, logWarn } from '../error/errorLogger';
 
+export class ApiClientError extends Error {
+  public readonly statusCode: number;
+  public readonly backendCode: string | undefined;
+  public readonly backendDetails: Record<string, unknown> | undefined;
+  public readonly backendRequestId: string | undefined;
+
+  constructor(args: {
+    message: string;
+    statusCode: number;
+    backendCode: string | undefined;
+    backendDetails: Record<string, unknown> | undefined;
+    backendRequestId: string | undefined;
+  }) {
+    super(args.message);
+    this.name = 'ApiClientError';
+    this.statusCode = args.statusCode;
+    this.backendCode = args.backendCode;
+    this.backendDetails = args.backendDetails;
+    this.backendRequestId = args.backendRequestId;
+  }
+}
+
 export interface ApiRequestConfig {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   headers?: Record<string, string>;
@@ -184,7 +206,24 @@ class ApiClient {
           requestInit.body = JSON.stringify(body);
         }
 
-        const response = await fetch(url, requestInit);
+        let response: Response;
+        try {
+          response = await fetch(url, requestInit);
+        } catch (fetchError) {
+          // Some test environments ship an AbortController/AbortSignal implementation that is
+          // incompatible with the fetch implementation (e.g. jsdom + undici), causing fetch() to
+          // throw synchronously when `signal` is provided. Fall back to a no-signal request.
+          if (
+            fetchError instanceof TypeError &&
+            typeof fetchError.message === 'string' &&
+            fetchError.message.includes('Expected signal')
+          ) {
+            const { signal: _signal, ...withoutSignal } = requestInit;
+            response = await fetch(url, withoutSignal);
+          } else {
+            throw fetchError;
+          }
+        }
 
         clearTimeout(timeoutId);
 
@@ -321,7 +360,8 @@ class ApiClient {
    */
   private createErrorFromResponse(response: Response, errorData: unknown): Error {
     const status = response.status;
-    const message = this.extractErrorMessage(errorData, response.statusText);
+    const parsed = this.extractBackendErrorEnvelope(errorData);
+    const message = parsed.message ?? this.extractErrorMessage(errorData, response.statusText);
 
     if (status === 401) {
       return new AuthError(message);
@@ -335,7 +375,13 @@ class ApiClient {
       return new NetworkError(message);
     }
 
-    return this.withStatusCode(new Error(message), status);
+    return new ApiClientError({
+      message,
+      statusCode: status,
+      backendCode: parsed.code,
+      backendDetails: parsed.details,
+      backendRequestId: parsed.requestId,
+    });
   }
 
   private extractErrorMessage(errorData: unknown, fallback: string): string {
@@ -361,6 +407,55 @@ class ApiClient {
     }
 
     return fallback;
+  }
+
+  private extractBackendErrorEnvelope(errorData: unknown): {
+    code: string | undefined;
+    message: string | undefined;
+    details: Record<string, unknown> | undefined;
+    requestId: string | undefined;
+  } {
+    if (!errorData || typeof errorData !== 'object') {
+      return { code: undefined, message: undefined, details: undefined, requestId: undefined };
+    }
+
+    const root = errorData as {
+      error?: unknown;
+      metadata?: unknown;
+    };
+
+    const error = root.error;
+    const metadata = root.metadata;
+
+    const code =
+      error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
+        ? ((error as { code: string }).code as string)
+        : undefined;
+
+    const message =
+      error &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof (error as { message?: unknown }).message === 'string'
+        ? ((error as { message: string }).message as string)
+        : undefined;
+
+    const detailsRaw =
+      error && typeof error === 'object' && 'details' in error ? (error as { details?: unknown }).details : undefined;
+    const details =
+      detailsRaw && typeof detailsRaw === 'object' && !Array.isArray(detailsRaw)
+        ? (detailsRaw as Record<string, unknown>)
+        : undefined;
+
+    const requestId =
+      metadata &&
+      typeof metadata === 'object' &&
+      'requestId' in metadata &&
+      typeof (metadata as { requestId?: unknown }).requestId === 'string'
+        ? ((metadata as { requestId: string }).requestId as string)
+        : undefined;
+
+    return { code, message, details, requestId };
   }
 
   /**

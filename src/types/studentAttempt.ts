@@ -82,6 +82,13 @@ export interface StudentAttempt {
     lastRecoveredAt: string | null;
     lastLocalMutationAt: string | null;
     lastPersistedAt: string | null;
+    lastDroppedMutations: {
+      at: string;
+      count: number;
+      fromModule: ModuleType | 'multiple' | null;
+      toModule: ModuleType | null;
+      reason: string;
+    } | null;
     pendingMutationCount: number;
     serverAcceptedThroughSeq: number;
     clientSessionId: string | null;

@@ -5,7 +5,8 @@ import {
   CheckSquare, AlertTriangle
 } from 'lucide-react';
 import { 
-  StudentSubmission, SectionSubmission, WritingTaskSubmission, ReviewDraft, 
+  StudentSubmission, SectionSubmission, WritingTaskSubmission, ReviewDraft,
+  StudentResult,
   RubricAssessment, ReleaseStatus, GradingChecklist,
   WritingAnnotation, DrawingAnnotation, CommentBankItem
 } from '../../types/grading';
@@ -68,10 +69,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     { id: '3', category: 'coherence', label: 'Transition needed', text: 'Add a transition word to improve flow between ideas.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
     { id: '4', category: 'task_response', label: 'Address the prompt', text: 'Ensure you fully address all parts of the prompt.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
   ]);
-
-  useEffect(() => {
-    loadData();
-  }, [submissionId]);
+  const submissionLoadSeq = useRef(0);
 
   useEffect(() => {
     const publishedVersionId = submission?.publishedVersionId;
@@ -111,6 +109,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   }, [submission?.publishedVersionId]);
 
   const loadData = useCallback(async () => {
+    const seq = ++submissionLoadSeq.current;
     setLoading(true);
     try {
       const [subData, sectionsData, writingsData] = await Promise.all([
@@ -119,16 +118,24 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         gradingRepository.getWritingSubmissionsBySubmissionId(submissionId)
       ]);
 
+      if (seq !== submissionLoadSeq.current) return;
+
       setSubmission(subData);
       setSectionSubmissions(sectionsData);
       setWritingSubmissions(writingsData);
 
       // Load or create review draft
       const existingDraft = await gradingRepository.getReviewDraftBySubmission(submissionId);
+      if (seq !== submissionLoadSeq.current) return;
+
       if (existingDraft) {
         setReviewDraft(existingDraft);
-      } else if (subData) {
+      } else if (
+        subData &&
+        ['submitted', 'in_progress', 'reopened'].includes(subData.gradingStatus)
+      ) {
         const result = await gradingService.startReview(submissionId, currentTeacherId, currentTeacherName);
+        if (seq !== submissionLoadSeq.current) return;
         if (result.success && result.data) {
           // Initialize with default checklist
           const initializedDraft = {
@@ -150,10 +157,32 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         }
       }
     } catch (error) {
+      if (seq !== submissionLoadSeq.current) return;
       logger.error('Failed to load submission:', error);
+    } finally {
+      if (seq === submissionLoadSeq.current) {
+        setLoading(false);
+      }
     }
-    setLoading(false);
   }, [submissionId, currentTeacherId, currentTeacherName]);
+
+  useEffect(() => {
+    submissionLoadSeq.current += 1;
+    setLoading(true);
+    setSubmission(null);
+    setSectionSubmissions([]);
+    setWritingSubmissions([]);
+    setReviewDraft(null);
+    setExamState(null);
+    setExamError(null);
+    setActiveSection('reading');
+    setActiveTask('task1');
+    setSaving(false);
+    setReleaseAction(null);
+    setReleaseError(null);
+    setShowReportPreview(false);
+    void loadData();
+  }, [submissionId, loadData]);
 
   const handleSaveDraft = async () => {
     if (!reviewDraft) return;
@@ -431,14 +460,6 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     );
   };
 
-  if (loading || !submission) {
-    return (
-      <div className="h-full bg-gray-50">
-        <SectionLoadingSkeleton message="Loading review workspace..." />
-      </div>
-    );
-  }
-
   const currentSectionSubmission = getSectionSubmission(activeSection);
   const currentWritingTaskId = activeSection === 'writing' ? activeTask : null;
   const currentWritingPrompt = currentWritingTaskId ? getWritingPrompt(currentWritingTaskId) : '';
@@ -456,7 +477,104 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           annotation.taskId === currentWritingTaskId && annotation.visibility === 'student_visible',
       ).length ?? 0
     : 0;
+  const previewSectionBands = useMemo(() => {
+    if (!reviewDraft) {
+      return {
+        listening: 0,
+        reading: 0,
+        writing: 0,
+        speaking: 0,
+      };
+    }
 
+    const writingDrafts = reviewDraft.sectionDrafts.writing;
+    const task1Band = writingDrafts?.task1?.overallBand ?? 0;
+    const task2Band = writingDrafts?.task2?.overallBand ?? 0;
+    const writingBand =
+      task1Band === 0 && task2Band === 0
+        ? 0
+        : task1Band === 0
+          ? task2Band
+          : task2Band === 0
+            ? task1Band
+            : Math.round(((task1Band + task2Band) / 2) * 2) / 2;
+
+    return {
+      listening: reviewDraft.sectionDrafts.listening?.overallBand ?? 0,
+      reading: reviewDraft.sectionDrafts.reading?.overallBand ?? 0,
+      writing: writingBand,
+      speaking: reviewDraft.sectionDrafts.speaking?.overallBand ?? 0,
+    };
+  }, [reviewDraft]);
+
+  const previewOverallBand = useMemo(() => {
+    if (!reviewDraft) {
+      return 0;
+    }
+
+    const bands = [
+      reviewDraft.sectionDrafts.listening?.overallBand,
+      reviewDraft.sectionDrafts.reading?.overallBand,
+      reviewDraft.sectionDrafts.writing?.task1?.overallBand,
+      reviewDraft.sectionDrafts.writing?.task2?.overallBand,
+      reviewDraft.sectionDrafts.speaking?.overallBand,
+    ].filter((band): band is number => typeof band === 'number' && band > 0);
+
+    if (bands.length === 0) {
+      return 0;
+    }
+
+    return Math.round((bands.reduce((sum, band) => sum + band, 0) / bands.length) * 2) / 2;
+  }, [reviewDraft]);
+
+  const previewWritingResults = useMemo<StudentResult['writingResults']>(() => {
+    const results: StudentResult['writingResults'] = {};
+
+    if (!reviewDraft) {
+      return results;
+    }
+
+    writingTasks.forEach((task) => {
+      const slot = task.taskId === 'task2' ? 'task2' : 'task1';
+      const rubric = (reviewDraft.sectionDrafts as any)?.writing?.[task.taskId];
+      const taskText = getWritingResponseText(task.taskId);
+      results[slot] = {
+        taskId: task.taskId,
+        taskLabel: task.taskId === 'task1' ? 'Task 1' : 'Task 2',
+        prompt: getWritingPrompt(task.taskId),
+        studentText: taskText,
+        wordCount: taskText.trim() ? taskText.trim().split(/\s+/).filter(Boolean).length : 0,
+        rubricScores: {
+          taskResponse: rubric?.taskResponseBand ?? 0,
+          coherence: rubric?.coherenceBand ?? 0,
+          lexical: rubric?.lexicalBand ?? 0,
+          grammar: rubric?.grammarBand ?? 0,
+        },
+        annotations: reviewDraft.annotations.filter(
+          (annotation) => annotation.taskId === task.taskId && annotation.visibility === 'student_visible',
+        ),
+        drawings: reviewDraft.drawings.filter(
+          (drawing) => drawing.taskId === task.taskId && drawing.visibility === 'student_visible',
+        ),
+        criterionFeedback: {
+          taskResponse: rubric?.taskResponseNotes,
+          coherence: rubric?.coherenceNotes,
+          lexical: rubric?.lexicalNotes,
+          grammar: rubric?.grammarNotes,
+        },
+      };
+    });
+
+    return results;
+  }, [getWritingPrompt, getWritingResponseText, reviewDraft, writingTasks]);
+
+  if (loading || !submission) {
+    return (
+      <div className="h-full bg-gray-50">
+        <SectionLoadingSkeleton message="Loading review workspace..." />
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
@@ -1005,37 +1123,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             studentId: reviewDraft.studentId,
             studentName: submission.studentName,
             releaseStatus: reviewDraft.releaseStatus,
-            overallBand: 6.5,
-            sectionBands: {
-              listening: 6.0,
-              reading: 6.5,
-              writing: 6.5,
-              speaking: 6.5
-            },
-            writingResults: {
-              task1: currentWritingTaskId ? {
-                taskId: currentWritingTaskId,
-                taskLabel: currentWritingTaskId === 'task1' ? 'Task 1' : currentWritingTaskId === 'task2' ? 'Task 2' : 'Writing Task',
-                prompt: currentWritingPrompt,
-                studentText: currentWritingText,
-                wordCount: currentWritingText ? currentWritingText.trim().split(/\s+/).filter(Boolean).length : 0,
-                rubricScores: {
-                  taskResponse: ((reviewDraft.sectionDrafts as any)?.writing?.[currentWritingTaskId]?.taskResponseBand as number | undefined) ?? 6,
-                  coherence: ((reviewDraft.sectionDrafts as any)?.writing?.[currentWritingTaskId]?.coherenceBand as number | undefined) ?? 6,
-                  lexical: ((reviewDraft.sectionDrafts as any)?.writing?.[currentWritingTaskId]?.lexicalBand as number | undefined) ?? 6,
-                  grammar: ((reviewDraft.sectionDrafts as any)?.writing?.[currentWritingTaskId]?.grammarBand as number | undefined) ?? 6
-                },
-                annotations: reviewDraft.annotations.filter(a => a.taskId === currentWritingTaskId && a.visibility === 'student_visible'),
-                drawings: reviewDraft.drawings.filter(d => d.taskId === currentWritingTaskId && d.visibility === 'student_visible'),
-                criterionFeedback: {
-                  taskResponse: (reviewDraft.sectionDrafts as any)?.writing?.[currentWritingTaskId]?.taskResponseNotes,
-                  coherence: (reviewDraft.sectionDrafts as any)?.writing?.[currentWritingTaskId]?.coherenceNotes,
-                  lexical: (reviewDraft.sectionDrafts as any)?.writing?.[currentWritingTaskId]?.lexicalNotes,
-                  grammar: (reviewDraft.sectionDrafts as any)?.writing?.[currentWritingTaskId]?.grammarNotes
-                }
-              } : undefined,
-              task2: undefined
-            },
+            overallBand: previewOverallBand,
+            sectionBands: previewSectionBands,
+            writingResults: previewWritingResults,
             teacherSummary: reviewDraft.teacherSummary || {
               strengths: [],
               improvementPriorities: [],

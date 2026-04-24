@@ -3,6 +3,7 @@ import {
   countAnsweredQuestions,
   countQuestionSlots,
 } from '@services/examAdapterService';
+import { AlertTriangle, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AccessibilitySettings } from './AccessibilitySettings';
 import { HelpModal } from './HelpModal';
@@ -106,6 +107,18 @@ function formatRuntimeTime(seconds: number) {
   return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
+function getFullscreenElement() {
+  return (
+    document.fullscreenElement ??
+    (
+      document as Document & {
+        webkitFullscreenElement?: Element | null;
+      }
+    ).webkitFullscreenElement ??
+    null
+  );
+}
+
 export function StudentApp() {
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
@@ -114,6 +127,7 @@ export function StudentApp() {
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
   const { setShowTimeExtensionRequest } = uiActions;
   const autoSubmitFingerprintRef = useRef<string | null>(null);
+  const priorTimeRemainingRef = useRef<number | null>(null);
   const runtimeFinalSubmitRef = useRef<string | null>(null);
   const finalSubmitInFlightRef = useRef<Promise<void> | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
@@ -123,6 +137,17 @@ export function StudentApp() {
   );
   const [lastAcknowledgedSecurityViolationId, setLastAcknowledgedSecurityViolationId] =
     useState<string | null>(null);
+  const [lastAcknowledgedSecondaryScreenViolationId, setLastAcknowledgedSecondaryScreenViolationId] =
+    useState<string | null>(null);
+  const [fullscreenWarningOpen, setFullscreenWarningOpen] = useState(false);
+  const [fullscreenWarningMessage, setFullscreenWarningMessage] = useState(
+    'Fullscreen mode is required. Please return to fullscreen to continue.',
+  );
+  const [fullscreenWarningSeverity, setFullscreenWarningSeverity] = useState<
+    'medium' | 'high' | 'critical'
+  >('high');
+  const fullscreenGraceTimerRef = useRef<number | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(() => Boolean(getFullscreenElement()));
   const latestPendingWarning = useMemo(() => {
     const warnings =
       attemptState.attempt?.violations.filter((violation) => violation.type === 'PROCTOR_WARNING') ??
@@ -139,6 +164,8 @@ export function StudentApp() {
     return latestWarning;
   }, [attemptState.attempt]);
 
+  const droppedMutations = attemptState.attempt?.recovery.lastDroppedMutations ?? null;
+
   useEffect(() => {
     if (!latestPendingWarning) {
       setWarningOpen(false);
@@ -151,6 +178,24 @@ export function StudentApp() {
     );
     setWarningOpen(true);
   }, [latestPendingWarning]);
+
+  useEffect(() => {
+    const handleFullscreenUpdate = () => {
+      setIsFullscreen(Boolean(getFullscreenElement()));
+    };
+
+    handleFullscreenUpdate();
+    document.addEventListener('fullscreenchange', handleFullscreenUpdate);
+    document.addEventListener('webkitfullscreenchange' as unknown as 'fullscreenchange', handleFullscreenUpdate);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenUpdate);
+      document.removeEventListener(
+        'webkitfullscreenchange' as unknown as 'fullscreenchange',
+        handleFullscreenUpdate,
+      );
+    };
+  }, []);
 
   const latestTabSwitchViolation = useMemo(() => {
     if (runtimeState.phase !== 'exam') {
@@ -169,14 +214,136 @@ export function StudentApp() {
 
   const shouldShowTabSwitchWarning =
     Boolean(latestTabSwitchViolation) &&
-    latestTabSwitchViolation?.id !== lastAcknowledgedSecurityViolationId;
+    latestTabSwitchViolation?.id !== lastAcknowledgedSecurityViolationId &&
+    !fullscreenWarningOpen;
 
   const tabSwitchSeverity =
     latestTabSwitchViolation?.severity === 'high' || latestTabSwitchViolation?.severity === 'critical'
       ? latestTabSwitchViolation.severity
       : 'medium';
 
+  const latestSecondaryScreenViolation = useMemo(() => {
+    if (runtimeState.phase !== 'exam') {
+      return null;
+    }
+
+    if (!examState.config.security.detectSecondaryScreen) {
+      return null;
+    }
+
+    const violations = runtimeState.violations.filter(
+      (violation) => violation.type === 'SECONDARY_SCREEN',
+    );
+    return violations[violations.length - 1] ?? null;
+  }, [examState.config.security.detectSecondaryScreen, runtimeState.phase, runtimeState.violations]);
+
+  const shouldShowSecondaryScreenWarning =
+    Boolean(latestSecondaryScreenViolation) &&
+    latestSecondaryScreenViolation?.id !== lastAcknowledgedSecondaryScreenViolationId &&
+    !fullscreenWarningOpen;
+
+  const latestFullscreenExitViolation = useMemo(() => {
+    if (runtimeState.phase !== 'exam') {
+      return null;
+    }
+
+    if (!examState.config.security.requireFullscreen) {
+      return null;
+    }
+
+    const violations = runtimeState.violations.filter(
+      (violation) => violation.type === 'FULLSCREEN_EXIT',
+    );
+    return violations[violations.length - 1] ?? null;
+  }, [examState.config.security.requireFullscreen, runtimeState.phase, runtimeState.violations]);
+
   useEffect(() => {
+    if (fullscreenGraceTimerRef.current) {
+      window.clearTimeout(fullscreenGraceTimerRef.current);
+      fullscreenGraceTimerRef.current = null;
+    }
+
+    if (
+      runtimeState.phase !== 'exam' ||
+      !examState.config.progression.showWarnings ||
+      !examState.config.security.requireFullscreen
+    ) {
+      setFullscreenWarningOpen(false);
+      return;
+    }
+
+    if (!latestFullscreenExitViolation) {
+      setFullscreenWarningOpen(false);
+      return;
+    }
+
+    if (isFullscreen) {
+      setFullscreenWarningOpen(false);
+      return;
+    }
+
+    fullscreenGraceTimerRef.current = window.setTimeout(() => {
+      if (getFullscreenElement()) {
+        setFullscreenWarningOpen(false);
+        return;
+      }
+
+      setFullscreenWarningMessage(
+        latestFullscreenExitViolation.description ??
+          'Fullscreen mode is required. Please return to fullscreen to continue.',
+      );
+      setFullscreenWarningSeverity(
+        latestFullscreenExitViolation.severity === 'critical'
+          ? 'critical'
+          : latestFullscreenExitViolation.severity === 'high'
+            ? 'high'
+            : 'medium',
+      );
+      setFullscreenWarningOpen(true);
+    }, 200);
+  }, [
+    examState.config.progression.showWarnings,
+    examState.config.security.requireFullscreen,
+    isFullscreen,
+    latestFullscreenExitViolation?.id,
+    runtimeState.phase,
+  ]);
+
+  useEffect(() => {
+    if (isFullscreen) {
+      setFullscreenWarningOpen(false);
+    }
+  }, [isFullscreen]);
+
+  const requestFullscreenFromOverlay = useMemo(() => {
+    return {
+      label: 'Return to Fullscreen',
+      onClick: () => {
+        try {
+          if (document.documentElement.requestFullscreen) {
+            void document.documentElement.requestFullscreen();
+            return;
+          }
+
+          void (
+            document.documentElement as HTMLElement & {
+              webkitRequestFullscreen?: () => Promise<void> | void;
+            }
+          ).webkitRequestFullscreen?.();
+        } catch {
+          // Best-effort only.
+        }
+      },
+    };
+  }, []);
+
+  useEffect(() => {
+    const priorTimeRemaining = priorTimeRemainingRef.current;
+    priorTimeRemainingRef.current =
+      typeof runtimeState.displayTimeRemaining === 'number'
+        ? runtimeState.displayTimeRemaining
+        : null;
+
     if (!examState.config.progression.autoSubmit) {
       autoSubmitFingerprintRef.current = null;
       return;
@@ -191,7 +358,23 @@ export function StudentApp() {
       return;
     }
 
-    if (runtimeState.displayTimeRemaining !== 0) {
+    if (typeof runtimeState.displayTimeRemaining !== 'number') {
+      return;
+    }
+
+    if (runtimeState.runtimeBacked) {
+      if (runtimeState.runtimeStatus !== 'live') {
+        return;
+      }
+
+      const transitionedToZero =
+        runtimeState.displayTimeRemaining === 0 &&
+        typeof priorTimeRemaining === 'number' &&
+        priorTimeRemaining > 0;
+      if (!transitionedToZero) {
+        return;
+      }
+    } else if (runtimeState.displayTimeRemaining !== 0) {
       return;
     }
 
@@ -220,6 +403,7 @@ export function StudentApp() {
     runtimeState.displayTimeRemaining,
     runtimeState.phase,
     runtimeState.runtimeBacked,
+    runtimeState.runtimeStatus,
   ]);
   const shouldShowTimeExtension = shouldOfferTimeExtension({
     config: examState.config,
@@ -534,6 +718,41 @@ export function StudentApp() {
         isExamActive={runtimeState.phase === 'exam'}
       />
 
+      {droppedMutations ? (
+        <div
+          className="mx-3 md:mx-4 lg:mx-6 mt-3 rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 flex items-start gap-3"
+          role="status"
+          aria-live="polite"
+        >
+          <AlertTriangle size={18} className="text-amber-700 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <div className="font-semibold">
+              {droppedMutations.count} unsent response{droppedMutations.count === 1 ? '' : 's'} discarded
+            </div>
+            <div className="text-amber-800">
+              {droppedMutations.fromModule && droppedMutations.toModule ? (
+                <>
+                  The exam advanced from {droppedMutations.fromModule} to {droppedMutations.toModule} while you
+                  were offline.
+                </>
+              ) : (
+                <>The exam section changed while you were offline.</>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="p-1 rounded-sm hover:bg-amber-100 text-amber-800"
+            aria-label="Dismiss notification"
+            onClick={() => {
+              void attemptActions.dismissDroppedMutationsBanner();
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      ) : null}
+
       <main id="main-content" className="flex-1 overflow-hidden relative flex flex-col" role="main">
         {runtimeState.currentModule === 'reading' ? (
           <StudentReading
@@ -635,6 +854,36 @@ export function StudentApp() {
             if (latestTabSwitchViolation) {
               setLastAcknowledgedSecurityViolationId(latestTabSwitchViolation.id);
             }
+          }}
+        />
+      ) : null}
+
+      {examState.config.progression.showWarnings ? (
+        <WarningOverlay
+          isOpen={shouldShowSecondaryScreenWarning}
+          severity="high"
+          message={
+            latestSecondaryScreenViolation?.description ??
+            'Multiple screens detected. Please disconnect additional displays to continue.'
+          }
+          showCountdown={false}
+          onAcknowledge={() => {
+            if (latestSecondaryScreenViolation) {
+              setLastAcknowledgedSecondaryScreenViolationId(latestSecondaryScreenViolation.id);
+            }
+          }}
+        />
+      ) : null}
+
+      {examState.config.progression.showWarnings ? (
+        <WarningOverlay
+          isOpen={fullscreenWarningOpen}
+          severity={fullscreenWarningSeverity}
+          message={fullscreenWarningMessage}
+          showCountdown={false}
+          actionButton={requestFullscreenFromOverlay}
+          onAcknowledge={() => {
+            requestFullscreenFromOverlay.onClick();
           }}
         />
       ) : null}

@@ -4,7 +4,7 @@ import { getExamStateFromEntity } from '@services/examAdapterService';
 import { examLifecycleService } from '@services/examLifecycleService';
 import { examRepository } from '@services/examRepository';
 import type { ExamState } from '../../../types';
-import type { ExamEntity, ExamVersion, PublishReadiness } from '../../../types/domain';
+import type { ExamEntity, ExamVersionSummary, PublishReadiness } from '../../../types/domain';
 
 export interface BuilderRouteController {
   error: string | null;
@@ -12,7 +12,7 @@ export interface BuilderRouteController {
   isLoading: boolean;
   publishReadiness: PublishReadiness | undefined;
   state: ExamState | null;
-  versions: ExamVersion[];
+  versions: ExamVersionSummary[];
   handleArchive: () => Promise<void>;
   handleOpenScheduling: () => void;
   handlePublish: (notes?: string) => Promise<void>;
@@ -33,7 +33,7 @@ export function useBuilderRouteController(
 
   const [state, setState] = useState<ExamState | null>(null);
   const [exam, setExam] = useState<ExamEntity | undefined>(undefined);
-  const [versions, setVersions] = useState<ExamVersion[]>([]);
+  const [versions, setVersions] = useState<ExamVersionSummary[]>([]);
   const [publishReadiness, setPublishReadiness] = useState<PublishReadiness | undefined>(
     undefined,
   );
@@ -58,7 +58,7 @@ export function useBuilderRouteController(
 
       const [examState, allVersions, readiness] = await Promise.all([
         getExamStateFromEntity(entity, examRepository),
-        examRepository.getAllVersions(examId),
+        examRepository.getVersionSummaries(examId),
         examLifecycleService.getPublishReadiness(examId),
       ]);
 
@@ -84,7 +84,7 @@ export function useBuilderRouteController(
 
     const [refreshedExam, refreshedVersions, readiness] = await Promise.all([
       examRepository.getExamById(examId),
-      examRepository.getAllVersions(examId),
+      examRepository.getVersionSummaries(examId),
       examLifecycleService.getPublishReadiness(examId),
     ]);
 

@@ -4,6 +4,7 @@ import { QuestionBuilderPane } from '../QuestionBuilderPane';
 import { Play, Square, Rewind, FastForward, Volume2, MapPin, Plus, Trash2, Link as LinkIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import { normalizeAudioUrl } from '../../utils/audioUrl';
 import { createId } from '../../utils/idUtils';
+import { getBlockQuestionCount as getBlockQuestionCountFromUtils } from '../../utils/examUtils';
 
 interface ListeningWorkspaceProps {
   state: ExamState;
@@ -66,9 +67,10 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
       case 'MATCHING':
       case 'MAP':
       case 'SHORT_ANSWER':
+        return 'questions' in block ? block.questions.length : 0;
       case 'SENTENCE_COMPLETION':
       case 'NOTE_COMPLETION':
-        return 'questions' in block ? block.questions.length : 0;
+        return getBlockQuestionCountFromUtils(block);
       default:
         return 0;
     }
@@ -86,9 +88,13 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
     }
   }
 
-  const updateBlocks = (blocks: QuestionBlock[]) => {
+  const updateBlocks: React.Dispatch<React.SetStateAction<QuestionBlock[]>> = (value) => {
+    const currentBlocks =
+      state.listening.parts.find((part) => part.id === activePart.id)?.blocks ?? [];
+    const nextBlocks = typeof value === 'function' ? value(currentBlocks) : value;
+
     const newParts = state.listening.parts.map(p => 
-      p.id === activePart.id ? { ...p, blocks } : p
+      p.id === activePart.id ? { ...p, blocks: nextBlocks } : p
     );
     setState({ ...state, listening: { ...state.listening, parts: newParts } });
   };

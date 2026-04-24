@@ -18,6 +18,20 @@ function jsonError(status: number, message: string) {
   });
 }
 
+function jsonConflict(reason: string, message = 'Conflict') {
+  return new Response(
+    JSON.stringify({
+      success: false,
+      error: { code: 'CONFLICT', message, details: { reason } },
+      metadata: { requestId: 'req-test', timestamp: '2026-01-01T00:00:00.000Z' },
+    }),
+    {
+      status: 409,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
+}
+
 function buildSchedule() {
   return {
     id: 'sched-1',
@@ -269,6 +283,95 @@ describe('studentAttemptRepository backend mode', () => {
     await studentAttemptRepository.clearPendingMutations(attempt.id);
     const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
     expect(cachedAttempts[0]?.answers).toEqual({ q1: 'A' });
+  });
+
+  it('drops stale objective mutations on SECTION_MISMATCH, retries flush, and records lastDroppedMutations', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          schedule: buildSchedule(),
+          version: buildVersion(),
+          runtime: null,
+          attempt: buildBackendAttempt(),
+          attemptCredential: buildAttemptCredential(),
+          degradedLiveMode: false,
+        }),
+      )
+      .mockResolvedValueOnce(jsonConflict('SECTION_MISMATCH', 'Mutation does not belong to the current section.'))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          schedule: buildSchedule(),
+          version: buildVersion(),
+          runtime: { status: 'live', currentSectionKey: 'reading' },
+          attempt: buildBackendAttempt(),
+          attemptCredential: buildAttemptCredential(),
+          degradedLiveMode: false,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          attempt: buildBackendAttempt({
+            answers: { q1: 'A' },
+            updatedAt: '2026-01-01T09:01:00.000Z',
+            revision: 2,
+          }),
+          appliedMutationCount: 1,
+          serverAcceptedThroughSeq: 1,
+        }),
+      );
+    global.fetch = fetchMock as typeof fetch;
+
+    const attempt = await studentAttemptRepository.createAttempt({
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      currentModule: 'reading',
+    });
+
+    await studentAttemptRepository.savePendingMutations(attempt.id, [
+      {
+        id: 'mutation-stale',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-01T09:00:10.000Z',
+        type: 'answer',
+        payload: { questionId: 'qOld', value: 'B', module: 'listening' },
+      },
+      {
+        id: 'mutation-live',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-01T09:00:20.000Z',
+        type: 'answer',
+        payload: { questionId: 'q1', value: 'A', module: 'reading' },
+      },
+    ]);
+
+    await studentAttemptRepository.saveAttempt(attempt);
+
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(firstBody.mutations).toHaveLength(2);
+
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body));
+    expect(secondBody.mutations).toHaveLength(1);
+    expect(secondBody.mutations[0].payload).toMatchObject({ module: 'reading' });
+
+    const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
+    const cached = cachedAttempts.find((candidate) => candidate.id === attempt.id) ?? null;
+    expect(cached?.recovery.lastDroppedMutations).toMatchObject({
+      count: 1,
+      fromModule: 'listening',
+      toModule: 'reading',
+      reason: 'SECTION_MISMATCH',
+    });
   });
 
   it('refreshes attempt credentials and retries once on 401 during mutation flush', async () => {

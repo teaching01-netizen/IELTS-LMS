@@ -164,6 +164,62 @@ describe('PublishActions', () => {
     expect(continueButton).toBeTruthy();
   });
 
+  it('shows republish latest draft action when there are unpublished draft changes', () => {
+    render(
+      <PublishActions
+        {...defaultProps}
+        canPublish={true}
+        publishReadiness={mockPublishReadiness}
+        publishSuccess={{
+          draftVersion: 3,
+          publishedVersion: 4,
+        }}
+        hasUnpublishedDraftChanges={true}
+        draftVersionNumber={5}
+        publishedVersionNumber={4}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /republish \(latest draft\)/i })).toBeTruthy();
+    expect(screen.getByText(/draft v5 has changes not in published v4/i)).toBeTruthy();
+  });
+
+  it('republish opens modal and confirms without schedule', async () => {
+    const onPublish = vi.fn();
+
+    render(
+      <PublishActions
+        {...defaultProps}
+        canPublish={true}
+        publishReadiness={mockPublishReadiness}
+        onPublish={onPublish}
+        publishSuccess={{
+          draftVersion: 3,
+          publishedVersion: 4,
+        }}
+        hasUnpublishedDraftChanges={true}
+        draftVersionNumber={5}
+        publishedVersionNumber={4}
+      />
+    );
+
+    fireEvent.change(screen.getByRole('textbox', { name: /publish notes/i }), {
+      target: { value: 'Republish notes' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /republish \(latest draft\)/i }));
+    expect(screen.getByText(/republish exam/i)).toBeTruthy();
+
+    const confirmButton = screen.getByRole('button', { name: /confirm republish/i });
+    expect(confirmButton).not.toBeDisabled();
+
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(onPublish).toHaveBeenCalledWith('Republish notes');
+    });
+  });
+
   it('copies the published student link', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, {

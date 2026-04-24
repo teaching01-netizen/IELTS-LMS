@@ -53,7 +53,10 @@ export function ProctoringProvider({
   const cooldownByTypeRef = useRef<Record<string, number>>({});
   const fullscreenReentryAttempts = useRef(0);
   const fullscreenEntryAttemptedRef = useRef(false);
-  const violationCooldownMs = 5_000;
+  const defaultViolationCooldownMs = 5_000;
+  const secondaryScreenViolationCooldownMs = 15_000;
+  const screenDetailsUnsupportedRef = useRef(false);
+  const screenDetailsLastPermissionDeniedAtRef = useRef(0);
   const violationCountsRef = useRef<Record<ViolationSeverity, number>>({
     low: 0,
     medium: 0,
@@ -69,8 +72,17 @@ export function ProctoringProvider({
     const now = Date.now();
     const lastViolationAt = cooldownByTypeRef.current[type] ?? 0;
 
-    if (now - lastViolationAt < violationCooldownMs) {
-      return;
+    const violationCooldownMs =
+      type === 'TAB_SWITCH' || type === 'FULLSCREEN_EXIT'
+        ? 0
+        : type === 'SECONDARY_SCREEN'
+          ? secondaryScreenViolationCooldownMs
+          : defaultViolationCooldownMs;
+
+    if (violationCooldownMs > 0) {
+      if (now - lastViolationAt < violationCooldownMs) {
+        return;
+      }
     }
 
     cooldownByTypeRef.current[type] = now;
@@ -226,6 +238,10 @@ export function ProctoringProvider({
       return;
     }
 
+    if (screenDetailsUnsupportedRef.current) {
+      return;
+    }
+
     if (!('getScreenDetails' in window)) {
       // Log unsupported API as informational event
       if (!isSafariBrowser()) {
@@ -239,6 +255,7 @@ export function ProctoringProvider({
           attemptState.attemptId ?? undefined,
         );
       }
+      screenDetailsUnsupportedRef.current = true;
       return;
     }
 
@@ -259,7 +276,12 @@ export function ProctoringProvider({
         );
       }
     } catch (error) {
-      // Log permission denied as informational event
+      const now = Date.now();
+      if (now - screenDetailsLastPermissionDeniedAtRef.current < 60_000) {
+        return;
+      }
+      screenDetailsLastPermissionDeniedAtRef.current = now;
+
       void saveStudentAuditEvent(
         scheduleId,
         'SCREEN_CHECK_PERMISSION_DENIED',
@@ -269,7 +291,13 @@ export function ProctoringProvider({
         attemptState.attemptId ?? undefined,
       );
     }
-  }, [config.security.detectSecondaryScreen, handleViolation, runtimeState.phase, scheduleId, attemptState.attemptId]);
+  }, [
+    attemptState.attemptId,
+    config.security.detectSecondaryScreen,
+    handleViolation,
+    runtimeState.phase,
+    scheduleId,
+  ]);
 
   useEffect(() => {
     let tabSwitchDebounceTimer: number | null = null;
@@ -279,7 +307,9 @@ export function ProctoringProvider({
     let closeSignalAt = 0;
 
     const closeSignalWindowMs = 1_000;
-    const closeSignalDelayMs = 200;
+    const closeSignalDelayMs = 50;
+    const tabSwitchDedupeWindowMs = 300;
+    const secondaryScreenCheckIntervalMs = 3_000;
 
     const recordCloseSignal = (eventType: string) => {
       if (runtimeState.phase !== 'exam') {
@@ -308,8 +338,8 @@ export function ProctoringProvider({
 
       const now = Date.now();
       
-      // Deduplicate events within 500ms
-      if (now - lastTabSwitchTime < 500) {
+      // Deduplicate bursts of events.
+      if (now - lastTabSwitchTime < tabSwitchDedupeWindowMs) {
         return;
       }
       lastTabSwitchTime = now;
@@ -318,18 +348,18 @@ export function ProctoringProvider({
         window.clearTimeout(tabSwitchDebounceTimer);
       }
 
-      tabSwitchDebounceTimer = window.setTimeout(() => {
-        if (config.security.tabSwitchRule === 'warn') {
-          handleViolation(
-            'TAB_SWITCH',
-            `Tab switching detected via ${eventType}. You must remain on the examination page at all times.`,
-            'medium',
-          );
-          return;
-        }
+      tabSwitchDebounceTimer = null;
 
-        handleViolation('TAB_SWITCH', `Tab switching detected via ${eventType}. Exam terminated.`, 'critical');
-      }, 500);
+      if (config.security.tabSwitchRule === 'warn') {
+        handleViolation(
+          'TAB_SWITCH',
+          `Tab switching detected via ${eventType}. You must remain on the examination page at all times.`,
+          'medium',
+        );
+        return;
+      }
+
+      handleViolation('TAB_SWITCH', `Tab switching detected via ${eventType}. Exam terminated.`, 'critical');
     };
 
     const handleVisibilityChange = () => {
@@ -382,21 +412,30 @@ export function ProctoringProvider({
         return;
       }
 
+      handleViolation(
+        'FULLSCREEN_EXIT',
+        config.security.fullscreenAutoReentry
+          ? 'Fullscreen mode was exited. Please return to fullscreen to continue.'
+          : 'You have exited fullscreen mode. The examination must be taken in fullscreen.',
+        'high',
+      );
+
       if (!config.security.fullscreenAutoReentry) {
-        handleViolation(
-          'FULLSCREEN_EXIT',
-          'You have exited fullscreen mode. The examination must be taken in fullscreen.',
-          'high',
-        );
         return;
       }
 
       const attemptReentry = async (attempt: number): Promise<void> => {
         if (attempt >= 3) {
-          handleViolation(
-            'FULLSCREEN_EXIT',
-            'Failed to re-enter fullscreen after multiple attempts.',
-            'high',
+          void saveStudentAuditEvent(
+            scheduleId,
+            'VIOLATION_DETECTED',
+            {
+              severity: 'high',
+              message: 'Failed to re-enter fullscreen after multiple attempts.',
+              violationType: 'FULLSCREEN_REENTRY_FAILED',
+              attemptCount: attempt,
+            },
+            attemptState.attemptId ?? undefined,
           );
           fullscreenReentryAttempts.current = 0;
           return;
@@ -426,7 +465,7 @@ export function ProctoringProvider({
     if (runtimeState.phase === 'exam' && config.security.detectSecondaryScreen) {
       secondaryScreenCheckTimer = window.setInterval(() => {
         void detectSecondaryScreens();
-      }, 15_000);
+      }, secondaryScreenCheckIntervalMs);
     }
 
     return () => {

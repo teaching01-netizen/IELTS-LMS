@@ -216,7 +216,10 @@ describe('StudentApp runtime-backed mode', () => {
         lastRecoveredAt: null,
         lastLocalMutationAt: null,
         lastPersistedAt: '2026-01-01T00:10:00.000Z',
+        lastDroppedMutations: null,
         pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
         syncState: 'saved',
       },
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -271,7 +274,10 @@ describe('StudentApp runtime-backed mode', () => {
         lastRecoveredAt: null,
         lastLocalMutationAt: null,
         lastPersistedAt: null,
+        lastDroppedMutations: null,
         pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
         syncState: 'saved',
       },
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -418,7 +424,10 @@ describe('StudentApp runtime-backed mode', () => {
         lastRecoveredAt: null,
         lastLocalMutationAt: null,
         lastPersistedAt: null,
+        lastDroppedMutations: null,
         pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
         syncState: 'saved',
       },
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -478,7 +487,7 @@ describe('StudentApp runtime-backed mode', () => {
       actualEndAt: null,
       activeSectionKey: 'reading',
       currentSectionKey: 'reading',
-      currentSectionRemainingSeconds: 0,
+      currentSectionRemainingSeconds: 1,
       waitingForNextSection: false,
       isOverrun: false,
       totalPausedSeconds: 0,
@@ -547,20 +556,33 @@ describe('StudentApp runtime-backed mode', () => {
         lastRecoveredAt: null,
         lastLocalMutationAt: null,
         lastPersistedAt: null,
+        lastDroppedMutations: null,
         pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
         syncState: 'saved',
       },
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
 
-    render(
+    const { rerender } = render(
       <StudentAppWrapper
         state={examState}
         onExit={() => {}}
         scheduleId={attemptSnapshot.scheduleId}
         attemptSnapshot={attemptSnapshot}
         runtimeSnapshot={runtimeSnapshot}
+      />,
+    );
+
+    rerender(
+      <StudentAppWrapper
+        state={examState}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={{ ...runtimeSnapshot, currentSectionRemainingSeconds: 0 }}
       />,
     );
 
@@ -662,7 +684,10 @@ describe('StudentApp runtime-backed mode', () => {
         lastRecoveredAt: null,
         lastLocalMutationAt: null,
         lastPersistedAt: null,
+        lastDroppedMutations: null,
         pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
         syncState: 'saved',
       },
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -769,7 +794,10 @@ describe('StudentApp runtime-backed mode', () => {
         lastRecoveredAt: null,
         lastLocalMutationAt: null,
         lastPersistedAt: null,
+        lastDroppedMutations: null,
         pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
         syncState: 'saved',
       },
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -880,7 +908,10 @@ describe('StudentApp runtime-backed mode', () => {
         lastRecoveredAt: null,
         lastLocalMutationAt: null,
         lastPersistedAt: null,
+        lastDroppedMutations: null,
         pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
         syncState: 'saved',
       },
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -983,7 +1014,10 @@ describe('StudentApp runtime-backed mode', () => {
         lastRecoveredAt: null,
         lastLocalMutationAt: null,
         lastPersistedAt: null,
+        lastDroppedMutations: null,
         pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
         syncState: 'saved',
       },
       createdAt: '2026-01-01T00:00:00.000Z',

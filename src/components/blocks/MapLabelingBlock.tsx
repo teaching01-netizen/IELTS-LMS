@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { QuestionBlock, MapBlock as MapBlockType } from '../../types';
 import { MoreVertical, Plus, Trash2, GripVertical, Image as ImageIcon, ArrowUp, ArrowDown, AlertCircle, Link as LinkIcon } from 'lucide-react';
 import { MIN_HEIGHTS } from '../../constants/uiConstants';
 import { createId } from '../../utils/idUtils';
+import { handleBoldHotkey } from '../../utils/boldMarkdown';
 
 interface Props {
   block: QuestionBlock;
@@ -18,12 +19,17 @@ export const MapLabelingBlock: React.FC<Props> = ({ block, startNum, endNum, upd
   const [showMenu, setShowMenu] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [imageLoadError, setImageLoadError] = useState(false);
   const imageRef = useRef<HTMLDivElement>(null);
   
   const mapBlock = block as MapBlockType;
   const questions = mapBlock.questions || [];
   
   const getFieldError = (field: string) => errors.find(e => e.field.includes(field));
+
+  useEffect(() => {
+    setImageLoadError(false);
+  }, [mapBlock.assetUrl]);
 
   const addHotspot = (x: number = 50, y: number = 50) => {
     const newQ = { id: createId('q'), label: `Location ${questions.length + 1}`, correctAnswer: '', x, y };
@@ -91,6 +97,7 @@ export const MapLabelingBlock: React.FC<Props> = ({ block, startNum, endNum, upd
             type="text" 
             value={mapBlock.instruction} 
             onChange={(e) => updateBlock({ ...mapBlock, instruction: e.target.value })}
+            onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...mapBlock, instruction: nextValue }))}
             className={`w-full text-sm font-medium text-gray-800 outline-none border-b ${getFieldError('instruction') ? 'border-red-500 bg-red-50' : 'border-transparent hover:border-gray-200 focus:border-blue-700'} bg-transparent transition-colors px-1 py-0.5 rounded-sm mb-3`}
             placeholder="Label the map below."
           />
@@ -118,30 +125,32 @@ export const MapLabelingBlock: React.FC<Props> = ({ block, startNum, endNum, upd
           )}
         </div>
         
-        <div 
-          ref={imageRef}
-          className={`border-2 rounded-sm relative overflow-hidden transition-colors cursor-crosshair ${isDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50 hover:border-gray-300'} ${getFieldError('assetUrl') ? 'border-red-200 bg-red-50/30' : ''}`}
-          style={{ minHeight: MIN_HEIGHTS.MAP_LABELING }}
-          onClick={handleImageClick}
-          onMouseEnter={() => setIsDragging(true)}
-          onMouseLeave={() => setIsDragging(false)}
-        >
-          {mapBlock.assetUrl ? (
-            <img 
-              src={mapBlock.assetUrl} 
-              alt="Map" 
-              className="w-full h-full object-contain pointer-events-none"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
-              <ImageIcon size={32} className="mb-2 text-gray-300" />
-              <p className="text-sm font-medium text-gray-600">Enter an image URL above</p>
-              <p className="text-[10px] mt-1 text-gray-400 font-bold uppercase tracking-wider">or click to add hotspot</p>
-            </div>
-          )}
+	        <div 
+	          ref={imageRef}
+	          className={`border-2 rounded-sm relative overflow-hidden transition-colors cursor-crosshair ${isDragging ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50 hover:border-gray-300'} ${getFieldError('assetUrl') ? 'border-red-200 bg-red-50/30' : ''}`}
+	          style={{ minHeight: MIN_HEIGHTS.MAP_LABELING }}
+	          onClick={handleImageClick}
+	          onMouseEnter={() => setIsDragging(true)}
+	          onMouseLeave={() => setIsDragging(false)}
+	        >
+	          {mapBlock.assetUrl && !imageLoadError ? (
+	            <img
+	              src={mapBlock.assetUrl}
+	              alt="Map"
+	              className="w-full h-full object-contain pointer-events-none"
+	              onError={() => setImageLoadError(true)}
+	            />
+	          ) : (
+	            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
+	              <ImageIcon size={32} className="mb-2 text-gray-300" />
+	              <p className="text-sm font-medium text-gray-600">
+	                {mapBlock.assetUrl ? 'Unable to load image' : 'Enter an image URL above'}
+	              </p>
+	              <p className="text-[10px] mt-1 text-gray-400 font-bold uppercase tracking-wider">
+	                {mapBlock.assetUrl ? 'Check the URL and try again' : 'or click to add hotspot'}
+	              </p>
+	            </div>
+	          )}
           
           {questions.map((q, i) => (
             <div 
@@ -193,6 +202,7 @@ export const MapLabelingBlock: React.FC<Props> = ({ block, startNum, endNum, upd
                       type="text" 
                       value={q.label} 
                       onChange={(e) => updateHotspot(q.id, 'label', e.target.value)}
+                      onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateHotspot(q.id, 'label', nextValue))}
                       className={`w-full border rounded-sm px-2 py-1 text-xs focus:ring-1 focus:ring-blue-700 outline-none transition-colors text-gray-800 ${getFieldError(`questions[${i}].label`) ? 'border-red-500' : 'border-gray-100'}`}
                       placeholder="Location A"
                     />

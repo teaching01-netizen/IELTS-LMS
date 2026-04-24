@@ -7,7 +7,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ExamLifecycleService } from '../examLifecycleService';
 import { IExamRepository } from '../examRepository';
-import { ExamEntity, ExamVersion, ExamEvent, ExamStatus, SCHEMA_VERSION } from '../../types/domain';
+import {
+  ExamEntity,
+  ExamEvent,
+  ExamStatus,
+  ExamVersion,
+  ExamVersionSummary,
+  SCHEMA_VERSION,
+} from '../../types/domain';
 import { ExamState } from '../../types';
 import { createDefaultConfig } from '../../constants/examDefaults';
 
@@ -44,6 +51,12 @@ class MockExamRepository implements IExamRepository {
 
   async getAllVersions(examId: string): Promise<ExamVersion[]> {
     return this.versions.filter(v => v.examId === examId);
+  }
+
+  async getVersionSummaries(examId: string): Promise<ExamVersionSummary[]> {
+    return this.versions
+      .filter((version) => version.examId === examId)
+      .map(({ contentSnapshot: _content, configSnapshot: _config, ...summary }) => summary);
   }
 
   async getVersionById(id: string): Promise<ExamVersion | null> {

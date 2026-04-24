@@ -6,7 +6,14 @@
  */
 
 import { Exam, ExamConfig } from '../../../types';
-import { ExamEntity, ExamVersion, ExamEvent, ExamSchedule, VersionDiff, BulkOperationResult } from '../../../types/domain';
+import {
+  BulkOperationResult,
+  ExamEntity,
+  ExamEvent,
+  ExamSchedule,
+  ExamVersionSummary,
+  VersionDiff,
+} from '../../../types/domain';
 
 /**
  * Admin navigation modes
@@ -50,7 +57,7 @@ export interface ExamOperationCallbacks {
  * Version management callbacks
  */
 export interface VersionManagementCallbacks {
-  onGetVersions: (examId: string) => Promise<ExamVersion[]>;
+  onGetVersions: (examId: string) => Promise<ExamVersionSummary[]>;
   onGetEvents: (examId: string) => Promise<ExamEvent[]>;
   onRestoreVersion: (versionId: string) => Promise<void>;
   onRepublishVersion: (versionId: string) => Promise<void>;
@@ -84,7 +91,7 @@ export interface BulkOperationCallbacks {
  */
 export interface ExamVersionHistoryProps {
   exam: ExamEntity;
-  versions: ExamVersion[];
+  versions: ExamVersionSummary[];
   events: ExamEvent[];
   onRestoreVersion?: ((versionId: string) => void) | undefined;
   onRepublishVersion?: ((versionId: string) => void) | undefined;
@@ -102,7 +109,7 @@ export interface AdminExamsProps {
   onNavigate: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
   exams: Exam[];
   examEntities?: ExamEntity[];
-  versions?: ExamVersion[];
+  versions?: ExamVersionSummary[];
   events?: ExamEvent[];
   onEditExam: (id: string) => void;
   onGoToConfig?: ((id: string) => void) | undefined;
@@ -115,7 +122,7 @@ export interface AdminExamsProps {
   onCloneExam?: (examId: string, newTitle: string) => Promise<void>;
   onCreateFromTemplate?: (templateId: string, newTitle: string) => Promise<void>;
   onDeleteExam?: (examId: string) => Promise<void>;
-  onGetVersions?: (examId: string) => Promise<ExamVersion[]>;
+  onGetVersions?: (examId: string) => Promise<ExamVersionSummary[]>;
   onGetEvents?: (examId: string) => Promise<ExamEvent[]>;
   onRestoreVersion?: (versionId: string) => Promise<void>;
   onRepublishVersion?: (versionId: string) => Promise<void>;

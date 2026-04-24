@@ -6,8 +6,8 @@ use axum::{
 use ielts_backend_application::builder::{BuilderError, BuilderService};
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::exam::{
-    CreateExamRequest, ExamEntity, ExamValidationSummary, ExamVersion, PublishExamRequest,
-    SaveDraftRequest, UpdateExamRequest,
+    CreateExamRequest, ExamEntity, ExamValidationSummary, ExamVersion, ExamVersionSummary,
+    PublishExamRequest, SaveDraftRequest, UpdateExamRequest,
 };
 use std::time::Instant;
 use uuid::Uuid;
@@ -132,6 +132,21 @@ pub async fn list_versions(
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let versions = service.list_versions(&ctx, exam_id.to_string()).await?;
+    Ok(ApiResponse::success_with_request_id(versions, request_id.0))
+}
+
+pub async fn list_version_summaries(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    Path(exam_id): Path<Uuid>,
+) -> Result<ApiResponse<Vec<ExamVersionSummary>>, ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    let ctx = principal.actor_context();
+    let service = BuilderService::new(state.db_pool());
+    let versions = service
+        .list_version_summaries(&ctx, exam_id.to_string())
+        .await?;
     Ok(ApiResponse::success_with_request_id(versions, request_id.0))
 }
 

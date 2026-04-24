@@ -313,7 +313,7 @@ export function QuestionBuilderPane({
           id: createId('blk'),
           type: 'SENTENCE_COMPLETION',
           instruction: 'Complete the sentences below using words from the passage.',
-          questions: [{ id: createId('q'), sentence: 'The ____ is ____.', blanks: [{ id: createId('blank'), correctAnswer: '', position: 0 }], answerRule: 'TWO_WORDS' }]
+          questions: [{ id: createId('q'), sentence: 'The ____ is important.', blanks: [{ id: createId('blank'), correctAnswer: '', position: 0 }], answerRule: 'TWO_WORDS' }]
         } as SentenceCompletionBlockType;
         break;
       case 'DIAGRAM_LABELING':
@@ -349,7 +349,7 @@ export function QuestionBuilderPane({
           id: createId('blk'),
           type: 'NOTE_COMPLETION',
           instruction: 'Complete the notes below.',
-          questions: [{ id: createId('q'), noteText: 'The ____ is ____.', blanks: [{ id: createId('blank'), correctAnswer: '', position: 0 }], answerRule: 'TWO_WORDS' }]
+          questions: [{ id: createId('q'), noteText: 'The ____ is important.', blanks: [{ id: createId('blank'), correctAnswer: '', position: 0 }], answerRule: 'TWO_WORDS' }]
         } as NoteCompletionBlockType;
         break;
       case 'CLASSIFICATION':

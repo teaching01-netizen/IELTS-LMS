@@ -21,6 +21,7 @@ import {
   MatchingFeaturesBlock,
   MatchingFeature
 } from '../types';
+import { countBlankPlaceholders } from './blankPlaceholders';
 
 export interface ValidationError {
   field: string;
@@ -131,8 +132,11 @@ function validateSentenceCompletion(block: SentenceCompletionBlock): ValidationE
     if (!q.sentence || q.sentence.trim() === '') {
       errors.push({ field: `sentence-${index}`, message: `Sentence ${index + 1} text is required` });
     }
-    if (!q.blanks || q.blanks.length === 0) {
-      errors.push({ field: `sentence-${index}-blanks`, message: `Sentence ${index + 1} must have at least one blank` });
+    const placeholderCount = countBlankPlaceholders(q.sentence);
+    if (placeholderCount === 0) {
+      errors.push({ field: `sentence-${index}-blanks`, message: `Sentence ${index + 1} must include at least one blank placeholder (____)` });
+    } else if (!q.blanks || q.blanks.length !== placeholderCount) {
+      errors.push({ field: `sentence-${index}-blanks`, message: `Sentence ${index + 1} blanks must match the number of ____ placeholders` });
     }
     q.blanks?.forEach((blank: SentenceBlank, blankIndex: number) => {
       if (!blank.correctAnswer || blank.correctAnswer.trim() === '') {
@@ -232,8 +236,11 @@ function validateNoteCompletion(block: NoteCompletionBlock): ValidationError[] {
     if (!q.noteText || q.noteText.trim() === '') {
       errors.push({ field: `note-${index}`, message: `Note ${index + 1} text is required` });
     }
-    if (!q.blanks || q.blanks.length === 0) {
-      errors.push({ field: `note-${index}-blanks`, message: `Note ${index + 1} must have at least one blank` });
+    const placeholderCount = countBlankPlaceholders(q.noteText);
+    if (placeholderCount === 0) {
+      errors.push({ field: `note-${index}-blanks`, message: `Note ${index + 1} must include at least one blank placeholder (____)` });
+    } else if (!q.blanks || q.blanks.length !== placeholderCount) {
+      errors.push({ field: `note-${index}-blanks`, message: `Note ${index + 1} blanks must match the number of ____ placeholders` });
     }
     q.blanks?.forEach((blank: NoteBlank, blankIndex: number) => {
       if (!blank.correctAnswer || blank.correctAnswer.trim() === '') {

@@ -2,6 +2,8 @@ import React from 'react';
 import { SentenceCompletionBlock as SentenceCompletionBlockType, AnswerRule } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
+import { countBlankPlaceholders } from '../../utils/blankPlaceholders';
+import { handleBoldHotkey } from '../../utils/boldMarkdown';
 
 interface SentenceCompletionBlockProps {
   block: SentenceCompletionBlockType;
@@ -19,9 +21,32 @@ export function SentenceCompletionBlock({ block, startNum, endNum, updateBlock, 
   };
 
   const updateQuestion = (questionId: string, updates: { sentence?: string; answerRule?: AnswerRule }) => {
-    const newQuestions = block.questions.map(q =>
-      q.id === questionId ? { ...q, ...updates } : q
-    );
+    const newQuestions = block.questions.map((q) => {
+      if (q.id !== questionId) return q;
+
+      const nextSentence = updates.sentence ?? q.sentence;
+      const placeholderCount = countBlankPlaceholders(nextSentence);
+
+      let nextBlanks = q.blanks;
+      if (placeholderCount !== q.blanks.length) {
+        nextBlanks = q.blanks.slice(0, placeholderCount);
+        while (nextBlanks.length < placeholderCount) {
+          nextBlanks = [
+            ...nextBlanks,
+            {
+              id: createId('blank'),
+              correctAnswer: '',
+              position: nextBlanks.length,
+            },
+          ];
+        }
+      }
+
+      nextBlanks = nextBlanks.map((blank, index) => ({ ...blank, position: index }));
+
+      return { ...q, ...updates, sentence: nextSentence, blanks: nextBlanks };
+    });
+
     updateBlock({ ...block, questions: newQuestions });
   };
 
@@ -39,8 +64,8 @@ export function SentenceCompletionBlock({ block, startNum, endNum, updateBlock, 
   const addQuestion = () => {
     const newQuestion = {
       id: createId('q'),
-      sentence: '',
-      blanks: [],
+      sentence: 'The ____ is important.',
+      blanks: [{ id: createId('blank'), correctAnswer: '', position: 0 }],
       answerRule: 'TWO_WORDS' as AnswerRule
     };
     updateBlock({ ...block, questions: [...block.questions, newQuestion] });
@@ -51,26 +76,15 @@ export function SentenceCompletionBlock({ block, startNum, endNum, updateBlock, 
     updateBlock({ ...block, questions: newQuestions });
   };
 
-  const addBlank = (questionId: string) => {
-    const newQuestions = block.questions.map(q => {
-      if (q.id !== questionId) return q;
-      const newBlank = {
-        id: createId('blank'),
-        correctAnswer: '',
-        position: q.blanks.length
-      };
-      return { ...q, blanks: [...q.blanks, newBlank] };
-    });
-    updateBlock({ ...block, questions: newQuestions });
-  };
-
-  const removeBlank = (questionId: string, blankId: string) => {
-    const newQuestions = block.questions.map(q => {
-      if (q.id !== questionId) return q;
-      const newBlanks = q.blanks.filter(b => b.id !== blankId);
-      return { ...q, blanks: newBlanks };
-    });
-    updateBlock({ ...block, questions: newQuestions });
+  const getQuestionNumberLabel = (questionIndex: number) => {
+    const offset = block.questions
+      .slice(0, questionIndex)
+      .reduce((count, q) => count + q.blanks.length, 0);
+    const start = startNum + offset;
+    const blanks = block.questions[questionIndex]?.blanks.length ?? 0;
+    const end = start + Math.max(0, blanks - 1);
+    if (blanks <= 1) return `${start}`;
+    return `${start}–${end}`;
   };
 
   return (
@@ -116,6 +130,7 @@ export function SentenceCompletionBlock({ block, startNum, endNum, updateBlock, 
         <textarea
           value={block.instruction}
           onChange={(e) => updateInstruction(e.target.value)}
+          onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateInstruction(nextValue))}
           className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           rows={2}
           placeholder="Enter instruction for this question..."
@@ -140,7 +155,7 @@ export function SentenceCompletionBlock({ block, startNum, endNum, updateBlock, 
             <div key={question.id} className="border rounded-md p-4">
               <div className="flex items-start justify-between mb-3">
                 <span className="text-sm font-medium text-gray-700">
-                  {startNum + index}.
+                  {getQuestionNumberLabel(index)}.
                 </span>
                 <div className="flex items-center gap-2">
                   <select
@@ -148,9 +163,9 @@ export function SentenceCompletionBlock({ block, startNum, endNum, updateBlock, 
                     onChange={(e) => updateQuestion(question.id, { answerRule: e.target.value as AnswerRule })}
                     className="text-xs border border-gray-300 rounded px-2 py-1"
                   >
-                    <option value="ONE_WORD">One word</option>
-                    <option value="TWO_WORDS">Two words</option>
-                    <option value="THREE_WORDS">Three words</option>
+                    <option value="ONE_WORD">One word only</option>
+                    <option value="TWO_WORDS">No more than two words</option>
+                    <option value="THREE_WORDS">No more than three words</option>
                   </select>
                   <button
                     onClick={() => removeQuestion(question.id)}
@@ -169,22 +184,20 @@ export function SentenceCompletionBlock({ block, startNum, endNum, updateBlock, 
                   <textarea
                     value={question.sentence}
                     onChange={(e) => updateQuestion(question.id, { sentence: e.target.value })}
+                    onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateQuestion(question.id, { sentence: nextValue }))}
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     rows={2}
                     placeholder="Enter sentence with ____ for blanks..."
                   />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Use <span className="font-mono">____</span> to create blanks. Answers below are generated automatically.
+                  </p>
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-xs font-medium text-gray-600">
                       Blank Answers ({question.blanks.length})
                     </label>
-                    <button
-                      onClick={() => addBlank(question.id)}
-                      className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                    >
-                      <Plus size={12} /> Add Blank
-                    </button>
                   </div>
                   {question.blanks.length > 0 ? (
                     <div className="space-y-2">
@@ -198,12 +211,6 @@ export function SentenceCompletionBlock({ block, startNum, endNum, updateBlock, 
                             className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                             placeholder="Answer..."
                           />
-                          <button
-                            onClick={() => removeBlank(question.id, blank.id)}
-                            className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"
-                          >
-                            <Trash2 size={12} />
-                          </button>
                         </div>
                       ))}
                     </div>

@@ -1,16 +1,19 @@
 use chrono::Utc;
 use ielts_backend_domain::exam::{
     CreateExamRequest, ExamEntity, ExamEvent, ExamEventAction, ExamStatus, ExamValidationSummary,
-    ExamVersion, PublishExamRequest, SaveDraftRequest, UpdateExamRequest, ValidationIssue,
+    ExamVersion, ExamVersionSummary, PublishExamRequest, SaveDraftRequest, UpdateExamRequest,
+    ValidationIssue,
 };
 use ielts_backend_infrastructure::{
     actor_context::ActorContext, authorization::AuthorizationService,
 };
-use sqlx::MySqlPool;
+use sqlx::{MySql, MySqlPool, QueryBuilder};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::validation::validate_exam_content;
+
+const MAX_DRAFT_VERSIONS_PER_EXAM: usize = 3;
 
 #[derive(Error, Debug)]
 pub enum BuilderError {
@@ -31,6 +34,54 @@ pub struct BuilderService {
 impl BuilderService {
     pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
+    }
+
+    async fn prune_old_draft_versions(
+        tx: &mut sqlx::Transaction<'_, MySql>,
+        exam_id: &str,
+    ) -> Result<(), BuilderError> {
+        let draft_version_ids: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT id
+            FROM exam_versions
+            WHERE exam_id = ? AND is_draft = true
+            ORDER BY created_at DESC, version_number DESC
+            "#,
+        )
+        .bind(exam_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        if draft_version_ids.len() <= MAX_DRAFT_VERSIONS_PER_EXAM {
+            return Ok(());
+        }
+
+        let ids_to_delete = &draft_version_ids[MAX_DRAFT_VERSIONS_PER_EXAM..];
+
+        // exam_events has an FK to exam_versions without cascade, so delete events first.
+        let mut delete_events =
+            QueryBuilder::<MySql>::new("DELETE FROM exam_events WHERE version_id IN (");
+        {
+            let mut separated = delete_events.separated(", ");
+            for version_id in ids_to_delete {
+                separated.push_bind(version_id);
+            }
+        }
+        delete_events.push(")");
+        delete_events.build().execute(&mut **tx).await?;
+
+        let mut delete_versions =
+            QueryBuilder::<MySql>::new("DELETE FROM exam_versions WHERE id IN (");
+        {
+            let mut separated = delete_versions.separated(", ");
+            for version_id in ids_to_delete {
+                separated.push_bind(version_id);
+            }
+        }
+        delete_versions.push(")");
+        delete_versions.build().execute(&mut **tx).await?;
+
+        Ok(())
     }
 
     pub async fn create_exam(
@@ -285,6 +336,8 @@ impl BuilderService {
         .execute(&mut *tx)
         .await?;
 
+        Self::prune_old_draft_versions(&mut tx, &exam_id).await?;
+
         tx.commit().await?;
 
         Ok(version)
@@ -432,6 +485,41 @@ impl BuilderService {
 
         sqlx::query_as::<_, ExamVersion>(
             "SELECT * FROM exam_versions WHERE exam_id = ? ORDER BY created_at DESC",
+        )
+        .bind(&exam_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(BuilderError::from)
+    }
+
+    pub async fn list_version_summaries(
+        &self,
+        ctx: &ActorContext,
+        exam_id: String,
+    ) -> Result<Vec<ExamVersionSummary>, BuilderError> {
+        // Check authorization: user must have access to the exam
+        let exam = self.get_exam(ctx, exam_id.clone()).await?;
+
+        sqlx::query_as::<_, ExamVersionSummary>(
+            r#"
+            SELECT
+              id,
+              exam_id,
+              version_number,
+              parent_version_id,
+              validation_snapshot,
+              created_by,
+              created_at,
+              publish_notes,
+              is_draft,
+              is_published
+            FROM
+              exam_versions
+            WHERE
+              exam_id = ?
+            ORDER BY
+              created_at DESC
+            "#,
         )
         .bind(&exam_id)
         .fetch_all(&self.pool)

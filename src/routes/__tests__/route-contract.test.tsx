@@ -32,4 +32,8 @@ describe('route contracts', () => {
     expect(getLeafPath('/proctor')).toBe('proctor');
     expect(getLeafPath('/proctor/settings')).toBe('*');
   });
+
+  it('exposes builder preview as a real route', () => {
+    expect(getLeafPath('/builder/exam-123/preview')).toBe('builder/:examId/preview');
+  });
 });

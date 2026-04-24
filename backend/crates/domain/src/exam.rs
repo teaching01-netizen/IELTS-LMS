@@ -162,6 +162,22 @@ pub struct ExamVersion {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]
+pub struct ExamVersionSummary {
+    pub id: String,
+    pub exam_id: String,
+    pub version_number: i32,
+    pub parent_version_id: Option<String>,
+    pub validation_snapshot: Option<serde_json::Value>,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+    pub publish_notes: Option<String>,
+    pub is_draft: bool,
+    pub is_published: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
+#[serde(rename_all = "camelCase")]
 pub struct ExamEvent {
     pub id: String,
     pub exam_id: String,

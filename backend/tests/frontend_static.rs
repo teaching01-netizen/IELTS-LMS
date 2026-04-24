@@ -6,7 +6,10 @@ use std::{
 
 use axum::{
     body::{to_bytes, Body},
-    http::{Request, StatusCode},
+    http::{
+        header::CACHE_CONTROL,
+        Request, StatusCode,
+    },
 };
 use ielts_backend_api::{router::build_router, state::AppState};
 use ielts_backend_infrastructure::config::AppConfig;
@@ -51,6 +54,15 @@ async fn spa_routes_serve_index_assets_and_keep_api_404s() {
         .await
         .unwrap();
     assert_eq!(spa_response.status(), StatusCode::OK);
+    let spa_cache_control = spa_response
+        .headers()
+        .get(CACHE_CONTROL)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        spa_cache_control.contains("no-store"),
+        "expected no-store for SPA entry HTML, got: {spa_cache_control}"
+    );
     let spa_body = to_bytes(spa_response.into_body(), usize::MAX)
         .await
         .unwrap();
@@ -69,6 +81,15 @@ async fn spa_routes_serve_index_assets_and_keep_api_404s() {
         .await
         .unwrap();
     assert_eq!(asset_response.status(), StatusCode::OK);
+    let asset_cache_control = asset_response
+        .headers()
+        .get(CACHE_CONTROL)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        asset_cache_control.contains("immutable"),
+        "expected immutable caching for fingerprinted assets, got: {asset_cache_control}"
+    );
     let asset_body = to_bytes(asset_response.into_body(), usize::MAX)
         .await
         .unwrap();
