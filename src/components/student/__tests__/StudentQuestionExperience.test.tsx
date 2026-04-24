@@ -169,6 +169,31 @@ describe('student question experience', () => {
     expect(onOpenNavigator).toHaveBeenCalledTimes(1);
   });
 
+  it('hides the header exit control when requested', () => {
+    render(
+      <StudentHeader
+        onExit={() => {}}
+        timeRemaining={1200}
+        isExamActive
+        showExitButton={false}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /exit exam/i })).not.toBeInTheDocument();
+  });
+
+  it('shows the header exit control by default outside active exam mode', () => {
+    render(
+      <StudentHeader
+        onExit={() => {}}
+        timeRemaining={1200}
+        isExamActive={false}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /exit preview/i })).toBeInTheDocument();
+  });
+
   it('wires the listening transport controls to the audio element', async () => {
     const play = vi
       .spyOn(HTMLMediaElement.prototype, 'play')

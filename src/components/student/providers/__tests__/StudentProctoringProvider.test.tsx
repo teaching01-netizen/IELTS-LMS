@@ -484,6 +484,42 @@ describe('StudentProctoringProvider', () => {
     ).toBe(true);
   });
 
+  it('does not log an iPad tab-switch warning when the writing editor causes window blur while typing', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value:
+        'Mozilla/5.0 (iPad; CPU OS 16_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Mobile/15E148 Safari/604.1',
+      configurable: true,
+    });
+
+    const harness = renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'warn' },
+    });
+    const editor = document.createElement('div');
+    editor.contentEditable = 'true';
+    editor.tabIndex = 0;
+    Object.defineProperty(editor, 'isContentEditable', {
+      value: true,
+      configurable: true,
+    });
+    document.body.appendChild(editor);
+
+    act(() => {
+      editor.focus();
+      window.dispatchEvent(new Event('blur'));
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(false);
+
+    editor.remove();
+  });
+
   it('activates anti-cheat after runtime-backed pre-check completes (late entry)', async () => {
     const harness = renderRuntimeBackedPreCheckHarness({
       ...mockConfig,

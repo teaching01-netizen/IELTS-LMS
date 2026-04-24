@@ -20,7 +20,7 @@ describe('Student completion summary', () => {
     vi.spyOn(studentAttemptRepository, 'getAttemptsByScheduleId').mockResolvedValue([]);
   });
 
-  it('shows answered/unanswered counts per enabled section', async () => {
+  it('shows student info and hides per-section answer counts after exam completion', async () => {
     const config = createDefaultConfig('Academic', 'Academic');
     config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
@@ -143,19 +143,13 @@ describe('Student completion summary', () => {
 
     render(<StudentAppWrapper state={state} onExit={() => {}} attemptSnapshot={attemptSnapshot} />);
 
-    expect(await screen.findByText(/Examination Complete/i)).toBeInTheDocument();
-    const readingRow = screen.getByText('Reading').parentElement?.parentElement;
-    expect(readingRow).toBeTruthy();
-    expect(readingRow).toHaveTextContent('1 answered');
-    expect(readingRow).toHaveTextContent('0 unanswered');
-
-    const listeningRow = screen.getByText('Listening').parentElement?.parentElement;
-    expect(listeningRow).toBeTruthy();
-    expect(listeningRow).toHaveTextContent('1 answered');
-
-    const writingRow = screen.getByText('Writing').parentElement?.parentElement;
-    expect(writingRow).toBeTruthy();
-    expect(writingRow).toHaveTextContent('1 answered');
-    expect(writingRow).toHaveTextContent('1 unanswered');
+    expect(await screen.findByRole('heading', { name: /IELTS Examination Complete!/i })).toBeInTheDocument();
+    expect(screen.getByText('Alice Roe')).toBeInTheDocument();
+    expect(screen.getByText('alice')).toBeInTheDocument();
+    expect(screen.getByText('alice@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Summary Exam')).toBeInTheDocument();
+    expect(screen.queryByText(/Section Summary/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/answered/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/unanswered/i)).not.toBeInTheDocument();
   });
 });

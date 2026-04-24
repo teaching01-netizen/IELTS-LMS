@@ -10,6 +10,7 @@ interface StudentHeaderProps {
   onOpenAccessibility?: (() => void) | undefined;
   onOpenNavigator?: (() => void) | undefined;
   isExamActive?: boolean | undefined;
+  showExitButton?: boolean | undefined;
 }
 
 export function StudentHeader({
@@ -20,6 +21,7 @@ export function StudentHeader({
   onOpenAccessibility,
   onOpenNavigator,
   isExamActive = false,
+  showExitButton = true,
 }: StudentHeaderProps) {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   
@@ -128,15 +130,19 @@ export function StudentHeader({
             </button>
           </>
         )}
-        <div className="w-px h-5 md:h-6 lg:h-8 bg-gray-200 mx-0.5 md:mx-1 lg:mx-2 hidden sm:block"></div>
-        <button
-          onClick={handleExit}
-          className="flex items-center gap-1 md:gap-1.5 lg:gap-2 px-1.5 md:px-2 lg:px-3 py-1 md:py-1.5 bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs lg:text-sm rounded-sm flex-shrink-0"
-          aria-label={isExamActive ? "Exit exam" : "Exit preview"}
-        >
-          <Menu size={14} strokeWidth={2.5} />
-          <span className="hidden sm:inline">Exit</span>
-        </button>
+        {showExitButton && (
+          <>
+            <div className="w-px h-5 md:h-6 lg:h-8 bg-gray-200 mx-0.5 md:mx-1 lg:mx-2 hidden sm:block"></div>
+            <button
+              onClick={handleExit}
+              className="flex items-center gap-1 md:gap-1.5 lg:gap-2 px-1.5 md:px-2 lg:px-3 py-1 md:py-1.5 bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs lg:text-sm rounded-sm flex-shrink-0"
+              aria-label={isExamActive ? "Exit exam" : "Exit preview"}
+            >
+              <Menu size={14} strokeWidth={2.5} />
+              <span className="hidden sm:inline">Exit</span>
+            </button>
+          </>
+        )}
       </div>
       
       {showExitConfirm && (

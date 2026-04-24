@@ -474,15 +474,6 @@ export function ProctoringProvider({
       }, closeSignalDelayMs);
     };
 
-    const handleBlur = () => {
-      window.setTimeout(() => {
-        if (Date.now() - closeSignalAt < closeSignalWindowMs) {
-          return;
-        }
-        handleTabSwitch('blur');
-      }, closeSignalDelayMs);
-    };
-
     const handlePageHide = () => {
       recordCloseSignal('pagehide');
     };
@@ -506,6 +497,26 @@ export function ProctoringProvider({
       const current = getViewportHeight();
       const delta = baseline - current;
       return delta > 140;
+    };
+
+    const shouldIgnoreTextEntryBlur = () => {
+      if (!isIosWebKit || document.hidden) {
+        return false;
+      }
+
+      const focusedTextInput = isTextInputElement(document.activeElement);
+      const viewportRecentlyChanged = Date.now() - lastViewportResizeAt < fullscreenViewportSettleMs;
+
+      return focusedTextInput || isKeyboardLikelyOpen() || viewportRecentlyChanged;
+    };
+
+    const handleBlur = () => {
+      window.setTimeout(() => {
+        if (Date.now() - closeSignalAt < closeSignalWindowMs || shouldIgnoreTextEntryBlur()) {
+          return;
+        }
+        handleTabSwitch('blur');
+      }, closeSignalDelayMs);
     };
 
     const shouldDeferFullscreenExit = () => {

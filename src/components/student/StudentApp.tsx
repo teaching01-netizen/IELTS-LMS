@@ -1,9 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  countAnsweredQuestions,
-  countQuestionSlots,
-  getStudentQuestionsForModule,
-} from '@services/examAdapterService';
+import { countAnsweredQuestions, countQuestionSlots } from '@services/examAdapterService';
 import { AlertTriangle, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AccessibilitySettings } from './AccessibilitySettings';
@@ -733,71 +729,12 @@ export function StudentApp() {
 
   if (shouldRenderPostExam) {
     const isProctorTerminated = verifiedTerminalState === 'terminated';
-    const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
-    const enabled = examState.config.sections;
-
-    const readingQuestions = getStudentQuestionsForModule(examState, 'reading');
-    const readingTotal = countQuestionSlots(readingQuestions);
-    const readingAnswered = countAnsweredQuestions(readingQuestions, runtimeState.answers);
-    const readingUnanswered = Math.max(0, readingTotal - readingAnswered);
-
-    const listeningQuestions = getStudentQuestionsForModule(examState, 'listening');
-    const listeningTotal = countQuestionSlots(listeningQuestions);
-    const listeningAnswered = countAnsweredQuestions(listeningQuestions, runtimeState.answers);
-    const listeningUnanswered = Math.max(0, listeningTotal - listeningAnswered);
-
-    const writingTasks = enabled.writing.tasks ?? [];
-    const writingAnswered = writingTasks.reduce((count, task) => {
-      const text = stripHtml(runtimeState.writingAnswers[task.id] ?? '');
-      return count + (text ? 1 : 0);
-    }, 0);
-    const writingTotal = writingTasks.length;
-    const writingUnanswered = Math.max(0, writingTotal - writingAnswered);
-
-    const speakingParts = enabled.speaking.parts ?? [];
-    const speakingTotal = speakingParts.length;
-    const speakingAnswered = isProctorTerminated ? 0 : speakingTotal;
-    const speakingUnanswered = Math.max(0, speakingTotal - speakingAnswered);
-
-    const sectionSummaries = [
-      enabled.listening.enabled
-        ? {
-            key: 'listening',
-            label: 'Listening',
-            answered: listeningAnswered,
-            unanswered: listeningUnanswered,
-          }
-        : null,
-      enabled.reading.enabled
-        ? {
-            key: 'reading',
-            label: 'Reading',
-            answered: readingAnswered,
-            unanswered: readingUnanswered,
-          }
-        : null,
-      enabled.writing.enabled
-        ? {
-            key: 'writing',
-            label: 'Writing',
-            answered: writingAnswered,
-            unanswered: writingUnanswered,
-          }
-        : null,
-      enabled.speaking.enabled
-        ? {
-            key: 'speaking',
-            label: 'Speaking',
-            answered: speakingAnswered,
-            unanswered: speakingUnanswered,
-          }
-        : null,
-    ].filter(Boolean) as Array<{
-      key: string;
-      label: string;
-      answered: number;
-      unanswered: number;
-    }>;
+    const studentInfo = [
+      { label: 'Student Name', value: attemptState.attempt?.candidateName },
+      { label: 'Student ID', value: attemptState.attempt?.candidateId },
+      { label: 'Email', value: attemptState.attempt?.candidateEmail },
+      { label: 'Exam', value: attemptState.attempt?.examTitle ?? examState.title },
+    ].filter((item): item is { label: string; value: string } => Boolean(item.value));
 
     return (
       <div className="flex flex-col items-center justify-center h-full w-full bg-gray-50 p-4 font-sans text-gray-900">
@@ -807,7 +744,7 @@ export function StudentApp() {
         <main id="main-content" role="main" className="flex flex-col items-center justify-center">
           <div className="bg-white p-6 md:p-8 rounded-lg shadow-md max-w-2xl w-full text-center">
             <h1 className="text-3xl font-bold mb-4">
-              {isProctorTerminated ? 'Session terminated' : '🎉 Examination Complete!'}
+              {isProctorTerminated ? 'Session terminated' : 'IELTS Examination Complete!'}
             </h1>
             {isProctorTerminated ? (
               <div className="text-gray-600 mb-8 space-y-3">
@@ -822,21 +759,17 @@ export function StudentApp() {
               </p>
             )}
 
-            {sectionSummaries.length > 0 ? (
-              <div className="mb-8 text-left">
-                <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500 mb-3">
-                  Section Summary
-                </p>
-                <div className="space-y-2">
-                  {sectionSummaries.map((section) => (
-                    <div
-                      key={section.key}
-                      className="flex items-center justify-between rounded-sm border border-gray-200 bg-gray-50 px-4 py-3"
-                    >
-                      <div className="font-bold text-gray-900">{section.label}</div>
-                      <div className="text-sm font-semibold text-gray-700">
-                        {section.answered} answered • {section.unanswered} unanswered
-                      </div>
+            {studentInfo.length > 0 ? (
+              <div className="mb-8 rounded-sm border border-gray-200 bg-gray-50 p-4 text-left">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {studentInfo.map((item) => (
+                    <div key={item.label}>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500">
+                        {item.label}
+                      </p>
+                      <p className="mt-1 break-words text-sm font-semibold text-gray-900">
+                        {item.value}
+                      </p>
                     </div>
                   ))}
                 </div>
@@ -893,6 +826,7 @@ export function StudentApp() {
             : undefined
         }
         isExamActive={effectivePhase === 'exam'}
+        showExitButton={effectivePhase !== 'exam'}
       />
 
       {droppedMutations ? (
