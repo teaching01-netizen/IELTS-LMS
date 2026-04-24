@@ -14,7 +14,6 @@ pub mod live_updates;
 pub mod runtime_auto_advance;
 pub mod router;
 pub mod routes;
-pub mod websocket_capacity;
 pub mod state;
 
 use ielts_backend_infrastructure::config::AppConfig;
@@ -25,7 +24,6 @@ use crate::{
     live_updates::spawn_postgres_listener,
     router::build_router,
     runtime_auto_advance::spawn_runtime_auto_advance,
-    websocket_capacity::cleanup_expired_websocket_connection_leases,
     state::AppState,
 };
 
@@ -43,7 +41,6 @@ pub async fn run() -> std::io::Result<()> {
     let _live_updates = spawn_postgres_listener(state.config.clone(), state.live_updates.clone());
     let _runtime_auto_advance = spawn_runtime_auto_advance(state.clone());
     spawn_rate_limiter_cleanup(state.rate_limiter.clone());
-    spawn_websocket_capacity_cleanup(state.db_pool());
     let app = build_router(state);
     let listener = TcpListener::bind(&bind_address).await?;
 
@@ -63,20 +60,6 @@ fn spawn_rate_limiter_cleanup(rate_limiter: ielts_backend_infrastructure::rate_l
         loop {
             interval.tick().await;
             rate_limiter.cleanup().await;
-        }
-    });
-}
-
-fn spawn_websocket_capacity_cleanup(pool: sqlx::MySqlPool) {
-    tokio::spawn(async move {
-        let _ = cleanup_expired_websocket_connection_leases(&pool).await;
-        let mut interval = tokio::time::interval(Duration::from_secs(30));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        interval.tick().await;
-
-        loop {
-            interval.tick().await;
-            let _ = cleanup_expired_websocket_connection_leases(&pool).await;
         }
     });
 }

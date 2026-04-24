@@ -519,9 +519,8 @@ Source: `backend/crates/api/src/live_updates.rs`
 
 - Broadcast hub with connection caps:
   - max 5 connections per user
-  - max 500 connections per backend instance
-  - max 500 connections per schedule
-- Capacity enforcement for live websocket connections is backed by MySQL leases so it remains consistent across backend replicas.
+  - max 1000 connections per backend instance
+  - max 100 connections per schedule
 - Postgres LISTEN/NOTIFY is disabled in MySQL mode; the worker/polling pattern is used instead.
 
 ## API map (backend)

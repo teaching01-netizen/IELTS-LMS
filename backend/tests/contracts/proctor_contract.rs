@@ -49,7 +49,6 @@ const PROCTOR_MIGRATIONS: &[&str] = &[
     "0008_grading_results.sql",
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
-    "0012_websocket_connection_leases.sql",
 ];
 
 #[tokio::test]
@@ -622,96 +621,6 @@ async fn websocket_live_endpoint_accepts_authenticated_connections_with_cookie()
     assert_eq!(update_payload["id"], "schedule-123");
     assert_eq!(update_payload["revision"], 9);
     assert_eq!(update_payload["event"], "runtime_changed");
-
-    server.abort();
-    database.shutdown().await;
-}
-
-#[tokio::test]
-async fn websocket_live_endpoint_enforces_shared_capacity_and_releases_after_disconnect() {
-    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
-    let schedule = seed_schedule(database.pool()).await;
-    let auth = create_authenticated_user(
-        database.pool(),
-        UserRole::Proctor,
-        "proctor-capacity@example.com",
-        "Capacity Proctor",
-    )
-    .await;
-    assign_staff_to_schedule(database.pool(), Uuid::parse_str(&schedule.id).unwrap(), auth.user_id, "proctor")
-        .await;
-
-    let config = AppConfig {
-        websocket_connection_cap: 1,
-        websocket_connections_per_schedule_cap: 1,
-        ..AppConfig::default()
-    };
-    let state = AppState::with_pool(config, database.pool().clone());
-    let router_state = state.clone();
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind test listener");
-    let address = listener.local_addr().expect("listener address");
-    let server = tokio::spawn(async move {
-        let app = build_router(router_state);
-        axum::serve(listener, app)
-            .await
-            .expect("serve websocket test app");
-    });
-
-    let ws_request = |cookie: &str| {
-        Request::builder()
-            .method("GET")
-            .uri(format!("ws://{address}/api/v1/ws/live?scheduleId={}", schedule.id))
-            .header("Host", format!("{address}"))
-            .header("Cookie", cookie)
-            .header("Connection", "Upgrade")
-            .header("Upgrade", "websocket")
-            .header("Sec-WebSocket-Version", "13")
-            .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-            .body(())
-            .expect("build websocket request")
-    };
-
-    let (mut first_socket, _) = connect_async(ws_request(&format!("__Host-session={}", auth.session_token)))
-        .await
-        .expect("connect first websocket");
-    let first_message = first_socket
-        .next()
-        .await
-        .expect("connected message")
-        .expect("websocket frame");
-    let first_payload: serde_json::Value =
-        serde_json::from_str(&first_message.into_text().expect("text frame"))
-            .expect("parse connected payload");
-    assert_eq!(first_payload["type"], "connected");
-
-    let second = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        connect_async(ws_request(&format!("__Host-session={}", auth.session_token))),
-    )
-    .await
-    .expect("second websocket connection timed out");
-    assert!(second.is_err(), "second websocket connection should be rejected at capacity");
-
-    first_socket.close(None).await.expect("close first websocket");
-    drop(first_socket);
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-    let third_socket = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        async {
-            loop {
-                match connect_async(ws_request(&format!("__Host-session={}", auth.session_token))).await {
-                    Ok(socket) => break socket,
-                    Err(_) => tokio::time::sleep(std::time::Duration::from_millis(200)).await,
-                }
-            }
-        },
-    )
-    .await
-    .expect("third websocket connection timed out");
-    let _ = third_socket;
 
     server.abort();
     database.shutdown().await;

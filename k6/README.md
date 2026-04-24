@@ -1,69 +1,111 @@
-# k6 Prod Load (API-level) — IELTS-like (Skip Speaking)
+# k6 Prod Load Suite
 
-This repository has a Playwright prod E2E that matches real browser UX, but it can be slow and flaky at scale.
-For faster feedback and higher concurrency, use **k6** to drive the **same production APIs** the UI uses.
+This folder contains API-level production load tests for the IELTS proctoring flow.
+The scripts drive the same backend endpoints as the UI, so they are useful for latency, throughput, and data-consistency checks.
 
 Important limits:
-- k6 **does not validate UI** (fullscreen/media permissions, rendering, client-side routing).
-- k6 **is ideal for load/perf** and backend correctness of the core exam loop.
+- k6 does not validate browser rendering, permissions, or client routing.
+- These runs mutate real schedule/runtime state.
+- Use a dedicated production E2E tenant and a dedicated schedule per scenario run.
 
-## What this script does
-- **Students**: `/api/v1/auth/student/entry` → `/api/v1/student/sessions/:scheduleId/bootstrap` → `/precheck` → poll session until runtime `live` → submit a small mutation batch (position + answer + writing + violation where possible) → `/submit`
-- **Control (proctor + admin verify)**:
-  - Proctor: login → `presence join/heartbeat` → wait for `checkedIn >= threshold` → **Start Exam** via `/api/v1/schedules/:scheduleId/runtime/commands` (`start_runtime`) → optional monitoring/interventions → **End Exam** via `end_runtime`
-  - Admin verify: poll `/api/v1/grading/sessions` until `submittedCount >= students`, then confirm submissions via `/api/v1/grading/sessions/:scheduleId`
+## Scenarios
 
-## Inputs
-- Target (non-secrets): `e2e/prod-data/prod-target.json`
-- Secrets (local/CI mounted): `e2e/prod-data/prod-creds.json`
-- Optional runtime override (from Playwright bootstrap): `e2e/.generated/prod-runtime.json`
+- `k6/prod-start-exam-200.js`
+  - 200 students in the waiting room
+  - measures propagation from `runtime.actualStartAt` to student visibility of `live`
+  - threshold: `start_exam_propagation_ms max < 2000`
 
-## Run (minimal N)
-From repo root:
+- `k6/prod-section-transition-200.js`
+  - 200 students
+  - uses proctor `end-section-now` as the proxy for section-zero transition
+  - threshold: `section_transition_ms max < 2000`
+  - requires a schedule that accepts section override actions; authentic IELTS mode rejects the endpoint
 
-```bash
-K6_STUDENTS=3 \
-K6_PROCTORS=1 \
-K6_CHECKED_IN_THRESHOLD=1 \
-k6 run k6/prod-exam-day.js
-```
+- `k6/prod-submit-storm-200.js`
+  - 200 students
+  - near-simultaneous submit storm
+  - thresholds: `submit_request_ms p(95) < 2000`, `submit_request_ms max < 10000`
+  - verifies `attempt.submittedAt`, `answers`, `writingAnswers`, and `finalSubmission`
 
-Optional interventions:
-```bash
-K6_PROCTOR_WARN=true \
-K6_STUDENT_VIOLATIONS=true \
-k6 run k6/prod-exam-day.js
-```
+- `k6/prod-resume-100.js`
+  - 100 students
+  - simulates browser close by pausing requests, then refreshing attempt credentials with a new `clientSessionId`
+  - verifies attempt identity and prior state survive the resume path
 
-## Run (bigger)
-```bash
-K6_STUDENTS=100 \
-K6_CHECKED_IN_THRESHOLD=95 \
-k6 run k6/prod-exam-day.js
-```
+- `k6/prod-auto-submit-200.js`
+  - 200 students
+  - proctor completes the exam and the backend auto-submits the cohort
+  - verifies `attempt.submittedAt` and `finalSubmission`
 
-## Pre-prod rehearsal (30–60 minutes)
-Run long enough to cross multiple attempt-token refresh windows and confirm students can keep heartbeating/mutating and still submit:
+## Data
 
-```bash
-K6_STUDENTS=50 \
-K6_PROCTORS=1 \
-K6_CHECKED_IN_THRESHOLD=45 \
-K6_WAIT_FOR_LIVE_TIMEOUT_SECONDS=1800 \
-K6_STUDENT_WORK_SECONDS=3600 \
-k6 run k6/prod-exam-day.js
-```
+- `e2e/prod-data/prod-target.json` contains the non-secret target data, including 200 students.
+- `e2e/prod-data/prod-creds.json` contains the login secrets and remains untracked.
+
+## Safety gate
+
+Set `K6_CONFIRM_PROD=true` before running any scenario. The scripts refuse to run without it.
 
 ## Common overrides
-- `K6_BASE_URL` (default from `prod-target.json`)
-- `K6_SCHEDULE_ID` (default from runtime override, else `prod-target.json`)
-- `K6_TARGET_PATH` (default `e2e/prod-data/prod-target.json`)
-- `K6_CREDS_PATH` (default `e2e/prod-data/prod-creds.json`)
-- `K6_RUNTIME_PATH` (default `e2e/.generated/prod-runtime.json`)
-- `K6_STUDENT_JITTER_MAX_SECONDS` (default `30`)
-- `K6_WAIT_FOR_LIVE_TIMEOUT_SECONDS` (default `1200`)
-- `K6_STUDENT_WORK_SECONDS` (default `60`)
-- `K6_PROCTOR_MONITOR_SECONDS` (default `180`)
-- `K6_WAIT_FOR_SUBMISSIONS_TIMEOUT_SECONDS` (default `1200`)
-- `K6_USE_EDITOR_AS_PROCTOR` (set `true` to use editor creds for proctor actions)
-- `K6_VERIFY_SUBMISSIONS` (set `false` to skip grading-based verification)
+
+- `K6_BASE_URL` defaults to `prod-target.json.baseURL`
+- `K6_SCHEDULE_ID` defaults to `prod-target.json.scheduleId`
+- `K6_TARGET_PATH` defaults to `e2e/prod-data/prod-target.json`
+- `K6_CREDS_PATH` defaults to `e2e/prod-data/prod-creds.json`
+- `K6_STUDENTS` controls the student count for each run
+- `K6_STUDENT_OFFSET` slices into the student list for smaller shards
+- `K6_RUN_ID` labels the run in logs and request reasons
+- `K6_DEBUG=true` enables extra logging
+
+## Typical runs
+
+Start exam:
+
+```bash
+K6_CONFIRM_PROD=true \
+K6_STUDENTS=200 \
+K6_CHECKED_IN_THRESHOLD=200 \
+k6 run k6/prod-start-exam-200.js
+```
+
+Section transition:
+
+```bash
+K6_CONFIRM_PROD=true \
+K6_STUDENTS=200 \
+K6_CHECKED_IN_THRESHOLD=200 \
+k6 run k6/prod-section-transition-200.js
+```
+
+Submit storm:
+
+```bash
+K6_CONFIRM_PROD=true \
+K6_STUDENTS=200 \
+K6_CHECKED_IN_THRESHOLD=200 \
+k6 run k6/prod-submit-storm-200.js
+```
+
+Resume after browser close:
+
+```bash
+K6_CONFIRM_PROD=true \
+K6_STUDENTS=100 \
+K6_CHECKED_IN_THRESHOLD=100 \
+k6 run k6/prod-resume-100.js
+```
+
+Auto-submit:
+
+```bash
+K6_CONFIRM_PROD=true \
+K6_STUDENTS=200 \
+K6_CHECKED_IN_THRESHOLD=200 \
+k6 run k6/prod-auto-submit-200.js
+```
+
+## Notes
+
+- The scripts assume the schedule is assigned to at least one proctor/editor account in `prod-creds.json`.
+- If you reuse the same schedule for multiple scenarios, later runs will not be meaningful because the earlier run mutates runtime state.
+- The section-transition scenario intentionally relies on `end-section-now`; if the backend returns a validation error about IELTS authentic mode, use a schedule that allows section overrides.

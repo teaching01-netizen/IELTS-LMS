@@ -21,17 +21,11 @@ use crate::{
         auth::parse_cookie,
         response::ApiError,
     },
-    websocket_capacity::{
-        acquire_websocket_connection_lease, renew_websocket_connection_lease,
-        WebsocketConnectionCapacityConfig, WebsocketConnectionCapacityError,
-        DEFAULT_LEASE_RENEW_INTERVAL, DEFAULT_LEASE_TTL,
-    },
     state::AppState,
 };
 use ielts_backend_application::auth::AuthService;
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::schedule::LiveUpdateEvent;
-use uuid::Uuid;
 
 #[derive(Debug)]
 enum OutboundItem {
@@ -120,47 +114,15 @@ pub async fn websocket_live(
         .into_response();
     }
 
-    let capacity_schedule_id = resolve_capacity_schedule_id(&state, schedule_id.as_deref(), attempt_id.as_deref()).await;
-    let capacity_config = WebsocketConnectionCapacityConfig::new(
-        state.config.websocket_connection_cap as u32,
-        state.config.websocket_connections_per_schedule_cap as u32,
-        DEFAULT_LEASE_TTL,
-    );
-    let lease = match acquire_websocket_connection_lease(
-        &state.db_pool(),
-        &session.user.id,
-        capacity_schedule_id.as_deref(),
-        &capacity_config,
-    )
-    .await
-    {
-        Ok(lease) => lease,
-        Err(WebsocketConnectionCapacityError::GlobalCapacityReached) => {
-            return ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "INSTANCE_CAPACITY",
-                "Server at maximum WebSocket capacity.",
-            )
-            .into_response();
-        }
-        Err(WebsocketConnectionCapacityError::ScheduleCapacityReached) => {
-            return ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "SCHEDULE_CAPACITY",
-                "Maximum connections for this schedule exceeded.",
-            )
-            .into_response();
-        }
-        Err(WebsocketConnectionCapacityError::Database(err)) => {
-            tracing::warn!(error = %err, "failed to acquire websocket lease");
-            return ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "CONNECTION_LIMIT",
-                "Unable to allocate websocket capacity right now.",
-            )
-            .into_response();
-        }
-    };
+    // Check per-instance connection cap
+    if state.live_updates.is_at_capacity() {
+        return ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "INSTANCE_CAPACITY",
+            "Server at maximum WebSocket capacity.",
+        )
+        .into_response();
+    }
 
     ws.write_buffer_size(0)
         .max_write_buffer_size(64 * 1024)
@@ -172,7 +134,6 @@ pub async fn websocket_live(
                 attempt_id,
                 session.user.id,
                 user_role,
-                lease.id,
             )
         })
 }
@@ -190,13 +151,11 @@ async fn handle_socket(
     attempt_id: Option<String>,
     user_id: String,
     user_role: UserRole,
-    lease_id: Uuid,
 ) {
     let queue_cap = state.config.websocket_outbound_queue_cap.max(1);
     let slow_client_disconnect =
         Duration::from_millis(state.config.websocket_slow_client_disconnect_ms.max(1));
     let write_timeout = Duration::from_millis(state.config.websocket_write_timeout_ms.max(1));
-    let lease_renew_interval = DEFAULT_LEASE_RENEW_INTERVAL;
 
     let current_connections = state.live_updates.connection_opened(&user_id);
     state
@@ -204,7 +163,20 @@ async fn handle_socket(
         .set_websocket_connections(current_connections);
     let mut subscription = state.live_updates.subscribe();
 
+    // Check per-schedule subscription cap
     if let Some(ref sid) = schedule_id {
+        if state.live_updates.is_schedule_at_capacity(sid) {
+            let payload = json!({
+                "type": "error",
+                "code": "SCHEDULE_CAPACITY",
+                "message": "Maximum connections for this schedule exceeded."
+            })
+            .to_string();
+            let _ = tokio::time::timeout(write_timeout, socket.send(Message::Text(payload))).await;
+            let remaining = state.live_updates.connection_closed(&user_id);
+            state.telemetry.set_websocket_connections(remaining);
+            return;
+        }
         state.live_updates.subscribe_to_schedule(sid, &user_id);
     }
 
@@ -220,38 +192,6 @@ async fn handle_socket(
     let notify = Arc::new(Notify::new());
     let latest_event: Arc<Mutex<Option<LiveUpdateEvent>>> = Arc::new(Mutex::new(None));
     let disconnect_reason: Arc<Mutex<Option<DisconnectReason>>> = Arc::new(Mutex::new(None));
-
-    let renewal_pool = state.db_pool();
-    let renewal_disconnect_reason = disconnect_reason.clone();
-    let renewal_notify = notify.clone();
-    let renewal_task = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(lease_renew_interval);
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        interval.tick().await;
-
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    match renew_websocket_connection_lease(&renewal_pool, lease_id, DEFAULT_LEASE_TTL).await {
-                        Ok(true) => {}
-                        Ok(false) | Err(_) => {
-                            *renewal_disconnect_reason.lock().unwrap() = Some(DisconnectReason {
-                                code: 1011,
-                                reason: "lease renewal failed".to_owned(),
-                            });
-                            renewal_notify.notify_one();
-                            break;
-                        }
-                    }
-                }
-                _ = renewal_notify.notified() => {
-                    if renewal_disconnect_reason.lock().unwrap().is_some() {
-                        break;
-                    }
-                }
-            }
-        }
-    });
 
     let writer_notify = notify.clone();
     let writer_latest_event = latest_event.clone();
@@ -361,8 +301,6 @@ async fn handle_socket(
                 state.live_updates.unsubscribe_from_schedule(sid, &user_id);
             }
             state.telemetry.set_websocket_connections(remaining);
-            renewal_task.abort();
-            let _ = crate::websocket_capacity::release_websocket_connection_lease(&state.db_pool(), lease_id).await;
             return;
         }
     }
@@ -380,8 +318,6 @@ async fn handle_socket(
             state.live_updates.unsubscribe_from_schedule(sid, &user_id);
         }
         state.telemetry.set_websocket_connections(remaining);
-        renewal_task.abort();
-        let _ = crate::websocket_capacity::release_websocket_connection_lease(&state.db_pool(), lease_id).await;
         return;
         }
     }
@@ -479,35 +415,4 @@ async fn handle_socket(
         state.live_updates.unsubscribe_from_schedule(sid, &user_id);
     }
     state.telemetry.set_websocket_connections(remaining);
-    renewal_task.abort();
-    let _ = crate::websocket_capacity::release_websocket_connection_lease(&state.db_pool(), lease_id).await;
-}
-
-async fn resolve_capacity_schedule_id(
-    state: &AppState,
-    schedule_id: Option<&str>,
-    attempt_id: Option<&str>,
-) -> Option<String> {
-    if let Some(schedule_id) = schedule_id {
-        return Some(schedule_id.to_owned());
-    }
-
-    let Some(attempt_id) = attempt_id else {
-        return None;
-    };
-
-    match sqlx::query_scalar::<_, String>(
-        "SELECT schedule_id FROM student_attempts WHERE id = ?",
-    )
-    .bind(attempt_id)
-    .fetch_optional(&state.db_pool())
-    .await
-    {
-        Ok(Some(schedule_id)) => Some(schedule_id),
-        Ok(None) => None,
-        Err(err) => {
-            tracing::warn!(error = %err, attempt_id = %attempt_id, "failed to resolve websocket schedule for capacity");
-            None
-        }
-    }
 }
