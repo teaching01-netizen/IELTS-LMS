@@ -35,6 +35,12 @@ pub struct ProctoringService {
     pool: MySqlPool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoAdvanceOutcome {
+    pub schedule_id: Uuid,
+    pub runtime_revision: i64,
+}
+
 impl ProctoringService {
     pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
@@ -1010,6 +1016,258 @@ impl ProctoringService {
         .await
     }
 
+    pub async fn auto_advance_expired_sections(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<AutoAdvanceOutcome>, ProctoringError> {
+        let limit = limit.max(1);
+        let candidates = sqlx::query_as::<_, AutoAdvanceCandidateRow>(
+            r#"
+            SELECT r.schedule_id AS schedule_id
+            FROM exam_session_runtimes r
+            JOIN exam_session_runtime_sections s
+              ON s.runtime_id = r.id
+             AND s.section_key = r.active_section_key
+            JOIN exam_schedules sch
+              ON sch.id = r.schedule_id
+            JOIN exam_versions v
+              ON v.id = sch.published_version_id
+            WHERE r.status = 'live'
+              AND r.active_section_key IS NOT NULL
+              AND s.status = 'live'
+              AND s.actual_start_at IS NOT NULL
+              AND s.paused_at IS NULL
+              AND COALESCE(
+                    JSON_UNQUOTE(JSON_EXTRACT(v.config_snapshot, '$.progression.autoSubmit')),
+                    'true'
+                  ) = 'true'
+              AND NOW() >= DATE_ADD(
+                    s.actual_start_at,
+                    INTERVAL ((s.planned_duration_minutes + s.extension_minutes) * 60 + s.accumulated_paused_seconds) SECOND
+                  )
+            ORDER BY s.actual_start_at ASC
+            LIMIT ?
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut outcomes = Vec::new();
+        for candidate in candidates {
+            let schedule_id = match Uuid::parse_str(&candidate.schedule_id) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if let Some(revision) = self.auto_advance_schedule_if_expired(schedule_id).await? {
+                outcomes.push(AutoAdvanceOutcome {
+                    schedule_id,
+                    runtime_revision: revision,
+                });
+            }
+        }
+
+        Ok(outcomes)
+    }
+
+    async fn auto_advance_schedule_if_expired(
+        &self,
+        schedule_id: Uuid,
+    ) -> Result<Option<i64>, ProctoringError> {
+        let mut tx = self.pool.begin().await?;
+
+        let runtime = sqlx::query_as::<_, RuntimeRow>(
+            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(tx.as_mut())
+        .await?
+        .ok_or(ProctoringError::NotFound)?;
+
+        if runtime.status != RuntimeStatus::Live {
+            return Ok(None);
+        }
+
+        let active_section_key = match runtime.active_section_key.as_deref() {
+            Some(value) if !value.trim().is_empty() => value.to_owned(),
+            _ => return Ok(None),
+        };
+
+        let sections = sqlx::query_as::<_, RuntimeSectionRow>(
+            "SELECT * FROM exam_session_runtime_sections WHERE runtime_id = ? ORDER BY section_order ASC FOR UPDATE",
+        )
+        .bind(runtime.id)
+        .fetch_all(tx.as_mut())
+        .await
+        .map_err(ProctoringError::from)?;
+
+        let active_index = sections
+            .iter()
+            .position(|section| section.section_key == active_section_key)
+            .ok_or_else(|| ProctoringError::Conflict("Active section row is missing.".to_owned()))?;
+        let active_section = sections
+            .get(active_index)
+            .ok_or_else(|| ProctoringError::Conflict("Active section row is missing.".to_owned()))?;
+        if active_section.status != SectionRuntimeStatus::Live {
+            return Ok(None);
+        }
+        if active_section.paused_at.is_some() {
+            return Ok(None);
+        }
+        let Some(actual_start_at) = active_section.actual_start_at else {
+            return Ok(None);
+        };
+
+        let now = Utc::now();
+        let computed = compute_section_remaining_seconds(
+            actual_start_at,
+            active_section.planned_duration_minutes,
+            active_section.extension_minutes,
+            active_section.paused_at,
+            active_section.accumulated_paused_seconds,
+            active_section.status.clone(),
+            now,
+        );
+        if computed > 0 {
+            return Ok(None);
+        }
+
+        let completion_reason = "time_expired";
+        sqlx::query(
+            r#"
+            UPDATE exam_session_runtime_sections
+            SET
+                status = ?,
+                actual_end_at = NOW(),
+                completion_reason = ?,
+                paused_at = NULL
+            WHERE runtime_id = ? AND section_key = ?
+            "#,
+        )
+        .bind(SectionRuntimeStatus::Completed)
+        .bind(completion_reason)
+        .bind(runtime.id)
+        .bind(&active_section_key)
+        .execute(tx.as_mut())
+        .await?;
+
+        let next_section = sections
+            .iter()
+            .skip(active_index + 1)
+            .find(|section| section.status == SectionRuntimeStatus::Locked);
+        let next_section_key = next_section.map(|section| section.section_key.clone());
+
+        if let Some(section) = next_section {
+            sqlx::query(
+                r#"
+                UPDATE exam_session_runtime_sections
+                SET
+                    status = ?,
+                    available_at = COALESCE(available_at, NOW()),
+                    actual_start_at = COALESCE(actual_start_at, NOW())
+                WHERE runtime_id = ? AND section_key = ?
+                "#,
+            )
+            .bind(SectionRuntimeStatus::Live)
+            .bind(runtime.id)
+            .bind(&section.section_key)
+            .execute(tx.as_mut())
+            .await?;
+
+            sqlx::query(
+                r#"
+                UPDATE exam_session_runtimes
+                SET
+                    active_section_key = ?,
+                    current_section_key = ?,
+                    current_section_remaining_seconds = ?,
+                    waiting_for_next_section = false,
+                    updated_at = NOW(),
+                    revision = revision + 1
+                WHERE id = ?
+                "#,
+            )
+            .bind(&section.section_key)
+            .bind(&section.section_key)
+            .bind((section.planned_duration_minutes + section.extension_minutes) * 60)
+            .bind(runtime.id)
+            .execute(tx.as_mut())
+            .await?;
+        } else {
+            sqlx::query(
+                r#"
+                UPDATE exam_session_runtimes
+                SET
+                    status = ?,
+                    actual_end_at = NOW(),
+                    active_section_key = NULL,
+                    current_section_key = NULL,
+                    current_section_remaining_seconds = 0,
+                    waiting_for_next_section = false,
+                    updated_at = NOW(),
+                    revision = revision + 1
+                WHERE id = ?
+                "#,
+            )
+            .bind(RuntimeStatus::Completed)
+            .bind(runtime.id)
+            .execute(tx.as_mut())
+            .await?;
+
+            sqlx::query(
+                "UPDATE exam_schedules SET status = 'completed', updated_at = NOW(), revision = revision + 1 WHERE id = ?",
+            )
+            .bind(schedule_id.to_string())
+            .execute(tx.as_mut())
+            .await?;
+
+            auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, completion_reason)
+                .await
+                .map_err(|error| match error {
+                    DeliveryError::Database(db) => ProctoringError::Database(db),
+                    DeliveryError::Conflict { message, .. }
+                    | DeliveryError::Validation(message)
+                    | DeliveryError::Internal(message) => ProctoringError::Validation(message),
+                    DeliveryError::NotFound => ProctoringError::NotFound,
+                })?;
+        }
+
+        insert_audit_log(
+            &mut tx,
+            schedule_id,
+            "system",
+            "SECTION_END",
+            None,
+            Some(json!({ "sectionKey": active_section_key, "reason": completion_reason })),
+        )
+        .await?;
+        if let Some(next_key) = &next_section_key {
+            insert_audit_log(
+                &mut tx,
+                schedule_id,
+                "system",
+                "SECTION_START",
+                None,
+                Some(json!({ "sectionKey": next_key })),
+            )
+            .await?;
+        } else {
+            insert_audit_log(
+                &mut tx,
+                schedule_id,
+                "system",
+                "SESSION_END",
+                None,
+                Some(json!({ "reason": completion_reason })),
+            )
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        Ok(Some(i64::from(runtime.revision + 1)))
+    }
+
     #[tracing::instrument(skip(self), fields(alert_id = %alert_id, actor_id = %ctx.actor_id))]
     pub async fn acknowledge_alert(
         &self,
@@ -1261,9 +1519,44 @@ struct RuntimeRow {
 #[derive(FromRow)]
 struct RuntimeSectionRow {
     section_key: String,
+    section_order: i32,
     planned_duration_minutes: i32,
     extension_minutes: i32,
     status: SectionRuntimeStatus,
+    actual_start_at: Option<DateTime<Utc>>,
+    paused_at: Option<DateTime<Utc>>,
+    accumulated_paused_seconds: i32,
+}
+
+#[derive(FromRow)]
+struct AutoAdvanceCandidateRow {
+    schedule_id: String,
+}
+
+fn compute_section_remaining_seconds(
+    actual_start_at: DateTime<Utc>,
+    planned_duration_minutes: i32,
+    extension_minutes: i32,
+    paused_at: Option<DateTime<Utc>>,
+    accumulated_paused_seconds: i32,
+    status: SectionRuntimeStatus,
+    now: DateTime<Utc>,
+) -> i32 {
+    let duration_seconds = i64::from(planned_duration_minutes.saturating_add(extension_minutes))
+        .saturating_mul(60);
+
+    let time_base = if status == SectionRuntimeStatus::Paused || paused_at.is_some() {
+        paused_at.unwrap_or(now)
+    } else {
+        now
+    };
+
+    let raw_elapsed_seconds = (time_base - actual_start_at).num_seconds().max(0);
+    let elapsed_seconds = raw_elapsed_seconds
+        .saturating_sub(i64::from(accumulated_paused_seconds.max(0)));
+    let remaining_seconds = (duration_seconds - elapsed_seconds).clamp(0, duration_seconds);
+
+    remaining_seconds as i32
 }
 
 fn system_actor() -> ActorContext {

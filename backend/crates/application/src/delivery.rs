@@ -1747,17 +1747,15 @@ fn index_block(
             let Some(questions) = block.get("questions").and_then(Value::as_array) else {
                 return Ok(());
             };
-            let mut allowed_heading_ids: Option<HashSet<String>> = None;
+            let mut allowed_heading_values: Option<HashSet<String>> = None;
             if block_type == "MATCHING" {
                 if let Some(headings) = block.get("headings").and_then(Value::as_array) {
-                    let mut ids = HashSet::new();
-                    for heading in headings {
-                        if let Some(id) = heading.get("id").and_then(Value::as_str) {
-                            ids.insert(id.to_owned());
-                        }
+                    let mut values = HashSet::new();
+                    for (index, _heading) in headings.iter().enumerate() {
+                        values.insert(matching_heading_value(index));
                     }
-                    if !ids.is_empty() {
-                        allowed_heading_ids = Some(ids);
+                    if !values.is_empty() {
+                        allowed_heading_values = Some(values);
                     }
                 }
             }
@@ -1774,7 +1772,7 @@ fn index_block(
                         };
                         AnswerConstraint::Enum(allowed)
                     }
-                    "MATCHING" => allowed_heading_ids
+                    "MATCHING" => allowed_heading_values
                         .clone()
                         .map(AnswerConstraint::Enum)
                         .unwrap_or(AnswerConstraint::Text),
@@ -1792,16 +1790,22 @@ fn index_block(
                 let Some(id) = question.get("id").and_then(Value::as_str) else {
                     continue;
                 };
-                let max_len = question
+                let blanks = question
                     .get("blanks")
-                    .and_then(Value::as_array)
-                    .map(|value| value.len())
-                    .unwrap_or(0);
+                    .and_then(Value::as_array);
+                let max_len = blanks.map(|value| value.len()).unwrap_or(0);
                 constraints.insert(
                     id.to_owned(),
                     AnswerConstraint::ArrayText { max_len },
                 );
                 register_section(sections, id, section_key)?;
+                if let Some(blanks) = blanks {
+                    for blank in blanks {
+                        if let Some(blank_id) = blank.get("id").and_then(Value::as_str) {
+                            register_section(sections, &format!("{id}:{blank_id}"), section_key)?;
+                        }
+                    }
+                }
             }
         }
         "MULTI_MCQ" => {
@@ -1842,41 +1846,70 @@ fn index_block(
         }
         "DIAGRAM_LABELING" => {
             let Some(block_id) = block_id else { return Ok(()); };
-            let max_len = block
+            let labels = block
                 .get("labels")
-                .and_then(Value::as_array)
-                .map(|value| value.len())
-                .unwrap_or(0);
+                .and_then(Value::as_array);
+            let max_len = labels.map(|value| value.len()).unwrap_or(0);
             register_section(sections, &block_id, section_key)?;
+            if let Some(labels) = labels {
+                for label in labels {
+                    if let Some(label_id) = label.get("id").and_then(Value::as_str) {
+                        register_section(
+                            sections,
+                            &format!("{block_id}:{label_id}"),
+                            section_key,
+                        )?;
+                    }
+                }
+            }
             constraints.insert(block_id, AnswerConstraint::ArrayText { max_len });
         }
         "FLOW_CHART" => {
             let Some(block_id) = block_id else { return Ok(()); };
-            let max_len = block
+            let steps = block
                 .get("steps")
-                .and_then(Value::as_array)
-                .map(|value| value.len())
-                .unwrap_or(0);
+                .and_then(Value::as_array);
+            let max_len = steps.map(|value| value.len()).unwrap_or(0);
             register_section(sections, &block_id, section_key)?;
+            if let Some(steps) = steps {
+                for step in steps {
+                    if let Some(step_id) = step.get("id").and_then(Value::as_str) {
+                        register_section(
+                            sections,
+                            &format!("{block_id}:{step_id}"),
+                            section_key,
+                        )?;
+                    }
+                }
+            }
             constraints.insert(block_id, AnswerConstraint::ArrayText { max_len });
         }
         "TABLE_COMPLETION" => {
             let Some(block_id) = block_id else { return Ok(()); };
-            let max_len = block
+            let cells = block
                 .get("cells")
-                .and_then(Value::as_array)
-                .map(|value| value.len())
-                .unwrap_or(0);
+                .and_then(Value::as_array);
+            let max_len = cells.map(|value| value.len()).unwrap_or(0);
             register_section(sections, &block_id, section_key)?;
+            if let Some(cells) = cells {
+                for cell in cells {
+                    if let Some(cell_id) = cell.get("id").and_then(Value::as_str) {
+                        register_section(
+                            sections,
+                            &format!("{block_id}:{cell_id}"),
+                            section_key,
+                        )?;
+                    }
+                }
+            }
             constraints.insert(block_id, AnswerConstraint::ArrayText { max_len });
         }
         "CLASSIFICATION" => {
             let Some(block_id) = block_id else { return Ok(()); };
-            let max_len = block
+            let items = block
                 .get("items")
-                .and_then(Value::as_array)
-                .map(|value| value.len())
-                .unwrap_or(0);
+                .and_then(Value::as_array);
+            let max_len = items.map(|value| value.len()).unwrap_or(0);
             let mut allowed = HashSet::new();
             if let Some(categories) = block.get("categories").and_then(Value::as_array) {
                 for category in categories.iter().filter_map(Value::as_str) {
@@ -1884,6 +1917,17 @@ fn index_block(
                 }
             }
             register_section(sections, &block_id, section_key)?;
+            if let Some(items) = items {
+                for item in items {
+                    if let Some(item_id) = item.get("id").and_then(Value::as_str) {
+                        register_section(
+                            sections,
+                            &format!("{block_id}:{item_id}"),
+                            section_key,
+                        )?;
+                    }
+                }
+            }
             constraints.insert(
                 block_id,
                 AnswerConstraint::EnumArray { allowed, max_len },
@@ -1891,11 +1935,10 @@ fn index_block(
         }
         "MATCHING_FEATURES" => {
             let Some(block_id) = block_id else { return Ok(()); };
-            let max_len = block
+            let features = block
                 .get("features")
-                .and_then(Value::as_array)
-                .map(|value| value.len())
-                .unwrap_or(0);
+                .and_then(Value::as_array);
+            let max_len = features.map(|value| value.len()).unwrap_or(0);
             let mut allowed = HashSet::new();
             if let Some(options) = block.get("options").and_then(Value::as_array) {
                 for option in options.iter().filter_map(Value::as_str) {
@@ -1903,6 +1946,17 @@ fn index_block(
                 }
             }
             register_section(sections, &block_id, section_key)?;
+            if let Some(features) = features {
+                for feature in features {
+                    if let Some(feature_id) = feature.get("id").and_then(Value::as_str) {
+                        register_section(
+                            sections,
+                            &format!("{block_id}:{feature_id}"),
+                            section_key,
+                        )?;
+                    }
+                }
+            }
             constraints.insert(
                 block_id,
                 AnswerConstraint::EnumArray { allowed, max_len },
@@ -1912,6 +1966,24 @@ fn index_block(
     }
 
     Ok(())
+}
+
+fn matching_heading_value(index: usize) -> String {
+    match index {
+        0 => "i".to_owned(),
+        1 => "ii".to_owned(),
+        2 => "iii".to_owned(),
+        3 => "iv".to_owned(),
+        4 => "v".to_owned(),
+        5 => "vi".to_owned(),
+        6 => "vii".to_owned(),
+        7 => "viii".to_owned(),
+        8 => "ix".to_owned(),
+        9 => "x".to_owned(),
+        10 => "xi".to_owned(),
+        11 => "xii".to_owned(),
+        _ => index.to_string(),
+    }
 }
 
 fn register_section(
@@ -2143,7 +2215,7 @@ fn apply_mutation(
                     "This session can no longer accept flag mutations.".to_owned(),
                 ));
             }
-            if !answer_schema.constraints.contains_key(&question_id) {
+            if !answer_schema.sections.contains_key(&question_id) {
                 return Err(DeliveryError::Validation(
                     "Mutation references an unknown `questionId`.".to_owned(),
                 ));
@@ -2204,7 +2276,7 @@ fn apply_mutation(
                 }
             };
             if let Some(ref value) = parsed_question_id {
-                let known_objective = answer_schema.constraints.contains_key(value);
+                let known_objective = answer_schema.sections.contains_key(value);
                 let known_writing = writing_task_ids.contains(value);
                 if !(known_objective || known_writing) {
                     return Err(DeliveryError::Validation(
@@ -2588,6 +2660,164 @@ mod tests {
         assert_eq!(recovery["clientPosition"]["phase"], "exam");
         assert_eq!(recovery["clientPosition"]["currentModule"], "reading");
         assert_eq!(recovery["clientPosition"]["currentQuestionId"], "q1");
+    }
+
+    #[test]
+    fn apply_mutation_accepts_reading_slot_ids_for_position_and_flags() {
+        let answer_schema = AnswerSchema {
+            constraints: HashMap::from_iter([(
+                "sentence-1".to_owned(),
+                AnswerConstraint::ArrayText { max_len: 1 },
+            )]),
+            sections: HashMap::from_iter([
+                ("sentence-1".to_owned(), "reading".to_owned()),
+                ("sentence-1:blank-1".to_owned(), "reading".to_owned()),
+            ]),
+        };
+        let writing_task_ids: HashSet<String> = HashSet::new();
+        let mut answers = json!({});
+        let mut writing_answers = json!({});
+        let mut flags = json!({});
+        let mut violations_snapshot = json!([]);
+        let mut phase = "exam".to_owned();
+        let mut current_module = "reading".to_owned();
+        let mut current_question_id = Some("sentence-1:blank-1".to_owned());
+        let mut recovery = json!({});
+
+        apply_mutation(
+            &MutationEnvelope {
+                id: "m-pos-slot".to_owned(),
+                seq: 1,
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+                mutation_type: "position".to_owned(),
+                payload: json!({
+                    "phase": "exam",
+                    "currentModule": "reading",
+                    "currentQuestionId": "sentence-1:blank-1"
+                }),
+            },
+            &answer_schema,
+            &writing_task_ids,
+            ObjectiveMutationGate::allow(),
+            Some("reading"),
+            &mut answers,
+            &mut writing_answers,
+            &mut flags,
+            &mut violations_snapshot,
+            &mut phase,
+            &mut current_module,
+            &mut current_question_id,
+            &mut recovery,
+        )
+        .expect("slot position should be accepted");
+
+        apply_mutation(
+            &MutationEnvelope {
+                id: "m-flag-slot".to_owned(),
+                seq: 2,
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 1).unwrap(),
+                mutation_type: "flag".to_owned(),
+                payload: json!({
+                    "questionId": "sentence-1:blank-1",
+                    "value": true
+                }),
+            },
+            &answer_schema,
+            &writing_task_ids,
+            ObjectiveMutationGate::allow(),
+            Some("reading"),
+            &mut answers,
+            &mut writing_answers,
+            &mut flags,
+            &mut violations_snapshot,
+            &mut phase,
+            &mut current_module,
+            &mut current_question_id,
+            &mut recovery,
+        )
+        .expect("slot flag should be accepted");
+
+        assert_eq!(
+            recovery["clientPosition"]["currentQuestionId"],
+            "sentence-1:blank-1",
+        );
+        assert_eq!(flags["sentence-1:blank-1"], true);
+    }
+
+    #[test]
+    fn build_answer_schema_indexes_reading_slot_ids_for_position_and_flags() {
+        let schema = build_answer_schema(&json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [
+                        {
+                            "id": "sentence-block",
+                            "type": "SENTENCE_COMPLETION",
+                            "questions": [{
+                                "id": "sentence-1",
+                                "blanks": [{ "id": "blank-1" }]
+                            }]
+                        },
+                        {
+                            "id": "diagram-block",
+                            "type": "DIAGRAM_LABELING",
+                            "labels": [{ "id": "label-1" }]
+                        }
+                    ]
+                }]
+            }
+        }))
+        .expect("schema");
+
+        assert!(schema.constraints.contains_key("sentence-1"));
+        assert!(!schema.constraints.contains_key("sentence-1:blank-1"));
+        assert_eq!(
+            schema.sections.get("sentence-1:blank-1").map(String::as_str),
+            Some("reading"),
+        );
+        assert_eq!(
+            schema.sections.get("diagram-block:label-1").map(String::as_str),
+            Some("reading"),
+        );
+    }
+
+    #[test]
+    fn build_answer_schema_uses_roman_values_for_matching_headings() {
+        let schema = build_answer_schema(&json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [
+                        {
+                            "id": "matching-block",
+                            "type": "MATCHING",
+                            "headings": [
+                                { "id": "heading-a", "text": "A" },
+                                { "id": "heading-b", "text": "B" },
+                                { "id": "heading-c", "text": "C" }
+                            ],
+                            "questions": [
+                                { "id": "q1", "paragraphLabel": "A" }
+                            ]
+                        }
+                    ]
+                }]
+            }
+        }))
+        .expect("schema");
+
+        let constraint = schema
+            .constraints
+            .get("q1")
+            .expect("matching question constraint");
+        match constraint {
+            AnswerConstraint::Enum(allowed) => {
+                assert!(allowed.contains("i"));
+                assert!(allowed.contains("ii"));
+                assert!(allowed.contains("iii"));
+                assert!(!allowed.contains("heading-a"));
+            }
+            other => panic!("expected enum constraint, found {other:?}"),
+        }
     }
 
     #[test]

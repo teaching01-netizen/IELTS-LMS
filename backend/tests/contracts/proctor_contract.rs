@@ -14,7 +14,11 @@ use tokio_tungstenite::connect_async;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use ielts_backend_api::{router::build_router, state::AppState};
+use ielts_backend_api::{
+    router::build_router,
+    runtime_auto_advance::spawn_runtime_auto_advance,
+    state::AppState,
+};
 use ielts_backend_application::{
     builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
 };
@@ -618,6 +622,407 @@ async fn websocket_live_endpoint_accepts_authenticated_connections_with_cookie()
     assert_eq!(update_payload["revision"], 9);
     assert_eq!(update_payload["event"], "runtime_changed");
 
+    server.abort();
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_live_emits_runtime_command_events() {
+    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let auth = create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "admin@example.com",
+        "Admin",
+    )
+    .await;
+
+    let state = AppState::with_pool(AppConfig::default(), database.pool().clone());
+    let app = build_router(state);
+    let http_app = app.clone();
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test listener");
+    let address = listener.local_addr().expect("listener address");
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("serve websocket test app");
+    });
+
+    let ws_request = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "ws://{address}/api/v1/ws/live?scheduleId={}",
+            schedule.id
+        ))
+        .header("Host", format!("{address}"))
+        .header("Cookie", format!("__Host-session={}", auth.session_token))
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .body(())
+        .expect("build websocket request");
+
+    let (mut socket, _) = connect_async(ws_request)
+        .await
+        .expect("connect websocket route with auth");
+
+    let first_message = socket
+        .next()
+        .await
+        .expect("connected message")
+        .expect("websocket frame");
+    let text = first_message.into_text().expect("text frame");
+    let payload: serde_json::Value = serde_json::from_str(&text).expect("parse handshake payload");
+    assert_eq!(payload["type"], "connected");
+    assert_eq!(payload["scheduleId"], schedule.id);
+
+    let start_response = http_app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!("/api/v1/schedules/{schedule_id}/runtime/commands"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({ "action": "start_runtime" })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(start_response.status(), StatusCode::OK);
+    let start_json = json_body(start_response).await;
+    let expected_revision = start_json["data"]["revision"].as_i64().unwrap();
+
+    let update_message = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        socket.next(),
+    )
+    .await
+    .expect("wait for update message")
+    .expect("update message")
+    .expect("websocket frame");
+    let update_text = update_message.into_text().expect("text frame");
+    let update_payload: serde_json::Value =
+        serde_json::from_str(&update_text).expect("parse update payload");
+
+    assert_eq!(update_payload["kind"], "schedule_runtime");
+    assert_eq!(update_payload["id"], schedule.id);
+    assert_eq!(update_payload["event"], "start_runtime");
+    assert_eq!(update_payload["revision"], expected_revision);
+
+    server.abort();
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_live_emits_attempt_command_events() {
+    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let attempt_id = bootstrap_attempt(database.pool(), schedule_id, "alice").await;
+    let auth = create_authenticated_user(
+        database.pool(),
+        UserRole::Proctor,
+        "proctor@example.com",
+        "Test Proctor",
+    )
+    .await;
+    assign_staff_to_schedule(database.pool(), schedule_id, auth.user_id, "proctor").await;
+
+    let state = AppState::with_pool(AppConfig::default(), database.pool().clone());
+    let app = build_router(state);
+    let http_app = app.clone();
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test listener");
+    let address = listener.local_addr().expect("listener address");
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("serve websocket test app");
+    });
+
+    let ws_request = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "ws://{address}/api/v1/ws/live?scheduleId={}",
+            schedule.id
+        ))
+        .header("Host", format!("{address}"))
+        .header("Cookie", format!("__Host-session={}", auth.session_token))
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .body(())
+        .expect("build websocket request");
+
+    let (mut socket, _) = connect_async(ws_request)
+        .await
+        .expect("connect websocket route with auth");
+
+    let first_message = socket
+        .next()
+        .await
+        .expect("connected message")
+        .expect("websocket frame");
+    let payload: serde_json::Value =
+        serde_json::from_str(&first_message.into_text().expect("text frame"))
+            .expect("parse handshake payload");
+    assert_eq!(payload["type"], "connected");
+    assert_eq!(payload["scheduleId"], schedule.id);
+
+    issue_attempt_command(
+        &http_app,
+        &auth,
+        schedule_id,
+        attempt_id,
+        "warn",
+        json!({ "message": "Look at the camera" }),
+    )
+    .await;
+
+    let update_message = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
+        .await
+        .expect("wait for update message")
+        .expect("update message")
+        .expect("websocket frame");
+    let update_payload: serde_json::Value =
+        serde_json::from_str(&update_message.into_text().expect("text frame"))
+            .expect("parse update payload");
+
+    assert_eq!(update_payload["kind"], "schedule_roster");
+    assert_eq!(update_payload["id"], schedule.id);
+    assert_eq!(update_payload["event"], "attempt_changed");
+
+    server.abort();
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_live_emits_attempt_scoped_events_when_subscribed_by_attempt_id() {
+    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let attempt_id = bootstrap_attempt(database.pool(), schedule_id, "alice").await;
+    let auth = create_authenticated_user(
+        database.pool(),
+        UserRole::Proctor,
+        "proctor@example.com",
+        "Test Proctor",
+    )
+    .await;
+    assign_staff_to_schedule(database.pool(), schedule_id, auth.user_id, "proctor").await;
+
+    let state = AppState::with_pool(AppConfig::default(), database.pool().clone());
+    let app = build_router(state);
+    let http_app = app.clone();
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test listener");
+    let address = listener.local_addr().expect("listener address");
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("serve websocket test app");
+    });
+
+    let ws_request = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "ws://{address}/api/v1/ws/live?attemptId={}",
+            attempt_id
+        ))
+        .header("Host", format!("{address}"))
+        .header("Cookie", format!("__Host-session={}", auth.session_token))
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .body(())
+        .expect("build websocket request");
+
+    let (mut socket, _) = connect_async(ws_request)
+        .await
+        .expect("connect websocket route with auth");
+
+    // connected
+    let _ = socket
+        .next()
+        .await
+        .expect("connected message")
+        .expect("websocket frame");
+
+    issue_attempt_command(
+        &http_app,
+        &auth,
+        schedule_id,
+        attempt_id,
+        "warn",
+        json!({ "message": "Look at the camera" }),
+    )
+    .await;
+
+    let update_message = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
+        .await
+        .expect("wait for update message")
+        .expect("update message")
+        .expect("websocket frame");
+    let update_payload: serde_json::Value =
+        serde_json::from_str(&update_message.into_text().expect("text frame"))
+            .expect("parse update payload");
+
+    assert_eq!(update_payload["kind"], "attempt");
+    assert_eq!(update_payload["id"], attempt_id.to_string());
+    assert_eq!(update_payload["event"], "attempt_changed");
+
+    server.abort();
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn runtime_auto_advance_completes_expired_section_and_emits_event() {
+    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let auth = create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "admin@example.com",
+        "Admin",
+    )
+    .await;
+
+    let state = AppState::with_pool(
+        AppConfig {
+            runtime_auto_advance_tick_ms: 50,
+            ..AppConfig::default()
+        },
+        database.pool().clone(),
+    );
+    let auto_advance_task =
+        spawn_runtime_auto_advance(state.clone()).expect("auto-advance task should start");
+    let app = build_router(state);
+    let http_app = app.clone();
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test listener");
+    let address = listener.local_addr().expect("listener address");
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("serve websocket test app");
+    });
+
+    let ws_request = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "ws://{address}/api/v1/ws/live?scheduleId={}",
+            schedule.id
+        ))
+        .header("Host", format!("{address}"))
+        .header("Cookie", format!("__Host-session={}", auth.session_token))
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .body(())
+        .expect("build websocket request");
+
+    let (mut socket, _) = connect_async(ws_request)
+        .await
+        .expect("connect websocket route with auth");
+
+    let first_message = socket
+        .next()
+        .await
+        .expect("connected message")
+        .expect("websocket frame");
+    let payload: serde_json::Value =
+        serde_json::from_str(&first_message.into_text().expect("text frame"))
+            .expect("parse handshake payload");
+    assert_eq!(payload["type"], "connected");
+    assert_eq!(payload["scheduleId"], schedule.id);
+
+    let start_response = http_app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!("/api/v1/schedules/{schedule_id}/runtime/commands"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({ "action": "start_runtime" })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(start_response.status(), StatusCode::OK);
+
+    let (runtime_id, active_section_key): (String, Option<String>) = sqlx::query_as(
+        "SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ?",
+    )
+    .bind(schedule.id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .expect("load runtime row");
+    let active_section_key = active_section_key.expect("active section key");
+
+    sqlx::query(
+        r#"
+        UPDATE exam_session_runtime_sections
+        SET planned_duration_minutes = 0
+        WHERE runtime_id = ? AND section_key = ?
+        "#,
+    )
+    .bind(&runtime_id)
+    .bind(&active_section_key)
+    .execute(database.pool())
+    .await
+    .expect("shorten active section");
+
+    let mut saw_auto_advance = false;
+    for _ in 0..10 {
+        let update_message = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
+            .await
+            .expect("wait for websocket message")
+            .expect("websocket message")
+            .expect("websocket frame");
+        let update_payload: serde_json::Value =
+            serde_json::from_str(&update_message.into_text().expect("text frame"))
+                .expect("parse update payload");
+
+        if update_payload.get("type").and_then(|v| v.as_str()) == Some("connected") {
+            continue;
+        }
+        if update_payload.get("event").and_then(|v| v.as_str()) != Some("auto_advance_section") {
+            continue;
+        }
+
+        assert_eq!(update_payload["kind"], "schedule_runtime");
+        assert_eq!(update_payload["id"], schedule.id);
+        saw_auto_advance = true;
+        break;
+    }
+    assert!(saw_auto_advance, "expected auto_advance_section websocket event");
+
+    let new_active_section: Option<String> = sqlx::query_scalar(
+        "SELECT active_section_key FROM exam_session_runtimes WHERE schedule_id = ?",
+    )
+    .bind(schedule.id.to_string())
+    .fetch_optional(database.pool())
+    .await
+    .expect("load runtime active section");
+    assert_ne!(new_active_section.as_deref(), Some(active_section_key.as_str()));
+
+    auto_advance_task.abort();
     server.abort();
     database.shutdown().await;
 }

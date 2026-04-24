@@ -13,7 +13,7 @@ use ielts_backend_api::{live_updates::LiveUpdateHub, router::build_router, state
 use ielts_backend_application::builder::BuilderService;
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::exam::{
-    CreateExamRequest, ExamEntity, ExamType, SaveDraftRequest, Visibility,
+    CreateExamRequest, ExamEntity, ExamType, PublishExamRequest, SaveDraftRequest, Visibility,
 };
 use ielts_backend_infrastructure::{
     actor_context::{ActorContext, ActorRole},
@@ -429,6 +429,79 @@ async fn get_validation_reports_publish_readiness_for_the_current_draft() {
     assert_eq!(json["data"]["draftVersionId"], saved_version.id.to_string());
     assert_eq!(json["data"]["canPublish"], true);
     assert_eq!(json["data"]["errors"], json!([]));
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn publish_revalidates_the_current_draft_before_marking_it_published() {
+    let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
+    let seeded = seed_exam(database.pool()).await;
+    let auth = mysql::create_authenticated_user(
+        database.pool(),
+        UserRole::Builder,
+        "builder@example.com",
+        "Builder",
+    )
+    .await;
+    let service = BuilderService::new(database.pool().clone());
+
+    service
+        .save_draft(
+            &contract_actor(),
+            seeded.id.clone(),
+            SaveDraftRequest {
+                content_snapshot: json!(null),
+                config_snapshot: json!(null),
+                revision: seeded.revision,
+            },
+        )
+        .await
+        .expect("save invalid draft");
+
+    let exam_after_draft = service
+        .get_exam(&contract_actor(), seeded.id.clone())
+        .await
+        .expect("exam after invalid draft");
+    let app = build_router(app_state(database.pool().clone()));
+
+    let response = app
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!("/api/v1/exams/{}/publish", seeded.id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&PublishExamRequest {
+                        publish_notes: Some("must not publish invalid latest draft".to_owned()),
+                        revision: exam_after_draft.revision,
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["success"], false);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .expect("validation error message")
+            .contains("not ready for publication")
+    );
+
+    let exam_after_publish_attempt = service
+        .get_exam(&contract_actor(), seeded.id.clone())
+        .await
+        .expect("exam after rejected publish");
+    assert_eq!(exam_after_publish_attempt.status, "draft");
+    assert!(exam_after_publish_attempt.current_published_version_id.is_none());
 
     database.shutdown().await;
 }

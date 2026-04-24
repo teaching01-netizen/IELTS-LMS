@@ -24,7 +24,7 @@ test.describe('Student system compatibility pre-check', () => {
       fullName: 'E2E Candidate',
     });
 
-    const preCheckHeading = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const preCheckHeading = page.getByRole('heading', { name: 'System checking' });
     const answerField = page.getByLabel('Answer for question 1');
 
     await expect
@@ -79,7 +79,7 @@ test.describe('Student system compatibility pre-check', () => {
       fullName: 'E2E Candidate',
     });
 
-    const preCheckHeading = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const preCheckHeading = page.getByRole('heading', { name: 'System checking' });
     const answerField = page.getByLabel('Answer for question 1');
 
     await expect

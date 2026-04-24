@@ -45,6 +45,7 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
   const staffInstructions = (state.config.sections.listening.staffInstructions ?? '').trim();
   const hasAudioSource = Boolean(activePart?.audioUrl);
   const canPlayAudio = audioPlaybackEnabled && hasAudioSource;
+  const shouldShowAudioPanel = audioPlaybackEnabled;
 
   useEffect(() => {
     if (currentQuestionId && questionContainerRef.current) {
@@ -182,84 +183,80 @@ export function StudentListening({ state, answers, onAnswerChange, currentQuesti
             />
           ) : null}
           
-          <div className="w-full bg-gray-50 rounded-xl p-4 md:p-6 border border-gray-200">
-            <h2 className="font-semibold text-gray-800 mb-3 md:mb-4 text-base md:text-lg">Listening Audio Track</h2>
+          {shouldShowAudioPanel ? (
+            <div className="w-full bg-gray-50 rounded-xl p-4 md:p-6 border border-gray-200">
+              <h2 className="font-semibold text-gray-800 mb-3 md:mb-4 text-base md:text-lg">Listening Audio Track</h2>
 
-            {!audioPlaybackEnabled ? (
-              <p className="mb-3 md:mb-4 text-xs md:text-sm text-gray-600">
-                Audio playback has been turned off by staff for this exam.
-              </p>
-            ) : null}
-            
-            <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
-              <button 
-                type="button"
-                onClick={() => void togglePlayback()}
-                disabled={!canPlayAudio}
-                className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 shadow-md flex-shrink-0"
-                aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
-              >
-                {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-1" />}
-              </button>
-              
-              <div className="flex-1">
-                <div
-                  className="h-2 bg-gray-200 rounded-full overflow-hidden relative cursor-pointer"
-                  data-testid="listening-progress-track"
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    seekToPercent((x / rect.width) * 100);
-                  }}
+              <div className="flex items-center gap-3 md:gap-4 mb-3 md:mb-4">
+                <button
+                  type="button"
+                  onClick={() => void togglePlayback()}
+                  disabled={!canPlayAudio}
+                  className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 shadow-md flex-shrink-0"
+                  aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
                 >
-                  <div className="h-full bg-blue-500" style={{ width: `${progress}%` }}></div>
+                  {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-1" />}
+                </button>
+
+                <div className="flex-1">
+                  <div
+                    className="h-2 bg-gray-200 rounded-full overflow-hidden relative cursor-pointer"
+                    data-testid="listening-progress-track"
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const x = e.clientX - rect.left;
+                      seekToPercent((x / rect.width) * 100);
+                    }}
+                  >
+                    <div className="h-full bg-blue-500" style={{ width: `${progress}%` }}></div>
+                  </div>
+                  <div className="flex justify-between mt-2 text-[10px] md:text-xs font-medium text-gray-500 font-mono">
+                    <span>{formatTime(currentSeconds)}</span>
+                    <span>{formatTime(totalSeconds)}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between mt-2 text-[10px] md:text-xs font-medium text-gray-500 font-mono">
-                  <span>{formatTime(currentSeconds)}</span>
-                  <span>{formatTime(totalSeconds)}</span>
+              </div>
+
+              <div className="flex items-center gap-3 md:gap-4 lg:gap-6 text-gray-600 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => adjustCurrentTime(-10)}
+                    className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
+                    title="Rewind 10s"
+                    disabled={!canPlayAudio}
+                    aria-label="Rewind 10 seconds"
+                  >
+                    <SkipBack size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustCurrentTime(10)}
+                    className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
+                    title="Forward 10s"
+                    disabled={!canPlayAudio}
+                    aria-label="Forward 10 seconds"
+                  >
+                    <SkipForward size={14} />
+                  </button>
+                </div>
+                <div className="h-3 md:h-4 w-px bg-gray-300 hidden sm:block"></div>
+                <div className="flex items-center gap-2 flex-1 max-w-[200px] md:max-w-xs">
+                  <Volume2 size={14} />
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={volume}
+                    onChange={(e) => setVolume(Number.parseInt(e.target.value, 10))}
+                    className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    aria-label="Audio volume"
+                    disabled={!canPlayAudio}
+                  />
                 </div>
               </div>
             </div>
-            
-            <div className="flex items-center gap-3 md:gap-4 lg:gap-6 text-gray-600 flex-wrap">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => adjustCurrentTime(-10)}
-                  className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
-                  title="Rewind 10s"
-                  disabled={!canPlayAudio}
-                  aria-label="Rewind 10 seconds"
-                >
-                  <SkipBack size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => adjustCurrentTime(10)}
-                  className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
-                  title="Forward 10s"
-                  disabled={!canPlayAudio}
-                  aria-label="Forward 10 seconds"
-                >
-                  <SkipForward size={14} />
-                </button>
-              </div>
-              <div className="h-3 md:h-4 w-px bg-gray-300 hidden sm:block"></div>
-              <div className="flex items-center gap-2 flex-1 max-w-[200px] md:max-w-xs">
-                <Volume2 size={14} />
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={volume}
-                  onChange={(e) => setVolume(Number.parseInt(e.target.value, 10))}
-                  className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                  aria-label="Audio volume"
-                  disabled={!canPlayAudio}
-                />
-              </div>
-            </div>
-          </div>
+          ) : null}
 
           {activePart.pins.length > 0 && (
             <div className="mt-4 md:mt-6">

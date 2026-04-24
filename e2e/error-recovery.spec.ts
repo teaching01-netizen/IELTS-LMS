@@ -25,7 +25,7 @@ test.describe('Error Recovery', () => {
     await page.reload();
 
     // Verify recovery
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -179,7 +179,7 @@ test.describe('Error Recovery', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -303,7 +303,7 @@ test.describe('Error Recovery', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible) {
       await page.getByRole('button', { name: 'Continue' }).click();
@@ -318,7 +318,7 @@ test.describe('Error Recovery', () => {
     await page.reload();
 
     // Verify recovery
-    const compatibilityCheck2 = page.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck2 = page.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible2 = await compatibilityCheck2.isVisible().catch(() => false);
     if (isCompatibilityCheckVisible2) {
       await page.getByRole('button', { name: 'Continue' }).click();

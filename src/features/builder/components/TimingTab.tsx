@@ -478,8 +478,8 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
         <div className="space-y-4 bg-white border border-gray-100 p-4 rounded-xl shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-semibold text-gray-900">Auto-submit on time up</p>
-              <p className="text-[10px] text-gray-500">Automatically move to the next section or finish the exam</p>
+              <p className="text-sm font-semibold text-gray-900">Auto-advance on time up</p>
+              <p className="text-[10px] text-gray-500">Server automatically advances the cohort when a section timer reaches 0</p>
             </div>
             <input 
               type="checkbox" 

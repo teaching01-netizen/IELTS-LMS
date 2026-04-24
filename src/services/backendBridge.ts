@@ -363,6 +363,7 @@ export function buildCreateSchedulePayload(
 
 export function buildUpdateSchedulePayload(schedule: ExamSchedule, revision: number) {
   return compactObject({
+    publishedVersionId: schedule.publishedVersionId,
     cohortName: schedule.cohortName,
     institution: schedule.institution,
     startTime: schedule.startTime,

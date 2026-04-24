@@ -287,14 +287,61 @@ impl SchedulingService {
             ));
         }
 
+        let requested_version_id = req.published_version_id.clone();
+        let version_changed = requested_version_id
+            .as_deref()
+            .is_some_and(|next| next != existing.published_version_id);
+
+        if version_changed && existing.status != ScheduleStatus::Scheduled {
+            return Err(SchedulingError::Validation(
+                "Cannot change published version for a non-scheduled session.".to_owned(),
+            ));
+        }
+
+        let next_start_time = req.start_time.unwrap_or(existing.start_time);
+        let next_end_time = req.end_time.unwrap_or(existing.end_time);
+
+        let time_window_changed =
+            req.start_time.is_some() || req.end_time.is_some();
+
+        let (published_version_id_update, planned_duration_minutes_update) = if version_changed {
+            let next_version_id = requested_version_id
+                .clone()
+                .ok_or_else(|| SchedulingError::Validation("Missing publishedVersionId".to_owned()))?;
+            let version = self.load_version_context(next_version_id.clone()).await?;
+
+            if version.exam_id.to_string() != existing.exam_id {
+                return Err(SchedulingError::Validation(
+                    "Published version does not belong to the schedule exam.".to_owned(),
+                ));
+            }
+
+            let plan = build_section_plan(&version.config_snapshot)?;
+            let planned_duration_minutes = plan_total_minutes(&plan);
+            validate_schedule_window(next_start_time, next_end_time, planned_duration_minutes)?;
+
+            (Some(next_version_id), Some(planned_duration_minutes))
+        } else {
+            if time_window_changed {
+                validate_schedule_window(
+                    next_start_time,
+                    next_end_time,
+                    existing.planned_duration_minutes,
+                )?;
+            }
+            (None, None)
+        };
+
         sqlx::query(
             r#"
             UPDATE exam_schedules
             SET
+                published_version_id = COALESCE(?, published_version_id),
                 cohort_name = COALESCE(?, cohort_name),
                 institution = COALESCE(?, institution),
                 start_time = COALESCE(?, start_time),
                 end_time = COALESCE(?, end_time),
+                planned_duration_minutes = COALESCE(?, planned_duration_minutes),
                 auto_start = COALESCE(?, auto_start),
                 auto_stop = COALESCE(?, auto_stop),
                 status = COALESCE(?, status),
@@ -303,10 +350,12 @@ impl SchedulingService {
             WHERE id = ?
             "#,
         )
+        .bind(published_version_id_update)
         .bind(req.cohort_name)
         .bind(req.institution)
         .bind(req.start_time)
         .bind(req.end_time)
+        .bind(planned_duration_minutes_update)
         .bind(req.auto_start)
         .bind(req.auto_stop)
         .bind(req.status)

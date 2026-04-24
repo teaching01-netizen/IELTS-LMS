@@ -2,8 +2,9 @@ import React from 'react';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
-import { ExamConfig, ExamState, ViolationSeverity } from '../../../types';
-import type { StudentAttempt } from '../../../types/studentAttempt';
+import type { ExamConfig, ExamState, ViolationSeverity } from '../../../../types';
+import type { ExamSessionRuntime } from '../../../../types/domain';
+import type { StudentAttempt } from '../../../../types/studentAttempt';
 
 // Mock ExamConfig
 const mockConfig: ExamConfig = {
@@ -93,8 +94,10 @@ const mockConfig: ExamConfig = {
     requireFullscreen: true,
     tabSwitchRule: 'warn',
     detectSecondaryScreen: true,
+    blockClipboard: true,
     preventAutofill: true,
     preventAutocorrect: true,
+    preventTranslation: true,
     fullscreenAutoReentry: true,
     fullscreenMaxViolations: 3,
     proctoringFlags: {
@@ -182,6 +185,70 @@ const hydratedAttempt: StudentAttempt = {
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
+
+function withCompletedPrecheck(attempt: StudentAttempt): StudentAttempt {
+  return {
+    ...attempt,
+    integrity: {
+      ...attempt.integrity,
+      preCheck: {
+        completedAt: '2026-01-01T00:00:00.000Z',
+        browserFamily: 'chrome',
+        browserVersion: 120,
+        screenDetailsSupported: true,
+        heartbeatReady: true,
+        acknowledgedSafariLimitation: false,
+        checks: [],
+      },
+    },
+  };
+}
+
+function createRuntimeSnapshot(
+  sectionKey: ExamSessionRuntime['currentSectionKey'],
+  remainingSeconds = 120,
+): ExamSessionRuntime {
+  const now = '2026-01-01T00:00:00.000Z';
+
+  return {
+    id: 'runtime-1',
+    scheduleId: hydratedAttempt.scheduleId,
+    examId: hydratedAttempt.examId,
+    examTitle: hydratedAttempt.examTitle,
+    cohortName: 'Cohort A',
+    deliveryMode: 'proctor_start',
+    status: 'live',
+    actualStartAt: now,
+    actualEndAt: null,
+    activeSectionKey: sectionKey,
+    currentSectionKey: sectionKey,
+    currentSectionRemainingSeconds: remainingSeconds,
+    waitingForNextSection: false,
+    isOverrun: false,
+    totalPausedSeconds: 0,
+    sections: [
+      {
+        sectionKey,
+        label: sectionKey ? sectionKey[0].toUpperCase() + sectionKey.slice(1) : 'Section',
+        order: 0,
+        plannedDurationMinutes: 60,
+        gapAfterMinutes: 0,
+        status: 'live',
+        availableAt: now,
+        actualStartAt: now,
+        actualEndAt: null,
+        pausedAt: null,
+        accumulatedPausedSeconds: 0,
+        extensionMinutes: 0,
+        completionReason: undefined,
+        projectedStartAt: now,
+        projectedEndAt: '2026-01-01T01:00:00.000Z',
+      },
+    ],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 describe('StudentRuntimeProvider - Violation Tracking', () => {
   beforeEach(() => {
@@ -473,6 +540,557 @@ describe('StudentRuntimeProvider - Violation Tracking', () => {
       expect(result.current.state.blocking.reason).toBe('offline');
       expect(result.current.state.attemptSyncState).toBe('syncing_reconnect');
     });
+
+    it('keeps the backend runtime section when a runtime-backed attempt snapshot is stale', () => {
+      const attemptSnapshot = withCompletedPrecheck({
+        ...hydratedAttempt,
+        currentModule: 'listening',
+        currentQuestionId: 'listening-q1',
+      });
+      const runtimeSnapshot = createRuntimeSnapshot('reading', 1800);
+      const stateWithQuestions: ExamState = {
+        ...mockExamState,
+        reading: {
+          passages: [
+            {
+              id: 'reading-passage-1',
+              title: 'Reading Passage 1',
+              text: '',
+              blocks: [
+                {
+                  id: 'reading-q1',
+                  type: 'SINGLE_MCQ',
+                  instruction: 'Choose one.',
+                  stem: 'Reading question',
+                  options: [{ id: 'a', text: 'A', isCorrect: true }],
+                },
+              ],
+            },
+          ],
+        },
+        listening: {
+          parts: [
+            {
+              id: 'listening-part-1',
+              title: 'Listening Part 1',
+              audioUrl: '',
+              transcript: '',
+              blocks: [
+                {
+                  id: 'listening-q1',
+                  type: 'SINGLE_MCQ',
+                  instruction: 'Choose one.',
+                  stem: 'Listening question',
+                  options: [{ id: 'a', text: 'A', isCorrect: true }],
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const runtimeBackedWrapper = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={stateWithQuestions}
+          onExit={vi.fn()}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result } = renderHook(() => useStudentRuntime(), { wrapper: runtimeBackedWrapper });
+
+      expect(result.current.state.currentModule).toBe('reading');
+      expect(result.current.state.currentQuestionId).toBe('reading-q1');
+    });
+
+    it('advances immediately to the next section after submitting a runtime-backed module', () => {
+      const attemptSnapshot = withCompletedPrecheck({
+        ...hydratedAttempt,
+        currentModule: 'listening',
+        currentQuestionId: 'listening-q1',
+      });
+      const runtimeSnapshot = createRuntimeSnapshot('listening', 1800);
+      const stateWithQuestions: ExamState = {
+        ...mockExamState,
+        reading: {
+          passages: [
+            {
+              id: 'reading-passage-1',
+              title: 'Reading Passage 1',
+              text: '',
+              blocks: [
+                {
+                  id: 'reading-q1',
+                  type: 'SINGLE_MCQ',
+                  instruction: 'Choose one.',
+                  stem: 'Reading question',
+                  options: [{ id: 'a', text: 'A', isCorrect: true }],
+                },
+              ],
+            },
+          ],
+        },
+        listening: {
+          parts: [
+            {
+              id: 'listening-part-1',
+              title: 'Listening Part 1',
+              audioUrl: '',
+              transcript: '',
+              blocks: [
+                {
+                  id: 'listening-q1',
+                  type: 'SINGLE_MCQ',
+                  instruction: 'Choose one.',
+                  stem: 'Listening question',
+                  options: [{ id: 'a', text: 'A', isCorrect: true }],
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const runtimeBackedWrapper = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={stateWithQuestions}
+          onExit={vi.fn()}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result } = renderHook(() => useStudentRuntime(), { wrapper: runtimeBackedWrapper });
+
+      act(() => {
+        result.current.actions.submitModule();
+      });
+
+      expect(result.current.state.currentModule).toBe('reading');
+      expect(result.current.state.currentQuestionId).toBe('reading-q1');
+      expect(result.current.state.waitingForCohortAdvance).toBe(false);
+    });
+  });
+});
+
+describe('StudentRuntimeProvider - Verified terminal guards', () => {
+  it('does not enter post-exam when runtime is completed but structurally incomplete', () => {
+    const attemptSnapshot: StudentAttempt = {
+      ...hydratedAttempt,
+      integrity: {
+        ...hydratedAttempt.integrity,
+        preCheck: {
+          completedAt: '2026-01-01T00:00:00.000Z',
+          browserFamily: 'chrome',
+          browserVersion: 120,
+          screenDetailsSupported: true,
+          heartbeatReady: true,
+          acknowledgedSafariLimitation: false,
+          checks: [],
+        },
+      },
+    };
+
+    const runtimeSnapshot: ExamSessionRuntime = {
+      id: 'runtime-1',
+      scheduleId: attemptSnapshot.scheduleId,
+      examId: attemptSnapshot.examId,
+      examTitle: attemptSnapshot.examTitle,
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start',
+      status: 'completed',
+      actualStartAt: '2026-01-01T00:00:00.000Z',
+      actualEndAt: null,
+      activeSectionKey: 'writing',
+      currentSectionKey: 'writing',
+      currentSectionRemainingSeconds: 0,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      sections: [
+        {
+          sectionKey: 'writing',
+          label: 'Writing',
+          order: 0,
+          plannedDurationMinutes: 60,
+          gapAfterMinutes: 0,
+          status: 'live',
+          availableAt: '2026-01-01T00:00:00.000Z',
+          actualStartAt: '2026-01-01T00:00:00.000Z',
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 0,
+          completionReason: undefined,
+          projectedStartAt: '2026-01-01T00:00:00.000Z',
+          projectedEndAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T01:00:00.000Z',
+    };
+
+    const runtimeBackedWrapper = ({ children }: { children: React.ReactNode }) => (
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        runtimeBacked
+        runtimeSnapshot={runtimeSnapshot}
+        attemptSnapshot={attemptSnapshot}
+      >
+        {children}
+      </StudentRuntimeProvider>
+    );
+
+    const { result } = renderHook(() => useStudentRuntime(), { wrapper: runtimeBackedWrapper });
+    expect(result.current.state.phase).toBe('exam');
+  });
+
+  it('ignores unverified attempt post-exam phases', () => {
+    const attemptSnapshot: StudentAttempt = {
+      ...hydratedAttempt,
+      phase: 'post-exam',
+      proctorStatus: 'active',
+      submittedAt: null,
+      integrity: {
+        ...hydratedAttempt.integrity,
+        preCheck: {
+          completedAt: '2026-01-01T00:00:00.000Z',
+          browserFamily: 'chrome',
+          browserVersion: 120,
+          screenDetailsSupported: true,
+          heartbeatReady: true,
+          acknowledgedSafariLimitation: false,
+          checks: [],
+        },
+      },
+    };
+
+    const runtimeSnapshot: ExamSessionRuntime = {
+      id: 'runtime-1',
+      scheduleId: attemptSnapshot.scheduleId,
+      examId: attemptSnapshot.examId,
+      examTitle: attemptSnapshot.examTitle,
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start',
+      status: 'live',
+      actualStartAt: '2026-01-01T00:00:00.000Z',
+      actualEndAt: null,
+      activeSectionKey: 'writing',
+      currentSectionKey: 'writing',
+      currentSectionRemainingSeconds: 120,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      sections: [
+        {
+          sectionKey: 'writing',
+          label: 'Writing',
+          order: 0,
+          plannedDurationMinutes: 60,
+          gapAfterMinutes: 0,
+          status: 'live',
+          availableAt: '2026-01-01T00:00:00.000Z',
+          actualStartAt: '2026-01-01T00:00:00.000Z',
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 0,
+          completionReason: undefined,
+          projectedStartAt: '2026-01-01T00:00:00.000Z',
+          projectedEndAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const runtimeBackedWrapper = ({ children }: { children: React.ReactNode }) => (
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        runtimeBacked
+        runtimeSnapshot={runtimeSnapshot}
+        attemptSnapshot={attemptSnapshot}
+      >
+        {children}
+      </StudentRuntimeProvider>
+    );
+
+    const { result } = renderHook(() => useStudentRuntime(), { wrapper: runtimeBackedWrapper });
+    expect(result.current.state.phase).toBe('exam');
+  });
+
+  it('enters post-exam when the attempt has submittedAt even if runtime is live', () => {
+    const attemptSnapshot: StudentAttempt = {
+      ...hydratedAttempt,
+      phase: 'exam',
+      submittedAt: '2026-01-01T00:30:00.000Z',
+      integrity: {
+        ...hydratedAttempt.integrity,
+        preCheck: {
+          completedAt: '2026-01-01T00:00:00.000Z',
+          browserFamily: 'chrome',
+          browserVersion: 120,
+          screenDetailsSupported: true,
+          heartbeatReady: true,
+          acknowledgedSafariLimitation: false,
+          checks: [],
+        },
+      },
+    };
+
+    const runtimeSnapshot: ExamSessionRuntime = {
+      id: 'runtime-1',
+      scheduleId: attemptSnapshot.scheduleId,
+      examId: attemptSnapshot.examId,
+      examTitle: attemptSnapshot.examTitle,
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start',
+      status: 'live',
+      actualStartAt: '2026-01-01T00:00:00.000Z',
+      actualEndAt: null,
+      activeSectionKey: 'writing',
+      currentSectionKey: 'writing',
+      currentSectionRemainingSeconds: 120,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      sections: [
+        {
+          sectionKey: 'writing',
+          label: 'Writing',
+          order: 0,
+          plannedDurationMinutes: 60,
+          gapAfterMinutes: 0,
+          status: 'live',
+          availableAt: '2026-01-01T00:00:00.000Z',
+          actualStartAt: '2026-01-01T00:00:00.000Z',
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 0,
+          completionReason: undefined,
+          projectedStartAt: '2026-01-01T00:00:00.000Z',
+          projectedEndAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const runtimeBackedWrapper = ({ children }: { children: React.ReactNode }) => (
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        runtimeBacked
+        runtimeSnapshot={runtimeSnapshot}
+        attemptSnapshot={attemptSnapshot}
+      >
+        {children}
+      </StudentRuntimeProvider>
+    );
+
+    const { result } = renderHook(() => useStudentRuntime(), { wrapper: runtimeBackedWrapper });
+    expect(result.current.state.phase).toBe('post-exam');
+  });
+});
+
+describe('StudentRuntimeProvider - Runtime timer smoothing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('syncs down when a runtime snapshot reports a lower backend remaining time in the same section', async () => {
+    const attemptSnapshot: StudentAttempt = {
+      ...hydratedAttempt,
+      integrity: {
+        ...hydratedAttempt.integrity,
+        preCheck: {
+          completedAt: '2026-01-01T00:00:00.000Z',
+          browserFamily: 'chrome',
+          browserVersion: 120,
+          screenDetailsSupported: true,
+          heartbeatReady: true,
+          acknowledgedSafariLimitation: false,
+          checks: [],
+        },
+      },
+    };
+
+    let runtimeSnapshot: ExamSessionRuntime = {
+      id: 'runtime-1',
+      scheduleId: attemptSnapshot.scheduleId,
+      examId: attemptSnapshot.examId,
+      examTitle: attemptSnapshot.examTitle,
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start',
+      status: 'live',
+      actualStartAt: '2026-01-01T00:00:00.000Z',
+      actualEndAt: null,
+      activeSectionKey: 'writing',
+      currentSectionKey: 'writing',
+      currentSectionRemainingSeconds: 79,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      sections: [
+        {
+          sectionKey: 'writing',
+          label: 'Writing',
+          order: 0,
+          plannedDurationMinutes: 60,
+          gapAfterMinutes: 0,
+          status: 'live',
+          availableAt: '2026-01-01T00:00:00.000Z',
+          actualStartAt: '2026-01-01T00:00:00.000Z',
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 0,
+          completionReason: undefined,
+          projectedStartAt: '2026-01-01T00:00:00.000Z',
+          projectedEndAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const runtimeBackedWrapper = ({ children }: { children: React.ReactNode }) => (
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        runtimeBacked
+        runtimeSnapshot={runtimeSnapshot}
+        attemptSnapshot={attemptSnapshot}
+      >
+        {children}
+      </StudentRuntimeProvider>
+    );
+
+    const { result, rerender } = renderHook(() => useStudentRuntime(), {
+      wrapper: runtimeBackedWrapper,
+    });
+
+    expect(result.current.state.phase).toBe('exam');
+    expect(result.current.state.displayTimeRemaining).toBe(79);
+
+    await act(async () => {
+      runtimeSnapshot = {
+        ...runtimeSnapshot,
+        currentSectionRemainingSeconds: 74,
+        updatedAt: '2026-01-01T00:00:05.000Z',
+      };
+      rerender();
+    });
+
+    expect(result.current.state.displayTimeRemaining).toBe(74);
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(result.current.state.displayTimeRemaining).toBe(73);
+  });
+
+  it('jumps up immediately when a runtime snapshot increases remaining time (extension)', async () => {
+    const attemptSnapshot: StudentAttempt = {
+      ...hydratedAttempt,
+      integrity: {
+        ...hydratedAttempt.integrity,
+        preCheck: {
+          completedAt: '2026-01-01T00:00:00.000Z',
+          browserFamily: 'chrome',
+          browserVersion: 120,
+          screenDetailsSupported: true,
+          heartbeatReady: true,
+          acknowledgedSafariLimitation: false,
+          checks: [],
+        },
+      },
+    };
+
+    let runtimeSnapshot: ExamSessionRuntime = {
+      id: 'runtime-1',
+      scheduleId: attemptSnapshot.scheduleId,
+      examId: attemptSnapshot.examId,
+      examTitle: attemptSnapshot.examTitle,
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start',
+      status: 'live',
+      actualStartAt: '2026-01-01T00:00:00.000Z',
+      actualEndAt: null,
+      activeSectionKey: 'writing',
+      currentSectionKey: 'writing',
+      currentSectionRemainingSeconds: 79,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      sections: [
+        {
+          sectionKey: 'writing',
+          label: 'Writing',
+          order: 0,
+          plannedDurationMinutes: 60,
+          gapAfterMinutes: 0,
+          status: 'live',
+          availableAt: '2026-01-01T00:00:00.000Z',
+          actualStartAt: '2026-01-01T00:00:00.000Z',
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 0,
+          completionReason: undefined,
+          projectedStartAt: '2026-01-01T00:00:00.000Z',
+          projectedEndAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const runtimeBackedWrapper = ({ children }: { children: React.ReactNode }) => (
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        runtimeBacked
+        runtimeSnapshot={runtimeSnapshot}
+        attemptSnapshot={attemptSnapshot}
+      >
+        {children}
+      </StudentRuntimeProvider>
+    );
+
+    const { result, rerender } = renderHook(() => useStudentRuntime(), {
+      wrapper: runtimeBackedWrapper,
+    });
+
+    expect(result.current.state.phase).toBe('exam');
+    expect(result.current.state.displayTimeRemaining).toBe(79);
+
+    await act(async () => {
+      runtimeSnapshot = {
+        ...runtimeSnapshot,
+        currentSectionRemainingSeconds: 90,
+        updatedAt: '2026-01-01T00:00:01.000Z',
+      };
+      rerender();
+    });
+
+    expect(result.current.state.displayTimeRemaining).toBe(90);
   });
 });
 

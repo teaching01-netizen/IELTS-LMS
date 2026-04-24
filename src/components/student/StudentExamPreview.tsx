@@ -232,8 +232,6 @@ function StudentExamPreviewInner({
       <StudentHeader
         onExit={handleExit}
         timeRemaining={timeRemaining}
-        elapsedTime={0}
-        totalSectionTime={timeRemaining}
         onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
         onOpenNavigator={
           currentModule === 'reading' || currentModule === 'listening'
@@ -342,4 +340,3 @@ export function StudentExamPreview(props: StudentExamPreviewProps) {
     </StudentUIProvider>
   );
 }
-

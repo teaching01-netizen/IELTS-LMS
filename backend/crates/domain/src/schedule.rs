@@ -275,6 +275,7 @@ pub struct CreateScheduleRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateScheduleRequest {
+    pub published_version_id: Option<String>,
     pub cohort_name: Option<String>,
     pub institution: Option<String>,
     pub start_time: Option<DateTime<Utc>>,

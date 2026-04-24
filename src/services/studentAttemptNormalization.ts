@@ -25,6 +25,9 @@ export function deriveProctorStatus(
   }
 
   if (attempt.phase === 'post-exam') {
+    if (attempt.submittedAt) {
+      return 'idle';
+    }
     return 'terminated';
   }
 
@@ -60,6 +63,7 @@ export function normalizeStudentAttempt(attempt: StudentAttempt): StudentAttempt
     writingAnswers: attempt.writingAnswers ?? {},
     flags: attempt.flags ?? {},
     violations: attempt.violations ?? [],
+    submittedAt: attempt.submittedAt ?? null,
     proctorStatus: deriveProctorStatus(attempt),
     proctorNote: attempt.proctorNote ?? null,
     proctorUpdatedAt: attempt.proctorUpdatedAt ?? null,

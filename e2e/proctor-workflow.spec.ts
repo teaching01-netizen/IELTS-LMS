@@ -23,7 +23,7 @@ test.describe('Proctor workflow', () => {
     await studentPage.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
 
     // Compatibility check might appear, handle it
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
 
     if (isCompatibilityCheckVisible) {
@@ -98,7 +98,7 @@ test.describe('Proctor workflow', () => {
     );
 
     // Compatibility check might appear, handle it
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System Compatibility Check' });
+    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
     const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
 
     if (isCompatibilityCheckVisible) {

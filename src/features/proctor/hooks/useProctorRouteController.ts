@@ -1,8 +1,10 @@
 import type { Dispatch, SetStateAction } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAsyncPolling } from '@app/hooks/useAsyncPolling';
+import { useLiveUpdates, type LiveUpdateEvent } from '@app/hooks/useLiveUpdates';
 import {
   backendGet,
+  getAttemptSchedule,
   mapBackendRuntime,
   mapBackendSchedule,
   rememberAttemptSchedule,
@@ -169,6 +171,81 @@ function mapBackendProctorPresence(payload: {
   };
 }
 
+type ProctorSessionDetailPayload = {
+  schedule: Parameters<typeof mapBackendSchedule>[0];
+  runtime: Parameters<typeof mapBackendRuntime>[0];
+  sessions: Array<Parameters<typeof mapBackendSessionSummary>[0]>;
+  alerts: Array<Parameters<typeof mapBackendAlert>[0]>;
+  auditLogs: Array<Parameters<typeof mapBackendAuditLog>[0]>;
+  notes: Array<Parameters<typeof mapBackendNote>[0]>;
+  presence: Array<Parameters<typeof mapBackendProctorPresence>[0]>;
+  violationRules: Array<Parameters<typeof mapBackendViolationRule>[0]>;
+  degradedLiveMode: boolean;
+};
+
+function buildScheduleMetrics(detail: ProctorSessionDetailPayload) {
+  const sessions = detail.sessions.map(mapBackendSessionSummary);
+  const alerts = detail.alerts.map(mapBackendAlert);
+
+  return {
+    studentCount: sessions.length,
+    activeCount: sessions.filter(
+      (session) => session.status === 'active' || session.status === 'warned',
+    ).length,
+    alertCount: alerts.length,
+    violationCount: sessions.reduce(
+      (count, session) => count + session.violations.length,
+      0,
+    ),
+    degradedLiveMode: detail.degradedLiveMode,
+  };
+}
+
+function sortSessionsByLastActivity(left: StudentSession, right: StudentSession) {
+  return new Date(right.lastActivity).getTime() - new Date(left.lastActivity).getTime();
+}
+
+function sortAlertsByTimestamp(left: ProctorAlert, right: ProctorAlert) {
+  return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();
+}
+
+function sortAuditLogsByTimestamp(left: SessionAuditLog, right: SessionAuditLog) {
+  return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();
+}
+
+function replaceItemById<T extends { id: string }>(items: T[], nextItem: T): T[] {
+  const withoutNextItem = items.filter((item) => item.id !== nextItem.id);
+  return [...withoutNextItem, nextItem];
+}
+
+function mergeScheduleScopedItems<T extends { scheduleId: string }>(
+  items: T[],
+  nextItems: T[],
+  scheduleId: string,
+) {
+  return [...items.filter((item) => item.scheduleId !== scheduleId), ...nextItems];
+}
+
+function mergeSessionAuditLogs(
+  items: SessionAuditLog[],
+  nextItems: SessionAuditLog[],
+  scheduleId: string,
+) {
+  return [...items.filter((item) => item.sessionId !== scheduleId), ...nextItems];
+}
+
+function getLiveUpdateScheduleId(event: LiveUpdateEvent): string | null {
+  if (event.kind === 'schedule_runtime' || event.kind === 'schedule_roster' || event.kind === 'schedule_alert') {
+    return event.id;
+  }
+
+  if (event.kind === 'attempt') {
+    return getAttemptSchedule(event.id) ?? null;
+  }
+
+  return null;
+}
+
 export interface ProctorRouteController {
   alerts: ProctorAlert[];
   auditLogs: SessionAuditLog[];
@@ -212,6 +289,7 @@ export function useProctorRouteController(): ProctorRouteController {
   const [error, setError] = useState<string | null>(null);
   const [pollIntervalMs, setPollIntervalMs] = useState(4_000);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const scheduleStudentIdsRef = useRef<Map<string, Set<string>>>(new Map());
 
   const loadMonitoringState = useCallback(async () => {
     const summaries = await backendGet<
@@ -268,18 +346,6 @@ export function useProctorRouteController(): ProctorRouteController {
       detailScheduleIds.add(selectedScheduleId);
     }
 
-    type ProctorSessionDetailPayload = {
-      schedule: Parameters<typeof mapBackendSchedule>[0];
-      runtime: Parameters<typeof mapBackendRuntime>[0];
-      sessions: Array<Parameters<typeof mapBackendSessionSummary>[0]>;
-      alerts: Array<Parameters<typeof mapBackendAlert>[0]>;
-      auditLogs: Array<Parameters<typeof mapBackendAuditLog>[0]>;
-      notes: Array<Parameters<typeof mapBackendNote>[0]>;
-      presence: Array<Parameters<typeof mapBackendProctorPresence>[0]>;
-      violationRules: Array<Parameters<typeof mapBackendViolationRule>[0]>;
-      degradedLiveMode: boolean;
-    };
-
     const detailResults = await Promise.allSettled(
       [...detailScheduleIds].map((scheduleId) =>
         backendGet<ProctorSessionDetailPayload>(`/v1/proctor/sessions/${scheduleId}`),
@@ -291,6 +357,14 @@ export function useProctorRouteController(): ProctorRouteController {
       if (result.status === 'fulfilled') {
         details.push(result.value);
       }
+    }
+
+    for (const detail of details) {
+      const scheduleId = detail.schedule.id;
+      scheduleStudentIdsRef.current.set(
+        scheduleId,
+        new Set(detail.sessions.map((session) => session.studentId)),
+      );
     }
 
     setRuntimeSnapshots((current) => {
@@ -309,19 +383,13 @@ export function useProctorRouteController(): ProctorRouteController {
       details
         .flatMap((detail) => detail.sessions)
         .map(mapBackendSessionSummary)
-        .sort(
-          (left, right) =>
-            new Date(right.lastActivity).getTime() - new Date(left.lastActivity).getTime(),
-        ),
+        .sort(sortSessionsByLastActivity),
     );
     setAlerts(
       details
         .flatMap((detail) => detail.alerts)
         .map(mapBackendAlert)
-        .sort(
-          (left, right) =>
-            new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime(),
-        ),
+        .sort(sortAlertsByTimestamp),
     );
     setAuditLogs(details.flatMap((detail) => detail.auditLogs).map(mapBackendAuditLog));
     setNotes(details.flatMap((detail) => detail.notes).map(mapBackendNote));
@@ -340,6 +408,65 @@ export function useProctorRouteController(): ProctorRouteController {
       throw loadError;
     }
   }, [loadMonitoringState]);
+
+  const refreshSchedule = useCallback(async (scheduleId: string) => {
+    const detail = await backendGet<ProctorSessionDetailPayload>(
+      `/v1/proctor/sessions/${scheduleId}`,
+    );
+    const schedule = mapBackendSchedule(detail.schedule);
+    const runtime = mapBackendRuntime(detail.runtime, schedule);
+    const sessions = detail.sessions.map(mapBackendSessionSummary).sort(sortSessionsByLastActivity);
+    const alerts = detail.alerts.map(mapBackendAlert).sort(sortAlertsByTimestamp);
+    const auditLogs = detail.auditLogs.map(mapBackendAuditLog).sort(sortAuditLogsByTimestamp);
+    const notes = detail.notes.map(mapBackendNote);
+    const violationRules = detail.violationRules.map(mapBackendViolationRule);
+    const studentIds = new Set(sessions.map((session) => session.studentId));
+    const previousStudentIds = scheduleStudentIdsRef.current.get(scheduleId) ?? new Set<string>();
+
+    scheduleStudentIdsRef.current.set(scheduleId, studentIds);
+
+    setSchedules((current) => replaceItemById(current, schedule));
+    setRuntimeSnapshots((current) => {
+      const bySchedule = new Map(current.map((item) => [item.scheduleId, item]));
+      bySchedule.set(scheduleId, {
+        ...runtime,
+        proctorPresence: (detail.presence ?? []).map(mapBackendProctorPresence),
+      });
+      return [...bySchedule.values()];
+    });
+    setSessions((current) => mergeScheduleScopedItems(current, sessions, scheduleId).sort(sortSessionsByLastActivity));
+    setAlerts((current) => {
+      const withoutScheduleAlerts = current.filter(
+        (alert) => !previousStudentIds.has(alert.studentId),
+      );
+      return [...withoutScheduleAlerts, ...alerts].sort(sortAlertsByTimestamp);
+    });
+    setAuditLogs((current) => mergeSessionAuditLogs(current, auditLogs, scheduleId).sort(sortAuditLogsByTimestamp));
+    setNotes((current) => mergeScheduleScopedItems(current, notes, scheduleId));
+    setViolationRules((current) => mergeScheduleScopedItems(current, violationRules, scheduleId));
+    setScheduleMetrics((current) => ({
+      ...current,
+      [scheduleId]: buildScheduleMetrics(detail),
+    }));
+    setError(null);
+  }, []);
+
+  const handleLiveUpdate = useCallback(
+    (event: LiveUpdateEvent) => {
+      const scheduleId = getLiveUpdateScheduleId(event);
+      if (!scheduleId) {
+        void refresh();
+        return;
+      }
+
+      void refreshSchedule(scheduleId).catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : 'Failed to refresh live data');
+      });
+    },
+    [refresh, refreshSchedule],
+  );
+
+  useLiveUpdates({ onEvent: handleLiveUpdate });
 
   useEffect(() => {
     void refresh().finally(() => {

@@ -33,6 +33,8 @@ pub struct AppConfig {
     pub websocket_outbound_queue_cap: usize,
     pub websocket_slow_client_disconnect_ms: u64,
     pub websocket_write_timeout_ms: u64,
+    pub runtime_auto_advance_enabled: bool,
+    pub runtime_auto_advance_tick_ms: u64,
     // Rate limiting configurations
     pub rate_limit_login_per_ip: u32,
     pub rate_limit_login_per_ip_window_secs: u64,
@@ -69,6 +71,9 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn from_env() -> Self {
         let default = Self::default();
+        let global_rate_limit = env::var("RATE_LIMIT_GLOBAL")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok());
 
         Self {
             api_host: env::var("API_HOST").unwrap_or(default.api_host),
@@ -190,95 +195,114 @@ impl AppConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.websocket_write_timeout_ms),
-            // Rate limiting env vars
-            rate_limit_login_per_ip: env::var("RATE_LIMIT_LOGIN_PER_IP")
+            runtime_auto_advance_enabled: env::var("RUNTIME_AUTO_ADVANCE_ENABLED")
+                .ok()
+                .and_then(|value| parse_bool(&value))
+                .unwrap_or(default.runtime_auto_advance_enabled),
+            runtime_auto_advance_tick_ms: env::var("RUNTIME_AUTO_ADVANCE_TICK_MS")
                 .ok()
                 .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_login_per_ip),
+                .unwrap_or(default.runtime_auto_advance_tick_ms),
+            // Rate limiting env vars
+            rate_limit_login_per_ip: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_LOGIN_PER_IP").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_login_per_ip,
+            ),
             rate_limit_login_per_ip_window_secs: env::var("RATE_LIMIT_LOGIN_PER_IP_WINDOW_SECS")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_login_per_ip_window_secs),
-            rate_limit_login_per_account: env::var("RATE_LIMIT_LOGIN_PER_ACCOUNT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_login_per_account),
+            rate_limit_login_per_account: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_LOGIN_PER_ACCOUNT").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_login_per_account,
+            ),
             rate_limit_login_per_account_window_secs: env::var("RATE_LIMIT_LOGIN_PER_ACCOUNT_WINDOW_SECS")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_login_per_account_window_secs),
-            rate_limit_password_reset_per_ip: env::var("RATE_LIMIT_PASSWORD_RESET_PER_IP")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_password_reset_per_ip),
+            rate_limit_password_reset_per_ip: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_PASSWORD_RESET_PER_IP").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_password_reset_per_ip,
+            ),
             rate_limit_password_reset_per_ip_window_secs: env::var("RATE_LIMIT_PASSWORD_RESET_PER_IP_WINDOW_SECS")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_password_reset_per_ip_window_secs),
-            rate_limit_student_entry_per_ip: env::var("RATE_LIMIT_STUDENT_ENTRY_PER_IP")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_student_entry_per_ip),
+            rate_limit_student_entry_per_ip: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_STUDENT_ENTRY_PER_IP").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_student_entry_per_ip,
+            ),
             rate_limit_student_entry_per_ip_window_secs: env::var(
                 "RATE_LIMIT_STUDENT_ENTRY_PER_IP_WINDOW_SECS",
             )
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(default.rate_limit_student_entry_per_ip_window_secs),
-            rate_limit_student_entry_per_schedule: env::var("RATE_LIMIT_STUDENT_ENTRY_PER_SCHEDULE")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_student_entry_per_schedule),
+            rate_limit_student_entry_per_schedule: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_STUDENT_ENTRY_PER_SCHEDULE").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_student_entry_per_schedule,
+            ),
             rate_limit_student_entry_per_schedule_window_secs: env::var(
                 "RATE_LIMIT_STUDENT_ENTRY_PER_SCHEDULE_WINDOW_SECS",
             )
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(default.rate_limit_student_entry_per_schedule_window_secs),
-            rate_limit_student_bootstrap_per_user: env::var("RATE_LIMIT_STUDENT_BOOTSTRAP_PER_USER")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_student_bootstrap_per_user),
+            rate_limit_student_bootstrap_per_user: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_STUDENT_BOOTSTRAP_PER_USER").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_student_bootstrap_per_user,
+            ),
             rate_limit_student_bootstrap_per_user_window_secs: env::var("RATE_LIMIT_STUDENT_BOOTSTRAP_PER_USER_WINDOW_SECS")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_student_bootstrap_per_user_window_secs),
-            rate_limit_mutation_per_attempt: env::var("RATE_LIMIT_MUTATION_PER_ATTEMPT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_mutation_per_attempt),
+            rate_limit_mutation_per_attempt: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_MUTATION_PER_ATTEMPT").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_mutation_per_attempt,
+            ),
             rate_limit_mutation_per_attempt_window_secs: env::var("RATE_LIMIT_MUTATION_PER_ATTEMPT_WINDOW_SECS")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_mutation_per_attempt_window_secs),
-            rate_limit_heartbeat_per_attempt: env::var("RATE_LIMIT_HEARTBEAT_PER_ATTEMPT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_heartbeat_per_attempt),
+            rate_limit_heartbeat_per_attempt: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_HEARTBEAT_PER_ATTEMPT").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_heartbeat_per_attempt,
+            ),
             rate_limit_heartbeat_per_attempt_window_secs: env::var("RATE_LIMIT_HEARTBEAT_PER_ATTEMPT_WINDOW_SECS")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_heartbeat_per_attempt_window_secs),
-            rate_limit_audit_per_attempt: env::var("RATE_LIMIT_AUDIT_PER_ATTEMPT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_audit_per_attempt),
+            rate_limit_audit_per_attempt: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_AUDIT_PER_ATTEMPT").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_audit_per_attempt,
+            ),
             rate_limit_audit_per_attempt_window_secs: env::var("RATE_LIMIT_AUDIT_PER_ATTEMPT_WINDOW_SECS")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_audit_per_attempt_window_secs),
-            rate_limit_submit_per_attempt: env::var("RATE_LIMIT_SUBMIT_PER_ATTEMPT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_submit_per_attempt),
+            rate_limit_submit_per_attempt: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_SUBMIT_PER_ATTEMPT").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_submit_per_attempt,
+            ),
             rate_limit_submit_per_attempt_window_secs: env::var("RATE_LIMIT_SUBMIT_PER_ATTEMPT_WINDOW_SECS")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_submit_per_attempt_window_secs),
-            rate_limit_export_per_user: env::var("RATE_LIMIT_EXPORT_PER_USER")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_export_per_user),
+            rate_limit_export_per_user: resolve_rate_limit_count(
+                env::var("RATE_LIMIT_EXPORT_PER_USER").ok().as_deref(),
+                global_rate_limit,
+                default.rate_limit_export_per_user,
+            ),
             rate_limit_export_per_user_window_secs: env::var("RATE_LIMIT_EXPORT_PER_USER_WINDOW_SECS")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -348,12 +372,14 @@ impl Default for AppConfig {
             session_idle_timeout_staff_minutes: 30,
             session_idle_timeout_student_minutes: 60,
             attempt_token_ttl_minutes: 15,
-            websocket_connection_cap: 200,
+            websocket_connection_cap: 600,
             websocket_connections_per_user_cap: 5,
-            websocket_connections_per_schedule_cap: 100,
+            websocket_connections_per_schedule_cap: 600,
             websocket_outbound_queue_cap: 16,
             websocket_slow_client_disconnect_ms: 200,
             websocket_write_timeout_ms: 200,
+            runtime_auto_advance_enabled: true,
+            runtime_auto_advance_tick_ms: 250,
             // Rate limiting defaults based on spec recommendations
             rate_limit_login_per_ip: 10,
             rate_limit_login_per_ip_window_secs: 60,
@@ -395,13 +421,29 @@ fn parse_bool(value: &str) -> Option<bool> {
     }
 }
 
+fn resolve_rate_limit_count(specific: Option<&str>, global: Option<u32>, default: u32) -> u32 {
+    specific
+        .and_then(|value| value.parse::<u32>().ok())
+        .or(global)
+        .unwrap_or(default)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{resolve_api_port, AppConfig};
+    use super::{resolve_api_port, resolve_rate_limit_count, AppConfig};
 
     #[test]
     fn default_frontend_dist_dir_points_at_the_runtime_image_path() {
         assert_eq!(AppConfig::default().frontend_dist_dir, "/app/frontend/dist");
+    }
+
+    #[test]
+    fn default_websocket_caps_support_six_hundred_student_exams() {
+        let config = AppConfig::default();
+
+        assert_eq!(config.websocket_connection_cap, 600);
+        assert_eq!(config.websocket_connections_per_schedule_cap, 600);
+        assert_eq!(config.websocket_connections_per_user_cap, 5);
     }
 
     #[test]
@@ -412,5 +454,15 @@ mod tests {
     #[test]
     fn api_port_falls_back_to_port_env() {
         assert_eq!(resolve_api_port(None, Some("4300"), 4000), 4300);
+    }
+
+    #[test]
+    fn global_rate_limit_applies_when_specific_limit_is_missing() {
+        assert_eq!(resolve_rate_limit_count(None, Some(500), 30), 500);
+    }
+
+    #[test]
+    fn specific_rate_limit_wins_over_global_limit() {
+        assert_eq!(resolve_rate_limit_count(Some("25"), Some(500), 30), 25);
     }
 }

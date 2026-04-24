@@ -365,6 +365,9 @@ Source: `src/components/student/providers/StudentProctoringProvider.tsx`
   - `terminate`: critical violation → terminate
 - Fullscreen
   - If `requireFullscreen=true`, requests fullscreen when exam starts.
+  - On iPadOS Safari/Chrome, fullscreen is best-effort:
+    - Text input and viewport-settling exits are deferred before enforcement.
+    - Re-entry is retried from user gestures such as tap/touch or the fullscreen overlay action.
   - On exit from fullscreen:
     - If violations exceed `fullscreenMaxViolations` → terminate
     - Else:

@@ -26,6 +26,7 @@ import {
 import { ProtectedInput } from './ProtectedInput';
 import { FormattedText } from './FormattedText';
 import { stripBoldMarkdown } from '../../utils/boldMarkdown';
+import { getImageUrlCandidates } from '../../utils/imageUrl';
 
 interface QuestionRendererProps {
   question:
@@ -61,7 +62,6 @@ export function QuestionRenderer({
   number,
   answer,
   onChange,
-  isFlagged,
   isActive = false,
   slotIds = [],
   currentQuestionId = null,
@@ -72,17 +72,6 @@ export function QuestionRenderer({
   studentId,
 }: QuestionRendererProps) {
   const stringArrayAnswer = Array.isArray(answer) ? answer : [];
-
-  const formatAnswerRule = (rule: 'ONE_WORD' | 'TWO_WORDS' | 'THREE_WORDS'): string => {
-    switch (rule) {
-      case 'ONE_WORD':
-        return 'one word only';
-      case 'TWO_WORDS':
-        return 'no more than two words';
-      case 'THREE_WORDS':
-        return 'no more than three words';
-    }
-  };
 
   const getSlotId = (index: number, fallback: string) => slotIds[index] ?? fallback;
   const getSlotClassName = (slotId: string) => {
@@ -308,12 +297,25 @@ export function QuestionRenderer({
 
   const renderMap = (mapBlock: MapBlock, q: MapQuestion, num: number) => (
     <div className="flex flex-col gap-4">
-      {mapBlock.assetUrl ? (
+      {getImageUrlCandidates(mapBlock.assetUrl ?? '')[0] ? (
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
           <img
-            src={mapBlock.assetUrl}
+            src={getImageUrlCandidates(mapBlock.assetUrl ?? '')[0]}
             alt="Map reference"
             className="h-auto w-full object-contain"
+            referrerPolicy="no-referrer"
+            data-candidate-index={0}
+            onError={(event) => {
+              const candidates = getImageUrlCandidates(mapBlock.assetUrl ?? '');
+              const img = event.currentTarget;
+              const currentIndex = Number(img.dataset['candidateIndex'] ?? '0');
+              const nextIndex = currentIndex + 1;
+              const nextSrc = candidates[nextIndex];
+              if (nextSrc) {
+                img.dataset['candidateIndex'] = String(nextIndex);
+                img.src = nextSrc;
+              }
+            }}
           />
         </div>
       ) : null}
@@ -438,9 +440,6 @@ export function QuestionRenderer({
             </React.Fragment>
           ))}
         </div>
-        <p className="pl-1 text-sm text-gray-500">
-          Limit: {formatAnswerRule(q.answerRule)}
-        </p>
       </div>
     );
   };
@@ -481,9 +480,6 @@ export function QuestionRenderer({
             </React.Fragment>
           ))}
         </div>
-        <p className="pl-1 text-sm text-gray-500">
-          Limit: {formatAnswerRule(noteQuestion.answerRule)}
-        </p>
       </div>
     );
   };
@@ -491,18 +487,26 @@ export function QuestionRenderer({
   const renderDiagramLabeling = (diagramBlock: DiagramLabelingBlock) => (
     <div className="flex flex-col gap-4">
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-        {diagramBlock.imageUrl ? (
+        {getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0] ? (
           <div className="relative">
-            <img src={diagramBlock.imageUrl} alt="Diagram reference" className="h-auto w-full object-contain" />
-            {diagramBlock.labels.map((label, index) => (
-              <span
-                key={label.id}
-                className="absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-blue-600 bg-white text-sm font-bold text-blue-700"
-                style={{ left: `${label.x}%`, top: `${label.y}%` }}
-              >
-                {number + index}
-              </span>
-            ))}
+            <img
+              src={getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0]}
+              alt="Diagram reference"
+              className="h-auto w-full object-contain"
+              referrerPolicy="no-referrer"
+              data-candidate-index={0}
+              onError={(event) => {
+                const candidates = getImageUrlCandidates(diagramBlock.imageUrl ?? '');
+                const img = event.currentTarget;
+                const currentIndex = Number(img.dataset['candidateIndex'] ?? '0');
+                const nextIndex = currentIndex + 1;
+                const nextSrc = candidates[nextIndex];
+                if (nextSrc) {
+                  img.dataset['candidateIndex'] = String(nextIndex);
+                  img.src = nextSrc;
+                }
+              }}
+            />
           </div>
         ) : (
           <div className="p-6 text-center text-sm text-gray-500">Add a diagram to support this question.</div>
@@ -695,14 +699,6 @@ export function QuestionRenderer({
 
   return (
     <div className="relative">
-      {isFlagged ? (
-        <div className="absolute -left-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border border-amber-200 bg-amber-100 shadow-sm">
-          <span className="text-xs text-amber-600" aria-hidden="true">
-            ⚑
-          </span>
-        </div>
-      ) : null}
-
       {block.type === 'TFNG' && question ? renderTFNG(block as TFNGBlock, question as TFNGQuestion) : null}
       {block.type === 'CLOZE' && question ? renderCloze(block as ClozeBlock, question as ClozeQuestion) : null}
       {block.type === 'MATCHING' && question ? renderMatching(block as MatchingBlock, question as MatchingQuestion) : null}

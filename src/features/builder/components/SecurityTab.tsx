@@ -39,18 +39,19 @@ export function SecurityTab({ config, onChange }: SecurityTabProps) {
           <Shield size={16} className="text-blue-500" /> Proctoring Control
         </h3>
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
-          <div className="p-4 border-b border-gray-50 flex items-center justify-between">
+          <label className="p-4 border-b border-gray-50 flex items-center justify-between cursor-pointer">
             <div>
-              <p className="text-sm font-semibold text-gray-900">Require Fullscreen</p>
-              <p className="text-[10px] text-gray-500">Lock the browser window during the exam</p>
+              <p className="text-sm font-semibold text-gray-900">Fullscreen Warning</p>
+              <p className="text-[10px] text-gray-500">Require fullscreen and warn if candidates exit it</p>
             </div>
             <input 
               type="checkbox" 
+              aria-label="Fullscreen Warning"
               checked={config.security.requireFullscreen}
               onChange={(e) => updateConfig('security', { requireFullscreen: e.target.checked })}
               className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
-          </div>
+          </label>
           <div className="p-4 border-b border-gray-50 flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-gray-900">Tab Switch Rule</p>
@@ -144,6 +145,19 @@ export function SecurityTab({ config, onChange }: SecurityTabProps) {
               className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
           </div>
+          <label className="p-4 border-t border-gray-50 flex items-center justify-between cursor-pointer">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Translation Warning</p>
+              <p className="text-[10px] text-gray-500">Block page translation markers and warn when translation is detected</p>
+            </div>
+            <input 
+              type="checkbox" 
+              aria-label="Translation Warning"
+              checked={config.security.preventTranslation !== false}
+              onChange={(e) => updateConfig('security', { preventTranslation: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
         </div>
       </section>
 

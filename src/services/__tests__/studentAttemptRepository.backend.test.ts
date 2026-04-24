@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { studentAttemptRepository } from '../studentAttemptRepository';
+import { mapBackendStudentAttempt, studentAttemptRepository } from '../studentAttemptRepository';
 import type { StudentAttemptMutation } from '../../types/studentAttempt';
 
 const originalFetch = global.fetch;
@@ -205,6 +205,29 @@ describe('studentAttemptRepository backend mode', () => {
 
     const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
     expect(cachedAttempts).toEqual([expect.objectContaining({ id: 'attempt-1' })]);
+  });
+
+  it('hydrates answers from finalSubmission when backend omits answers', () => {
+    const mapped = mapBackendStudentAttempt(
+      buildBackendAttempt({
+        phase: 'post-exam',
+        answers: null,
+        writingAnswers: null,
+        flags: null,
+        finalSubmission: {
+          submissionId: 'submission-1',
+          submittedAt: '2026-01-01T10:00:00.000Z',
+          answers: { q1: 'A' },
+          writingAnswers: { task1: '<p>Draft</p>' },
+          flags: { q1: true },
+        },
+        submittedAt: '2026-01-01T10:00:00.000Z',
+      }),
+    );
+
+    expect(mapped.answers).toEqual({ q1: 'A' });
+    expect(mapped.writingAnswers).toEqual({ task1: '<p>Draft</p>' });
+    expect(mapped.flags).toEqual({ q1: true });
   });
 
   it('flushes pending mutations through the backend before saving the local cache', async () => {
@@ -452,16 +475,15 @@ describe('studentAttemptRepository backend mode', () => {
     expect(calledUrls.some((url) => url.includes('/api/v1/student/sessions/sched-1?'))).toBe(true);
   });
 
-  it('restores clientSessionId from backend attempt when sessionStorage is cleared', async () => {
+  it('keeps the browser-local clientSessionId when backend attempt payload conflicts', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
-    vi.resetModules();
 
-    const module = await import('../studentAttemptRepository');
-    const repo = module.studentAttemptRepository;
+    const clientSessionStorageKey = 'ielts-student-client-session:v1:sched-1:student-sched-1-alice';
+    const localClientSessionId = 'local-client-1';
+    sessionStorage.setItem(clientSessionStorageKey, localClientSessionId);
 
     let lastMutationBatchBody: any = null;
     const fetchMock = vi.fn()
-      // bootstrap
       .mockResolvedValueOnce(
         jsonResponse({
           schedule: buildSchedule(),
@@ -474,7 +496,7 @@ describe('studentAttemptRepository backend mode', () => {
               lastPersistedAt: null,
               pendingMutationCount: 0,
               serverAcceptedThroughSeq: 5,
-              clientSessionId: 'client-restore-1',
+              clientSessionId: 'backend-client-1',
               syncState: 'idle',
             },
           }),
@@ -482,14 +504,6 @@ describe('studentAttemptRepository backend mode', () => {
           degradedLiveMode: false,
         }),
       )
-      // refresh attempt credential after sessionStorage clear
-      .mockResolvedValueOnce(
-        jsonResponse({
-          attempt: buildBackendAttempt(),
-          attemptCredential: buildAttemptCredential('attempt-token-2'),
-        }),
-      )
-      // mutation batch
       .mockImplementationOnce(async (_url: string, init?: RequestInit) => {
         lastMutationBatchBody = init?.body ? JSON.parse(String(init.body)) : null;
         return jsonResponse({
@@ -502,7 +516,7 @@ describe('studentAttemptRepository backend mode', () => {
               lastPersistedAt: '2026-01-01T09:01:00.000Z',
               pendingMutationCount: 0,
               serverAcceptedThroughSeq: 6,
-              clientSessionId: 'client-restore-1',
+              clientSessionId: 'backend-client-1',
               syncState: 'saved',
             },
           }),
@@ -513,7 +527,7 @@ describe('studentAttemptRepository backend mode', () => {
       });
     global.fetch = fetchMock as typeof fetch;
 
-    const attempt = await repo.createAttempt({
+    const attempt = await studentAttemptRepository.createAttempt({
       scheduleId: 'sched-1',
       studentKey: 'student-sched-1-alice',
       examId: 'exam-1',
@@ -524,10 +538,9 @@ describe('studentAttemptRepository backend mode', () => {
       currentModule: 'reading',
     });
 
-    // Simulate browser sessionStorage loss (new tab/crash/reopen).
-    sessionStorage.clear();
+    expect(sessionStorage.getItem(clientSessionStorageKey)).toBe(localClientSessionId);
 
-    await repo.savePendingMutations(attempt.id, [
+    await studentAttemptRepository.savePendingMutations(attempt.id, [
       {
         id: 'mutation-1',
         attemptId: attempt.id,
@@ -537,10 +550,143 @@ describe('studentAttemptRepository backend mode', () => {
         payload: { questionId: 'q1', value: 'A' },
       } satisfies StudentAttemptMutation,
     ]);
-    await repo.saveAttempt(attempt);
+    await studentAttemptRepository.saveAttempt(attempt);
 
-    expect(lastMutationBatchBody.clientSessionId).toBe('client-restore-1');
+    expect(lastMutationBatchBody.clientSessionId).toBe(localClientSessionId);
     expect(lastMutationBatchBody.mutations[0].seq).toBe(6);
+  });
+
+  it('resumes mutation sequences from stored browser watermarks after a module reload', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+
+    const clientSessionStorageKey = 'ielts-student-client-session:v1:sched-1:student-sched-1-alice';
+    const localClientSessionId = 'local-client-2';
+    sessionStorage.setItem(clientSessionStorageKey, localClientSessionId);
+
+    let callCount = 0;
+    let firstMutationBody: any = null;
+    let secondMutationBody: any = null;
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return jsonResponse({
+          schedule: buildSchedule(),
+          version: buildVersion(),
+          runtime: null,
+          attempt: buildBackendAttempt({
+            recovery: {
+              lastRecoveredAt: null,
+              lastLocalMutationAt: null,
+              lastPersistedAt: null,
+              pendingMutationCount: 0,
+              serverAcceptedThroughSeq: 5,
+              clientSessionId: 'backend-client-2',
+              syncState: 'idle',
+            },
+          }),
+          attemptCredential: buildAttemptCredential('attempt-token-1'),
+          degradedLiveMode: false,
+        });
+      }
+
+      const parsedBody = init?.body ? JSON.parse(String(init.body)) : null;
+      if (callCount === 2) {
+        firstMutationBody = parsedBody;
+        return jsonResponse({
+          attempt: buildBackendAttempt({
+            answers: { q1: 'A' },
+            updatedAt: '2026-01-01T09:01:00.000Z',
+            revision: 2,
+            recovery: {
+              lastRecoveredAt: null,
+              lastLocalMutationAt: null,
+              lastPersistedAt: '2026-01-01T09:01:00.000Z',
+              pendingMutationCount: 0,
+              serverAcceptedThroughSeq: 6,
+              clientSessionId: 'backend-client-2',
+              syncState: 'saved',
+            },
+          }),
+          appliedMutationCount: 1,
+          serverAcceptedThroughSeq: 6,
+          refreshedAttemptCredential: null,
+        });
+      }
+
+      if (callCount === 3) {
+        secondMutationBody = parsedBody;
+        return jsonResponse({
+          attempt: buildBackendAttempt({
+            answers: { q1: 'A', q2: 'B' },
+            updatedAt: '2026-01-01T09:02:00.000Z',
+            revision: 3,
+            recovery: {
+              lastRecoveredAt: null,
+              lastLocalMutationAt: null,
+              lastPersistedAt: '2026-01-01T09:02:00.000Z',
+              pendingMutationCount: 0,
+              serverAcceptedThroughSeq: 7,
+              clientSessionId: 'backend-client-2',
+              syncState: 'saved',
+            },
+          }),
+          appliedMutationCount: 1,
+          serverAcceptedThroughSeq: 7,
+          refreshedAttemptCredential: null,
+        });
+      }
+
+      throw new Error(`Unexpected fetch call ${callCount}`);
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const attempt = await studentAttemptRepository.createAttempt({
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      currentModule: 'reading',
+    });
+
+    await studentAttemptRepository.savePendingMutations(attempt.id, [
+      {
+        id: 'mutation-1',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-01T09:00:30.000Z',
+        type: 'answer',
+        payload: { questionId: 'q1', value: 'A' },
+      } satisfies StudentAttemptMutation,
+    ]);
+    await studentAttemptRepository.saveAttempt(attempt);
+
+    expect(firstMutationBody.mutations[0].seq).toBe(6);
+    expect(sessionStorage.getItem(
+      `ielts-student-mutation-watermark:v1:${attempt.id}:${localClientSessionId}`,
+    )).toBe('6');
+
+    vi.resetModules();
+    const reloadedModule = await import('../studentAttemptRepository');
+    const reloadedRepo = reloadedModule.studentAttemptRepository;
+
+    await reloadedRepo.savePendingMutations(attempt.id, [
+      {
+        id: 'mutation-2',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-01T09:01:30.000Z',
+        type: 'answer',
+        payload: { questionId: 'q2', value: 'B' },
+      } satisfies StudentAttemptMutation,
+    ]);
+    await reloadedRepo.saveAttempt(attempt);
+
+    expect(secondMutationBody.clientSessionId).toBe(localClientSessionId);
+    expect(secondMutationBody.mutations[0].seq).toBe(7);
   });
 
   it('starts mutation sequences from the backend recovery watermark', async () => {

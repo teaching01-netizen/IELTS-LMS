@@ -5,6 +5,7 @@ import { getWritingTaskContent } from '../../utils/writingTaskUtils';
 import { MIN_HEIGHTS, CHAR_HEIGHT_PX, WRITING } from '../../constants/uiConstants';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
+import { htmlToPlainText } from '../../utils/htmlText';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 
 interface StudentWritingProps {
@@ -22,15 +23,17 @@ interface StudentWritingProps {
   } | undefined;
   sessionId?: string | undefined;
   studentId?: string | undefined;
+  showSubmitButton?: boolean | undefined;
 }
 
-export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmit, currentQuestionId, onNavigate, timeRemaining, onTimeExpired, security = { preventAutofill: false, preventAutocorrect: false }, sessionId, studentId }: StudentWritingProps) {
+export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmit, currentQuestionId, onNavigate, timeRemaining, onTimeExpired, security = { preventAutofill: false, preventAutocorrect: false }, sessionId, studentId, showSubmitButton = true }: StudentWritingProps) {
   const attemptContext = useOptionalStudentAttempt();
   const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
   const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
   const writingConfig = state.config.sections.writing;
   const [activeTaskId, setActiveTaskId] = useState<string>(currentQuestionId || writingConfig.tasks[0]?.id || 'task1');
   const [leftWidth, setLeftWidth] = useState(50);
+  const [isEditorFocused, setIsEditorFocused] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const lastKeydownRef = useRef<number>(0);
   const previousValueRef = useRef<string>('');
@@ -64,6 +67,8 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
 
   const currentTask = writingConfig.tasks.find(t => t.id === activeTaskId) || writingConfig.tasks[0];
   const currentText = writingAnswers[activeTaskId] || '';
+  const currentPlainText = currentText.replace(/<[^>]*>/g, '').trim();
+  const showEditorPlaceholder = !isEditorFocused && currentPlainText.length === 0;
 
   useEffect(() => {
     if (currentQuestionId && currentQuestionId !== activeTaskId) {
@@ -155,6 +160,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
 
   const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
   const currentPrompt = currentTaskContent?.prompt ?? '';
+  const currentPromptText = htmlToPlainText(currentPrompt);
   const minWords = currentTask.minWords || 150;
   const currentChart = currentTaskContent?.chart;
 
@@ -255,12 +261,12 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
 
 	return (
     <div className="flex flex-col h-full w-full bg-white">
-      <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative border-t border-gray-300">
+      <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden relative border-t border-gray-300">
         <div style={{ width: `${leftWidth}%` }} className="h-full flex flex-col relative min-w-[260px] md:min-w-[280px] lg:min-w-[300px]">
           {/* Timer Bar */}
           <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-500' : isTimeWarning ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
 
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pr-4 md:pr-6 lg:pr-12 pb-20 md:pb-24 font-sans text-sm md:text-base leading-relaxed text-gray-900">
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pr-4 md:pr-6 lg:pr-12 pb-6 md:pb-8 font-sans text-sm md:text-base leading-relaxed text-gray-900">
             <div className="flex items-center justify-between mb-4 md:mb-6">
               <h2 className="text-lg md:text-xl font-bold">{currentTask.label}</h2>
               <div className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest ${
@@ -294,29 +300,8 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
             )}
             
             <div className="prose prose-sm md:prose-lg max-w-none text-gray-900 whitespace-pre-wrap leading-relaxed">
-              {currentPrompt}
+              {currentPromptText}
             </div>
-          </div>
-          
-          <div className="absolute bottom-16 md:bottom-20 left-4 md:left-6 flex gap-2 shadow-md z-20">
-            {writingConfig.tasks.map((task) => (
-              <button 
-                key={task.id}
-                onClick={() => {
-                  setActiveTaskId(task.id);
-                  onNavigate(task.id);
-                }}
-                className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${activeTaskId === task.id ? 'bg-blue-600 text-white shadow-md shadow-blue-100' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'}`}
-              >
-                {task.label}
-              </button>
-            ))}
-            <button
-              onClick={handleSubmitClick}
-              className="px-4 md:px-6 py-1.5 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs md:text-sm font-bold transition-colors shadow-md"
-            >
-              Review & Submit
-            </button>
           </div>
         </div>
 
@@ -332,32 +317,44 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
 
 	        <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
 	          <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
-	            <div
-	              ref={editorRef}
-	              contentEditable
-	              onInput={handleEditorInput}
-                suppressContentEditableWarning
-                onFocus={() => {
-                  editorHasFocusRef.current = true;
-                }}
-                onBlur={() => {
-                  editorHasFocusRef.current = false;
-                  if (editorRef.current) {
-                    const sanitized = sanitizeHtml(editorRef.current.innerHTML);
-                    if (sanitized !== editorRef.current.innerHTML) {
-                      editorRef.current.innerHTML = sanitized;
+              <div className="relative flex-1 w-full">
+                {showEditorPlaceholder && (
+                  <div className="pointer-events-none absolute left-4 top-4 md:left-6 md:top-6 lg:left-8 lg:top-8 text-base md:text-lg leading-relaxed text-gray-400 font-serif select-none">
+                    Write your answer here…
+                  </div>
+                )}
+	              <div
+	                ref={editorRef}
+	                contentEditable
+	                onInput={handleEditorInput}
+                  suppressContentEditableWarning
+                  role="textbox"
+                  aria-multiline="true"
+                  aria-label="Writing response"
+                  onFocus={() => {
+                    editorHasFocusRef.current = true;
+                    setIsEditorFocused(true);
+                  }}
+                  onBlur={() => {
+                    editorHasFocusRef.current = false;
+                    setIsEditorFocused(false);
+                    if (editorRef.current) {
+                      const sanitized = sanitizeHtml(editorRef.current.innerHTML);
+                      if (sanitized !== editorRef.current.innerHTML) {
+                        editorRef.current.innerHTML = sanitized;
+                      }
+                      onWritingChange(activeTaskId, editorRef.current.innerHTML);
                     }
-                    onWritingChange(activeTaskId, editorRef.current.innerHTML);
-                  }
-                }}
-                onPaste={handleEditorPaste}
-                onDrop={handleEditorDrop}
-	              className="flex-1 w-full p-4 md:p-6 lg:p-8 text-base md:text-lg leading-relaxed text-gray-800 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-	              style={{ minHeight: MIN_HEIGHTS.WRITING_EDITOR }}
-	              spellCheck={!security.preventAutocorrect}
-	              autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
-	              autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
-	            />
+                  }}
+                  onPaste={handleEditorPaste}
+                  onDrop={handleEditorDrop}
+	                className="flex-1 w-full p-4 md:p-6 lg:p-8 text-base md:text-lg leading-relaxed text-gray-800 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+	                style={{ minHeight: MIN_HEIGHTS.WRITING_EDITOR }}
+	                spellCheck={!security.preventAutocorrect}
+	                autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
+	                autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
+	              />
+              </div>
             
 	            <div className="border-t border-gray-200 p-3 md:p-5 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs md:text-sm flex-shrink-0">
 	              <div className="flex gap-4 md:gap-8 w-full sm:w-auto">
@@ -378,6 +375,39 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
 
         </div>
       </div>
+
+      <footer
+        className="border-t border-gray-200 bg-white flex flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.03)]"
+        role="contentinfo"
+        aria-label="Writing task navigation and submission"
+      >
+        <div className="flex items-center gap-2 md:gap-3 px-2 md:px-3 lg:px-4 py-2 md:py-2.5 overflow-x-auto w-full">
+          {writingConfig.tasks.map((task) => (
+            <button
+              key={task.id}
+              onClick={() => {
+                setActiveTaskId(task.id);
+                onNavigate(task.id);
+              }}
+              className={`min-w-[72px] md:min-w-[88px] px-3 md:px-4 py-1.5 md:py-2 rounded-sm text-xs md:text-sm font-bold transition-all flex-shrink-0 ${
+                activeTaskId === task.id
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-100'
+                  : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              {task.label}
+            </button>
+          ))}
+          {showSubmitButton ? (
+            <button
+              onClick={handleSubmitClick}
+              className="min-w-[132px] md:min-w-[156px] px-4 md:px-6 py-1.5 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-sm text-xs md:text-sm font-bold transition-colors shadow-md flex-shrink-0"
+            >
+              Review & Submit
+            </button>
+          ) : null}
+        </div>
+      </footer>
 
       {/* Submission Review Modal */}
       {showReviewModal && (

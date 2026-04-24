@@ -201,7 +201,7 @@ export async function openStudentCheckIn(page: Page, scheduleId: string) {
 }
 
 export async function completePreCheckIfPresent(page: Page) {
-  const compatibilityCheck = page.getByRole('heading', { name: 'System Compatibility Check' });
+  const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
   await compatibilityCheck.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
   const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
   if (!isCompatibilityCheckVisible) {
@@ -288,7 +288,7 @@ export async function openStudentSessionWithRetry(
   const targetUrl = `/student/${scheduleId}/${candidateId}`;
   const loadingError = page.getByRole('heading', { name: 'Loading Error' });
   const retryButton = page.getByRole('button', { name: 'Retry' });
-  const preCheckHeading = page.getByRole('heading', { name: 'System Compatibility Check' });
+  const preCheckHeading = page.getByRole('heading', { name: 'System checking' });
   const answerField = page.getByLabel('Answer for question 1');
   const finishButton = page.getByRole('button', { name: 'Finish' });
   const reviewButton = page.getByRole('button', { name: 'Review & Submit' });

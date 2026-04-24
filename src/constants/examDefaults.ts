@@ -380,6 +380,7 @@ const buildDefaultConfig = (
       blockClipboard: true,
       preventAutofill: true,
       preventAutocorrect: true,
+      preventTranslation: true,
       fullscreenAutoReentry: true,
       fullscreenMaxViolations: 3,
       heartbeatIntervalSeconds: 15,

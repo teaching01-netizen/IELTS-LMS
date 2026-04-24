@@ -130,7 +130,19 @@ pub async fn apply_runtime_command(
     principal.require_one_of(&[UserRole::Admin, UserRole::Proctor])?;
     let ctx = principal.actor_context();
     let service = SchedulingService::new(state.db_pool());
+    let event = match req.action {
+        ielts_backend_domain::schedule::RuntimeCommandAction::StartRuntime => "start_runtime",
+        ielts_backend_domain::schedule::RuntimeCommandAction::PauseRuntime => "pause_runtime",
+        ielts_backend_domain::schedule::RuntimeCommandAction::ResumeRuntime => "resume_runtime",
+        ielts_backend_domain::schedule::RuntimeCommandAction::EndRuntime => "complete_runtime",
+    };
     let runtime = service.apply_runtime_command(&ctx, id, req).await?;
+    state.live_updates.publish(ielts_backend_domain::schedule::LiveUpdateEvent {
+        kind: "schedule_runtime".to_owned(),
+        id: id.to_string(),
+        revision: i64::from(runtime.revision),
+        event: event.to_owned(),
+    });
     Ok(ApiResponse::success_with_request_id(runtime, request_id.0))
 }
 

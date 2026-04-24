@@ -4,6 +4,7 @@ import { MoreVertical, Plus, Trash2, GripVertical, Image as ImageIcon, ArrowUp, 
 import { MIN_HEIGHTS } from '../../constants/uiConstants';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
+import { getImageUrlCandidates } from '../../utils/imageUrl';
 
 interface Props {
   block: QuestionBlock;
@@ -20,15 +21,19 @@ export const MapLabelingBlock: React.FC<Props> = ({ block, startNum, endNum, upd
   const [isDragging, setIsDragging] = useState(false);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [imageLoadError, setImageLoadError] = useState(false);
+  const [imageCandidateIndex, setImageCandidateIndex] = useState(0);
   const imageRef = useRef<HTMLDivElement>(null);
   
   const mapBlock = block as MapBlockType;
   const questions = mapBlock.questions || [];
+  const imageCandidates = getImageUrlCandidates(mapBlock.assetUrl ?? '');
+  const resolvedAssetUrl = imageCandidates[imageCandidateIndex] ?? '';
   
   const getFieldError = (field: string) => errors.find(e => e.field.includes(field));
 
   useEffect(() => {
     setImageLoadError(false);
+    setImageCandidateIndex(0);
   }, [mapBlock.assetUrl]);
 
   const addHotspot = (x: number = 50, y: number = 50) => {
@@ -133,21 +138,31 @@ export const MapLabelingBlock: React.FC<Props> = ({ block, startNum, endNum, upd
 	          onMouseEnter={() => setIsDragging(true)}
 	          onMouseLeave={() => setIsDragging(false)}
 	        >
-	          {mapBlock.assetUrl && !imageLoadError ? (
+	          {resolvedAssetUrl && !imageLoadError ? (
 	            <img
-	              src={mapBlock.assetUrl}
+	              src={resolvedAssetUrl}
 	              alt="Map"
 	              className="w-full h-full object-contain pointer-events-none"
-	              onError={() => setImageLoadError(true)}
+	              onError={() => {
+	                setImageCandidateIndex((current) => {
+	                  const next = current + 1;
+	                  if (next < imageCandidates.length) {
+	                    return next;
+	                  }
+	                  setImageLoadError(true);
+	                  return current;
+	                });
+	              }}
+	              referrerPolicy="no-referrer"
 	            />
 	          ) : (
 	            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
 	              <ImageIcon size={32} className="mb-2 text-gray-300" />
 	              <p className="text-sm font-medium text-gray-600">
-	                {mapBlock.assetUrl ? 'Unable to load image' : 'Enter an image URL above'}
+	                {resolvedAssetUrl ? 'Unable to load image' : 'Enter an image URL above'}
 	              </p>
 	              <p className="text-[10px] mt-1 text-gray-400 font-bold uppercase tracking-wider">
-	                {mapBlock.assetUrl ? 'Check the URL and try again' : 'or click to add hotspot'}
+	                {resolvedAssetUrl ? 'Check the URL and try again' : 'or click to add hotspot'}
 	              </p>
 	            </div>
 	          )}

@@ -29,6 +29,7 @@ import type {
   StudentPreCheckResult,
 } from '../../../types/studentAttempt';
 import { useStudentRuntime } from './StudentRuntimeProvider';
+import { isVerifiedTerminalStudentState } from './verifiedTerminalState';
 
 interface StudentAttemptState {
   attempt: StudentAttempt | null;
@@ -345,45 +346,81 @@ export function StudentAttemptProvider({
         }
       }
 
-      const savingAttempt = mergeAttempt(currentAttempt, {
-        recovery: {
-          syncState: 'saving',
-          pendingMutationCount: pendingMutationsRef.current.length,
-        },
-      });
-      syncAttemptState(savingAttempt);
-
-      try {
-        const persistedAt = new Date().toISOString();
-        const persistedAttempt = mergeAttempt(savingAttempt, {
+      while (pendingMutationsRef.current.length > 0) {
+        const attemptBeforeFlush = attemptRef.current ?? currentAttempt;
+        const mutationsBeingFlushed = pendingMutationsRef.current;
+        const flushedMutationIds = new Set(mutationsBeingFlushed.map((mutation) => mutation.id));
+        const savingAttempt = mergeAttempt(attemptBeforeFlush, {
           recovery: {
-            lastPersistedAt: persistedAt,
-            pendingMutationCount: 0,
-            syncState: 'saved',
+            syncState: 'saving',
+            pendingMutationCount: mutationsBeingFlushed.length,
           },
         });
+        syncAttemptState(savingAttempt);
 
-        await studentAttemptRepository.saveAttempt(persistedAttempt);
-        await studentAttemptRepository.clearPendingMutations(persistedAttempt.id);
-        pendingMutationsRef.current = [];
-        setPendingMutationCount(0);
-        const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId(
-          persistedAttempt.scheduleId,
-        );
-        const refreshed =
-          cachedAttempts.find((candidate) => candidate.id === persistedAttempt.id) ?? persistedAttempt;
-        syncAttemptState(refreshed);
-        return true;
-      } catch {
-        const erroredAttempt = mergeAttempt(savingAttempt, {
-          recovery: {
-            syncState: navigator.onLine ? 'error' : 'offline',
-            pendingMutationCount: pendingMutationsRef.current.length,
-          },
-        });
-        syncAttemptState(erroredAttempt);
-        return false;
+        try {
+          const persistedAt = new Date().toISOString();
+          const persistedAttempt = mergeAttempt(savingAttempt, {
+            recovery: {
+              lastPersistedAt: persistedAt,
+              pendingMutationCount: 0,
+              syncState: 'saved',
+            },
+          });
+
+          await studentAttemptRepository.saveAttempt(persistedAttempt);
+
+          const remainingMutations = pendingMutationsRef.current.filter(
+            (mutation) => !flushedMutationIds.has(mutation.id),
+          );
+
+          if (remainingMutations.length > 0) {
+            pendingMutationsRef.current = remainingMutations;
+            setPendingMutationCount(remainingMutations.length);
+            await studentAttemptRepository.savePendingMutations(
+              persistedAttempt.id,
+              remainingMutations,
+            );
+            const stillSavingAttempt = mergeAttempt(attemptRef.current ?? persistedAttempt, {
+              recovery: {
+                lastPersistedAt: persistedAt,
+                pendingMutationCount: remainingMutations.length,
+                syncState: navigator.onLine ? 'saving' : 'offline',
+              },
+            });
+            syncAttemptState(stillSavingAttempt);
+
+            if (!navigator.onLine) {
+              return false;
+            }
+
+            continue;
+          }
+
+          await studentAttemptRepository.clearPendingMutations(persistedAttempt.id);
+          pendingMutationsRef.current = [];
+          setPendingMutationCount(0);
+          const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId(
+            persistedAttempt.scheduleId,
+          );
+          const refreshed =
+            cachedAttempts.find((candidate) => candidate.id === persistedAttempt.id) ?? persistedAttempt;
+          syncAttemptState(refreshed);
+          return true;
+        } catch {
+          const erroredAttempt = mergeAttempt(attemptRef.current ?? savingAttempt, {
+            recovery: {
+              syncState: navigator.onLine ? 'error' : 'offline',
+              pendingMutationCount: pendingMutationsRef.current.length,
+            },
+          });
+          syncAttemptState(erroredAttempt);
+          return false;
+        }
       }
+
+      setRuntimeAttemptSyncState((attemptRef.current ?? currentAttempt).recovery.syncState);
+      return true;
     })();
 
     flushInFlightRef.current = promise;
@@ -425,7 +462,10 @@ export function StudentAttemptProvider({
 
       const mergedAttempt = mergeAttempt(currentAttempt, {
         phase:
-          attemptSnapshot.proctorStatus === 'terminated' || attemptSnapshot.phase === 'post-exam'
+          isVerifiedTerminalStudentState({
+            attempt: attemptSnapshot,
+            runtimeSnapshot: runtimeState.runtimeSnapshot,
+          }) !== 'not_terminal'
             ? 'post-exam'
             : currentAttempt.phase,
         proctorStatus: attemptSnapshot.proctorStatus,
@@ -459,6 +499,77 @@ export function StudentAttemptProvider({
       pendingMutationsRef.current = pendingMutations;
       setPendingMutationCount(pendingMutations.length);
 
+      if (pendingMutations.length > 0) {
+        const replayAnswers: Record<string, StudentAnswerValue> = {};
+        const replayWritingAnswers: Record<string, string> = {};
+        const replayFlags: Record<string, boolean> = {};
+
+        for (const mutation of pendingMutations) {
+          if (mutation.type === 'answer') {
+            const questionId = mutation.payload['questionId'];
+            if (typeof questionId !== 'string' || questionId.trim() === '') {
+              continue;
+            }
+            replayAnswers[questionId] = mutation.payload['value'] as StudentAnswerValue;
+            continue;
+          }
+
+          if (mutation.type === 'writing_answer') {
+            const taskId = mutation.payload['taskId'];
+            if (typeof taskId !== 'string' || taskId.trim() === '') {
+              continue;
+            }
+            const value = mutation.payload['value'];
+            if (typeof value !== 'string') {
+              continue;
+            }
+            replayWritingAnswers[taskId] = value;
+            continue;
+          }
+
+          if (mutation.type === 'flag') {
+            const questionId = mutation.payload['questionId'];
+            if (typeof questionId !== 'string' || questionId.trim() === '') {
+              continue;
+            }
+            const value = mutation.payload['value'];
+            if (typeof value !== 'boolean') {
+              continue;
+            }
+            replayFlags[questionId] = value;
+          }
+        }
+
+        for (const [questionId, value] of Object.entries(replayAnswers)) {
+          runtimeActions.setAnswer(questionId, value as any);
+        }
+
+        for (const [taskId, value] of Object.entries(replayWritingAnswers)) {
+          runtimeActions.setWritingAnswer(taskId, value);
+        }
+
+        for (const [questionId, flagged] of Object.entries(replayFlags)) {
+          if (runtimeState.flags[questionId] === flagged) {
+            continue;
+          }
+          runtimeActions.toggleFlag(questionId);
+        }
+
+        const currentAttempt = attemptRef.current ?? attemptSnapshot;
+        const replayedAttempt = mergeAttempt(currentAttempt, {
+          answers: replayAnswers,
+          writingAnswers: replayWritingAnswers,
+          flags: replayFlags,
+          recovery: {
+            pendingMutationCount: pendingMutations.length,
+            syncState: navigator.onLine ? currentAttempt.recovery.syncState : 'offline',
+          },
+        });
+
+        syncAttemptState(replayedAttempt);
+        observedRef.current = createObservedSnapshot(replayedAttempt);
+      }
+
       if (pendingMutations.length > 0 && navigator.onLine) {
         await flushPending();
       }
@@ -467,7 +578,7 @@ export function StudentAttemptProvider({
     return () => {
       cancelled = true;
     };
-  }, [attemptSnapshot, flushPending, setRuntimeAttemptSyncState]);
+  }, [attemptSnapshot, flushPending, runtimeState.runtimeSnapshot, setRuntimeAttemptSyncState]);
 
   useEffect(() => {
     const currentAttempt = attemptRef.current;
@@ -475,13 +586,24 @@ export function StudentAttemptProvider({
       return;
     }
 
+    const verifiedTerminalState = isVerifiedTerminalStudentState({
+      attempt: currentAttempt,
+      runtimeSnapshot: runtimeState.runtimeSnapshot,
+    });
+    const effectivePhase =
+      runtimeState.runtimeBacked &&
+      runtimeState.phase === 'post-exam' &&
+      verifiedTerminalState === 'not_terminal'
+        ? 'exam'
+        : runtimeState.phase;
+
     const nextObserved: ObservedSnapshot = {
       answers: JSON.stringify(runtimeState.answers),
       writingAnswers: JSON.stringify(runtimeState.writingAnswers),
       flags: JSON.stringify(runtimeState.flags),
       violations: JSON.stringify(runtimeState.violations),
       position: JSON.stringify({
-        phase: runtimeState.phase,
+        phase: effectivePhase,
         currentModule: runtimeState.currentModule,
         currentQuestionId: runtimeState.currentQuestionId,
       }),
@@ -494,7 +616,7 @@ export function StudentAttemptProvider({
     }
 
     if (nextObserved.position !== observedRef.current.position) {
-      objectivePatch.phase = runtimeState.phase;
+      objectivePatch.phase = effectivePhase;
       objectivePatch.currentModule = runtimeState.currentModule;
       objectivePatch.currentQuestionId = runtimeState.currentQuestionId;
     }
@@ -509,7 +631,7 @@ export function StudentAttemptProvider({
     if (nextObserved.position !== observedRef.current.position) {
       void applyPatch(objectivePatch, 'position', 400, {
         changedAreas: ['position'],
-        phase: runtimeState.phase,
+        phase: effectivePhase,
         currentModule: runtimeState.currentModule,
         currentQuestionId: runtimeState.currentQuestionId,
       });
@@ -525,6 +647,8 @@ export function StudentAttemptProvider({
     runtimeState.phase,
     runtimeState.violations,
     runtimeState.writingAnswers,
+    runtimeState.runtimeBacked,
+    runtimeState.runtimeSnapshot,
   ]);
 
   useEffect(() => {

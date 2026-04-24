@@ -55,7 +55,8 @@ make worker
 
 ## Device Support (Student Delivery)
 
-- **Secure mode** (fullscreen and/or secondary-screen detection enabled) is intended for **desktop/laptop** browsers.
-- **Mobile/iPad** devices are supported only in **non-secure mode**, meaning both:
+- **Secure mode** (fullscreen and/or secondary-screen detection enabled) is strongest on **desktop/laptop** browsers.
+- **iPad secure mode** is best-effort: Safari/Chrome on iPadOS may temporarily leave fullscreen while typing or while the viewport settles after scrolling, and the student may need to tap to restore fullscreen.
+- **Other mobile** devices are supported only in **non-secure mode**, meaning both:
   - `config.security.requireFullscreen = false`
   - `config.security.detectSecondaryScreen = false`

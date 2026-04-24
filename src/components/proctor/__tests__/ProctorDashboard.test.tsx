@@ -130,6 +130,7 @@ describe('ProctorDashboard runtime controls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
     expect(screen.getByText(/running past the scheduled window/i)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /end section/i })).not.toBeInTheDocument();
   });
 
   it('opens student detail in a full-page split view with roster rail', () => {

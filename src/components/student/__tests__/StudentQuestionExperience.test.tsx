@@ -149,6 +149,7 @@ describe('student question experience', () => {
 
     expect(screen.queryByText(/not yet implemented/i)).not.toBeInTheDocument();
     expect(screen.getAllByRole('textbox')).toHaveLength(2);
+    expect(screen.queryByText(/limit:/i)).not.toBeInTheDocument();
   });
 
   it('opens the question navigator from the header when the control is available', () => {
@@ -158,8 +159,6 @@ describe('student question experience', () => {
       <StudentHeader
         onExit={() => {}}
         timeRemaining={1200}
-        elapsedTime={0}
-        totalSectionTime={1200}
         isExamActive
         onOpenNavigator={onOpenNavigator}
       />,
@@ -168,6 +167,31 @@ describe('student question experience', () => {
     fireEvent.click(screen.getByRole('button', { name: /open question navigator/i }));
 
     expect(onOpenNavigator).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the header exit control when requested', () => {
+    render(
+      <StudentHeader
+        onExit={() => {}}
+        timeRemaining={1200}
+        isExamActive
+        showExitButton={false}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /exit exam/i })).not.toBeInTheDocument();
+  });
+
+  it('shows the header exit control by default outside active exam mode', () => {
+    render(
+      <StudentHeader
+        onExit={() => {}}
+        timeRemaining={1200}
+        isExamActive={false}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /exit preview/i })).toBeInTheDocument();
   });
 
   it('wires the listening transport controls to the audio element', async () => {
@@ -320,10 +344,6 @@ describe('student question experience', () => {
   });
 
   it('disables the listening audio player when staff turns off audio playback', () => {
-    const play = vi
-      .spyOn(HTMLMediaElement.prototype, 'play')
-      .mockResolvedValue(undefined);
-
     const state: ExamState = {
       title: 'Listening Test',
       type: 'Academic',
@@ -419,13 +439,8 @@ describe('student question experience', () => {
     );
 
     expect(document.querySelector('audio')).toBeNull();
-    expect(screen.getByText(/audio playback has been turned off/i)).toBeInTheDocument();
     expect(screen.getByText(/staff instructions/i)).toBeInTheDocument();
     expect(screen.getByText(/use the invigilator audio system/i)).toBeInTheDocument();
-
-    const playButton = screen.getByRole('button', { name: /play audio/i });
-    expect(playButton).toBeDisabled();
-    fireEvent.click(playButton);
-    expect(play).not.toHaveBeenCalled();
+    expect(screen.queryByText(/listening audio track/i)).toBeNull();
   });
 });

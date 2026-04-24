@@ -1,8 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  countAnsweredQuestions,
-  countQuestionSlots,
-} from '@services/examAdapterService';
+import { countAnsweredQuestions, countQuestionSlots } from '@services/examAdapterService';
 import { AlertTriangle, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AccessibilitySettings } from './AccessibilitySettings';
@@ -18,10 +15,12 @@ import { StudentSpeaking } from './StudentSpeaking';
 import { StudentWriting } from './StudentWriting';
 import { SubmitConfirmation } from './SubmitConfirmation';
 import { WarningOverlay } from './WarningOverlay';
+import { getFullscreenElement, requestStudentFullscreen } from './fullscreen';
 import { shouldOfferTimeExtension } from './timeExtensionPolicy';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
 import { useStudentRuntime } from './providers/StudentRuntimeProvider';
 import { useStudentUI } from './providers/StudentUIProvider';
+import { isRuntimeStructurallyCompleted, isVerifiedTerminalStudentState } from './providers/verifiedTerminalState';
 
 function getBlockingCopy(reason: ReturnType<typeof useStudentRuntime>['state']['blocking']['reason']) {
   switch (reason) {
@@ -48,21 +47,8 @@ function getBlockingCopy(reason: ReturnType<typeof useStudentRuntime>['state']['
         contextLabel: 'Cohort Runtime',
       };
     case 'waiting_for_advance':
-      return {
-        title: 'Waiting for cohort advance',
-        message:
-          'Your section is locked until the cohort advances.',
-        badge: 'Locked',
-        contextLabel: 'Cohort Runtime',
-      };
     case 'waiting_for_runtime':
-      return {
-        title: 'Waiting for cohort advance',
-        message:
-          'The next section will open when the cohort timing allows it.',
-        badge: 'Waiting',
-        contextLabel: 'Cohort Runtime',
-      };
+      return null;
     case 'offline':
       return {
         title: 'Connection lost',
@@ -107,19 +93,11 @@ function formatRuntimeTime(seconds: number) {
   return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
-function getFullscreenElement() {
-  return (
-    document.fullscreenElement ??
-    (
-      document as Document & {
-        webkitFullscreenElement?: Element | null;
-      }
-    ).webkitFullscreenElement ??
-    null
-  );
+interface StudentAppProps {
+  showSubmitControls?: boolean | undefined;
 }
 
-export function StudentApp() {
+export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
   const { state: uiState, actions: uiActions } = useStudentUI();
@@ -127,6 +105,9 @@ export function StudentApp() {
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
   const { setShowTimeExtensionRequest } = uiActions;
   const autoSubmitFingerprintRef = useRef<string | null>(null);
+  const runtimeStateRef = useRef(runtimeState);
+  const moduleSubmitInFlightRef = useRef<Promise<void> | null>(null);
+  const moduleSubmitFingerprintRef = useRef<string | null>(null);
   const priorTimeRemainingRef = useRef<number | null>(null);
   const runtimeFinalSubmitRef = useRef<string | null>(null);
   const finalSubmitInFlightRef = useRef<Promise<void> | null>(null);
@@ -138,6 +119,8 @@ export function StudentApp() {
   const [lastAcknowledgedSecurityViolationId, setLastAcknowledgedSecurityViolationId] =
     useState<string | null>(null);
   const [lastAcknowledgedSecondaryScreenViolationId, setLastAcknowledgedSecondaryScreenViolationId] =
+    useState<string | null>(null);
+  const [lastAcknowledgedTranslationViolationId, setLastAcknowledgedTranslationViolationId] =
     useState<string | null>(null);
   const [fullscreenWarningOpen, setFullscreenWarningOpen] = useState(false);
   const [fullscreenWarningMessage, setFullscreenWarningMessage] = useState(
@@ -165,6 +148,79 @@ export function StudentApp() {
   }, [attemptState.attempt]);
 
   const droppedMutations = attemptState.attempt?.recovery.lastDroppedMutations ?? null;
+  const verifiedTerminalState = useMemo(
+    () =>
+      isVerifiedTerminalStudentState({
+        attempt: attemptState.attempt,
+        runtimeSnapshot: runtimeState.runtimeSnapshot,
+      }),
+    [attemptState.attempt, runtimeState.runtimeSnapshot],
+  );
+  const shouldRenderPostExam =
+    verifiedTerminalState !== 'not_terminal' ||
+    (!runtimeState.runtimeBacked && runtimeState.phase === 'post-exam');
+  const effectivePhase =
+    runtimeState.phase === 'post-exam' && !shouldRenderPostExam ? 'exam' : runtimeState.phase;
+  const runtimeCompletionVerified = isRuntimeStructurallyCompleted(runtimeState.runtimeSnapshot);
+
+  useEffect(() => {
+    runtimeStateRef.current = runtimeState;
+  }, [runtimeState]);
+
+  const flushAndSubmitCurrentModuleWithRetry = useMemo(() => {
+    return async (fingerprint: string) => {
+      if (
+        moduleSubmitInFlightRef.current &&
+        moduleSubmitFingerprintRef.current === fingerprint
+      ) {
+        await moduleSubmitInFlightRef.current;
+        return;
+      }
+
+      const moduleKey = runtimeStateRef.current.currentModule;
+      moduleSubmitFingerprintRef.current = fingerprint;
+
+      const promise = (async () => {
+        let attemptIndex = 0;
+
+        while (true) {
+          const latestState = runtimeStateRef.current;
+          if (latestState.phase !== 'exam') {
+            return;
+          }
+
+          if (latestState.currentModule !== moduleKey) {
+            return;
+          }
+
+          const flushed = await attemptActions.flushPending();
+          if (flushed) {
+            runtimeActions.setBlockingReason(null);
+            runtimeActions.submitModule();
+            return;
+          }
+
+          runtimeActions.setBlockingReason(navigator.onLine ? 'syncing_reconnect' : 'offline');
+
+          const backoffMs = Math.min(30_000, 1_000 * 2 ** attemptIndex);
+          attemptIndex += 1;
+
+          await new Promise<void>((resolve) => {
+            window.setTimeout(() => resolve(), backoffMs);
+          });
+        }
+      })();
+
+      moduleSubmitInFlightRef.current = promise;
+      try {
+        await promise;
+      } finally {
+        if (moduleSubmitInFlightRef.current === promise) {
+          moduleSubmitInFlightRef.current = null;
+        }
+      }
+    };
+  }, [attemptActions, runtimeActions]);
 
   useEffect(() => {
     if (!latestPendingWarning) {
@@ -198,7 +254,7 @@ export function StudentApp() {
   }, []);
 
   const latestTabSwitchViolation = useMemo(() => {
-    if (runtimeState.phase !== 'exam') {
+    if (effectivePhase !== 'exam') {
       return null;
     }
 
@@ -210,7 +266,7 @@ export function StudentApp() {
       (violation) => violation.type === 'TAB_SWITCH',
     );
     return tabSwitchViolations[tabSwitchViolations.length - 1] ?? null;
-  }, [examState.config.security.tabSwitchRule, runtimeState.phase, runtimeState.violations]);
+  }, [effectivePhase, examState.config.security.tabSwitchRule, runtimeState.violations]);
 
   const shouldShowTabSwitchWarning =
     Boolean(latestTabSwitchViolation) &&
@@ -223,7 +279,7 @@ export function StudentApp() {
       : 'medium';
 
   const latestSecondaryScreenViolation = useMemo(() => {
-    if (runtimeState.phase !== 'exam') {
+    if (effectivePhase !== 'exam') {
       return null;
     }
 
@@ -235,15 +291,35 @@ export function StudentApp() {
       (violation) => violation.type === 'SECONDARY_SCREEN',
     );
     return violations[violations.length - 1] ?? null;
-  }, [examState.config.security.detectSecondaryScreen, runtimeState.phase, runtimeState.violations]);
+  }, [effectivePhase, examState.config.security.detectSecondaryScreen, runtimeState.violations]);
 
   const shouldShowSecondaryScreenWarning =
     Boolean(latestSecondaryScreenViolation) &&
     latestSecondaryScreenViolation?.id !== lastAcknowledgedSecondaryScreenViolationId &&
     !fullscreenWarningOpen;
 
+  const latestTranslationViolation = useMemo(() => {
+    if (effectivePhase !== 'exam') {
+      return null;
+    }
+
+    if (examState.config.security.preventTranslation === false) {
+      return null;
+    }
+
+    const violations = runtimeState.violations.filter(
+      (violation) => violation.type === 'TRANSLATION_DETECTED',
+    );
+    return violations[violations.length - 1] ?? null;
+  }, [effectivePhase, examState.config.security.preventTranslation, runtimeState.violations]);
+
+  const shouldShowTranslationWarning =
+    Boolean(latestTranslationViolation) &&
+    latestTranslationViolation?.id !== lastAcknowledgedTranslationViolationId &&
+    !fullscreenWarningOpen;
+
   const latestFullscreenExitViolation = useMemo(() => {
-    if (runtimeState.phase !== 'exam') {
+    if (effectivePhase !== 'exam') {
       return null;
     }
 
@@ -255,7 +331,7 @@ export function StudentApp() {
       (violation) => violation.type === 'FULLSCREEN_EXIT',
     );
     return violations[violations.length - 1] ?? null;
-  }, [examState.config.security.requireFullscreen, runtimeState.phase, runtimeState.violations]);
+  }, [effectivePhase, examState.config.security.requireFullscreen, runtimeState.violations]);
 
   useEffect(() => {
     if (fullscreenGraceTimerRef.current) {
@@ -264,7 +340,7 @@ export function StudentApp() {
     }
 
     if (
-      runtimeState.phase !== 'exam' ||
+      effectivePhase !== 'exam' ||
       !examState.config.progression.showWarnings ||
       !examState.config.security.requireFullscreen
     ) {
@@ -302,11 +378,11 @@ export function StudentApp() {
       setFullscreenWarningOpen(true);
     }, 200);
   }, [
+    effectivePhase,
     examState.config.progression.showWarnings,
     examState.config.security.requireFullscreen,
     isFullscreen,
     latestFullscreenExitViolation?.id,
-    runtimeState.phase,
   ]);
 
   useEffect(() => {
@@ -315,24 +391,45 @@ export function StudentApp() {
     }
   }, [isFullscreen]);
 
+  useEffect(() => {
+    if (effectivePhase !== 'exam') {
+      return;
+    }
+
+    const root = document.documentElement;
+    const body = document.body;
+
+    const updateViewportHeight = () => {
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      root.style.setProperty('--student-viewport-height', `${Math.round(viewportHeight)}px`);
+    };
+
+    updateViewportHeight();
+    root.classList.add('student-exam-active');
+    body.classList.add('student-exam-active');
+    window.addEventListener('resize', updateViewportHeight);
+    window.addEventListener('orientationchange', updateViewportHeight);
+    window.visualViewport?.addEventListener('resize', updateViewportHeight);
+    window.visualViewport?.addEventListener('scroll', updateViewportHeight);
+
+    return () => {
+      root.classList.remove('student-exam-active');
+      body.classList.remove('student-exam-active');
+      root.style.removeProperty('--student-viewport-height');
+      window.removeEventListener('resize', updateViewportHeight);
+      window.removeEventListener('orientationchange', updateViewportHeight);
+      window.visualViewport?.removeEventListener('resize', updateViewportHeight);
+      window.visualViewport?.removeEventListener('scroll', updateViewportHeight);
+    };
+  }, [effectivePhase]);
+
   const requestFullscreenFromOverlay = useMemo(() => {
     return {
       label: 'Return to Fullscreen',
       onClick: () => {
-        try {
-          if (document.documentElement.requestFullscreen) {
-            void document.documentElement.requestFullscreen();
-            return;
-          }
-
-          void (
-            document.documentElement as HTMLElement & {
-              webkitRequestFullscreen?: () => Promise<void> | void;
-            }
-          ).webkitRequestFullscreen?.();
-        } catch {
+        void requestStudentFullscreen().catch(() => {
           // Best-effort only.
-        }
+        });
       },
     };
   }, []);
@@ -349,7 +446,7 @@ export function StudentApp() {
       return;
     }
 
-    if (runtimeState.phase !== 'exam') {
+    if (effectivePhase !== 'exam') {
       autoSubmitFingerprintRef.current = null;
       return;
     }
@@ -367,11 +464,11 @@ export function StudentApp() {
         return;
       }
 
+      const reachedZero = runtimeState.displayTimeRemaining === 0;
       const transitionedToZero =
-        runtimeState.displayTimeRemaining === 0 &&
-        typeof priorTimeRemaining === 'number' &&
-        priorTimeRemaining > 0;
-      if (!transitionedToZero) {
+        reachedZero && typeof priorTimeRemaining === 'number' && priorTimeRemaining > 0;
+      const loadedAtZero = reachedZero && priorTimeRemaining === null;
+      if (!transitionedToZero && !loadedAtZero) {
         return;
       }
     } else if (runtimeState.displayTimeRemaining !== 0) {
@@ -384,30 +481,22 @@ export function StudentApp() {
     }
 
     autoSubmitFingerprintRef.current = fingerprint;
-    void (async () => {
-      const flushed = await attemptActions.flushPending();
-      if (!flushed) {
-        runtimeActions.setBlockingReason(navigator.onLine ? 'syncing_reconnect' : 'offline');
-        return;
-      }
-
-      runtimeActions.setBlockingReason(null);
-      runtimeActions.submitModule();
-    })();
+    void flushAndSubmitCurrentModuleWithRetry(fingerprint);
   }, [
     attemptActions,
+    effectivePhase,
     examState.config.progression.autoSubmit,
+    flushAndSubmitCurrentModuleWithRetry,
     runtimeActions,
     runtimeState.blocking.active,
     runtimeState.currentModule,
     runtimeState.displayTimeRemaining,
-    runtimeState.phase,
     runtimeState.runtimeBacked,
     runtimeState.runtimeStatus,
   ]);
   const shouldShowTimeExtension = shouldOfferTimeExtension({
     config: examState.config,
-    phase: runtimeState.phase,
+    phase: effectivePhase,
     runtimeBacked: runtimeState.runtimeBacked,
     displayTimeRemaining: runtimeState.displayTimeRemaining,
   });
@@ -427,14 +516,8 @@ export function StudentApp() {
 
   const performModuleSubmit = async () => {
     if (runtimeState.runtimeBacked) {
-      const flushed = await attemptActions.flushPending();
-      if (!flushed) {
-        runtimeActions.setBlockingReason(navigator.onLine ? 'syncing_reconnect' : 'offline');
-        return;
-      }
-
-      runtimeActions.setBlockingReason(null);
-      runtimeActions.submitModule();
+      const fingerprint = `manual:${runtimeState.currentModule}`;
+      await flushAndSubmitCurrentModuleWithRetry(fingerprint);
       return;
     }
 
@@ -463,19 +546,14 @@ export function StudentApp() {
       return;
     }
 
-    if (runtimeState.runtimeStatus !== 'completed') {
+    if (runtimeState.runtimeStatus !== 'completed' || !runtimeCompletionVerified) {
       runtimeFinalSubmitRef.current = null;
       finalSubmitInFlightRef.current = null;
       setFinalSubmitStatus('idle');
       return;
     }
 
-    if (runtimeState.phase === 'post-exam') {
-      return;
-    }
-
-    if (attemptState.attempt?.phase === 'post-exam') {
-      setFinalSubmitStatus('idle');
+    if (shouldRenderPostExam) {
       return;
     }
 
@@ -522,11 +600,11 @@ export function StudentApp() {
     });
   }, [
     attemptActions,
-    attemptState.attempt?.phase,
     attemptState.attemptId,
-    runtimeState.phase,
     runtimeState.runtimeBacked,
     runtimeState.runtimeStatus,
+    runtimeCompletionVerified,
+    shouldRenderPostExam,
   ]);
 
   const handleAnswerChange = (questionId: string, answer: Parameters<typeof runtimeActions.setAnswer>[1]) => {
@@ -575,8 +653,8 @@ export function StudentApp() {
   const finalSubmitOverlay =
     runtimeState.runtimeBacked &&
     runtimeState.runtimeStatus === 'completed' &&
-    runtimeState.phase !== 'post-exam' &&
-    attemptState.attempt?.phase !== 'post-exam' &&
+    runtimeCompletionVerified &&
+    !shouldRenderPostExam &&
     finalSubmitStatus !== 'idle' ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
         <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8 text-center">
@@ -605,7 +683,7 @@ export function StudentApp() {
       </div>
     ) : null;
 
-  if (runtimeState.phase === 'pre-check') {
+  if (!shouldRenderPostExam && effectivePhase === 'pre-check') {
     return (
       <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900">
         <a href="#main-content" className="skip-link">
@@ -621,13 +699,12 @@ export function StudentApp() {
             onExit={onExit}
           />
         </main>
-        {blockingOverlay}
         {finalSubmitOverlay}
       </div>
     );
   }
 
-  if (!runtimeState.runtimeBacked && runtimeState.phase === 'lobby') {
+  if (!shouldRenderPostExam && !runtimeState.runtimeBacked && effectivePhase === 'lobby') {
     return (
       <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900">
         <a href="#main-content" className="skip-link">
@@ -641,8 +718,15 @@ export function StudentApp() {
     );
   }
 
-  if (runtimeState.phase === 'post-exam') {
-    const isProctorTerminated = runtimeState.proctorStatus === 'terminated';
+  if (shouldRenderPostExam) {
+    const isProctorTerminated = verifiedTerminalState === 'terminated';
+    const studentInfo = [
+      { label: 'Student Name', value: attemptState.attempt?.candidateName },
+      { label: 'Student ID', value: attemptState.attempt?.candidateId },
+      { label: 'Email', value: attemptState.attempt?.candidateEmail },
+      { label: 'Exam', value: attemptState.attempt?.examTitle ?? examState.title },
+    ].filter((item): item is { label: string; value: string } => Boolean(item.value));
+
     return (
       <div className="flex flex-col items-center justify-center h-full w-full bg-gray-50 p-4 font-sans text-gray-900">
         <a href="#main-content" className="skip-link">
@@ -651,7 +735,7 @@ export function StudentApp() {
         <main id="main-content" role="main" className="flex flex-col items-center justify-center">
           <div className="bg-white p-6 md:p-8 rounded-lg shadow-md max-w-2xl w-full text-center">
             <h1 className="text-3xl font-bold mb-4">
-              {isProctorTerminated ? 'Session terminated' : '🎉 Examination Complete!'}
+              {isProctorTerminated ? 'Session terminated' : 'IELTS Examination Complete!'}
             </h1>
             {isProctorTerminated ? (
               <div className="text-gray-600 mb-8 space-y-3">
@@ -665,6 +749,23 @@ export function StudentApp() {
                 Congratulations! You have completed all modules of the IELTS examination.
               </p>
             )}
+
+            {studentInfo.length > 0 ? (
+              <div className="mb-8 rounded-sm border border-gray-200 bg-gray-50 p-4 text-left">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {studentInfo.map((item) => (
+                    <div key={item.label}>
+                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500">
+                        {item.label}
+                      </p>
+                      <p className="mt-1 break-words text-sm font-semibold text-gray-900">
+                        {item.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <Button onClick={onExit}>Exit Exam Platform</Button>
           </div>
         </main>
@@ -675,10 +776,11 @@ export function StudentApp() {
 
   return (
     <div
-      className={`flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
+      className={`student-exam-shell flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
         uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
       }`}
       style={{
+        height: 'var(--student-viewport-height, 100dvh)',
         fontSize:
           uiState.accessibilitySettings.fontSize === 'small'
             ? '14px'
@@ -708,14 +810,14 @@ export function StudentApp() {
         onExit={onExit}
         testTakerId={attemptState.attempt?.candidateId ?? undefined}
         timeRemaining={runtimeState.displayTimeRemaining}
-        totalSectionTime={examState.config.sections[runtimeState.currentModule]?.duration * 60 || 0}
         onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
         onOpenNavigator={
           runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening'
             ? () => uiActions.setShowNavigator(true)
             : undefined
         }
-        isExamActive={runtimeState.phase === 'exam'}
+        isExamActive={effectivePhase === 'exam'}
+        showExitButton={effectivePhase !== 'exam'}
       />
 
       {droppedMutations ? (
@@ -785,6 +887,8 @@ export function StudentApp() {
             currentQuestionId={runtimeState.currentQuestionId}
             onNavigate={runtimeActions.setCurrentQuestionId}
             timeRemaining={runtimeState.displayTimeRemaining}
+            security={examState.config.security}
+            showSubmitButton={showSubmitControls}
           />
         ) : null}
         {runtimeState.currentModule === 'speaking' ? (
@@ -810,6 +914,7 @@ export function StudentApp() {
           flags={runtimeState.flags}
           onToggleFlag={handleFlagToggle}
           onSubmit={handleModuleSubmit}
+          showSubmitButton={showSubmitControls}
         />
       ) : null}
 
@@ -853,6 +958,23 @@ export function StudentApp() {
           onAcknowledge={() => {
             if (latestTabSwitchViolation) {
               setLastAcknowledgedSecurityViolationId(latestTabSwitchViolation.id);
+            }
+          }}
+        />
+      ) : null}
+
+      {examState.config.progression.showWarnings ? (
+        <WarningOverlay
+          isOpen={shouldShowTranslationWarning}
+          severity="medium"
+          message={
+            latestTranslationViolation?.description ??
+            'Translation tools detected. Please disable translation and continue in the original language.'
+          }
+          showCountdown={false}
+          onAcknowledge={() => {
+            if (latestTranslationViolation) {
+              setLastAcknowledgedTranslationViolationId(latestTranslationViolation.id);
             }
           }}
         />

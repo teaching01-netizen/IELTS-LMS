@@ -44,6 +44,8 @@ function submitForm() {
 
 describe('StudentEntryRoute', () => {
   afterEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
     navigateMock.mockReset();
     studentEntryMock.mockReset();
     vi.unstubAllEnvs();
@@ -79,5 +81,63 @@ describe('StudentEntryRoute', () => {
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith(`/student/${scheduleId}/W250334`);
     });
+  });
+
+  it('auto-resumes an existing attempt for the last wcode instead of forcing check-in again', async () => {
+    const scheduleId = '550e8400-e29b-41d4-a716-446655440001';
+    window.localStorage.setItem(`ielts-student-last-wcode:${scheduleId}`, 'W250334');
+    window.localStorage.setItem(
+      'ielts_student_attempts_v1',
+      JSON.stringify([
+        {
+          id: 'attempt-1',
+          scheduleId,
+          studentKey: `student-${scheduleId}-W250334`,
+          examId: 'exam-1',
+          examTitle: 'Mock Exam',
+          candidateId: 'W250334',
+          candidateName: 'Student One',
+          candidateEmail: 'student@example.com',
+          phase: 'exam',
+          currentModule: 'reading',
+          currentQuestionId: null,
+          answers: {},
+          writingAnswers: {},
+          flags: {},
+          violations: [],
+          integrity: {
+            preCheck: null,
+            deviceFingerprintHash: null,
+            clientSessionId: null,
+            lastDisconnectAt: null,
+            lastReconnectAt: null,
+            lastHeartbeatAt: null,
+            lastHeartbeatStatus: 'idle',
+          },
+          recovery: {
+            lastRecoveredAt: null,
+            lastLocalMutationAt: null,
+            lastPersistedAt: null,
+            lastDroppedMutations: null,
+            pendingMutationCount: 0,
+            serverAcceptedThroughSeq: 0,
+            clientSessionId: null,
+            syncState: 'idle',
+          },
+          createdAt: '2026-04-24T00:00:00.000Z',
+          updatedAt: '2026-04-24T00:00:00.000Z',
+        },
+      ]),
+    );
+
+    renderRoute(scheduleId);
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith(`/student/${scheduleId}/W250334`, {
+        replace: true,
+      });
+    });
+
+    expect(studentEntryMock).not.toHaveBeenCalled();
   });
 });

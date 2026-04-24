@@ -552,6 +552,7 @@ export interface ExamConfig {
     blockClipboard: boolean;
     preventAutofill: boolean;
     preventAutocorrect: boolean;
+    preventTranslation: boolean;
     fullscreenAutoReentry: boolean;
     fullscreenMaxViolations: number;
     heartbeatIntervalSeconds?: number | undefined;

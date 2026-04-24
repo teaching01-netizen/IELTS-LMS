@@ -6,24 +6,22 @@ interface StudentHeaderProps {
   onExit: () => void;
   testTakerId?: string | undefined;
   timeRemaining?: number | undefined;
-  elapsedTime?: number | undefined;
-  totalSectionTime?: number | undefined;
   autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | null | undefined;
   onOpenAccessibility?: (() => void) | undefined;
   onOpenNavigator?: (() => void) | undefined;
   isExamActive?: boolean | undefined;
+  showExitButton?: boolean | undefined;
 }
 
 export function StudentHeader({
   onExit,
   testTakerId,
   timeRemaining,
-  elapsedTime = 0,
-  totalSectionTime = 0,
   autoSaveStatus,
   onOpenAccessibility,
   onOpenNavigator,
   isExamActive = false,
+  showExitButton = true,
 }: StudentHeaderProps) {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   
@@ -63,11 +61,6 @@ export function StudentHeader({
       {timeRemaining !== undefined && (
         <div className="flex items-center gap-2 md:gap-3 lg:gap-4 overflow-x-auto no-scrollbar">
           <div className="flex items-center gap-1.5 md:gap-2 lg:gap-3 flex-shrink-0">
-            <div className="text-right hidden sm:block">
-              <div className="text-[9px] md:text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-0.5">Elapsed</div>
-              <div className="font-mono text-xs md:text-sm font-bold text-gray-700">{formatTime(elapsedTime)}</div>
-            </div>
-            <div className="w-px h-5 md:h-6 lg:h-8 bg-gray-200 hidden sm:block"></div>
             <div className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-bold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border-2 rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? 'bg-red-100 border-red-700 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-900'}`}>
               <Clock size={14} className={timeRemaining < 300 ? 'text-red-900' : 'text-gray-700'} />
               <span
@@ -78,10 +71,6 @@ export function StudentHeader({
               >
                 {formatTime(timeRemaining)}
               </span>
-            </div>
-            <div className="text-right hidden md:block">
-              <div className="text-[9px] md:text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-0.5">Total</div>
-              <div className="font-mono text-xs md:text-sm font-bold text-gray-700">{formatTime(totalSectionTime)}</div>
             </div>
           </div>
         </div>
@@ -141,15 +130,19 @@ export function StudentHeader({
             </button>
           </>
         )}
-        <div className="w-px h-5 md:h-6 lg:h-8 bg-gray-200 mx-0.5 md:mx-1 lg:mx-2 hidden sm:block"></div>
-        <button
-          onClick={handleExit}
-          className="flex items-center gap-1 md:gap-1.5 lg:gap-2 px-1.5 md:px-2 lg:px-3 py-1 md:py-1.5 bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs lg:text-sm rounded-sm flex-shrink-0"
-          aria-label={isExamActive ? "Exit exam" : "Exit preview"}
-        >
-          <Menu size={14} strokeWidth={2.5} />
-          <span className="hidden sm:inline">Exit</span>
-        </button>
+        {showExitButton && (
+          <>
+            <div className="w-px h-5 md:h-6 lg:h-8 bg-gray-200 mx-0.5 md:mx-1 lg:mx-2 hidden sm:block"></div>
+            <button
+              onClick={handleExit}
+              className="flex items-center gap-1 md:gap-1.5 lg:gap-2 px-1.5 md:px-2 lg:px-3 py-1 md:py-1.5 bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs lg:text-sm rounded-sm flex-shrink-0"
+              aria-label={isExamActive ? "Exit exam" : "Exit preview"}
+            >
+              <Menu size={14} strokeWidth={2.5} />
+              <span className="hidden sm:inline">Exit</span>
+            </button>
+          </>
+        )}
       </div>
       
       {showExitConfirm && (

@@ -531,8 +531,8 @@ export function AdminSettings({ config, onChange }: AdminSettingsProps) {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <label className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 cursor-pointer hover:bg-white hover:shadow-md transition-all group">
                       <div>
-                        <p className="text-sm font-bold text-gray-900">Auto-submit Timers</p>
-                        <p className="text-[10px] text-gray-500 font-medium mt-0.5">Move to next section automatically</p>
+                        <p className="text-sm font-bold text-gray-900">Auto-advance on time up</p>
+                        <p className="text-[10px] text-gray-500 font-medium mt-0.5">Server automatically advances the cohort when a section timer reaches 0</p>
                       </div>
                       <input 
                         type="checkbox" 

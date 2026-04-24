@@ -31,11 +31,6 @@ export interface ValidationError {
 export function validateQuestionBlock(block: QuestionBlock): ValidationError[] {
   const errors: ValidationError[] = [];
 
-  // Validate instruction
-  if (!block.instruction || block.instruction.trim() === '') {
-    errors.push({ field: 'instruction', message: 'Instruction is required' });
-  }
-
   // Type-specific validation
   switch (block.type) {
     case 'SINGLE_MCQ':
@@ -162,12 +157,6 @@ function validateDiagramLabeling(block: DiagramLabelingBlock): ValidationError[]
   block.labels?.forEach((label: DiagramLabel, index: number) => {
     if (!label.correctAnswer || label.correctAnswer.trim() === '') {
       errors.push({ field: `label-${index}`, message: `Label ${index + 1} answer is required` });
-    }
-    if (label.x < 0 || label.x > 100) {
-      errors.push({ field: `label-${index}-x`, message: `Label ${index + 1} X position must be between 0 and 100` });
-    }
-    if (label.y < 0 || label.y > 100) {
-      errors.push({ field: `label-${index}-y`, message: `Label ${index + 1} Y position must be between 0 and 100` });
     }
   });
 

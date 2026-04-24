@@ -128,7 +128,7 @@ export function ValidationSummary({
       <div className="flex items-start gap-2 p-3 bg-sky-50 rounded-lg border border-sky-100">
         <Info size={14} className="text-sky-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
         <p className="text-xs text-sky-900">
-          <span className="font-semibold">Next steps:</span> Review content quality, then schedule and publish.
+          <span className="font-semibold">Next steps:</span> Fix validation issues, review content, then schedule access time and publish (or republish) when ready.
         </p>
       </div>
 
