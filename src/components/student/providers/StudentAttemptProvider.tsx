@@ -346,45 +346,81 @@ export function StudentAttemptProvider({
         }
       }
 
-      const savingAttempt = mergeAttempt(currentAttempt, {
-        recovery: {
-          syncState: 'saving',
-          pendingMutationCount: pendingMutationsRef.current.length,
-        },
-      });
-      syncAttemptState(savingAttempt);
-
-      try {
-        const persistedAt = new Date().toISOString();
-        const persistedAttempt = mergeAttempt(savingAttempt, {
+      while (pendingMutationsRef.current.length > 0) {
+        const attemptBeforeFlush = attemptRef.current ?? currentAttempt;
+        const mutationsBeingFlushed = pendingMutationsRef.current;
+        const flushedMutationIds = new Set(mutationsBeingFlushed.map((mutation) => mutation.id));
+        const savingAttempt = mergeAttempt(attemptBeforeFlush, {
           recovery: {
-            lastPersistedAt: persistedAt,
-            pendingMutationCount: 0,
-            syncState: 'saved',
+            syncState: 'saving',
+            pendingMutationCount: mutationsBeingFlushed.length,
           },
         });
+        syncAttemptState(savingAttempt);
 
-        await studentAttemptRepository.saveAttempt(persistedAttempt);
-        await studentAttemptRepository.clearPendingMutations(persistedAttempt.id);
-        pendingMutationsRef.current = [];
-        setPendingMutationCount(0);
-        const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId(
-          persistedAttempt.scheduleId,
-        );
-        const refreshed =
-          cachedAttempts.find((candidate) => candidate.id === persistedAttempt.id) ?? persistedAttempt;
-        syncAttemptState(refreshed);
-        return true;
-      } catch {
-        const erroredAttempt = mergeAttempt(savingAttempt, {
-          recovery: {
-            syncState: navigator.onLine ? 'error' : 'offline',
-            pendingMutationCount: pendingMutationsRef.current.length,
-          },
-        });
-        syncAttemptState(erroredAttempt);
-        return false;
+        try {
+          const persistedAt = new Date().toISOString();
+          const persistedAttempt = mergeAttempt(savingAttempt, {
+            recovery: {
+              lastPersistedAt: persistedAt,
+              pendingMutationCount: 0,
+              syncState: 'saved',
+            },
+          });
+
+          await studentAttemptRepository.saveAttempt(persistedAttempt);
+
+          const remainingMutations = pendingMutationsRef.current.filter(
+            (mutation) => !flushedMutationIds.has(mutation.id),
+          );
+
+          if (remainingMutations.length > 0) {
+            pendingMutationsRef.current = remainingMutations;
+            setPendingMutationCount(remainingMutations.length);
+            await studentAttemptRepository.savePendingMutations(
+              persistedAttempt.id,
+              remainingMutations,
+            );
+            const stillSavingAttempt = mergeAttempt(attemptRef.current ?? persistedAttempt, {
+              recovery: {
+                lastPersistedAt: persistedAt,
+                pendingMutationCount: remainingMutations.length,
+                syncState: navigator.onLine ? 'saving' : 'offline',
+              },
+            });
+            syncAttemptState(stillSavingAttempt);
+
+            if (!navigator.onLine) {
+              return false;
+            }
+
+            continue;
+          }
+
+          await studentAttemptRepository.clearPendingMutations(persistedAttempt.id);
+          pendingMutationsRef.current = [];
+          setPendingMutationCount(0);
+          const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId(
+            persistedAttempt.scheduleId,
+          );
+          const refreshed =
+            cachedAttempts.find((candidate) => candidate.id === persistedAttempt.id) ?? persistedAttempt;
+          syncAttemptState(refreshed);
+          return true;
+        } catch {
+          const erroredAttempt = mergeAttempt(attemptRef.current ?? savingAttempt, {
+            recovery: {
+              syncState: navigator.onLine ? 'error' : 'offline',
+              pendingMutationCount: pendingMutationsRef.current.length,
+            },
+          });
+          syncAttemptState(erroredAttempt);
+          return false;
+        }
       }
+
+      setRuntimeAttemptSyncState((attemptRef.current ?? currentAttempt).recovery.syncState);
+      return true;
     })();
 
     flushInFlightRef.current = promise;

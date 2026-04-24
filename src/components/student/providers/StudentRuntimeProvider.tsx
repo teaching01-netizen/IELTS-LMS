@@ -134,6 +134,7 @@ type RuntimeAction =
       snapshot: StudentAttempt;
       runtimeBacked: boolean;
       runtimeSnapshot: ExamSessionRuntime | null;
+      runtimeFirstQuestionId: string | null;
     }
   | { type: 'set_phase'; phase: ExamPhase }
   | { type: 'set_current_module'; module: ModuleType; firstQuestionId: string | null }
@@ -301,13 +302,16 @@ function createInitialRuntimeState(
     attemptSnapshot?.currentModule ??
     enabledModules[0] ??
     'listening';
+  const firstQuestionId = getFirstQuestionIdForModule(examState, firstModule);
+  const attemptQuestionId =
+    !runtimeBacked || attemptSnapshot?.currentModule === firstModule
+      ? attemptSnapshot?.currentQuestionId ?? null
+      : null;
 
   return {
     phase: getInitialPhase(runtimeBacked, runtimeSnapshot, attemptSnapshot),
     currentModule: firstModule,
-    currentQuestionId:
-      attemptSnapshot?.currentQuestionId ??
-      (runtimeBacked ? getFirstQuestionIdForModule(examState, firstModule) : null),
+    currentQuestionId: attemptQuestionId ?? (runtimeBacked ? firstQuestionId : null),
     timeRemaining: runtimeBacked ? runtimeSnapshot?.currentSectionRemainingSeconds ?? 0 : 0,
     elapsedTime: 0,
     submittedModules: [],
@@ -378,20 +382,8 @@ function runtimeReducer(
               : 'exam';
       const nextQuestionId = moduleChanged ? action.nextQuestionId : state.currentQuestionId;
       const snapshotTimeRemaining = action.snapshot?.currentSectionRemainingSeconds;
-      const resolvedSnapshotTimeRemaining = snapshotTimeRemaining ?? state.timeRemaining;
-      const allowSnapshotDecrease =
-        moduleChanged ||
-        runtimeStatus !== 'live' ||
-        Boolean(action.snapshot?.waitingForNextSection) ||
-        (typeof snapshotTimeRemaining === 'number' && snapshotTimeRemaining <= 0);
       const nextTimeRemaining =
-        allowSnapshotDecrease
-          ? resolvedSnapshotTimeRemaining
-          : snapshotTimeRemaining === undefined
-            ? state.timeRemaining
-            : snapshotTimeRemaining > state.timeRemaining
-              ? snapshotTimeRemaining
-              : state.timeRemaining;
+        typeof snapshotTimeRemaining === 'number' ? snapshotTimeRemaining : state.timeRemaining;
       const nextWaitingForCohortAdvance =
         state.waitingForCohortAdvance && !moduleChanged && !terminalVerified;
 
@@ -455,6 +447,16 @@ function runtimeReducer(
       };
     }
     case 'hydrate_attempt': {
+      const runtimeModule = action.runtimeBacked
+        ? action.runtimeSnapshot?.currentSectionKey ?? null
+        : null;
+      const nextCurrentModule = runtimeModule ?? action.snapshot.currentModule;
+      const moduleChanged = nextCurrentModule !== state.currentModule;
+      const nextCurrentQuestionId = action.runtimeBacked
+        ? moduleChanged
+          ? action.runtimeFirstQuestionId
+          : state.currentQuestionId ?? action.runtimeFirstQuestionId
+        : action.snapshot.currentQuestionId;
       const nextSubmittedAt = state.submittedAt ?? action.snapshot.submittedAt ?? null;
       const terminalVerified =
         action.snapshot.proctorStatus === 'terminated' ||
@@ -473,8 +475,8 @@ function runtimeReducer(
 
       if (
         state.phase === nextPhase &&
-        state.currentModule === action.snapshot.currentModule &&
-        state.currentQuestionId === action.snapshot.currentQuestionId &&
+        state.currentModule === nextCurrentModule &&
+        state.currentQuestionId === nextCurrentQuestionId &&
         JSON.stringify(state.answers) === JSON.stringify(action.snapshot.answers) &&
         JSON.stringify(state.writingAnswers) === JSON.stringify(action.snapshot.writingAnswers) &&
         JSON.stringify(state.flags) === JSON.stringify(action.snapshot.flags) &&
@@ -490,8 +492,8 @@ function runtimeReducer(
       return {
         ...state,
         phase: nextPhase,
-        currentModule: action.snapshot.currentModule,
-        currentQuestionId: action.snapshot.currentQuestionId,
+        currentModule: nextCurrentModule,
+        currentQuestionId: nextCurrentQuestionId,
         answers: action.snapshot.answers,
         writingAnswers: action.snapshot.writingAnswers,
         flags: action.snapshot.flags,
@@ -724,8 +726,11 @@ export function StudentRuntimeProvider({
       snapshot: attemptSnapshot,
       runtimeBacked,
       runtimeSnapshot,
+      runtimeFirstQuestionId: runtimeSnapshot?.currentSectionKey
+        ? getFirstQuestionIdForModule(state, runtimeSnapshot.currentSectionKey)
+        : null,
     });
-  }, [attemptSnapshot, runtimeBacked, runtimeSnapshot, runtimeState.attemptSyncState]);
+  }, [attemptSnapshot, runtimeBacked, runtimeSnapshot, runtimeState.attemptSyncState, state]);
 
   useEffect(() => {
     if (!runtimeBacked) {

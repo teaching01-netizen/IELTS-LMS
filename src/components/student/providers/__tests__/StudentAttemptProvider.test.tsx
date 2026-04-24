@@ -95,6 +95,60 @@ function createAttemptSnapshot(): StudentAttempt {
   };
 }
 
+function createRuntimeSnapshot(currentSectionKey: 'listening' | 'reading' = 'reading'): ExamSessionRuntime {
+  const now = '2026-01-01T00:00:00.000Z';
+
+  return {
+    id: 'runtime-1',
+    scheduleId: 'sched-1',
+    examId: 'exam-1',
+    examTitle: 'Test Exam',
+    cohortName: 'Test Cohort',
+    deliveryMode: 'proctor_start',
+    status: 'live',
+    actualStartAt: now,
+    actualEndAt: null,
+    activeSectionKey: currentSectionKey,
+    currentSectionKey,
+    currentSectionRemainingSeconds: 3000,
+    waitingForNextSection: false,
+    isOverrun: false,
+    totalPausedSeconds: 0,
+    sections: [
+      {
+        sectionKey: 'listening',
+        label: 'Listening',
+        order: 1,
+        plannedDurationMinutes: 30,
+        gapAfterMinutes: 0,
+        status: currentSectionKey === 'listening' ? 'live' : 'completed',
+        availableAt: now,
+        actualStartAt: now,
+        actualEndAt: currentSectionKey === 'listening' ? null : now,
+        pausedAt: null,
+        accumulatedPausedSeconds: 0,
+        extensionMinutes: 0,
+      },
+      {
+        sectionKey: 'reading',
+        label: 'Reading',
+        order: 2,
+        plannedDurationMinutes: 60,
+        gapAfterMinutes: 0,
+        status: currentSectionKey === 'reading' ? 'live' : 'locked',
+        availableAt: currentSectionKey === 'reading' ? now : null,
+        actualStartAt: currentSectionKey === 'reading' ? now : null,
+        actualEndAt: null,
+        pausedAt: null,
+        accumulatedPausedSeconds: 0,
+        extensionMinutes: 0,
+      },
+    ],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 describe('StudentAttemptProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -137,6 +191,27 @@ describe('StudentAttemptProvider', () => {
       <StudentRuntimeProvider
         state={state}
         onExit={vi.fn()}
+        attemptSnapshot={attemptSnapshot}
+      >
+        <StudentAttemptProvider
+          scheduleId={attemptSnapshot.scheduleId}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentAttemptProvider>
+      </StudentRuntimeProvider>
+    );
+  }
+
+  function createRuntimeBackedWrapper(attemptSnapshot: StudentAttempt, runtimeSnapshot: ExamSessionRuntime) {
+    const state = createExamState();
+
+    return ({ children }: { children: React.ReactNode }) => (
+      <StudentRuntimeProvider
+        state={state}
+        onExit={vi.fn()}
+        runtimeBacked
+        runtimeSnapshot={runtimeSnapshot}
         attemptSnapshot={attemptSnapshot}
       >
         <StudentAttemptProvider
@@ -451,6 +526,59 @@ describe('StudentAttemptProvider', () => {
     expect(saveOrder).toBeLessThan(submitOrder);
   });
 
+  it('flushes answer changes made while another flush is in flight before reporting success', async () => {
+    let resolveFirstSave: (() => void) | null = null;
+    vi.mocked(studentAttemptRepository.saveAttempt)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirstSave = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'first');
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(1);
+    });
+
+    let flushPromise: Promise<boolean>;
+    await act(async () => {
+      flushPromise = result.current.actions.flushPending();
+    });
+
+    await waitFor(() => {
+      expect(studentAttemptRepository.saveAttempt).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'second');
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.attempt?.answers.q1).toBe('second');
+    });
+
+    await act(async () => {
+      resolveFirstSave?.();
+      await flushPromise;
+    });
+
+    expect(studentAttemptRepository.saveAttempt).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(studentAttemptRepository.saveAttempt).mock.calls.at(-1)?.[0].answers.q1)
+      .toBe('second');
+    expect(result.current.state.pendingMutationCount).toBe(0);
+  });
+
   it('does not submit the attempt when flushing pending mutations fails', async () => {
     Object.defineProperty(window.navigator, 'onLine', {
       configurable: true,
@@ -516,6 +644,39 @@ describe('StudentAttemptProvider', () => {
     expect(studentAttemptRepository.clearPendingMutations).not.toHaveBeenCalled();
     expect(result.current.state.pendingMutationCount).toBeGreaterThan(0);
     expect(result.current.state.attempt?.recovery.syncState).toBe('error');
+  });
+
+  it('tags objective answer mutations with the runtime section when the attempt snapshot is stale', async () => {
+    const staleAttempt = {
+      ...createAttemptSnapshot(),
+      currentModule: 'listening' as const,
+      currentQuestionId: 'listening-q1',
+    };
+    const runtimeSnapshot = createRuntimeSnapshot('reading');
+
+    const { result } = renderHook(() => useStudentAttempt(), {
+      wrapper: createRuntimeBackedWrapper(staleAttempt, runtimeSnapshot),
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('reading-q1', 'mars');
+    });
+
+    await waitFor(() => {
+      const pendingMutations = vi
+        .mocked(studentAttemptRepository.savePendingMutations)
+        .mock.calls.at(-1)?.[1];
+      expect(pendingMutations).toHaveLength(1);
+      expect(pendingMutations?.[0]?.payload).toMatchObject({
+        questionId: 'reading-q1',
+        value: 'mars',
+        module: 'reading',
+      });
+    });
   });
 
   it('reloads durable pending mutations on refresh', async () => {

@@ -186,6 +186,70 @@ const hydratedAttempt: StudentAttempt = {
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
+function withCompletedPrecheck(attempt: StudentAttempt): StudentAttempt {
+  return {
+    ...attempt,
+    integrity: {
+      ...attempt.integrity,
+      preCheck: {
+        completedAt: '2026-01-01T00:00:00.000Z',
+        browserFamily: 'chrome',
+        browserVersion: 120,
+        screenDetailsSupported: true,
+        heartbeatReady: true,
+        acknowledgedSafariLimitation: false,
+        checks: [],
+      },
+    },
+  };
+}
+
+function createRuntimeSnapshot(
+  sectionKey: ExamSessionRuntime['currentSectionKey'],
+  remainingSeconds = 120,
+): ExamSessionRuntime {
+  const now = '2026-01-01T00:00:00.000Z';
+
+  return {
+    id: 'runtime-1',
+    scheduleId: hydratedAttempt.scheduleId,
+    examId: hydratedAttempt.examId,
+    examTitle: hydratedAttempt.examTitle,
+    cohortName: 'Cohort A',
+    deliveryMode: 'proctor_start',
+    status: 'live',
+    actualStartAt: now,
+    actualEndAt: null,
+    activeSectionKey: sectionKey,
+    currentSectionKey: sectionKey,
+    currentSectionRemainingSeconds: remainingSeconds,
+    waitingForNextSection: false,
+    isOverrun: false,
+    totalPausedSeconds: 0,
+    sections: [
+      {
+        sectionKey,
+        label: sectionKey ? sectionKey[0].toUpperCase() + sectionKey.slice(1) : 'Section',
+        order: 0,
+        plannedDurationMinutes: 60,
+        gapAfterMinutes: 0,
+        status: 'live',
+        availableAt: now,
+        actualStartAt: now,
+        actualEndAt: null,
+        pausedAt: null,
+        accumulatedPausedSeconds: 0,
+        extensionMinutes: 0,
+        completionReason: undefined,
+        projectedStartAt: now,
+        projectedEndAt: '2026-01-01T01:00:00.000Z',
+      },
+    ],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 describe('StudentRuntimeProvider - Violation Tracking', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -476,6 +540,72 @@ describe('StudentRuntimeProvider - Violation Tracking', () => {
       expect(result.current.state.blocking.reason).toBe('offline');
       expect(result.current.state.attemptSyncState).toBe('syncing_reconnect');
     });
+
+    it('keeps the backend runtime section when a runtime-backed attempt snapshot is stale', () => {
+      const attemptSnapshot = withCompletedPrecheck({
+        ...hydratedAttempt,
+        currentModule: 'listening',
+        currentQuestionId: 'listening-q1',
+      });
+      const runtimeSnapshot = createRuntimeSnapshot('reading', 1800);
+      const stateWithQuestions: ExamState = {
+        ...mockExamState,
+        reading: {
+          passages: [
+            {
+              id: 'reading-passage-1',
+              title: 'Reading Passage 1',
+              text: '',
+              blocks: [
+                {
+                  id: 'reading-q1',
+                  type: 'SINGLE_MCQ',
+                  instruction: 'Choose one.',
+                  stem: 'Reading question',
+                  options: [{ id: 'a', text: 'A', isCorrect: true }],
+                },
+              ],
+            },
+          ],
+        },
+        listening: {
+          parts: [
+            {
+              id: 'listening-part-1',
+              title: 'Listening Part 1',
+              audioUrl: '',
+              transcript: '',
+              blocks: [
+                {
+                  id: 'listening-q1',
+                  type: 'SINGLE_MCQ',
+                  instruction: 'Choose one.',
+                  stem: 'Listening question',
+                  options: [{ id: 'a', text: 'A', isCorrect: true }],
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const runtimeBackedWrapper = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={stateWithQuestions}
+          onExit={vi.fn()}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result } = renderHook(() => useStudentRuntime(), { wrapper: runtimeBackedWrapper });
+
+      expect(result.current.state.currentModule).toBe('reading');
+      expect(result.current.state.currentQuestionId).toBe('reading-q1');
+    });
   });
 });
 
@@ -712,7 +842,7 @@ describe('StudentRuntimeProvider - Runtime timer smoothing', () => {
     vi.useRealTimers();
   });
 
-  it('does not jump down when a runtime snapshot reports a lower remaining time in the same section', async () => {
+  it('syncs down when a runtime snapshot reports a lower backend remaining time in the same section', async () => {
     const attemptSnapshot: StudentAttempt = {
       ...hydratedAttempt,
       integrity: {
@@ -796,14 +926,13 @@ describe('StudentRuntimeProvider - Runtime timer smoothing', () => {
       rerender();
     });
 
-    // Keep ticking smoothly: no big downward jump like 1:19 -> 1:14
-    expect(result.current.state.displayTimeRemaining).toBe(79);
+    expect(result.current.state.displayTimeRemaining).toBe(74);
 
     act(() => {
       vi.advanceTimersByTime(1_000);
     });
 
-    expect(result.current.state.displayTimeRemaining).toBe(78);
+    expect(result.current.state.displayTimeRemaining).toBe(73);
   });
 
   it('jumps up immediately when a runtime snapshot increases remaining time (extension)', async () => {
