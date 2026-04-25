@@ -5,7 +5,7 @@ use axum::{
 };
 use chrono::Utc;
 use ielts_backend_application::auth::{AuthService, StudentAccess};
-use ielts_backend_application::delivery::{DeliveryError, DeliveryService};
+use ielts_backend_application::delivery::{DeliveryError, DeliveryService, MutationBatchResponseMode};
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::attempt::{
     StudentBootstrapRequest, StudentHeartbeatRequest, StudentMutationBatchRequest,
@@ -29,6 +29,13 @@ use crate::{
     state::AppState,
 };
 
+fn delivery_service(state: &AppState) -> DeliveryService {
+    DeliveryService::with_idempotency_usable_hours(
+        state.db_pool(),
+        state.config.retention_idempotency_usable_hours,
+    )
+}
+
 pub async fn get_student_session(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
@@ -43,7 +50,7 @@ pub async fn get_student_session(
         UserRole::Proctor,
     ])?;
     let access = authorize_student(&state, &principal, schedule_id).await?;
-    let service = DeliveryService::new(state.db_pool());
+    let service = delivery_service(&state);
     let started = Instant::now();
     
     let wcode = if !access.wcode.is_empty() {
@@ -122,7 +129,7 @@ pub async fn save_precheck(
         UserRole::Proctor,
     ])?;
     let access = authorize_student(&state, &principal, schedule_id).await?;
-    let service = DeliveryService::new(state.db_pool());
+    let service = delivery_service(&state);
     let started = Instant::now();
     
     let wcode = if !access.wcode.is_empty() {
@@ -185,7 +192,7 @@ pub async fn bootstrap_student_session(
         }
     }
     let access = authorize_student(&state, &principal, schedule_id).await?;
-    let service = DeliveryService::new(state.db_pool());
+    let service = delivery_service(&state);
     let started = Instant::now();
     
     let wcode = if !access.wcode.is_empty() {
@@ -242,8 +249,16 @@ pub async fn apply_mutation_batch(
     principal: AttemptPrincipal,
     headers: HeaderMap,
     Path((schedule_id, _batch)): Path<(Uuid, String)>,
-    Json(mut req): Json<StudentMutationBatchRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<ApiResponse<StudentMutationBatchResponse>, ApiError> {
+    let response_mode = parse_mutation_batch_response_mode(&payload)?;
+    let mut req: StudentMutationBatchRequest = serde_json::from_value(payload).map_err(|err| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            &format!("Invalid mutation batch payload: {err}"),
+        )
+    })?;
     let attempt_id = principal.authorization.claims.attempt_id.clone();
     let claims_schedule_id = principal.authorization.claims.schedule_id.clone();
     let claims_client_session_id = principal.authorization.claims.client_session_id.clone();
@@ -327,10 +342,15 @@ pub async fn apply_mutation_batch(
     req.client_session_id = claims_client_session_id;
     req.student_key = load_attempt_student_key(&state, &attempt_id)
         .await?;
-    let service = DeliveryService::new(state.db_pool());
+    let service = delivery_service(&state);
     let started = Instant::now();
     let mut result = service
-        .apply_mutation_batch(schedule_id, req, extract_idempotency_key(&headers)?)
+        .apply_mutation_batch(
+            schedule_id,
+            req,
+            response_mode,
+            extract_idempotency_key(&headers)?,
+        )
         .await?;
     let auth_service = AuthService::new(state.db_pool(), state.config.clone());
     result.refreshed_attempt_credential = auth_service
@@ -356,6 +376,21 @@ pub async fn apply_mutation_batch(
             });
     }
     Ok(ApiResponse::success_with_request_id(result, request_id.0))
+}
+
+fn parse_mutation_batch_response_mode(
+    payload: &Value,
+) -> Result<MutationBatchResponseMode, ApiError> {
+    match payload.get("responseMode").and_then(Value::as_str) {
+        None => Ok(MutationBatchResponseMode::Full),
+        Some("full") => Ok(MutationBatchResponseMode::Full),
+        Some("ack") => Ok(MutationBatchResponseMode::Ack),
+        Some(_) => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            "responseMode must be either 'full' or 'ack'.",
+        )),
+    }
 }
 
 pub async fn record_heartbeat(
@@ -397,7 +432,7 @@ pub async fn record_heartbeat(
     req.client_session_id = claims_client_session_id;
     req.student_key = load_attempt_student_key(&state, &attempt_id)
         .await?;
-    let service = DeliveryService::new(state.db_pool());
+    let service = delivery_service(&state);
     let started = Instant::now();
     let event_type = req.event_type.clone();
     let attempt = service.record_heartbeat(schedule_id, req).await?;
@@ -644,7 +679,7 @@ pub async fn submit_student_session(
     req.attempt_id = attempt_id.clone();
     req.student_key = load_attempt_student_key(&state, &attempt_id)
         .await?;
-    let service = DeliveryService::new(state.db_pool());
+    let service = delivery_service(&state);
     let started = Instant::now();
     let mut submission = service
         .submit_attempt(schedule_id, req, extract_idempotency_key(&headers)?)

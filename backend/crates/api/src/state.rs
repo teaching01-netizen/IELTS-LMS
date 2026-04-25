@@ -21,7 +21,10 @@ pub struct AppState {
 impl AppState {
     pub fn new(config: AppConfig) -> Self {
         let live_mode_enabled = config.live_mode_enabled;
-        let rate_limiter = RateLimiter::new(RateLimitConfig::new(1000, 60)); // Default permissive limit
+        let rate_limiter = RateLimiter::with_bucket_cap(
+            RateLimitConfig::new(1000, 60),
+            config.rate_limiter_bucket_cap,
+        ); // Default permissive limit
 
         Self {
             live_updates: LiveUpdateHub::with_config(&config),
@@ -35,7 +38,10 @@ impl AppState {
 
     pub fn with_pool(config: AppConfig, pool: MySqlPool) -> Self {
         let live_mode_enabled = config.live_mode_enabled;
-        let rate_limiter = RateLimiter::new(RateLimitConfig::new(1000, 60)); // Default permissive limit
+        let rate_limiter = RateLimiter::with_bucket_cap(
+            RateLimitConfig::new(1000, 60),
+            config.rate_limiter_bucket_cap,
+        ); // Default permissive limit
 
         Self {
             live_updates: LiveUpdateHub::with_config(&config),

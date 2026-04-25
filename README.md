@@ -47,6 +47,12 @@ make worker
 - The frontend dev server now proxies `/api/*` to `http://127.0.0.1:4000` by default.
 - Override the proxy target with `VITE_BACKEND_API_URL` when the backend runs elsewhere.
 
+## Cache And Retention Notes
+
+- Student exam recovery data is kept locally only while an attempt is active, unsynced, or missing submit confirmation; submitted synced attempts compact to receipt metadata.
+- `shared_cache_entries` is a database-backed cache table, not an in-process RAM cache. Expired or invalidated rows remain unreadable immediately and are physically deleted by the worker after the configured grace window.
+- API RAM guardrails include bounded in-memory rate limiter buckets and telemetry for bucket count, websocket count, process RSS, worker retention rows, and storage budget.
+
 ## Working Rules
 
 - Treat route behavior as the source of truth.

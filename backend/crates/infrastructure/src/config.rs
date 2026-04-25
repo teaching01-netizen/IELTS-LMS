@@ -58,6 +58,15 @@ pub struct AppConfig {
     pub rate_limit_submit_per_attempt_window_secs: u64,
     pub rate_limit_export_per_user: u32,
     pub rate_limit_export_per_user_window_secs: u64,
+    pub rate_limiter_bucket_cap: usize,
+    // Retention and cleanup policies
+    pub retention_cleanup_batch_limit: i64,
+    pub retention_shared_cache_grace_hours: i64,
+    pub retention_idempotency_usable_hours: i64,
+    pub retention_idempotency_grace_hours: i64,
+    pub retention_heartbeat_days: i64,
+    pub retention_mutation_days: i64,
+    pub retention_user_session_days: i64,
     // Delivery request guardrails
     pub max_mutations_per_batch: usize,
     pub max_writing_answer_chars: usize,
@@ -307,6 +316,38 @@ impl AppConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.rate_limit_export_per_user_window_secs),
+            rate_limiter_bucket_cap: env::var("RATE_LIMITER_BUCKET_CAP")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.rate_limiter_bucket_cap),
+            retention_cleanup_batch_limit: env::var("RETENTION_CLEANUP_BATCH_LIMIT")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.retention_cleanup_batch_limit),
+            retention_shared_cache_grace_hours: env::var("RETENTION_SHARED_CACHE_GRACE_HOURS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.retention_shared_cache_grace_hours),
+            retention_idempotency_usable_hours: env::var("RETENTION_IDEMPOTENCY_USABLE_HOURS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.retention_idempotency_usable_hours),
+            retention_idempotency_grace_hours: env::var("RETENTION_IDEMPOTENCY_GRACE_HOURS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.retention_idempotency_grace_hours),
+            retention_heartbeat_days: env::var("RETENTION_HEARTBEAT_DAYS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.retention_heartbeat_days),
+            retention_mutation_days: env::var("RETENTION_MUTATION_DAYS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.retention_mutation_days),
+            retention_user_session_days: env::var("RETENTION_USER_SESSION_DAYS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.retention_user_session_days),
             max_mutations_per_batch: env::var("MAX_MUTATIONS_PER_BATCH")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -403,6 +444,14 @@ impl Default for AppConfig {
             rate_limit_submit_per_attempt_window_secs: 300,
             rate_limit_export_per_user: 3,
             rate_limit_export_per_user_window_secs: 300,
+            rate_limiter_bucket_cap: 10_000,
+            retention_cleanup_batch_limit: 1000,
+            retention_shared_cache_grace_hours: 24,
+            retention_idempotency_usable_hours: 72,
+            retention_idempotency_grace_hours: 24,
+            retention_heartbeat_days: 7,
+            retention_mutation_days: 30,
+            retention_user_session_days: 30,
             max_mutations_per_batch: 200,
             max_writing_answer_chars: 50_000,
             max_text_answer_chars: 512,
@@ -444,6 +493,20 @@ mod tests {
         assert_eq!(config.websocket_connection_cap, 600);
         assert_eq!(config.websocket_connections_per_schedule_cap, 600);
         assert_eq!(config.websocket_connections_per_user_cap, 5);
+    }
+
+    #[test]
+    fn default_cache_retention_windows_match_current_policy() {
+        let config = AppConfig::default();
+
+        assert_eq!(config.retention_cleanup_batch_limit, 1000);
+        assert_eq!(config.retention_shared_cache_grace_hours, 24);
+        assert_eq!(config.retention_idempotency_usable_hours, 72);
+        assert_eq!(config.retention_idempotency_grace_hours, 24);
+        assert_eq!(config.retention_heartbeat_days, 7);
+        assert_eq!(config.retention_mutation_days, 30);
+        assert_eq!(config.retention_user_session_days, 30);
+        assert_eq!(config.rate_limiter_bucket_cap, 10_000);
     }
 
     #[test]

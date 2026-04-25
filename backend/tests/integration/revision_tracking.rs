@@ -6,7 +6,9 @@ use serde_json::json;
 use uuid::Uuid;
 
 use ielts_backend_application::{
-    builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
+    builder::BuilderService,
+    delivery::{DeliveryService, MutationBatchResponseMode},
+    scheduling::SchedulingService,
 };
 use ielts_backend_domain::{
     attempt::{MutationEnvelope, StudentBootstrapRequest, StudentMutationBatchRequest},
@@ -76,12 +78,14 @@ async fn revision_increments_and_mutations_record_applied_revision() {
                     },
                 ],
             },
+            MutationBatchResponseMode::Full,
             None,
         )
         .await
         .expect("apply first batch");
-    assert_eq!(first.attempt.revision, 1);
-    let attempt_id = first.attempt.id.clone();
+    let first_attempt = first.attempt.expect("full mutation response includes attempt");
+    assert_eq!(first_attempt.revision, 1);
+    let attempt_id = first_attempt.id.clone();
 
     let applied_1: i64 = sqlx::query_scalar(
         "SELECT applied_revision FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
@@ -108,16 +112,18 @@ async fn revision_increments_and_mutations_record_applied_revision() {
                     payload: json!({"questionId": "q2", "value": "B"}),
                 }],
             },
+            MutationBatchResponseMode::Full,
             None,
         )
         .await
         .expect("apply second batch");
-    assert_eq!(second.attempt.revision, 2);
+    let second_attempt = second.attempt.expect("full mutation response includes attempt");
+    assert_eq!(second_attempt.revision, 2);
 
     let applied_2: i64 = sqlx::query_scalar(
         "SELECT applied_revision FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
     )
-    .bind(second.attempt.id)
+    .bind(second_attempt.id)
     .bind("m3")
     .fetch_one(database.pool())
     .await

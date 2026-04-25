@@ -97,7 +97,7 @@ async fn run_outbox_cycle(
     cycle_started: Instant,
 ) -> Result<(), sqlx::Error> {
     let outbox = drain_outbox_until_empty(pool.clone(), &config.live_mode_notify_channel).await?;
-    let retention = jobs::retention::run_once(pool.clone()).await?;
+    let retention = jobs::retention::run_once_with_config(pool.clone(), config).await?;
     let media = jobs::media::run_once(pool.clone()).await?;
     log_storage_budget(pool, config).await?;
 
@@ -160,7 +160,7 @@ async fn run_maintenance_cycle(
     config: &AppConfig,
     cycle_started: Instant,
 ) -> Result<(), sqlx::Error> {
-    let retention = jobs::retention::run_once(pool.clone()).await?;
+    let retention = jobs::retention::run_once_with_config(pool.clone(), config).await?;
     let media = jobs::media::run_once(pool.clone()).await?;
     log_storage_budget(pool, config).await?;
 

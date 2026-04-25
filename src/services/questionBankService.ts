@@ -11,6 +11,7 @@ import {
   backendPost,
 } from './backendBridge';
 import { logError } from '../app/error/errorLogger';
+import { createTtlLruCache } from '../utils/ttlLruCache';
 
 type LegacyBackendQuestionBankItem = {
   id: string;
@@ -44,7 +45,10 @@ type BackendQuestionBankItemV2 = {
   revision: number;
 };
 
-const questionRevisions = new Map<string, number>();
+const questionRevisions = createTtlLruCache<string, number>({
+  maxEntries: 500,
+  ttlMs: 30 * 60 * 1000,
+});
 
 class BackendQuestionBank {
   async getAllQuestions(): Promise<QuestionBankItem[]> {

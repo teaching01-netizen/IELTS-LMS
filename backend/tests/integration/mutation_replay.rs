@@ -6,7 +6,9 @@ use serde_json::json;
 use uuid::Uuid;
 
 use ielts_backend_application::{
-    builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
+    builder::BuilderService,
+    delivery::{DeliveryService, MutationBatchResponseMode},
+    scheduling::SchedulingService,
 };
 use ielts_backend_domain::{
     attempt::{MutationEnvelope, StudentBootstrapRequest, StudentMutationBatchRequest},
@@ -75,14 +77,18 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
                     },
                 ],
             },
+            MutationBatchResponseMode::Full,
             None,
         )
         .await
         .expect("apply first batch");
 
     assert_eq!(first_batch.server_accepted_through_seq, 2);
-    assert_eq!(first_batch.attempt.answers["q1"], "A");
-    assert_eq!(first_batch.attempt.writing_answers["task-1"], "Draft 1");
+    let first_attempt = first_batch
+        .attempt
+        .expect("full mutation response includes attempt");
+    assert_eq!(first_attempt.answers["q1"], "A");
+    assert_eq!(first_attempt.writing_answers["task-1"], "Draft 1");
 
     let second_batch = service
         .apply_mutation_batch(
@@ -108,14 +114,18 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
                     },
                 ],
             },
+            MutationBatchResponseMode::Full,
             None,
         )
         .await
         .expect("apply second batch");
 
     assert_eq!(second_batch.server_accepted_through_seq, 4);
-    assert_eq!(second_batch.attempt.answers["q1"], "B");
-    assert_eq!(second_batch.attempt.flags["q1"], true);
+    let second_attempt = second_batch
+        .attempt
+        .expect("full mutation response includes attempt");
+    assert_eq!(second_attempt.answers["q1"], "B");
+    assert_eq!(second_attempt.flags["q1"], true);
 
     let overlap = service
         .apply_mutation_batch(
@@ -132,6 +142,7 @@ async fn mutation_batches_replay_in_sequence_and_reject_overlapping_ranges() {
                     payload: json!({"questionId": "q1", "value": "C"}),
                 }],
             },
+            MutationBatchResponseMode::Full,
             None,
         )
         .await;

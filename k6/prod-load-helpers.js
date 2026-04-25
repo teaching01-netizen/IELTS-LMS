@@ -227,8 +227,7 @@ export function ensureStudentRegistrations(baseUrl, scheduleId, creds, students,
 }
 
 export function shouldAutoRegisterStudents() {
-  if (__ENV.K6_AUTO_REGISTER === 'false') return false;
-  return Boolean(__ENV.K6_REGISTER_URL || __ENV.K6_SCHEDULE_URL || __ENV.K6_EXAM_URL || __ENV.K6_ENTRY_URL);
+  return __ENV.K6_AUTO_REGISTER === 'true';
 }
 
 export function ensureProdRunAllowed() {

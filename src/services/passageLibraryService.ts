@@ -11,6 +11,7 @@ import {
   backendPost,
 } from './backendBridge';
 import { logError } from '../app/error/errorLogger';
+import { createTtlLruCache } from '../utils/ttlLruCache';
 
 type LegacyBackendPassageItem = {
   id: string;
@@ -48,7 +49,10 @@ type BackendPassageItemV2 = {
   revision: number;
 };
 
-const passageRevisions = new Map<string, number>();
+const passageRevisions = createTtlLruCache<string, number>({
+  maxEntries: 500,
+  ttlMs: 30 * 60 * 1000,
+});
 
 class BackendPassageLibrary {
   async getAllPassages(): Promise<PassageLibraryItem[]> {

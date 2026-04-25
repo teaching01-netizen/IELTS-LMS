@@ -195,14 +195,111 @@
   html.student-exam-active,
   body.student-exam-active {
     height: var(--student-viewport-height, 100dvh);
+    width: 100%;
     overflow: hidden;
     overscroll-behavior: none;
   }
 
   .student-exam-shell {
+    height: var(--student-viewport-height, 100dvh);
     min-height: 0;
+    overflow: hidden;
     overscroll-behavior: none;
     touch-action: manipulation;
+    padding-left: env(safe-area-inset-left, 0);
+    padding-right: env(safe-area-inset-right, 0);
+  }
+
+  .student-exam-main,
+  .student-adaptive-workspace {
+    min-height: 0;
+    min-width: 0;
+  }
+
+  .student-adaptive-workspace {
+    flex-direction: column;
+  }
+
+  .student-exam-footer {
+    padding-bottom: max(0.375rem, env(safe-area-inset-bottom, 0));
+  }
+
+  .student-pane-separator {
+    display: none;
+  }
+
+  .student-question-stepper {
+    bottom: calc(env(safe-area-inset-bottom, 0) + 4rem);
+  }
+
+  .student-reading-passage-pane,
+  .student-reading-question-pane,
+  .student-writing-prompt-pane,
+  .student-writing-editor-pane {
+    min-height: 0;
+    min-width: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .student-reading-passage-pane,
+  .student-writing-prompt-pane {
+    flex: 0 0 min(42%, 22rem);
+    max-height: min(42%, 22rem);
+  }
+
+  .student-reading-question-pane,
+  .student-writing-editor-pane {
+    flex: 1 1 0;
+  }
+
+  @media (orientation: portrait) and (min-width: 640px) and (max-width: 1180px) {
+    .student-reading-passage-pane {
+      flex-basis: min(40%, 24rem);
+      max-height: min(40%, 24rem);
+    }
+
+    .student-writing-prompt-pane {
+      flex-basis: min(36%, 20rem);
+      max-height: min(36%, 20rem);
+    }
+  }
+
+  @media (orientation: landscape) and (min-width: 900px) {
+    .student-adaptive-workspace {
+      flex-direction: row;
+    }
+
+    .student-pane-separator {
+      display: flex;
+    }
+
+    .student-reading-passage-pane {
+      flex: 0 0 var(--reading-pane-width, 50%);
+      width: var(--reading-pane-width, 50%);
+      max-height: none;
+    }
+
+    .student-reading-question-pane {
+      flex: 1 1 var(--question-pane-width, calc(50% - 16px));
+      width: var(--question-pane-width, calc(50% - 16px));
+    }
+
+    .student-writing-prompt-pane {
+      flex: 0 0 var(--writing-prompt-pane-width, 50%);
+      width: var(--writing-prompt-pane-width, 50%);
+      max-height: none;
+    }
+
+    .student-writing-editor-pane {
+      flex: 1 1 var(--writing-editor-pane-width, calc(50% - 16px));
+      width: var(--writing-editor-pane-width, calc(50% - 16px));
+    }
+  }
+
+  @media (orientation: landscape) and (min-width: 900px) and (max-height: 820px) {
+    .student-question-stepper {
+      bottom: calc(env(safe-area-inset-bottom, 0) + 3rem);
+    }
   }
 
   /* Accessibility: Live region announcements */

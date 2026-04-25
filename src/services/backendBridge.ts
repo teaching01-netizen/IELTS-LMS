@@ -17,6 +17,7 @@ import type {
   SectionRuntimeState,
 } from '../types/domain';
 import type { ModuleType } from '../types';
+import { createTtlLruCache } from '../utils/ttlLruCache';
 
 type BackendEnvelope<T> = {
   success: boolean;
@@ -149,9 +150,13 @@ type BackendExamSessionRuntime = {
   sections: BackendRuntimeSectionState[];
 };
 
-const examRevisions = new Map<string, number>();
-const scheduleRevisions = new Map<string, number>();
-const attemptSchedules = new Map<string, string>();
+const revisionCachePolicy = { maxEntries: 500, ttlMs: 30 * 60 * 1000 };
+const examRevisions = createTtlLruCache<string, number>(revisionCachePolicy);
+const scheduleRevisions = createTtlLruCache<string, number>(revisionCachePolicy);
+const attemptSchedules = createTtlLruCache<string, string>({
+  maxEntries: 500,
+  ttlMs: 2 * 60 * 60 * 1000,
+});
 
 function envFlag(name: string): boolean {
   const env = import.meta.env as Record<string, string | boolean | undefined>;

@@ -79,6 +79,10 @@ function getViewportHeight(): number {
   return window.visualViewport?.height ?? window.innerHeight;
 }
 
+function getViewportScale(): number {
+  return window.visualViewport?.scale ?? 1;
+}
+
 export function ProctoringProvider({
   children,
   config,
@@ -519,14 +523,31 @@ export function ProctoringProvider({
       }, closeSignalDelayMs);
     };
 
-    const shouldDeferFullscreenExit = () => {
+    const getFullscreenExitDeferralReason = ():
+      | 'focused-text-input'
+      | 'keyboard'
+      | 'zoom'
+      | 'viewport-settle'
+      | null => {
       if (!isIosWebKit) {
-        return false;
+        return null;
       }
 
       const focusedTextInput = isTextInputElement(document.activeElement);
+      if (focusedTextInput) {
+        return 'focused-text-input';
+      }
+
+      if (isKeyboardLikelyOpen()) {
+        return 'keyboard';
+      }
+
+      if (Math.abs(getViewportScale() - 1) > 0.01) {
+        return 'zoom';
+      }
+
       const viewportRecentlyChanged = Date.now() - lastViewportResizeAt < fullscreenViewportSettleMs;
-      return focusedTextInput || isKeyboardLikelyOpen() || viewportRecentlyChanged;
+      return viewportRecentlyChanged ? 'viewport-settle' : null;
     };
 
     const handleFullscreenChange = async (options: { forceEnforce?: boolean } = {}) => {
@@ -542,7 +563,8 @@ export function ProctoringProvider({
         return;
       }
 
-      if (!options.forceEnforce && shouldDeferFullscreenExit()) {
+      const deferralReason = getFullscreenExitDeferralReason();
+      if (!options.forceEnforce && deferralReason) {
         if (!fullscreenExitDeferStartedAt) {
           fullscreenExitDeferStartedAt = Date.now();
         }
@@ -560,8 +582,13 @@ export function ProctoringProvider({
           }
 
           const elapsed = Date.now() - fullscreenExitDeferStartedAt;
-          if (shouldDeferFullscreenExit() && elapsed < fullscreenExitMaxDeferMs) {
-            // Keep deferring until the keyboard/focus settles or we hit the cap.
+          const nextDeferralReason = getFullscreenExitDeferralReason();
+          const canKeepDeferring =
+            nextDeferralReason &&
+            (nextDeferralReason !== 'viewport-settle' || elapsed < fullscreenExitMaxDeferMs);
+
+          if (canKeepDeferring) {
+            // Keep deferring while iPadOS WebKit is moving the keyboard, zoom, or viewport.
             void handleFullscreenChange();
             return;
           }
@@ -694,6 +721,7 @@ export function ProctoringProvider({
     );
     document.addEventListener('focusout', handleFocusOut, true);
     window.visualViewport?.addEventListener('resize', handleViewportResize);
+    window.visualViewport?.addEventListener('scroll', handleViewportResize);
     document.addEventListener('pointerup', attemptFullscreenOnGesture, true);
     document.addEventListener('touchend', attemptFullscreenOnGesture, true);
 
@@ -715,6 +743,7 @@ export function ProctoringProvider({
       );
       document.removeEventListener('focusout', handleFocusOut, true);
       window.visualViewport?.removeEventListener('resize', handleViewportResize);
+      window.visualViewport?.removeEventListener('scroll', handleViewportResize);
       document.removeEventListener('pointerup', attemptFullscreenOnGesture, true);
       document.removeEventListener('touchend', attemptFullscreenOnGesture, true);
       if (tabSwitchDebounceTimer) {

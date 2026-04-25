@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ExamState } from '../../types';
 import { ArrowLeftRight, Check, X, AlertTriangle } from 'lucide-react';
 import { getWritingTaskContent } from '../../utils/writingTaskUtils';
-import { MIN_HEIGHTS, CHAR_HEIGHT_PX, WRITING } from '../../constants/uiConstants';
+import { MIN_HEIGHTS } from '../../constants/uiConstants';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { htmlToPlainText } from '../../utils/htmlText';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -39,6 +40,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
   const previousValueRef = useRef<string>('');
   const editorHasFocusRef = useRef(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const reviewDialogRef = useFocusTrap(showReviewModal, () => setShowReviewModal(false));
 
   const handleDrag = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
@@ -63,6 +65,26 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
     document.addEventListener('mouseup', handleMouseUp);
     document.addEventListener('touchmove', handleMouseMove);
     document.addEventListener('touchend', handleMouseUp);
+  };
+
+  const setClampedLeftWidth = (nextWidth: number) => {
+    setLeftWidth(Math.max(30, Math.min(70, nextWidth)));
+  };
+
+  const handleSeparatorKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      setClampedLeftWidth(leftWidth - 5);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      setClampedLeftWidth(leftWidth + 5);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setClampedLeftWidth(30);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setClampedLeftWidth(70);
+    }
   };
 
   const currentTask = writingConfig.tasks.find(t => t.id === activeTaskId) || writingConfig.tasks[0];
@@ -174,7 +196,6 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
   const optimalMax = currentTask.optimalMax || Math.ceil(minWords * 1.5);
   const isOptimal = wordCount >= optimalMin && wordCount <= optimalMax;
   const isOverLength = currentTask.maxWords && wordCount > currentTask.maxWords;
-  const overLengthWarning = currentTask.maxWords && wordCount > currentTask.maxWords * 0.9;
 
   const resolvedTimeRemaining = timeRemaining ?? writingConfig.duration * 60;
 
@@ -189,15 +210,6 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
 
   const isTimeCritical = resolvedTimeRemaining <= 300;
   const isTimeWarning = resolvedTimeRemaining <= 600;
-
-  // Rich text formatting commands
-  const handleFormat = (command: string, value?: string) => {
-    document.execCommand(command, false, value);
-    if (editorRef.current) {
-      const htmlContent = editorRef.current.innerHTML;
-      onWritingChange(activeTaskId, htmlContent);
-    }
-  };
 
   const handleEditorInput = () => {
     if (editorRef.current) {
@@ -259,14 +271,24 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
     return count >= task.minWords;
   });
 
-	return (
-    <div className="flex flex-col h-full w-full bg-white">
-      <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden relative border-t border-gray-300">
-        <div style={{ width: `${leftWidth}%` }} className="h-full flex flex-col relative min-w-[260px] md:min-w-[280px] lg:min-w-[300px]">
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col bg-white">
+      <div
+        data-testid="writing-split-pane"
+        className="student-adaptive-workspace flex flex-1 min-h-0 overflow-hidden relative border-t border-gray-300"
+        style={{
+          ['--writing-prompt-pane-width' as string]: `${leftWidth}%`,
+          ['--writing-editor-pane-width' as string]: `calc(${100 - leftWidth}% - 16px)`,
+        } as React.CSSProperties}
+      >
+        <div
+          data-testid="writing-prompt-pane"
+          className="student-writing-prompt-pane min-h-0 min-w-0 w-full flex flex-col relative"
+        >
           {/* Timer Bar */}
           <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-500' : isTimeWarning ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
 
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pr-4 md:pr-6 lg:pr-12 pb-6 md:pb-8 font-sans text-sm md:text-base leading-relaxed text-gray-900">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pr-4 md:pr-6 lg:pr-12 pb-6 md:pb-8 font-sans text-sm md:text-base leading-relaxed text-gray-900">
             <div className="flex items-center justify-between mb-4 md:mb-6">
               <h2 className="text-lg md:text-xl font-bold">{currentTask.label}</h2>
               <div className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest ${
@@ -305,79 +327,92 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
           </div>
         </div>
 
-        <div 
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- ARIA separator pattern requires keyboard handlers. */}
+        <div
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          className="hidden lg:flex w-4 bg-gray-400 relative flex items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors"
+          onKeyDown={handleSeparatorKeyDown}
+          className="student-pane-separator w-4 bg-gray-400 relative items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+          role="separator"
+          aria-label="Resize writing prompt and response panes"
+          aria-orientation="vertical"
+          aria-valuemin={30}
+          aria-valuemax={70}
+          aria-valuenow={Math.round(leftWidth)}
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- ARIA separator pattern requires tab focus.
+          tabIndex={0}
         >
           <div className="w-8 h-8 bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none">
             <ArrowLeftRight size={14} className="text-gray-600" />
           </div>
         </div>
 
-	        <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
-	          <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
-              <div className="relative flex-1 w-full">
-                {showEditorPlaceholder && (
-                  <div className="pointer-events-none absolute left-4 top-4 md:left-6 md:top-6 lg:left-8 lg:top-8 text-base md:text-lg leading-relaxed text-gray-400 font-serif select-none">
-                    Write your answer here…
-                  </div>
-                )}
-	              <div
-	                ref={editorRef}
-	                contentEditable
-	                onInput={handleEditorInput}
-                  suppressContentEditableWarning
-                  role="textbox"
-                  aria-multiline="true"
-                  aria-label="Writing response"
-                  onFocus={() => {
-                    editorHasFocusRef.current = true;
-                    setIsEditorFocused(true);
-                  }}
-                  onBlur={() => {
-                    editorHasFocusRef.current = false;
-                    setIsEditorFocused(false);
-                    if (editorRef.current) {
-                      const sanitized = sanitizeHtml(editorRef.current.innerHTML);
-                      if (sanitized !== editorRef.current.innerHTML) {
-                        editorRef.current.innerHTML = sanitized;
-                      }
-                      onWritingChange(activeTaskId, editorRef.current.innerHTML);
+        <div
+          data-testid="writing-editor-pane"
+          className="student-writing-editor-pane min-h-0 min-w-0 w-full flex flex-1 flex-col relative"
+        >
+          <div className="min-h-0 flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
+            <div className="relative min-h-0 flex-1 w-full">
+              {showEditorPlaceholder && (
+                <div className="pointer-events-none absolute left-4 top-4 md:left-6 md:top-6 lg:left-8 lg:top-8 text-base md:text-lg leading-relaxed text-gray-400 font-serif select-none">
+                  Write your answer here…
+                </div>
+              )}
+              <div
+                ref={editorRef}
+                contentEditable
+                onInput={handleEditorInput}
+                suppressContentEditableWarning
+                role="textbox"
+                aria-multiline="true"
+                aria-label="Writing response"
+                tabIndex={0}
+                onFocus={() => {
+                  editorHasFocusRef.current = true;
+                  setIsEditorFocused(true);
+                }}
+                onBlur={() => {
+                  editorHasFocusRef.current = false;
+                  setIsEditorFocused(false);
+                  if (editorRef.current) {
+                    const sanitized = sanitizeHtml(editorRef.current.innerHTML);
+                    if (sanitized !== editorRef.current.innerHTML) {
+                      editorRef.current.innerHTML = sanitized;
                     }
-                  }}
-                  onPaste={handleEditorPaste}
-                  onDrop={handleEditorDrop}
-	                className="flex-1 w-full p-4 md:p-6 lg:p-8 text-base md:text-lg leading-relaxed text-gray-800 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-	                style={{ minHeight: MIN_HEIGHTS.WRITING_EDITOR }}
-	                spellCheck={!security.preventAutocorrect}
-	                autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
-	                autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
-	              />
-              </div>
+                    onWritingChange(activeTaskId, editorRef.current.innerHTML);
+                  }
+                }}
+                onPaste={handleEditorPaste}
+                onDrop={handleEditorDrop}
+                className="flex-1 w-full p-4 md:p-6 lg:p-8 text-base md:text-lg leading-relaxed text-gray-800 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                style={{ minHeight: MIN_HEIGHTS.WRITING_EDITOR }}
+                spellCheck={!security.preventAutocorrect}
+                autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
+                autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
+              />
+            </div>
             
-	            <div className="border-t border-gray-200 p-3 md:p-5 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs md:text-sm flex-shrink-0">
-	              <div className="flex gap-4 md:gap-8 w-full sm:w-auto">
-	                <div className="flex flex-col">
-	                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Word Count</span>
-	                  <span className={`text-lg md:text-xl font-black ${
-	                    isOptimal ? 'text-emerald-600' :
-	                    isOverLength ? 'text-red-600' :
-	                    isWordCountMet ? 'text-blue-600' :
-	                    isWordCountWarning ? 'text-amber-500' : 'text-gray-900'
-	                  }`}>
-	                    {wordCount}
-	                  </span>
-	                </div>
-	              </div>
-	            </div>
-	          </div>
-
+            <div className="border-t border-gray-200 p-3 md:p-5 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs md:text-sm flex-shrink-0">
+              <div className="flex gap-4 md:gap-8 w-full sm:w-auto">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Word Count</span>
+                  <span className={`text-lg md:text-xl font-black ${
+                    isOptimal ? 'text-emerald-600' :
+                    isOverLength ? 'text-red-600' :
+                    isWordCountMet ? 'text-blue-600' :
+                    isWordCountWarning ? 'text-amber-500' : 'text-gray-900'
+                  }`}>
+                    {wordCount}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       <footer
-        className="border-t border-gray-200 bg-white flex flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.03)]"
+        className="student-exam-footer border-t border-gray-200 bg-white flex flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.03)]"
         role="contentinfo"
         aria-label="Writing task navigation and submission"
       >
@@ -389,7 +424,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
                 setActiveTaskId(task.id);
                 onNavigate(task.id);
               }}
-              className={`min-w-[72px] md:min-w-[88px] px-3 md:px-4 py-1.5 md:py-2 rounded-sm text-xs md:text-sm font-bold transition-all flex-shrink-0 ${
+              className={`min-h-11 min-w-[72px] md:min-w-[88px] px-3 md:px-4 py-2 rounded-sm text-xs md:text-sm font-bold transition-all flex-shrink-0 ${
                 activeTaskId === task.id
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-100'
                   : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
@@ -401,7 +436,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
           {showSubmitButton ? (
             <button
               onClick={handleSubmitClick}
-              className="min-w-[132px] md:min-w-[156px] px-4 md:px-6 py-1.5 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-sm text-xs md:text-sm font-bold transition-colors shadow-md flex-shrink-0"
+              className="min-h-11 min-w-[132px] md:min-w-[156px] px-4 md:px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-sm text-xs md:text-sm font-bold transition-colors shadow-md flex-shrink-0"
             >
               Review & Submit
             </button>
@@ -411,10 +446,17 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
 
       {/* Submission Review Modal */}
       {showReviewModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div
+          ref={reviewDialogRef as React.RefObject<HTMLDivElement>}
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="writing-review-title"
+          tabIndex={-1}
+        >
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-900">Review Your Responses</h2>
+              <h2 id="writing-review-title" className="text-xl font-bold text-gray-900">Review Your Responses</h2>
               <p className="text-sm text-gray-500 mt-1">Please review your answers before submitting.</p>
             </div>
 

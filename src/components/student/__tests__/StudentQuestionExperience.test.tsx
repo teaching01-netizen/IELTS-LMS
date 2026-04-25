@@ -2,11 +2,15 @@ import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createDefaultConfig } from '../../../constants/examDefaults';
 import type { ExamState, MultiMCQBlock, SentenceCompletionBlock } from '../../../types';
+import { AccessibilitySettings } from '../AccessibilitySettings';
+import { QuestionNavigator } from '../QuestionNavigator';
 import { QuestionRenderer } from '../QuestionRenderer';
 import { StudentFooter } from '../StudentFooter';
 import { StudentHeader } from '../StudentHeader';
 import { StudentListening } from '../StudentListening';
+import { StudentReading } from '../StudentReading';
 
 describe('student question experience', () => {
   beforeEach(() => {
@@ -49,9 +53,9 @@ describe('student question experience', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: '1' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '2-4' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '5' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Question 1/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Question 2-4/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Question 5/i })).toBeInTheDocument();
   });
 
   it('allows jumping to another part from the footer progress pill', () => {
@@ -192,6 +196,194 @@ describe('student question experience', () => {
     );
 
     expect(screen.getByRole('button', { name: /exit preview/i })).toBeInTheDocument();
+  });
+
+  it('keeps focus inside the question navigator and restores focus when it closes', () => {
+    const onNavigate = vi.fn();
+
+    function Harness() {
+      const [open, setOpen] = React.useState(false);
+
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open navigator
+          </button>
+          {open ? (
+            <QuestionNavigator
+              questions={[
+                {
+                  id: 'q1',
+                  blockId: 'q1',
+                  groupId: 'group-1',
+                  groupLabel: 'Section 1',
+                  isMulti: false,
+                  correctCount: 1,
+                },
+              ]}
+              answers={{}}
+              flags={{}}
+              currentQuestionId="q1"
+              onNavigate={onNavigate}
+              onClose={() => setOpen(false)}
+            />
+          ) : null}
+        </>
+      );
+    }
+
+    render(<Harness />);
+
+    const openButton = screen.getByRole('button', { name: /open navigator/i });
+    openButton.focus();
+    fireEvent.click(openButton);
+
+    const dialog = screen.getByRole('dialog', { name: /question navigator/i });
+    const closeButton = within(dialog).getByRole('button', { name: /close question navigator/i });
+    const questionButton = within(dialog).getByRole('button', { name: /Question 1/i });
+
+    expect(closeButton).toHaveFocus();
+
+    questionButton.focus();
+    fireEvent.keyDown(questionButton, { key: 'Tab' });
+    expect(closeButton).toHaveFocus();
+
+    fireEvent.keyDown(closeButton, { key: 'Escape' });
+    expect(openButton).toHaveFocus();
+  });
+
+  it('exposes accessibility settings state to assistive technology', () => {
+    render(
+      <AccessibilitySettings
+        isOpen
+        onClose={() => undefined}
+        fontSize="large"
+        highContrast
+        onFontSizeChange={() => undefined}
+        onHighContrastToggle={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole('dialog', { name: /accessibility/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Large' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('switch', { name: /high contrast mode/i })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('uses iPad-friendly touch targets in the footer navigator', () => {
+    render(
+      <StudentFooter
+        questions={[
+          {
+            id: 'q1',
+            blockId: 'q1',
+            groupId: 'group-1',
+            groupLabel: 'Section 1',
+            isMulti: false,
+            correctCount: 1,
+          },
+        ]}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+        answers={{}}
+        onSubmit={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /Question 1/i }).getAttribute('class')).toContain('min-h-11');
+    expect(screen.getByRole('button', { name: /finish/i }).getAttribute('class')).toContain('min-h-11');
+  });
+
+  it('keeps reading panes under the orientation-aware adaptive workspace and exposes a keyboard separator', () => {
+    const state: ExamState = {
+      title: 'Reading Test',
+      type: 'Academic',
+      activeModule: 'reading',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'l1',
+      config: createDefaultConfig('Academic', 'Academic'),
+      reading: {
+        passages: [
+          {
+            id: 'passage-1',
+            title: 'Passage 1',
+            content: 'A passage.',
+            images: [],
+            blocks: [
+              {
+                id: 'q1',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer the question.',
+                questions: [{ id: 'q1', prompt: 'Question?', correctAnswer: 'Answer' }],
+              } as any,
+            ],
+          },
+        ],
+      },
+      listening: { parts: [] },
+      writing: { task1Prompt: '', task2Prompt: '', tasks: [], customPromptTemplates: [] },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    };
+
+    render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => undefined}
+        currentQuestionId="q1"
+        onNavigate={() => undefined}
+      />,
+    );
+
+    expect(screen.getByTestId('reading-split-pane')).toHaveClass('student-adaptive-workspace');
+    expect(screen.getByTestId('reading-split-pane').getAttribute('class')).not.toContain('lg:flex-row');
+    const separator = screen.getByRole('separator', { name: /resize reading and questions panes/i });
+    expect(separator).toHaveAttribute('aria-valuenow', '50');
+  });
+
+  it('marks reading panes with the iPad adaptive layout contract', () => {
+    const state: ExamState = {
+      title: 'Reading Test',
+      type: 'Academic',
+      activeModule: 'reading',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'l1',
+      config: createDefaultConfig('Academic', 'Academic'),
+      reading: {
+        passages: [
+          {
+            id: 'passage-1',
+            title: 'Passage 1',
+            content: 'A passage.',
+            images: [],
+            blocks: [
+              {
+                id: 'q1',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer the question.',
+                questions: [{ id: 'q1', prompt: 'Question?', correctAnswer: 'Answer' }],
+              } as any,
+            ],
+          },
+        ],
+      },
+      listening: { parts: [] },
+      writing: { task1Prompt: '', task2Prompt: '', tasks: [], customPromptTemplates: [] },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    };
+
+    render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => undefined}
+        currentQuestionId="q1"
+        onNavigate={() => undefined}
+      />,
+    );
+
+    expect(screen.getByTestId('reading-split-pane')).toHaveClass('student-adaptive-workspace');
+    expect(screen.getByTestId('reading-passage-pane')).toHaveClass('student-reading-passage-pane');
+    expect(screen.getByTestId('reading-question-pane')).toHaveClass('student-reading-question-pane');
   });
 
   it('wires the listening transport controls to the audio element', async () => {

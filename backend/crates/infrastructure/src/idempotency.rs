@@ -24,11 +24,19 @@ pub enum IdempotencyLookupStatus {
 #[derive(Clone)]
 pub struct IdempotencyRepository {
     pool: MySqlPool,
+    usable_hours: i64,
 }
 
 impl IdempotencyRepository {
     pub fn new(pool: MySqlPool) -> Self {
-        Self { pool }
+        Self::with_usable_hours(pool, 72)
+    }
+
+    pub fn with_usable_hours(pool: MySqlPool, usable_hours: i64) -> Self {
+        Self {
+            pool,
+            usable_hours: usable_hours.max(1),
+        }
     }
 
     pub async fn lookup_with_executor<'e, E>(
@@ -82,7 +90,7 @@ impl IdempotencyRepository {
     where
         E: Executor<'e, Database = MySql>,
     {
-        let expires_at = Self::default_expiry();
+        let expires_at = self.default_expiry();
         sqlx::query(
             r#"
             INSERT INTO idempotency_keys (
@@ -150,14 +158,23 @@ impl IdempotencyRepository {
     }
 
     pub async fn purge_expired(&self, limit: i64) -> Result<u64, sqlx::Error> {
+        self.purge_expired_with_grace_hours(limit, 24).await
+    }
+
+    pub async fn purge_expired_with_grace_hours(
+        &self,
+        limit: i64,
+        grace_hours: i64,
+    ) -> Result<u64, sqlx::Error> {
         let result = sqlx::query(
             r#"
             DELETE FROM idempotency_keys
-            WHERE expires_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)
+            WHERE expires_at < DATE_SUB(NOW(), INTERVAL ? HOUR)
             ORDER BY expires_at ASC
             LIMIT ?
             "#,
         )
+        .bind(grace_hours.max(0))
         .bind(limit)
         .execute(&self.pool)
         .await?;
@@ -165,8 +182,8 @@ impl IdempotencyRepository {
         Ok(result.rows_affected())
     }
 
-    pub fn default_expiry() -> DateTime<Utc> {
-        Utc::now() + Duration::hours(72)
+    pub fn default_expiry(&self) -> DateTime<Utc> {
+        Utc::now() + Duration::hours(self.usable_hours)
     }
 }
 

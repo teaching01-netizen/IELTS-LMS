@@ -259,6 +259,66 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
 }
 
 #[tokio::test]
+async fn mutation_batch_ack_mode_returns_only_commit_metadata() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"].as_str().unwrap().to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id,
+                        "studentKey": student_key,
+                        "clientSessionId": client_session_id,
+                        "responseMode": "ack",
+                        "mutations": [{
+                            "id": "mutation-ack-1",
+                            "seq": 1,
+                            "timestamp": "2026-01-10T09:05:00Z",
+                            "mutationType": "answer",
+                            "payload": {"questionId": "q1", "value": "A"}
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+
+    assert_eq!(json["data"]["appliedMutationCount"], 1);
+    assert_eq!(json["data"]["serverAcceptedThroughSeq"], 1);
+    assert_eq!(json["data"]["revision"], 2);
+    assert!(json["data"].get("attempt").is_none());
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
 async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_answers() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;

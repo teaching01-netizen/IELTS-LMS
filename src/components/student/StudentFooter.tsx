@@ -57,7 +57,7 @@ export function StudentFooter({
 
   return (
     <footer
-      className="border-t border-gray-200 bg-white flex flex-col flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.03)] max-h-32 md:max-h-28 lg:max-h-24"
+      className="student-exam-footer border-t border-gray-200 bg-white flex flex-col flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.03)] max-h-36 md:max-h-32 lg:max-h-28"
       role="contentinfo"
       aria-label="Question navigation and progress"
     >
@@ -72,7 +72,7 @@ export function StudentFooter({
             <Button
               variant={hasUnanswered ? 'warning' : 'primary'}
               size="sm"
-              className="min-w-[60px] md:min-w-[80px] shadow-md flex-shrink-0"
+              className="min-h-11 min-w-[72px] md:min-w-[88px] shadow-md flex-shrink-0"
               onClick={onSubmit}
             >
               Finish
@@ -115,7 +115,8 @@ export function StudentFooter({
                       <button
                         key={question.id}
                         onClick={() => onNavigate(question.id)}
-                        className={`relative text-[8px] md:text-[9px] lg:text-[10px] flex items-center justify-center min-w-[20px] md:min-w-[24px] lg:min-w-[28px] h-5 md:h-6 lg:h-7 px-0.5 md:px-1 rounded-sm font-bold border ${
+                        aria-label={`Question ${getQuestionNumberLabel(questions, question.id)}${isCurrent ? ', current' : ''}${isAnswered ? ', answered' : ', unanswered'}${isFlagged ? ', flagged' : ''}`}
+                        className={`relative text-[10px] md:text-xs flex items-center justify-center min-w-11 min-h-11 px-2 rounded-sm font-bold border ${
                           isCurrent
                             ? 'bg-blue-800 border-blue-800 text-white'
                             : isFlagged
@@ -144,7 +145,7 @@ export function StudentFooter({
                   }}
                   aria-label={`Jump to Part ${partNumber}`}
                   title={`Click to jump to Part ${partNumber}`}
-                  className="flex items-center gap-1 md:gap-1.5 rounded-sm px-1 py-0.5 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex min-h-11 items-center gap-1 md:gap-1.5 rounded-sm px-2 py-1 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <div className="w-8 md:w-10 lg:w-12 h-1 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
                     <div

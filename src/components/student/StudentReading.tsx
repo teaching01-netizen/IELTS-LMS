@@ -79,14 +79,41 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
       document.addEventListener('touchend', handleMouseUp);
     };
 
+  const setClampedLeftWidth = (nextWidth: number) => {
+    setLeftWidth(Math.max(30, Math.min(70, nextWidth)));
+  };
+
+  const handleSeparatorKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      setClampedLeftWidth(leftWidth - 5);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      setClampedLeftWidth(leftWidth + 5);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setClampedLeftWidth(30);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setClampedLeftWidth(70);
+    }
+  };
+
   if (!activePassage) {
     return null;
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-white">
-      <div className="relative flex flex-1 flex-col overflow-hidden border-t border-gray-300 md:flex-row" style={splitPaneStyle}>
-        <div className="h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12">
+    <div className="flex h-full min-h-0 w-full flex-col bg-white">
+      <div
+        data-testid="reading-split-pane"
+        className="student-adaptive-workspace relative flex flex-1 overflow-hidden border-t border-gray-300"
+        style={splitPaneStyle}
+      >
+        <div
+          data-testid="reading-passage-pane"
+          className="student-reading-passage-pane min-h-0 min-w-0 w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base lg:p-8 lg:pr-12"
+        >
           <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePassage.title}</h2>
           <div className="leading-relaxed text-gray-900 space-y-4 [&_h1]:text-2xl [&_h1]:font-black [&_h2]:text-xl [&_h2]:font-bold [&_h3]:text-lg [&_h3]:font-bold [&_img]:max-w-full [&_img]:rounded-2xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6">
             {passageHasHtml ? (
@@ -127,18 +154,31 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
           </div>
         </div>
 
-        <div 
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- ARIA separator pattern requires keyboard handlers. */}
+        <div
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          className="hidden lg:flex w-4 bg-gray-400 relative flex items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors"
+          onKeyDown={handleSeparatorKeyDown}
+          className="student-pane-separator w-4 bg-gray-400 relative items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+          role="separator"
+          aria-label="Resize reading and questions panes"
+          aria-orientation="vertical"
+          aria-valuemin={30}
+          aria-valuemax={70}
+          aria-valuenow={Math.round(leftWidth)}
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- ARIA separator pattern requires tab focus.
+          tabIndex={0}
         >
           <div className="w-8 h-8 bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none">
             <ArrowLeftRight size={14} className="text-gray-600" />
           </div>
         </div>
 
-        <div className="relative flex h-full w-full min-w-0 flex-col md:min-w-[320px] lg:w-[var(--question-pane-width)]">
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10" ref={questionContainerRef}>
+        <div
+          data-testid="reading-question-pane"
+          className="student-reading-question-pane relative flex min-h-0 min-w-0 w-full flex-1 flex-col"
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10" ref={questionContainerRef}>
             {activePassage.blocks.map((block) => {
               const blockQuestions = allQuestions.filter((question) => question.blockId === block.id);
               const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
@@ -183,7 +223,7 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                             {onToggleFlag && flagId && !inlineFlags ? (
                               <button
                                 onClick={(e) => { e.stopPropagation(); onToggleFlag(flagId); }}
-                                className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
+                                className={`absolute top-0 right-0 min-h-11 min-w-11 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
                                   flags[flagId] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
                                 }`}
                                 title={flags[flagId] ? 'Unflag question' : 'Flag question'}
@@ -216,7 +256,7 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                         {onToggleFlag && singleBlockQuestion ? (
                           <button
                             onClick={(e) => { e.stopPropagation(); onToggleFlag(singleBlockQuestion.id); }}
-                            className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
+                            className={`absolute top-0 right-0 min-h-11 min-w-11 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
                               flags[singleBlockQuestion.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
                             }`}
                             title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
@@ -245,16 +285,18 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
             })}
           </div>
 
-          <div className="absolute bottom-16 md:bottom-20 right-4 md:right-6 flex shadow-md z-20">
+          <div className="student-question-stepper absolute right-4 md:right-6 flex shadow-md z-20">
             <button 
               onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
-              className={`w-9 h-9 md:w-10 md:h-10 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
+              aria-label="Previous question"
+              className={`min-h-11 min-w-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
             >
               <ArrowLeft size={16} strokeWidth={3} />
             </button>
             <button 
               onClick={() => nextQuestion && onNavigate(nextQuestion.id)}
-              className={`w-9 h-9 md:w-10 md:h-10 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
+              aria-label="Next question"
+              className={`min-h-11 min-w-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
             >
               <ArrowRight size={16} strokeWidth={3} />
             </button>

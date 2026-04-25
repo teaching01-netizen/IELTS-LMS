@@ -10,8 +10,13 @@ vi.mock('../backendBridge', () => ({
   rememberAttemptSchedule: vi.fn(),
 }));
 
+import type { ExamSchedule } from '../../types/domain';
 import type { StudentAttempt, StudentAttemptMutation } from '../../types/studentAttempt';
-import { studentAttemptRepository } from '../studentAttemptRepository';
+import {
+  compactSubmittedAttempt,
+  pruneStudentAttemptCache,
+  studentAttemptRepository,
+} from '../studentAttemptRepository';
 import { backendPost } from '../backendBridge';
 
 function nowIso(): string {
@@ -224,6 +229,54 @@ describe('studentAttemptRepository', () => {
     expect(remaining.map((event) => event.id)).toEqual(['hb-2', 'hb-3']);
   });
 
+  it('clears pending mutations after an ack-only backend response', async () => {
+    const attempt = makeAttempt({
+      answers: { q1: 'A' },
+      recovery: { ...makeAttempt().recovery, clientSessionId: 'client-session-2' },
+      integrity: { ...makeAttempt().integrity, clientSessionId: 'client-session-2' },
+    });
+    await studentAttemptRepository.saveAttempt(attempt);
+    storeAttemptCredential(attempt);
+
+    await studentAttemptRepository.savePendingMutations(attempt.id, [
+      {
+        id: 'mutation-1',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-10T09:00:01.000Z',
+        type: 'answer',
+        payload: { questionId: 'q1', value: 'A' },
+      },
+    ]);
+
+    const post = vi.mocked(backendPost);
+    post.mockResolvedValueOnce({
+      appliedMutationCount: 1,
+      serverAcceptedThroughSeq: 1,
+      revision: 2,
+    });
+
+    await studentAttemptRepository.saveAttempt(attempt);
+
+    expect(post).toHaveBeenCalledWith(
+      '/v1/student/sessions/schedule-1/mutations:batch',
+      expect.objectContaining({
+        responseMode: 'ack',
+        mutations: [
+          expect.objectContaining({
+            id: 'mutation-1',
+            seq: 1,
+          }),
+        ],
+      }),
+      expect.any(Object),
+    );
+    expect(await studentAttemptRepository.getPendingMutations(attempt.id)).toEqual([]);
+    const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId(attempt.scheduleId);
+    expect(cachedAttempts[0]?.answers).toEqual({ q1: 'A' });
+    expect(cachedAttempts[0]?.recovery.serverAcceptedThroughSeq).toBe(1);
+  });
+
   it('chunks pending mutation flushes to respect server caps', async () => {
     const attempt = makeAttempt({
       phase: 'exam',
@@ -280,5 +333,135 @@ describe('studentAttemptRepository', () => {
     const callSizes = post.mock.calls.map((call) => (call[1] as { mutations: unknown[] }).mutations.length);
     expect(callSizes).toEqual([100, 100, 5]);
   });
-});
 
+  it('compacts a submitted attempt to receipt metadata when no local queues remain', async () => {
+    const submitted = {
+      ...makeAttempt({
+      phase: 'post-exam',
+      answers: { q1: 'A' },
+      writingAnswers: { task1: 'Essay text' },
+      submittedAt: '2026-01-10T09:30:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        serverAcceptedThroughSeq: 12,
+        pendingMutationCount: 0,
+        syncState: 'saved',
+      },
+      }),
+      finalSubmission: {
+        submissionId: 'submission-1',
+        submittedAt: '2026-01-10T09:30:00.000Z',
+        answers: { q1: 'A' },
+        writingAnswers: { task1: 'Essay text' },
+        flags: {},
+      },
+    } as StudentAttempt;
+
+    const receipt = compactSubmittedAttempt(submitted);
+
+    expect(receipt).toEqual({
+      attemptId: 'attempt-1',
+      scheduleId: 'schedule-1',
+      submittedAt: '2026-01-10T09:30:00.000Z',
+      submissionId: 'submission-1',
+      lastServerAcceptedSeq: 12,
+      compactedAt: expect.any(String),
+    });
+    expect(JSON.stringify(receipt)).not.toContain('Essay text');
+  });
+
+  it('prunes submitted synced attempts to receipts and purges old receipts', async () => {
+    const now = new Date('2026-01-11T10:00:00.000Z');
+    const submitted = {
+      ...makeAttempt({
+      phase: 'post-exam',
+      answers: { q1: 'A' },
+      submittedAt: '2026-01-10T09:30:00.000Z',
+      updatedAt: '2026-01-10T09:30:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        serverAcceptedThroughSeq: 12,
+        pendingMutationCount: 0,
+        syncState: 'saved',
+      },
+      }),
+      finalSubmission: {
+        submissionId: 'submission-1',
+        submittedAt: '2026-01-10T09:30:00.000Z',
+        answers: { q1: 'A' },
+        writingAnswers: {},
+        flags: {},
+      },
+    } as StudentAttempt;
+    const active = makeAttempt({
+      id: 'attempt-active',
+      phase: 'exam',
+      answers: { q2: 'B' },
+    });
+
+    window.localStorage.setItem('ielts_student_attempts_v1', JSON.stringify([submitted, active]));
+
+    const result = await pruneStudentAttemptCache(now, () => null);
+    const storedAttempts = JSON.parse(
+      window.localStorage.getItem('ielts_student_attempts_v1') ?? '[]',
+    ) as StudentAttempt[];
+
+    expect(result.compactedAttempts).toBe(1);
+    expect(result.purgedReceipts).toBe(0);
+    expect(storedAttempts.map((attempt) => attempt.id)).toEqual(['attempt-active']);
+    expect(window.localStorage.getItem('ielts_student_attempt_receipts_v1')).toContain('submission-1');
+
+    const later = new Date('2026-01-12T10:00:01.000Z');
+    const second = await pruneStudentAttemptCache(later, () => null);
+
+    expect(second.purgedReceipts).toBe(1);
+    expect(window.localStorage.getItem('ielts_student_attempt_receipts_v1')).toBe('[]');
+  });
+
+  it('keeps unsynced attempts but purges stale unfinished attempts after the recovery window', async () => {
+    const unsynced = makeAttempt({
+      id: 'attempt-unsynced',
+      updatedAt: '2026-01-01T09:00:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        pendingMutationCount: 1,
+        syncState: 'pending',
+      },
+    });
+    const stale = makeAttempt({
+      id: 'attempt-stale',
+      updatedAt: '2026-01-01T09:00:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        pendingMutationCount: 0,
+        syncState: 'saved',
+      },
+    });
+
+    window.localStorage.setItem('ielts_student_attempts_v1', JSON.stringify([unsynced, stale]));
+    await studentAttemptRepository.savePendingMutations(unsynced.id, [
+      {
+        id: 'mutation-unsynced',
+        attemptId: unsynced.id,
+        scheduleId: unsynced.scheduleId,
+        timestamp: '2026-01-01T09:00:01.000Z',
+        type: 'answer',
+        payload: { questionId: 'q1', value: 'A' },
+      },
+    ]);
+
+    const scheduleLookup = (): Pick<ExamSchedule, 'endTime'> => ({
+      endTime: '2026-01-02T09:00:00.000Z',
+    });
+    const result = await pruneStudentAttemptCache(
+      new Date('2026-01-10T09:00:01.000Z'),
+      scheduleLookup,
+    );
+    const storedAttempts = JSON.parse(
+      window.localStorage.getItem('ielts_student_attempts_v1') ?? '[]',
+    ) as StudentAttempt[];
+
+    expect(result.purgedAttempts).toBe(1);
+    expect(storedAttempts.map((attempt) => attempt.id)).toEqual(['attempt-unsynced']);
+  });
+});

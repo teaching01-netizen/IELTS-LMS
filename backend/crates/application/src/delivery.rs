@@ -15,7 +15,7 @@ use ielts_backend_infrastructure::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Map, Value};
-use sqlx::{MySqlConnection, MySqlPool};
+use sqlx::{MySql, MySqlConnection, MySqlPool, QueryBuilder};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
@@ -28,6 +28,19 @@ pub enum DeliveryConflictReason {
     SectionMismatch,
     AttemptProctorBlocked,
     AttemptSubmitted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MutationBatchResponseMode {
+    Full,
+    Ack,
+}
+
+impl MutationBatchResponseMode {
+    fn includes_attempt(self) -> bool {
+        matches!(self, Self::Full)
+    }
 }
 
 impl DeliveryConflictReason {
@@ -89,11 +102,19 @@ impl DeliveryError {
 
 pub struct DeliveryService {
     pool: MySqlPool,
+    idempotency_usable_hours: i64,
 }
 
 impl DeliveryService {
     pub fn new(pool: MySqlPool) -> Self {
-        Self { pool }
+        Self::with_idempotency_usable_hours(pool, 72)
+    }
+
+    pub fn with_idempotency_usable_hours(pool: MySqlPool, idempotency_usable_hours: i64) -> Self {
+        Self {
+            pool,
+            idempotency_usable_hours: idempotency_usable_hours.max(1),
+        }
     }
 
     pub async fn get_session_context(
@@ -320,6 +341,7 @@ impl DeliveryService {
         &self,
         schedule_id: Uuid,
         req: StudentMutationBatchRequest,
+        response_mode: MutationBatchResponseMode,
         idempotency_key: Option<String>,
     ) -> Result<StudentMutationBatchResponse, DeliveryError> {
         if req.mutations.is_empty() {
@@ -332,7 +354,13 @@ impl DeliveryService {
 
         let repository = self.idempotency_repository();
         let route_key = mutation_batch_route_key(schedule_id);
-        let request_hash = self.idempotency_request_hash(&req, idempotency_key.as_ref())?;
+        let request_hash = self.idempotency_request_hash(
+            &json!({
+                "request": &req,
+                "responseMode": response_mode,
+            }),
+            idempotency_key.as_ref(),
+        )?;
         if let Some(response) = self
             .lookup_idempotent_response(
                 &repository,
@@ -410,13 +438,26 @@ impl DeliveryService {
         let answer_schema = build_answer_schema(&version.content_snapshot)?;
         let writing_task_ids = build_writing_task_ids(&version.config_snapshot);
 
-        let existing_max_seq: i64 = sqlx::query_scalar(
+        let persisted_max_seq: i64 = sqlx::query_scalar(
             "SELECT COALESCE(MAX(mutation_seq), 0) FROM student_attempt_mutations WHERE attempt_id = ? AND client_session_id = ?",
         )
         .bind(&req.attempt_id)
         .bind(&req.client_session_id)
         .fetch_one(tx.as_mut())
         .await?;
+        let recovery_max_seq = attempt
+            .recovery
+            .get("clientSessionId")
+            .and_then(Value::as_str)
+            .filter(|client_session_id| *client_session_id == req.client_session_id)
+            .and_then(|_| {
+                attempt
+                    .recovery
+                    .get("serverAcceptedThroughSeq")
+                    .and_then(Value::as_i64)
+            })
+            .unwrap_or(0);
+        let existing_max_seq = persisted_max_seq.max(recovery_max_seq);
 
         validate_contiguous_sequences(existing_max_seq, &req.mutations)?;
 
@@ -477,29 +518,41 @@ impl DeliveryService {
             }),
         );
 
-        for mutation in &req.mutations {
-            sqlx::query(
+        let persisted_mutations: Vec<&MutationEnvelope> = req
+            .mutations
+            .iter()
+            .filter(|mutation| should_persist_mutation_row(response_mode, &mutation.mutation_type))
+            .collect();
+        let should_write_batch_audit =
+            response_mode == MutationBatchResponseMode::Full || !persisted_mutations.is_empty();
+
+        if !persisted_mutations.is_empty() {
+            let schedule_id = schedule_id.to_string();
+            let mut query_builder: QueryBuilder<MySql> = QueryBuilder::new(
                 r#"
                 INSERT INTO student_attempt_mutations (
                     id, attempt_id, schedule_id, client_session_id, mutation_type,
                     client_mutation_id, mutation_seq, payload, client_timestamp,
                     server_received_at, applied_revision, applied_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())
                 "#,
-            )
-            .bind(Uuid::new_v4().to_string())
-            .bind(&req.attempt_id)
-            .bind(schedule_id.to_string())
-            .bind(&req.client_session_id)
-            .bind(&mutation.mutation_type)
-            .bind(&mutation.id)
-            .bind(mutation.seq)
-            .bind(&mutation.payload)
-            .bind(mutation.timestamp)
-            .bind(attempt.revision + 1)
-            .execute(tx.as_mut())
-            .await?;
+            );
+            query_builder.push_values(persisted_mutations.iter(), |mut row, mutation| {
+                let mutation = *mutation;
+                row.push_bind(Uuid::new_v4().to_string())
+                    .push_bind(&req.attempt_id)
+                    .push_bind(&schedule_id)
+                    .push_bind(&req.client_session_id)
+                    .push_bind(&mutation.mutation_type)
+                    .push_bind(&mutation.id)
+                    .push_bind(mutation.seq)
+                    .push_bind(&mutation.payload)
+                    .push_bind(mutation.timestamp)
+                    .push("NOW()")
+                    .push_bind(attempt.revision + 1)
+                    .push("NOW()");
+            });
+            query_builder.build().execute(tx.as_mut()).await?;
         }
 
         sqlx::query(
@@ -545,34 +598,37 @@ impl DeliveryService {
         let mut mutation_types: Vec<String> = mutation_types.into_iter().collect();
         mutation_types.sort();
 
-        sqlx::query(
-            r#"
-            INSERT INTO session_audit_logs (
-                id, schedule_id, actor, action_type, target_student_id, payload, created_at
+        if should_write_batch_audit {
+            sqlx::query(
+                r#"
+                INSERT INTO session_audit_logs (
+                    id, schedule_id, actor, action_type, target_student_id, payload, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, NOW())
+                "#,
             )
-            VALUES (?, ?, ?, ?, ?, ?, NOW())
-            "#,
-        )
-        .bind(Uuid::new_v4().to_string())
-        .bind(schedule_id.to_string())
-        .bind(&attempt.candidate_name)
-        .bind("STUDENT_MUTATION_BATCH")
-        .bind(&attempt.id)
-        .bind(json!({
-            "count": req.mutations.len(),
-            "seqFrom": seq_from,
-            "seqTo": seq_to,
-            "types": mutation_types,
-            "phase": attempt.phase,
-            "currentModule": attempt.current_module,
-            "currentQuestionId": attempt.current_question_id,
-            "clientSessionId": req.client_session_id
-        }))
-        .execute(tx.as_mut())
-        .await?;
+            .bind(Uuid::new_v4().to_string())
+            .bind(schedule_id.to_string())
+            .bind(&attempt.candidate_name)
+            .bind("STUDENT_MUTATION_BATCH")
+            .bind(&attempt.id)
+            .bind(json!({
+                "count": req.mutations.len(),
+                "seqFrom": seq_from,
+                "seqTo": seq_to,
+                "types": mutation_types,
+                "phase": attempt.phase,
+                "currentModule": attempt.current_module,
+                "currentQuestionId": attempt.current_question_id,
+                "clientSessionId": req.client_session_id
+            }))
+            .execute(tx.as_mut())
+            .await?;
+        }
 
         let response = StudentMutationBatchResponse {
-            attempt,
+            revision: attempt.revision,
+            attempt: response_mode.includes_attempt().then_some(attempt),
             applied_mutation_count: req.mutations.len(),
             server_accepted_through_seq,
             refreshed_attempt_credential: None,
@@ -1219,7 +1275,10 @@ impl DeliveryService {
     }
 
     fn idempotency_repository(&self) -> IdempotencyRepository {
-        IdempotencyRepository::new(self.pool.clone())
+        IdempotencyRepository::with_usable_hours(
+            self.pool.clone(),
+            self.idempotency_usable_hours,
+        )
     }
 
     fn idempotency_request_hash<T: Serialize>(
@@ -1343,6 +1402,20 @@ fn derive_student_key(schedule_id: Uuid, candidate_id: &str) -> String {
 
 fn mutation_batch_route_key(schedule_id: Uuid) -> String {
     format!("POST:/api/v1/student/sessions/{schedule_id}/mutations:batch")
+}
+
+fn should_persist_mutation_row(
+    response_mode: MutationBatchResponseMode,
+    mutation_type: &str,
+) -> bool {
+    if response_mode == MutationBatchResponseMode::Full {
+        return true;
+    }
+
+    !matches!(
+        mutation_type,
+        "answer" | "writing_answer" | "flag" | "position"
+    )
 }
 
 fn submit_route_key(schedule_id: Uuid) -> String {

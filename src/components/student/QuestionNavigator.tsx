@@ -1,5 +1,6 @@
 import React from 'react';
 import { Flag, X } from 'lucide-react';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import {
   countQuestionSlots,
   getAnsweredSlotCount,
@@ -27,6 +28,7 @@ export function QuestionNavigator({
   onNavigate,
   onClose,
 }: QuestionNavigatorProps) {
+  const dialogRef = useFocusTrap(true, onClose);
   const totalQuestions = countQuestionSlots(questions);
   const answeredCount = questions.reduce(
     (count, question) => count + getAnsweredSlotCount(question, answers),
@@ -46,10 +48,12 @@ export function QuestionNavigator({
 
   return (
     <div
+      ref={dialogRef as React.RefObject<HTMLDivElement>}
       className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="question-navigator-title"
+      tabIndex={-1}
     >
       <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between p-3 md:p-4 border-b border-gray-200">
@@ -58,7 +62,7 @@ export function QuestionNavigator({
           </h2>
           <button
             onClick={onClose}
-            className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md"
+            className="min-h-11 min-w-11 p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md"
             aria-label="Close question navigator"
           >
             <X size={18} />
@@ -99,8 +103,9 @@ export function QuestionNavigator({
                     <button
                       key={question.id}
                       onClick={() => onNavigate(question.id)}
+                      aria-label={`Question ${getQuestionNumberLabel(questions, question.id)}${isCurrent ? ', current' : ''}${isFullyComplete ? ', answered' : isAnswered ? ', partially answered' : ', unanswered'}${isFlagged ? ', flagged' : ''}`}
                       className={`
-                        relative ${question.isMulti ? 'px-2 md:px-3 min-w-[2.5rem] md:min-w-[3rem]' : 'w-10 md:w-12'} h-10 md:h-12 rounded-md flex items-center justify-center text-sm md:text-base font-medium transition-all
+                        relative ${question.isMulti ? 'px-3 min-w-11 md:min-w-12' : 'min-w-11 md:min-w-12'} min-h-11 rounded-md flex items-center justify-center text-sm md:text-base font-medium transition-all
                         ${isCurrent ? 'ring-2 ring-blue-500 ring-offset-2' : ''}
                         ${isFullyComplete ? 'bg-green-500 text-white hover:bg-green-600' : isAnswered ? 'bg-green-200 text-green-800' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
                         ${isFlagged && !isAnswered ? 'bg-amber-100 text-amber-800 border border-amber-300' : ''}

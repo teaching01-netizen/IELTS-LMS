@@ -6,7 +6,7 @@
 import { useQuery, useMutation, useQueryClient, UseMutationOptions } from '@tanstack/react-query';
 import { gradingService } from '../../services/gradingService';
 import { gradingRepository } from '../../services/gradingRepository';
-import { queryKeys } from './queryClient';
+import { liveQueryPolicy, queryKeys } from './queryClient';
 import { SessionDetailFilters, ReviewDraft, StudentResult, WritingAnnotation } from '../../types/grading';
 
 function requireResultData<T>(
@@ -50,8 +50,8 @@ export function useSessionSubmissions(sessionId: string, filters?: SessionDetail
     queryKey: queryKeys.grading.submissions(sessionId),
     queryFn: () => gradingService.getSessionStudentSubmissions(sessionId, filters).then(r => r.data || []),
     enabled: !!sessionId,
-    staleTime: 30 * 1000, // 30 seconds
-    refetchInterval: 30 * 1000, // Poll every 30 seconds
+    ...liveQueryPolicy,
+    refetchInterval: 15 * 1000,
   });
 }
 
@@ -75,7 +75,7 @@ export function useReviewDraft(submissionId: string) {
     queryKey: ['review-draft', submissionId],
     queryFn: () => gradingRepository.getReviewDraftBySubmission(submissionId),
     enabled: !!submissionId,
-    staleTime: 30 * 1000,
+    ...liveQueryPolicy,
   });
 }
 

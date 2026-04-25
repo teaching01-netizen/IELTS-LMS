@@ -14,11 +14,12 @@ export function useFocusTrap(isActive: boolean, onEscape?: () => void) {
     if (!isActive || !containerRef.current) return;
 
     const container = containerRef.current;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusableElements = container.querySelectorAll(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
     );
-    const firstElement = focusableElements[0] as HTMLElement;
-    const lastElement = focusableElements[focusableElements.length - 1] as HTMLElement;
+    const firstElement = (focusableElements[0] as HTMLElement | undefined) ?? container;
+    const lastElement = (focusableElements[focusableElements.length - 1] as HTMLElement | undefined) ?? container;
 
     // Focus the first element when trap activates
     if (firstElement) {
@@ -55,6 +56,9 @@ export function useFocusTrap(isActive: boolean, onEscape?: () => void) {
     return () => {
       container.removeEventListener('keydown', handleTabKey);
       document.removeEventListener('keydown', handleEscapeKey);
+      if (previouslyFocused?.isConnected) {
+        previouslyFocused.focus();
+      }
     };
   }, [isActive, onEscape]);
 

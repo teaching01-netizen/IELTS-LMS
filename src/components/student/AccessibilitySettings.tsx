@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Contrast } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface AccessibilitySettingsProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ export function AccessibilitySettings({
   onFontSizeChange, 
   onHighContrastToggle 
 }: AccessibilitySettingsProps) {
+  const dialogRef = useFocusTrap(isOpen, onClose);
+
   if (!isOpen) return null;
 
   const fontSizes = [
@@ -28,16 +31,27 @@ export function AccessibilitySettings({
   ];
 
   return (
-    <div className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6">
+    <div
+      ref={dialogRef as React.RefObject<HTMLDivElement>}
+      className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="accessibility-settings-title"
+      tabIndex={-1}
+    >
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200">
           <div className="flex items-center gap-2 md:gap-3">
             <div className="p-1.5 md:p-2 bg-purple-100 rounded-lg">
               <Contrast size={20} className="text-purple-600" />
             </div>
-            <h2 className="text-lg md:text-xl font-bold text-gray-900">Accessibility</h2>
+            <h2 id="accessibility-settings-title" className="text-lg md:text-xl font-bold text-gray-900">Accessibility</h2>
           </div>
-          <button onClick={onClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors">
+          <button
+            onClick={onClose}
+            className="min-h-11 min-w-11 p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors"
+            aria-label="Close accessibility settings"
+          >
             <X size={18} />
           </button>
         </div>
@@ -50,7 +64,8 @@ export function AccessibilitySettings({
                 <button
                   key={size.value}
                   onClick={() => onFontSizeChange(size.value)}
-                  className={`flex-1 px-4 py-3 rounded-lg border-2 font-medium transition-all ${
+                  aria-pressed={fontSize === size.value}
+                  className={`flex-1 min-h-11 px-4 py-3 rounded-lg border-2 font-medium transition-all ${
                     fontSize === size.value
                       ? 'bg-blue-50 border-blue-500 text-blue-700'
                       : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'
@@ -72,7 +87,10 @@ export function AccessibilitySettings({
               </div>
               <button
                 onClick={onHighContrastToggle}
-                className={`relative w-12 h-6 rounded-full transition-colors ${
+                role="switch"
+                aria-checked={highContrast}
+                aria-label="High Contrast Mode"
+                className={`relative min-h-11 min-w-11 w-12 h-6 rounded-full transition-colors ${
                   highContrast ? 'bg-blue-600' : 'bg-gray-300'
                 }`}
               >

@@ -8,7 +8,6 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 /// Unique identifier for a rate limit bucket.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -67,19 +66,22 @@ struct Bucket {
     window: Duration,
     max_requests: u32,
     burst: u32,
+    last_seen: Instant,
 }
 
 impl Bucket {
-    fn new(config: &RateLimitConfig) -> Self {
+    fn new(config: &RateLimitConfig, now: Instant) -> Self {
         Self {
             requests: Vec::with_capacity((config.max_requests + config.burst) as usize),
             window: config.window,
             max_requests: config.max_requests,
             burst: config.burst,
+            last_seen: now,
         }
     }
 
     fn check_and_record(&mut self, now: Instant) -> RateLimitResult {
+        self.last_seen = now;
         // Remove expired entries outside the window
         let cutoff = now - self.window;
         self.requests.retain(|&t| t > cutoff);
@@ -111,14 +113,21 @@ impl Bucket {
 pub struct RateLimiter {
     buckets: Arc<RwLock<HashMap<RateLimitKey, Bucket>>>,
     default_config: RateLimitConfig,
+    bucket_cap: usize,
 }
 
 impl RateLimiter {
     /// Create a new rate limiter with default configuration.
     pub fn new(default_config: RateLimitConfig) -> Self {
+        Self::with_bucket_cap(default_config, 10_000)
+    }
+
+    /// Create a new rate limiter with an upper bound on tracked buckets.
+    pub fn with_bucket_cap(default_config: RateLimitConfig, bucket_cap: usize) -> Self {
         Self {
             buckets: Arc::new(RwLock::new(HashMap::new())),
             default_config,
+            bucket_cap: bucket_cap.max(1),
         }
     }
 
@@ -126,10 +135,11 @@ impl RateLimiter {
     pub async fn check(&self, key: &RateLimitKey) -> RateLimitResult {
         let now = Instant::now();
         let mut buckets = self.buckets.write().await;
+        self.evict_if_needed(&mut buckets, key, now);
 
         let bucket = buckets
             .entry(key.clone())
-            .or_insert_with(|| Bucket::new(&self.default_config));
+            .or_insert_with(|| Bucket::new(&self.default_config, now));
 
         bucket.check_and_record(now)
     }
@@ -142,11 +152,12 @@ impl RateLimiter {
     ) -> RateLimitResult {
         let now = Instant::now();
         let mut buckets = self.buckets.write().await;
+        self.evict_if_needed(&mut buckets, key, now);
 
         // Use entry API to handle the case where bucket exists with different config
         let bucket = buckets
             .entry(key.clone())
-            .or_insert_with(|| Bucket::new(config));
+            .or_insert_with(|| Bucket::new(config, now));
 
         // If bucket exists but was created with different config, we keep using it
         // (config changes only affect new buckets)
@@ -193,12 +204,41 @@ impl RateLimiter {
     pub async fn bucket_count(&self) -> usize {
         self.buckets.read().await.len()
     }
+
+    fn evict_if_needed(
+        &self,
+        buckets: &mut HashMap<RateLimitKey, Bucket>,
+        incoming_key: &RateLimitKey,
+        now: Instant,
+    ) {
+        if buckets.contains_key(incoming_key) || buckets.len() < self.bucket_cap {
+            return;
+        }
+
+        buckets.retain(|_, bucket| {
+            let cutoff = now - bucket.window;
+            bucket.requests.retain(|&t| t > cutoff);
+            !bucket.requests.is_empty()
+        });
+
+        while buckets.len() >= self.bucket_cap {
+            let Some(oldest_key) = buckets
+                .iter()
+                .min_by_key(|(_, bucket)| bucket.last_seen)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            buckets.remove(&oldest_key);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::net::Ipv4Addr;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn allows_requests_under_limit() {
@@ -336,5 +376,22 @@ mod tests {
         // Should be allowed again (new bucket)
         let result = limiter.check(&key).await;
         assert!(matches!(result, RateLimitResult::Allowed { remaining: 0, .. }));
+    }
+
+    #[tokio::test]
+    async fn bucket_cap_evicts_oldest_idle_bucket() {
+        let limiter = RateLimiter::with_bucket_cap(RateLimitConfig::new(5, 60), 2);
+        let key1 = RateLimitKey::Custom("bucket-1".to_owned());
+        let key2 = RateLimitKey::Custom("bucket-2".to_owned());
+        let key3 = RateLimitKey::Custom("bucket-3".to_owned());
+
+        limiter.check(&key1).await;
+        limiter.check(&key2).await;
+        limiter.check(&key3).await;
+
+        assert_eq!(limiter.bucket_count().await, 2);
+        assert!(limiter.peek(&key1).await.is_none());
+        assert!(limiter.peek(&key2).await.is_some());
+        assert!(limiter.peek(&key3).await.is_some());
     }
 }

@@ -162,9 +162,11 @@ pub struct StudentSessionContext {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudentMutationBatchResponse {
-    pub attempt: StudentAttempt,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<StudentAttempt>,
     pub applied_mutation_count: usize,
     pub server_accepted_through_seq: i64,
+    pub revision: i32,
     pub refreshed_attempt_credential: Option<crate::auth::IssueAttemptToken>,
 }
 

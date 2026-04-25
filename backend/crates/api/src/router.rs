@@ -13,6 +13,7 @@ use crate::{
     },
     state::AppState,
 };
+use tower_http::compression::CompressionLayer;
 
 pub fn build_router(state: AppState) -> Router {
     let middleware_state = state.clone();
@@ -238,5 +239,6 @@ pub fn build_router(state: AppState) -> Router {
             middleware_state,
             request_id_middleware,
         ))
+        .layer(CompressionLayer::new())
         .with_state(state)
 }

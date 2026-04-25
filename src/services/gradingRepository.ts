@@ -9,9 +9,14 @@ import type {
   StudentSubmission,
   WritingTaskSubmission,
 } from '../types/grading';
+import { createTtlLruCache } from '../utils/ttlLruCache';
 
-const reviewDraftRevisions = new Map<string, number>();
-const writingTaskSectionIndex = new Map<string, string>();
+const gradingMemoryCachePolicy = {
+  maxEntries: 500,
+  ttlMs: 30 * 60 * 1000,
+};
+const reviewDraftRevisions = createTtlLruCache<string, number>(gradingMemoryCachePolicy);
+const writingTaskSectionIndex = createTtlLruCache<string, string>(gradingMemoryCachePolicy);
 
 function normalizeTeacherSummary(value: unknown): NonNullable<ReviewDraft['teacherSummary']> {
   if (value && typeof value === 'object') {
@@ -119,7 +124,9 @@ export interface IGradingRepository {
 }
 
 class BackendGradingRepository implements IGradingRepository {
-  private readonly submissionBundleCache = new Map<string, Promise<any>>();
+  private readonly submissionBundleCache = createTtlLruCache<string, Promise<any>>(
+    gradingMemoryCachePolicy,
+  );
 
   private mapSession(payload: any): GradingSession {
     return {

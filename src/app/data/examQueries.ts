@@ -6,7 +6,7 @@
 import { useQuery, useMutation, useQueryClient, UseMutationOptions } from '@tanstack/react-query';
 import { examRepository } from '../../services/examRepository';
 import { examLifecycleService } from '../../services/examLifecycleService';
-import { queryKeys } from './queryClient';
+import { liveQueryPolicy, queryKeys } from './queryClient';
 import { ExamState } from '../../types';
 import { ExamSchedule, ExamSessionRuntime, ExamStatus } from '../../types/domain';
 import { TransitionResult } from '../../types/domain';
@@ -89,8 +89,8 @@ export function useScheduleRuntime(scheduleId: string) {
     queryKey: ['schedule-runtime', scheduleId],
     queryFn: () => examRepository.getRuntimeByScheduleId(scheduleId),
     enabled: !!scheduleId,
-    staleTime: 30 * 1000, // 30 seconds
-    refetchInterval: 30 * 1000, // Poll every 30 seconds
+    ...liveQueryPolicy,
+    refetchInterval: 15 * 1000,
   });
 }
 

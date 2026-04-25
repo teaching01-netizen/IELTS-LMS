@@ -103,7 +103,7 @@ export function StudentHeader({
         {onOpenAccessibility && (
           <button
             onClick={onOpenAccessibility}
-            className="p-1 md:p-1.5 rounded-sm flex-shrink-0"
+            className="min-h-11 min-w-11 p-1 md:p-1.5 rounded-sm flex-shrink-0"
             aria-label="Open accessibility settings"
           >
             <Contrast size={16} strokeWidth={2} />
@@ -112,7 +112,7 @@ export function StudentHeader({
         {onOpenNavigator && (
           <button
             onClick={onOpenNavigator}
-            className="flex items-center gap-1 md:gap-1.5 px-2 md:px-2.5 py-1 md:py-1.5 rounded-sm bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs"
+            className="flex min-h-11 items-center gap-1 md:gap-1.5 px-3 py-2 rounded-sm bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs"
             aria-label="Open question navigator"
           >
             <LayoutGrid size={16} strokeWidth={2} />
@@ -121,11 +121,11 @@ export function StudentHeader({
         )}
         {!isExamActive && (
           <>
-            <button className="p-1 md:p-1.5 rounded-sm relative hidden sm:block" aria-label="Connection status: Online">
+            <button className="min-h-11 min-w-11 p-1 md:p-1.5 rounded-sm relative hidden sm:block" aria-label="Connection status: Online">
               <Wifi size={16} strokeWidth={2} />
               <div className="absolute top-1 md:top-1.5 right-1 md:right-1.5 w-1.5 md:w-2 h-1.5 md:h-2 bg-green-600 rounded-full border-2 border-white"></div>
             </button>
-            <button className="p-1 md:p-1.5 rounded-sm hidden sm:block" aria-label="Notifications">
+            <button className="min-h-11 min-w-11 p-1 md:p-1.5 rounded-sm hidden sm:block" aria-label="Notifications">
               <Bell size={16} strokeWidth={2} />
             </button>
           </>
@@ -135,7 +135,7 @@ export function StudentHeader({
             <div className="w-px h-5 md:h-6 lg:h-8 bg-gray-200 mx-0.5 md:mx-1 lg:mx-2 hidden sm:block"></div>
             <button
               onClick={handleExit}
-              className="flex items-center gap-1 md:gap-1.5 lg:gap-2 px-1.5 md:px-2 lg:px-3 py-1 md:py-1.5 bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs lg:text-sm rounded-sm flex-shrink-0"
+              className="flex min-h-11 items-center gap-1 md:gap-1.5 lg:gap-2 px-3 py-2 bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs lg:text-sm rounded-sm flex-shrink-0"
               aria-label={isExamActive ? "Exit exam" : "Exit preview"}
             >
               <Menu size={14} strokeWidth={2.5} />

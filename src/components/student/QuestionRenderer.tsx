@@ -89,7 +89,7 @@ export function QuestionRenderer({
       <button
         type="button"
         onClick={() => onToggleFlag(slotId)}
-        className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
+        className={`inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
           flags[slotId]
             ? 'border-amber-700 bg-amber-700 text-white'
             : 'border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700'

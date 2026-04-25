@@ -88,6 +88,8 @@ type ObservedSnapshot = {
 };
 
 const StudentAttemptContext = createContext<StudentAttemptContextValue | null>(null);
+const NORMAL_MUTATION_FLUSH_DELAY_MS = 5_000;
+const CRITICAL_MUTATION_FLUSH_DELAY_MS = 400;
 
 function getMutationCoalesceKey(mutation: StudentAttemptMutation): string | null {
   switch (mutation.type) {
@@ -622,14 +624,14 @@ export function StudentAttemptProvider({
     }
 
     if (nextObserved.violations !== observedRef.current.violations) {
-      void applyPatch(objectivePatch, 'violation', 400, {
+      void applyPatch(objectivePatch, 'violation', CRITICAL_MUTATION_FLUSH_DELAY_MS, {
         changedAreas: ['violation'],
         violations: runtimeState.violations,
       });
     }
 
     if (nextObserved.position !== observedRef.current.position) {
-      void applyPatch(objectivePatch, 'position', 400, {
+      void applyPatch(objectivePatch, 'position', CRITICAL_MUTATION_FLUSH_DELAY_MS, {
         changedAreas: ['position'],
         phase: effectivePhase,
         currentModule: runtimeState.currentModule,
@@ -670,7 +672,7 @@ export function StudentAttemptProvider({
         },
       },
       'answer',
-      400,
+      NORMAL_MUTATION_FLUSH_DELAY_MS,
       { questionId, value: answer },
     );
   }, [applyPatch]);
@@ -683,7 +685,7 @@ export function StudentAttemptProvider({
         },
       },
       'writing_answer',
-      1_500,
+      NORMAL_MUTATION_FLUSH_DELAY_MS,
       { taskId, value: text },
     );
   }, [applyPatch]);
@@ -696,7 +698,7 @@ export function StudentAttemptProvider({
         },
       },
       'flag',
-      400,
+      NORMAL_MUTATION_FLUSH_DELAY_MS,
       { questionId, value: flagged },
     );
   }, [applyPatch]);
@@ -716,7 +718,7 @@ export function StudentAttemptProvider({
         violations: nextViolations,
       },
       'violation',
-      400,
+      CRITICAL_MUTATION_FLUSH_DELAY_MS,
       {
         violationId: violation.id,
         violationType: violation.type,
@@ -737,7 +739,7 @@ export function StudentAttemptProvider({
         phase,
       },
       'position',
-      400,
+      CRITICAL_MUTATION_FLUSH_DELAY_MS,
       {
         currentModule,
         currentQuestionId,

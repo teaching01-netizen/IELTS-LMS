@@ -18,6 +18,16 @@ const DEFAULT_STALE_TIME = 5 * 60 * 1000;
  */
 const DEFAULT_CACHE_TIME = 10 * 60 * 1000;
 
+export const liveQueryPolicy = {
+  staleTime: 15 * 1000,
+  gcTime: 2 * 60 * 1000,
+} as const;
+
+export const staticQueryPolicy = {
+  staleTime: 30 * 60 * 1000,
+  gcTime: 60 * 60 * 1000,
+} as const;
+
 /**
  * Default retry configuration
  * Retry failed requests up to 3 times with exponential backoff
