@@ -191,9 +191,13 @@ export function BuilderRoot() {
   const currentStateRef = useRef<ExamState | null>(null);
   const debouncedAutosaveRef = useRef<number | null>(null);
   const pendingAutosaveStateRef = useRef<ExamState | null>(null);
+  const pendingAutosaveRequestIdRef = useRef<number | null>(null);
+  const latestSaveRequestIdRef = useRef(0);
   const handleUpdateExamContentRef = useRef(handleUpdateExamContent);
   const pushToastRef = useRef<(toast: Omit<GlobalToastItem, 'id'>) => void>(() => {});
-  const saveRunnerRef = useRef<LatestOnlyAsyncRunner<ExamState> | null>(null);
+  const saveRunnerRef = useRef<LatestOnlyAsyncRunner<{ state: ExamState; requestId: number }> | null>(
+    null,
+  );
 
   useEffect(() => {
     if (examId !== initializedExamId) {
@@ -252,32 +256,39 @@ export function BuilderRoot() {
   }, [pushToast]);
 
   if (!saveRunnerRef.current) {
-    saveRunnerRef.current = createLatestOnlyAsyncRunner(async (nextState) => {
+    saveRunnerRef.current = createLatestOnlyAsyncRunner(async ({ state: nextState, requestId }) => {
       setSaveStatus('saving');
       try {
         await handleUpdateExamContentRef.current(nextState);
-        setSaveStatus('saved');
+        if (requestId === latestSaveRequestIdRef.current) {
+          setSaveStatus('saved');
+        }
       } catch (error) {
-        setSaveStatus('error');
-        pushToastRef.current({
-          variant: 'error',
-          title: 'Save failed',
-          message: error instanceof Error ? error.message : 'Latest change could not be saved.',
-          actionLabel: 'Retry',
-          onAction: () => {
-            const latest = currentStateRef.current;
-            if (latest) {
-              saveRunnerRef.current?.enqueue(latest);
-            }
-          },
-        });
+        if (requestId === latestSaveRequestIdRef.current) {
+          setSaveStatus('error');
+          pushToastRef.current({
+            variant: 'error',
+            title: 'Save failed',
+            message: error instanceof Error ? error.message : 'Latest change could not be saved.',
+            actionLabel: 'Retry',
+            onAction: () => {
+              const latest = currentStateRef.current;
+              if (latest) {
+                const retryRequestId = ++latestSaveRequestIdRef.current;
+                saveRunnerRef.current?.enqueue({ state: latest, requestId: retryRequestId });
+              }
+            },
+          });
+        }
         throw error;
       }
     });
   }
 
   const scheduleAutosave = (nextState: ExamState) => {
+    const requestId = ++latestSaveRequestIdRef.current;
     pendingAutosaveStateRef.current = nextState;
+    pendingAutosaveRequestIdRef.current = requestId;
     setSaveStatus('unsaved');
 
     if (debouncedAutosaveRef.current) {
@@ -286,12 +297,14 @@ export function BuilderRoot() {
 
     debouncedAutosaveRef.current = window.setTimeout(() => {
       const pending = pendingAutosaveStateRef.current;
-      if (!pending) {
+      const pendingRequestId = pendingAutosaveRequestIdRef.current;
+      if (!pending || pendingRequestId === null) {
         return;
       }
 
-      saveRunnerRef.current?.enqueue(pending);
+      saveRunnerRef.current?.enqueue({ state: pending, requestId: pendingRequestId });
       pendingAutosaveStateRef.current = null;
+      pendingAutosaveRequestIdRef.current = null;
       debouncedAutosaveRef.current = null;
     }, 350);
   };
@@ -350,26 +363,31 @@ export function BuilderRoot() {
       return false;
     }
 
+    const requestId = ++latestSaveRequestIdRef.current;
+
     if (debouncedAutosaveRef.current) {
       window.clearTimeout(debouncedAutosaveRef.current);
       debouncedAutosaveRef.current = null;
     }
 
     pendingAutosaveStateRef.current = null;
+    pendingAutosaveRequestIdRef.current = null;
 
-    saveRunnerRef.current?.enqueue(nextState);
+    saveRunnerRef.current?.enqueue({ state: nextState, requestId });
     await saveRunnerRef.current?.idle();
 
-    if (saveRunnerRef.current?.lastError) {
+    if (requestId === latestSaveRequestIdRef.current && saveRunnerRef.current?.lastError) {
       return false;
     }
 
-    pushToast({
-      variant: 'success',
-      title: 'Saved',
-      message: 'All changes saved.',
-      timestamp: nowLabel(),
-    });
+    if (requestId === latestSaveRequestIdRef.current) {
+      pushToast({
+        variant: 'success',
+        title: 'Saved',
+        message: 'All changes saved.',
+        timestamp: nowLabel(),
+      });
+    }
     return true;
   };
 

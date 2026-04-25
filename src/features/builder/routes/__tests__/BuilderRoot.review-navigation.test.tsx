@@ -9,6 +9,17 @@ const mockHandleUpdateExamContent = vi.fn().mockResolvedValue(undefined);
 const createControllerState = () => createInitialExamState('Mock IELTS Exam', 'Academic');
 let controllerState = createControllerState();
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
   return {
@@ -58,9 +69,17 @@ vi.mock('@components/Sidebar', () => ({
 }));
 
 vi.mock('@components/Header', () => ({
-  Header: ({ onNavigateToConfig, onNavigateToReview, onReturnToAdmin, onUpdateState, state }: any) => (
+  Header: ({
+    onNavigateToConfig,
+    onNavigateToReview,
+    onReturnToAdmin,
+    onUpdateState,
+    saveStatusLabel,
+    state,
+  }: any) => (
     <div>
       <div data-testid="header-title">{state.title}</div>
+      <div data-testid="save-status">{saveStatusLabel}</div>
       <button
         type="button"
         onClick={() => {
@@ -116,7 +135,15 @@ vi.mock('@components/CommandPalette', () => ({
 }));
 
 vi.mock('@components/GlobalToast', () => ({
-  GlobalToast: () => null,
+  GlobalToast: ({ toasts }: any) => (
+    <div>
+      {toasts.map((toast: any) => (
+        <div key={toast.id} data-testid="toast-item">
+          {toast.title}
+        </div>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock('@components/scoring/BandScoreMatrix', () => ({
@@ -130,6 +157,7 @@ vi.mock('@components/scoring/GradingWorkspace', () => ({
 describe('BuilderRoot review navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockHandleUpdateExamContent.mockReset().mockResolvedValue(undefined);
     controllerState = createControllerState();
   });
 
@@ -196,6 +224,82 @@ describe('BuilderRoot review navigation', () => {
         title: 'Edited Mock IELTS Exam',
       }),
     );
+  });
+
+  it('does not surface an error toast for a superseded autosave failure', async () => {
+    vi.useFakeTimers();
+    const firstSave = createDeferred<void>();
+    const secondSave = createDeferred<void>();
+    let saveCallCount = 0;
+    mockHandleUpdateExamContent.mockImplementation(() => {
+      saveCallCount += 1;
+      if (saveCallCount === 1) {
+        return firstSave.promise;
+      }
+      if (saveCallCount === 2) {
+        return secondSave.promise;
+      }
+      throw new Error('Unexpected save call');
+    });
+
+    render(<BuilderRoot />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const editButton = screen.getByRole('button', { name: /edit draft/i });
+
+    await act(async () => {
+      fireEvent.click(editButton);
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+    });
+
+    expect(mockHandleUpdateExamContent).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      fireEvent.click(editButton);
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+    });
+
+    expect(mockHandleUpdateExamContent).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstSave.reject(new Error('Draft has been modified'));
+      await Promise.resolve();
+    });
+
+    expect(mockHandleUpdateExamContent).toHaveBeenCalledTimes(2);
+
+    expect(screen.getByTestId('save-status')).not.toHaveTextContent(/save failed/i);
+    expect(
+      screen
+        .queryAllByTestId('toast-item')
+        .map((item) => item.textContent)
+        .filter(Boolean),
+    ).not.toContain('Save failed');
+
+    await act(async () => {
+      secondSave.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('save-status')).toHaveTextContent(/all changes saved/i);
+
+    expect(
+      screen
+        .queryAllByTestId('toast-item')
+        .map((item) => item.textContent)
+        .filter(Boolean),
+    ).not.toContain('Save failed');
+
+    vi.useRealTimers();
   });
 
   it('shows a recovery screen when no builder modules are enabled', async () => {

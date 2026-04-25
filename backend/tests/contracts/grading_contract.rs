@@ -119,6 +119,46 @@ async fn grading_review_and_result_release_flow_round_trips() {
     let start_review_json = json_body(start_review).await;
     assert_eq!(start_review_json["data"]["teacherId"], auth.user_id.to_string());
 
+    let save_draft_missing_revision = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("PUT")
+                .uri(format!(
+                    "/api/v1/grading/submissions/{}/review-draft",
+                    submission_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "teacherId": auth.user_id.to_string(),
+                        "sectionDrafts": {
+                            "listening": {"overallBand": 7.0},
+                            "reading": {"overallBand": 6.5},
+                            "writing": {
+                                "task1": {"overallBand": 6.0},
+                                "task2": {"overallBand": 6.5}
+                            },
+                            "speaking": {"overallBand": 7.0}
+                        },
+                        "annotations": [],
+                        "drawings": [],
+                        "teacherSummary": {
+                            "strengths": ["Fluent reading comprehension"],
+                            "improvementPriorities": ["More task response detail"],
+                            "recommendedPractice": ["Timed writing drills"]
+                        },
+                        "checklist": {"rubricAligned": true},
+                        "hasUnsavedChanges": false
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(save_draft_missing_revision.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
     let save_draft = app
         .clone()
         .oneshot(
@@ -306,6 +346,48 @@ async fn grading_review_and_result_release_flow_round_trips() {
         result_detail_json["data"]["submissionId"],
         submission_id.to_string()
     );
+    assert_eq!(
+        result_detail_json["data"]["writingResults"]["task1"]["prompt"],
+        "Summarise the chart."
+    );
+    assert_eq!(
+        result_detail_json["data"]["writingResults"]["task1"]["studentText"],
+        "Task response"
+    );
+
+    let unauthorized_grader = create_authenticated_user(
+        database.pool(),
+        UserRole::Grader,
+        "other-grader@example.com",
+        "Other Grader",
+    )
+    .await;
+
+    let forbidden_result_detail = app
+        .clone()
+        .oneshot(
+            unauthorized_grader.with_auth(
+                Request::builder().uri(format!("/api/v1/results/{}", result_id)),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(forbidden_result_detail.status(), StatusCode::FORBIDDEN);
+
+    let forbidden_result_events = app
+        .clone()
+        .oneshot(
+            unauthorized_grader.with_auth(
+                Request::builder().uri(format!("/api/v1/results/{}/events", result_id)),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(forbidden_result_events.status(), StatusCode::FORBIDDEN);
 
     let analytics = app
         .clone()

@@ -163,7 +163,11 @@ export function Workspace({
 
     const fallbackPassageId = state.reading.passages[0]?.id;
     if (fallbackPassageId) {
-      void setState({ ...state, activePassageId: fallbackPassageId });
+      void setState((previous) =>
+        previous.activePassageId === fallbackPassageId
+          ? previous
+          : { ...previous, activePassageId: fallbackPassageId },
+      );
       return <WorkspaceSkeleton progress={100} />;
     }
 
@@ -190,26 +194,46 @@ export function Workspace({
   };
 
   const handlePassageSelect = (passageId: string) => {
-    void setState({ ...state, activePassageId: passageId });
+    void setState((previous) =>
+      previous.activePassageId === passageId ? previous : { ...previous, activePassageId: passageId },
+    );
   };
 
   // handlePassageAdd declared above (used for empty state recovery).
 
   const handlePassageDelete = (passageId: string) => {
-    const newPassages = state.reading.passages.filter(p => p.id !== passageId);
-    const newActiveId = state.activePassageId === passageId
-      ? (newPassages[0]?.id || '')
-      : state.activePassageId;
-    void setState({ ...state, reading: { ...state.reading, passages: newPassages }, activePassageId: newActiveId });
+    if (editingPassageId === passageId) {
+      setEditingPassageId(null);
+    }
+
+    void setState((previous) => {
+      const newPassages = previous.reading.passages.filter((p) => p.id !== passageId);
+      if (newPassages.length === previous.reading.passages.length) {
+        return previous;
+      }
+
+      const newActiveId =
+        previous.activePassageId === passageId ? newPassages[0]?.id ?? '' : previous.activePassageId;
+
+      return {
+        ...previous,
+        reading: { ...previous.reading, passages: newPassages },
+        activePassageId: newActiveId,
+      };
+    });
   };
 
   const handlePassageReorder = (fromIndex: number, toIndex: number) => {
-    const newPassages = [...state.reading.passages];
-    const [removed] = newPassages.splice(fromIndex, 1);
-    if (removed) {
+    void setState((previous) => {
+      const newPassages = [...previous.reading.passages];
+      const [removed] = newPassages.splice(fromIndex, 1);
+      if (!removed) {
+        return previous;
+      }
+
       newPassages.splice(toIndex, 0, removed);
-      void setState({ ...state, reading: { ...state.reading, passages: newPassages } });
-    }
+      return { ...previous, reading: { ...previous.reading, passages: newPassages } };
+    });
   };
 
   const handlePassageEdit = (passageId: string) => {
@@ -217,25 +241,29 @@ export function Workspace({
   };
 
   const handleMetadataSave = (metadataUpdates: Omit<PassageMetadata, 'id' | 'createdAt' | 'usageCount'>) => {
-    if (!editingPassageId) return;
+    const passageId = editingPassageId;
+    if (!passageId) return;
 
-    const passage = state.reading.passages.find(p => p.id === editingPassageId);
-    if (!passage) return;
+    void setState((previous) => {
+      const passage = previous.reading.passages.find((p) => p.id === passageId);
+      if (!passage) {
+        return previous;
+      }
 
-    // Create or update metadata
-    const updatedMetadata: PassageMetadata = {
-      id: passage.metadata?.id || createId('passage_meta'),
-      createdAt: passage.metadata?.createdAt || new Date().toISOString(),
-      usageCount: passage.metadata?.usageCount || 0,
-      lastUsedAt: passage.metadata?.lastUsedAt,
-      ...metadataUpdates
-    };
+      const updatedMetadata: PassageMetadata = {
+        id: passage.metadata?.id || createId('passage_meta'),
+        createdAt: passage.metadata?.createdAt || new Date().toISOString(),
+        usageCount: passage.metadata?.usageCount || 0,
+        lastUsedAt: passage.metadata?.lastUsedAt,
+        ...metadataUpdates,
+      };
 
-    const newPassages = state.reading.passages.map(p =>
-      p.id === editingPassageId ? { ...p, metadata: updatedMetadata } : p
-    );
+      const newPassages = previous.reading.passages.map((p) =>
+        p.id === passageId ? { ...p, metadata: updatedMetadata } : p,
+      );
 
-    void setState({ ...state, reading: { ...state.reading, passages: newPassages } });
+      return { ...previous, reading: { ...previous.reading, passages: newPassages } };
+    });
     setEditingPassageId(null);
   };
 
