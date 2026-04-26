@@ -437,7 +437,7 @@ describe('gradingReviewUtils', () => {
     expect(exportData.rows[0]?.['answer:lq-1']).toBe('Train');
   });
 
-  test('leaves missing objective answers and unscored questions blank', () => {
+  test('uses computed auto scores when stored question scores are missing', () => {
     const examState = createInitialExamState('Exam', 'Academic');
     examState.reading.passages = [
       {
@@ -476,7 +476,8 @@ describe('gradingReviewUtils', () => {
     });
 
     expect(exportData.rows[0]?.['answer:q-2']).toBe('');
-    expect(exportData.rows[0]?.['score:q-2']).toBe('');
+    expect(exportData.rows[0]?.['score:q-1']).toBe(1);
+    expect(exportData.rows[0]?.['score:q-2']).toBe(0);
   });
 
   test('writing export columns remain stable', () => {
