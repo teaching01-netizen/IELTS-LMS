@@ -4,10 +4,86 @@ import {
   buildCsvContent,
   buildObjectiveExportRows,
   buildQuestionTracebackGroups,
+  buildWideObjectiveExport,
   escapeCsvValue,
-  READING_EXPORT_COLUMNS,
+  OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS,
   WRITING_EXPORT_COLUMNS,
 } from '../gradingReviewUtils';
+
+function createStudentSubmission(id: string, studentId: string, studentName: string) {
+  return {
+    id,
+    submissionId: id,
+    scheduleId: 'sched-1',
+    examId: 'exam-1',
+    publishedVersionId: 'ver-1',
+    studentId,
+    studentName,
+    studentEmail: `${studentId}@example.com`,
+    cohortName: 'Cohort',
+    submittedAt: '2026-01-01T00:00:00.000Z',
+    timeSpentSeconds: 0,
+    gradingStatus: 'submitted',
+    isFlagged: false,
+    isOverdue: false,
+    sectionStatuses: {
+      listening: 'pending',
+      reading: 'auto_graded',
+      writing: 'needs_review',
+      speaking: 'pending',
+    },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  } as any;
+}
+
+function createQuestionResult(questionId: string, isCorrect: boolean, awardedScore: number) {
+  return {
+    questionId,
+    studentAnswer: '',
+    correctAnswer: '',
+    isCorrect,
+    awardedScore,
+    maxScore: 1,
+    scoringRule: 'one_word',
+    hasOverride: false,
+  };
+}
+
+function createSectionSubmission(
+  submissionId: string,
+  section: 'reading' | 'listening',
+  answers: Record<string, unknown>,
+  questionResults: ReturnType<typeof createQuestionResult>[],
+) {
+  return {
+    id: `${submissionId}-${section}`,
+    submissionId,
+    section,
+    answers: {
+      type: section,
+      answers,
+    },
+    autoGradingResults: {
+      generatedAt: new Date().toISOString(),
+      totalScore: questionResults.reduce((sum, result) => sum + result.awardedScore, 0),
+      maxScore: questionResults.reduce((sum, result) => sum + result.maxScore, 0),
+      percentage:
+        questionResults.length === 0
+          ? 0
+          : (questionResults.reduce((sum, result) => sum + result.awardedScore, 0) /
+              questionResults.reduce((sum, result) => sum + result.maxScore, 0)) *
+            100,
+      questionResults,
+    },
+    gradingStatus: 'auto_graded',
+    reviewedBy: undefined,
+    reviewedAt: undefined,
+    finalizedBy: undefined,
+    finalizedAt: undefined,
+    submittedAt: '2026-01-01T00:00:00.000Z',
+  } as any;
+}
 
 describe('gradingReviewUtils', () => {
   test('escapes csv values with commas, quotes, and newlines', () => {
@@ -22,7 +98,7 @@ describe('gradingReviewUtils', () => {
   });
 
   test('builds stable csv content with escaped values', () => {
-    const csv = buildCsvContent(READING_EXPORT_COLUMNS.slice(0, 3), [
+    const csv = buildCsvContent(OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS.slice(0, 3), [
       {
         examTitle: 'Test, Exam',
         sessionId: 'sess-1',
@@ -236,6 +312,171 @@ describe('gradingReviewUtils', () => {
     expect(rows[0]?.isCorrect).toBe('Incorrect');
     expect(rows[0]?.autoScore).toBe(0);
     expect(rows[0]?.maxScore).toBe(1);
+  });
+
+  test('builds one reading export row per student with answers before scores', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages = [
+      {
+        id: 'passage-1',
+        title: 'Passage 1',
+        content: 'Content',
+        blocks: [
+          {
+            id: 'block-1',
+            type: 'SHORT_ANSWER',
+            instruction: 'Answer the questions.',
+            questions: [
+              { id: 'q-1', prompt: 'First?', correctAnswer: 'Alpha', answerRule: 'ONE_WORD' },
+              { id: 'q-2', prompt: 'Second?', correctAnswer: 'Beta', answerRule: 'ONE_WORD' },
+            ],
+          },
+        ],
+        images: [],
+        wordCount: 1,
+      },
+    ];
+    const submissions = [
+      createStudentSubmission('sub-1', 'stu-1', 'Student One'),
+      createStudentSubmission('sub-2', 'stu-2', 'Student Two'),
+    ];
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions,
+      sectionSubmissions: [
+        {
+          submissionId: 'sub-1',
+          sectionSubmission: createSectionSubmission('sub-1', 'reading', { 'q-1': 'Alpha', 'q-2': 'Wrong' }, [
+            createQuestionResult('q-1', true, 1),
+            createQuestionResult('q-2', false, 0),
+          ]),
+        },
+        {
+          submissionId: 'sub-2',
+          sectionSubmission: createSectionSubmission('sub-2', 'reading', { 'q-1': 'Other', 'q-2': 'Beta' }, [
+            createQuestionResult('q-1', false, 0),
+            createQuestionResult('q-2', true, 1),
+          ]),
+        },
+      ],
+      examState,
+      moduleType: 'reading',
+    });
+
+    expect(exportData.rows).toHaveLength(2);
+    expect(exportData.columns.map((column) => column.label)).toEqual([
+      'Exam Title',
+      'Session ID',
+      'Schedule ID',
+      'Submission ID',
+      'Student Name',
+      'Student ID',
+      'Student Email',
+      'Cohort Name',
+      'Section',
+      'Submitted At',
+      'Total Score',
+      'Max Score',
+      'Percentage',
+      'Correct Count',
+      'Q1 Answer',
+      'Q2 Answer',
+      'Q1 Score',
+      'Q2 Score',
+    ]);
+    expect(exportData.rows[0]?.['answer:q-1']).toBe('Alpha');
+    expect(exportData.rows[0]?.['answer:q-2']).toBe('Wrong');
+    expect(exportData.rows[0]?.['score:q-1']).toBe(1);
+    expect(exportData.rows[0]?.['score:q-2']).toBe(0);
+    expect(exportData.rows[1]?.['answer:q-1']).toBe('Other');
+    expect(exportData.rows[1]?.['answer:q-2']).toBe('Beta');
+    expect(exportData.rows[1]?.correctCount).toBe(1);
+  });
+
+  test('builds listening export with the same wide format', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.listening.parts = [
+      {
+        id: 'part-1',
+        title: 'Part 1',
+        audioUrl: undefined,
+        pins: [],
+        blocks: [
+          {
+            id: 'listen-block-1',
+            type: 'SHORT_ANSWER',
+            instruction: 'Answer the question.',
+            questions: [
+              { id: 'lq-1', prompt: 'Listen for the word.', correctAnswer: 'Train', answerRule: 'ONE_WORD' },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      sectionSubmissions: [
+        {
+          submissionId: 'sub-1',
+          sectionSubmission: createSectionSubmission('sub-1', 'listening', { 'lq-1': 'Train' }, [
+            createQuestionResult('lq-1', true, 1),
+          ]),
+        },
+      ],
+      examState,
+      moduleType: 'listening',
+    });
+
+    expect(exportData.rows).toHaveLength(1);
+    expect(exportData.columns.at(-2)?.label).toBe('Q1 Answer');
+    expect(exportData.columns.at(-1)?.label).toBe('Q1 Score');
+    expect(exportData.rows[0]?.section).toBe('listening');
+    expect(exportData.rows[0]?.['answer:lq-1']).toBe('Train');
+  });
+
+  test('leaves missing objective answers and unscored questions blank', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages = [
+      {
+        id: 'passage-1',
+        title: 'Passage 1',
+        content: 'Content',
+        blocks: [
+          {
+            id: 'block-1',
+            type: 'SHORT_ANSWER',
+            instruction: 'Answer the questions.',
+            questions: [
+              { id: 'q-1', prompt: 'First?', correctAnswer: 'Alpha', answerRule: 'ONE_WORD' },
+              { id: 'q-2', prompt: 'Second?', correctAnswer: 'Beta', answerRule: 'ONE_WORD' },
+            ],
+          },
+        ],
+        images: [],
+        wordCount: 1,
+      },
+    ];
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      sectionSubmissions: [
+        {
+          submissionId: 'sub-1',
+          sectionSubmission: createSectionSubmission('sub-1', 'reading', { 'q-1': 'Alpha' }, [
+            createQuestionResult('q-1', true, 1),
+          ]),
+        },
+      ],
+      examState,
+      moduleType: 'reading',
+    });
+
+    expect(exportData.rows[0]?.['answer:q-2']).toBe('');
+    expect(exportData.rows[0]?.['score:q-2']).toBe('');
   });
 
   test('writing export columns remain stable', () => {

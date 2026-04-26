@@ -10,11 +10,9 @@ import { GradingExportButtons } from './GradingExportButtons';
 import {
   buildCsvContent,
   buildCsvFilename,
-  buildObjectiveExportRows,
+  buildWideObjectiveExport,
   buildWritingExportRows,
   downloadCsvFile,
-  LISTENING_EXPORT_COLUMNS,
-  READING_EXPORT_COLUMNS,
   WRITING_EXPORT_COLUMNS,
   type GradingExportSection,
 } from './gradingReviewUtils';
@@ -171,36 +169,28 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         examTitle: fullSession.examTitle,
       };
 
-      const rows =
+      const exportPayload =
         section === 'writing'
-          ? bundles.flatMap(({ submission, writing }) =>
-              buildWritingExportRows(sessionContext, submission, writing),
-            )
-          : bundles.flatMap(({ submission, sections }) => {
-              const sectionSubmission = sections.find((item) => item.section === section);
-              if (!sectionSubmission) {
-                return [];
-              }
-
-              return buildObjectiveExportRows({
-                session: sessionContext,
-                submission,
-                sectionSubmission,
-                examState,
-                moduleType: section,
-              });
+          ? {
+              columns: WRITING_EXPORT_COLUMNS,
+              rows: bundles.flatMap(({ submission, writing }) =>
+                buildWritingExportRows(sessionContext, submission, writing),
+              ),
+            }
+          : buildWideObjectiveExport({
+              session: sessionContext,
+              submissions: bundles.map(({ submission }) => submission),
+              sectionSubmissions: bundles.map(({ submission, sections }) => ({
+                submissionId: submission.id,
+                sectionSubmission: sections.find((item) => item.section === section),
+              })),
+              examState,
+              moduleType: section,
             });
-
-      const columns =
-        section === 'writing'
-          ? WRITING_EXPORT_COLUMNS
-          : section === 'reading'
-            ? READING_EXPORT_COLUMNS
-            : LISTENING_EXPORT_COLUMNS;
 
       downloadCsvFile(
         buildCsvFilename(fullSession.examTitle, section, fullSession.cohortName),
-        buildCsvContent(columns, rows),
+        buildCsvContent(exportPayload.columns, exportPayload.rows),
       );
     } catch (error) {
       setExportError(error instanceof Error ? error.message : 'Failed to export section CSV.');
