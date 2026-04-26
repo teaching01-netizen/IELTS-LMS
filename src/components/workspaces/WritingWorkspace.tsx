@@ -11,8 +11,8 @@ import {
   updateWritingTaskContent,
 } from '../../utils/writingTaskUtils';
 import { WritingTaskPanel } from '../WritingTaskPanel';
-import { CHAR_HEIGHT_PX, WRITING } from '../../constants/uiConstants';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
+import { WritingChartPreview } from '../writing/WritingChartPreview';
 
 const toDataUrl = (file: File) =>
   new Promise<string>((resolve) => {
@@ -20,63 +20,6 @@ const toDataUrl = (file: File) =>
     reader.onload = () => resolve(String(reader.result ?? ''));
     reader.readAsDataURL(file);
   });
-
-const chartPreview = (chart?: WritingChartData) => {
-  if (!chart) {
-    return null;
-  }
-
-  if (chart.imageSrc) {
-    return (
-      <div className="rounded-[28px] border border-gray-200 bg-white p-4 shadow-sm">
-        <img src={chart.imageSrc} alt={chart.title} className="w-full rounded-2xl object-contain max-h-72" />
-      </div>
-    );
-  }
-
-  if (chart.type === 'table') {
-    return (
-      <div className="rounded-[28px] border border-gray-200 bg-white p-4 shadow-sm">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-gray-400 uppercase text-[10px] tracking-[0.2em]">
-              <th className="pb-2">Label</th>
-              <th className="pb-2">Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            {chart.labels.map((label, index) => (
-              <tr key={label} className="border-t border-gray-100">
-                <td className="py-2">{label}</td>
-                <td className="py-2 font-semibold">{chart.values[index] ?? 0}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-[28px] border border-gray-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-black text-gray-400 uppercase tracking-[0.22em] mb-4">{chart.title}</p>
-      <div className="flex items-end gap-3 h-56">
-        {chart.values.map((value, index) => (
-          <div key={`${chart.labels[index]}-${value}`} className="flex-1 text-center">
-            <div
-              className={`mx-auto rounded-t-2xl ${
-                chart.type === 'line' ? 'bg-amber-300' : chart.type === 'pie' ? 'bg-emerald-400' : 'bg-blue-500'
-              }`}
-              style={{ height: `${Math.max(WRITING.MIN_HEIGHT_CHARS, value * CHAR_HEIGHT_PX)}px` }}
-            />
-            <p className="text-[11px] font-semibold text-gray-500 mt-2">{chart.labels[index]}</p>
-            <p className="text-sm font-black text-gray-900">{value}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 const syncWritingRubricWeights = (state: ExamState, rubric: RubricDefinition): ExamState => {
   const nextConfig = syncConfigWithStandards({
@@ -542,7 +485,13 @@ export function WritingWorkspace({
                         </div>
                       </div>
 
-                      {chartPreview(taskContent.chart)}
+                      {taskContent.chart?.imageSrc ? (
+                        <div className="rounded-[28px] border border-gray-200 bg-white p-4 shadow-sm">
+                          <img src={taskContent.chart.imageSrc} alt={taskContent.chart.title} className="w-full rounded-2xl object-contain max-h-72" />
+                        </div>
+                      ) : (
+                        <WritingChartPreview chart={taskContent.chart} variant="builder" />
+                      )}
                     </div>
                   )}
 

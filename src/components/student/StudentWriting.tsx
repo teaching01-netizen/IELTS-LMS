@@ -3,11 +3,12 @@ import { ExamState } from '../../types';
 import { ArrowLeftRight, Check, X, AlertTriangle } from 'lucide-react';
 import { getWritingTaskContent } from '../../utils/writingTaskUtils';
 import { stripHtml } from '../../utils/builderEnhancements';
-import { MIN_HEIGHTS, CHAR_HEIGHT_PX, WRITING } from '../../constants/uiConstants';
+import { MIN_HEIGHTS } from '../../constants/uiConstants';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
+import { WritingChartPreview } from '../writing/WritingChartPreview';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -307,16 +308,7 @@ export function StudentWriting({
                     className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
                   />
                 ) : (
-                  <div className="flex items-end gap-3 h-44">
-                    {currentChart.values.map((value, index) => (
-                      <div key={`${currentChart.labels[index]}-${value}`} className="flex-1 text-center">
-                        <div className="mx-auto rounded-t-2xl bg-blue-500" style={{ height: `${Math.max(16, value * 12)}px` }} />
-                        <p className="text-[length:var(--student-meta-font-size)] font-semibold text-gray-500 mt-2">
-                          {currentChart.labels[index]}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+                  <WritingChartPreview chart={currentChart} variant="student" />
                 )}
               </div>
             )}
