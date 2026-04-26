@@ -20,6 +20,7 @@ import { StudentReportPreview } from './StudentReportPreview';
 import { QuestionTracebackPanel } from './QuestionTracebackPanel';
 import { logger } from '../../utils/logger';
 import { SectionLoadingSkeleton } from '@components/ui';
+import { htmlToPlainText } from '../../utils/htmlText';
 
 export interface StudentReviewWorkspaceProps {
   submissionId: string;
@@ -463,7 +464,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const currentSectionSubmission = getSectionSubmission(activeSection);
   const currentWritingTaskId = activeSection === 'writing' ? activeTask : null;
   const currentWritingPrompt = currentWritingTaskId ? getWritingPrompt(currentWritingTaskId) : '';
-  const currentWritingText = currentWritingTaskId ? getWritingResponseText(currentWritingTaskId) : '';
+  const currentWritingText = currentWritingTaskId ? htmlToPlainText(getWritingResponseText(currentWritingTaskId)) : '';
   const currentWritingTaskSubmission = currentWritingTaskId ? getWritingTaskSubmission(currentWritingTaskId) : null;
   const currentWritingAssessment = currentWritingTaskId
     ? (reviewDraft?.sectionDrafts as any)?.writing?.[currentWritingTaskId]
@@ -537,7 +538,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     writingTasks.forEach((task) => {
       const slot = task.taskId === 'task2' ? 'task2' : 'task1';
       const rubric = (reviewDraft.sectionDrafts as any)?.writing?.[task.taskId];
-      const taskText = getWritingResponseText(task.taskId);
+      const taskText = htmlToPlainText(getWritingResponseText(task.taskId));
       results[slot] = {
         taskId: task.taskId,
         taskLabel: task.taskId === 'task1' ? 'Task 1' : 'Task 2',

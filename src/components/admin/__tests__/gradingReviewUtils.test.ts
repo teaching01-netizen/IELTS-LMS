@@ -5,6 +5,7 @@ import {
   buildObjectiveExportRows,
   buildQuestionTracebackGroups,
   buildWideObjectiveExport,
+  buildWideWritingExport,
   escapeCsvValue,
   OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS,
   WRITING_EXPORT_COLUMNS,
@@ -82,6 +83,62 @@ function createSectionSubmission(
     finalizedBy: undefined,
     finalizedAt: undefined,
     submittedAt: '2026-01-01T00:00:00.000Z',
+  } as any;
+}
+
+function createWritingTaskSubmission(
+  submissionId: string,
+  taskId: string,
+  studentText: string,
+  wordCount: number,
+) {
+  return {
+    id: `${submissionId}-${taskId}`,
+    submissionId,
+    taskId,
+    taskLabel: taskId === 'task1' ? 'Task 1' : 'Task 2',
+    prompt: `${taskId} prompt`,
+    studentText,
+    wordCount,
+    rubricAssessment: {
+      taskResponseBand: 7,
+      coherenceBand: 6.5,
+      lexicalBand: 7.5,
+      grammarBand: 6,
+      overallBand: 7,
+    },
+    annotations: [
+      {
+        id: `${submissionId}-${taskId}-annotation-1`,
+        taskId,
+        type: 'highlight',
+        startOffset: 0,
+        endOffset: 5,
+        selectedText: 'Hello',
+        comment: '',
+        visibility: 'student_visible',
+        createdBy: 'teacher-1',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: `${submissionId}-${taskId}-annotation-2`,
+        taskId,
+        type: 'inline_comment',
+        startOffset: 6,
+        endOffset: 11,
+        selectedText: 'world',
+        comment: 'Internal',
+        visibility: 'internal_only',
+        createdBy: 'teacher-1',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+    overallFeedback: `${taskId} feedback`,
+    studentVisibleNotes: `${taskId} notes`,
+    gradingStatus: 'finalized',
+    submittedAt: '2026-01-01T00:00:00.000Z',
+    gradedBy: 'teacher-1',
+    gradedAt: '2026-01-02T00:00:00.000Z',
   } as any;
 }
 
@@ -555,5 +612,92 @@ describe('gradingReviewUtils', () => {
 
     expect(csv).toContain('Exam');
     expect(csv).toContain('Student');
+  });
+
+  test('builds wide writing export with one row per student and plain text responses', () => {
+    const submissions = [
+      createStudentSubmission('sub-1', 'stu-1', 'Student One'),
+      createStudentSubmission('sub-2', 'stu-2', 'Student Two'),
+    ];
+
+    const exportData = buildWideWritingExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions,
+      writingSubmissions: [
+        {
+          submissionId: 'sub-1',
+          writing: [
+            createWritingTaskSubmission(
+              'sub-1',
+              'task1',
+              '<div>Hello&nbsp;world</div><div>Second line</div>',
+              4,
+            ),
+            createWritingTaskSubmission('sub-1', 'task2', '<p>Task two &amp; more</p>', 4),
+          ],
+        },
+        {
+          submissionId: 'sub-2',
+          writing: [
+            createWritingTaskSubmission('sub-2', 'task1', '<span>Another answer</span>', 2),
+            createWritingTaskSubmission('sub-2', 'task2', '=formula-like text', 2),
+          ],
+        },
+      ],
+    });
+
+    expect(exportData.rows).toHaveLength(2);
+    expect(exportData.columns.map((column) => column.label)).toContain('Task 1 Response');
+    expect(exportData.columns.map((column) => column.label)).toContain('Task 2 Overall Band');
+    expect(exportData.rows[0]?.['task1:response']).toBe('Hello world\nSecond line');
+    expect(exportData.rows[0]?.['task2:response']).toBe('Task two & more');
+    expect(exportData.rows[0]?.['task1:wordCount']).toBe(4);
+    expect(exportData.rows[0]?.['task1:overallBand']).toBe(7);
+    expect(exportData.rows[0]?.['task1:annotationCount']).toBe(2);
+    expect(exportData.rows[0]?.['task1:studentVisibleAnnotationCount']).toBe(1);
+    expect(exportData.rows[1]?.studentName).toBe('Student Two');
+    expect(exportData.rows[1]?.['task2:response']).toBe('=formula-like text');
+  });
+
+  test('leaves missing writing task columns blank', () => {
+    const exportData = buildWideWritingExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      writingSubmissions: [
+        {
+          submissionId: 'sub-1',
+          writing: [createWritingTaskSubmission('sub-1', 'task1', '<p>Task one only</p>', 3)],
+        },
+      ],
+    });
+
+    expect(exportData.rows[0]?.['task1:response']).toBe('Task one only');
+    expect(exportData.rows[0]?.['task2:response']).toBe('');
+    expect(exportData.rows[0]?.['task2:wordCount']).toBe('');
+    expect(exportData.rows[0]?.['task2:overallBand']).toBe('');
+  });
+
+  test('wide writing csv keeps escaping and formula protection', () => {
+    const exportData = buildWideWritingExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      writingSubmissions: [
+        {
+          submissionId: 'sub-1',
+          writing: [
+            createWritingTaskSubmission(
+              'sub-1',
+              'task1',
+              '<p>Hello, "world"</p><p>=SUM(A1:A2)</p>',
+              3,
+            ),
+          ],
+        },
+      ],
+    });
+
+    const csv = buildCsvContent(exportData.columns, exportData.rows);
+
+    expect(csv).toContain('"Hello, ""world""\n=SUM(A1:A2)"');
   });
 });
