@@ -1,28 +1,15 @@
 import type { ReactNode } from 'react';
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthSessionProvider } from '../../../auth/authSession';
 import { authService, type AuthSession } from '../../../../services/authService';
-import { studentAttemptRepository } from '../../../../services/studentAttemptRepository';
 import { useStudentSessionRouteData } from '../useStudentSessionRouteData';
-import { queryKeys } from '../../../../app/data/queryClient';
 
 const originalFetch = global.fetch;
 
 function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-    },
-  });
-
   return function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <QueryClientProvider client={queryClient}>
-        <AuthSessionProvider>{children}</AuthSessionProvider>
-      </QueryClientProvider>
-    );
+    return <AuthSessionProvider>{children}</AuthSessionProvider>;
   };
 }
 
@@ -156,7 +143,7 @@ function buildSessionContext(attempt: Record<string, unknown> | null) {
   };
 }
 
-function buildAttempt(overrides: Record<string, unknown> = {}) {
+function buildAttempt() {
   return {
     id: 'attempt-1',
     scheduleId: 'sched-1',
@@ -196,14 +183,6 @@ function buildAttempt(overrides: Record<string, unknown> = {}) {
     createdAt: '2026-01-01T09:00:00.000Z',
     updatedAt: '2026-01-01T09:00:00.000Z',
     revision: 1,
-    ...overrides,
-  };
-}
-
-function buildSubmittedAttempt() {
-  return {
-    ...buildAttempt(),
-    submittedAt: '2026-01-01T11:00:00.000Z',
   };
 }
 
@@ -224,16 +203,7 @@ describe('useStudentSessionRouteData backend mode', () => {
     vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({
-        schedule: buildSessionContext(null).schedule,
-        version: buildSessionContext(null).version,
-        degradedLiveMode: false,
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        runtime: buildSessionContext(null).runtime,
-        attempt: null,
-        degradedLiveMode: false,
-      }))
+      .mockResolvedValueOnce(jsonResponse(buildSessionContext(null)))
       .mockResolvedValueOnce(jsonResponse(buildSessionContext(buildAttempt())))
       .mockResolvedValue(jsonResponse(buildSessionContext(buildAttempt())));
     global.fetch = fetchMock as typeof fetch;
@@ -267,16 +237,11 @@ describe('useStudentSessionRouteData backend mode', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/v1/student/sessions/sched-1/static?candidateId=W250334',
+      '/api/v1/student/sessions/sched-1?candidateId=W250334',
       expect.objectContaining({ method: 'GET' }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      '/api/v1/student/sessions/sched-1/live?candidateId=W250334',
-      expect.objectContaining({ method: 'GET' }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
       '/api/v1/student/sessions/sched-1/bootstrap',
       expect.objectContaining({ method: 'POST' }),
     );
@@ -295,22 +260,8 @@ describe('useStudentSessionRouteData backend mode', () => {
 
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({
-        schedule: buildSessionContext(null).schedule,
-        version: buildSessionContext(null).version,
-        degradedLiveMode: false,
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        runtime: buildSessionContext(null).runtime,
-        attempt: null,
-        degradedLiveMode: false,
-      }))
-      .mockResolvedValueOnce(jsonResponse(buildSessionContext(buildAttempt())))
-      .mockResolvedValue(jsonResponse({
-        runtime: buildSessionContext(buildAttempt()).runtime,
-        attempt: buildAttempt(),
-        degradedLiveMode: false,
-      }));
+      .mockResolvedValueOnce(jsonResponse(buildSessionContext(null)))
+      .mockResolvedValueOnce(jsonResponse(buildSessionContext(buildAttempt())));
     global.fetch = fetchMock as typeof fetch;
 
     renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
@@ -324,7 +275,7 @@ describe('useStudentSessionRouteData backend mode', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(
         1,
-        '/api/v1/student/sessions/sched-1/static?candidateId=W250334',
+        '/api/v1/student/sessions/sched-1?candidateId=W250334',
         expect.objectContaining({ method: 'GET' }),
       );
     });
@@ -332,14 +283,6 @@ describe('useStudentSessionRouteData backend mode', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(
         2,
-        '/api/v1/student/sessions/sched-1/live?candidateId=W250334',
-        expect.objectContaining({ method: 'GET' }),
-      );
-    });
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        3,
         '/api/v1/student/sessions/sched-1/bootstrap',
         expect.objectContaining({ method: 'POST' }),
       );
@@ -362,129 +305,5 @@ describe('useStudentSessionRouteData backend mode', () => {
 
     expect(result.current.error).toMatch(/invalid access code/i);
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('separates cached backend student sessions by candidate id', () => {
-    expect(queryKeys.students.staticSession('sched-1', 'W250334')).not.toEqual(
-      queryKeys.students.staticSession('sched-1', 'W250335'),
-    );
-    expect(queryKeys.students.liveSession('sched-1', 'W250334')).not.toEqual(
-      queryKeys.students.liveSession('sched-1', 'W250335'),
-    );
-  });
-
-  it('refetches the live backend session snapshot on each runtime refresh', async () => {
-    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
-    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
-
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({
-        schedule: buildSessionContext(null).schedule,
-        version: buildSessionContext(null).version,
-        degradedLiveMode: false,
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        runtime: buildSessionContext(null).runtime,
-        attempt: buildSubmittedAttempt(),
-        degradedLiveMode: false,
-      }))
-      .mockImplementation(() => Promise.resolve(jsonResponse({
-        runtime: buildSessionContext(buildSubmittedAttempt()).runtime,
-        attempt: buildSubmittedAttempt(),
-        degradedLiveMode: false,
-      })));
-    global.fetch = fetchMock as typeof fetch;
-
-    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
-      wrapper: createWrapper(),
-    });
-
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-      expect(result.current.attemptSnapshot).not.toBeNull();
-    });
-
-    const liveCallCountBeforeRefresh = fetchMock.mock.calls.filter(
-      ([url]) => url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334',
-    ).length;
-
-    await act(async () => {
-      await result.current.refreshRuntime();
-      await result.current.refreshRuntime();
-    });
-
-    const liveCallCountAfterRefresh = fetchMock.mock.calls.filter(
-      ([url]) => url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334',
-    ).length;
-    expect(liveCallCountAfterRefresh).toBe(liveCallCountBeforeRefresh + 2);
-  });
-
-  it('hydrates attempt snapshots from the reconciled local cache when live refresh is stale', async () => {
-    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
-    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
-
-    sessionStorage.setItem(
-      'ielts_student_attempt_credentials_v1',
-      JSON.stringify([
-        {
-          attemptId: 'attempt-1',
-          scheduleId: 'sched-1',
-          attemptToken: 'attempt-token-1',
-          expiresAt: '2026-01-01T09:15:00.000Z',
-        },
-      ]),
-    );
-    await studentAttemptRepository.savePendingMutations('attempt-1', [
-      {
-        id: 'mutation-1',
-        attemptId: 'attempt-1',
-        scheduleId: 'sched-1',
-        timestamp: '2026-01-01T09:00:30.000Z',
-        type: 'answer',
-        payload: { questionId: 'q1', value: 'A' },
-      },
-    ]);
-
-    const fetchMock = vi.fn((url: string | URL | Request) => {
-      const endpoint = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
-
-      if (endpoint === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
-        return Promise.resolve(jsonResponse({
-          schedule: buildSessionContext(null).schedule,
-          version: buildSessionContext(null).version,
-          degradedLiveMode: false,
-        }));
-      }
-
-      if (endpoint === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
-        return Promise.resolve(jsonResponse({
-          runtime: buildSessionContext(buildAttempt({ answers: {} })).runtime,
-          attempt: buildAttempt({ answers: {} }),
-          degradedLiveMode: false,
-        }));
-      }
-
-      if (endpoint === '/api/v1/student/sessions/sched-1/mutations:batch') {
-        return Promise.resolve(jsonResponse({
-          appliedMutationCount: 1,
-          serverAcceptedThroughSeq: 1,
-        }));
-      }
-
-      throw new Error(`Unexpected fetch call: ${endpoint}`);
-    });
-    global.fetch = fetchMock as typeof fetch;
-
-    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
-      wrapper: createWrapper(),
-    });
-
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-      expect(result.current.attemptSnapshot).not.toBeNull();
-    });
-
-    expect(result.current.attemptSnapshot?.answers).toEqual({ q1: 'A' });
   });
 });

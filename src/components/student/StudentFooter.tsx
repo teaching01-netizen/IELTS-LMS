@@ -18,6 +18,7 @@ interface StudentFooterProps {
   onToggleFlag?: (id: string) => void;
   onSubmit: () => void;
   showSubmitButton?: boolean | undefined;
+  tabletMode?: boolean | undefined;
 }
 
 export function StudentFooter({
@@ -28,6 +29,7 @@ export function StudentFooter({
   flags = {},
   onSubmit,
   showSubmitButton = true,
+  tabletMode = false,
 }: StudentFooterProps) {
   const groupedQuestions = questions.reduce<Record<string, StudentQuestionDescriptor[]>>(
     (groups, question) => {
@@ -57,14 +59,16 @@ export function StudentFooter({
 
   return (
     <footer
-      className="student-exam-footer border-t border-gray-200 bg-white flex flex-col flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.03)] max-h-36 md:max-h-32 lg:max-h-28"
+      className={`border-t border-gray-200 bg-white flex flex-col flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.03)] ${
+        tabletMode ? 'max-h-24 md:max-h-24' : 'max-h-32 md:max-h-28 lg:max-h-24'
+      }`}
       role="contentinfo"
       aria-label="Question navigation and progress"
     >
-      <div className="flex items-center justify-between px-2 md:px-3 lg:px-4 py-1.5 md:py-2">
+      <div className={`flex items-center justify-between px-2 md:px-3 lg:px-4 ${tabletMode ? 'py-1' : 'py-1.5 md:py-2'}`}>
         <div className="flex items-center gap-2 md:gap-3 flex-1 overflow-x-auto">
-          <div className="flex items-center gap-1 md:gap-1.5 px-1.5 md:px-2 py-0.5 bg-gray-50 rounded-sm flex-shrink-0">
-            <span className="text-[9px] md:text-[10px] lg:text-[11px] font-black text-gray-900">
+          <div className="flex items-center gap-1 md:gap-1.5 px-2 md:px-2.5 py-1 bg-gray-50 rounded-sm flex-shrink-0">
+            <span className="text-[length:var(--student-chip-font-size)] font-black text-gray-900">
               {answeredCount}/{totalQuestions}
             </span>
           </div>
@@ -72,7 +76,7 @@ export function StudentFooter({
             <Button
               variant={hasUnanswered ? 'warning' : 'primary'}
               size="sm"
-              className="min-h-11 min-w-[72px] md:min-w-[88px] shadow-md flex-shrink-0"
+              className="min-w-[4.25rem] md:min-w-[5rem] shadow-md flex-shrink-0"
               onClick={onSubmit}
             >
               Finish
@@ -115,8 +119,7 @@ export function StudentFooter({
                       <button
                         key={question.id}
                         onClick={() => onNavigate(question.id)}
-                        aria-label={`Question ${getQuestionNumberLabel(questions, question.id)}${isCurrent ? ', current' : ''}${isAnswered ? ', answered' : ', unanswered'}${isFlagged ? ', flagged' : ''}`}
-                        className={`relative text-[10px] md:text-xs flex items-center justify-center min-w-11 min-h-11 px-2 rounded-sm font-bold border ${
+                        className={`relative text-[length:var(--student-chip-font-size)] flex items-center justify-center min-w-[1.6rem] md:min-w-[1.8rem] lg:min-w-[2rem] h-6 md:h-7 lg:h-8 px-1 md:px-1.5 rounded-sm font-bold border ${
                           isCurrent
                             ? 'bg-blue-800 border-blue-800 text-white'
                             : isFlagged
@@ -145,7 +148,7 @@ export function StudentFooter({
                   }}
                   aria-label={`Jump to Part ${partNumber}`}
                   title={`Click to jump to Part ${partNumber}`}
-                  className="flex min-h-11 items-center gap-1 md:gap-1.5 rounded-sm px-2 py-1 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex items-center gap-1 md:gap-1.5 rounded-sm px-1 py-0.5 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <div className="w-8 md:w-10 lg:w-12 h-1 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
                     <div
@@ -155,7 +158,7 @@ export function StudentFooter({
                       }}
                     ></div>
                   </div>
-                  <div className="flex items-center gap-1 text-[7px] md:text-[8px] lg:text-[9px] font-bold text-gray-500">
+                  <div className="flex items-center gap-1 text-[length:var(--student-meta-font-size)] font-bold text-gray-500">
                     <span>
                       {groupAnsweredSlots}/{groupTotalSlots}
                     </span>

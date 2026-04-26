@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { parseBoldMarkdown } from '../../utils/boldMarkdown';
 import { applySelectionHighlight, escapeHtml } from './highlightSelection';
 import { getStudentHighlightClassName, type StudentHighlightColor } from './highlightPalette';
+import { usePersistedStudentHighlightHtml } from './highlightPersistence';
 
 type FormattedTextProps = {
   text: string;
@@ -10,6 +11,7 @@ type FormattedTextProps = {
   highlightEnabled?: boolean | undefined;
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
+  highlightPersistenceKey?: string | undefined;
 };
 
 export function FormattedText({
@@ -19,6 +21,7 @@ export function FormattedText({
   highlightEnabled = false,
   highlightColor,
   highlightClassName,
+  highlightPersistenceKey,
 }: FormattedTextProps) {
   const Tag = as as any;
   const segments = useMemo(() => parseBoldMarkdown(text), [text]);
@@ -31,11 +34,10 @@ export function FormattedText({
         .join(''),
     [segments],
   );
-  const [html, setHtml] = useState(initialHtml);
-
-  useEffect(() => {
-    setHtml(initialHtml);
-  }, [initialHtml]);
+  const { html, setHtml, hasPersistedHtml } = usePersistedStudentHighlightHtml(
+    initialHtml,
+    highlightPersistenceKey,
+  );
 
   const handleSelection = () => {
     if (!highlightEnabled) {
@@ -60,14 +62,14 @@ export function FormattedText({
     }
   };
 
-  if (highlightEnabled) {
+  if (highlightEnabled || hasPersistedHtml) {
     return (
       <Tag
         ref={containerRef as any}
         className={classes}
-        onMouseUp={handleSelection}
-        onKeyUp={handleSelection}
-        onTouchEnd={handleSelection}
+        onMouseUp={highlightEnabled ? handleSelection : undefined}
+        onKeyUp={highlightEnabled ? handleSelection : undefined}
+        onTouchEnd={highlightEnabled ? handleSelection : undefined}
         dangerouslySetInnerHTML={{ __html: html }}
       />
     );

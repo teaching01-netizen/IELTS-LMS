@@ -20,6 +20,7 @@ interface StudentListeningProps {
   highlightEnabled?: boolean | undefined;
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
+  tabletMode?: boolean | undefined;
 }
 
 export function StudentListening({
@@ -33,7 +34,9 @@ export function StudentListening({
   highlightEnabled = false,
   highlightColor,
   highlightClassName,
+  tabletMode = false,
 }: StudentListeningProps) {
+  const isTabletMode = Boolean(tabletMode);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(70);
@@ -176,8 +179,18 @@ export function StudentListening({
 
   return (
     <div className="flex flex-col h-full w-full bg-white">
-      <div className="relative flex flex-1 flex-col overflow-hidden border-t border-gray-300 md:flex-row" style={splitPaneStyle}>
-        <div className="h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12" data-student-zoom-scroll>
+      <div
+        className={`relative flex flex-1 overflow-hidden border-t border-gray-300 ${
+          isTabletMode ? 'flex-col' : 'flex-col md:flex-row'
+        }`}
+        style={isTabletMode ? undefined : splitPaneStyle}
+      >
+        <div
+          className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base ${
+            isTabletMode ? 'max-h-[42dvh] border-b border-gray-200' : 'lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
+          }`}
+          data-student-zoom-scroll
+        >
           <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePart.title}</h2>
 
           {staffInstructions ? (
@@ -233,7 +246,7 @@ export function StudentListening({
                   >
                     <div className="h-full bg-blue-500" style={{ width: `${progress}%` }}></div>
                   </div>
-                  <div className="flex justify-between mt-2 text-[10px] md:text-xs font-medium text-gray-500 font-mono">
+                  <div className="flex justify-between mt-2 text-[length:var(--student-meta-font-size)] font-medium text-gray-500 font-mono">
                     <span>{formatTime(currentSeconds)}</span>
                     <span>{formatTime(totalSeconds)}</span>
                   </div>
@@ -245,7 +258,7 @@ export function StudentListening({
                   <button
                     type="button"
                     onClick={() => adjustCurrentTime(-10)}
-                    className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
+                    className="p-2 md:p-2.5 hover:bg-gray-200 rounded-full"
                     title="Rewind 10s"
                     disabled={!canPlayAudio}
                     aria-label="Rewind 10 seconds"
@@ -255,7 +268,7 @@ export function StudentListening({
                   <button
                     type="button"
                     onClick={() => adjustCurrentTime(10)}
-                    className="p-1.5 md:p-2 hover:bg-gray-200 rounded-full"
+                    className="p-2 md:p-2.5 hover:bg-gray-200 rounded-full"
                     title="Forward 10s"
                     disabled={!canPlayAudio}
                     aria-label="Forward 10 seconds"
@@ -287,8 +300,12 @@ export function StudentListening({
               <div className="space-y-1.5 md:space-y-2">
                 {activePart.pins.map((pin) => (
                   <div key={pin.id} className="flex items-center gap-2 md:gap-3 p-2 bg-gray-50 border border-gray-200 rounded-lg">
-                    <span className="font-mono text-xs md:text-sm text-blue-600 bg-blue-100 px-2 py-0.5 rounded">{pin.time}</span>
-                    <span className="text-xs md:text-sm text-gray-700">{pin.label}</span>
+                    <span className="font-mono text-[length:var(--student-meta-font-size)] text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
+                      {pin.time}
+                    </span>
+                    <span className="text-[length:var(--student-control-font-size)] text-gray-700">
+                      {pin.label}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -306,8 +323,14 @@ export function StudentListening({
           </div>
         </div>
 
-        <div className="relative flex h-full w-full min-w-0 flex-col md:min-w-[320px] lg:w-[var(--question-pane-width)]">
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10" ref={questionContainerRef} data-student-zoom-scroll>
+        <div className="relative flex h-full w-full min-w-0 flex-col md:min-w-[320px] lg:w-[var(--question-pane-width)] min-h-0">
+          <div
+            className={`flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10 ${
+              isTabletMode ? 'pb-28 md:pb-28' : ''
+            }`}
+            ref={questionContainerRef}
+            data-student-zoom-scroll
+          >
             {activePart.blocks.map((block) => {
               const blockQuestions = allQuestions.filter((question) => question.blockId === block.id);
               const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
@@ -350,12 +373,37 @@ export function StudentListening({
                           <div
                             key={q.id}
                             id={!inlineFlags && flagId ? `question-${flagId}` : undefined}
-                            className={
-                              onToggleFlag && flagId && !inlineFlags
-                                ? 'grid grid-cols-[minmax(0,1fr)_44px] items-start gap-3'
-                                : 'relative'
-                            }
+                            className={`relative ${isTabletMode ? 'space-y-2' : ''}`}
                           >
+                            {isTabletMode && onToggleFlag && flagId && !inlineFlags ? (
+                              <div className="flex justify-end">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onToggleFlag(flagId);
+                                  }}
+                                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition-all ${
+                                    flags[flagId]
+                                      ? 'bg-amber-700 text-white border-amber-700'
+                                      : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                                  }`}
+                                  title={flags[flagId] ? 'Unflag question' : 'Flag question'}
+                                >
+                                  <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
+                                </button>
+                              </div>
+                            ) : null}
+                            {!isTabletMode && onToggleFlag && flagId && !inlineFlags ? (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); onToggleFlag(flagId); }}
+                                className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
+                                  flags[flagId] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                                }`}
+                                title={flags[flagId] ? 'Unflag question' : 'Flag question'}
+                              >
+                                <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
+                              </button>
+                            ) : null}
                             <QuestionRenderer
                               question={q}
                               block={block}
@@ -368,22 +416,10 @@ export function StudentListening({
                               currentQuestionId={currentQuestionId}
                               flags={flags}
                               onToggleFlag={onToggleFlag}
+                              tabletMode={isTabletMode}
                               highlightEnabled={highlightEnabled}
                               highlightColor={highlightColor}
                             />
-                            {onToggleFlag && flagId && !inlineFlags ? (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); onToggleFlag(flagId); }}
-                                className={`min-h-11 min-w-11 rounded-full flex items-center justify-center transition-all shadow-sm ${
-                                  flags[flagId] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-                                }`}
-                                aria-label={flags[flagId] ? 'Unflag question' : 'Flag question'}
-                                title={flags[flagId] ? 'Unflag question' : 'Flag question'}
-                              >
-                                <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
-                              </button>
-                            ) : null}
                           </div>
                         );
                       })
@@ -391,12 +427,37 @@ export function StudentListening({
                       <div
                         key={block.id}
                         id={singleBlockQuestion ? `question-${singleBlockQuestion.id}` : undefined}
-                        className={
-                          onToggleFlag && singleBlockQuestion
-                            ? 'grid grid-cols-[minmax(0,1fr)_44px] items-start gap-3'
-                            : 'relative'
-                        }
+                        className="relative"
                       >
+                        {isTabletMode && onToggleFlag && singleBlockQuestion ? (
+                          <div className="mb-2 flex justify-end">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleFlag(singleBlockQuestion.id);
+                              }}
+                              className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition-all ${
+                                flags[singleBlockQuestion.id]
+                                  ? 'bg-amber-700 text-white border-amber-700'
+                                  : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                              }`}
+                              title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
+                            >
+                              <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
+                            </button>
+                          </div>
+                        ) : null}
+                        {!isTabletMode && onToggleFlag && singleBlockQuestion ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onToggleFlag(singleBlockQuestion.id); }}
+                            className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
+                              flags[singleBlockQuestion.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                            }`}
+                            title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
+                          >
+                            <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
+                          </button>
+                        ) : null}
                         <QuestionRenderer
                           question={null}
                           block={block}
@@ -409,22 +470,10 @@ export function StudentListening({
                           currentQuestionId={currentQuestionId}
                           flags={flags}
                           onToggleFlag={onToggleFlag}
+                          tabletMode={isTabletMode}
                           highlightEnabled={highlightEnabled}
                           highlightColor={highlightColor}
                         />
-                        {onToggleFlag && singleBlockQuestion ? (
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); onToggleFlag(singleBlockQuestion.id); }}
-                            className={`min-h-11 min-w-11 rounded-full flex items-center justify-center transition-all shadow-sm ${
-                              flags[singleBlockQuestion.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-                            }`}
-                            aria-label={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
-                            title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
-                          >
-                            <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
-                          </button>
-                        ) : null}
                       </div>
                     )}
                   </div>
@@ -433,16 +482,16 @@ export function StudentListening({
             })}
           </div>
 
-          <div className="absolute bottom-16 md:bottom-20 right-4 md:right-6 flex shadow-md z-20">
+          <div className={`absolute ${isTabletMode ? 'bottom-4 right-4' : 'bottom-16 md:bottom-20 right-4 md:right-6'} flex shadow-md z-20`}>
             <button 
               onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
-              className={`w-9 h-9 md:w-10 md:h-10 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
+              className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
             >
               <ArrowLeft size={16} strokeWidth={3} />
             </button>
             <button 
               onClick={() => nextQuestion && onNavigate(nextQuestion.id)}
-              className={`w-9 h-9 md:w-10 md:h-10 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
+              className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
             >
               <ArrowRight size={16} strokeWidth={3} />
             </button>

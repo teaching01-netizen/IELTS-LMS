@@ -6,22 +6,22 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-export function useZoomScrollAnchoring(zoom: number, selector: string = DEFAULT_SELECTOR) {
-  const previousZoomRef = useRef(zoom);
+export function useZoomScrollAnchoring(scale: number, selector: string = DEFAULT_SELECTOR) {
+  const previousScaleRef = useRef(scale);
 
   useLayoutEffect(() => {
-    const previousZoom = previousZoomRef.current;
-    previousZoomRef.current = zoom;
+    const previousScale = previousScaleRef.current;
+    previousScaleRef.current = scale;
 
-    if (!Number.isFinite(previousZoom) || !Number.isFinite(zoom) || previousZoom <= 0 || zoom <= 0) {
+    if (!Number.isFinite(previousScale) || !Number.isFinite(scale) || previousScale <= 0 || scale <= 0) {
       return;
     }
 
-    if (previousZoom === zoom) {
+    if (previousScale === scale) {
       return;
     }
 
-    const ratio = zoom / previousZoom;
+    const ratio = scale / previousScale;
 
     document.querySelectorAll<HTMLElement>(selector).forEach((element) => {
       if (element.scrollHeight <= element.clientHeight && element.scrollWidth <= element.clientWidth) {
@@ -40,5 +40,5 @@ export function useZoomScrollAnchoring(zoom: number, selector: string = DEFAULT_
       element.scrollTop = clamp(nextScrollTop, 0, maxScrollTop);
       element.scrollLeft = clamp(nextScrollLeft, 0, maxScrollLeft);
     });
-  }, [selector, zoom]);
+  }, [scale, selector]);
 }

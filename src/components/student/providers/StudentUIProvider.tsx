@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { defaultStudentHighlightColor, type StudentHighlightColor } from '../highlightPalette';
+import type { StudentFontSize } from '../accessibilityScale';
 
 interface UIState {
   showNavigator: boolean;
@@ -11,7 +12,7 @@ interface UIState {
   timeExtensionGranted: boolean;
   timeExtensionMinutes: number;
   accessibilitySettings: {
-    fontSize: 'small' | 'normal' | 'large';
+    fontSize: StudentFontSize;
     highContrast: boolean;
     zoom: number;
     highlightMode: boolean;
@@ -27,7 +28,7 @@ interface UIActions {
   setShowTimeExtensionRequest: (show: boolean) => void;
   setTimeExtensionReason: (reason: string) => void;
   grantTimeExtension: (minutes: number) => void;
-  setFontSize: (size: 'small' | 'normal' | 'large') => void;
+  setFontSize: (size: StudentFontSize) => void;
   toggleHighContrast: () => void;
   setZoom: (zoom: number) => void;
   zoomIn: () => void;
@@ -58,7 +59,7 @@ export function StudentUIProvider({ children }: UIProviderProps) {
   const [timeExtensionGranted, setTimeExtensionGranted] = useState(false);
   const [timeExtensionMinutes, setTimeExtensionMinutes] = useState(0);
   const [accessibilitySettings, setAccessibilitySettings] = useState({
-    fontSize: 'normal' as 'small' | 'normal' | 'large',
+    fontSize: 'normal' as StudentFontSize,
     highContrast: false,
     zoom: 1,
     highlightMode: false,
@@ -72,7 +73,7 @@ export function StudentUIProvider({ children }: UIProviderProps) {
     setTimeExtensionReason('');
   }, []);
 
-  const setFontSize = useCallback((size: 'small' | 'normal' | 'large') => {
+  const setFontSize = useCallback((size: StudentFontSize) => {
     setAccessibilitySettings(prev => ({ ...prev, fontSize: size }));
   }, []);
 
