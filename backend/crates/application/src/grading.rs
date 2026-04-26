@@ -16,6 +16,7 @@ use ielts_backend_infrastructure::{
 };
 use serde_json::{json, Map, Value};
 use sqlx::{FromRow, MySqlPool};
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
 
@@ -1070,9 +1071,12 @@ impl GradingService {
                 a.candidate_email,
                 s.cohort_name,
                 a.submitted_at,
-                a.final_submission
+                a.final_submission,
+                v.content_snapshot,
+                v.config_snapshot
             FROM student_attempts a
             JOIN exam_schedules s ON s.id = a.schedule_id
+            JOIN exam_versions v ON v.id = a.published_version_id
             WHERE a.final_submission IS NOT NULL
             ORDER BY a.updated_at ASC
             "#,
@@ -1135,8 +1139,13 @@ impl GradingService {
             .fetch_one(&self.pool)
             .await?;
 
-            self.ensure_section_submissions(&submission, &attempt.final_submission)
-                .await?;
+            self.ensure_section_submissions(
+                &submission,
+                &attempt.final_submission,
+                &attempt.content_snapshot,
+                &attempt.config_snapshot,
+            )
+            .await?;
         }
 
         Ok(())
@@ -1146,6 +1155,8 @@ impl GradingService {
         &self,
         submission: &StudentSubmission,
         final_submission: &Value,
+        content_snapshot: &Value,
+        config_snapshot: &Value,
     ) -> Result<(), GradingError> {
         let answers = final_submission
             .get("answers")
@@ -1156,21 +1167,24 @@ impl GradingService {
             .cloned()
             .unwrap_or_else(|| json!({}));
         let submitted_at = submission.submitted_at;
+        let answer_sections = build_objective_answer_sections(content_snapshot);
+        let listening_answers = filter_answers_for_section(&answers, &answer_sections, "listening");
+        let reading_answers = filter_answers_for_section(&answers, &answer_sections, "reading");
 
         for (section, payload, status) in [
             (
                 "listening",
-                json!({ "type": "listening", "answers": answers.clone() }),
+                json!({ "type": "listening", "answers": listening_answers }),
                 SectionGradingStatus::AutoGraded,
             ),
             (
                 "reading",
-                json!({ "type": "reading", "answers": answers.clone() }),
+                json!({ "type": "reading", "answers": reading_answers }),
                 SectionGradingStatus::AutoGraded,
             ),
             (
                 "writing",
-                json!({ "type": "writing", "tasks": writing_task_array(&writing_answers) }),
+                json!({ "type": "writing", "tasks": writing_task_array(&writing_answers, content_snapshot, config_snapshot) }),
                 SectionGradingStatus::NeedsReview,
             ),
             (
@@ -1215,7 +1229,7 @@ impl GradingService {
             .await?;
 
             if section == "writing" {
-                let tasks = writing_task_entries(&writing_answers);
+                let tasks = writing_task_entries(&writing_answers, content_snapshot, config_snapshot);
                 for (task_id, value) in tasks {
                     let task_label = value
                         .get("label")
@@ -1348,6 +1362,8 @@ struct AttemptSubmissionRow {
     cohort_name: String,
     submitted_at: Option<chrono::DateTime<Utc>>,
     final_submission: Value,
+    content_snapshot: Value,
+    config_snapshot: Value,
 }
 
 #[derive(FromRow)]
@@ -1370,9 +1386,13 @@ fn map_schedule_status(status: ScheduleStatus) -> GradingSessionStatus {
     }
 }
 
-fn writing_task_array(writing_answers: &Value) -> Value {
+fn writing_task_array(
+    writing_answers: &Value,
+    content_snapshot: &Value,
+    config_snapshot: &Value,
+) -> Value {
     Value::Array(
-        writing_task_entries(writing_answers)
+        writing_task_entries(writing_answers, content_snapshot, config_snapshot)
             .into_iter()
             .map(|(task_id, value)| {
                 let text_value = value
@@ -1406,62 +1426,234 @@ mod refresh_session_counters_tests {
     }
 }
 
-fn writing_task_entries(writing_answers: &Value) -> Vec<(String, Value)> {
-    let Some(items) = writing_answers.as_object() else {
-        return vec![];
-    };
+#[derive(Debug, Clone)]
+struct WritingTaskDescriptor {
+    task_id: String,
+    label: String,
+    prompt: String,
+}
 
-    items
-        .iter()
-        .map(|(task_id, value)| {
-            let normalized = match value {
-                Value::Null => json!({
-                    "label": task_id,
-                    "prompt": "",
-                    "text": "",
-                    "wordCount": 0
-                }),
-                Value::String(text) => json!({
-                    "label": task_id,
-                    "prompt": "",
-                    "text": text,
-                    "wordCount": text.split_whitespace().count()
-                }),
-                Value::Object(_) => {
-                    let label = value
-                        .get("label")
-                        .and_then(Value::as_str)
-                        .unwrap_or(task_id);
-                    let prompt = value
-                        .get("prompt")
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
-                    let text = value
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
-                    let word_count = value
-                        .get("wordCount")
-                        .and_then(Value::as_i64)
-                        .unwrap_or_else(|| text.split_whitespace().count() as i64);
-                    json!({
-                        "label": label,
-                        "prompt": prompt,
-                        "text": text,
-                        "wordCount": word_count
-                    })
-                }
-                _ => json!({
-                    "label": task_id,
-                    "prompt": "",
-                    "text": "",
-                    "wordCount": 0
-                }),
-            };
-
-            (task_id.clone(), normalized)
+fn writing_task_entries(
+    writing_answers: &Value,
+    content_snapshot: &Value,
+    config_snapshot: &Value,
+) -> Vec<(String, Value)> {
+    build_writing_task_descriptors(writing_answers, content_snapshot, config_snapshot)
+        .into_iter()
+        .map(|descriptor| {
+            let normalized =
+                normalize_writing_task_value(&descriptor, writing_answers.get(&descriptor.task_id));
+            (descriptor.task_id, normalized)
         })
         .collect()
+}
+
+fn build_writing_task_descriptors(
+    writing_answers: &Value,
+    content_snapshot: &Value,
+    config_snapshot: &Value,
+) -> Vec<WritingTaskDescriptor> {
+    let mut content_labels = HashMap::new();
+    let mut prompts = HashMap::new();
+
+    if let Some(tasks) = content_snapshot
+        .get("writing")
+        .and_then(|writing| writing.get("tasks"))
+        .and_then(Value::as_array)
+    {
+        for task in tasks {
+            let Some(task_id) = writing_task_id(task) else {
+                continue;
+            };
+            if let Some(label) = non_empty_string(task.get("label")) {
+                content_labels.insert(task_id.clone(), label);
+            }
+            if let Some(prompt) = non_empty_string(task.get("prompt")) {
+                prompts.insert(task_id, prompt);
+            }
+        }
+    }
+
+    if let Some(writing) = content_snapshot.get("writing") {
+        for (task_id, prompt_key) in [("task1", "task1Prompt"), ("task2", "task2Prompt")] {
+            if let Some(prompt) = non_empty_string(writing.get(prompt_key)) {
+                prompts.entry(task_id.to_owned()).or_insert(prompt);
+            }
+        }
+    }
+
+    let mut descriptors = Vec::new();
+    let mut seen = HashSet::new();
+
+    if let Some(tasks) = config_snapshot
+        .get("sections")
+        .and_then(|sections| sections.get("writing"))
+        .and_then(|writing| writing.get("tasks"))
+        .and_then(Value::as_array)
+    {
+        for task in tasks {
+            let Some(task_id) = writing_task_id(task) else {
+                continue;
+            };
+            let label = non_empty_string(task.get("label"))
+                .or_else(|| content_labels.get(&task_id).cloned())
+                .unwrap_or_else(|| task_id.clone());
+            let prompt = prompts.get(&task_id).cloned().unwrap_or_default();
+            push_writing_task_descriptor(
+                &mut descriptors,
+                &mut seen,
+                WritingTaskDescriptor {
+                    task_id,
+                    label,
+                    prompt,
+                },
+            );
+        }
+    }
+
+    if let Some(tasks) = content_snapshot
+        .get("writing")
+        .and_then(|writing| writing.get("tasks"))
+        .and_then(Value::as_array)
+    {
+        for task in tasks {
+            let Some(task_id) = writing_task_id(task) else {
+                continue;
+            };
+            let label = content_labels
+                .get(&task_id)
+                .cloned()
+                .unwrap_or_else(|| task_id.clone());
+            let prompt = prompts.get(&task_id).cloned().unwrap_or_default();
+            push_writing_task_descriptor(
+                &mut descriptors,
+                &mut seen,
+                WritingTaskDescriptor {
+                    task_id,
+                    label,
+                    prompt,
+                },
+            );
+        }
+    }
+
+    if descriptors.is_empty() {
+        for task_id in ["task1", "task2"] {
+            if let Some(prompt) = prompts.get(task_id).cloned() {
+                push_writing_task_descriptor(
+                    &mut descriptors,
+                    &mut seen,
+                    WritingTaskDescriptor {
+                        task_id: task_id.to_owned(),
+                        label: content_labels
+                            .get(task_id)
+                            .cloned()
+                            .unwrap_or_else(|| task_id.to_owned()),
+                        prompt,
+                    },
+                );
+            }
+        }
+    }
+
+    if let Some(items) = writing_answers.as_object() {
+        for (task_id, value) in items {
+            if seen.contains(task_id) {
+                continue;
+            }
+            let label = non_empty_string(value.get("label"))
+                .or_else(|| content_labels.get(task_id).cloned())
+                .unwrap_or_else(|| task_id.clone());
+            let prompt = prompts
+                .get(task_id)
+                .cloned()
+                .or_else(|| non_empty_string(value.get("prompt")))
+                .unwrap_or_default();
+            push_writing_task_descriptor(
+                &mut descriptors,
+                &mut seen,
+                WritingTaskDescriptor {
+                    task_id: task_id.clone(),
+                    label,
+                    prompt,
+                },
+            );
+        }
+    }
+
+    descriptors
+}
+
+fn push_writing_task_descriptor(
+    descriptors: &mut Vec<WritingTaskDescriptor>,
+    seen: &mut HashSet<String>,
+    descriptor: WritingTaskDescriptor,
+) {
+    if seen.insert(descriptor.task_id.clone()) {
+        descriptors.push(descriptor);
+    }
+}
+
+fn normalize_writing_task_value(
+    descriptor: &WritingTaskDescriptor,
+    value: Option<&Value>,
+) -> Value {
+    let mut label = descriptor.label.clone();
+    let mut prompt = descriptor.prompt.clone();
+
+    let (value_label, value_prompt, text, word_count) = match value {
+        Some(Value::String(text)) => (
+            None,
+            None,
+            text.clone(),
+            text.split_whitespace().count() as i64,
+        ),
+        Some(Value::Object(_)) => {
+            let value_label = non_empty_string(value.and_then(|item| item.get("label")));
+            let value_prompt = non_empty_string(value.and_then(|item| item.get("prompt")));
+            let text = value
+                .and_then(|item| item.get("text"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            let word_count = value
+                .and_then(|item| item.get("wordCount"))
+                .and_then(Value::as_i64)
+                .unwrap_or_else(|| text.split_whitespace().count() as i64);
+            (value_label, value_prompt, text, word_count)
+        }
+        _ => (None, None, String::new(), 0),
+    };
+
+    if label.is_empty() {
+        label = value_label.unwrap_or_else(|| descriptor.task_id.clone());
+    }
+    if prompt.is_empty() {
+        prompt = value_prompt.unwrap_or_default();
+    }
+
+    json!({
+        "label": label,
+        "prompt": prompt,
+        "text": text,
+        "wordCount": word_count
+    })
+}
+
+fn writing_task_id(task: &Value) -> Option<String> {
+    task.get("id")
+        .or_else(|| task.get("taskId"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn non_empty_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn word_count(value: &Value) -> i32 {
@@ -1475,6 +1667,169 @@ fn word_count(value: &Value) -> i32 {
     }
 }
 
+fn build_objective_answer_sections(content_snapshot: &Value) -> HashMap<String, String> {
+    let mut sections = HashMap::new();
+
+    if let Some(passages) = content_snapshot
+        .get("reading")
+        .and_then(|reading| reading.get("passages"))
+        .and_then(Value::as_array)
+    {
+        for passage in passages {
+            if let Some(blocks) = passage.get("blocks").and_then(Value::as_array) {
+                for block in blocks {
+                    index_objective_block_sections(block, "reading", &mut sections);
+                }
+            }
+        }
+    }
+
+    if let Some(parts) = content_snapshot
+        .get("listening")
+        .and_then(|listening| listening.get("parts"))
+        .and_then(Value::as_array)
+    {
+        for part in parts {
+            if let Some(blocks) = part.get("blocks").and_then(Value::as_array) {
+                for block in blocks {
+                    index_objective_block_sections(block, "listening", &mut sections);
+                }
+            }
+        }
+    }
+
+    sections
+}
+
+fn filter_answers_for_section(
+    answers: &Value,
+    answer_sections: &HashMap<String, String>,
+    section_key: &str,
+) -> Value {
+    if answer_sections.is_empty() {
+        return answers.clone();
+    }
+
+    let Some(items) = answers.as_object() else {
+        return json!({});
+    };
+
+    Value::Object(
+        items
+            .iter()
+            .filter(|(question_id, _)| {
+                answer_sections
+                    .get(*question_id)
+                    .is_some_and(|section| section == section_key)
+            })
+            .map(|(question_id, value)| (question_id.clone(), value.clone()))
+            .collect(),
+    )
+}
+
+fn index_objective_block_sections(
+    block: &Value,
+    section_key: &str,
+    sections: &mut HashMap<String, String>,
+) {
+    let Some(block_type) = block.get("type").and_then(Value::as_str) else {
+        return;
+    };
+    let block_id = block.get("id").and_then(Value::as_str);
+
+    match block_type {
+        "TFNG" | "CLOZE" | "MATCHING" | "MAP" | "SHORT_ANSWER" => {
+            register_question_array_sections(block, section_key, sections);
+        }
+        "SENTENCE_COMPLETION" | "NOTE_COMPLETION" => {
+            if let Some(questions) = block.get("questions").and_then(Value::as_array) {
+                for question in questions {
+                    let Some(question_id) = question.get("id").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    register_answer_section(sections, question_id, section_key);
+                    if let Some(blanks) = question.get("blanks").and_then(Value::as_array) {
+                        for blank in blanks {
+                            if let Some(blank_id) = blank.get("id").and_then(Value::as_str) {
+                                register_answer_section(
+                                    sections,
+                                    &format!("{question_id}:{blank_id}"),
+                                    section_key,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "MULTI_MCQ" | "SINGLE_MCQ" => {
+            if let Some(block_id) = block_id {
+                register_answer_section(sections, block_id, section_key);
+            }
+        }
+        "DIAGRAM_LABELING" => {
+            register_block_slot_sections(block, block_id, "labels", section_key, sections);
+        }
+        "FLOW_CHART" => {
+            register_block_slot_sections(block, block_id, "steps", section_key, sections);
+        }
+        "TABLE_COMPLETION" => {
+            register_block_slot_sections(block, block_id, "cells", section_key, sections);
+        }
+        "CLASSIFICATION" => {
+            register_block_slot_sections(block, block_id, "items", section_key, sections);
+        }
+        "MATCHING_FEATURES" => {
+            register_block_slot_sections(block, block_id, "features", section_key, sections);
+        }
+        _ => {}
+    }
+}
+
+fn register_question_array_sections(
+    block: &Value,
+    section_key: &str,
+    sections: &mut HashMap<String, String>,
+) {
+    if let Some(questions) = block.get("questions").and_then(Value::as_array) {
+        for question in questions {
+            if let Some(question_id) = question.get("id").and_then(Value::as_str) {
+                register_answer_section(sections, question_id, section_key);
+            }
+        }
+    }
+}
+
+fn register_block_slot_sections(
+    block: &Value,
+    block_id: Option<&str>,
+    slot_key: &str,
+    section_key: &str,
+    sections: &mut HashMap<String, String>,
+) {
+    let Some(block_id) = block_id else {
+        return;
+    };
+    register_answer_section(sections, block_id, section_key);
+    if let Some(slots) = block.get(slot_key).and_then(Value::as_array) {
+        for slot in slots {
+            if let Some(slot_id) = slot.get("id").and_then(Value::as_str) {
+                register_answer_section(sections, &format!("{block_id}:{slot_id}"), section_key);
+            }
+        }
+    }
+}
+
+fn register_answer_section(
+    sections: &mut HashMap<String, String>,
+    answer_key: &str,
+    section_key: &str,
+) {
+    sections
+        .entry(answer_key.to_owned())
+        .or_insert_with(|| section_key.to_owned());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1486,7 +1841,7 @@ mod tests {
             "task1": "Hello world"
         });
 
-        let tasks = writing_task_array(&writing_answers);
+        let tasks = writing_task_array(&writing_answers, &json!({}), &json!({}));
         assert_eq!(
             tasks,
             json!([
@@ -1501,7 +1856,7 @@ mod tests {
             "task1": "Hello world"
         });
 
-        let entries = writing_task_entries(&writing_answers);
+        let entries = writing_task_entries(&writing_answers, &json!({}), &json!({}));
         assert_eq!(entries.len(), 1);
 
         let (task_id, value) = &entries[0];
@@ -1510,6 +1865,85 @@ mod tests {
         assert_eq!(value.get("label").and_then(Value::as_str), Some("task1"));
         assert_eq!(value.get("prompt").and_then(Value::as_str), Some(""));
         assert_eq!(value.get("wordCount").and_then(Value::as_i64), Some(2));
+    }
+
+    #[test]
+    fn writing_task_entries_uses_published_prompts_for_string_answers() {
+        let writing_answers = json!({
+            "task1": "Hello world"
+        });
+        let content_snapshot = json!({
+            "writing": {
+                "tasks": [
+                    { "taskId": "task1", "label": "Task 1", "prompt": "Summarise the chart." },
+                    { "taskId": "task2", "label": "Task 2", "prompt": "Discuss both views." }
+                ]
+            }
+        });
+        let config_snapshot = json!({
+            "sections": {
+                "writing": {
+                    "tasks": [
+                        { "id": "task1", "label": "Task 1" },
+                        { "id": "task2", "label": "Task 2" }
+                    ]
+                }
+            }
+        });
+
+        let entries = writing_task_entries(&writing_answers, &content_snapshot, &config_snapshot);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, "task1");
+        assert_eq!(
+            entries[0].1.get("prompt").and_then(Value::as_str),
+            Some("Summarise the chart.")
+        );
+        assert_eq!(
+            entries[0].1.get("text").and_then(Value::as_str),
+            Some("Hello world")
+        );
+        assert_eq!(entries[1].0, "task2");
+        assert_eq!(
+            entries[1].1.get("prompt").and_then(Value::as_str),
+            Some("Discuss both views.")
+        );
+        assert_eq!(entries[1].1.get("text").and_then(Value::as_str), Some(""));
+    }
+
+    #[test]
+    fn objective_answers_are_scoped_to_their_materialized_section() {
+        let answers = json!({
+            "listening-q1": "A",
+            "reading-q1": "B"
+        });
+        let content_snapshot = json!({
+            "listening": {
+                "parts": [{
+                    "blocks": [{
+                        "type": "SHORT_ANSWER",
+                        "questions": [{ "id": "listening-q1" }]
+                    }]
+                }]
+            },
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "type": "SHORT_ANSWER",
+                        "questions": [{ "id": "reading-q1" }]
+                    }]
+                }]
+            }
+        });
+
+        let answer_sections = build_objective_answer_sections(&content_snapshot);
+        assert_eq!(
+            filter_answers_for_section(&answers, &answer_sections, "listening"),
+            json!({ "listening-q1": "A" })
+        );
+        assert_eq!(
+            filter_answers_for_section(&answers, &answer_sections, "reading"),
+            json!({ "reading-q1": "B" })
+        );
     }
 }
 

@@ -230,6 +230,78 @@ describe('studentAttemptRepository backend mode', () => {
     expect(mapped.flags).toEqual({ q1: true });
   });
 
+  it('submits the browser-local final answer snapshot with the terminal submit request', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          schedule: buildSchedule(),
+          version: buildVersion(),
+          runtime: null,
+          attempt: buildBackendAttempt(),
+          attemptCredential: buildAttemptCredential(),
+          degradedLiveMode: false,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          attempt: buildBackendAttempt({
+            phase: 'post-exam',
+            answers: { q1: 'A' },
+            writingAnswers: { task1: '<p>Draft</p>' },
+            flags: { q1: true },
+            finalSubmission: {
+              submissionId: 'submission-1',
+              submittedAt: '2026-01-01T10:00:00.000Z',
+              answers: { q1: 'A' },
+              writingAnswers: { task1: '<p>Draft</p>' },
+              flags: { q1: true },
+            },
+            submittedAt: '2026-01-01T10:00:00.000Z',
+            updatedAt: '2026-01-01T10:00:00.000Z',
+            revision: 2,
+          }),
+          submissionId: 'submission-1',
+          submittedAt: '2026-01-01T10:00:00.000Z',
+          refreshedAttemptCredential: null,
+        }),
+      );
+    global.fetch = fetchMock as typeof fetch;
+
+    const attempt = await studentAttemptRepository.createAttempt({
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      currentModule: 'reading',
+    });
+
+    const localFinalAttempt = {
+      ...attempt,
+      answers: { q1: 'A' },
+      writingAnswers: { task1: '<p>Draft</p>' },
+      flags: { q1: true },
+    };
+
+    await studentAttemptRepository.submitAttempt(localFinalAttempt);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/student/sessions/sched-1/submit',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      attemptId: attempt.id,
+      studentKey: 'student-sched-1-alice',
+      answers: { q1: 'A' },
+      writingAnswers: { task1: '<p>Draft</p>' },
+      flags: { q1: true },
+    });
+  });
+
   it('flushes pending mutations through the backend before saving the local cache', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
     const fetchMock = vi.fn().mockResolvedValueOnce(

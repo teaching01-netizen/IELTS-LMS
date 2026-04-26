@@ -1606,6 +1606,9 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
       {
         attemptId: attempt.id,
         studentKey: attempt.studentKey,
+        answers: attempt.answers,
+        writingAnswers: attempt.writingAnswers,
+        flags: attempt.flags,
       },
       {
         headers: {

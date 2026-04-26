@@ -146,6 +146,12 @@ pub struct StudentAuditLogRequest {
 pub struct StudentSubmitRequest {
     pub attempt_id: String,
     pub student_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answers: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub writing_answers: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

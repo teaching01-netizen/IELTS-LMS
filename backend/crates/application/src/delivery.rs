@@ -1019,7 +1019,22 @@ impl DeliveryService {
             .and_then(Value::as_str)
             .unwrap_or("confirm");
         let answer_schema = build_answer_schema(&version.content_snapshot)?;
-        let completion = compute_answer_completion(&answer_schema, &attempt.answers);
+        let writing_task_ids = build_writing_task_ids(&version.config_snapshot);
+        let final_answers = match req.answers.as_ref() {
+            Some(snapshot) => validate_final_answers_snapshot(Some(snapshot), &answer_schema)?,
+            None => attempt.answers.clone(),
+        };
+        let final_writing_answers = match req.writing_answers.as_ref() {
+            Some(snapshot) => {
+                validate_final_writing_answers_snapshot(Some(snapshot), &writing_task_ids)?
+            }
+            None => attempt.writing_answers.clone(),
+        };
+        let final_flags = match req.flags.as_ref() {
+            Some(snapshot) => validate_final_flags_snapshot(Some(snapshot), &answer_schema)?,
+            None => attempt.flags.clone(),
+        };
+        let completion = compute_answer_completion(&answer_schema, &final_answers);
         let runtime_status = runtime_gate.as_ref().map(|row| row.status.as_str());
 
         if unanswered_submission_policy == "block"
@@ -1038,9 +1053,9 @@ impl DeliveryService {
         let final_submission = json!({
             "submissionId": submission_id,
             "submittedAt": now,
-            "answers": attempt.answers,
-            "writingAnswers": attempt.writing_answers,
-            "flags": attempt.flags
+            "answers": final_answers,
+            "writingAnswers": final_writing_answers,
+            "flags": final_flags
         });
         let recovery = merge_recovery(
             attempt.recovery.clone(),
@@ -1056,6 +1071,9 @@ impl DeliveryService {
             UPDATE student_attempts
             SET
                 phase = ?,
+                answers = ?,
+                writing_answers = ?,
+                flags = ?,
                 recovery = ?,
                 final_submission = ?,
                 submitted_at = ?,
@@ -1065,6 +1083,9 @@ impl DeliveryService {
             "#,
         )
         .bind("post-exam")
+        .bind(&final_submission["answers"])
+        .bind(&final_submission["writingAnswers"])
+        .bind(&final_submission["flags"])
         .bind(recovery)
         .bind(&final_submission)
         .bind(now)
@@ -2320,6 +2341,89 @@ fn validate_answer_value(
     }
 }
 
+fn validate_final_answers_snapshot(
+    snapshot: Option<&Value>,
+    answer_schema: &AnswerSchema,
+) -> Result<Value, DeliveryError> {
+    let Some(snapshot) = snapshot else {
+        return Ok(json!({}));
+    };
+    let Some(items) = snapshot.as_object() else {
+        return Err(DeliveryError::Validation(
+            "Submit answers must be an object.".to_owned(),
+        ));
+    };
+
+    for (question_id, value) in items {
+        let constraint = answer_schema.constraints.get(question_id).ok_or_else(|| {
+            DeliveryError::Validation(
+                "Submit answers reference an unknown `questionId`.".to_owned(),
+            )
+        })?;
+        validate_answer_value(constraint, value)?;
+    }
+
+    Ok(Value::Object(items.clone()))
+}
+
+fn validate_final_writing_answers_snapshot(
+    snapshot: Option<&Value>,
+    writing_task_ids: &HashSet<String>,
+) -> Result<Value, DeliveryError> {
+    let Some(snapshot) = snapshot else {
+        return Ok(json!({}));
+    };
+    let Some(items) = snapshot.as_object() else {
+        return Err(DeliveryError::Validation(
+            "Submit writing answers must be an object.".to_owned(),
+        ));
+    };
+
+    for (task_id, value) in items {
+        if !writing_task_ids.contains(task_id) {
+            return Err(DeliveryError::Validation(
+                "Submit writing answers reference an unknown `taskId`.".to_owned(),
+            ));
+        }
+        if !matches!(value, Value::String(_) | Value::Null) {
+            return Err(DeliveryError::Validation(
+                "Submit writing answers must be strings (or null).".to_owned(),
+            ));
+        }
+    }
+
+    Ok(Value::Object(items.clone()))
+}
+
+fn validate_final_flags_snapshot(
+    snapshot: Option<&Value>,
+    answer_schema: &AnswerSchema,
+) -> Result<Value, DeliveryError> {
+    let Some(snapshot) = snapshot else {
+        return Ok(json!({}));
+    };
+    let Some(items) = snapshot.as_object() else {
+        return Err(DeliveryError::Validation(
+            "Submit flags must be an object.".to_owned(),
+        ));
+    };
+
+    for (question_id, value) in items {
+        if !answer_schema.sections.contains_key(question_id) {
+            return Err(DeliveryError::Validation(
+                "Submit flags reference an unknown `questionId`.".to_owned(),
+            ));
+        }
+        if !value.is_boolean() {
+            return Err(DeliveryError::Validation(
+                "Submit flags must be boolean.".to_owned(),
+            ));
+        }
+    }
+
+    Ok(Value::Object(items.clone()))
+}
+
 fn apply_mutation(
     mutation: &MutationEnvelope,
     answer_schema: &AnswerSchema,
@@ -3045,5 +3149,44 @@ mod tests {
         let completion = compute_answer_completion(&schema, &answers);
         assert_eq!(completion.total_slots, 1 + 2 + 2 + 3);
         assert_eq!(completion.answered_slots, 1 + 1 + 1 + 1);
+    }
+
+    #[test]
+    fn submit_final_snapshot_validation_accepts_known_answers_writing_and_flags() {
+        let schema = AnswerSchema {
+            constraints: HashMap::from_iter([(
+                "q1".to_owned(),
+                AnswerConstraint::Enum(HashSet::from_iter(["A".to_owned(), "B".to_owned()])),
+            )]),
+            sections: HashMap::from_iter([("q1".to_owned(), "reading".to_owned())]),
+        };
+        let writing_task_ids = HashSet::from_iter(["task1".to_owned()]);
+
+        let answers = validate_final_answers_snapshot(Some(&json!({ "q1": "A" })), &schema)
+            .expect("answers should validate");
+        let writing_answers = validate_final_writing_answers_snapshot(
+            Some(&json!({ "task1": "Essay text" })),
+            &writing_task_ids,
+        )
+        .expect("writing should validate");
+        let flags = validate_final_flags_snapshot(Some(&json!({ "q1": true })), &schema)
+            .expect("flags should validate");
+
+        assert_eq!(answers, json!({ "q1": "A" }));
+        assert_eq!(writing_answers, json!({ "task1": "Essay text" }));
+        assert_eq!(flags, json!({ "q1": true }));
+    }
+
+    #[test]
+    fn submit_final_snapshot_validation_rejects_unknown_objective_question() {
+        let schema = AnswerSchema {
+            constraints: HashMap::from_iter([("q1".to_owned(), AnswerConstraint::Text)]),
+            sections: HashMap::from_iter([("q1".to_owned(), "reading".to_owned())]),
+        };
+
+        let err = validate_final_answers_snapshot(Some(&json!({ "q-missing": "A" })), &schema)
+            .expect_err("unknown answers should be rejected");
+
+        assert!(matches!(err, DeliveryError::Validation(_)));
     }
 }

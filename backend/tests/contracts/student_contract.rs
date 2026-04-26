@@ -942,6 +942,9 @@ async fn submit_finalizes_the_attempt_idempotently() {
                     serde_json::to_vec(&StudentSubmitRequest {
                         attempt_id: attempt_id.clone(),
                         student_key: student_key.clone(),
+                        answers: None,
+                        writing_answers: None,
+                        flags: None,
                     })
                     .unwrap(),
                 ))
@@ -970,6 +973,9 @@ async fn submit_finalizes_the_attempt_idempotently() {
                     serde_json::to_vec(&StudentSubmitRequest {
                         attempt_id,
                         student_key: student_key.clone(),
+                        answers: None,
+                        writing_answers: None,
+                        flags: None,
                     })
                     .unwrap(),
                 ))
@@ -1017,6 +1023,9 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
                     serde_json::to_vec(&StudentSubmitRequest {
                         attempt_id: attempt_id.clone(),
                         student_key: student_key.clone(),
+                        answers: None,
+                        writing_answers: None,
+                        flags: None,
                     })
                     .unwrap(),
                 ))
@@ -1066,6 +1075,9 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
                     serde_json::to_vec(&StudentSubmitRequest {
                         attempt_id,
                         student_key: student_key.clone(),
+                        answers: None,
+                        writing_answers: None,
+                        flags: None,
                     })
                     .unwrap(),
                 ))

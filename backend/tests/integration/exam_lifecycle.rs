@@ -111,6 +111,9 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
             StudentSubmitRequest {
                 attempt_id: attempt_after_runtime.id.clone(),
                 student_key: student_key.clone(),
+                answers: None,
+                writing_answers: None,
+                flags: None,
             },
             None,
         )

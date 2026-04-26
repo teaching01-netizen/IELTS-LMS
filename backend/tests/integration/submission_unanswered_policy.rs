@@ -110,6 +110,9 @@ async fn submit_attempt_blocks_unanswered_only_while_runtime_live_or_paused() {
             StudentSubmitRequest {
                 attempt_id: attempt_after_runtime.id.clone(),
                 student_key: student_key.clone(),
+                answers: None,
+                writing_answers: None,
+                flags: None,
             },
             None,
         )
@@ -142,6 +145,9 @@ async fn submit_attempt_blocks_unanswered_only_while_runtime_live_or_paused() {
             StudentSubmitRequest {
                 attempt_id: attempt_after_runtime.id.clone(),
                 student_key: student_key.clone(),
+                answers: None,
+                writing_answers: None,
+                flags: None,
             },
             None,
         )

@@ -207,7 +207,7 @@ CREATE INDEX idx_foo_id ON foo(id);\n";
     }
 
     #[test]
-    fn student_attempt_presence_fk_columns_match_parent_types() {
+    fn student_attempt_presence_uses_fresh_schema_uuid_type_fallbacks() {
         let delivery_sql = std::fs::read_to_string("../../migrations/0006_delivery.sql")
             .expect("read delivery migration");
         let presence_sql =
@@ -216,15 +216,34 @@ CREATE INDEX idx_foo_id ON foo(id);\n";
 
         let parent_type =
             column_type(&delivery_sql, "student_attempts", "id").expect("student_attempts.id type");
-        let presence_attempt_type =
-            column_type(&presence_sql, "student_attempt_presence", "attempt_id")
-                .expect("student_attempt_presence.attempt_id type");
-        let presence_schedule_type =
-            column_type(&presence_sql, "student_attempt_presence", "schedule_id")
-                .expect("student_attempt_presence.schedule_id type");
 
-        assert_eq!(presence_attempt_type, parent_type);
-        assert_eq!(presence_schedule_type, "VARCHAR(36)");
+        assert_eq!(parent_type, "VARCHAR(36)");
+        assert!(presence_sql
+            .contains("COALESCE(@student_attempt_presence_attempt_id_type, 'VARCHAR(36)')"));
+        assert!(presence_sql
+            .contains("COALESCE(@student_attempt_presence_schedule_id_type, 'VARCHAR(36)')"));
+    }
+
+    #[test]
+    fn student_attempt_presence_attempt_id_is_derived_from_existing_parent_column() {
+        let presence_sql =
+            std::fs::read_to_string("../../migrations/0014_student_attempt_presence.sql")
+                .expect("read student attempt presence migration");
+
+        assert!(
+            presence_sql.contains("information_schema.columns"),
+            "presence migration must inspect the existing student_attempts.id definition"
+        );
+        assert!(presence_sql.contains("COLUMN_TYPE"));
+        assert!(presence_sql.contains("CHARACTER_SET_NAME"));
+        assert!(presence_sql.contains("COLLATION_NAME"));
+        assert!(presence_sql.contains("TABLE_NAME = 'student_attempts'"));
+        assert!(presence_sql.contains("COLUMN_NAME = 'id'"));
+        assert!(presence_sql.contains("CONSTRAINT student_attempt_presence_attempt_fk"));
+        assert!(
+            !presence_sql.contains("attempt_id VARCHAR(36) PRIMARY KEY"),
+            "hard-coding VARCHAR(36) is incompatible with legacy CHAR(36) parent columns"
+        );
     }
 
     fn column_type(sql: &str, table: &str, column: &str) -> Option<String> {

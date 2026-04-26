@@ -547,6 +547,9 @@ async fn bootstrap_and_submit(pool: &sqlx::MySqlPool, schedule_id: Uuid, candida
             StudentSubmitRequest {
                 attempt_id: attempt_id.clone(),
                 student_key: student_key(schedule_id, candidate_id),
+                answers: None,
+                writing_answers: None,
+                flags: None,
             },
             None,
         )
