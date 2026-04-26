@@ -335,7 +335,6 @@ export function buildWideObjectiveExport({
     const groups = buildQuestionTracebackGroups(examState, sectionSubmission, moduleType);
     const items = new Map(groups.flatMap((group) => group.items.map((item) => [item.questionId, item] as const)));
     const autoGradingResults = sectionSubmission?.autoGradingResults;
-    const scoredResults = buildQuestionResultMap(autoGradingResults?.questionResults);
     const row: Record<string, unknown> = {
       examTitle: session.examTitle,
       sessionId: session.sessionId,
@@ -357,9 +356,8 @@ export function buildWideObjectiveExport({
 
     for (const descriptor of descriptors) {
       const item = items.get(descriptor.id);
-      const scoredResult = scoredResults.get(descriptor.id);
       row[`answer:${descriptor.id}`] = item?.studentAnswer ?? '';
-      row[`score:${descriptor.id}`] = toOptionalNumber(scoredResult?.awardedScore);
+      row[`score:${descriptor.id}`] = toOptionalNumber(item?.awardedScore);
     }
 
     return row;
