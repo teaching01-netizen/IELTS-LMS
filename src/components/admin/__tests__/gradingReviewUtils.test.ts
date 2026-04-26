@@ -382,8 +382,8 @@ describe('gradingReviewUtils', () => {
       'Correct Count',
       'Q1 Answer',
       'Q2 Answer',
-      'Q1 Correct Answer',
-      'Q2 Correct Answer',
+      'Q1 Right Answer',
+      'Q2 Right Answer',
       'Q1 Score',
       'Q2 Score',
     ]);
@@ -438,7 +438,7 @@ describe('gradingReviewUtils', () => {
 
     expect(exportData.rows).toHaveLength(1);
     expect(exportData.columns.at(-3)?.label).toBe('Q1 Answer');
-    expect(exportData.columns.at(-2)?.label).toBe('Q1 Correct Answer');
+    expect(exportData.columns.at(-2)?.label).toBe('Q1 Right Answer');
     expect(exportData.columns.at(-1)?.label).toBe('Q1 Score');
     expect(exportData.rows[0]?.section).toBe('listening');
     expect(exportData.rows[0]?.['answer:lq-1']).toBe('Train');
