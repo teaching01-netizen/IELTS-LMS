@@ -173,6 +173,51 @@ describe('student question experience', () => {
     expect(onOpenNavigator).toHaveBeenCalledTimes(1);
   });
 
+  it('wires zoom controls and opens the highlight palette from the header', () => {
+    const onOpenAccessibility = vi.fn();
+    const onZoomIn = vi.fn();
+    const onZoomOut = vi.fn();
+    const onZoomReset = vi.fn();
+    const onHighlightModeToggle = vi.fn();
+    const onHighlightColorChange = vi.fn();
+
+    render(
+      <StudentHeader
+        onExit={() => {}}
+        timeRemaining={1200}
+        isExamActive
+        zoom={1.25}
+        highlightEnabled={false}
+        highlightColor="yellow"
+        onOpenAccessibility={onOpenAccessibility}
+        onZoomIn={onZoomIn}
+        onZoomOut={onZoomOut}
+        onZoomReset={onZoomReset}
+        onHighlightModeToggle={onHighlightModeToggle}
+        onHighlightColorChange={onHighlightColorChange}
+      />,
+    );
+
+    expect(screen.getByTestId('zoom-controls')).toHaveClass('w-[11.5rem]');
+    expect(screen.getByTestId('zoom-percent')).toHaveTextContent('125%');
+    expect(screen.getByText('125%')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /zoom out/i }));
+    fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+    fireEvent.click(screen.getByRole('button', { name: /reset zoom/i }));
+    fireEvent.click(screen.getByRole('button', { name: /open highlight options/i }));
+    expect(screen.getByRole('dialog', { name: /highlight options/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /select amber highlight color/i }));
+    fireEvent.click(screen.getByRole('button', { name: /open accessibility settings/i }));
+
+    expect(onZoomOut).toHaveBeenCalledTimes(1);
+    expect(onZoomIn).toHaveBeenCalledTimes(1);
+    expect(onZoomReset).toHaveBeenCalledTimes(1);
+    expect(onHighlightModeToggle).toHaveBeenCalledTimes(1);
+    expect(onHighlightColorChange).toHaveBeenCalledWith('amber');
+    expect(onOpenAccessibility).toHaveBeenCalledTimes(1);
+  });
+
   it('hides the header exit control when requested', () => {
     render(
       <StudentHeader

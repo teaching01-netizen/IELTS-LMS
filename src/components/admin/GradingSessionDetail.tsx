@@ -4,6 +4,7 @@ import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGr
 import { gradingService } from '../../services/gradingService';
 import { gradingRepository } from '../../services/gradingRepository';
 import { examRepository } from '../../services/examRepository';
+import { seedDevelopmentFixtures } from '../../services/developmentFixtures';
 import { TableLoadingSkeleton } from '@components/ui';
 import { GradingExportButtons } from './GradingExportButtons';
 import {
@@ -35,7 +36,19 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    loadSubmissions();
+    let cancelled = false;
+    void loadSubmissions();
+    void seedDevelopmentFixtures()
+      .then(() => {
+        if (!cancelled) {
+          void loadSubmissions();
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId, filters]);
 
   const loadSubmissions = async () => {

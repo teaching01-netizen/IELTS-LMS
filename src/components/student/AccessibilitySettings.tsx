@@ -14,11 +14,11 @@ interface AccessibilitySettingsProps {
 
 export function AccessibilitySettings({ 
   isOpen, 
-  onClose, 
-  fontSize, 
-  highContrast, 
+  onClose,
+  fontSize,
+  highContrast,
   onFontSizeChange, 
-  onHighContrastToggle 
+  onHighContrastToggle,
 }: AccessibilitySettingsProps) {
   const dialogRef = useFocusTrap(isOpen, onClose);
 

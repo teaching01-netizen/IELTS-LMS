@@ -157,4 +157,21 @@ describe('StudentWriting a11y', () => {
 
     expect(screen.getByRole('heading', { name: /review your responses/i })).toBeInTheDocument();
   });
+
+  it('does not expose a writing highlight toolbar button', () => {
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: /highlight selected text/i }),
+    ).not.toBeInTheDocument();
+  });
 });

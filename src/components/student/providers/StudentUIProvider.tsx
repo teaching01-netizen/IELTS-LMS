@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { defaultStudentHighlightColor, type StudentHighlightColor } from '../highlightPalette';
 
 interface UIState {
   showNavigator: boolean;
@@ -12,6 +13,9 @@ interface UIState {
   accessibilitySettings: {
     fontSize: 'small' | 'normal' | 'large';
     highContrast: boolean;
+    zoom: number;
+    highlightMode: boolean;
+    highlightColor: StudentHighlightColor;
   };
 }
 
@@ -25,6 +29,12 @@ interface UIActions {
   grantTimeExtension: (minutes: number) => void;
   setFontSize: (size: 'small' | 'normal' | 'large') => void;
   toggleHighContrast: () => void;
+  setZoom: (zoom: number) => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
+  toggleHighlightMode: () => void;
+  setHighlightColor: (color: StudentHighlightColor) => void;
 }
 
 interface UIContextValue {
@@ -50,6 +60,9 @@ export function StudentUIProvider({ children }: UIProviderProps) {
   const [accessibilitySettings, setAccessibilitySettings] = useState({
     fontSize: 'normal' as 'small' | 'normal' | 'large',
     highContrast: false,
+    zoom: 1,
+    highlightMode: false,
+    highlightColor: defaultStudentHighlightColor,
   });
 
   const grantTimeExtension = useCallback((minutes: number) => {
@@ -65,6 +78,37 @@ export function StudentUIProvider({ children }: UIProviderProps) {
 
   const toggleHighContrast = useCallback(() => {
     setAccessibilitySettings(prev => ({ ...prev, highContrast: !prev.highContrast }));
+  }, []);
+
+  const setZoom = useCallback((zoom: number) => {
+    const clamped = Math.min(1.5, Math.max(0.85, zoom));
+    setAccessibilitySettings(prev => ({ ...prev, zoom: clamped }));
+  }, []);
+
+  const zoomIn = useCallback(() => {
+    setAccessibilitySettings((prev) => ({
+      ...prev,
+      zoom: Math.min(1.5, Math.max(0.85, prev.zoom + 0.1)),
+    }));
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setAccessibilitySettings((prev) => ({
+      ...prev,
+      zoom: Math.min(1.5, Math.max(0.85, prev.zoom - 0.1)),
+    }));
+  }, []);
+
+  const resetZoom = useCallback(() => {
+    setZoom(1);
+  }, [setZoom]);
+
+  const toggleHighlightMode = useCallback(() => {
+    setAccessibilitySettings(prev => ({ ...prev, highlightMode: !prev.highlightMode }));
+  }, []);
+
+  const setHighlightColor = useCallback((color: StudentHighlightColor) => {
+    setAccessibilitySettings((prev) => ({ ...prev, highlightColor: color }));
   }, []);
 
   const state: UIState = {
@@ -89,6 +133,12 @@ export function StudentUIProvider({ children }: UIProviderProps) {
     grantTimeExtension,
     setFontSize,
     toggleHighContrast,
+    setZoom,
+    zoomIn,
+    zoomOut,
+    resetZoom,
+    toggleHighlightMode,
+    setHighlightColor,
   };
 
   return (

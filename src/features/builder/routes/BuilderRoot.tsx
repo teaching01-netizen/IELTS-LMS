@@ -376,7 +376,7 @@ export function BuilderRoot() {
     saveRunnerRef.current?.enqueue({ state: nextState, requestId });
     await saveRunnerRef.current?.idle();
 
-    if (requestId === latestSaveRequestIdRef.current && saveRunnerRef.current?.lastError) {
+    if (saveRunnerRef.current?.lastError) {
       return false;
     }
 

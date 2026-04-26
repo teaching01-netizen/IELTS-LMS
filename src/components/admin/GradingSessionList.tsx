@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Search, Filter, Clock, Users, AlertCircle, ArrowRight, Calendar } from 'lucide-react';
+import { Search, Filter, Clock, Users, AlertCircle, ArrowRight, Calendar, Download } from 'lucide-react';
 import { GradingSession, GradingQueueFilters } from '../../types/grading';
 import { gradingService } from '../../services/gradingService';
 import { TableLoadingSkeleton } from '@components/ui';
+import { seedDevelopmentFixtures } from '../../services/developmentFixtures';
+import { downloadCsv } from '../../utils/csvExport';
 
 interface GradingSessionListProps {
   onSessionSelect: (sessionId: string) => void;
@@ -15,7 +17,19 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    loadSessions();
+    let cancelled = false;
+    void loadSessions();
+    void seedDevelopmentFixtures()
+      .then(() => {
+        if (!cancelled) {
+          void loadSessions();
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
   }, [filters]);
 
   const loadSessions = async () => {
@@ -64,6 +78,39 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
     );
   }, []);
 
+  const handleExportCsv = useCallback(() => {
+    const filename = `grading-sessions-${new Date().toISOString().split('T')[0]}.csv`;
+    downloadCsv(filename, [
+      'Session ID',
+      'Exam',
+      'Cohort',
+      'Institution',
+      'Start Time',
+      'End Time',
+      'Status',
+      'Total Students',
+      'Pending Reviews',
+      'In Progress',
+      'Finalized',
+      'Overdue',
+      'Assigned Teachers',
+    ], sessions.map((session) => [
+      session.id,
+      session.examTitle,
+      session.cohortName,
+      session.institution ?? '',
+      session.startTime,
+      session.endTime,
+      session.status,
+      session.totalStudents,
+      session.pendingManualReviews,
+      session.inProgressReviews,
+      session.finalizedReviews,
+      session.overdueReviews,
+      session.assignedTeachers.join('; '),
+    ]));
+  }, [sessions]);
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -87,6 +134,15 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
           <button className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
             <Filter size={16} />
             Filter
+          </button>
+          <button
+            onClick={handleExportCsv}
+            disabled={loading || sessions.length === 0}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Export sessions as CSV"
+          >
+            <Download size={16} />
+            CSV
           </button>
         </div>
       </div>

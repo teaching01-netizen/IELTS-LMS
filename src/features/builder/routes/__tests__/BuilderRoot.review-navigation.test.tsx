@@ -302,6 +302,78 @@ describe('BuilderRoot review navigation', () => {
     vi.useRealTimers();
   });
 
+  it('blocks review navigation when a newer autosave fails after saveDraftNow starts', async () => {
+    vi.useFakeTimers();
+    const firstSave = createDeferred<void>();
+    const secondSave = createDeferred<void>();
+    let saveCallCount = 0;
+    mockHandleUpdateExamContent.mockImplementation(() => {
+      saveCallCount += 1;
+      if (saveCallCount === 1) {
+        return firstSave.promise;
+      }
+      if (saveCallCount === 2) {
+        return secondSave.promise;
+      }
+      throw new Error('Unexpected save call');
+    });
+
+    render(<BuilderRoot />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const editButton = screen.getByRole('button', { name: /edit draft/i });
+
+    await act(async () => {
+      fireEvent.click(editButton);
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+    });
+
+    expect(mockHandleUpdateExamContent).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /finish & review/i }));
+    });
+
+    await act(async () => {
+      fireEvent.click(editButton);
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+    });
+
+    expect(mockHandleUpdateExamContent).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstSave.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockHandleUpdateExamContent).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      secondSave.reject(new Error('Draft has been modified'));
+      await Promise.resolve();
+    });
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(screen.getByTestId('save-status')).toHaveTextContent(/save failed/i);
+    expect(
+      screen
+        .queryAllByTestId('toast-item')
+        .map((item) => item.textContent)
+        .filter(Boolean),
+    ).toContain('Save failed');
+
+    vi.useRealTimers();
+  });
+
   it('shows a recovery screen when no builder modules are enabled', async () => {
     controllerState.config.sections.reading.enabled = false;
     controllerState.config.sections.listening.enabled = false;

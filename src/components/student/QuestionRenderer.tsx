@@ -27,6 +27,7 @@ import { ProtectedInput } from './ProtectedInput';
 import { FormattedText } from './FormattedText';
 import { stripBoldMarkdown } from '../../utils/boldMarkdown';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
+import type { StudentHighlightColor } from './highlightPalette';
 
 interface QuestionRendererProps {
   question:
@@ -48,6 +49,8 @@ interface QuestionRendererProps {
   currentQuestionId?: string | null | undefined;
   flags?: Record<string, boolean> | undefined;
   onToggleFlag?: ((id: string) => void) | undefined;
+  highlightEnabled?: boolean | undefined;
+  highlightColor?: StudentHighlightColor | undefined;
   security?: {
     preventAutofill: boolean;
     preventAutocorrect: boolean;
@@ -67,6 +70,8 @@ export function QuestionRenderer({
   currentQuestionId = null,
   flags = {},
   onToggleFlag,
+  highlightEnabled = false,
+  highlightColor,
   security = { preventAutofill: false, preventAutocorrect: false },
   sessionId,
   studentId,
@@ -135,7 +140,15 @@ export function QuestionRenderer({
         />
         {renderFlagButton(slotId)}
       </div>
-      {extraCopy ? <FormattedText as="p" className="mt-2 pl-11 text-sm text-gray-600" text={extraCopy} /> : null}
+      {extraCopy ? (
+        <FormattedText
+          as="p"
+          className="mt-2 pl-11 text-sm text-gray-600"
+          text={extraCopy}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+        />
+      ) : null}
     </div>
   );
 
@@ -152,7 +165,13 @@ export function QuestionRenderer({
           <div className="mt-0.5 flex h-[24px] min-w-[24px] items-center justify-center border-2 border-blue-500 text-sm font-bold text-blue-600">
             {number}
           </div>
-          <FormattedText as="span" className="leading-relaxed text-gray-900" text={q.statement} />
+          <FormattedText
+            as="span"
+            className="leading-relaxed text-gray-900"
+            text={q.statement}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+          />
         </legend>
         <div className="ml-9 flex flex-col gap-3">
           {options.map((option) => (
@@ -178,7 +197,13 @@ export function QuestionRenderer({
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
           <span className="min-w-[24px] font-bold text-gray-900">{number}.</span>
-          <FormattedText as="span" className="text-gray-800" text={q.prompt} />
+          <FormattedText
+            as="span"
+            className="text-gray-800"
+            text={q.prompt}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+          />
         </div>
         <div className="ml-9 mt-2">
           <ProtectedInput
@@ -242,11 +267,13 @@ export function QuestionRenderer({
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3">
           <span className="min-w-[24px] font-bold text-gray-900">{blockNum}.</span>
-          <FormattedText
-            as="span"
-            className="text-gray-800"
-            text={mcqBlock.stem || 'Select the correct options:'}
-          />
+        <FormattedText
+          as="span"
+          className="text-gray-800"
+          text={mcqBlock.stem || 'Select the correct options:'}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+        />
         </legend>
         <div className="ml-9 space-y-3">
           {mcqBlock.options?.map((option, index) => {
@@ -282,7 +309,7 @@ export function QuestionRenderer({
                 </div>
                 <div className="flex gap-2">
                   <span className="font-bold text-gray-700">{letter}.</span>
-                  <FormattedText as="span" className="text-gray-800" text={option.text} />
+                  <FormattedText as="span" className="text-gray-800" text={option.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </div>
               </label>
             );
@@ -323,7 +350,7 @@ export function QuestionRenderer({
         <div className="flex gap-3">
           <span className="min-w-[24px] font-bold text-gray-900">{num}.</span>
           <span className="text-gray-800">
-            Label <FormattedText as="span" className="text-gray-800" text={q.label} />
+            Label <FormattedText as="span" className="text-gray-800" text={q.label} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
           </span>
         </div>
         <div className="ml-9 mt-2">
@@ -352,6 +379,8 @@ export function QuestionRenderer({
           as="span"
           className="text-gray-800"
           text={mcqBlock.stem || 'Select the correct option:'}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
         />
       </legend>
       <div className="ml-9 space-y-3">
@@ -368,7 +397,7 @@ export function QuestionRenderer({
               />
               <div className="flex gap-2">
                 <span className="font-bold text-gray-700">{letter}.</span>
-                <FormattedText as="span" className="text-gray-800" text={option.text} />
+                  <FormattedText as="span" className="text-gray-800" text={option.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
               </div>
             </label>
           );
@@ -383,7 +412,7 @@ export function QuestionRenderer({
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
           <span className="min-w-[24px] font-bold text-gray-900">{num}.</span>
-          <FormattedText as="span" className="text-gray-800" text={q.prompt} />
+          <FormattedText as="span" className="text-gray-800" text={q.prompt} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
         </div>
         <div className="ml-9 mt-2">
           <ProtectedInput
@@ -413,7 +442,7 @@ export function QuestionRenderer({
         <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
           {parts.map((part, index) => (
             <React.Fragment key={`${q.id}-${index}`}>
-              <FormattedText as="span" text={part} />
+              <FormattedText as="span" text={part} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
               {index < blanks ? (
                 <span
                   id={`question-${getSlotId(index, `${q.id}:${index}`)}`}
@@ -453,7 +482,7 @@ export function QuestionRenderer({
         <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
           {parts.map((part, index) => (
             <React.Fragment key={`${noteQuestion.id}-${index}`}>
-              <FormattedText as="span" text={part} />
+              <FormattedText as="span" text={part} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
               {index < blanks ? (
                 <span
                   id={`question-${getSlotId(index, `${noteQuestion.id}:${index}`)}`}
@@ -561,7 +590,7 @@ export function QuestionRenderer({
             <tr>
               {tableBlock.headers.map((header, index) => (
                 <th key={`${header}-${index}`} className="border border-gray-200 px-3 py-2 text-left font-semibold text-gray-900">
-                  <FormattedText as="span" className="text-gray-900" text={header} />
+                  <FormattedText as="span" className="text-gray-900" text={header} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </th>
               ))}
             </tr>
@@ -575,7 +604,7 @@ export function QuestionRenderer({
                   if (!slot) {
                     return (
                       <td key={`cell-${rowIndex}-${cellIndex}`} className="border border-gray-200 px-3 py-2 text-gray-800">
-                        <FormattedText as="span" className="text-gray-800" text={cellValue} />
+                        <FormattedText as="span" className="text-gray-800" text={cellValue} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                       </td>
                     );
                   }
@@ -616,7 +645,7 @@ export function QuestionRenderer({
       <div className="flex flex-wrap gap-2">
         {classificationBlock.categories.map((category) => (
           <span key={category} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-            <FormattedText as="span" className="text-blue-700" text={category} />
+            <FormattedText as="span" className="text-blue-700" text={category} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
           </span>
         ))}
       </div>
@@ -628,7 +657,7 @@ export function QuestionRenderer({
               <div className="flex flex-col gap-3 md:flex-row md:items-center">
                 <div className="flex items-start gap-3 md:flex-1">
                   <span className="min-w-[32px] font-bold text-gray-900">{number + index}.</span>
-                  <FormattedText as="span" className="text-gray-800" text={item.text} />
+                  <FormattedText as="span" className="text-gray-800" text={item.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </div>
                 <div className="flex items-center gap-3">
                   <select
@@ -659,7 +688,7 @@ export function QuestionRenderer({
       <div className="flex flex-wrap gap-2">
         {matchingFeaturesBlock.options.map((option) => (
           <span key={option} className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
-            <FormattedText as="span" className="text-gray-700" text={option} />
+            <FormattedText as="span" className="text-gray-700" text={option} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
           </span>
         ))}
       </div>
@@ -671,7 +700,7 @@ export function QuestionRenderer({
               <div className="flex flex-col gap-3 md:flex-row md:items-center">
                 <div className="flex items-start gap-3 md:flex-1">
                   <span className="min-w-[32px] font-bold text-gray-900">{number + index}.</span>
-                  <FormattedText as="span" className="text-gray-800" text={feature.text} />
+                  <FormattedText as="span" className="text-gray-800" text={feature.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </div>
                 <div className="flex items-center gap-3">
                   <select

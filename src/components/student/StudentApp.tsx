@@ -16,12 +16,14 @@ import { StudentWriting } from './StudentWriting';
 import { SubmitConfirmation } from './SubmitConfirmation';
 import { WarningOverlay } from './WarningOverlay';
 import { getFullscreenElement, requestStudentFullscreen } from './fullscreen';
+import { getStudentHighlightClassName } from './highlightPalette';
 import { shouldOfferTimeExtension } from './timeExtensionPolicy';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
 import { useStudentRuntime } from './providers/StudentRuntimeProvider';
 import { useStudentUI } from './providers/StudentUIProvider';
 import { isRuntimeStructurallyCompleted, isVerifiedTerminalStudentState } from './providers/verifiedTerminalState';
+import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
 
 function getBlockingCopy(reason: ReturnType<typeof useStudentRuntime>['state']['blocking']['reason']) {
   switch (reason) {
@@ -113,9 +115,12 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
   const { state: uiState, actions: uiActions } = useStudentUI();
+  useZoomScrollAnchoring(uiState.accessibilitySettings.zoom);
   const [finalSubmitStatus, setFinalSubmitStatus] = useState<'idle' | 'submitting' | 'retrying' | 'failed'>('idle');
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
   const { setShowTimeExtensionRequest } = uiActions;
+  const highlightColor = uiState.accessibilitySettings.highlightColor;
+  const highlightClassName = getStudentHighlightClassName(highlightColor);
   const autoSubmitFingerprintRef = useRef<string | null>(null);
   const runtimeStateRef = useRef(runtimeState);
   const moduleSubmitInFlightRef = useRef<Promise<void> | null>(null);
@@ -818,13 +823,14 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
       }`}
       style={{
         height: 'var(--student-viewport-height, 100dvh)',
+        zoom: uiState.accessibilitySettings.zoom,
         fontSize:
           uiState.accessibilitySettings.fontSize === 'small'
             ? '14px'
             : uiState.accessibilitySettings.fontSize === 'large'
               ? '18px'
               : '16px',
-      }}
+      } as React.CSSProperties}
     >
       <style>{`
         input:-webkit-autofill,
@@ -847,6 +853,19 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
         onExit={onExit}
         testTakerId={attemptState.attempt?.candidateId ?? undefined}
         timeRemaining={runtimeState.displayTimeRemaining}
+        zoom={uiState.accessibilitySettings.zoom}
+        onZoomIn={uiActions.zoomIn}
+        onZoomOut={uiActions.zoomOut}
+        onZoomReset={uiActions.resetZoom}
+        highlightEnabled={uiState.accessibilitySettings.highlightMode}
+        highlightColor={highlightColor}
+        onHighlightModeToggle={
+          runtimeState.currentModule === 'reading' ||
+          runtimeState.currentModule === 'listening'
+            ? uiActions.toggleHighlightMode
+            : undefined
+        }
+        onHighlightColorChange={uiActions.setHighlightColor}
         onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
         onOpenNavigator={
           runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening'
@@ -902,6 +921,9 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
             onNavigate={runtimeActions.setCurrentQuestionId}
             flags={runtimeState.flags}
             onToggleFlag={handleFlagToggle}
+            highlightEnabled={uiState.accessibilitySettings.highlightMode}
+            highlightColor={highlightColor}
+            highlightClassName={highlightClassName}
           />
         ) : null}
         {runtimeState.currentModule === 'listening' ? (
@@ -913,6 +935,9 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
             onNavigate={runtimeActions.setCurrentQuestionId}
             flags={runtimeState.flags}
             onToggleFlag={handleFlagToggle}
+            highlightEnabled={uiState.accessibilitySettings.highlightMode}
+            highlightColor={highlightColor}
+            highlightClassName={highlightClassName}
           />
         ) : null}
         {runtimeState.currentModule === 'writing' ? (

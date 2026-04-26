@@ -231,19 +231,10 @@ function deriveBlockingState(
     };
   }
 
-  if (waitingForCohortAdvance) {
+  if (waitingForCohortAdvance || runtimeSnapshot?.waitingForNextSection) {
     return {
       active: true,
       reason: 'waiting_for_advance',
-      runtimeStatus,
-      timeRemaining,
-    };
-  }
-
-  if (runtimeSnapshot?.waitingForNextSection) {
-    return {
-      active: true,
-      reason: 'waiting_for_runtime',
       runtimeStatus,
       timeRemaining,
     };
