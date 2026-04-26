@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { countAnsweredQuestions, countQuestionSlots } from '@services/examAdapterService';
 import { AlertTriangle, X } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -18,6 +18,7 @@ import { WarningOverlay } from './WarningOverlay';
 import { getFullscreenElement, requestStudentFullscreen } from './fullscreen';
 import { getStudentTypographyScale } from './accessibilityScale';
 import { getStudentHighlightClassName } from './highlightPalette';
+import { StudentHighlightPersistenceProvider, clearStudentHighlights } from './highlightPersistence';
 import { useStudentTabletMode } from './tabletMode';
 import { shouldOfferTimeExtension } from './timeExtensionPolicy';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
@@ -124,6 +125,13 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
   const { setShowTimeExtensionRequest } = uiActions;
   const highlightColor = uiState.accessibilitySettings.highlightColor;
   const highlightClassName = getStudentHighlightClassName(highlightColor);
+  const highlightNamespace = useMemo(
+    () => `attempt:${attemptState.attempt?.id ?? 'unknown'}`,
+    [attemptState.attempt?.id],
+  );
+  const clearHighlights = useCallback(() => {
+    clearStudentHighlights(highlightNamespace);
+  }, [highlightNamespace]);
   const studentShellStyle = {
     height: 'var(--student-viewport-height, 100dvh)',
     zoom: uiState.accessibilitySettings.zoom,
@@ -805,7 +813,8 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
   }
 
   return (
-    <div
+    <StudentHighlightPersistenceProvider namespace={highlightNamespace}>
+      <div
       className={`student-exam-shell flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
         uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
       }`}
@@ -833,6 +842,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
         testTakerId={attemptState.attempt?.candidateId ?? undefined}
         timeRemaining={runtimeState.displayTimeRemaining}
         tabletMode={tabletMode}
+        onClearHighlights={clearHighlights}
         zoom={uiState.accessibilitySettings.zoom}
         onZoomIn={uiActions.zoomIn}
         onZoomOut={uiActions.zoomOut}
@@ -1116,6 +1126,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
         onFontSizeChange={uiActions.setFontSize}
         onHighContrastToggle={uiActions.toggleHighContrast}
       />
-    </div>
+      </div>
+    </StudentHighlightPersistenceProvider>
   );
 }

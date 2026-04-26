@@ -18,6 +18,7 @@ import { StudentWriting } from './StudentWriting';
 import { StudentUIProvider, useStudentUI } from './providers/StudentUIProvider';
 import { getStudentTypographyScale } from './accessibilityScale';
 import { getStudentHighlightClassName } from './highlightPalette';
+import { StudentHighlightPersistenceProvider, clearStudentHighlights } from './highlightPersistence';
 import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
 import { useStudentTabletMode } from './tabletMode';
 
@@ -100,6 +101,10 @@ function StudentExamPreviewInner({
   useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const highlightColor = uiState.accessibilitySettings.highlightColor;
   const highlightClassName = getStudentHighlightClassName(highlightColor);
+  const highlightNamespace = `preview:${examId}`;
+  const clearHighlights = () => {
+    clearStudentHighlights(highlightNamespace);
+  };
   const studentShellStyle = {
     zoom: uiState.accessibilitySettings.zoom,
     fontSize: studentTypography.rootFontSize,
@@ -195,7 +200,8 @@ function StudentExamPreviewInner({
   };
 
   return (
-    <div
+    <StudentHighlightPersistenceProvider namespace={highlightNamespace}>
+      <div
       className={`student-exam-shell flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
         uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
       }`}
@@ -244,6 +250,7 @@ function StudentExamPreviewInner({
         onExit={handleExit}
         timeRemaining={timeRemaining}
         tabletMode={tabletMode}
+        onClearHighlights={clearHighlights}
         zoom={uiState.accessibilitySettings.zoom}
         onZoomIn={uiActions.zoomIn}
         onZoomOut={uiActions.zoomOut}
@@ -362,7 +369,8 @@ function StudentExamPreviewInner({
         description="Submission is disabled in preview. Use the builder to edit and publish."
         onClose={() => setSubmitWarningOpen(false)}
       />
-    </div>
+      </div>
+    </StudentHighlightPersistenceProvider>
   );
 }
 

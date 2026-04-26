@@ -27,6 +27,7 @@ interface StudentHeaderProps {
   autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | null | undefined;
   onOpenAccessibility?: (() => void) | undefined;
   onOpenNavigator?: (() => void) | undefined;
+  onClearHighlights?: (() => void) | undefined;
   tabletMode?: boolean | undefined;
   zoom?: number | undefined;
   onZoomIn?: (() => void) | undefined;
@@ -47,6 +48,7 @@ export function StudentHeader({
   autoSaveStatus,
   onOpenAccessibility,
   onOpenNavigator,
+  onClearHighlights,
   tabletMode = false,
   zoom,
   onZoomIn,
@@ -426,6 +428,19 @@ export function StudentHeader({
                         );
                       })}
                     </div>
+                    {onClearHighlights ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClearHighlights();
+                          setShowTabletControls(false);
+                          setShowHighlightPalette(false);
+                        }}
+                        className="mt-3 w-full rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[length:var(--student-control-font-size)] font-bold text-rose-700 hover:border-rose-300 hover:bg-rose-100"
+                      >
+                        Remove all highlights
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -560,6 +575,18 @@ export function StudentHeader({
                         );
                       })}
                     </div>
+                    {onClearHighlights ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClearHighlights();
+                          setShowHighlightPalette(false);
+                        }}
+                        className="mt-3 w-full rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[length:var(--student-control-font-size)] font-bold text-rose-700 hover:border-rose-300 hover:bg-rose-100"
+                      >
+                        Remove all highlights
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
