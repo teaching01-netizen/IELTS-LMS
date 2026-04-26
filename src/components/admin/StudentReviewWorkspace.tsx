@@ -463,7 +463,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
   const currentSectionSubmission = getSectionSubmission(activeSection);
   const currentWritingTaskId = activeSection === 'writing' ? activeTask : null;
-  const currentWritingPrompt = currentWritingTaskId ? getWritingPrompt(currentWritingTaskId) : '';
+  const currentWritingPrompt = currentWritingTaskId ? htmlToPlainText(getWritingPrompt(currentWritingTaskId)) : '';
   const currentWritingText = currentWritingTaskId ? htmlToPlainText(getWritingResponseText(currentWritingTaskId)) : '';
   const currentWritingTaskSubmission = currentWritingTaskId ? getWritingTaskSubmission(currentWritingTaskId) : null;
   const currentWritingAssessment = currentWritingTaskId

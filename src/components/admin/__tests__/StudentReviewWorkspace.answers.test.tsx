@@ -421,7 +421,7 @@ describe('StudentReviewWorkspace objective answers', () => {
         submissionId: 'sub-3',
         taskId: 'task1',
         taskLabel: 'Task 1',
-        prompt: 'Write something.',
+        prompt: '<p class="MsoNormal"><span>You should write something.</span></p><p><b>Use details.</b></p>',
         studentText: '<div>Hello&nbsp;world</div><div>Second line</div>',
         wordCount: 4,
         rubricAssessment: undefined,
@@ -470,8 +470,11 @@ describe('StudentReviewWorkspace objective answers', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /writing/i }));
 
+    expect(await screen.findByText(/You should write something/)).toBeInTheDocument();
+    expect(await screen.findByText(/Use details/)).toBeInTheDocument();
     expect(await screen.findByText(/Hello world/)).toBeInTheDocument();
     expect(await screen.findByText(/Second line/)).toBeInTheDocument();
     expect(screen.queryByText(/<div>/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/MsoNormal/)).not.toBeInTheDocument();
   });
 });
