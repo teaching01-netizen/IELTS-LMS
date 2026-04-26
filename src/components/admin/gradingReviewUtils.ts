@@ -1,4 +1,4 @@
-import type { ExamState } from '../../types';
+import type { BandScoreTable, ExamState } from '../../types';
 import type {
   ObjectiveQuestionResult,
   SectionSubmission,
@@ -87,6 +87,10 @@ export const OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS: CsvColumn[] = [
   { key: 'maxScore', label: 'Max Score' },
   { key: 'percentage', label: 'Percentage' },
   { key: 'correctCount', label: 'Correct Count' },
+];
+
+const OBJECTIVE_WIDE_EXPORT_TRAILING_COLUMNS: CsvColumn[] = [
+  { key: 'ieltsBandScore', label: 'IELTS Band Score' },
 ];
 
 export const WRITING_EXPORT_COLUMNS: CsvColumn[] = [
@@ -310,6 +314,46 @@ function countCorrectAnswers(groups: ObjectiveTracebackGroup[]): number {
   );
 }
 
+function sumAwardedScores(groups: ObjectiveTracebackGroup[]): number | '' {
+  const scores = groups.flatMap((group) => group.items.map((item) => item.awardedScore));
+  if (scores.every((score) => score === null)) return '';
+  return scores.reduce<number>((total, score) => total + (score ?? 0), 0);
+}
+
+function sumMaxScores(groups: ObjectiveTracebackGroup[]): number | '' {
+  const scores = groups.flatMap((group) => group.items.map((item) => item.maxScore));
+  if (scores.every((score) => score === null)) return '';
+  return scores.reduce<number>((total, score) => total + (score ?? 0), 0);
+}
+
+function calculatePercentage(totalScore: number | '', maxScore: number | ''): number | '' {
+  if (totalScore === '' || maxScore === '' || maxScore === 0) return '';
+  return (totalScore / maxScore) * 100;
+}
+
+function getObjectiveBandScoreTable(
+  examState: ExamState | null,
+  moduleType: 'reading' | 'listening',
+): BandScoreTable | null {
+  if (!examState) return null;
+  return examState.config.sections[moduleType].bandScoreTable;
+}
+
+function calculateBandScore(correctCount: number, table: BandScoreTable | null): number | '' {
+  const thresholds = Object.keys(table ?? {})
+    .map(Number)
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => b - a);
+
+  for (const threshold of thresholds) {
+    if (correctCount >= threshold) {
+      return table?.[threshold] ?? '';
+    }
+  }
+
+  return thresholds.length > 0 ? 0 : '';
+}
+
 export function buildWideObjectiveExport({
   session,
   submissions,
@@ -330,6 +374,7 @@ export function buildWideObjectiveExport({
     const label = getQuestionColumnLabel(descriptor, descriptors);
     return { key: `score:${descriptor.id}`, label: `${label} Score` };
   });
+  const bandScoreTable = getObjectiveBandScoreTable(examState, moduleType);
   const sectionBySubmissionId = new Map(
     sectionSubmissions.map((entry) => [entry.submissionId, entry.sectionSubmission] as const),
   );
@@ -338,7 +383,9 @@ export function buildWideObjectiveExport({
     const sectionSubmission = sectionBySubmissionId.get(submission.id) ?? null;
     const groups = buildQuestionTracebackGroups(examState, sectionSubmission, moduleType);
     const items = new Map(groups.flatMap((group) => group.items.map((item) => [item.questionId, item] as const)));
-    const autoGradingResults = sectionSubmission?.autoGradingResults;
+    const totalScore = sumAwardedScores(groups);
+    const maxScore = sumMaxScores(groups);
+    const correctCount = countCorrectAnswers(groups);
     const row: Record<string, unknown> = {
       examTitle: session.examTitle,
       sessionId: session.sessionId,
@@ -350,12 +397,11 @@ export function buildWideObjectiveExport({
       cohortName: submission.cohortName,
       section: moduleType,
       submittedAt: sectionSubmission?.submittedAt ?? submission.submittedAt,
-      totalScore: toOptionalNumber(autoGradingResults?.totalScore),
-      maxScore: toOptionalNumber(autoGradingResults?.maxScore),
-      percentage: toOptionalNumber(autoGradingResults?.percentage),
-      correctCount: autoGradingResults?.questionResults
-        ? autoGradingResults.questionResults.filter((result) => result.isCorrect).length
-        : countCorrectAnswers(groups),
+      totalScore,
+      maxScore,
+      percentage: calculatePercentage(totalScore, maxScore),
+      correctCount,
+      ieltsBandScore: calculateBandScore(correctCount, bandScoreTable),
     };
 
     for (const descriptor of descriptors) {
@@ -369,7 +415,13 @@ export function buildWideObjectiveExport({
   });
 
   return {
-    columns: [...OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS, ...answerColumns, ...correctAnswerColumns, ...scoreColumns],
+    columns: [
+      ...OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS,
+      ...answerColumns,
+      ...correctAnswerColumns,
+      ...scoreColumns,
+      ...OBJECTIVE_WIDE_EXPORT_TRAILING_COLUMNS,
+    ],
     rows,
   };
 }

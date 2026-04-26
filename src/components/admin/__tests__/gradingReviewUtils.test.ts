@@ -386,6 +386,7 @@ describe('gradingReviewUtils', () => {
       'Q2 Right Answer',
       'Q1 Score',
       'Q2 Score',
+      'IELTS Band Score',
     ]);
     expect(exportData.rows[0]?.['answer:q-1']).toBe('Alpha');
     expect(exportData.rows[0]?.['answer:q-2']).toBe('Wrong');
@@ -398,6 +399,56 @@ describe('gradingReviewUtils', () => {
     expect(exportData.rows[1]?.['correct:q-1']).toBe('Alpha');
     expect(exportData.rows[1]?.['correct:q-2']).toBe('Beta');
     expect(exportData.rows[1]?.correctCount).toBe(1);
+    expect(exportData.rows[1]?.totalScore).toBe(1);
+  });
+
+  test('recomputes correct count from per-question scores and adds IELTS band score', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages = [
+      {
+        id: 'passage-1',
+        title: 'Passage 1',
+        content: 'Content',
+        blocks: [
+          {
+            id: 'block-1',
+            type: 'SHORT_ANSWER',
+            instruction: 'Answer the questions.',
+            questions: Array.from({ length: 40 }, (_, index) => ({
+              id: `q-${index + 1}`,
+              prompt: `Question ${index + 1}?`,
+              correctAnswer: `A${index + 1}`,
+              answerRule: 'ONE_WORD' as const,
+            })),
+          },
+        ],
+        images: [],
+        wordCount: 1,
+      },
+    ];
+    const questionResults = Array.from({ length: 40 }, (_, index) =>
+      createQuestionResult(`q-${index + 1}`, true, 1),
+    );
+    const sectionSubmission = createSectionSubmission(
+      'sub-1',
+      'reading',
+      Object.fromEntries(questionResults.map((result, index) => [result.questionId, `A${index + 1}`])),
+      questionResults,
+    );
+    sectionSubmission.autoGradingResults.totalScore = 0;
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      sectionSubmissions: [{ submissionId: 'sub-1', sectionSubmission }],
+      examState,
+      moduleType: 'reading',
+    });
+
+    expect(exportData.columns.at(-1)?.label).toBe('IELTS Band Score');
+    expect(exportData.rows[0]?.correctCount).toBe(40);
+    expect(exportData.rows[0]?.totalScore).toBe(40);
+    expect(exportData.rows[0]?.ieltsBandScore).toBe(9);
   });
 
   test('builds listening export with the same wide format', () => {
@@ -437,9 +488,10 @@ describe('gradingReviewUtils', () => {
     });
 
     expect(exportData.rows).toHaveLength(1);
-    expect(exportData.columns.at(-3)?.label).toBe('Q1 Answer');
-    expect(exportData.columns.at(-2)?.label).toBe('Q1 Right Answer');
-    expect(exportData.columns.at(-1)?.label).toBe('Q1 Score');
+    expect(exportData.columns.at(-4)?.label).toBe('Q1 Answer');
+    expect(exportData.columns.at(-3)?.label).toBe('Q1 Right Answer');
+    expect(exportData.columns.at(-2)?.label).toBe('Q1 Score');
+    expect(exportData.columns.at(-1)?.label).toBe('IELTS Band Score');
     expect(exportData.rows[0]?.section).toBe('listening');
     expect(exportData.rows[0]?.['answer:lq-1']).toBe('Train');
     expect(exportData.rows[0]?.['correct:lq-1']).toBe('Train');
