@@ -72,6 +72,23 @@ export const READING_EXPORT_COLUMNS: CsvColumn[] = [
 
 export const LISTENING_EXPORT_COLUMNS: CsvColumn[] = READING_EXPORT_COLUMNS.map((column) => column);
 
+export const OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS: CsvColumn[] = [
+  { key: 'examTitle', label: 'Exam Title' },
+  { key: 'sessionId', label: 'Session ID' },
+  { key: 'scheduleId', label: 'Schedule ID' },
+  { key: 'submissionId', label: 'Submission ID' },
+  { key: 'studentName', label: 'Student Name' },
+  { key: 'studentId', label: 'Student ID' },
+  { key: 'studentEmail', label: 'Student Email' },
+  { key: 'cohortName', label: 'Cohort Name' },
+  { key: 'section', label: 'Section' },
+  { key: 'submittedAt', label: 'Submitted At' },
+  { key: 'totalScore', label: 'Total Score' },
+  { key: 'maxScore', label: 'Max Score' },
+  { key: 'percentage', label: 'Percentage' },
+  { key: 'correctCount', label: 'Correct Count' },
+];
+
 export const WRITING_EXPORT_COLUMNS: CsvColumn[] = [
   { key: 'examTitle', label: 'Exam Title' },
   { key: 'sessionId', label: 'Session ID' },
@@ -221,6 +238,22 @@ export interface ObjectiveExportRowInput {
   moduleType: 'reading' | 'listening';
 }
 
+export interface WideObjectiveExportInput {
+  session: ExportSessionContext;
+  submissions: StudentSubmission[];
+  sectionSubmissions: Array<{
+    submissionId: string;
+    sectionSubmission: SectionSubmission | null | undefined;
+  }>;
+  examState: ExamState | null;
+  moduleType: 'reading' | 'listening';
+}
+
+export interface WideObjectiveExport {
+  columns: CsvColumn[];
+  rows: Array<Record<string, unknown>>;
+}
+
 export function buildObjectiveExportRows({
   session,
   submission,
@@ -263,6 +296,79 @@ export function buildObjectiveExportRows({
   }
 
   return rows;
+}
+
+function getQuestionColumnLabel(descriptor: StudentQuestionDescriptor, descriptors: StudentQuestionDescriptor[]): string {
+  const numberLabel = getQuestionNumberLabel(descriptors, descriptor.id);
+  return `Q${numberLabel}`;
+}
+
+function countCorrectAnswers(groups: ObjectiveTracebackGroup[]): number {
+  return groups.reduce(
+    (count, group) => count + group.items.filter((item) => item.correctness === true).length,
+    0,
+  );
+}
+
+export function buildWideObjectiveExport({
+  session,
+  submissions,
+  sectionSubmissions,
+  examState,
+  moduleType,
+}: WideObjectiveExportInput): WideObjectiveExport {
+  const descriptors = examState ? getStudentQuestionsForModule(examState, moduleType) : [];
+  const answerColumns = descriptors.map((descriptor) => {
+    const label = getQuestionColumnLabel(descriptor, descriptors);
+    return { key: `answer:${descriptor.id}`, label: `${label} Answer` };
+  });
+  const scoreColumns = descriptors.map((descriptor) => {
+    const label = getQuestionColumnLabel(descriptor, descriptors);
+    return { key: `score:${descriptor.id}`, label: `${label} Score` };
+  });
+  const sectionBySubmissionId = new Map(
+    sectionSubmissions.map((entry) => [entry.submissionId, entry.sectionSubmission] as const),
+  );
+
+  const rows = submissions.map((submission) => {
+    const sectionSubmission = sectionBySubmissionId.get(submission.id) ?? null;
+    const groups = buildQuestionTracebackGroups(examState, sectionSubmission, moduleType);
+    const items = new Map(groups.flatMap((group) => group.items.map((item) => [item.questionId, item] as const)));
+    const autoGradingResults = sectionSubmission?.autoGradingResults;
+    const scoredResults = buildQuestionResultMap(autoGradingResults?.questionResults);
+    const row: Record<string, unknown> = {
+      examTitle: session.examTitle,
+      sessionId: session.sessionId,
+      scheduleId: submission.scheduleId,
+      submissionId: submission.id,
+      studentName: submission.studentName,
+      studentId: submission.studentId,
+      studentEmail: submission.studentEmail ?? '',
+      cohortName: submission.cohortName,
+      section: moduleType,
+      submittedAt: sectionSubmission?.submittedAt ?? submission.submittedAt,
+      totalScore: toOptionalNumber(autoGradingResults?.totalScore),
+      maxScore: toOptionalNumber(autoGradingResults?.maxScore),
+      percentage: toOptionalNumber(autoGradingResults?.percentage),
+      correctCount: autoGradingResults?.questionResults
+        ? autoGradingResults.questionResults.filter((result) => result.isCorrect).length
+        : countCorrectAnswers(groups),
+    };
+
+    for (const descriptor of descriptors) {
+      const item = items.get(descriptor.id);
+      const scoredResult = scoredResults.get(descriptor.id);
+      row[`answer:${descriptor.id}`] = item?.studentAnswer ?? '';
+      row[`score:${descriptor.id}`] = toOptionalNumber(scoredResult?.awardedScore);
+    }
+
+    return row;
+  });
+
+  return {
+    columns: [...OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS, ...answerColumns, ...scoreColumns],
+    rows,
+  };
 }
 
 export function buildWritingExportRows(
