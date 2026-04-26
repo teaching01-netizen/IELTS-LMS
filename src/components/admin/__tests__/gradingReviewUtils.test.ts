@@ -382,15 +382,21 @@ describe('gradingReviewUtils', () => {
       'Correct Count',
       'Q1 Answer',
       'Q2 Answer',
+      'Q1 Correct Answer',
+      'Q2 Correct Answer',
       'Q1 Score',
       'Q2 Score',
     ]);
     expect(exportData.rows[0]?.['answer:q-1']).toBe('Alpha');
     expect(exportData.rows[0]?.['answer:q-2']).toBe('Wrong');
+    expect(exportData.rows[0]?.['correct:q-1']).toBe('Alpha');
+    expect(exportData.rows[0]?.['correct:q-2']).toBe('Beta');
     expect(exportData.rows[0]?.['score:q-1']).toBe(1);
     expect(exportData.rows[0]?.['score:q-2']).toBe(0);
     expect(exportData.rows[1]?.['answer:q-1']).toBe('Other');
     expect(exportData.rows[1]?.['answer:q-2']).toBe('Beta');
+    expect(exportData.rows[1]?.['correct:q-1']).toBe('Alpha');
+    expect(exportData.rows[1]?.['correct:q-2']).toBe('Beta');
     expect(exportData.rows[1]?.correctCount).toBe(1);
   });
 
@@ -431,10 +437,12 @@ describe('gradingReviewUtils', () => {
     });
 
     expect(exportData.rows).toHaveLength(1);
-    expect(exportData.columns.at(-2)?.label).toBe('Q1 Answer');
+    expect(exportData.columns.at(-3)?.label).toBe('Q1 Answer');
+    expect(exportData.columns.at(-2)?.label).toBe('Q1 Correct Answer');
     expect(exportData.columns.at(-1)?.label).toBe('Q1 Score');
     expect(exportData.rows[0]?.section).toBe('listening');
     expect(exportData.rows[0]?.['answer:lq-1']).toBe('Train');
+    expect(exportData.rows[0]?.['correct:lq-1']).toBe('Train');
   });
 
   test('uses computed auto scores when stored question scores are missing', () => {
@@ -476,6 +484,7 @@ describe('gradingReviewUtils', () => {
     });
 
     expect(exportData.rows[0]?.['answer:q-2']).toBe('');
+    expect(exportData.rows[0]?.['correct:q-2']).toBe('Beta');
     expect(exportData.rows[0]?.['score:q-1']).toBe(1);
     expect(exportData.rows[0]?.['score:q-2']).toBe(0);
   });

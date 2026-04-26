@@ -322,6 +322,10 @@ export function buildWideObjectiveExport({
     const label = getQuestionColumnLabel(descriptor, descriptors);
     return { key: `answer:${descriptor.id}`, label: `${label} Answer` };
   });
+  const correctAnswerColumns = descriptors.map((descriptor) => {
+    const label = getQuestionColumnLabel(descriptor, descriptors);
+    return { key: `correct:${descriptor.id}`, label: `${label} Correct Answer` };
+  });
   const scoreColumns = descriptors.map((descriptor) => {
     const label = getQuestionColumnLabel(descriptor, descriptors);
     return { key: `score:${descriptor.id}`, label: `${label} Score` };
@@ -357,6 +361,7 @@ export function buildWideObjectiveExport({
     for (const descriptor of descriptors) {
       const item = items.get(descriptor.id);
       row[`answer:${descriptor.id}`] = item?.studentAnswer ?? '';
+      row[`correct:${descriptor.id}`] = item?.correctAnswer ?? getCorrectAnswerDisplay(descriptor);
       row[`score:${descriptor.id}`] = toOptionalNumber(item?.awardedScore);
     }
 
@@ -364,7 +369,7 @@ export function buildWideObjectiveExport({
   });
 
   return {
-    columns: [...OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS, ...answerColumns, ...scoreColumns],
+    columns: [...OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS, ...answerColumns, ...correctAnswerColumns, ...scoreColumns],
     rows,
   };
 }
