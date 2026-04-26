@@ -324,7 +324,7 @@ export function buildWideObjectiveExport({
   });
   const correctAnswerColumns = descriptors.map((descriptor) => {
     const label = getQuestionColumnLabel(descriptor, descriptors);
-    return { key: `correct:${descriptor.id}`, label: `${label} Correct Answer` };
+    return { key: `correct:${descriptor.id}`, label: `${label} Right Answer` };
   });
   const scoreColumns = descriptors.map((descriptor) => {
     const label = getQuestionColumnLabel(descriptor, descriptors);
