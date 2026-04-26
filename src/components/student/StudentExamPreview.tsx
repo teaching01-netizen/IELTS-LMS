@@ -16,6 +16,8 @@ import { StudentReading } from './StudentReading';
 import { StudentSpeaking } from './StudentSpeaking';
 import { StudentWriting } from './StudentWriting';
 import { StudentUIProvider, useStudentUI } from './providers/StudentUIProvider';
+import { getStudentHighlightClassName } from './highlightPalette';
+import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
 
 interface StudentExamPreviewProps {
   state: ExamState;
@@ -91,6 +93,9 @@ function StudentExamPreviewInner({
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { state: uiState, actions: uiActions } = useStudentUI();
+  useZoomScrollAnchoring(uiState.accessibilitySettings.zoom);
+  const highlightColor = uiState.accessibilitySettings.highlightColor;
+  const highlightClassName = getStudentHighlightClassName(highlightColor);
 
   const enabledModules = useMemo(() => getEnabledModules(state.config), [state.config]);
   const resolvedInitialModule: ModuleType = useMemo(() => {
@@ -182,13 +187,14 @@ function StudentExamPreviewInner({
         uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
       }`}
       style={{
+        zoom: uiState.accessibilitySettings.zoom,
         fontSize:
           uiState.accessibilitySettings.fontSize === 'small'
             ? '14px'
             : uiState.accessibilitySettings.fontSize === 'large'
               ? '18px'
               : '16px',
-      }}
+      } as React.CSSProperties}
     >
       <div className="h-10 border-b border-gray-200 bg-white flex items-center justify-between px-3 md:px-4 lg:px-6 flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
@@ -232,6 +238,18 @@ function StudentExamPreviewInner({
       <StudentHeader
         onExit={handleExit}
         timeRemaining={timeRemaining}
+        zoom={uiState.accessibilitySettings.zoom}
+        onZoomIn={uiActions.zoomIn}
+        onZoomOut={uiActions.zoomOut}
+        onZoomReset={uiActions.resetZoom}
+        highlightEnabled={uiState.accessibilitySettings.highlightMode}
+        highlightColor={highlightColor}
+        onHighlightModeToggle={
+          currentModule === 'reading' || currentModule === 'listening'
+            ? uiActions.toggleHighlightMode
+            : undefined
+        }
+        onHighlightColorChange={uiActions.setHighlightColor}
         onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
         onOpenNavigator={
           currentModule === 'reading' || currentModule === 'listening'
@@ -251,6 +269,9 @@ function StudentExamPreviewInner({
             onNavigate={setCurrentQuestionId}
             flags={flags}
             onToggleFlag={handleFlagToggle}
+            highlightEnabled={uiState.accessibilitySettings.highlightMode}
+            highlightColor={highlightColor}
+            highlightClassName={highlightClassName}
           />
         ) : null}
 
@@ -263,6 +284,9 @@ function StudentExamPreviewInner({
             onNavigate={setCurrentQuestionId}
             flags={flags}
             onToggleFlag={handleFlagToggle}
+            highlightEnabled={uiState.accessibilitySettings.highlightMode}
+            highlightColor={highlightColor}
+            highlightClassName={highlightClassName}
           />
         ) : null}
 

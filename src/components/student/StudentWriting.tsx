@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ExamState } from '../../types';
 import { ArrowLeftRight, Check, X, AlertTriangle } from 'lucide-react';
 import { getWritingTaskContent } from '../../utils/writingTaskUtils';
+import { stripHtml } from '../../utils/builderEnhancements';
 import { MIN_HEIGHTS, CHAR_HEIGHT_PX, WRITING } from '../../constants/uiConstants';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
-import { htmlToPlainText } from '../../utils/htmlText';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 
 interface StudentWritingProps {
@@ -26,7 +26,20 @@ interface StudentWritingProps {
   showSubmitButton?: boolean | undefined;
 }
 
-export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmit, currentQuestionId, onNavigate, timeRemaining, onTimeExpired, security = { preventAutofill: false, preventAutocorrect: false }, sessionId, studentId, showSubmitButton = true }: StudentWritingProps) {
+export function StudentWriting({
+  state,
+  writingAnswers,
+  onWritingChange,
+  onSubmit,
+  currentQuestionId,
+  onNavigate,
+  timeRemaining,
+  onTimeExpired,
+  security = { preventAutofill: false, preventAutocorrect: false },
+  sessionId,
+  studentId,
+  showSubmitButton = true,
+}: StudentWritingProps) {
   const attemptContext = useOptionalStudentAttempt();
   const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
   const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
@@ -160,7 +173,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
 
   const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
   const currentPrompt = currentTaskContent?.prompt ?? '';
-  const currentPromptText = htmlToPlainText(currentPrompt);
+  const currentPromptText = stripHtml(currentPrompt);
   const minWords = currentTask.minWords || 150;
   const currentChart = currentTaskContent?.chart;
 
@@ -266,7 +279,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
           {/* Timer Bar */}
           <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-500' : isTimeWarning ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
 
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pr-4 md:pr-6 lg:pr-12 pb-6 md:pb-8 font-sans text-sm md:text-base leading-relaxed text-gray-900">
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pr-4 md:pr-6 lg:pr-12 pb-6 md:pb-8 font-sans text-sm md:text-base leading-relaxed text-gray-900" data-student-zoom-scroll>
             <div className="flex items-center justify-between mb-4 md:mb-6">
               <h2 className="text-lg md:text-xl font-bold">{currentTask.label}</h2>
               <div className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest ${
@@ -315,14 +328,17 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
           </div>
         </div>
 
-	        <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
-	          <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
-              <div className="relative flex-1 w-full">
-                {showEditorPlaceholder && (
-                  <div className="pointer-events-none absolute left-4 top-4 md:left-6 md:top-6 lg:left-8 lg:top-8 text-base md:text-lg leading-relaxed text-gray-400 font-serif select-none">
+        <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
+          <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
+            <div className="relative flex-1 w-full">
+              <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-600">
+                <span>Writing Response</span>
+              </div>
+              {showEditorPlaceholder && (
+                  <div className="pointer-events-none absolute left-4 top-14 md:left-6 md:top-16 lg:left-8 lg:top-20 text-base md:text-lg leading-relaxed text-gray-400 font-serif select-none">
                     Write your answer here…
                   </div>
-                )}
+              )}
 	              <div
 	                ref={editorRef}
 	                contentEditable
@@ -349,6 +365,7 @@ export function StudentWriting({ state, writingAnswers, onWritingChange, onSubmi
                   onPaste={handleEditorPaste}
                   onDrop={handleEditorDrop}
 	                className="flex-1 w-full p-4 md:p-6 lg:p-8 text-base md:text-lg leading-relaxed text-gray-800 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                  data-student-zoom-scroll
 	                style={{ minHeight: MIN_HEIGHTS.WRITING_EDITOR }}
 	                spellCheck={!security.preventAutocorrect}
 	                autoCorrect={security.preventAutocorrect ? 'off' : 'on'}

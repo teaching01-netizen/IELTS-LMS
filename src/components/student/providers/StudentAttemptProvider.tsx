@@ -18,6 +18,7 @@ import {
   studentAttemptRepository,
 } from '@services/studentAttemptRepository';
 import { saveStudentAuditEvent } from '@services/studentAuditService';
+import { queryClient } from '../../../app/data/queryClient';
 import type { ModuleType, Violation } from '../../../types';
 import type {
   AttemptSyncState,
@@ -885,6 +886,7 @@ export function StudentAttemptProvider({
     const submittedAttempt = await studentAttemptRepository.submitAttempt(latestAttempt);
     runtimeActions.setPhase('post-exam');
     syncAttemptState(submittedAttempt);
+    void queryClient.invalidateQueries();
     return true;
   }, [flushPending, runtimeActions, syncAttemptState]);
 

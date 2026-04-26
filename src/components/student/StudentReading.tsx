@@ -5,8 +5,9 @@ import { ArrowLeft, ArrowRight, ArrowLeftRight, Flag } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
-import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { FormattedText } from './FormattedText';
+import { RichTextHighlighter } from './RichTextHighlighter';
+import type { StudentHighlightColor } from './highlightPalette';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -16,9 +17,23 @@ interface StudentReadingProps {
   onNavigate: (id: string) => void;
   flags?: Record<string, boolean>;
   onToggleFlag?: (id: string) => void;
+  highlightEnabled?: boolean | undefined;
+  highlightColor?: StudentHighlightColor | undefined;
+  highlightClassName?: string | undefined;
 }
 
-export function StudentReading({ state, answers, onAnswerChange, currentQuestionId, onNavigate, flags = {}, onToggleFlag }: StudentReadingProps) {
+export function StudentReading({
+  state,
+  answers,
+  onAnswerChange,
+  currentQuestionId,
+  onNavigate,
+  flags = {},
+  onToggleFlag,
+  highlightEnabled = false,
+  highlightColor,
+  highlightClassName,
+}: StudentReadingProps) {
   const [leftWidth, setLeftWidth] = useState(50);
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, 'reading'), [state]);
@@ -86,14 +101,17 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
   return (
     <div className="flex flex-col h-full w-full bg-white">
       <div className="relative flex flex-1 flex-col overflow-hidden border-t border-gray-300 md:flex-row" style={splitPaneStyle}>
-        <div className="h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12">
+        <div className="h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12" data-student-zoom-scroll>
           <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePassage.title}</h2>
           <div className="leading-relaxed text-gray-900 space-y-4 [&_h1]:text-2xl [&_h1]:font-black [&_h2]:text-xl [&_h2]:font-bold [&_h3]:text-lg [&_h3]:font-bold [&_img]:max-w-full [&_img]:rounded-2xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6">
-            {passageHasHtml ? (
-              <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(activePassage.content) }} />
-            ) : (
-              <div className="whitespace-pre-wrap">{activePassage.content}</div>
-            )}
+            <RichTextHighlighter
+              content={activePassage.content}
+              contentType={passageHasHtml ? 'html' : 'text'}
+              enabled={highlightEnabled}
+              className="whitespace-pre-wrap"
+              highlightColor={highlightColor}
+              highlightClassName={highlightClassName}
+            />
             {(activePassage.images ?? []).map((image) => (
               <div key={image.id} className="relative rounded-2xl overflow-hidden border border-gray-200 bg-gray-50">
                 <img src={image.src} alt={image.alt} className="w-full object-contain" loading="lazy" />
@@ -138,7 +156,7 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
         </div>
 
         <div className="relative flex h-full w-full min-w-0 flex-col md:min-w-[320px] lg:w-[var(--question-pane-width)]">
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10" ref={questionContainerRef}>
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10" ref={questionContainerRef} data-student-zoom-scroll>
             {activePassage.blocks.map((block) => {
               const blockQuestions = allQuestions.filter((question) => question.blockId === block.id);
               const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
@@ -158,7 +176,12 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                     <h3 className="font-bold text-gray-900 mb-1 md:mb-2 text-base md:text-lg">
                       Questions {blockStartQ}–{blockEndQ}
                     </h3>
-                    <FormattedText as="p" className="text-gray-900 text-sm md:text-base" text={block.instruction} />
+                    <FormattedText
+                      as="p"
+                      className="text-gray-900 text-sm md:text-base"
+                      text={block.instruction}
+                      highlightEnabled={highlightEnabled}
+                    />
                   </div>
                   
                   <div className="space-y-8 md:space-y-10">
@@ -203,6 +226,8 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                               currentQuestionId={currentQuestionId}
                               flags={flags}
                               onToggleFlag={onToggleFlag}
+                              highlightEnabled={highlightEnabled}
+                              highlightColor={highlightColor}
                             />
                           </div>
                         );
@@ -236,6 +261,8 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                           currentQuestionId={currentQuestionId}
                           flags={flags}
                           onToggleFlag={onToggleFlag}
+                          highlightEnabled={highlightEnabled}
+                          highlightColor={highlightColor}
                         />
                       </div>
                     )}

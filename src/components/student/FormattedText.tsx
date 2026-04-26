@@ -1,16 +1,77 @@
-import React from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { parseBoldMarkdown } from '../../utils/boldMarkdown';
+import { applySelectionHighlight, escapeHtml } from './highlightSelection';
+import { getStudentHighlightClassName, type StudentHighlightColor } from './highlightPalette';
 
 type FormattedTextProps = {
   text: string;
   className?: string | undefined;
   as?: 'span' | 'div' | 'p';
+  highlightEnabled?: boolean | undefined;
+  highlightColor?: StudentHighlightColor | undefined;
+  highlightClassName?: string | undefined;
 };
 
-export function FormattedText({ text, className, as = 'span' }: FormattedTextProps) {
-  const Tag = as;
-  const segments = parseBoldMarkdown(text);
+export function FormattedText({
+  text,
+  className,
+  as = 'span',
+  highlightEnabled = false,
+  highlightColor,
+  highlightClassName,
+}: FormattedTextProps) {
+  const Tag = as as any;
+  const segments = useMemo(() => parseBoldMarkdown(text), [text]);
   const classes = ['whitespace-pre-wrap', 'break-words', className].filter(Boolean).join(' ');
+  const containerRef = useRef<HTMLElement | null>(null);
+  const initialHtml = useMemo(
+    () =>
+      segments
+        .map((segment) => (segment.bold ? `<strong>${escapeHtml(segment.text)}</strong>` : escapeHtml(segment.text)))
+        .join(''),
+    [segments],
+  );
+  const [html, setHtml] = useState(initialHtml);
+
+  useEffect(() => {
+    setHtml(initialHtml);
+  }, [initialHtml]);
+
+  const handleSelection = () => {
+    if (!highlightEnabled) {
+      return;
+    }
+
+    const container = containerRef.current;
+    const selection = window.getSelection();
+    if (!container || !selection) {
+      return;
+    }
+
+    const nextHtml = applySelectionHighlight(
+      container,
+      selection,
+      highlightClassName ??
+        (highlightColor ? getStudentHighlightClassName(highlightColor) : 'rounded-sm bg-yellow-200/80 px-0.5 text-gray-900'),
+    );
+
+    if (nextHtml) {
+      setHtml(nextHtml);
+    }
+  };
+
+  if (highlightEnabled) {
+    return (
+      <Tag
+        ref={containerRef as any}
+        className={classes}
+        onMouseUp={handleSelection}
+        onKeyUp={handleSelection}
+        onTouchEnd={handleSelection}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  }
 
   return (
     <Tag className={classes}>
@@ -26,4 +87,3 @@ export function FormattedText({ text, className, as = 'span' }: FormattedTextPro
     </Tag>
   );
 }
-

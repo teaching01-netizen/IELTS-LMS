@@ -13,11 +13,11 @@ interface AccessibilitySettingsProps {
 
 export function AccessibilitySettings({ 
   isOpen, 
-  onClose, 
-  fontSize, 
-  highContrast, 
+  onClose,
+  fontSize,
+  highContrast,
   onFontSizeChange, 
-  onHighContrastToggle 
+  onHighContrastToggle,
 }: AccessibilitySettingsProps) {
   if (!isOpen) return null;
 
