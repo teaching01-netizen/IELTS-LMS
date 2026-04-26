@@ -218,19 +218,12 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                           <div
                             key={q.id}
                             id={!inlineFlags && flagId ? `question-${flagId}` : undefined}
-                            className="relative"
+                            className={
+                              onToggleFlag && flagId && !inlineFlags
+                                ? 'grid grid-cols-[minmax(0,1fr)_44px] items-start gap-3'
+                                : 'relative'
+                            }
                           >
-                            {onToggleFlag && flagId && !inlineFlags ? (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); onToggleFlag(flagId); }}
-                                className={`absolute top-0 right-0 min-h-11 min-w-11 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
-                                  flags[flagId] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-                                }`}
-                                title={flags[flagId] ? 'Unflag question' : 'Flag question'}
-                              >
-                                <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
-                              </button>
-                            ) : null}
                             <QuestionRenderer
                               question={q}
                               block={block}
@@ -244,6 +237,19 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                               flags={flags}
                               onToggleFlag={onToggleFlag}
                             />
+                            {onToggleFlag && flagId && !inlineFlags ? (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); onToggleFlag(flagId); }}
+                                className={`min-h-11 min-w-11 rounded-full flex items-center justify-center transition-all shadow-sm ${
+                                  flags[flagId] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                                }`}
+                                aria-label={flags[flagId] ? 'Unflag question' : 'Flag question'}
+                                title={flags[flagId] ? 'Unflag question' : 'Flag question'}
+                              >
+                                <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
+                              </button>
+                            ) : null}
                           </div>
                         );
                       })
@@ -251,19 +257,12 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                       <div
                         key={block.id}
                         id={singleBlockQuestion ? `question-${singleBlockQuestion.id}` : undefined}
-                        className="relative"
+                        className={
+                          onToggleFlag && singleBlockQuestion
+                            ? 'grid grid-cols-[minmax(0,1fr)_44px] items-start gap-3'
+                            : 'relative'
+                        }
                       >
-                        {onToggleFlag && singleBlockQuestion ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onToggleFlag(singleBlockQuestion.id); }}
-                            className={`absolute top-0 right-0 min-h-11 min-w-11 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
-                              flags[singleBlockQuestion.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-                            }`}
-                            title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
-                          >
-                            <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
-                          </button>
-                        ) : null}
                         <QuestionRenderer
                           question={null}
                           block={block}
@@ -277,6 +276,19 @@ export function StudentReading({ state, answers, onAnswerChange, currentQuestion
                           flags={flags}
                           onToggleFlag={onToggleFlag}
                         />
+                        {onToggleFlag && singleBlockQuestion ? (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onToggleFlag(singleBlockQuestion.id); }}
+                            className={`min-h-11 min-w-11 rounded-full flex items-center justify-center transition-all shadow-sm ${
+                              flags[singleBlockQuestion.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                            }`}
+                            aria-label={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
+                            title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
+                          >
+                            <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
+                          </button>
+                        ) : null}
                       </div>
                     )}
                   </div>

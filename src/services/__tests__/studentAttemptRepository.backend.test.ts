@@ -308,6 +308,125 @@ describe('studentAttemptRepository backend mode', () => {
     expect(cachedAttempts[0]?.answers).toEqual({ q1: 'A' });
   });
 
+  it('preserves local pending answers when an ack-only flush starts from a stale backend snapshot', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        schedule: buildSchedule(),
+        version: buildVersion(),
+        runtime: null,
+        attempt: buildBackendAttempt(),
+        attemptCredential: buildAttemptCredential(),
+        degradedLiveMode: false,
+      }),
+    ).mockResolvedValueOnce(
+      jsonResponse({
+        appliedMutationCount: 1,
+        serverAcceptedThroughSeq: 1,
+      }),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const attempt = await studentAttemptRepository.createAttempt({
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      currentModule: 'reading',
+    });
+
+    await studentAttemptRepository.savePendingMutations(attempt.id, [
+      {
+        id: 'mutation-1',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-01T09:00:30.000Z',
+        type: 'answer',
+        payload: { questionId: 'q1', value: 'A' },
+      },
+    ]);
+
+    await studentAttemptRepository.saveAttempt({
+      ...attempt,
+      answers: {},
+      updatedAt: '2026-01-01T09:00:10.000Z',
+    });
+
+    expect(await studentAttemptRepository.getPendingMutations(attempt.id)).toEqual([]);
+    const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
+    expect(cachedAttempts[0]?.answers).toEqual({ q1: 'A' });
+  });
+
+  it('preserves newer accepted local navigation when a stale backend snapshot is saved', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        schedule: buildSchedule(),
+        version: buildVersion(),
+        runtime: null,
+        attempt: buildBackendAttempt(),
+        attemptCredential: buildAttemptCredential(),
+        degradedLiveMode: false,
+      }),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const attempt = await studentAttemptRepository.createAttempt({
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      currentModule: 'reading',
+    });
+
+    const newerAcceptedAttempt = {
+      ...attempt,
+      phase: 'exam' as const,
+      currentModule: 'writing' as const,
+      currentQuestionId: 'task1',
+      answers: { q1: 'A' },
+      writingAnswers: { task1: '<p>Draft</p>' },
+      recovery: {
+        ...attempt.recovery,
+        pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 2,
+        syncState: 'saved' as const,
+      },
+    };
+    await studentAttemptRepository.saveAttempt(newerAcceptedAttempt);
+
+    await studentAttemptRepository.saveAttempt({
+      ...attempt,
+      phase: 'lobby',
+      currentModule: 'reading',
+      currentQuestionId: 'q1',
+      answers: {},
+      writingAnswers: {},
+      recovery: {
+        ...attempt.recovery,
+        serverAcceptedThroughSeq: 1,
+      },
+    });
+
+    const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
+    expect(cachedAttempts[0]).toMatchObject({
+      phase: 'exam',
+      currentModule: 'writing',
+      currentQuestionId: 'task1',
+      answers: { q1: 'A' },
+      writingAnswers: { task1: '<p>Draft</p>' },
+      recovery: expect.objectContaining({
+        serverAcceptedThroughSeq: 2,
+      }),
+    });
+  });
+
   it('drops stale objective mutations on SECTION_MISMATCH, retries flush, and records lastDroppedMutations', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
 

@@ -386,6 +386,62 @@ describe('student question experience', () => {
     expect(screen.getByTestId('reading-question-pane')).toHaveClass('student-reading-question-pane');
   });
 
+  it('reserves inline space for reading flag buttons instead of overlaying questions', () => {
+    const onToggleFlag = vi.fn();
+    const state: ExamState = {
+      title: 'Reading Test',
+      type: 'Academic',
+      activeModule: 'reading',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'l1',
+      config: createDefaultConfig('Academic', 'Academic'),
+      reading: {
+        passages: [
+          {
+            id: 'passage-1',
+            title: 'Passage 1',
+            content: 'A passage.',
+            images: [],
+            blocks: [
+              {
+                id: 'q1',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer the question.',
+                questions: [{ id: 'q1', prompt: 'Question?', correctAnswer: 'Answer' }],
+              } as any,
+            ],
+          },
+        ],
+      },
+      listening: { parts: [] },
+      writing: { task1Prompt: '', task2Prompt: '', tasks: [], customPromptTemplates: [] },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    };
+
+    render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => undefined}
+        currentQuestionId="q1"
+        onNavigate={() => undefined}
+        flags={{ q1: true }}
+        onToggleFlag={onToggleFlag}
+      />,
+    );
+
+    const question = document.getElementById('question-q1');
+    expect(question).not.toBeNull();
+    expect(question).toHaveClass('grid');
+    expect(question).not.toHaveClass('relative');
+
+    const flagButton = screen.getByRole('button', { name: /unflag question/i });
+    expect(flagButton).not.toHaveClass('absolute');
+    expect(flagButton).toHaveClass('min-h-11');
+    fireEvent.click(flagButton);
+    expect(onToggleFlag).toHaveBeenCalledWith('q1');
+  });
+
   it('wires the listening transport controls to the audio element', async () => {
     const play = vi
       .spyOn(HTMLMediaElement.prototype, 'play')
@@ -533,6 +589,63 @@ describe('student question experience', () => {
     const trackPanel = screen.getByText('Listening Audio Track').closest('div');
     expect(trackPanel).not.toBeNull();
     expect(within(trackPanel as HTMLElement).getByText('02:00')).toBeInTheDocument();
+  });
+
+  it('reserves inline space for listening flag buttons instead of overlaying questions', () => {
+    const onToggleFlag = vi.fn();
+    const state: ExamState = {
+      title: 'Listening Test',
+      type: 'Academic',
+      activeModule: 'listening',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: createDefaultConfig('Academic', 'Academic'),
+      reading: { passages: [] },
+      listening: {
+        parts: [
+          {
+            id: 'part-1',
+            title: 'Part 1',
+            audioUrl: '/audio/test.mp3',
+            transcript: '',
+            pins: [],
+            blocks: [
+              {
+                id: 'q1',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer the question.',
+                questions: [{ id: 'q1', prompt: 'Question?', correctAnswer: 'Answer' }],
+              } as any,
+            ],
+          },
+        ],
+      },
+      writing: { task1Prompt: '', task2Prompt: '', tasks: [], customPromptTemplates: [] },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    };
+
+    render(
+      <StudentListening
+        state={state}
+        answers={{}}
+        onAnswerChange={() => undefined}
+        currentQuestionId="q1"
+        onNavigate={() => undefined}
+        flags={{}}
+        onToggleFlag={onToggleFlag}
+      />,
+    );
+
+    const question = document.getElementById('question-q1');
+    expect(question).not.toBeNull();
+    expect(question).toHaveClass('grid');
+    expect(question).not.toHaveClass('relative');
+
+    const flagButton = screen.getByRole('button', { name: /flag question/i });
+    expect(flagButton).not.toHaveClass('absolute');
+    expect(flagButton).toHaveClass('min-h-11');
+    fireEvent.click(flagButton);
+    expect(onToggleFlag).toHaveBeenCalledWith('q1');
   });
 
   it('disables the listening audio player when staff turns off audio playback', () => {

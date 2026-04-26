@@ -6,6 +6,7 @@ import {
 import { ApiClientError, type ApiRequestConfig } from '../app/api/apiClient';
 import type {
   StudentAttempt,
+  StudentAnswerValue,
   StudentAttemptMutation,
   StudentAttemptSeed,
   StudentHeartbeatEvent,
@@ -655,6 +656,163 @@ function enforcePendingMutationPolicy(mutations: StudentAttemptMutation[]): Stud
   return next;
 }
 
+function isModuleType(value: unknown): value is ModuleType {
+  return (
+    value === 'listening' ||
+    value === 'reading' ||
+    value === 'writing' ||
+    value === 'speaking'
+  );
+}
+
+function isAttemptPhase(value: unknown): value is StudentAttempt['phase'] {
+  return (
+    value === 'pre-check' ||
+    value === 'lobby' ||
+    value === 'exam' ||
+    value === 'post-exam'
+  );
+}
+
+export function replayPendingMutationsOntoAttempt(
+  attempt: StudentAttempt,
+  mutations: StudentAttemptMutation[],
+): StudentAttempt {
+  if (mutations.length === 0) {
+    return attempt;
+  }
+
+  let nextAttempt = attempt;
+
+  for (const mutation of mutations) {
+    switch (mutation.type) {
+      case 'answer': {
+        const questionId = mutation.payload['questionId'];
+        if (typeof questionId !== 'string' || !('value' in mutation.payload)) {
+          break;
+        }
+
+        nextAttempt = {
+          ...nextAttempt,
+          answers: {
+            ...nextAttempt.answers,
+            [questionId]: mutation.payload['value'] as StudentAnswerValue,
+          },
+        };
+        break;
+      }
+      case 'writing_answer': {
+        const taskId = mutation.payload['taskId'];
+        const value = mutation.payload['value'];
+        if (typeof taskId !== 'string' || typeof value !== 'string') {
+          break;
+        }
+
+        nextAttempt = {
+          ...nextAttempt,
+          writingAnswers: {
+            ...nextAttempt.writingAnswers,
+            [taskId]: value,
+          },
+        };
+        break;
+      }
+      case 'flag': {
+        const questionId = mutation.payload['questionId'];
+        const value = mutation.payload['value'];
+        if (typeof questionId !== 'string' || typeof value !== 'boolean') {
+          break;
+        }
+
+        nextAttempt = {
+          ...nextAttempt,
+          flags: {
+            ...nextAttempt.flags,
+            [questionId]: value,
+          },
+        };
+        break;
+      }
+      case 'position': {
+        const currentModule = mutation.payload['currentModule'];
+        const currentQuestionId = mutation.payload['currentQuestionId'];
+        const phase = mutation.payload['phase'];
+
+        nextAttempt = {
+          ...nextAttempt,
+          ...(isModuleType(currentModule) ? { currentModule } : {}),
+          ...(typeof currentQuestionId === 'string' || currentQuestionId === null
+            ? { currentQuestionId }
+            : {}),
+          ...(isAttemptPhase(phase) ? { phase } : {}),
+        };
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return {
+    ...nextAttempt,
+    recovery: {
+      ...nextAttempt.recovery,
+      pendingMutationCount: mutations.length,
+    },
+  };
+}
+
+function attemptAcceptedSeq(attempt: StudentAttempt): number {
+  return attempt.recovery.serverAcceptedThroughSeq ?? 0;
+}
+
+function hasNewerAcceptedLocalState(
+  localAttempt: StudentAttempt | null,
+  incomingAttempt: StudentAttempt,
+): localAttempt is StudentAttempt {
+  if (!localAttempt || localAttempt.id !== incomingAttempt.id || incomingAttempt.submittedAt) {
+    return false;
+  }
+
+  return attemptAcceptedSeq(localAttempt) > attemptAcceptedSeq(incomingAttempt);
+}
+
+function preserveNewerAcceptedLocalState(
+  incomingAttempt: StudentAttempt,
+  localAttempt: StudentAttempt | null,
+): StudentAttempt {
+  if (!hasNewerAcceptedLocalState(localAttempt, incomingAttempt)) {
+    return incomingAttempt;
+  }
+
+  return {
+    ...incomingAttempt,
+    phase: localAttempt.phase,
+    currentModule: localAttempt.currentModule,
+    currentQuestionId: localAttempt.currentQuestionId,
+    answers: localAttempt.answers,
+    writingAnswers: localAttempt.writingAnswers,
+    flags: localAttempt.flags,
+    recovery: {
+      ...incomingAttempt.recovery,
+      lastLocalMutationAt:
+        localAttempt.recovery.lastLocalMutationAt ?? incomingAttempt.recovery.lastLocalMutationAt,
+      lastPersistedAt:
+        localAttempt.recovery.lastPersistedAt ?? incomingAttempt.recovery.lastPersistedAt,
+      lastDroppedMutations:
+        localAttempt.recovery.lastDroppedMutations ?? incomingAttempt.recovery.lastDroppedMutations,
+      pendingMutationCount: Math.max(
+        localAttempt.recovery.pendingMutationCount,
+        incomingAttempt.recovery.pendingMutationCount,
+      ),
+      serverAcceptedThroughSeq: attemptAcceptedSeq(localAttempt),
+      clientSessionId:
+        localAttempt.recovery.clientSessionId ?? incomingAttempt.recovery.clientSessionId,
+      syncState: localAttempt.recovery.syncState,
+    },
+  };
+}
+
 function backendConflictReason(error: unknown): string | null {
   if (error instanceof ApiClientError) {
     const reason = error.backendDetails?.['reason'];
@@ -1185,6 +1343,16 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     }
   }
 
+  private async reconcileAttemptWithCachedState(
+    attempt: StudentAttempt,
+    pendingMutations: StudentAttemptMutation[],
+  ): Promise<StudentAttempt> {
+    const localAttempt =
+      (await this.cache.getAllAttempts()).find((candidate) => candidate.id === attempt.id) ?? null;
+    const acceptedAttempt = preserveNewerAcceptedLocalState(attempt, localAttempt);
+    return replayPendingMutationsOntoAttempt(acceptedAttempt, pendingMutations);
+  }
+
   private async flushMutationQueue(args: {
     attempt: StudentAttempt;
     clientSessionId: string;
@@ -1256,9 +1424,11 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
   }
 
   private async cacheAttempt(attempt: StudentAttempt): Promise<StudentAttempt> {
-    await this.cache.saveAttempt(attempt);
-    primeMutationSequenceWatermark(attempt);
-    return attempt;
+    const pendingMutations = await this.cache.getPendingMutations(attempt.id);
+    const reconciledAttempt = await this.reconcileAttemptWithCachedState(attempt, pendingMutations);
+    await this.cache.saveAttempt(reconciledAttempt);
+    primeMutationSequenceWatermark(reconciledAttempt);
+    return reconciledAttempt;
   }
 
   async getAttemptByScheduleId(scheduleId: string, studentKey: string): Promise<StudentAttempt | null> {
@@ -1283,11 +1453,11 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
   }
 
   async saveAttempt(attempt: StudentAttempt): Promise<void> {
-    let currentAttempt = attempt;
+    const pendingMutations = await this.cache.getPendingMutations(attempt.id);
+    let currentAttempt = await this.reconcileAttemptWithCachedState(attempt, pendingMutations);
     await this.cache.saveAttempt(currentAttempt);
     primeMutationSequenceWatermark(currentAttempt);
 
-    const pendingMutations = await this.cache.getPendingMutations(currentAttempt.id);
     if (pendingMutations.length === 0) {
       return;
     }

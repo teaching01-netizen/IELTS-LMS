@@ -86,6 +86,12 @@ function createCandidateProfile(
   };
 }
 
+async function saveAttemptSnapshotForHydration(attempt: StudentAttempt): Promise<StudentAttempt> {
+  await studentAttemptRepository.saveAttempt(attempt);
+  const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId(attempt.scheduleId);
+  return cachedAttempts.find((candidate) => candidate.id === attempt.id) ?? attempt;
+}
+
 interface StudentSessionRouteData {
   attemptSnapshot: StudentAttempt | null;
   error: string | null;
@@ -153,8 +159,7 @@ export function useStudentSessionRouteData(
       const nextAttempt = mapBackendStudentAttempt(
         liveSession.attempt as Parameters<typeof mapBackendStudentAttempt>[0],
       );
-      await studentAttemptRepository.saveAttempt(nextAttempt);
-      setAttemptSnapshot(nextAttempt);
+      setAttemptSnapshot(await saveAttemptSnapshotForHydration(nextAttempt));
     }
   }, [candidateId, queryClient, schedule, scheduleId]);
 
@@ -261,17 +266,17 @@ export function useStudentSessionRouteData(
           }
         }
 
-        await studentAttemptRepository.saveAttempt(nextAttempt);
+        const reconciledAttempt = await saveAttemptSnapshotForHydration(nextAttempt);
         if (isSubmittedAttempt) {
-          setAttemptSnapshot(nextAttempt);
+          setAttemptSnapshot(reconciledAttempt);
         } else if (!hasAttemptCredential(nextAttempt.scheduleId, nextAttempt.id)) {
-          const hydratedAttempt = await studentAttemptRepository.getAttemptByScheduleId(
+          const credentialHydratedAttempt = await studentAttemptRepository.getAttemptByScheduleId(
             scheduleId,
             nextAttempt.studentKey,
           );
-          setAttemptSnapshot(hydratedAttempt ?? nextAttempt);
+          setAttemptSnapshot(credentialHydratedAttempt ?? reconciledAttempt);
         } else {
-          setAttemptSnapshot(nextAttempt);
+          setAttemptSnapshot(reconciledAttempt);
         }
       } else {
         const firstEnabledModule =
