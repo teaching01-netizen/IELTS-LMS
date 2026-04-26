@@ -7,6 +7,7 @@ import { MIN_HEIGHTS, CHAR_HEIGHT_PX, WRITING } from '../../constants/uiConstant
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
+import { StudentZoomableMedia } from './StudentZoomableMedia';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -298,7 +299,13 @@ export function StudentWriting({
                   Stimulus Chart
                 </p>
                 {currentChart.imageSrc ? (
-                  <img src={currentChart.imageSrc} alt={currentChart.title} className="w-full rounded-2xl object-contain max-h-64" />
+                  <StudentZoomableMedia
+                    sources={[currentChart.imageSrc]}
+                    alt={currentChart.title}
+                    label={currentChart.title}
+                    hint="Tap to zoom the chart"
+                    className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
+                  />
                 ) : (
                   <div className="flex items-end gap-3 h-44">
                     {currentChart.values.map((value, index) => (

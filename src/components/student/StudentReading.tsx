@@ -7,7 +7,9 @@ import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../serv
 import { prefersReducedMotion } from './prefersReducedMotion';
 import { FormattedText } from './FormattedText';
 import { RichTextHighlighter } from './RichTextHighlighter';
+import { StudentZoomableMedia } from './StudentZoomableMedia';
 import type { StudentHighlightColor } from './highlightPalette';
+import type { StimulusAnnotation } from '../../types';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -60,6 +62,73 @@ export function StudentReading({
         ['--question-pane-width' as string]: `calc(${100 - leftWidth}% - 16px)`,
       }) as React.CSSProperties,
     [leftWidth],
+  );
+
+  const renderPassageImageAnnotations = (annotations: StimulusAnnotation[], zoom = 1) => (
+    <>
+      {annotations.map((annotation) => {
+        const positionStyle: React.CSSProperties = {
+          left: `${annotation.x}%`,
+          top: `${annotation.y}%`,
+          transform: 'translate(-50%, -50%)',
+        };
+
+        if (annotation.width) {
+          positionStyle.width = `${annotation.width}%`;
+        }
+
+        if (annotation.height) {
+          positionStyle.height = `${annotation.height}%`;
+        }
+
+        if (annotation.type === 'hotspot') {
+          return (
+            <span
+              key={annotation.id}
+              className="absolute flex items-center justify-center rounded-full bg-red-600 text-white"
+              style={{
+                ...positionStyle,
+                width: `${Math.max(16, 20 * zoom)}px`,
+                height: `${Math.max(16, 20 * zoom)}px`,
+                fontSize: `${Math.max(10, 12 * zoom)}px`,
+              }}
+            >
+              •
+            </span>
+          );
+        }
+
+        if (annotation.type === 'text') {
+          return (
+            <span
+              key={annotation.id}
+              className="absolute rounded-lg bg-white/90 px-2 py-1 font-semibold text-gray-800 border border-gray-200 shadow-sm"
+              style={{
+                ...positionStyle,
+                fontSize: `calc(var(--student-meta-font-size) * ${Math.max(1, zoom)})`,
+              }}
+            >
+              {annotation.text}
+            </span>
+          );
+        }
+
+        if (annotation.type === 'box') {
+          return (
+            <span
+              key={annotation.id}
+              className="absolute block rounded-lg border-2 border-blue-600 bg-blue-100/10"
+              style={{
+                ...positionStyle,
+                borderWidth: `${Math.max(2, 2 * zoom)}px`,
+              }}
+            />
+          );
+        }
+
+        return null;
+      })}
+    </>
   );
   
   // Auto-scroll to current question when it changes
@@ -126,34 +195,15 @@ export function StudentReading({
               highlightClassName={highlightClassName}
             />
             {(activePassage.images ?? []).map((image) => (
-              <div key={image.id} className="relative rounded-2xl overflow-hidden border border-gray-200 bg-gray-50">
-                <img src={image.src} alt={image.alt} className="w-full object-contain" loading="lazy" />
-                {image.annotations.map((annotation) => (
-                  <span
-                    key={annotation.id}
-                    className="absolute"
-                    style={{
-                      left: `${annotation.x}%`,
-                      top: `${annotation.y}%`,
-                      width: annotation.width ? `${annotation.width}%` : undefined,
-                      height: annotation.height ? `${annotation.height}%` : undefined,
-                      transform: 'translate(-50%, -50%)',
-                    }}
-                  >
-                    {annotation.type === 'hotspot' && (
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white">•</span>
-                    )}
-                    {annotation.type === 'text' && (
-                      <span className="rounded-lg bg-white/90 px-2 py-1 text-[length:var(--student-meta-font-size)] font-semibold text-gray-800 border border-gray-200">
-                        {annotation.text}
-                      </span>
-                    )}
-                    {annotation.type === 'box' && (
-                      <span className="block h-full w-full rounded-lg border-2 border-blue-600 bg-blue-100/10" />
-                    )}
-                  </span>
-                ))}
-              </div>
+              <StudentZoomableMedia
+                key={image.id}
+                sources={[image.src]}
+                alt={image.alt}
+                label={image.alt || 'Passage image'}
+                hint="Tap to zoom the passage image"
+                className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
+                renderOverlay={(zoom) => renderPassageImageAnnotations(image.annotations, zoom)}
+              />
             ))}
           </div>
         </div>

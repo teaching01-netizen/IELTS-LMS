@@ -27,6 +27,7 @@ import { ProtectedInput } from './ProtectedInput';
 import { FormattedText } from './FormattedText';
 import { stripBoldMarkdown } from '../../utils/boldMarkdown';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
+import { StudentZoomableMedia } from './StudentZoomableMedia';
 import type { StudentHighlightColor } from './highlightPalette';
 
 interface QuestionRendererProps {
@@ -330,28 +331,12 @@ export function QuestionRenderer({
 
   const renderMap = (mapBlock: MapBlock, q: MapQuestion, num: number) => (
     <div className="flex flex-col gap-4">
-      {getImageUrlCandidates(mapBlock.assetUrl ?? '')[0] ? (
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-          <img
-            src={getImageUrlCandidates(mapBlock.assetUrl ?? '')[0]}
-            alt="Map reference"
-            className="h-auto w-full object-contain"
-            referrerPolicy="no-referrer"
-            data-candidate-index={0}
-            onError={(event) => {
-              const candidates = getImageUrlCandidates(mapBlock.assetUrl ?? '');
-              const img = event.currentTarget;
-              const currentIndex = Number(img.dataset['candidateIndex'] ?? '0');
-              const nextIndex = currentIndex + 1;
-              const nextSrc = candidates[nextIndex];
-              if (nextSrc) {
-                img.dataset['candidateIndex'] = String(nextIndex);
-                img.src = nextSrc;
-              }
-            }}
-          />
-        </div>
-      ) : null}
+      <StudentZoomableMedia
+        sources={getImageUrlCandidates(mapBlock.assetUrl ?? '')}
+        alt="Map reference"
+        label="Map reference image"
+        hint="Tap to zoom the map"
+      />
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
           <span className="min-w-[1.75rem] font-bold text-gray-900">{num}.</span>
@@ -525,32 +510,18 @@ export function QuestionRenderer({
 
   const renderDiagramLabeling = (diagramBlock: DiagramLabelingBlock) => (
     <div className="flex flex-col gap-4">
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-        {getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0] ? (
-          <div className="relative">
-            <img
-              src={getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0]}
-              alt="Diagram reference"
-              className="h-auto w-full object-contain"
-              referrerPolicy="no-referrer"
-              data-candidate-index={0}
-              onError={(event) => {
-                const candidates = getImageUrlCandidates(diagramBlock.imageUrl ?? '');
-                const img = event.currentTarget;
-                const currentIndex = Number(img.dataset['candidateIndex'] ?? '0');
-                const nextIndex = currentIndex + 1;
-                const nextSrc = candidates[nextIndex];
-                if (nextSrc) {
-                  img.dataset['candidateIndex'] = String(nextIndex);
-                  img.src = nextSrc;
-                }
-              }}
-            />
-          </div>
-        ) : (
+      {getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0] ? (
+        <StudentZoomableMedia
+          sources={getImageUrlCandidates(diagramBlock.imageUrl ?? '')}
+          alt="Diagram reference"
+          label="Diagram reference image"
+          hint="Tap to zoom the diagram"
+        />
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
           <div className="p-6 text-center text-sm text-gray-500">Add a diagram to support this question.</div>
-        )}
-      </div>
+        </div>
+      )}
       <div className="space-y-3">
         {diagramBlock.labels.map((label, index) =>
           renderTextField(
