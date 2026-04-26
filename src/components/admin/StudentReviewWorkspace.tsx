@@ -30,6 +30,7 @@ import {
   getStudentAnswerDisplay,
   isStudentAnswerCorrect,
 } from './gradingAnswerUtils';
+import { htmlToPlainText } from '../../utils/htmlText';
 
 export interface StudentReviewWorkspaceProps {
   submissionId: string;
@@ -460,7 +461,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       : [];
   const currentWritingTaskId = activeSection === 'writing' ? activeTask : null;
   const currentWritingPrompt = currentWritingTaskId ? getWritingPrompt(currentWritingTaskId) : '';
-  const currentWritingText = currentWritingTaskId ? getWritingResponseText(currentWritingTaskId) : '';
+  const currentWritingText = currentWritingTaskId ? htmlToPlainText(getWritingResponseText(currentWritingTaskId)) : '';
 
   return (
     <div className="flex flex-col h-full bg-gray-50">

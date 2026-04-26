@@ -11,9 +11,8 @@ import {
   buildCsvContent,
   buildCsvFilename,
   buildWideObjectiveExport,
-  buildWritingExportRows,
+  buildWideWritingExport,
   downloadCsvFile,
-  WRITING_EXPORT_COLUMNS,
   type GradingExportSection,
 } from './gradingReviewUtils';
 import type { ExamState } from '../../types';
@@ -168,12 +167,14 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       };
       const exportPayload =
         section === 'writing'
-          ? {
-              columns: WRITING_EXPORT_COLUMNS,
-              rows: bundles.flatMap(({ submission, writing }) =>
-                buildWritingExportRows(sessionContext, submission, writing),
-              ),
-            }
+          ? buildWideWritingExport({
+              session: sessionContext,
+              submissions: bundles.map(({ submission }) => submission),
+              writingSubmissions: bundles.map(({ submission, writing }) => ({
+                submissionId: submission.id,
+                writing,
+              })),
+            })
           : buildWideObjectiveExport({
               session: sessionContext,
               submissions: bundles.map(({ submission }) => submission),

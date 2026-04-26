@@ -17,6 +17,7 @@ import {
   getStudentAnswerDisplay,
   isStudentAnswerCorrect,
 } from './gradingAnswerUtils';
+import { htmlToPlainText } from '../../utils/htmlText';
 
 export type GradingExportSection = 'reading' | 'listening' | 'writing';
 
@@ -121,6 +122,46 @@ export const WRITING_EXPORT_COLUMNS: CsvColumn[] = [
   { key: 'submittedAt', label: 'Submitted At' },
   { key: 'gradedBy', label: 'Graded By' },
   { key: 'gradedAt', label: 'Graded At' },
+];
+
+const WRITING_WIDE_EXPORT_BASE_COLUMNS: CsvColumn[] = [
+  { key: 'examTitle', label: 'Exam Title' },
+  { key: 'sessionId', label: 'Session ID' },
+  { key: 'scheduleId', label: 'Schedule ID' },
+  { key: 'submissionId', label: 'Submission ID' },
+  { key: 'studentName', label: 'Student Name' },
+  { key: 'studentId', label: 'Student ID' },
+  { key: 'studentEmail', label: 'Student Email' },
+  { key: 'cohortName', label: 'Cohort Name' },
+  { key: 'section', label: 'Section' },
+  { key: 'submittedAt', label: 'Submitted At' },
+];
+
+const WRITING_WIDE_TASK_FIELDS = [
+  { key: 'wordCount', label: 'Word Count' },
+  { key: 'response', label: 'Response' },
+  { key: 'taskResponseBand', label: 'Task Response Band' },
+  { key: 'coherenceBand', label: 'Coherence Band' },
+  { key: 'lexicalBand', label: 'Lexical Band' },
+  { key: 'grammarBand', label: 'Grammar Band' },
+  { key: 'overallBand', label: 'Overall Band' },
+  { key: 'overallFeedback', label: 'Overall Feedback' },
+  { key: 'studentVisibleNotes', label: 'Student Visible Notes' },
+  { key: 'annotationCount', label: 'Annotation Count' },
+  { key: 'studentVisibleAnnotationCount', label: 'Student Visible Annotation Count' },
+  { key: 'gradingStatus', label: 'Grading Status' },
+  { key: 'gradedBy', label: 'Graded By' },
+  { key: 'gradedAt', label: 'Graded At' },
+] as const;
+
+export const WRITING_WIDE_EXPORT_COLUMNS: CsvColumn[] = [
+  ...WRITING_WIDE_EXPORT_BASE_COLUMNS,
+  ...['task1', 'task2'].flatMap((taskKey, index) =>
+    WRITING_WIDE_TASK_FIELDS.map((field) => ({
+      key: `${taskKey}:${field.key}`,
+      label: `Task ${index + 1} ${field.label}`,
+    })),
+  ),
 ];
 
 function toPlainText(value: unknown): string {
@@ -254,6 +295,20 @@ export interface WideObjectiveExportInput {
 }
 
 export interface WideObjectiveExport {
+  columns: CsvColumn[];
+  rows: Array<Record<string, unknown>>;
+}
+
+export interface WideWritingExportInput {
+  session: ExportSessionContext;
+  submissions: StudentSubmission[];
+  writingSubmissions: Array<{
+    submissionId: string;
+    writing: WritingTaskSubmission[];
+  }>;
+}
+
+export interface WideWritingExport {
   columns: CsvColumn[];
   rows: Array<Record<string, unknown>>;
 }
@@ -465,6 +520,95 @@ export function buildWritingExportRows(
       gradedAt: task.gradedAt ?? '',
     };
   });
+}
+
+function getWritingTaskSlot(task: WritingTaskSubmission): 'task1' | 'task2' | null {
+  const normalizedId = task.taskId.trim().toLowerCase();
+  const normalizedLabel = task.taskLabel.trim().toLowerCase();
+
+  if (normalizedId === 'task1' || normalizedId === 'task-1' || normalizedLabel === 'task 1') {
+    return 'task1';
+  }
+
+  if (normalizedId === 'task2' || normalizedId === 'task-2' || normalizedLabel === 'task 2') {
+    return 'task2';
+  }
+
+  return null;
+}
+
+function assignWritingTaskColumns(row: Record<string, unknown>, slot: 'task1' | 'task2', task?: WritingTaskSubmission) {
+  if (!task) {
+    for (const field of WRITING_WIDE_TASK_FIELDS) {
+      row[`${slot}:${field.key}`] = '';
+    }
+    return;
+  }
+
+  const visibleAnnotations = task.annotations.filter((annotation) => annotation.visibility === 'student_visible');
+  const rubric = task.rubricAssessment;
+
+  row[`${slot}:wordCount`] = task.wordCount;
+  row[`${slot}:response`] = htmlToPlainText(task.studentText);
+  row[`${slot}:taskResponseBand`] = rubric?.taskResponseBand ?? '';
+  row[`${slot}:coherenceBand`] = rubric?.coherenceBand ?? '';
+  row[`${slot}:lexicalBand`] = rubric?.lexicalBand ?? '';
+  row[`${slot}:grammarBand`] = rubric?.grammarBand ?? '';
+  row[`${slot}:overallBand`] = rubric?.overallBand ?? '';
+  row[`${slot}:overallFeedback`] = task.overallFeedback ?? '';
+  row[`${slot}:studentVisibleNotes`] = task.studentVisibleNotes ?? '';
+  row[`${slot}:annotationCount`] = task.annotations.length;
+  row[`${slot}:studentVisibleAnnotationCount`] = visibleAnnotations.length;
+  row[`${slot}:gradingStatus`] = task.gradingStatus;
+  row[`${slot}:gradedBy`] = task.gradedBy ?? '';
+  row[`${slot}:gradedAt`] = task.gradedAt ?? '';
+}
+
+export function buildWideWritingExport({
+  session,
+  submissions,
+  writingSubmissions,
+}: WideWritingExportInput): WideWritingExport {
+  const writingBySubmissionId = new Map(
+    writingSubmissions.map((entry) => [entry.submissionId, entry.writing] as const),
+  );
+
+  const rows = submissions.map((submission) => {
+    const tasks = writingBySubmissionId.get(submission.id) ?? [];
+    const tasksBySlot = new Map<'task1' | 'task2', WritingTaskSubmission>();
+
+    for (const task of tasks) {
+      const slot = getWritingTaskSlot(task);
+      if (slot && !tasksBySlot.has(slot)) {
+        tasksBySlot.set(slot, task);
+      }
+    }
+
+    const submittedAt =
+      tasks.find((task) => task.submittedAt)?.submittedAt ?? submission.submittedAt;
+    const row: Record<string, unknown> = {
+      examTitle: session.examTitle,
+      sessionId: session.sessionId,
+      scheduleId: submission.scheduleId,
+      submissionId: submission.id,
+      studentName: submission.studentName,
+      studentId: submission.studentId,
+      studentEmail: submission.studentEmail ?? '',
+      cohortName: submission.cohortName,
+      section: 'writing',
+      submittedAt,
+    };
+
+    assignWritingTaskColumns(row, 'task1', tasksBySlot.get('task1'));
+    assignWritingTaskColumns(row, 'task2', tasksBySlot.get('task2'));
+
+    return row;
+  });
+
+  return {
+    columns: WRITING_WIDE_EXPORT_COLUMNS,
+    rows,
+  };
 }
 
 export function slugifyCsvFilePart(value: string): string {
