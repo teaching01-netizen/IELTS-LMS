@@ -1,7 +1,6 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle, X } from 'lucide-react';
 import { Button } from '../ui/Button';
-import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface SubmitConfirmationProps {
   isOpen: boolean;
@@ -24,8 +23,6 @@ export function SubmitConfirmation({
   timeRemaining,
   unansweredSubmissionPolicy = 'confirm',
 }: SubmitConfirmationProps) {
-  const dialogRef = useFocusTrap(isOpen, onClose);
-
   if (!isOpen) return null;
 
   const unansweredCount = totalQuestions - answeredCount;
@@ -41,14 +38,7 @@ export function SubmitConfirmation({
   };
 
   return (
-    <div
-      ref={dialogRef as React.RefObject<HTMLDivElement>}
-      className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="submit-confirm-title"
-      tabIndex={-1}
-    >
+    <div className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200">
           <div className="flex items-center gap-2 md:gap-3">
@@ -61,15 +51,11 @@ export function SubmitConfirmation({
                 <CheckCircle size={20} className="text-green-600" />
               </div>
             )}
-            <h2 id="submit-confirm-title" className="text-lg md:text-xl font-bold text-gray-900">
+            <h2 className="text-lg md:text-xl font-bold text-gray-900">
               {hasUnanswered ? 'Confirm Submission' : 'Ready to Submit?'}
             </h2>
           </div>
-          <button
-            onClick={onClose}
-            className="min-h-11 min-w-11 p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors"
-            aria-label="Close submit confirmation"
-          >
+          <button onClick={onClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors">
             <X size={18} />
           </button>
         </div>

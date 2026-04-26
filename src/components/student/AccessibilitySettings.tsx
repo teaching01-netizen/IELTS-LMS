@@ -1,14 +1,18 @@
 import React from 'react';
 import { X, Contrast } from 'lucide-react';
 import { Button } from '../ui/Button';
-import { useFocusTrap } from '../../hooks/useFocusTrap';
+import {
+  getStudentFontSizeLabel,
+  getStudentTypographyScale,
+  type StudentFontSize,
+} from './accessibilityScale';
 
 interface AccessibilitySettingsProps {
   isOpen: boolean;
   onClose: () => void;
-  fontSize: 'small' | 'normal' | 'large';
+  fontSize: StudentFontSize;
   highContrast: boolean;
-  onFontSizeChange: (size: 'small' | 'normal' | 'large') => void;
+  onFontSizeChange: (size: StudentFontSize) => void;
   onHighContrastToggle: () => void;
 }
 
@@ -20,38 +24,40 @@ export function AccessibilitySettings({
   onFontSizeChange, 
   onHighContrastToggle,
 }: AccessibilitySettingsProps) {
-  const dialogRef = useFocusTrap(isOpen, onClose);
-
   if (!isOpen) return null;
 
   const fontSizes = [
-    { value: 'small' as const, label: 'Small', size: '14px' },
-    { value: 'normal' as const, label: 'Normal', size: '16px' },
-    { value: 'large' as const, label: 'Large', size: '18px' },
+    {
+      value: 'small' as const,
+      label: getStudentFontSizeLabel('small'),
+      preview: getStudentTypographyScale('small').previewFontSize,
+      description: 'Compact for a fuller page view',
+    },
+    {
+      value: 'normal' as const,
+      label: getStudentFontSizeLabel('normal'),
+      preview: getStudentTypographyScale('normal').previewFontSize,
+      description: 'Balanced for most screens',
+    },
+    {
+      value: 'large' as const,
+      label: getStudentFontSizeLabel('large'),
+      preview: getStudentTypographyScale('large').previewFontSize,
+      description: 'Easier to read on iPad and desktop',
+    },
   ];
 
   return (
-    <div
-      ref={dialogRef as React.RefObject<HTMLDivElement>}
-      className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="accessibility-settings-title"
-      tabIndex={-1}
-    >
+    <div className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200">
           <div className="flex items-center gap-2 md:gap-3">
             <div className="p-1.5 md:p-2 bg-purple-100 rounded-lg">
               <Contrast size={20} className="text-purple-600" />
             </div>
-            <h2 id="accessibility-settings-title" className="text-lg md:text-xl font-bold text-gray-900">Accessibility</h2>
+            <h2 className="text-lg md:text-xl font-bold text-gray-900">Accessibility</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="min-h-11 min-w-11 p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors"
-            aria-label="Close accessibility settings"
-          >
+          <button onClick={onClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors">
             <X size={18} />
           </button>
         </div>
@@ -59,20 +65,33 @@ export function AccessibilitySettings({
         <div className="p-4 sm:p-6 space-y-4 md:space-y-6">
           <div>
             <h3 className="font-semibold text-gray-900 mb-3">Font Size</h3>
-            <div className="flex items-center gap-3">
+            <div className="grid gap-3 sm:grid-cols-3">
               {fontSizes.map((size) => (
                 <button
                   key={size.value}
                   onClick={() => onFontSizeChange(size.value)}
                   aria-pressed={fontSize === size.value}
-                  className={`flex-1 min-h-11 px-4 py-3 rounded-lg border-2 font-medium transition-all ${
+                  data-testid={`font-size-option-${size.value}`}
+                  className={`rounded-xl border-2 p-4 text-left transition-all ${
                     fontSize === size.value
-                      ? 'bg-blue-50 border-blue-500 text-blue-700'
-                      : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'
+                      ? 'bg-blue-50 border-blue-500 text-blue-900 shadow-sm ring-1 ring-blue-200'
+                      : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50'
                   }`}
-                  style={{ fontSize: size.size }}
+                  style={{ fontSize: size.preview }}
                 >
-                  {size.label}
+                  <span className="block text-[0.72rem] font-black uppercase tracking-[0.22em] text-gray-500">
+                    {size.label}
+                  </span>
+                  <span
+                    data-testid={`font-size-preview-${size.value}`}
+                    className="mt-2 block font-serif text-gray-900"
+                    style={{ fontSize: size.preview, lineHeight: 1.35 }}
+                  >
+                    The quick brown fox reads the passage comfortably.
+                  </span>
+                  <span className="mt-2 block text-[0.75rem] font-medium text-gray-600">
+                    {size.description}
+                  </span>
                 </button>
               ))}
             </div>
@@ -87,10 +106,7 @@ export function AccessibilitySettings({
               </div>
               <button
                 onClick={onHighContrastToggle}
-                role="switch"
-                aria-checked={highContrast}
-                aria-label="High Contrast Mode"
-                className={`relative min-h-11 min-w-11 w-12 h-6 rounded-full transition-colors ${
+                className={`relative w-12 h-6 rounded-full transition-colors ${
                   highContrast ? 'bg-blue-600' : 'bg-gray-300'
                 }`}
               >

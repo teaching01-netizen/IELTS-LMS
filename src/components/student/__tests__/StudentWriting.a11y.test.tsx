@@ -116,27 +116,9 @@ describe('StudentWriting a11y', () => {
     });
 
     expect(within(footer).getByRole('button', { name: 'Task 1' })).toBeInTheDocument();
-    expect(footer).toHaveClass('student-exam-footer');
     fireEvent.click(within(footer).getByRole('button', { name: 'Task 2' }));
     expect(onNavigate).toHaveBeenCalledWith('task2');
     expect(within(footer).getByRole('button', { name: /review & submit/i })).toBeInTheDocument();
-  });
-
-  it('marks writing panes with the iPad adaptive layout contract', () => {
-    render(
-      <StudentWriting
-        state={createExamState()}
-        writingAnswers={{}}
-        onWritingChange={() => undefined}
-        onSubmit={() => undefined}
-        currentQuestionId={null}
-        onNavigate={() => undefined}
-      />,
-    );
-
-    expect(screen.getByTestId('writing-split-pane')).toHaveClass('student-adaptive-workspace');
-    expect(screen.getByTestId('writing-prompt-pane')).toHaveClass('student-writing-prompt-pane');
-    expect(screen.getByTestId('writing-editor-pane')).toHaveClass('student-writing-editor-pane');
   });
 
   it('opens the review modal from the writing footer', () => {

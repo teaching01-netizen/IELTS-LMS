@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { applySelectionHighlight, escapeHtml } from './highlightSelection';
 import { getStudentHighlightClassName, type StudentHighlightColor } from './highlightPalette';
+import { usePersistedStudentHighlightHtml } from './highlightPersistence';
 
 interface RichTextHighlighterProps {
   content: string;
@@ -11,6 +12,7 @@ interface RichTextHighlighterProps {
   className?: string | undefined;
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
+  highlightPersistenceKey?: string | undefined;
 }
 
 export function RichTextHighlighter({
@@ -21,6 +23,7 @@ export function RichTextHighlighter({
   className,
   highlightColor,
   highlightClassName,
+  highlightPersistenceKey,
 }: RichTextHighlighterProps) {
   const Tag = as as any;
   const containerRef = useRef<HTMLElement | null>(null);
@@ -28,11 +31,10 @@ export function RichTextHighlighter({
     () => (contentType === 'html' ? sanitizeHtml(content) : escapeHtml(content)),
     [content, contentType],
   );
-  const [html, setHtml] = useState(initialHtml);
-
-  useEffect(() => {
-    setHtml(initialHtml);
-  }, [initialHtml]);
+  const { html, setHtml } = usePersistedStudentHighlightHtml(
+    initialHtml,
+    highlightPersistenceKey,
+  );
 
   const handleSelection = () => {
     if (!enabled) {
@@ -61,9 +63,9 @@ export function RichTextHighlighter({
     <Tag
       ref={containerRef as any}
       className={className}
-      onMouseUp={handleSelection}
-      onKeyUp={handleSelection}
-      onTouchEnd={handleSelection}
+      onMouseUp={enabled ? handleSelection : undefined}
+      onKeyUp={enabled ? handleSelection : undefined}
+      onTouchEnd={enabled ? handleSelection : undefined}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

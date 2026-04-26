@@ -7,7 +7,9 @@ import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../serv
 import { prefersReducedMotion } from './prefersReducedMotion';
 import { FormattedText } from './FormattedText';
 import { RichTextHighlighter } from './RichTextHighlighter';
+import { StudentZoomableMedia } from './StudentZoomableMedia';
 import type { StudentHighlightColor } from './highlightPalette';
+import type { StimulusAnnotation } from '../../types';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -20,6 +22,7 @@ interface StudentReadingProps {
   highlightEnabled?: boolean | undefined;
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
+  tabletMode?: boolean | undefined;
 }
 
 export function StudentReading({
@@ -33,7 +36,9 @@ export function StudentReading({
   highlightEnabled = false,
   highlightColor,
   highlightClassName,
+  tabletMode = false,
 }: StudentReadingProps) {
+  const isTabletMode = Boolean(tabletMode);
   const [leftWidth, setLeftWidth] = useState(50);
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, 'reading'), [state]);
@@ -57,6 +62,73 @@ export function StudentReading({
         ['--question-pane-width' as string]: `calc(${100 - leftWidth}% - 16px)`,
       }) as React.CSSProperties,
     [leftWidth],
+  );
+
+  const renderPassageImageAnnotations = (annotations: StimulusAnnotation[], zoom = 1) => (
+    <>
+      {annotations.map((annotation) => {
+        const positionStyle: React.CSSProperties = {
+          left: `${annotation.x}%`,
+          top: `${annotation.y}%`,
+          transform: 'translate(-50%, -50%)',
+        };
+
+        if (annotation.width) {
+          positionStyle.width = `${annotation.width}%`;
+        }
+
+        if (annotation.height) {
+          positionStyle.height = `${annotation.height}%`;
+        }
+
+        if (annotation.type === 'hotspot') {
+          return (
+            <span
+              key={annotation.id}
+              className="absolute flex items-center justify-center rounded-full bg-red-600 text-white"
+              style={{
+                ...positionStyle,
+                width: `${Math.max(16, 20 * zoom)}px`,
+                height: `${Math.max(16, 20 * zoom)}px`,
+                fontSize: `${Math.max(10, 12 * zoom)}px`,
+              }}
+            >
+              •
+            </span>
+          );
+        }
+
+        if (annotation.type === 'text') {
+          return (
+            <span
+              key={annotation.id}
+              className="absolute rounded-lg bg-white/90 px-2 py-1 font-semibold text-gray-800 border border-gray-200 shadow-sm"
+              style={{
+                ...positionStyle,
+                fontSize: `calc(var(--student-meta-font-size) * ${Math.max(1, zoom)})`,
+              }}
+            >
+              {annotation.text}
+            </span>
+          );
+        }
+
+        if (annotation.type === 'box') {
+          return (
+            <span
+              key={annotation.id}
+              className="absolute block rounded-lg border-2 border-blue-600 bg-blue-100/10"
+              style={{
+                ...positionStyle,
+                borderWidth: `${Math.max(2, 2 * zoom)}px`,
+              }}
+            />
+          );
+        }
+
+        return null;
+      })}
+    </>
   );
   
   // Auto-scroll to current question when it changes
@@ -94,40 +166,22 @@ export function StudentReading({
       document.addEventListener('touchend', handleMouseUp);
     };
 
-  const setClampedLeftWidth = (nextWidth: number) => {
-    setLeftWidth(Math.max(30, Math.min(70, nextWidth)));
-  };
-
-  const handleSeparatorKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault();
-      setClampedLeftWidth(leftWidth - 5);
-    } else if (event.key === 'ArrowRight') {
-      event.preventDefault();
-      setClampedLeftWidth(leftWidth + 5);
-    } else if (event.key === 'Home') {
-      event.preventDefault();
-      setClampedLeftWidth(30);
-    } else if (event.key === 'End') {
-      event.preventDefault();
-      setClampedLeftWidth(70);
-    }
-  };
-
   if (!activePassage) {
     return null;
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-white">
+    <div className="flex flex-col h-full w-full bg-white">
       <div
-        data-testid="reading-split-pane"
-        className="student-adaptive-workspace relative flex flex-1 overflow-hidden border-t border-gray-300"
-        style={splitPaneStyle}
+        className={`relative flex flex-1 overflow-hidden border-t border-gray-300 ${
+          isTabletMode ? 'flex-col' : 'flex-col md:flex-row'
+        }`}
+        style={isTabletMode ? undefined : splitPaneStyle}
       >
         <div
-          data-testid="reading-passage-pane"
-          className="student-reading-passage-pane min-h-0 min-w-0 w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base lg:p-8 lg:pr-12"
+          className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base ${
+            isTabletMode ? 'max-h-[42dvh] border-b border-gray-200' : 'lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
+          }`}
           data-student-zoom-scroll
         >
           <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePassage.title}</h2>
@@ -141,63 +195,37 @@ export function StudentReading({
               highlightClassName={highlightClassName}
             />
             {(activePassage.images ?? []).map((image) => (
-              <div key={image.id} className="relative rounded-2xl overflow-hidden border border-gray-200 bg-gray-50">
-                <img src={image.src} alt={image.alt} className="w-full object-contain" loading="lazy" />
-                {image.annotations.map((annotation) => (
-                  <span
-                    key={annotation.id}
-                    className="absolute"
-                    style={{
-                      left: `${annotation.x}%`,
-                      top: `${annotation.y}%`,
-                      width: annotation.width ? `${annotation.width}%` : undefined,
-                      height: annotation.height ? `${annotation.height}%` : undefined,
-                      transform: 'translate(-50%, -50%)',
-                    }}
-                  >
-                    {annotation.type === 'hotspot' && (
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white">•</span>
-                    )}
-                    {annotation.type === 'text' && (
-                      <span className="rounded-lg bg-white/90 px-2 py-1 text-[11px] font-semibold text-gray-800 border border-gray-200">
-                        {annotation.text}
-                      </span>
-                    )}
-                    {annotation.type === 'box' && (
-                      <span className="block h-full w-full rounded-lg border-2 border-blue-600 bg-blue-100/10" />
-                    )}
-                  </span>
-                ))}
-              </div>
+              <StudentZoomableMedia
+                key={image.id}
+                sources={[image.src]}
+                alt={image.alt}
+                label={image.alt || 'Passage image'}
+                hint="Tap to zoom the passage image"
+                className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
+                renderOverlay={(zoom) => renderPassageImageAnnotations(image.annotations, zoom)}
+              />
             ))}
           </div>
         </div>
 
-        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- ARIA separator pattern requires keyboard handlers. */}
-        <div
+        <div 
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          onKeyDown={handleSeparatorKeyDown}
-          className="student-pane-separator w-4 bg-gray-400 relative items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-          role="separator"
-          aria-label="Resize reading and questions panes"
-          aria-orientation="vertical"
-          aria-valuemin={30}
-          aria-valuemax={70}
-          aria-valuenow={Math.round(leftWidth)}
-          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- ARIA separator pattern requires tab focus.
-          tabIndex={0}
+          className="hidden lg:flex w-4 bg-gray-400 relative flex items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors"
         >
           <div className="w-8 h-8 bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none">
             <ArrowLeftRight size={14} className="text-gray-600" />
           </div>
         </div>
 
-        <div
-          data-testid="reading-question-pane"
-          className="student-reading-question-pane relative flex min-h-0 min-w-0 w-full flex-1 flex-col"
-        >
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10" ref={questionContainerRef} data-student-zoom-scroll>
+        <div className="relative flex h-full w-full min-w-0 flex-col md:min-w-[320px] lg:w-[var(--question-pane-width)] min-h-0">
+          <div
+            className={`flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10 ${
+              isTabletMode ? 'pb-28 md:pb-28' : ''
+            }`}
+            ref={questionContainerRef}
+            data-student-zoom-scroll
+          >
             {activePassage.blocks.map((block) => {
               const blockQuestions = allQuestions.filter((question) => question.blockId === block.id);
               const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
@@ -233,21 +261,46 @@ export function StudentReading({
                         const globalIdx =
                           (firstEntry ? getQuestionStartNumber(allQuestions, firstEntry.id) : null) ??
                           blockStartQ + qIdx;
-                        const isActive = questionEntries.some((entry) => entry.id === currentQuestionId);
-                        const inlineFlags = block.type === 'SENTENCE_COMPLETION' || block.type === 'NOTE_COMPLETION';
-                        const flagId = firstEntry?.id;
-                        const answerKey = firstEntry?.answerKey ?? q.id;
+                          const isActive = questionEntries.some((entry) => entry.id === currentQuestionId);
+                          const inlineFlags = block.type === 'SENTENCE_COMPLETION' || block.type === 'NOTE_COMPLETION';
+                          const flagId = firstEntry?.id;
+                          const answerKey = firstEntry?.answerKey ?? q.id;
 
                         return (
                           <div
                             key={q.id}
                             id={!inlineFlags && flagId ? `question-${flagId}` : undefined}
-                            className={
-                              onToggleFlag && flagId && !inlineFlags
-                                ? 'grid grid-cols-[minmax(0,1fr)_44px] items-start gap-3'
-                                : 'relative'
-                            }
+                            className={`relative ${isTabletMode ? 'space-y-2' : ''}`}
                           >
+                            {isTabletMode && onToggleFlag && flagId && !inlineFlags ? (
+                              <div className="flex justify-end">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onToggleFlag(flagId);
+                                  }}
+                                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition-all ${
+                                    flags[flagId]
+                                      ? 'bg-amber-700 text-white border-amber-700'
+                                      : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                                  }`}
+                                  title={flags[flagId] ? 'Unflag question' : 'Flag question'}
+                                >
+                                  <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
+                                </button>
+                              </div>
+                            ) : null}
+                            {!isTabletMode && onToggleFlag && flagId && !inlineFlags ? (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); onToggleFlag(flagId); }}
+                                className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
+                                  flags[flagId] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                                }`}
+                                title={flags[flagId] ? 'Unflag question' : 'Flag question'}
+                              >
+                                <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
+                              </button>
+                            ) : null}
                             <QuestionRenderer
                               question={q}
                               block={block}
@@ -260,22 +313,10 @@ export function StudentReading({
                               currentQuestionId={currentQuestionId}
                               flags={flags}
                               onToggleFlag={onToggleFlag}
+                              tabletMode={isTabletMode}
                               highlightEnabled={highlightEnabled}
                               highlightColor={highlightColor}
                             />
-                            {onToggleFlag && flagId && !inlineFlags ? (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); onToggleFlag(flagId); }}
-                                className={`min-h-11 min-w-11 rounded-full flex items-center justify-center transition-all shadow-sm ${
-                                  flags[flagId] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-                                }`}
-                                aria-label={flags[flagId] ? 'Unflag question' : 'Flag question'}
-                                title={flags[flagId] ? 'Unflag question' : 'Flag question'}
-                              >
-                                <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
-                              </button>
-                            ) : null}
                           </div>
                         );
                       })
@@ -283,12 +324,37 @@ export function StudentReading({
                       <div
                         key={block.id}
                         id={singleBlockQuestion ? `question-${singleBlockQuestion.id}` : undefined}
-                        className={
-                          onToggleFlag && singleBlockQuestion
-                            ? 'grid grid-cols-[minmax(0,1fr)_44px] items-start gap-3'
-                            : 'relative'
-                        }
+                        className="relative"
                       >
+                        {isTabletMode && onToggleFlag && singleBlockQuestion ? (
+                          <div className="mb-2 flex justify-end">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleFlag(singleBlockQuestion.id);
+                              }}
+                              className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition-all ${
+                                flags[singleBlockQuestion.id]
+                                  ? 'bg-amber-700 text-white border-amber-700'
+                                  : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                              }`}
+                              title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
+                            >
+                              <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
+                            </button>
+                          </div>
+                        ) : null}
+                        {!isTabletMode && onToggleFlag && singleBlockQuestion ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onToggleFlag(singleBlockQuestion.id); }}
+                            className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
+                              flags[singleBlockQuestion.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
+                            }`}
+                            title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
+                          >
+                            <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
+                          </button>
+                        ) : null}
                         <QuestionRenderer
                           question={null}
                           block={block}
@@ -301,22 +367,10 @@ export function StudentReading({
                           currentQuestionId={currentQuestionId}
                           flags={flags}
                           onToggleFlag={onToggleFlag}
+                          tabletMode={isTabletMode}
                           highlightEnabled={highlightEnabled}
                           highlightColor={highlightColor}
                         />
-                        {onToggleFlag && singleBlockQuestion ? (
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); onToggleFlag(singleBlockQuestion.id); }}
-                            className={`min-h-11 min-w-11 rounded-full flex items-center justify-center transition-all shadow-sm ${
-                              flags[singleBlockQuestion.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-                            }`}
-                            aria-label={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
-                            title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
-                          >
-                            <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
-                          </button>
-                        ) : null}
                       </div>
                     )}
                   </div>
@@ -325,18 +379,16 @@ export function StudentReading({
             })}
           </div>
 
-          <div className="student-question-stepper absolute right-4 md:right-6 flex shadow-md z-20">
+          <div className={`absolute ${isTabletMode ? 'bottom-4 right-4' : 'bottom-16 md:bottom-20 right-4 md:right-6'} flex shadow-md z-20`}>
             <button 
               onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
-              aria-label="Previous question"
-              className={`min-h-11 min-w-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
+              className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
             >
               <ArrowLeft size={16} strokeWidth={3} />
             </button>
             <button 
               onClick={() => nextQuestion && onNavigate(nextQuestion.id)}
-              aria-label="Next question"
-              className={`min-h-11 min-w-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
+              className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
             >
               <ArrowRight size={16} strokeWidth={3} />
             </button>

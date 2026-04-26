@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { AlertTriangle, ShieldAlert, XOctagon } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { motion } from 'motion/react';
-import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface WarningOverlayProps {
   isOpen: boolean;
@@ -18,7 +17,6 @@ interface WarningOverlayProps {
 
 export function WarningOverlay({ isOpen, severity, message, onAcknowledge, actionButton, showCountdown = true }: WarningOverlayProps) {
   const [countdown, setCountdown] = useState(30);
-  const dialogRef = useFocusTrap(isOpen, severity === 'critical' ? undefined : onAcknowledge);
 
   useEffect(() => {
     if (isOpen && showCountdown && countdown > 0) {
@@ -64,15 +62,7 @@ export function WarningOverlay({ isOpen, severity, message, onAcknowledge, actio
   if (!isOpen) return null;
 
   return (
-    <div
-      ref={dialogRef as React.RefObject<HTMLDivElement>}
-      className="fixed inset-0 z-[100] flex items-center justify-center p-6"
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="student-warning-title"
-      aria-describedby="student-warning-message"
-      tabIndex={-1}
-    >
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -87,12 +77,12 @@ export function WarningOverlay({ isOpen, severity, message, onAcknowledge, actio
         <div className="p-12 text-center flex flex-col items-center">
           <div className="mb-8">{config.icon}</div>
           
-          <h2 id="student-warning-title" className={`text-4xl font-black mb-6 tracking-tight ${config.text}`}>
+          <h2 className={`text-4xl font-black mb-6 tracking-tight ${config.text}`}>
             {config.title}
           </h2>
           
           <div className="bg-white/50 rounded-2xl p-8 mb-10 border border-black/5 shadow-inner">
-            <p id="student-warning-message" className="text-lg font-medium text-gray-800 leading-relaxed">
+            <p className="text-lg font-medium text-gray-800 leading-relaxed">
               {message}
             </p>
           </div>

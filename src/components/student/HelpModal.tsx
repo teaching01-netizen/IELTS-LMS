@@ -1,6 +1,5 @@
 import React from 'react';
 import { X, Keyboard, ArrowRight, ArrowLeft, Flag, ChevronDown } from 'lucide-react';
-import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface HelpModalProps {
   isOpen: boolean;
@@ -8,32 +7,19 @@ interface HelpModalProps {
 }
 
 export function HelpModal({ isOpen, onClose }: HelpModalProps) {
-  const dialogRef = useFocusTrap(isOpen, onClose);
-
   if (!isOpen) return null;
 
   return (
-    <div
-      ref={dialogRef as React.RefObject<HTMLDivElement>}
-      className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="student-help-title"
-      tabIndex={-1}
-    >
+    <div className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200">
           <div className="flex items-center gap-2 md:gap-3">
             <div className="p-1.5 md:p-2 bg-blue-100 rounded-lg">
               <Keyboard size={20} className="text-blue-600" />
             </div>
-            <h2 id="student-help-title" className="text-lg md:text-xl font-bold text-gray-900">Keyboard Shortcuts</h2>
+            <h2 className="text-lg md:text-xl font-bold text-gray-900">Keyboard Shortcuts</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="min-h-11 min-w-11 p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors"
-            aria-label="Close help"
-          >
+          <button onClick={onClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors">
             <X size={18} />
           </button>
         </div>

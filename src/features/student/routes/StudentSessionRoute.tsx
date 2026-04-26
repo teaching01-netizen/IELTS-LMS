@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { StudentAppWrapper } from '@components/student/StudentAppWrapper';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
+import { useAuthSession } from '../../auth/authSession';
 import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRouteData';
 
 /**
@@ -13,6 +14,7 @@ import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRout
 export function StudentSessionRoute() {
   const { scheduleId, studentId } = useParams<{ scheduleId: string; studentId?: string }>();
   const navigate = useNavigate();
+  const { logoutAll } = useAuthSession();
   const {
     attemptSnapshot,
     error,
@@ -24,7 +26,13 @@ export function StudentSessionRoute() {
   } =
     useStudentSessionRouteData(scheduleId, studentId);
 
-  const navigateToStudentCheckIn = () => {
+  const navigateToStudentCheckIn = async () => {
+    try {
+      await logoutAll();
+    } catch {
+      // Continue to the student check-in flow even if the backend logout request fails.
+    }
+
     if (scheduleId) {
       navigate(`/student/${scheduleId}`);
       return;

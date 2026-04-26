@@ -27,6 +27,7 @@ import { ProtectedInput } from './ProtectedInput';
 import { FormattedText } from './FormattedText';
 import { stripBoldMarkdown } from '../../utils/boldMarkdown';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
+import { StudentZoomableMedia } from './StudentZoomableMedia';
 import type { StudentHighlightColor } from './highlightPalette';
 
 interface QuestionRendererProps {
@@ -49,6 +50,7 @@ interface QuestionRendererProps {
   currentQuestionId?: string | null | undefined;
   flags?: Record<string, boolean> | undefined;
   onToggleFlag?: ((id: string) => void) | undefined;
+  tabletMode?: boolean | undefined;
   highlightEnabled?: boolean | undefined;
   highlightColor?: StudentHighlightColor | undefined;
   security?: {
@@ -70,6 +72,7 @@ export function QuestionRenderer({
   currentQuestionId = null,
   flags = {},
   onToggleFlag,
+  tabletMode = false,
   highlightEnabled = false,
   highlightColor,
   security = { preventAutofill: false, preventAutocorrect: false },
@@ -77,6 +80,8 @@ export function QuestionRenderer({
   studentId,
 }: QuestionRendererProps) {
   const stringArrayAnswer = Array.isArray(answer) ? answer : [];
+  const fieldIndentClass = tabletMode ? 'ml-0' : 'ml-9';
+  const inputWidthClass = tabletMode ? 'max-w-full' : 'max-w-md';
 
   const getSlotId = (index: number, fallback: string) => slotIds[index] ?? fallback;
   const getSlotClassName = (slotId: string) => {
@@ -94,7 +99,7 @@ export function QuestionRenderer({
       <button
         type="button"
         onClick={() => onToggleFlag(slotId)}
-        className={`inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
+        className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
           flags[slotId]
             ? 'border-amber-700 bg-amber-700 text-white'
             : 'border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700'
@@ -125,13 +130,13 @@ export function QuestionRenderer({
   ) => (
     <div id={`question-${slotId}`} className={getSlotClassName(slotId)}>
       <div className="flex items-center gap-3">
-        <span className="min-w-[32px] font-bold text-gray-900">{slotNumber}.</span>
+        <span className="min-w-[2rem] font-bold text-gray-900">{slotNumber}.</span>
         <ProtectedInput
           type="text"
           name={slotId}
           value={value}
           onChange={(event) => changeValue(event.target.value)}
-          className="w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
           placeholder="Enter answer..."
           security={security}
           sessionId={sessionId}
@@ -143,7 +148,7 @@ export function QuestionRenderer({
       {extraCopy ? (
         <FormattedText
           as="p"
-          className="mt-2 pl-11 text-sm text-gray-600"
+          className={`mt-2 text-sm text-gray-600 ${tabletMode ? 'pl-0' : 'pl-11'}`}
           text={extraCopy}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
@@ -162,7 +167,7 @@ export function QuestionRenderer({
     return (
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3 items-start">
-          <div className="mt-0.5 flex h-[24px] min-w-[24px] items-center justify-center border-2 border-blue-500 text-sm font-bold text-blue-600">
+          <div className="mt-0.5 flex h-6 min-w-[1.75rem] items-center justify-center border-2 border-blue-500 text-[length:var(--student-chip-font-size)] font-bold text-blue-600">
             {number}
           </div>
           <FormattedText
@@ -173,7 +178,7 @@ export function QuestionRenderer({
             highlightColor={highlightColor}
           />
         </legend>
-        <div className="ml-9 flex flex-col gap-3">
+        <div className={`${fieldIndentClass} flex flex-col gap-3`}>
           {options.map((option) => (
             <label key={option} className="flex items-center gap-3 cursor-pointer">
               <input
@@ -196,7 +201,7 @@ export function QuestionRenderer({
     return (
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <span className="min-w-[24px] font-bold text-gray-900">{number}.</span>
+          <span className="min-w-[1.75rem] font-bold text-gray-900">{number}.</span>
           <FormattedText
             as="span"
             className="text-gray-800"
@@ -205,13 +210,13 @@ export function QuestionRenderer({
             highlightColor={highlightColor}
           />
         </div>
-        <div className="ml-9 mt-2">
+        <div className={`${fieldIndentClass} mt-2`}>
           <ProtectedInput
             type="text"
             name={q.id}
             value={typeof answer === 'string' ? answer : ''}
             onChange={(event) => onChange(event.target.value)}
-            className="w-full max-w-md rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
             placeholder="Enter answer..."
             security={security}
             sessionId={sessionId}
@@ -226,13 +231,15 @@ export function QuestionRenderer({
   const renderMatching = (matchingBlock: MatchingBlock, q: MatchingQuestion) => (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-4">
-        <span className="min-w-[24px] font-bold text-gray-900">{number}.</span>
-        <span className="font-medium text-gray-800">Paragraph {q.paragraphLabel}</span>
+          <span className="min-w-[1.75rem] font-bold text-gray-900">{number}.</span>
+        <span className="font-medium text-gray-800 text-[length:var(--student-control-font-size)]">
+          Paragraph {q.paragraphLabel}
+        </span>
 
         <select
           value={typeof answer === 'string' ? answer : ''}
           onChange={(event) => onChange(event.target.value)}
-          className="max-w-xs flex-1 rounded-md border-2 border-gray-300 px-3 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          className={`flex-1 rounded-md border-2 border-gray-300 px-3 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${tabletMode ? 'max-w-full' : 'max-w-xs'}`}
           aria-label={`Heading selection for question ${number}`}
         >
           <option value="">Choose heading…</option>
@@ -266,7 +273,7 @@ export function QuestionRenderer({
     return (
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3">
-          <span className="min-w-[24px] font-bold text-gray-900">{blockNum}.</span>
+          <span className="min-w-[1.75rem] font-bold text-gray-900">{blockNum}.</span>
         <FormattedText
           as="span"
           className="text-gray-800"
@@ -275,7 +282,7 @@ export function QuestionRenderer({
           highlightColor={highlightColor}
         />
         </legend>
-        <div className="ml-9 space-y-3">
+        <div className={`${fieldIndentClass} space-y-3`}>
           {mcqBlock.options?.map((option, index) => {
             const letter = String.fromCharCode(65 + index);
             const isSelected = selectedOptions.includes(option.id);
@@ -315,7 +322,7 @@ export function QuestionRenderer({
             );
           })}
         </div>
-        <div className="ml-9 text-sm font-medium text-gray-500">
+        <div className={`${fieldIndentClass} text-[length:var(--student-meta-font-size)] font-medium text-gray-500`}>
           Selections: {selectedOptions.length}/{mcqBlock.requiredSelections} required
         </div>
       </fieldset>
@@ -324,42 +331,26 @@ export function QuestionRenderer({
 
   const renderMap = (mapBlock: MapBlock, q: MapQuestion, num: number) => (
     <div className="flex flex-col gap-4">
-      {getImageUrlCandidates(mapBlock.assetUrl ?? '')[0] ? (
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-          <img
-            src={getImageUrlCandidates(mapBlock.assetUrl ?? '')[0]}
-            alt="Map reference"
-            className="h-auto w-full object-contain"
-            referrerPolicy="no-referrer"
-            data-candidate-index={0}
-            onError={(event) => {
-              const candidates = getImageUrlCandidates(mapBlock.assetUrl ?? '');
-              const img = event.currentTarget;
-              const currentIndex = Number(img.dataset['candidateIndex'] ?? '0');
-              const nextIndex = currentIndex + 1;
-              const nextSrc = candidates[nextIndex];
-              if (nextSrc) {
-                img.dataset['candidateIndex'] = String(nextIndex);
-                img.src = nextSrc;
-              }
-            }}
-          />
-        </div>
-      ) : null}
+      <StudentZoomableMedia
+        sources={getImageUrlCandidates(mapBlock.assetUrl ?? '')}
+        alt="Map reference"
+        label="Map reference image"
+        hint="Tap to zoom the map"
+      />
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <span className="min-w-[24px] font-bold text-gray-900">{num}.</span>
+          <span className="min-w-[1.75rem] font-bold text-gray-900">{num}.</span>
           <span className="text-gray-800">
             Label <FormattedText as="span" className="text-gray-800" text={q.label} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
           </span>
         </div>
-        <div className="ml-9 mt-2">
+        <div className={`${fieldIndentClass} mt-2`}>
           <ProtectedInput
             type="text"
             name={q.id}
             value={typeof answer === 'string' ? answer : ''}
             onChange={(event) => onChange(event.target.value)}
-            className="w-full max-w-md rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
             placeholder="Enter label..."
             security={security}
             sessionId={sessionId}
@@ -374,7 +365,7 @@ export function QuestionRenderer({
   const renderSingleMCQ = (mcqBlock: SingleMCQBlock, blockNum: number) => (
     <fieldset className="flex flex-col gap-4">
       <legend className="flex gap-3">
-        <span className="min-w-[24px] font-bold text-gray-900">{blockNum}.</span>
+        <span className="min-w-[1.75rem] font-bold text-gray-900">{blockNum}.</span>
         <FormattedText
           as="span"
           className="text-gray-800"
@@ -383,7 +374,7 @@ export function QuestionRenderer({
           highlightColor={highlightColor}
         />
       </legend>
-      <div className="ml-9 space-y-3">
+      <div className={`${fieldIndentClass} space-y-3`}>
         {mcqBlock.options?.map((option, index) => {
           const letter = String.fromCharCode(65 + index);
           return (
@@ -411,16 +402,16 @@ export function QuestionRenderer({
     return (
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <span className="min-w-[24px] font-bold text-gray-900">{num}.</span>
+          <span className="min-w-[1.75rem] font-bold text-gray-900">{num}.</span>
           <FormattedText as="span" className="text-gray-800" text={q.prompt} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
         </div>
-        <div className="ml-9 mt-2">
+        <div className={`${fieldIndentClass} mt-2`}>
           <ProtectedInput
             type="text"
             name={q.id}
             value={typeof answer === 'string' ? answer : ''}
             onChange={(event) => onChange(event.target.value)}
-            className="w-full max-w-md rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
             placeholder="Enter answer..."
             security={security}
             sessionId={sessionId}
@@ -450,13 +441,15 @@ export function QuestionRenderer({
                     getSlotId(index, `${q.id}:${index}`),
                   )}`}
                 >
-                  <span className="min-w-[24px] text-sm font-bold text-blue-700">{number + index}</span>
+                  <span className="min-w-[1.75rem] text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
+                    {number + index}
+                  </span>
                   <ProtectedInput
                     type="text"
                     name={getSlotId(index, `${q.id}:${index}`)}
                     value={stringArrayAnswer[index] ?? ''}
                     onChange={(event) => updateIndexedAnswer(index, event.target.value, blanks)}
-                    className="w-28 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className={`w-28 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${tabletMode ? 'max-w-full' : ''}`}
                     placeholder="Answer..."
                     security={security}
                     sessionId={sessionId}
@@ -490,13 +483,15 @@ export function QuestionRenderer({
                     getSlotId(index, `${noteQuestion.id}:${index}`),
                   )}`}
                 >
-                  <span className="min-w-[24px] text-sm font-bold text-blue-700">{number + index}</span>
+                  <span className="min-w-[1.75rem] text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
+                    {number + index}
+                  </span>
                   <ProtectedInput
                     type="text"
                     name={getSlotId(index, `${noteQuestion.id}:${index}`)}
                     value={stringArrayAnswer[index] ?? ''}
                     onChange={(event) => updateIndexedAnswer(index, event.target.value, blanks)}
-                    className="w-28 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className={`w-28 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${tabletMode ? 'max-w-full' : ''}`}
                     placeholder="Answer..."
                     security={security}
                     sessionId={sessionId}
@@ -515,32 +510,18 @@ export function QuestionRenderer({
 
   const renderDiagramLabeling = (diagramBlock: DiagramLabelingBlock) => (
     <div className="flex flex-col gap-4">
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-        {getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0] ? (
-          <div className="relative">
-            <img
-              src={getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0]}
-              alt="Diagram reference"
-              className="h-auto w-full object-contain"
-              referrerPolicy="no-referrer"
-              data-candidate-index={0}
-              onError={(event) => {
-                const candidates = getImageUrlCandidates(diagramBlock.imageUrl ?? '');
-                const img = event.currentTarget;
-                const currentIndex = Number(img.dataset['candidateIndex'] ?? '0');
-                const nextIndex = currentIndex + 1;
-                const nextSrc = candidates[nextIndex];
-                if (nextSrc) {
-                  img.dataset['candidateIndex'] = String(nextIndex);
-                  img.src = nextSrc;
-                }
-              }}
-            />
-          </div>
-        ) : (
+      {getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0] ? (
+        <StudentZoomableMedia
+          sources={getImageUrlCandidates(diagramBlock.imageUrl ?? '')}
+          alt="Diagram reference"
+          label="Diagram reference image"
+          hint="Tap to zoom the diagram"
+        />
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
           <div className="p-6 text-center text-sm text-gray-500">Add a diagram to support this question.</div>
-        )}
-      </div>
+        </div>
+      )}
       <div className="space-y-3">
         {diagramBlock.labels.map((label, index) =>
           renderTextField(
@@ -615,7 +596,9 @@ export function QuestionRenderer({
                       id={`question-${slot.slotId}`}
                       className={`border border-gray-200 px-3 py-2 align-top ${getSlotClassName(slot.slotId)}`}
                     >
-                      <div className="mb-2 text-sm font-bold text-blue-700">{number + slot.index}</div>
+                      <div className="mb-2 text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
+                        {number + slot.index}
+                      </div>
                       <ProtectedInput
                         type="text"
                         name={slot.slotId}
@@ -656,14 +639,14 @@ export function QuestionRenderer({
             <div key={item.id} id={`question-${slotId}`} className={getSlotClassName(slotId)}>
               <div className="flex flex-col gap-3 md:flex-row md:items-center">
                 <div className="flex items-start gap-3 md:flex-1">
-                  <span className="min-w-[32px] font-bold text-gray-900">{number + index}.</span>
+                  <span className="min-w-[2rem] font-bold text-gray-900">{number + index}.</span>
                   <FormattedText as="span" className="text-gray-800" text={item.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </div>
                 <div className="flex items-center gap-3">
                   <select
                     value={typeof stringArrayAnswer[index] === 'string' ? stringArrayAnswer[index] : ''}
                     onChange={(event) => updateIndexedAnswer(index, event.target.value, classificationBlock.items.length)}
-                    className="min-w-[180px] rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="min-w-[11rem] rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                     aria-label={`Category selection for question ${number + index}`}
                   >
                     <option value="">Choose category…</option>
@@ -699,14 +682,14 @@ export function QuestionRenderer({
             <div key={feature.id} id={`question-${slotId}`} className={getSlotClassName(slotId)}>
               <div className="flex flex-col gap-3 md:flex-row md:items-center">
                 <div className="flex items-start gap-3 md:flex-1">
-                  <span className="min-w-[32px] font-bold text-gray-900">{number + index}.</span>
+                  <span className="min-w-[2rem] font-bold text-gray-900">{number + index}.</span>
                   <FormattedText as="span" className="text-gray-800" text={feature.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </div>
                 <div className="flex items-center gap-3">
                   <select
                     value={typeof stringArrayAnswer[index] === 'string' ? stringArrayAnswer[index] : ''}
                     onChange={(event) => updateIndexedAnswer(index, event.target.value, matchingFeaturesBlock.features.length)}
-                    className="min-w-[180px] rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="min-w-[11rem] rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                     aria-label={`Matching selection for question ${number + index}`}
                   >
                     <option value="">Choose match…</option>

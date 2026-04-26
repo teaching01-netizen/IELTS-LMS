@@ -231,7 +231,7 @@ describe('Student Provider Runtime Integration', () => {
     });
   });
 
-  it('handles runtime waitingForNextSection by showing blocking overlay', async () => {
+  it('handles runtime waitingForNextSection by showing blocking overlay', () => {
     runtimeSnapshot.waitingForNextSection = true;
     runtimeSnapshot.currentSectionKey = 'reading';
     runtimeSnapshot.sections[0].status = 'completed';
@@ -247,9 +247,7 @@ describe('Student Provider Runtime Integration', () => {
     );
 
     // Should show cohort blocking overlay when waiting for next section
-    await waitFor(() => {
-      expect(screen.getByText(/waiting for cohort advance/i)).toBeInTheDocument();
-    });
+    expect(screen.getByText(/waiting for cohort advance/i)).toBeInTheDocument();
   });
 
   it('handles runtime paused status by showing blocking overlay', () => {
