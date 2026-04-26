@@ -1,24 +1,28 @@
-SELECT CONCAT(
-    COLUMN_TYPE,
-    IF(CHARACTER_SET_NAME IS NULL, '', CONCAT(' CHARACTER SET ', CHARACTER_SET_NAME)),
-    IF(COLLATION_NAME IS NULL, '', CONCAT(' COLLATE ', COLLATION_NAME))
-)
-INTO @student_attempt_presence_attempt_id_type
-FROM information_schema.columns
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'student_attempts'
-  AND COLUMN_NAME = 'id';
+SET @student_attempt_presence_attempt_id_type = (
+    SELECT CONCAT(
+        COLUMN_TYPE,
+        IF(CHARACTER_SET_NAME IS NULL, '', CONCAT(' CHARACTER SET ', CHARACTER_SET_NAME)),
+        IF(COLLATION_NAME IS NULL, '', CONCAT(' COLLATE ', COLLATION_NAME))
+    )
+    FROM information_schema.columns
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'student_attempts'
+      AND COLUMN_NAME = 'id'
+    LIMIT 1
+);
 
-SELECT CONCAT(
-    COLUMN_TYPE,
-    IF(CHARACTER_SET_NAME IS NULL, '', CONCAT(' CHARACTER SET ', CHARACTER_SET_NAME)),
-    IF(COLLATION_NAME IS NULL, '', CONCAT(' COLLATE ', COLLATION_NAME))
-)
-INTO @student_attempt_presence_schedule_id_type
-FROM information_schema.columns
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'exam_schedules'
-  AND COLUMN_NAME = 'id';
+SET @student_attempt_presence_schedule_id_type = (
+    SELECT CONCAT(
+        COLUMN_TYPE,
+        IF(CHARACTER_SET_NAME IS NULL, '', CONCAT(' CHARACTER SET ', CHARACTER_SET_NAME)),
+        IF(COLLATION_NAME IS NULL, '', CONCAT(' COLLATE ', COLLATION_NAME))
+    )
+    FROM information_schema.columns
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'exam_schedules'
+      AND COLUMN_NAME = 'id'
+    LIMIT 1
+);
 
 SET @student_attempt_presence_attempt_id_type =
     COALESCE(@student_attempt_presence_attempt_id_type, 'VARCHAR(36)');

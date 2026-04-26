@@ -246,6 +246,20 @@ CREATE INDEX idx_foo_id ON foo(id);\n";
         );
     }
 
+    #[test]
+    fn student_attempt_presence_avoids_select_into_user_variables() {
+        let presence_sql =
+            std::fs::read_to_string("../../migrations/0014_student_attempt_presence.sql")
+                .expect("read student attempt presence migration");
+
+        assert!(
+            !presence_sql.contains("INTO @"),
+            "TiDB rejects SELECT ... INTO @user_variable in startup migrations"
+        );
+        assert!(presence_sql.contains("SET @student_attempt_presence_attempt_id_type = ("));
+        assert!(presence_sql.contains("SET @student_attempt_presence_schedule_id_type = ("));
+    }
+
     fn column_type(sql: &str, table: &str, column: &str) -> Option<String> {
         let create_marker = format!("CREATE TABLE IF NOT EXISTS {table}");
         let table_sql = sql.split(&create_marker).nth(1)?;
