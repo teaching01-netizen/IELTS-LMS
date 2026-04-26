@@ -1,7 +1,9 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi, afterEach } from 'vitest';
+import { AuthSessionProvider } from '../../../auth/authSession';
+import { authService } from '../../../../services/authService';
 import { StudentSessionRoute } from '../StudentSessionRoute';
 
 const navigateMock = vi.fn();
@@ -27,9 +29,11 @@ vi.mock('@components/student/StudentAppWrapper', () => ({
 function renderRoute(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/student/:scheduleId/:studentId" element={<StudentSessionRoute />} />
-      </Routes>
+      <AuthSessionProvider>
+        <Routes>
+          <Route path="/student/:scheduleId/:studentId" element={<StudentSessionRoute />} />
+        </Routes>
+      </AuthSessionProvider>
     </MemoryRouter>,
   );
 }
@@ -42,7 +46,9 @@ describe('StudentSessionRoute', () => {
     vi.restoreAllMocks();
   });
 
-  it('routes missing state back to student check-in instead of /admin', () => {
+  it('routes missing state back to student check-in instead of /admin', async () => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue(null);
+    vi.spyOn(authService, 'logoutAll').mockResolvedValue();
     useStudentSessionRouteDataMock.mockReturnValue({
       attemptSnapshot: null,
       error: null,
@@ -56,10 +62,14 @@ describe('StudentSessionRoute', () => {
     renderRoute('/student/sched-1/alice');
     fireEvent.click(screen.getByRole('button', { name: /back to check-in/i }));
 
-    expect(navigateMock).toHaveBeenCalledWith('/student/sched-1');
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith('/student/sched-1');
+    });
   });
 
-  it('routes invalid access code errors back to check-in', () => {
+  it('routes invalid access code errors back to check-in', async () => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue(null);
+    vi.spyOn(authService, 'logoutAll').mockResolvedValue();
     useStudentSessionRouteDataMock.mockReturnValue({
       attemptSnapshot: null,
       error: 'Invalid access code. Please check in again.',
@@ -73,10 +83,25 @@ describe('StudentSessionRoute', () => {
     renderRoute('/student/sched-1/precheck');
     fireEvent.click(screen.getByRole('button', { name: /back to check-in/i }));
 
-    expect(navigateMock).toHaveBeenCalledWith('/student/sched-1');
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith('/student/sched-1');
+    });
   });
 
-  it('routes student exit back to student check-in instead of /admin', () => {
+  it('routes student exit back to student check-in instead of /admin', async () => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue({
+      user: {
+        id: 'student-1',
+        email: 'student@example.com',
+        displayName: 'Student User',
+        role: 'student',
+        state: 'active',
+      },
+      csrfToken: 'csrf-student',
+      expiresAt: '2026-01-01T12:00:00.000Z',
+    });
+    const logoutAllMock = vi.spyOn(authService, 'logoutAll').mockResolvedValue();
+
     StudentAppWrapperMock.mockImplementation((props: any) => (
       <button onClick={props.onExit}>Exit</button>
     ));
@@ -92,8 +117,12 @@ describe('StudentSessionRoute', () => {
     });
 
     renderRoute('/student/sched-1/alice');
+
     fireEvent.click(screen.getByRole('button', { name: /exit/i }));
 
+    await waitFor(() => {
+      expect(logoutAllMock).toHaveBeenCalledTimes(1);
+    });
     expect(navigateMock).toHaveBeenCalledWith('/student/sched-1');
   });
 });

@@ -294,7 +294,7 @@ export function StudentWriting({
             </div>
             {currentChart && (
               <div className="mb-5 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.22em] mb-3">
+                <p className="text-[length:var(--student-meta-font-size)] font-black text-gray-400 uppercase tracking-[0.22em] mb-3">
                   Stimulus Chart
                 </p>
                 {currentChart.imageSrc ? (
@@ -304,7 +304,9 @@ export function StudentWriting({
                     {currentChart.values.map((value, index) => (
                       <div key={`${currentChart.labels[index]}-${value}`} className="flex-1 text-center">
                         <div className="mx-auto rounded-t-2xl bg-blue-500" style={{ height: `${Math.max(16, value * 12)}px` }} />
-                        <p className="text-[11px] font-semibold text-gray-500 mt-2">{currentChart.labels[index]}</p>
+                        <p className="text-[length:var(--student-meta-font-size)] font-semibold text-gray-500 mt-2">
+                          {currentChart.labels[index]}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -376,7 +378,9 @@ export function StudentWriting({
 	            <div className="border-t border-gray-200 p-3 md:p-5 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs md:text-sm flex-shrink-0">
 	              <div className="flex gap-4 md:gap-8 w-full sm:w-auto">
 	                <div className="flex flex-col">
-	                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Word Count</span>
+	                  <span className="text-[length:var(--student-meta-font-size)] font-bold text-gray-400 uppercase tracking-widest">
+	                    Word Count
+	                  </span>
 	                  <span className={`text-lg md:text-xl font-black ${
 	                    isOptimal ? 'text-emerald-600' :
 	                    isOverLength ? 'text-red-600' :
@@ -406,7 +410,7 @@ export function StudentWriting({
                 setActiveTaskId(task.id);
                 onNavigate(task.id);
               }}
-              className={`min-w-[72px] md:min-w-[88px] px-3 md:px-4 py-1.5 md:py-2 rounded-sm text-xs md:text-sm font-bold transition-all flex-shrink-0 ${
+              className={`min-w-[5rem] md:min-w-[5.75rem] px-3 md:px-4 py-1.5 md:py-2 rounded-sm text-[length:var(--student-control-font-size)] font-bold transition-all flex-shrink-0 ${
                 activeTaskId === task.id
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-100'
                   : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
@@ -418,7 +422,7 @@ export function StudentWriting({
           {showSubmitButton ? (
             <button
               onClick={handleSubmitClick}
-              className="min-w-[132px] md:min-w-[156px] px-4 md:px-6 py-1.5 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-sm text-xs md:text-sm font-bold transition-colors shadow-md flex-shrink-0"
+              className="min-w-[8.25rem] md:min-w-[9.5rem] px-4 md:px-6 py-1.5 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-sm text-[length:var(--student-control-font-size)] font-bold transition-colors shadow-md flex-shrink-0"
             >
               Review & Submit
             </button>

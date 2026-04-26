@@ -214,6 +214,52 @@ describe('student question experience', () => {
     expect(onOpenAccessibility).toHaveBeenCalledTimes(1);
   });
 
+  it('renders a compact tablet controls panel in the header', () => {
+    const onOpenAccessibility = vi.fn();
+    const onZoomIn = vi.fn();
+    const onZoomOut = vi.fn();
+    const onZoomReset = vi.fn();
+    const onHighlightModeToggle = vi.fn();
+    const onHighlightColorChange = vi.fn();
+
+    render(
+      <StudentHeader
+        onExit={() => {}}
+        timeRemaining={1200}
+        isExamActive
+        tabletMode
+        zoom={1.1}
+        highlightEnabled={false}
+        highlightColor="yellow"
+        onOpenAccessibility={onOpenAccessibility}
+        onZoomIn={onZoomIn}
+        onZoomOut={onZoomOut}
+        onZoomReset={onZoomReset}
+        onHighlightModeToggle={onHighlightModeToggle}
+        onHighlightColorChange={onHighlightColorChange}
+      />,
+    );
+
+    expect(screen.queryByTestId('zoom-controls')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /open tablet controls/i }));
+
+    const panel = screen.getByRole('dialog', { name: /tablet controls/i });
+    expect(within(panel).getByTestId('zoom-controls')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: /accessibility settings/i })).toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole('button', { name: /zoom in/i }));
+    fireEvent.click(within(panel).getByRole('button', { name: /select amber highlight color/i }));
+    fireEvent.click(within(panel).getByRole('button', { name: /accessibility settings/i }));
+
+    expect(onZoomIn).toHaveBeenCalledTimes(1);
+    expect(onHighlightColorChange).toHaveBeenCalledWith('amber');
+    expect(onHighlightModeToggle).toHaveBeenCalledTimes(1);
+    expect(onOpenAccessibility).toHaveBeenCalledTimes(1);
+    expect(onZoomOut).not.toHaveBeenCalled();
+    expect(onZoomReset).not.toHaveBeenCalled();
+  });
+
   it('hides the header exit control when requested', () => {
     render(
       <StudentHeader
@@ -386,6 +432,112 @@ describe('student question experience', () => {
     const trackPanel = screen.getByText('Listening Audio Track').closest('div');
     expect(trackPanel).not.toBeNull();
     expect(within(trackPanel as HTMLElement).getByText('02:00')).toBeInTheDocument();
+  });
+
+  it('moves the listening flag control into reserved inline space in tablet mode', () => {
+    const onToggleFlag = vi.fn();
+
+    const state: ExamState = {
+      title: 'Listening Test',
+      type: 'Academic',
+      activeModule: 'listening',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: {
+            enabled: true,
+            order: 1,
+            duration: 30,
+            autoContinue: true,
+            allowedQuestionTypes: ['TFNG'],
+          },
+          reading: {
+            enabled: false,
+            order: 2,
+            duration: 60,
+            autoContinue: true,
+            allowedQuestionTypes: ['TFNG'],
+          },
+          writing: {
+            enabled: false,
+            order: 3,
+            duration: 60,
+            autoContinue: true,
+            allowedQuestionTypes: ['TFNG'],
+          },
+          speaking: {
+            enabled: false,
+            order: 4,
+            duration: 15,
+            autoContinue: true,
+            allowedQuestionTypes: ['TFNG'],
+          },
+        },
+      },
+      reading: { passages: [] },
+      listening: {
+        parts: [
+          {
+            id: 'part-1',
+            title: 'Part 1',
+            audioUrl: '/audio/test.mp3',
+            transcript: '',
+            pins: [],
+            blocks: [
+              {
+                id: 'tfng-1',
+                type: 'TFNG',
+                instruction: 'Answer the question.',
+                mode: 'TFNG',
+                questions: [
+                  {
+                    id: 'q1',
+                    statement: 'The statement is true.',
+                    correctAnswer: 'T',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      writing: {
+        task1Prompt: '',
+        task2Prompt: '',
+      },
+      speaking: {
+        part1Topics: [],
+        cueCard: '',
+        part3Discussion: [],
+      },
+    };
+
+    render(
+      <StudentListening
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+        flags={{ q1: true }}
+        onToggleFlag={onToggleFlag}
+        tabletMode
+      />,
+    );
+
+    const flagButton = screen.getByRole('button', { name: /unflag question/i });
+    expect(flagButton).toHaveClass('inline-flex');
+    expect(flagButton).not.toHaveClass('absolute');
+
+    fireEvent.click(flagButton);
+    expect(onToggleFlag).toHaveBeenCalledWith('q1');
   });
 
   it('disables the listening audio player when staff turns off audio playback', () => {

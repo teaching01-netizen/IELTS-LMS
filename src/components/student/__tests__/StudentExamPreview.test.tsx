@@ -44,14 +44,27 @@ describe('StudentExamPreview', () => {
     expect(screen.getByRole('button', { name: /zoom out/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /zoom in/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /reset zoom/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /enable highlight mode/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open accessibility settings/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
     expect(zoomPercent).toHaveTextContent('110%');
     expect(zoomControls).toHaveClass('w-[11.5rem]');
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: /enable highlight mode/i }));
-    expect(screen.getByRole('button', { name: /disable highlight mode/i })).toBeInTheDocument();
+  it('updates the preview shell font size when the accessibility setting changes', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <StudentExamPreview state={createExamState()} examId="exam-1" initialModule="writing" />
+      </MemoryRouter>,
+    );
+
+    const shell = container.querySelector('.student-exam-shell') as HTMLElement;
+    const initialFontSize = shell.style.fontSize;
+
+    fireEvent.click(screen.getByRole('button', { name: /open accessibility settings/i }));
+    fireEvent.click(screen.getByTestId('font-size-option-large'));
+
+    expect(shell.style.fontSize).not.toBe(initialFontSize);
+    expect(shell.style.fontSize).toContain('clamp');
   });
 });

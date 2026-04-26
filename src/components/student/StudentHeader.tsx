@@ -27,6 +27,7 @@ interface StudentHeaderProps {
   autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | null | undefined;
   onOpenAccessibility?: (() => void) | undefined;
   onOpenNavigator?: (() => void) | undefined;
+  tabletMode?: boolean | undefined;
   zoom?: number | undefined;
   onZoomIn?: (() => void) | undefined;
   onZoomOut?: (() => void) | undefined;
@@ -46,6 +47,7 @@ export function StudentHeader({
   autoSaveStatus,
   onOpenAccessibility,
   onOpenNavigator,
+  tabletMode = false,
   zoom,
   onZoomIn,
   onZoomOut,
@@ -59,13 +61,21 @@ export function StudentHeader({
 }: StudentHeaderProps) {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showHighlightPalette, setShowHighlightPalette] = useState(false);
+  const [showTabletControls, setShowTabletControls] = useState(false);
   const [highlightPaletteStyle, setHighlightPaletteStyle] = useState<React.CSSProperties>({
     top: 0,
     left: 0,
     width: 288,
   });
+  const [tabletControlsStyle, setTabletControlsStyle] = useState<React.CSSProperties>({
+    top: 0,
+    left: 0,
+    width: 320,
+  });
   const highlightButtonRef = useRef<HTMLButtonElement | null>(null);
   const highlightPaletteRef = useRef<HTMLDivElement | null>(null);
+  const tabletControlsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const tabletControlsPanelRef = useRef<HTMLDivElement | null>(null);
   const showZoomControls = zoom !== undefined && onZoomIn && onZoomOut && onZoomReset;
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
   const showHighlightControls = Boolean(onHighlightModeToggle && onHighlightColorChange);
@@ -164,6 +174,65 @@ export function StudentHeader({
     setShowHighlightPalette((open) => !open);
   }, []);
 
+  const updateTabletControlsPosition = useCallback(() => {
+    const button = tabletControlsButtonRef.current;
+    if (!button) {
+      return;
+    }
+
+    const rect = button.getBoundingClientRect();
+    const width = Math.min(336, Math.max(280, window.innerWidth - 24));
+    const left = Math.min(Math.max(12, rect.right - width), Math.max(12, window.innerWidth - width - 12));
+
+    setTabletControlsStyle({
+      top: Math.round(rect.bottom + 10),
+      left: Math.round(left),
+      width,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!tabletMode || !showTabletControls) {
+      return;
+    }
+
+    updateTabletControlsPosition();
+
+    const handleResize = () => {
+      updateTabletControlsPosition();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowTabletControls(false);
+      }
+    };
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (
+        target &&
+        (tabletControlsButtonRef.current?.contains(target) || tabletControlsPanelRef.current?.contains(target))
+      ) {
+        return;
+      }
+
+      setShowTabletControls(false);
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [showTabletControls, tabletMode, updateTabletControlsPosition]);
+
   const handleHighlightColorChange = (color: StudentHighlightColor) => {
     onHighlightColorChange?.(color);
     if (!highlightEnabled) {
@@ -179,8 +248,10 @@ export function StudentHeader({
           <div className="text-gray-900 font-black text-lg md:text-xl lg:text-2xl tracking-tighter" style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif' }}>IELTS</div>
         </div>
         <div className="flex flex-col min-w-0 hidden sm:flex">
-          <div className="font-bold text-[10px] md:text-[11px] text-gray-600 uppercase tracking-widest">Test taker ID</div>
-          <div className="text-xs md:text-sm font-bold text-gray-900 truncate">
+          <div className="font-bold text-[length:var(--student-meta-font-size)] text-gray-600 uppercase tracking-widest">
+            Test taker ID
+          </div>
+          <div className="text-[length:var(--student-control-font-size)] font-bold text-gray-900 truncate">
             {testTakerId ?? '—'}
           </div>
         </div>
@@ -204,9 +275,9 @@ export function StudentHeader({
         </div>
       )}
 
-      <div className="flex items-center gap-1.5 md:gap-2 lg:gap-4 text-gray-700 flex-shrink-0 overflow-x-auto no-scrollbar max-w-full">
-        {autoSaveStatus && (
-          <div className="flex items-center gap-1 md:gap-1.5 text-[9px] md:text-[10px] lg:text-xs font-bold uppercase tracking-wider hidden sm:flex">
+        <div className="flex items-center gap-1.5 md:gap-2 lg:gap-4 text-gray-700 flex-shrink-0 overflow-x-auto no-scrollbar max-w-full">
+          {autoSaveStatus && (
+            <div className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-wider hidden sm:flex">
             {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (
               <>
                 <LoadingMark size="xs" className="bg-gray-300" />
@@ -228,132 +299,278 @@ export function StudentHeader({
             )}
           </div>
         )}
-        {showZoomControls ? (
-          <div
-            data-testid="zoom-controls"
-            className="flex w-[11.5rem] shrink-0 items-center gap-1 rounded-sm border border-gray-200 bg-gray-50 p-1"
-          >
-            <button
-              type="button"
-              onClick={onZoomOut}
-              className="flex h-8 w-8 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
-              aria-label="Zoom out"
-              title="Zoom out"
-            >
-              <Minus size={14} />
-            </button>
-            <div
-              data-testid="zoom-percent"
-              className="w-12 shrink-0 px-1 text-center text-[10px] md:text-xs font-bold text-gray-700 tabular-nums"
-              aria-live="polite"
-              aria-label={zoomPercent !== null ? `Zoom level ${zoomPercent}%` : undefined}
-            >
-              {zoomPercent !== null ? `${zoomPercent}%` : null}
-            </div>
-            <button
-              type="button"
-              onClick={onZoomIn}
-              className="flex h-8 w-8 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
-              aria-label="Zoom in"
-              title="Zoom in"
-            >
-              <Plus size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={onZoomReset}
-              className="flex h-8 w-8 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
-              aria-label="Reset zoom"
-              title="Reset zoom"
-            >
-              <RefreshCw size={14} />
-            </button>
-          </div>
-        ) : null}
-        {showHighlightControls ? (
+        {tabletMode ? (
           <div className="relative">
             <button
-              ref={highlightButtonRef}
+              ref={tabletControlsButtonRef}
               type="button"
-              onClick={handleHighlightButtonClick}
-              className={`flex items-center gap-1 rounded-sm border px-2 py-1 text-[10px] md:text-xs font-bold transition-colors ${
+              onClick={() => setShowTabletControls((open) => !open)}
+              className={`flex items-center gap-1 rounded-sm border px-2.5 py-1.5 text-[length:var(--student-control-font-size)] font-bold transition-colors ${
                 highlightEnabled
                   ? 'border-amber-500 bg-amber-50 text-amber-800'
                   : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300 hover:bg-gray-100'
               }`}
-              aria-expanded={showHighlightPalette}
-              aria-controls="student-highlight-palette"
-              aria-label="Open highlight options"
-              title="Open highlight options"
+              aria-expanded={showTabletControls}
+              aria-label="Open tablet controls"
+              title="Open tablet controls"
             >
               <Highlighter size={14} strokeWidth={2.2} />
-              <span className="hidden sm:inline">Highlight</span>
-              <span className={`h-2.5 w-2.5 rounded-full border border-white shadow-sm ${selectedHighlight.swatchClassName}`} />
+              <span className="hidden sm:inline">Controls</span>
+              {zoomPercent !== null ? (
+                <span className="rounded-full bg-white px-1.5 py-0.5 text-[length:var(--student-meta-font-size)] font-black tabular-nums text-gray-700">
+                  {zoomPercent}%
+                </span>
+              ) : null}
               <ChevronDown size={12} className="hidden sm:inline" />
             </button>
-            {showHighlightPalette ? (
+            {showTabletControls ? (
               <div
-                ref={highlightPaletteRef}
-                id="student-highlight-palette"
+                ref={tabletControlsPanelRef}
                 role="dialog"
-                aria-label="Highlight options"
-                className="fixed z-50 rounded-xl border border-gray-200 bg-white p-3 shadow-2xl"
-                style={highlightPaletteStyle}
+                aria-label="Tablet controls"
+                className="fixed z-50 max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-2xl"
+                style={tabletControlsStyle}
               >
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-gray-500">
-                      Highlight
+                {showZoomControls ? (
+                  <div className="mb-3">
+                    <div className="mb-2 text-[length:var(--student-meta-font-size)] font-black uppercase tracking-[0.18em] text-gray-500">
+                      Zoom
                     </div>
-                    <div className="text-xs text-gray-600">
-                      Pick a color and turn highlight mode on or off.
+                    <div
+                      data-testid="zoom-controls"
+                      className="flex w-full items-center gap-1 rounded-sm border border-gray-200 bg-gray-50 p-1"
+                    >
+                      <button
+                        type="button"
+                        onClick={onZoomOut}
+                        className="flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                        aria-label="Zoom out"
+                        title="Zoom out"
+                      >
+                        <Minus size={16} />
+                      </button>
+                      <div
+                        data-testid="zoom-percent"
+                        className="flex-1 px-1 text-center text-[length:var(--student-meta-font-size)] font-bold text-gray-700 tabular-nums"
+                        aria-live="polite"
+                        aria-label={zoomPercent !== null ? `Zoom level ${zoomPercent}%` : undefined}
+                      >
+                        {zoomPercent !== null ? `${zoomPercent}%` : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={onZoomIn}
+                        className="flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                        aria-label="Zoom in"
+                        title="Zoom in"
+                      >
+                        <Plus size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onZoomReset}
+                        className="flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                        aria-label="Reset zoom"
+                        title="Reset zoom"
+                      >
+                        <RefreshCw size={14} />
+                      </button>
                     </div>
                   </div>
+                ) : null}
+
+                {showHighlightControls ? (
+                  <div className="mb-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[length:var(--student-meta-font-size)] font-black uppercase tracking-[0.18em] text-gray-500">
+                          Highlight
+                        </div>
+                        <div className="text-xs text-gray-600">
+                          Pick a color and turn highlight mode on or off.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onHighlightModeToggle?.();
+                        }}
+                        className={`rounded-full border px-3 py-1.5 text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-wide transition-colors ${
+                          highlightEnabled
+                            ? 'border-amber-500 bg-amber-50 text-amber-800'
+                            : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300'
+                        }`}
+                      >
+                        {highlightEnabled ? 'On' : 'Off'}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {studentHighlightPalette.map((color) => {
+                        const isActive = highlightColor === color.id;
+                        return (
+                          <button
+                            key={color.id}
+                            type="button"
+                            onClick={() => handleHighlightColorChange(color.id)}
+                            className={`rounded-lg border-2 p-2 text-left transition-all ${
+                              isActive
+                                ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
+                                : 'border-gray-200 bg-white hover:border-gray-300'
+                            }`}
+                            aria-pressed={isActive}
+                            aria-label={`Select ${color.label} highlight color`}
+                          >
+                            <div className={`h-6 rounded-md ${color.swatchClassName}`} />
+                            <div className="mt-1 text-xs font-semibold text-gray-900">{color.label}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
+                {onOpenAccessibility ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      onHighlightModeToggle?.();
-                    }}
-                    className={`rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-wide transition-colors ${
-                      highlightEnabled
-                        ? 'border-amber-500 bg-amber-50 text-amber-800'
-                        : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300'
-                    }`}
+                    onClick={onOpenAccessibility}
+                    className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-[length:var(--student-control-font-size)] font-bold text-gray-700 hover:border-gray-300 hover:bg-gray-100"
                   >
-                    {highlightEnabled ? 'On' : 'Off'}
+                    Accessibility settings
                   </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {studentHighlightPalette.map((color) => {
-                    const isActive = highlightColor === color.id;
-                    return (
-                      <button
-                        key={color.id}
-                        type="button"
-                        onClick={() => handleHighlightColorChange(color.id)}
-                        className={`rounded-lg border-2 p-2 text-left transition-all ${
-                          isActive
-                            ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
-                            : 'border-gray-200 bg-white hover:border-gray-300'
-                        }`}
-                        aria-pressed={isActive}
-                        aria-label={`Select ${color.label} highlight color`}
-                      >
-                        <div className={`h-6 rounded-md ${color.swatchClassName}`} />
-                        <div className="mt-1 text-xs font-semibold text-gray-900">{color.label}</div>
-                      </button>
-                    );
-                  })}
-                </div>
+                ) : null}
               </div>
             ) : null}
           </div>
-        ) : null}
+        ) : (
+          <>
+            {showZoomControls ? (
+              <div
+                data-testid="zoom-controls"
+                className="flex w-[11.5rem] shrink-0 items-center gap-1 rounded-sm border border-gray-200 bg-gray-50 p-1"
+              >
+                <button
+                  type="button"
+                  onClick={onZoomOut}
+                  className="flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                  aria-label="Zoom out"
+                  title="Zoom out"
+                >
+                  <Minus size={16} />
+                </button>
+                <div
+                  data-testid="zoom-percent"
+                  className="w-12 shrink-0 px-1 text-center text-[length:var(--student-meta-font-size)] font-bold text-gray-700 tabular-nums"
+                  aria-live="polite"
+                  aria-label={zoomPercent !== null ? `Zoom level ${zoomPercent}%` : undefined}
+                >
+                  {zoomPercent !== null ? `${zoomPercent}%` : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={onZoomIn}
+                  className="flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                  aria-label="Zoom in"
+                  title="Zoom in"
+                >
+                  <Plus size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={onZoomReset}
+                  className="flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                  aria-label="Reset zoom"
+                  title="Reset zoom"
+                >
+                  <RefreshCw size={14} />
+                </button>
+              </div>
+            ) : null}
+            {showHighlightControls ? (
+              <div className="relative">
+                <button
+                  ref={highlightButtonRef}
+                  type="button"
+                  onClick={handleHighlightButtonClick}
+                  className={`flex items-center gap-1 rounded-sm border px-2.5 py-1.5 text-[length:var(--student-control-font-size)] font-bold transition-colors ${
+                    highlightEnabled
+                      ? 'border-amber-500 bg-amber-50 text-amber-800'
+                      : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300 hover:bg-gray-100'
+                  }`}
+                  aria-expanded={showHighlightPalette}
+                  aria-controls="student-highlight-palette"
+                  aria-label="Open highlight options"
+                  title="Open highlight options"
+                >
+                  <Highlighter size={14} strokeWidth={2.2} />
+                  <span className="hidden sm:inline">Highlight</span>
+                  <span className={`h-2.5 w-2.5 rounded-full border border-white shadow-sm ${selectedHighlight.swatchClassName}`} />
+                  <ChevronDown size={12} className="hidden sm:inline" />
+                </button>
+                {showHighlightPalette ? (
+                  <div
+                    ref={highlightPaletteRef}
+                    id="student-highlight-palette"
+                    role="dialog"
+                    aria-label="Highlight options"
+                    className="fixed z-50 max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-2xl"
+                    style={highlightPaletteStyle}
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[length:var(--student-meta-font-size)] font-black uppercase tracking-[0.18em] text-gray-500">
+                          Highlight
+                        </div>
+                        <div className="text-xs text-gray-600">
+                          Pick a color and turn highlight mode on or off.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onHighlightModeToggle?.();
+                        }}
+                        className={`rounded-full border px-3 py-1.5 text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-wide transition-colors ${
+                          highlightEnabled
+                            ? 'border-amber-500 bg-amber-50 text-amber-800'
+                            : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300'
+                        }`}
+                      >
+                        {highlightEnabled ? 'On' : 'Off'}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {studentHighlightPalette.map((color) => {
+                        const isActive = highlightColor === color.id;
+                        return (
+                          <button
+                            key={color.id}
+                            type="button"
+                            onClick={() => handleHighlightColorChange(color.id)}
+                            className={`rounded-lg border-2 p-2 text-left transition-all ${
+                              isActive
+                                ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
+                                : 'border-gray-200 bg-white hover:border-gray-300'
+                            }`}
+                            aria-pressed={isActive}
+                            aria-label={`Select ${color.label} highlight color`}
+                          >
+                            <div className={`h-6 rounded-md ${color.swatchClassName}`} />
+                            <div className="mt-1 text-xs font-semibold text-gray-900">{color.label}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        )}
         {onOpenAccessibility && (
           <button
             type="button"
             onClick={onOpenAccessibility}
-            className="p-1 md:p-1.5 rounded-sm flex-shrink-0"
+            className="p-2 md:p-2.5 rounded-sm flex-shrink-0"
             aria-label="Open accessibility settings"
           >
             <Contrast size={16} strokeWidth={2} />
@@ -363,7 +580,7 @@ export function StudentHeader({
           <button
             type="button"
             onClick={onOpenNavigator}
-            className="flex items-center gap-1 md:gap-1.5 px-2 md:px-2.5 py-1 md:py-1.5 rounded-sm bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs"
+            className="flex items-center gap-1 md:gap-1.5 px-2.5 md:px-3 py-1.5 md:py-2 rounded-sm bg-gray-50 text-gray-900 font-bold text-[length:var(--student-control-font-size)]"
             aria-label="Open question navigator"
           >
             <LayoutGrid size={16} strokeWidth={2} />
@@ -372,11 +589,11 @@ export function StudentHeader({
         )}
         {!isExamActive && (
           <>
-            <button type="button" className="p-1 md:p-1.5 rounded-sm relative hidden sm:block" aria-label="Connection status: Online">
+            <button type="button" className="p-2 md:p-2.5 rounded-sm relative hidden sm:block" aria-label="Connection status: Online">
               <Wifi size={16} strokeWidth={2} />
               <div className="absolute top-1 md:top-1.5 right-1 md:right-1.5 w-1.5 md:w-2 h-1.5 md:h-2 bg-green-600 rounded-full border-2 border-white"></div>
             </button>
-            <button type="button" className="p-1 md:p-1.5 rounded-sm hidden sm:block" aria-label="Notifications">
+            <button type="button" className="p-2 md:p-2.5 rounded-sm hidden sm:block" aria-label="Notifications">
               <Bell size={16} strokeWidth={2} />
             </button>
           </>
@@ -387,8 +604,8 @@ export function StudentHeader({
             <button
               type="button"
               onClick={handleExit}
-              className="flex items-center gap-1 md:gap-1.5 lg:gap-2 px-1.5 md:px-2 lg:px-3 py-1 md:py-1.5 bg-gray-50 text-gray-900 font-bold text-[10px] md:text-xs lg:text-sm rounded-sm flex-shrink-0"
-              aria-label={isExamActive ? "Exit exam" : "Exit preview"}
+              className="flex items-center gap-1 md:gap-1.5 lg:gap-2 px-2 md:px-2.5 lg:px-3 py-1.5 md:py-2 bg-gray-50 text-gray-900 font-bold text-[length:var(--student-control-font-size)] rounded-sm flex-shrink-0"
+              aria-label={isExamActive ? 'Exit exam' : 'Exit preview'}
             >
               <Menu size={14} strokeWidth={2.5} />
               <span className="hidden sm:inline">Exit</span>

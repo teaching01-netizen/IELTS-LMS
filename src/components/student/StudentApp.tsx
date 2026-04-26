@@ -16,7 +16,9 @@ import { StudentWriting } from './StudentWriting';
 import { SubmitConfirmation } from './SubmitConfirmation';
 import { WarningOverlay } from './WarningOverlay';
 import { getFullscreenElement, requestStudentFullscreen } from './fullscreen';
+import { getStudentTypographyScale } from './accessibilityScale';
 import { getStudentHighlightClassName } from './highlightPalette';
+import { useStudentTabletMode } from './tabletMode';
 import { shouldOfferTimeExtension } from './timeExtensionPolicy';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
 import { useStudentRuntime } from './providers/StudentRuntimeProvider';
@@ -114,12 +116,24 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
   const { state: uiState, actions: uiActions } = useStudentUI();
-  useZoomScrollAnchoring(uiState.accessibilitySettings.zoom);
+  const tabletMode = useStudentTabletMode();
+  const studentTypography = getStudentTypographyScale(uiState.accessibilitySettings.fontSize);
+  useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const [finalSubmitStatus, setFinalSubmitStatus] = useState<'idle' | 'submitting' | 'retrying' | 'failed'>('idle');
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
   const { setShowTimeExtensionRequest } = uiActions;
   const highlightColor = uiState.accessibilitySettings.highlightColor;
   const highlightClassName = getStudentHighlightClassName(highlightColor);
+  const studentShellStyle = {
+    height: 'var(--student-viewport-height, 100dvh)',
+    zoom: uiState.accessibilitySettings.zoom,
+    fontSize: studentTypography.rootFontSize,
+    lineHeight: studentTypography.lineHeight,
+    ['--student-meta-font-size' as string]: studentTypography.metaFontSize,
+    ['--student-chip-font-size' as string]: studentTypography.chipFontSize,
+    ['--student-control-font-size' as string]: studentTypography.controlFontSize,
+    ['--student-preview-font-size' as string]: studentTypography.previewFontSize,
+  } as React.CSSProperties;
   const autoSubmitFingerprintRef = useRef<string | null>(null);
   const runtimeStateRef = useRef(runtimeState);
   const moduleSubmitInFlightRef = useRef<Promise<void> | null>(null);
@@ -647,7 +661,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
     runtimeState.blocking.active && blockingCopy ? (
       <div className="fixed inset-0 z-40 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
         <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8 text-center">
-          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500 mb-3">
+          <p className="text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-[0.3em] text-gray-500 mb-3">
             {blockingCopy.contextLabel}
           </p>
           <h2 className="text-2xl font-black text-gray-900 mb-3">{blockingCopy.title}</h2>
@@ -674,7 +688,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
     finalSubmitStatus !== 'idle' ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
         <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8 text-center">
-          <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-gray-500 mb-3">
+          <p className="text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-[0.3em] text-gray-500 mb-3">
             Submission
           </p>
           <h2 className="text-2xl font-black text-gray-900 mb-3">Submitting your exam</h2>
@@ -701,7 +715,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
 
   if (!shouldRenderPostExam && effectivePhase === 'pre-check') {
     return (
-      <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900">
+      <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900" style={studentShellStyle}>
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
@@ -722,7 +736,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
 
   if (!shouldRenderPostExam && !runtimeState.runtimeBacked && effectivePhase === 'lobby') {
     return (
-      <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900">
+      <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900" style={studentShellStyle}>
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
@@ -771,7 +785,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
                 <div className="grid gap-3 sm:grid-cols-2">
                   {studentInfo.map((item) => (
                     <div key={item.label}>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500">
+                      <p className="text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-[0.2em] text-gray-500">
                         {item.label}
                       </p>
                       <p className="mt-1 break-words text-sm font-semibold text-gray-900">
@@ -795,16 +809,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
       className={`student-exam-shell flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
         uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
       }`}
-      style={{
-        height: 'var(--student-viewport-height, 100dvh)',
-        zoom: uiState.accessibilitySettings.zoom,
-        fontSize:
-          uiState.accessibilitySettings.fontSize === 'small'
-            ? '14px'
-            : uiState.accessibilitySettings.fontSize === 'large'
-              ? '18px'
-              : '16px',
-      } as React.CSSProperties}
+      style={studentShellStyle}
     >
       <style>{`
         input:-webkit-autofill,
@@ -827,6 +832,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
         onExit={onExit}
         testTakerId={attemptState.attempt?.candidateId ?? undefined}
         timeRemaining={runtimeState.displayTimeRemaining}
+        tabletMode={tabletMode}
         zoom={uiState.accessibilitySettings.zoom}
         onZoomIn={uiActions.zoomIn}
         onZoomOut={uiActions.zoomOut}
@@ -895,6 +901,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
             onNavigate={runtimeActions.setCurrentQuestionId}
             flags={runtimeState.flags}
             onToggleFlag={handleFlagToggle}
+            tabletMode={tabletMode}
             highlightEnabled={uiState.accessibilitySettings.highlightMode}
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
@@ -909,6 +916,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
             onNavigate={runtimeActions.setCurrentQuestionId}
             flags={runtimeState.flags}
             onToggleFlag={handleFlagToggle}
+            tabletMode={tabletMode}
             highlightEnabled={uiState.accessibilitySettings.highlightMode}
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
@@ -951,6 +959,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
           onToggleFlag={handleFlagToggle}
           onSubmit={handleModuleSubmit}
           showSubmitButton={showSubmitControls}
+          tabletMode={tabletMode}
         />
       ) : null}
 

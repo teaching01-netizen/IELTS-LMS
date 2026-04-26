@@ -16,8 +16,10 @@ import { StudentReading } from './StudentReading';
 import { StudentSpeaking } from './StudentSpeaking';
 import { StudentWriting } from './StudentWriting';
 import { StudentUIProvider, useStudentUI } from './providers/StudentUIProvider';
+import { getStudentTypographyScale } from './accessibilityScale';
 import { getStudentHighlightClassName } from './highlightPalette';
 import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
+import { useStudentTabletMode } from './tabletMode';
 
 interface StudentExamPreviewProps {
   state: ExamState;
@@ -93,9 +95,20 @@ function StudentExamPreviewInner({
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { state: uiState, actions: uiActions } = useStudentUI();
-  useZoomScrollAnchoring(uiState.accessibilitySettings.zoom);
+  const tabletMode = useStudentTabletMode();
+  const studentTypography = getStudentTypographyScale(uiState.accessibilitySettings.fontSize);
+  useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const highlightColor = uiState.accessibilitySettings.highlightColor;
   const highlightClassName = getStudentHighlightClassName(highlightColor);
+  const studentShellStyle = {
+    zoom: uiState.accessibilitySettings.zoom,
+    fontSize: studentTypography.rootFontSize,
+    lineHeight: studentTypography.lineHeight,
+    ['--student-meta-font-size' as string]: studentTypography.metaFontSize,
+    ['--student-chip-font-size' as string]: studentTypography.chipFontSize,
+    ['--student-control-font-size' as string]: studentTypography.controlFontSize,
+    ['--student-preview-font-size' as string]: studentTypography.previewFontSize,
+  } as React.CSSProperties;
 
   const enabledModules = useMemo(() => getEnabledModules(state.config), [state.config]);
   const resolvedInitialModule: ModuleType = useMemo(() => {
@@ -183,22 +196,14 @@ function StudentExamPreviewInner({
 
   return (
     <div
-      className={`flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
+      className={`student-exam-shell flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
         uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
       }`}
-      style={{
-        zoom: uiState.accessibilitySettings.zoom,
-        fontSize:
-          uiState.accessibilitySettings.fontSize === 'small'
-            ? '14px'
-            : uiState.accessibilitySettings.fontSize === 'large'
-              ? '18px'
-              : '16px',
-      } as React.CSSProperties}
+      style={studentShellStyle}
     >
       <div className="h-10 border-b border-gray-200 bg-white flex items-center justify-between px-3 md:px-4 lg:px-6 flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <span className="text-[10px] font-black uppercase tracking-[0.22em] text-gray-500">
+          <span className="text-[length:var(--student-meta-font-size)] font-black uppercase tracking-[0.22em] text-gray-500">
             Preview (not saved)
           </span>
           <a
@@ -238,6 +243,7 @@ function StudentExamPreviewInner({
       <StudentHeader
         onExit={handleExit}
         timeRemaining={timeRemaining}
+        tabletMode={tabletMode}
         zoom={uiState.accessibilitySettings.zoom}
         onZoomIn={uiActions.zoomIn}
         onZoomOut={uiActions.zoomOut}
@@ -266,12 +272,13 @@ function StudentExamPreviewInner({
             answers={answers}
             onAnswerChange={handleAnswerChange}
             currentQuestionId={currentQuestionId}
-            onNavigate={setCurrentQuestionId}
-            flags={flags}
-            onToggleFlag={handleFlagToggle}
-            highlightEnabled={uiState.accessibilitySettings.highlightMode}
-            highlightColor={highlightColor}
-            highlightClassName={highlightClassName}
+          onNavigate={setCurrentQuestionId}
+          flags={flags}
+          onToggleFlag={handleFlagToggle}
+          tabletMode={tabletMode}
+          highlightEnabled={uiState.accessibilitySettings.highlightMode}
+          highlightColor={highlightColor}
+          highlightClassName={highlightClassName}
           />
         ) : null}
 
@@ -281,12 +288,13 @@ function StudentExamPreviewInner({
             answers={answers}
             onAnswerChange={handleAnswerChange}
             currentQuestionId={currentQuestionId}
-            onNavigate={setCurrentQuestionId}
-            flags={flags}
-            onToggleFlag={handleFlagToggle}
-            highlightEnabled={uiState.accessibilitySettings.highlightMode}
-            highlightColor={highlightColor}
-            highlightClassName={highlightClassName}
+          onNavigate={setCurrentQuestionId}
+          flags={flags}
+          onToggleFlag={handleFlagToggle}
+          tabletMode={tabletMode}
+          highlightEnabled={uiState.accessibilitySettings.highlightMode}
+          highlightColor={highlightColor}
+          highlightClassName={highlightClassName}
           />
         ) : null}
 
@@ -321,6 +329,7 @@ function StudentExamPreviewInner({
           flags={flags}
           onToggleFlag={handleFlagToggle}
           onSubmit={handleSubmit}
+          tabletMode={tabletMode}
         />
       ) : null}
 
