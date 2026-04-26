@@ -470,11 +470,16 @@ describe('StudentReviewWorkspace objective answers', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /writing/i }));
 
-    expect(await screen.findByText(/You should write something/)).toBeInTheDocument();
-    expect(await screen.findByText(/Use details/)).toBeInTheDocument();
-    expect(await screen.findByText(/Hello world/)).toBeInTheDocument();
-    expect(await screen.findByText(/Second line/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/You should write something/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Use details/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Hello world/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Second line/)).length).toBeGreaterThan(0);
     expect(screen.queryByText(/<div>/)).not.toBeInTheDocument();
     expect(screen.queryByText(/MsoNormal/)).not.toBeInTheDocument();
+
+    const printSpy = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+    fireEvent.click(screen.getByRole('button', { name: /print writing/i }));
+    expect(printSpy).toHaveBeenCalledOnce();
+    printSpy.mockRestore();
   });
 });
