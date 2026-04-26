@@ -55,7 +55,6 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       gradingRepository.getSessionById(sessionId),
       gradingService.getSessionStudentSubmissions(sessionId, { ...filters, searchQuery }),
     ]);
-
     setSession(sessionResult);
     if (result.success && result.data) {
       setSubmissions(result.data);
@@ -163,12 +162,10 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           writing: await gradingRepository.getWritingSubmissionsBySubmissionId(submission.id),
         })),
       );
-
       const sessionContext = {
         sessionId: fullSession.id,
         examTitle: fullSession.examTitle,
       };
-
       const exportPayload =
         section === 'writing'
           ? {
