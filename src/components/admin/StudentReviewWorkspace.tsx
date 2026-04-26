@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   ArrowLeft, Save, CheckCircle, Clock, FileText,
   MessageSquare, BookOpen, ChevronLeft, ChevronRight, Eye, Calendar,
-  CheckSquare, AlertTriangle
+  CheckSquare, AlertTriangle, Printer
 } from 'lucide-react';
 import { 
   StudentSubmission, SectionSubmission, WritingTaskSubmission, ReviewDraft, 
@@ -462,9 +462,99 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const currentWritingTaskId = activeSection === 'writing' ? activeTask : null;
   const currentWritingPrompt = currentWritingTaskId ? htmlToPlainText(getWritingPrompt(currentWritingTaskId)) : '';
   const currentWritingText = currentWritingTaskId ? htmlToPlainText(getWritingResponseText(currentWritingTaskId)) : '';
+  const printableWritingTasks = writingTasks.map((task, index) => {
+    const rubric = (reviewDraft?.sectionDrafts as any)?.writing?.[task.taskId] as RubricAssessment | undefined;
+    const text = htmlToPlainText(getWritingResponseText(task.taskId));
+    const prompt = htmlToPlainText(getWritingPrompt(task.taskId));
+    const taskSubmission = getWritingTaskSubmission(task.taskId);
+
+    return {
+      taskId: task.taskId,
+      label:
+        task.taskId === 'task1'
+          ? 'Task 1'
+          : task.taskId === 'task2'
+            ? 'Task 2'
+            : `Task ${index + 1}`,
+      prompt,
+      text,
+      wordCount: taskSubmission?.wordCount ?? (text ? text.trim().split(/\s+/).filter(Boolean).length : 0),
+      rubric,
+    };
+  });
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
+      <style>{`
+        .writing-print-root {
+          display: none;
+        }
+
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+
+          .writing-print-root,
+          .writing-print-root * {
+            visibility: visible !important;
+          }
+
+          .writing-print-root {
+            display: block !important;
+            position: absolute;
+            inset: 0 auto auto 0;
+            width: 100%;
+            padding: 24px;
+            color: #111827;
+            background: #ffffff;
+            font-family: Arial, sans-serif;
+          }
+
+          .writing-print-task {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            margin-top: 24px;
+            border-top: 1px solid #d1d5db;
+            padding-top: 18px;
+          }
+        }
+      `}</style>
+      <div className="writing-print-root">
+        <h1 className="text-2xl font-bold">Writing Results</h1>
+        <div className="mt-2 text-sm">
+          <div><strong>Student:</strong> {submission.studentName}</div>
+          <div><strong>Student ID:</strong> {submission.studentId}</div>
+          <div><strong>Email:</strong> {submission.studentEmail ?? ''}</div>
+          <div><strong>Cohort:</strong> {submission.cohortName}</div>
+          <div><strong>Submitted:</strong> {new Date(submission.submittedAt).toLocaleString()}</div>
+        </div>
+
+        {printableWritingTasks.map((task) => (
+          <section key={task.taskId} className="writing-print-task">
+            <h2 className="text-xl font-bold">{task.label}</h2>
+            <div className="mt-2 text-sm"><strong>Word Count:</strong> {task.wordCount}</div>
+            <div className="mt-3">
+              <h3 className="text-base font-bold">Prompt</h3>
+              <p className="mt-1 whitespace-pre-wrap">{task.prompt || 'Prompt unavailable.'}</p>
+            </div>
+            <div className="mt-4">
+              <h3 className="text-base font-bold">Student Response</h3>
+              <p className="mt-1 whitespace-pre-wrap">{task.text || 'No writing response recorded.'}</p>
+            </div>
+            <div className="mt-4">
+              <h3 className="text-base font-bold">Assessment</h3>
+              <div className="mt-1 grid grid-cols-2 gap-2 text-sm">
+                <div><strong>Task Response:</strong> {task.rubric?.taskResponseBand ?? '-'}</div>
+                <div><strong>Coherence:</strong> {task.rubric?.coherenceBand ?? '-'}</div>
+                <div><strong>Lexical:</strong> {task.rubric?.lexicalBand ?? '-'}</div>
+                <div><strong>Grammar:</strong> {task.rubric?.grammarBand ?? '-'}</div>
+                <div><strong>Overall:</strong> {task.rubric?.overallBand ?? '-'}</div>
+              </div>
+            </div>
+          </section>
+        ))}
+      </div>
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -489,6 +579,15 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               <Clock size={16} />
               <span>Submitted {new Date(submission.submittedAt).toLocaleString()}</span>
             </div>
+            {activeSection === 'writing' && (
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              >
+                <Printer size={16} />
+                Print Writing
+              </button>
+            )}
             <button
               onClick={handleSaveDraft}
               disabled={!reviewDraft?.hasUnsavedChanges || saving}
