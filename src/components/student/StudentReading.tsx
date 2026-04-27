@@ -180,13 +180,19 @@ export function StudentReading({
         style={isTabletMode ? undefined : splitPaneStyle}
       >
         <div
-          className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base ${
+          className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-gray-900 md:p-6 md:pr-6 ${
             isTabletMode ? 'max-h-[42dvh] border-b border-gray-200' : 'lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
           }`}
+          style={{
+            fontSize: 'var(--student-passage-font-size)',
+            lineHeight: 'var(--student-passage-line-height)',
+          }}
           data-student-zoom-scroll
         >
-          <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePassage.title}</h2>
-          <div className="leading-relaxed text-gray-900 space-y-4 [&_h1]:text-2xl [&_h1]:font-black [&_h2]:text-xl [&_h2]:font-bold [&_h3]:text-lg [&_h3]:font-bold [&_img]:max-w-full [&_img]:rounded-2xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6">
+          <h2 className="mb-4 font-bold leading-tight text-gray-950 md:mb-6" style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
+            {activePassage.title}
+          </h2>
+          <div className="space-y-5 text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7">
             <RichTextHighlighter
               content={activePassage.content}
               contentType={passageHasHtml ? 'html' : 'text'}

@@ -293,6 +293,73 @@ describe('student question experience', () => {
     expect(stickyWrapper).not.toBeNull();
   });
 
+  it('uses accessibility typography variables for the reading passage panel', () => {
+    const state = {
+      title: 'Reading Test',
+      type: 'Academic',
+      activeModule: 'reading',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: { enabled: false, order: 1, duration: 30, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          reading: { enabled: true, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+        },
+      },
+      reading: {
+        passages: [
+          {
+            id: 'passage-1',
+            title: 'Accessible Passage',
+            content: '<h1>Main heading</h1><p>Read the passage text.</p><ul><li>First point</li></ul>',
+            images: [],
+            blocks: [
+              {
+                id: 'q-block',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer.',
+                questions: [{ id: 'q1', prompt: 'What is shown?', correctAnswer: 'passage', answerRule: 'ONE_WORD' }],
+              },
+            ],
+          },
+        ],
+      },
+      listening: { parts: [] },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    } as ExamState;
+
+    render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+      />,
+    );
+
+    const passageTitle = screen.getByRole('heading', { name: 'Accessible Passage' });
+    const passagePanel = passageTitle.parentElement;
+
+    expect(passagePanel).toHaveStyle({
+      fontSize: 'var(--student-passage-font-size)',
+      lineHeight: 'var(--student-passage-line-height)',
+    });
+    expect(passagePanel?.className).not.toContain('text-sm');
+    expect(passagePanel?.className).not.toContain('md:text-base');
+    expect(passageTitle).toHaveStyle({ fontSize: 'var(--student-passage-title-font-size)' });
+    expect(passageTitle.nextElementSibling?.className).toContain('--student-passage-h1-font-size');
+  });
+
   it('shows a single reading question number without a repeated range', () => {
     const state = {
       title: 'Reading Test',
