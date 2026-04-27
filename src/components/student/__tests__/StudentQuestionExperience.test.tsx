@@ -153,7 +153,7 @@ describe('student question experience', () => {
     expect(screen.queryByText(/limit:/i)).not.toBeInTheDocument();
   });
 
-  it('renders diagram-labeling answers directly on the diagram without label helper text', () => {
+  it('renders diagram-labeling answers below a sticky diagram reference', () => {
     const onChange = vi.fn();
     const block: DiagramLabelingBlock = {
       id: 'diagram-1',
@@ -179,6 +179,7 @@ describe('student question experience', () => {
     );
 
     expect(screen.getByAltText('Diagram reference')).toBeInTheDocument();
+    expect(screen.getByTestId('diagram-sticky-reference')).toHaveClass('sticky');
     expect(screen.getByRole('textbox', { name: 'Answer for question 12' })).toHaveValue('existing');
     expect(screen.getByRole('textbox', { name: 'Answer for question 13' })).toBeInTheDocument();
     expect(screen.queryByText(/label 1/i)).not.toBeInTheDocument();
