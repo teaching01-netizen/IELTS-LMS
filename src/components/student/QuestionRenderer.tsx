@@ -508,33 +508,91 @@ export function QuestionRenderer({
     );
   };
 
-  const renderDiagramLabeling = (diagramBlock: DiagramLabelingBlock) => (
-    <div className="flex flex-col gap-4">
-      {getImageUrlCandidates(diagramBlock.imageUrl ?? '')[0] ? (
-        <StudentZoomableMedia
-          sources={getImageUrlCandidates(diagramBlock.imageUrl ?? '')}
-          alt="Diagram reference"
-          label="Diagram reference image"
-          hint="Tap to zoom the diagram"
-        />
-      ) : (
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-          <div className="p-6 text-center text-sm text-gray-500">Add a diagram to support this question.</div>
-        </div>
-      )}
-      <div className="space-y-3">
-        {diagramBlock.labels.map((label, index) =>
-          renderTextField(
+  const renderDiagramFallbackFields = (diagramBlock: DiagramLabelingBlock) => (
+    <div className="space-y-3">
+      {diagramBlock.labels.map((label, index) => (
+        <React.Fragment key={label.id}>
+          {renderTextField(
             getSlotId(index, `${diagramBlock.id}:${label.id}`),
             number + index,
             stringArrayAnswer[index] ?? '',
             (nextValue) => updateIndexedAnswer(index, nextValue, diagramBlock.labels.length),
-            `Label ${index + 1}`,
-          ),
-        )}
-      </div>
+          )}
+        </React.Fragment>
+      ))}
     </div>
   );
+
+  const renderDiagramLabeling = (diagramBlock: DiagramLabelingBlock) => {
+    const sources = getImageUrlCandidates(diagramBlock.imageUrl ?? '');
+    const hasImage = Boolean(sources[0]);
+    const hasCoordinates = diagramBlock.labels.every((label) => Number.isFinite(label.x) && Number.isFinite(label.y));
+
+    if (!hasImage || !hasCoordinates) {
+      return (
+        <div className="flex flex-col gap-4">
+          {!hasImage ? (
+            <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
+              <div className="p-6 text-center text-sm text-gray-500">Add a diagram to support this question.</div>
+            </div>
+          ) : (
+            <StudentZoomableMedia
+              sources={sources}
+              alt="Diagram reference"
+              label="Diagram reference image"
+              hint="Tap to zoom the diagram"
+            />
+          )}
+          {renderDiagramFallbackFields(diagramBlock)}
+        </div>
+      );
+    }
+
+    return (
+      <StudentZoomableMedia
+        sources={sources}
+        alt="Diagram reference"
+        label="Diagram reference image"
+        hint="Tap to zoom the diagram"
+        renderInteractiveOverlay={() =>
+          diagramBlock.labels.map((label, index) => {
+            const slotId = getSlotId(index, `${diagramBlock.id}:${label.id}`);
+
+            return (
+              <div
+                key={label.id}
+                id={`question-${slotId}`}
+                className={`absolute z-10 min-w-[9rem] max-w-[13rem] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white/95 p-2 shadow-lg backdrop-blur ${getSlotClassName(slotId)}`}
+                style={{
+                  left: `${label.x}%`,
+                  top: `${label.y}%`,
+                }}
+              >
+                <label className="flex items-center gap-2">
+                  <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-blue-700 px-2 text-[length:var(--student-chip-font-size)] font-bold text-white">
+                    {number + index}
+                  </span>
+                  <ProtectedInput
+                    type="text"
+                    name={slotId}
+                    value={stringArrayAnswer[index] ?? ''}
+                    onChange={(event) => updateIndexedAnswer(index, event.target.value, diagramBlock.labels.length)}
+                    className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    placeholder="Answer..."
+                    security={security}
+                    sessionId={sessionId}
+                    studentId={studentId}
+                    aria-label={`Answer for question ${number + index}`}
+                  />
+                  {renderFlagButton(slotId)}
+                </label>
+              </div>
+            );
+          })
+        }
+      />
+    );
+  };
 
   const renderFlowChart = (flowChartBlock: FlowChartBlock) => (
     <div className="space-y-3">

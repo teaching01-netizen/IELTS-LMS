@@ -2,11 +2,12 @@ import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ExamState, MultiMCQBlock, SentenceCompletionBlock } from '../../../types';
+import type { DiagramLabelingBlock, ExamState, MultiMCQBlock, SentenceCompletionBlock } from '../../../types';
 import { QuestionRenderer } from '../QuestionRenderer';
 import { StudentFooter } from '../StudentFooter';
 import { StudentHeader } from '../StudentHeader';
 import { StudentListening } from '../StudentListening';
+import { StudentReading } from '../StudentReading';
 
 describe('student question experience', () => {
   beforeEach(() => {
@@ -150,6 +151,143 @@ describe('student question experience', () => {
     expect(screen.queryByText(/not yet implemented/i)).not.toBeInTheDocument();
     expect(screen.getAllByRole('textbox')).toHaveLength(2);
     expect(screen.queryByText(/limit:/i)).not.toBeInTheDocument();
+  });
+
+  it('renders diagram-labeling answers directly on the diagram without label helper text', () => {
+    const onChange = vi.fn();
+    const block: DiagramLabelingBlock = {
+      id: 'diagram-1',
+      type: 'DIAGRAM_LABELING',
+      instruction: 'Label the diagram.',
+      imageUrl: '/diagram.jpg',
+      labels: [
+        { id: 'label-a', x: 25, y: 35, correctAnswer: 'engine' },
+        { id: 'label-b', x: 70, y: 62, correctAnswer: 'wheel' },
+      ],
+    };
+
+    render(
+      <QuestionRenderer
+        question={null}
+        block={block}
+        number={12}
+        answer={['existing', '']}
+        onChange={onChange}
+        slotIds={['diagram-1:label-a', 'diagram-1:label-b']}
+        currentQuestionId="diagram-1:label-a"
+      />,
+    );
+
+    expect(screen.getByAltText('Diagram reference')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Answer for question 12' })).toHaveValue('existing');
+    expect(screen.getByRole('textbox', { name: 'Answer for question 13' })).toBeInTheDocument();
+    expect(screen.queryByText(/label 1/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/label 2/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Answer for question 13' }), {
+      target: { value: 'wheel' },
+    });
+
+    expect(onChange).toHaveBeenCalledWith(['existing', 'wheel']);
+  });
+
+  it('keeps diagram-labeling fallback fields free of label helper text', () => {
+    const block: DiagramLabelingBlock = {
+      id: 'diagram-1',
+      type: 'DIAGRAM_LABELING',
+      instruction: 'Label the diagram.',
+      imageUrl: '',
+      labels: [
+        { id: 'label-a', x: 25, y: 35, correctAnswer: 'engine' },
+        { id: 'label-b', x: 70, y: 62, correctAnswer: 'wheel' },
+      ],
+    };
+
+    render(
+      <QuestionRenderer
+        question={null}
+        block={block}
+        number={12}
+        answer={['', '']}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/add a diagram/i)).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Answer for question 12' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Answer for question 13' })).toBeInTheDocument();
+    expect(screen.queryByText(/label 1/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/label 2/i)).not.toBeInTheDocument();
+  });
+
+  it('renders uploaded reading pictures in a sticky wrapper on desktop', () => {
+    const state = {
+      title: 'Reading Test',
+      type: 'Academic',
+      activeModule: 'reading',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: { enabled: false, order: 1, duration: 30, autoContinue: true, allowedQuestionTypes: ['TFNG'] },
+          reading: { enabled: true, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['TFNG'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['TFNG'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['TFNG'] },
+        },
+      },
+      reading: {
+        passages: [
+          {
+            id: 'passage-1',
+            title: 'Passage 1',
+            content: 'Read the diagram.',
+            images: [
+              {
+                id: 'img-1',
+                src: '/uploaded-picture.jpg',
+                alt: 'Uploaded diagram',
+                annotations: [],
+                crop: { x: 0, y: 0, width: 100, height: 100 },
+                height: 600,
+                width: 800,
+                zoom: 1,
+              },
+            ],
+            blocks: [
+              {
+                id: 'q-block',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer.',
+                questions: [{ id: 'q1', prompt: 'What is shown?', correctAnswer: 'diagram', answerRule: 'ONE_WORD' }],
+              },
+            ],
+          },
+        ],
+      },
+      listening: { parts: [] },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    } as ExamState;
+
+    render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+      />,
+    );
+
+    const image = screen.getByAltText('Uploaded diagram');
+    const stickyWrapper = image.closest('.lg\\:sticky');
+    expect(stickyWrapper).not.toBeNull();
   });
 
   it('opens the question navigator from the header when the control is available', () => {

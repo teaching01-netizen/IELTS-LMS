@@ -195,15 +195,16 @@ export function StudentReading({
               highlightClassName={highlightClassName}
             />
             {(activePassage.images ?? []).map((image) => (
-              <StudentZoomableMedia
-                key={image.id}
-                sources={[image.src]}
-                alt={image.alt}
-                label={image.alt || 'Passage image'}
-                hint="Tap to zoom the passage image"
-                className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
-                renderOverlay={(zoom) => renderPassageImageAnnotations(image.annotations, zoom)}
-              />
+              <div key={image.id} className={isTabletMode ? '' : 'lg:sticky lg:top-0 lg:z-10 lg:bg-white lg:py-2'}>
+                <StudentZoomableMedia
+                  sources={[image.src]}
+                  alt={image.alt}
+                  label={image.alt || 'Passage image'}
+                  hint="Tap to zoom the passage image"
+                  className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
+                  renderOverlay={(zoom) => renderPassageImageAnnotations(image.annotations, zoom)}
+                />
+              </div>
             ))}
           </div>
         </div>
