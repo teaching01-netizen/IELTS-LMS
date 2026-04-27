@@ -11,6 +11,7 @@ type StudentZoomableMediaProps = {
   modalImageClassName?: string | undefined;
   zoomStep?: number | undefined;
   renderOverlay?: ((zoom: number) => React.ReactNode) | undefined;
+  renderInteractiveOverlay?: (() => React.ReactNode) | undefined;
 };
 
 const MIN_ZOOM = 1;
@@ -27,6 +28,7 @@ export function StudentZoomableMedia({
   modalImageClassName,
   zoomStep = 0.2,
   renderOverlay,
+  renderInteractiveOverlay,
 }: StudentZoomableMediaProps) {
   const normalizedSources = useMemo(
     () => sources.map((source) => source.trim()).filter(Boolean),
@@ -112,49 +114,82 @@ export function StudentZoomableMedia({
     return null;
   }
 
-  return (
-    <>
-      <button
-        type="button"
-        onClick={handleOpen}
+  const imageContent = (
+    <div className="relative">
+      <img
+        src={currentSource}
+        alt={alt}
+        className={`h-auto w-full object-contain select-none ${imageClassName ?? ''}`}
+        loading="lazy"
+        draggable={false}
+        referrerPolicy="no-referrer"
+        onError={handleImageError}
         onContextMenu={handleContextMenu}
-        className={`group relative block w-full overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 text-left ${className ?? ''}`}
-        aria-label={`${label}. ${hint}`}
-        title={hint}
-      >
-        <div className="relative">
-          <img
-            src={currentSource}
-            alt={alt}
-            className={`h-auto w-full object-contain select-none ${imageClassName ?? ''}`}
-            loading="lazy"
-            draggable={false}
-            referrerPolicy="no-referrer"
-            onError={handleImageError}
-            onContextMenu={handleContextMenu}
-            onDragStart={handleContextMenu}
-            style={{
-              WebkitTouchCallout: 'none',
-              WebkitUserSelect: 'none',
-              userSelect: 'none',
-              touchAction: 'manipulation',
-            }}
-          />
-          {renderOverlay ? (
-            <div className="pointer-events-none absolute inset-0">
-              {renderOverlay(1)}
-            </div>
-          ) : null}
-          <div className="absolute left-3 top-3 rounded-full bg-gray-950/75 px-3 py-1 text-xs font-black uppercase tracking-[0.2em] text-white shadow-lg">
-            Zoom
-          </div>
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-gray-950/75 to-transparent px-3 py-2">
-            <div className="inline-flex items-center rounded-full bg-white/95 px-3 py-1 text-[length:var(--student-meta-font-size)] font-bold text-gray-900 shadow-sm">
-              {hint}
-            </div>
+        onDragStart={handleContextMenu}
+        style={{
+          WebkitTouchCallout: 'none',
+          WebkitUserSelect: 'none',
+          userSelect: 'none',
+          touchAction: 'manipulation',
+        }}
+      />
+      {renderOverlay ? (
+        <div className="pointer-events-none absolute inset-0">
+          {renderOverlay(1)}
+        </div>
+      ) : null}
+      {renderInteractiveOverlay ? (
+        <div className="absolute inset-0">
+          {renderInteractiveOverlay()}
+        </div>
+      ) : null}
+      {!renderInteractiveOverlay ? (
+        <div className="absolute left-3 top-3 rounded-full bg-gray-950/75 px-3 py-1 text-xs font-black uppercase tracking-[0.2em] text-white shadow-lg">
+          Zoom
+        </div>
+      ) : null}
+      {!renderInteractiveOverlay ? (
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-gray-950/75 to-transparent px-3 py-2">
+          <div className="inline-flex items-center rounded-full bg-white/95 px-3 py-1 text-[length:var(--student-meta-font-size)] font-bold text-gray-900 shadow-sm">
+            {hint}
           </div>
         </div>
-      </button>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <>
+      {renderInteractiveOverlay ? (
+        <div
+          onContextMenu={handleContextMenu}
+          className={`group relative block w-full overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 text-left ${className ?? ''}`}
+        >
+          {imageContent}
+          <div className="border-t border-gray-200 bg-white px-3 py-2">
+            <button
+              type="button"
+              onClick={handleOpen}
+              className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-[length:var(--student-meta-font-size)] font-bold text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
+              aria-label={`${label}. ${hint}`}
+              title={hint}
+            >
+              Open zoom view
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={handleOpen}
+          onContextMenu={handleContextMenu}
+          className={`group relative block w-full overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 text-left ${className ?? ''}`}
+          aria-label={`${label}. ${hint}`}
+          title={hint}
+        >
+          {imageContent}
+        </button>
+      )}
 
       {isOpen ? (
         <div
