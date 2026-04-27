@@ -221,31 +221,31 @@ export function StudentWriting({
     }
   };
 
-  const insertPlainTextAtCursor = (text: string) => {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) {
-      return;
+  const blockWritingEditorInteraction = (
+    event:
+      | React.ClipboardEvent<HTMLDivElement>
+      | React.DragEvent<HTMLDivElement>
+      | React.MouseEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.type === 'paste') {
+      saveStudentAuditEvent(
+        resolvedSessionId,
+        'PASTE_BLOCKED',
+        {
+          targetName: 'DIV',
+          targetType: 'writing-editor',
+          isContentEditable: true,
+        },
+        resolvedStudentId,
+      );
     }
-    const range = selection.getRangeAt(0);
-    range.deleteContents();
-    const textNode = document.createTextNode(text);
-    range.insertNode(textNode);
-    range.setStartAfter(textNode);
-    range.setEndAfter(textNode);
-    selection.removeAllRanges();
-    selection.addRange(range);
   };
 
-  const handleEditorPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+  const blockMediaSaveInteraction = (event: React.SyntheticEvent) => {
     event.preventDefault();
-    const pasted = event.clipboardData?.getData('text/plain') ?? '';
-    if (!pasted) return;
-    insertPlainTextAtCursor(pasted);
-    handleEditorInput();
-  };
-
-  const handleEditorDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
+    event.stopPropagation();
   };
 
   const handleSubmitClick = () => {
@@ -295,7 +295,12 @@ export function StudentWriting({
               </div>
             </div>
             {currentChart && (
-              <div className="mb-5 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div
+                className="mb-5 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm"
+                onContextMenu={blockMediaSaveInteraction}
+                onDragStart={blockMediaSaveInteraction}
+                onDrop={blockMediaSaveInteraction}
+              >
                 <p className="text-[length:var(--student-meta-font-size)] font-black text-gray-400 uppercase tracking-[0.22em] mb-3">
                   Stimulus Chart
                 </p>
@@ -332,8 +337,21 @@ export function StudentWriting({
         <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
           <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
             <div className="relative flex-1 w-full">
-              <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-600">
+              <div className="flex flex-col gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-600 sm:flex-row sm:items-center sm:justify-between">
                 <span>Writing Response</span>
+                <div className="flex items-center gap-2" aria-label="Current word count">
+                  <span className="text-[length:var(--student-meta-font-size)] font-bold text-gray-400 uppercase tracking-widest">
+                    Word Count
+                  </span>
+                  <span className={`text-lg font-black leading-none ${
+                    isOptimal ? 'text-emerald-600' :
+                    isOverLength ? 'text-red-600' :
+                    isWordCountMet ? 'text-blue-600' :
+                    isWordCountWarning ? 'text-amber-500' : 'text-gray-900'
+                  }`}>
+                    {wordCount}
+                  </span>
+                </div>
               </div>
               {showEditorPlaceholder && (
                   <div className="pointer-events-none absolute left-4 top-14 md:left-6 md:top-16 lg:left-8 lg:top-20 text-base md:text-lg leading-relaxed text-gray-400 font-serif select-none">
@@ -363,8 +381,11 @@ export function StudentWriting({
                       onWritingChange(activeTaskId, editorRef.current.innerHTML);
                     }
                   }}
-                  onPaste={handleEditorPaste}
-                  onDrop={handleEditorDrop}
+                  onPaste={blockWritingEditorInteraction}
+                  onCopy={blockWritingEditorInteraction}
+                  onCut={blockWritingEditorInteraction}
+                  onDrop={blockWritingEditorInteraction}
+                  onContextMenu={blockWritingEditorInteraction}
 	                className="flex-1 w-full p-4 md:p-6 lg:p-8 text-base md:text-lg leading-relaxed text-gray-800 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                   data-student-zoom-scroll
 	                style={{ minHeight: MIN_HEIGHTS.WRITING_EDITOR }}
@@ -373,24 +394,6 @@ export function StudentWriting({
 	                autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
 	              />
               </div>
-            
-	            <div className="border-t border-gray-200 p-3 md:p-5 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs md:text-sm flex-shrink-0">
-	              <div className="flex gap-4 md:gap-8 w-full sm:w-auto">
-	                <div className="flex flex-col">
-	                  <span className="text-[length:var(--student-meta-font-size)] font-bold text-gray-400 uppercase tracking-widest">
-	                    Word Count
-	                  </span>
-	                  <span className={`text-lg md:text-xl font-black ${
-	                    isOptimal ? 'text-emerald-600' :
-	                    isOverLength ? 'text-red-600' :
-	                    isWordCountMet ? 'text-blue-600' :
-	                    isWordCountWarning ? 'text-amber-500' : 'text-gray-900'
-	                  }`}>
-	                    {wordCount}
-	                  </span>
-	                </div>
-	              </div>
-	            </div>
 	          </div>
 
         </div>

@@ -52,13 +52,14 @@ describe('StudentWriting clipboard', () => {
     vi.restoreAllMocks();
   });
 
-  it('does not emit paste audit events (clipboard enforcement lives at document level)', () => {
+  it('blocks paste in the writing editor and emits an audit event', () => {
     const state = createExamState();
+    const onWritingChange = vi.fn();
     const { container } = render(
       <StudentWriting
         state={state}
         writingAnswers={{}}
-        onWritingChange={vi.fn()}
+        onWritingChange={onWritingChange}
         onSubmit={vi.fn()}
         currentQuestionId={null}
         onNavigate={vi.fn()}
@@ -73,9 +74,45 @@ describe('StudentWriting clipboard', () => {
       throw new Error('Expected writing editor to render');
     }
 
-    fireEvent.paste(editor);
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    fireEvent(editor, pasteEvent);
 
-    expect(saveStudentAuditEventMock).not.toHaveBeenCalled();
+    expect(pasteEvent.defaultPrevented).toBe(true);
+    expect(onWritingChange).not.toHaveBeenCalled();
+    expect(saveStudentAuditEventMock).toHaveBeenCalledWith(
+      'sched-1',
+      'PASTE_BLOCKED',
+      {
+        targetName: 'DIV',
+        targetType: 'writing-editor',
+        isContentEditable: true,
+      },
+      'attempt-1',
+    );
+  });
+
+  it('blocks copy, cut, drop, and context menu in the writing editor', () => {
+    const state = createExamState();
+    const { container } = render(
+      <StudentWriting
+        state={state}
+        writingAnswers={{}}
+        onWritingChange={vi.fn()}
+        onSubmit={vi.fn()}
+        currentQuestionId={null}
+        onNavigate={vi.fn()}
+      />,
+    );
+
+    const editor = container.querySelector('[contenteditable="true"]');
+    if (!editor) {
+      throw new Error('Expected writing editor to render');
+    }
+
+    for (const eventName of ['copy', 'cut', 'drop', 'contextmenu']) {
+      const event = new Event(eventName, { bubbles: true, cancelable: true });
+      fireEvent(editor, event);
+      expect(event.defaultPrevented).toBe(true);
+    }
   });
 });
-

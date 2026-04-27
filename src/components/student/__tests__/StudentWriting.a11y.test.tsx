@@ -156,4 +156,60 @@ describe('StudentWriting a11y', () => {
       screen.queryByRole('button', { name: /highlight selected text/i }),
     ).not.toBeInTheDocument();
   });
+
+  it('shows word count above the writing editor', () => {
+    const { container } = render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{ task1: 'one two three' }}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    const wordCount = screen.getByLabelText(/current word count/i);
+    const bottomWordCount = container.querySelector('.border-t.border-gray-200.p-3');
+
+    expect(wordCount).toHaveTextContent('Word Count');
+    expect(wordCount).toHaveTextContent('3');
+    expect(wordCount.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bottomWordCount).not.toBeInTheDocument();
+  });
+
+  it('blocks save interactions on Task 1 stimulus media', () => {
+    const state = createExamState();
+    state.writing.task1Chart = {
+      id: 'chart-1',
+      type: 'bar',
+      title: 'Task 1 chart',
+      labels: ['A'],
+      values: [10],
+      imageSrc: '/chart.png',
+    };
+
+    render(
+      <StudentWriting
+        state={state}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    const stimulus = screen.getByText(/stimulus chart/i).closest('.rounded-3xl');
+    if (!stimulus) {
+      throw new Error('Expected stimulus chart container');
+    }
+
+    for (const eventName of ['contextmenu', 'dragstart', 'drop']) {
+      const event = new Event(eventName, { bubbles: true, cancelable: true });
+      fireEvent(stimulus, event);
+      expect(event.defaultPrevented).toBe(true);
+    }
+  });
 });
