@@ -509,7 +509,7 @@ export function QuestionRenderer({
   };
 
   const renderDiagramFallbackFields = (diagramBlock: DiagramLabelingBlock) => (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid="diagram-answer-panel">
       {diagramBlock.labels.map((label, index) => (
         <React.Fragment key={label.id}>
           {renderTextField(
@@ -528,23 +528,28 @@ export function QuestionRenderer({
     const hasImage = Boolean(sources[0]);
 
     return (
-      <div className="flex flex-col gap-4">
-        {hasImage ? (
-          <div className="sticky top-0 z-20 bg-white pb-3" data-testid="diagram-sticky-reference">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.75fr)] lg:items-start">
+        <div className="sticky top-0 z-20 bg-white pb-3" data-testid="diagram-sticky-reference">
+          {hasImage ? (
             <StudentZoomableMedia
               sources={sources}
               alt="Diagram reference"
               label="Diagram reference image"
               hint="Tap to zoom the diagram"
-              imageClassName="max-h-[40dvh]"
+              imageClassName="max-h-[48dvh]"
             />
+          ) : (
+            <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
+              <div className="p-6 text-center text-sm text-gray-500">Add a diagram to support this question.</div>
+            </div>
+          )}
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 text-[length:var(--student-meta-font-size)] font-black uppercase tracking-[0.18em] text-gray-500">
+            Answers
           </div>
-        ) : (
-          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-            <div className="p-6 text-center text-sm text-gray-500">Add a diagram to support this question.</div>
-          </div>
-        )}
-        {renderDiagramFallbackFields(diagramBlock)}
+          {renderDiagramFallbackFields(diagramBlock)}
+        </div>
       </div>
     );
   };

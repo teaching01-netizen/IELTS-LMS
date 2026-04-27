@@ -180,6 +180,8 @@ describe('student question experience', () => {
 
     expect(screen.getByAltText('Diagram reference')).toBeInTheDocument();
     expect(screen.getByTestId('diagram-sticky-reference')).toHaveClass('sticky');
+    expect(screen.getByTestId('diagram-answer-panel')).toBeInTheDocument();
+    expect(screen.getByText('Answers')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Answer for question 12' })).toHaveValue('existing');
     expect(screen.getByRole('textbox', { name: 'Answer for question 13' })).toBeInTheDocument();
     expect(screen.queryByText(/label 1/i)).not.toBeInTheDocument();
