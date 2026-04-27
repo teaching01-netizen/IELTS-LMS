@@ -293,6 +293,165 @@ describe('student question experience', () => {
     expect(stickyWrapper).not.toBeNull();
   });
 
+  it('shows a single reading question number without a repeated range', () => {
+    const state = {
+      title: 'Reading Test',
+      type: 'Academic',
+      activeModule: 'reading',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: { enabled: false, order: 1, duration: 30, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          reading: { enabled: true, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+        },
+      },
+      reading: {
+        passages: [
+          {
+            id: 'passage-1',
+            title: 'Passage 1',
+            content: 'Read the passage.',
+            images: [],
+            blocks: [
+              {
+                id: 'reading-block-1',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer questions 1 to 10.',
+                questions: Array.from({ length: 10 }, (_, index) => ({
+                  id: `reading-pre-${index + 1}`,
+                  prompt: `Question ${index + 1}`,
+                  correctAnswer: 'answer',
+                  answerRule: 'ONE_WORD',
+                })),
+              },
+              {
+                id: 'reading-block-2',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer question 11.',
+                questions: [{ id: 'reading-q11', prompt: 'Single question?', correctAnswer: 'yes', answerRule: 'ONE_WORD' }],
+              },
+              {
+                id: 'reading-block-3',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer questions 12 and 13.',
+                questions: [
+                  { id: 'reading-q12', prompt: 'First multi?', correctAnswer: 'yes', answerRule: 'ONE_WORD' },
+                  { id: 'reading-q13', prompt: 'Second multi?', correctAnswer: 'yes', answerRule: 'ONE_WORD' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      listening: { parts: [] },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    } as ExamState;
+
+    render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="reading-q11"
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(screen.getByText('Questions 11')).toBeInTheDocument();
+    expect(screen.queryByText('Questions 11–11')).not.toBeInTheDocument();
+    expect(screen.getByText('Questions 12–13')).toBeInTheDocument();
+  });
+
+  it('shows a single listening question number without a repeated range', () => {
+    const state = {
+      title: 'Listening Test',
+      type: 'Academic',
+      activeModule: 'listening',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: { enabled: true, order: 1, duration: 30, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          reading: { enabled: false, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+        },
+      },
+      reading: { passages: [] },
+      listening: {
+        parts: [
+          {
+            id: 'part-1',
+            title: 'Part 1',
+            audioUrl: '/audio/test.mp3',
+            transcript: 'Listen and answer.',
+            pins: [],
+            blocks: [
+              {
+                id: 'listening-block-1',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer questions 1 to 10.',
+                questions: Array.from({ length: 10 }, (_, index) => ({
+                  id: `listening-pre-${index + 1}`,
+                  prompt: `Question ${index + 1}`,
+                  correctAnswer: 'answer',
+                  answerRule: 'ONE_WORD',
+                })),
+              },
+              {
+                id: 'listening-block-2',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer question 11.',
+                questions: [{ id: 'listening-q11', prompt: 'Single question?', correctAnswer: 'yes', answerRule: 'ONE_WORD' }],
+              },
+              {
+                id: 'listening-block-3',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer questions 12 and 13.',
+                questions: [
+                  { id: 'listening-q12', prompt: 'First multi?', correctAnswer: 'yes', answerRule: 'ONE_WORD' },
+                  { id: 'listening-q13', prompt: 'Second multi?', correctAnswer: 'yes', answerRule: 'ONE_WORD' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    } as ExamState;
+
+    render(
+      <StudentListening
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="listening-q11"
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(screen.getByText('Questions 11')).toBeInTheDocument();
+    expect(screen.queryByText('Questions 11–11')).not.toBeInTheDocument();
+    expect(screen.getByText('Questions 12–13')).toBeInTheDocument();
+  });
+
   it('opens the question navigator from the header when the control is available', () => {
     const onOpenNavigator = vi.fn();
 

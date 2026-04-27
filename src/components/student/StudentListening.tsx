@@ -8,6 +8,7 @@ import { prefersReducedMotion } from './prefersReducedMotion';
 import { FormattedText } from './FormattedText';
 import { RichTextHighlighter } from './RichTextHighlighter';
 import type { StudentHighlightColor } from './highlightPalette';
+import { formatQuestionRange } from './questionRangeLabel';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -348,7 +349,7 @@ export function StudentListening({
                 <div key={block.id} className="space-y-4 md:space-y-6 mb-4 md:mb-6">
                   <div className="mb-3 md:mb-4">
                     <h3 className="font-bold text-gray-900 mb-1 md:mb-2 text-base md:text-lg">
-                      Questions {blockStartQ}–{blockEndQ}
+                      Questions {formatQuestionRange(blockStartQ, blockEndQ)}
                     </h3>
                     <FormattedText
                       as="p"
