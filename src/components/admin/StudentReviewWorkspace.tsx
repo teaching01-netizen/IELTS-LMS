@@ -31,6 +31,7 @@ import {
   isStudentAnswerCorrect,
 } from './gradingAnswerUtils';
 import { htmlToPlainText } from '../../utils/htmlText';
+import { sanitizeHtml } from '../../utils/sanitizeHtml';
 
 export interface StudentReviewWorkspaceProps {
   submissionId: string;
@@ -463,9 +464,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const currentWritingPrompt = currentWritingTaskId ? htmlToPlainText(getWritingPrompt(currentWritingTaskId)) : '';
   const currentWritingText = currentWritingTaskId ? htmlToPlainText(getWritingResponseText(currentWritingTaskId)) : '';
   const printableWritingTasks = writingTasks.map((task, index) => {
-    const rubric = (reviewDraft?.sectionDrafts as any)?.writing?.[task.taskId] as RubricAssessment | undefined;
-    const text = htmlToPlainText(getWritingResponseText(task.taskId));
-    const prompt = htmlToPlainText(getWritingPrompt(task.taskId));
+    const rawText = getWritingResponseText(task.taskId);
+    const text = htmlToPlainText(rawText);
     const taskSubmission = getWritingTaskSubmission(task.taskId);
 
     return {
@@ -476,10 +476,10 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           : task.taskId === 'task2'
             ? 'Task 2'
             : `Task ${index + 1}`,
-      prompt,
+      promptHtml: sanitizeHtml(getWritingPrompt(task.taskId)),
+      responseHtml: sanitizeHtml(rawText),
       text,
       wordCount: taskSubmission?.wordCount ?? (text ? text.trim().split(/\s+/).filter(Boolean).length : 0),
-      rubric,
     };
   });
 
@@ -508,7 +508,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             padding: 24px;
             color: #111827;
             background: #ffffff;
-            font-family: Arial, sans-serif;
+            font-family: Arial, "Times New Roman", serif;
+            font-size: 12pt;
+            line-height: 1.45;
           }
 
           .writing-print-task {
@@ -517,6 +519,40 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             margin-top: 24px;
             border-top: 1px solid #d1d5db;
             padding-top: 18px;
+          }
+
+          .writing-print-rich {
+            white-space: normal;
+          }
+
+          .writing-print-rich p {
+            margin: 0 0 10px;
+          }
+
+          .writing-print-rich div {
+            margin: 0 0 10px;
+          }
+
+          .writing-print-assessment-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+            font-size: 11pt;
+          }
+
+          .writing-print-assessment-table th,
+          .writing-print-assessment-table td {
+            border: 1px solid #9ca3af;
+            padding: 8px;
+            vertical-align: top;
+          }
+
+          .writing-print-band-box {
+            height: 28px;
+          }
+
+          .writing-print-comment-box {
+            height: 68px;
           }
         }
       `}</style>
@@ -536,20 +572,54 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             <div className="mt-2 text-sm"><strong>Word Count:</strong> {task.wordCount}</div>
             <div className="mt-3">
               <h3 className="text-base font-bold">Prompt</h3>
-              <p className="mt-1 whitespace-pre-wrap">{task.prompt || 'Prompt unavailable.'}</p>
+              {task.promptHtml ? (
+                <div
+                  className="writing-print-rich mt-1"
+                  dangerouslySetInnerHTML={{ __html: task.promptHtml }}
+                />
+              ) : (
+                <p className="mt-1">Prompt unavailable.</p>
+              )}
             </div>
             <div className="mt-4">
               <h3 className="text-base font-bold">Student Response</h3>
-              <p className="mt-1 whitespace-pre-wrap">{task.text || 'No writing response recorded.'}</p>
+              {task.responseHtml ? (
+                <div
+                  className="writing-print-rich mt-1"
+                  dangerouslySetInnerHTML={{ __html: task.responseHtml }}
+                />
+              ) : (
+                <p className="mt-1">No writing response recorded.</p>
+              )}
             </div>
             <div className="mt-4">
               <h3 className="text-base font-bold">Assessment</h3>
-              <div className="mt-1 grid grid-cols-2 gap-2 text-sm">
-                <div><strong>Task Response:</strong> {task.rubric?.taskResponseBand ?? '-'}</div>
-                <div><strong>Coherence:</strong> {task.rubric?.coherenceBand ?? '-'}</div>
-                <div><strong>Lexical:</strong> {task.rubric?.lexicalBand ?? '-'}</div>
-                <div><strong>Grammar:</strong> {task.rubric?.grammarBand ?? '-'}</div>
-                <div><strong>Overall:</strong> {task.rubric?.overallBand ?? '-'}</div>
+              <table className="writing-print-assessment-table">
+                <thead>
+                  <tr>
+                    <th>Criterion</th>
+                    <th>Band</th>
+                    <th>Teacher Comment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {['Task Response', 'Coherence & Cohesion', 'Lexical Resource', 'Grammar'].map((criterion) => (
+                    <tr key={`${task.taskId}-${criterion}`}>
+                      <td>{criterion}</td>
+                      <td className="writing-print-band-box" />
+                      <td className="writing-print-comment-box" />
+                    </tr>
+                  ))}
+                  <tr>
+                    <td><strong>Overall Band</strong></td>
+                    <td className="writing-print-band-box" />
+                    <td className="writing-print-comment-box" />
+                  </tr>
+                </tbody>
+              </table>
+              <div className="mt-4">
+                <h4 className="text-sm font-bold">Overall Teacher Comment</h4>
+                <div className="writing-print-comment-box mt-2 border border-gray-400" />
               </div>
             </div>
           </section>
