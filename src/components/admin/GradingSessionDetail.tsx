@@ -266,7 +266,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           @media print {
             @page {
               size: A4;
-              margin: 14mm 12mm;
+              margin: 11mm 10mm;
             }
 
             body * {
@@ -286,28 +286,27 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
               color: #111827;
               background: #ffffff;
               font-family: Arial, Helvetica, sans-serif;
-              font-size: 10.5pt;
-              line-height: 1.48;
+              font-size: 9.8pt;
+              line-height: 1.42;
             }
 
-            .session-writing-print-cover {
-              break-after: page;
-              page-break-after: always;
-              padding-top: 24mm;
+            .session-writing-print-summary {
+              border-bottom: 2px solid #111827;
+              margin-bottom: 5mm;
+              padding-bottom: 4mm;
             }
 
-            .session-writing-print-cover h1 {
-              margin: 0 0 10mm;
-              font-size: 24pt;
+            .session-writing-print-summary h1 {
+              margin: 0 0 3mm;
+              font-size: 17pt;
               line-height: 1.1;
             }
 
             .session-writing-print-meta {
               display: grid;
-              grid-template-columns: 34mm 1fr;
-              gap: 4mm 7mm;
-              max-width: 160mm;
-              font-size: 11pt;
+              grid-template-columns: 22mm 1fr 26mm 1fr;
+              gap: 1.5mm 5mm;
+              font-size: 9.2pt;
             }
 
             .session-writing-print-meta dt {
@@ -321,37 +320,34 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             }
 
             .session-writing-print-student {
-              break-before: page;
-              page-break-before: always;
-            }
-
-            .session-writing-print-student:first-of-type {
-              break-before: auto;
-              page-break-before: auto;
+              margin-top: 5mm;
+              padding-top: 4mm;
+              border-top: 1px solid #9ca3af;
             }
 
             .session-writing-print-student-header {
-              border-bottom: 2px solid #111827;
-              padding-bottom: 5mm;
-              margin-bottom: 6mm;
+              border: 1px solid #cbd5e1;
+              background: #f8fafc;
+              padding: 3mm;
+              margin-bottom: 4mm;
             }
 
             .session-writing-print-student-header h2 {
-              margin: 0 0 3mm;
-              font-size: 18pt;
+              margin: 0 0 2mm;
+              font-size: 13pt;
               line-height: 1.2;
             }
 
             .session-writing-print-grid {
               display: grid;
               grid-template-columns: 1fr 1fr;
-              gap: 2.5mm 8mm;
+              gap: 1.5mm 6mm;
             }
 
             .session-writing-print-field {
               display: grid;
-              grid-template-columns: 30mm 1fr;
-              gap: 4mm;
+              grid-template-columns: 24mm 1fr;
+              gap: 3mm;
             }
 
             .session-writing-print-field span:first-child {
@@ -360,45 +356,43 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             }
 
             .session-writing-print-task {
-              margin-top: 7mm;
-              break-inside: avoid;
-              page-break-inside: avoid;
+              margin-top: 4mm;
             }
 
             .session-writing-print-task h3 {
-              margin: 0 0 3mm;
-              font-size: 14pt;
+              margin: 0 0 2mm;
+              font-size: 12pt;
               line-height: 1.2;
             }
 
             .session-writing-print-task-summary {
               display: flex;
-              gap: 8mm;
-              margin-bottom: 4mm;
+              flex-wrap: wrap;
+              gap: 2mm 7mm;
+              margin-bottom: 3mm;
               color: #374151;
-              font-size: 10pt;
+              font-size: 9pt;
             }
 
             .session-writing-print-block {
-              margin-top: 5mm;
+              margin-top: 3mm;
             }
 
             .session-writing-print-block h4 {
-              margin: 0 0 2mm;
-              font-size: 10pt;
+              margin: 0 0 1.5mm;
+              font-size: 9pt;
               letter-spacing: 0;
               text-transform: uppercase;
             }
 
             .session-writing-print-rich {
-              min-height: 22mm;
               border: 1px solid #cbd5e1;
-              padding: 4mm;
+              padding: 2.5mm 3mm;
               white-space: normal;
             }
 
             .session-writing-print-rich p {
-              margin: 0 0 3mm;
+              margin: 0 0 2mm;
             }
 
             .session-writing-print-rich p:last-child {
@@ -409,49 +403,49 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
               width: 100%;
               table-layout: fixed;
               border-collapse: collapse;
-              margin-top: 3mm;
+              margin-top: 2mm;
             }
 
             .session-writing-print-assessment th,
             .session-writing-print-assessment td {
               border: 1px solid #9ca3af;
-              padding: 3mm;
+              padding: 2mm 2.5mm;
               vertical-align: top;
             }
 
             .session-writing-print-assessment th {
               background: #f3f4f6;
               text-align: left;
-              font-size: 9.5pt;
+              font-size: 8.8pt;
             }
 
             .session-writing-print-criterion {
-              width: 30%;
+              width: 29%;
               font-weight: 700;
             }
 
             .session-writing-print-band {
-              width: 13%;
+              width: 12%;
               text-align: center;
               font-weight: 700;
             }
 
             .session-writing-print-comment {
-              width: 57%;
-              min-height: 16mm;
+              width: 59%;
+              min-height: 10mm;
             }
 
             .session-writing-print-empty {
               border: 1px dashed #9ca3af;
               color: #6b7280;
-              padding: 6mm;
+              padding: 4mm;
             }
           }
         `}
       </style>
       {writingPrintSession ? (
         <div className="session-writing-print-root" aria-hidden="true">
-          <section className="session-writing-print-cover">
+          <section className="session-writing-print-summary">
             <h1>Writing Results</h1>
             <dl className="session-writing-print-meta">
               <dt>Exam</dt>

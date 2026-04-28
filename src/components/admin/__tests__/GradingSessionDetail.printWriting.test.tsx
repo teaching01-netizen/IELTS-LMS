@@ -145,5 +145,13 @@ describe('GradingSessionDetail print writing', () => {
     expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Ada Student');
     expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Ben Student');
     expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Assessment Form');
+    const printStyle = Array.from(document.querySelectorAll('style'))
+      .map((style) => style.textContent ?? '')
+      .find((text) => text.includes('.session-writing-print-root'));
+
+    expect(printStyle).toContain('.session-writing-print-summary');
+    expect(printStyle).not.toContain('page-break-before: always');
+    expect(printStyle).not.toContain('page-break-after: always');
+    expect(printStyle).not.toContain('break-inside: avoid');
   });
 });

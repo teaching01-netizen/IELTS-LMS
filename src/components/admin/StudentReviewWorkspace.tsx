@@ -604,6 +604,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         }
 
         @media print {
+          @page {
+            size: A4;
+            margin: 11mm 10mm;
+          }
+
           body * {
             visibility: hidden !important;
           }
@@ -618,121 +623,189 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             position: absolute;
             inset: 0 auto auto 0;
             width: 100%;
-            padding: 24px;
             color: #111827;
             background: #ffffff;
-            font-family: Arial, "Times New Roman", serif;
-            font-size: 12pt;
-            line-height: 1.45;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 9.8pt;
+            line-height: 1.42;
+          }
+
+          .writing-print-summary {
+            border-bottom: 2px solid #111827;
+            margin-bottom: 5mm;
+            padding-bottom: 4mm;
+          }
+
+          .writing-print-summary h1 {
+            margin: 0 0 3mm;
+            font-size: 17pt;
+            line-height: 1.1;
+          }
+
+          .writing-print-meta {
+            display: grid;
+            grid-template-columns: 24mm 1fr 24mm 1fr;
+            gap: 1.5mm 5mm;
+            font-size: 9.2pt;
           }
 
           .writing-print-task {
-            break-inside: avoid;
-            page-break-inside: avoid;
-            margin-top: 24px;
-            border-top: 1px solid #d1d5db;
-            padding-top: 18px;
+            margin-top: 4mm;
+          }
+
+          .writing-print-task h2 {
+            margin: 0 0 2mm;
+            font-size: 12pt;
+            line-height: 1.2;
+          }
+
+          .writing-print-task-summary {
+            margin-bottom: 3mm;
+            color: #374151;
+            font-size: 9pt;
+          }
+
+          .writing-print-block {
+            margin-top: 3mm;
+          }
+
+          .writing-print-block h3,
+          .writing-print-block h4 {
+            margin: 0 0 1.5mm;
+            font-size: 9pt;
+            letter-spacing: 0;
+            text-transform: uppercase;
           }
 
           .writing-print-rich {
+            border: 1px solid #cbd5e1;
+            padding: 2.5mm 3mm;
             white-space: normal;
           }
 
           .writing-print-rich p {
-            margin: 0 0 10px;
+            margin: 0 0 2mm;
           }
 
           .writing-print-rich div {
-            margin: 0 0 10px;
+            margin: 0 0 2mm;
           }
 
           .writing-print-assessment-table {
             width: 100%;
+            table-layout: fixed;
             border-collapse: collapse;
-            margin-top: 8px;
-            font-size: 11pt;
+            margin-top: 2mm;
           }
 
           .writing-print-assessment-table th,
           .writing-print-assessment-table td {
             border: 1px solid #9ca3af;
-            padding: 8px;
+            padding: 2mm 2.5mm;
             vertical-align: top;
           }
 
+          .writing-print-assessment-table th {
+            background: #f3f4f6;
+            text-align: left;
+            font-size: 8.8pt;
+          }
+
+          .writing-print-criterion {
+            width: 29%;
+            font-weight: 700;
+          }
+
+          .writing-print-band {
+            width: 12%;
+            text-align: center;
+            font-weight: 700;
+          }
+
+          .writing-print-comment {
+            width: 59%;
+          }
+
           .writing-print-band-box {
-            height: 28px;
+            min-height: 10mm;
           }
 
           .writing-print-comment-box {
-            height: 68px;
+            min-height: 10mm;
           }
         }
       `}</style>
       <div className="writing-print-root">
-        <h1 className="text-2xl font-bold">Writing Results</h1>
-        <div className="mt-2 text-sm">
-          <div><strong>Student:</strong> {submission.studentName}</div>
-          <div><strong>Student ID:</strong> {submission.studentId}</div>
-          <div><strong>Email:</strong> {submission.studentEmail ?? ''}</div>
-          <div><strong>Cohort:</strong> {submission.cohortName}</div>
-          <div><strong>Submitted:</strong> {new Date(submission.submittedAt).toLocaleString()}</div>
+        <div className="writing-print-summary">
+          <h1>Writing Results</h1>
+          <div className="writing-print-meta">
+            <div><strong>Student</strong></div>
+            <div>{submission.studentName}</div>
+            <div><strong>Student ID</strong></div>
+            <div>{submission.studentId}</div>
+            <div><strong>Email</strong></div>
+            <div>{submission.studentEmail ?? ''}</div>
+            <div><strong>Cohort</strong></div>
+            <div>{submission.cohortName}</div>
+            <div><strong>Submitted</strong></div>
+            <div>{new Date(submission.submittedAt).toLocaleString()}</div>
+          </div>
         </div>
 
         {printableWritingTasks.map((task) => (
           <section key={task.taskId} className="writing-print-task">
-            <h2 className="text-xl font-bold">{task.label}</h2>
-            <div className="mt-2 text-sm"><strong>Word Count:</strong> {task.wordCount}</div>
-            <div className="mt-3">
-              <h3 className="text-base font-bold">Prompt</h3>
+            <h2>{task.label}</h2>
+            <div className="writing-print-task-summary"><strong>Word Count:</strong> {task.wordCount}</div>
+            <div className="writing-print-block">
+              <h3>Prompt</h3>
               {task.promptHtml ? (
                 <div
-                  className="writing-print-rich mt-1"
+                  className="writing-print-rich"
                   dangerouslySetInnerHTML={{ __html: task.promptHtml }}
                 />
               ) : (
-                <p className="mt-1">Prompt unavailable.</p>
+                <p>Prompt unavailable.</p>
               )}
             </div>
-            <div className="mt-4">
-              <h3 className="text-base font-bold">Student Response</h3>
+            <div className="writing-print-block">
+              <h3>Student Response</h3>
               {task.responseHtml ? (
                 <div
-                  className="writing-print-rich mt-1"
+                  className="writing-print-rich"
                   dangerouslySetInnerHTML={{ __html: task.responseHtml }}
                 />
               ) : (
-                <p className="mt-1">No writing response recorded.</p>
+                <p>No writing response recorded.</p>
               )}
             </div>
-            <div className="mt-4">
-              <h3 className="text-base font-bold">Assessment</h3>
+            <div className="writing-print-block">
+              <h3>Assessment</h3>
               <table className="writing-print-assessment-table">
                 <thead>
                   <tr>
-                    <th>Criterion</th>
-                    <th>Band</th>
-                    <th>Teacher Comment</th>
+                    <th className="writing-print-criterion">Criterion</th>
+                    <th className="writing-print-band">Band</th>
+                    <th className="writing-print-comment">Teacher Comment</th>
                   </tr>
                 </thead>
                 <tbody>
                   {['Task Response', 'Coherence & Cohesion', 'Lexical Resource', 'Grammar'].map((criterion) => (
                     <tr key={`${task.taskId}-${criterion}`}>
-                      <td>{criterion}</td>
-                      <td className="writing-print-band-box" />
-                      <td className="writing-print-comment-box" />
+                      <td className="writing-print-criterion">{criterion}</td>
+                      <td className="writing-print-band writing-print-band-box" />
+                      <td className="writing-print-comment writing-print-comment-box" />
                     </tr>
                   ))}
                   <tr>
-                    <td><strong>Overall Band</strong></td>
-                    <td className="writing-print-band-box" />
-                    <td className="writing-print-comment-box" />
+                    <td className="writing-print-criterion"><strong>Overall Band</strong></td>
+                    <td className="writing-print-band writing-print-band-box" />
+                    <td className="writing-print-comment writing-print-comment-box" />
                   </tr>
                 </tbody>
               </table>
-              <div className="mt-4">
-                <h4 className="text-sm font-bold">Overall Teacher Comment</h4>
-                <div className="writing-print-comment-box mt-2 border border-gray-400" />
+              <div className="writing-print-block">
+                <h4>Overall Teacher Comment</h4>
+                <div className="writing-print-comment-box border border-gray-400" />
               </div>
             </div>
           </section>
