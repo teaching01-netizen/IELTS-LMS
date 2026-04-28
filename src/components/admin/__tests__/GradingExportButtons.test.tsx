@@ -18,9 +18,12 @@ describe('GradingExportButtons', () => {
       />,
     );
 
+    expect(screen.getByText(/export \/ print/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /writing csv/i })).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('button', { name: /reading csv/i }));
     fireEvent.click(screen.getByRole('button', { name: /listening csv/i }));
-    fireEvent.click(screen.getByRole('button', { name: /writing csv/i }));
+    fireEvent.click(screen.getByRole('button', { name: /print writing/i }));
 
     expect(onExportReading).toHaveBeenCalledTimes(1);
     expect(onExportListening).toHaveBeenCalledTimes(1);

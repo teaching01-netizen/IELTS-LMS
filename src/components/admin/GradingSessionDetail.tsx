@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Filter, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight } from 'lucide-react';
-import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus } from '../../types/grading';
+import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus, WritingTaskSubmission } from '../../types/grading';
 import { gradingService } from '../../services/gradingService';
 import { gradingRepository } from '../../services/gradingRepository';
 import { examRepository } from '../../services/examRepository';
@@ -11,11 +11,58 @@ import {
   buildCsvContent,
   buildCsvFilename,
   buildWideObjectiveExport,
-  buildWideWritingExport,
   downloadCsvFile,
   type GradingExportSection,
 } from './gradingReviewUtils';
 import type { ExamState } from '../../types';
+import { sanitizeHtml } from '../../utils/sanitizeHtml';
+
+interface SessionWritingPrintStudent {
+  submission: StudentSubmission;
+  writing: WritingTaskSubmission[];
+}
+
+const formatPrintDate = (value?: string) => {
+  if (!value) {
+    return 'Not submitted';
+  }
+
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
+};
+
+const getTaskDisplayLabel = (task: WritingTaskSubmission, index: number) =>
+  task.taskLabel || `Task ${index + 1}`;
+
+const getAssessmentRows = (task: WritingTaskSubmission) => [
+  {
+    criterion: 'Task Response / Achievement',
+    band: task.rubricAssessment?.taskResponseBand,
+    notes: task.rubricAssessment?.taskResponseNotes,
+  },
+  {
+    criterion: 'Coherence and Cohesion',
+    band: task.rubricAssessment?.coherenceBand,
+    notes: task.rubricAssessment?.coherenceNotes,
+  },
+  {
+    criterion: 'Lexical Resource',
+    band: task.rubricAssessment?.lexicalBand,
+    notes: task.rubricAssessment?.lexicalNotes,
+  },
+  {
+    criterion: 'Grammatical Range and Accuracy',
+    band: task.rubricAssessment?.grammarBand,
+    notes: task.rubricAssessment?.grammarNotes,
+  },
+  {
+    criterion: 'Overall Band',
+    band: task.rubricAssessment?.overallBand,
+    notes: task.overallFeedback || task.studentVisibleNotes || task.rubricAssessment?.internalNotes,
+  },
+];
 
 interface GradingSessionDetailProps {
   sessionId: string;
@@ -29,6 +76,9 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
   const [loading, setLoading] = useState(true);
   const [exportingSection, setExportingSection] = useState<GradingExportSection | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [writingPrintSession, setWritingPrintSession] = useState<GradingSession | null>(null);
+  const [writingPrintStudents, setWritingPrintStudents] = useState<SessionWritingPrintStudent[]>([]);
+  const [writingPrintGeneratedAt, setWritingPrintGeneratedAt] = useState<string | null>(null);
   const [filters, setFilters] = useState<SessionDetailFilters>({});
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -139,6 +189,20 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     return (version?.contentSnapshot as ExamState | undefined) ?? null;
   };
 
+  const prepareWritingPrint = async (fullSession: GradingSession, fullSubmissions: StudentSubmission[]) => {
+    const printStudents = await Promise.all(
+      fullSubmissions.map(async (submission) => ({
+        submission,
+        writing: await gradingRepository.getWritingSubmissionsBySubmissionId(submission.id),
+      })),
+    );
+
+    setWritingPrintSession(fullSession);
+    setWritingPrintStudents(printStudents);
+    setWritingPrintGeneratedAt(new Date().toISOString());
+    window.setTimeout(() => window.print(), 0);
+  };
+
   const handleExportSection = async (section: GradingExportSection) => {
     setExportError(null);
     setExportingSection(section);
@@ -153,45 +217,39 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         throw new Error('Could not load grading session metadata.');
       }
 
-      const examState = section === 'writing' ? null : await resolveExamState(fullSession.publishedVersionId);
+      if (section === 'writing') {
+        await prepareWritingPrint(fullSession, fullSubmissions);
+        return;
+      }
+
+      const examState = await resolveExamState(fullSession.publishedVersionId);
       const bundles = await Promise.all(
         fullSubmissions.map(async (submission) => ({
           submission,
           sections: await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id),
-          writing: await gradingRepository.getWritingSubmissionsBySubmissionId(submission.id),
         })),
       );
       const sessionContext = {
         sessionId: fullSession.id,
         examTitle: fullSession.examTitle,
       };
-      const exportPayload =
-        section === 'writing'
-          ? buildWideWritingExport({
-              session: sessionContext,
-              submissions: bundles.map(({ submission }) => submission),
-              writingSubmissions: bundles.map(({ submission, writing }) => ({
-                submissionId: submission.id,
-                writing,
-              })),
-            })
-          : buildWideObjectiveExport({
-              session: sessionContext,
-              submissions: bundles.map(({ submission }) => submission),
-              sectionSubmissions: bundles.map(({ submission, sections }) => ({
-                submissionId: submission.id,
-                sectionSubmission: sections.find((item) => item.section === section),
-              })),
-              examState,
-              moduleType: section,
-            });
+      const exportPayload = buildWideObjectiveExport({
+        session: sessionContext,
+        submissions: bundles.map(({ submission }) => submission),
+        sectionSubmissions: bundles.map(({ submission, sections }) => ({
+          submissionId: submission.id,
+          sectionSubmission: sections.find((item) => item.section === section),
+        })),
+        examState,
+        moduleType: section,
+      });
 
       downloadCsvFile(
         buildCsvFilename(fullSession.examTitle, section, fullSession.cohortName),
         buildCsvContent(exportPayload.columns, exportPayload.rows),
       );
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'Failed to export section CSV.');
+      setExportError(error instanceof Error ? error.message : 'Failed to export or print section.');
     } finally {
       setExportingSection(null);
     }
@@ -199,6 +257,300 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
+      <style>
+        {`
+          .session-writing-print-root {
+            display: none;
+          }
+
+          @media print {
+            @page {
+              size: A4;
+              margin: 14mm 12mm;
+            }
+
+            body * {
+              visibility: hidden !important;
+            }
+
+            .session-writing-print-root,
+            .session-writing-print-root * {
+              visibility: visible !important;
+            }
+
+            .session-writing-print-root {
+              display: block !important;
+              position: absolute;
+              inset: 0 auto auto 0;
+              width: 100%;
+              color: #111827;
+              background: #ffffff;
+              font-family: Arial, Helvetica, sans-serif;
+              font-size: 10.5pt;
+              line-height: 1.48;
+            }
+
+            .session-writing-print-cover {
+              break-after: page;
+              page-break-after: always;
+              padding-top: 24mm;
+            }
+
+            .session-writing-print-cover h1 {
+              margin: 0 0 10mm;
+              font-size: 24pt;
+              line-height: 1.1;
+            }
+
+            .session-writing-print-meta {
+              display: grid;
+              grid-template-columns: 34mm 1fr;
+              gap: 4mm 7mm;
+              max-width: 160mm;
+              font-size: 11pt;
+            }
+
+            .session-writing-print-meta dt {
+              margin: 0;
+              color: #4b5563;
+              font-weight: 700;
+            }
+
+            .session-writing-print-meta dd {
+              margin: 0;
+            }
+
+            .session-writing-print-student {
+              break-before: page;
+              page-break-before: always;
+            }
+
+            .session-writing-print-student:first-of-type {
+              break-before: auto;
+              page-break-before: auto;
+            }
+
+            .session-writing-print-student-header {
+              border-bottom: 2px solid #111827;
+              padding-bottom: 5mm;
+              margin-bottom: 6mm;
+            }
+
+            .session-writing-print-student-header h2 {
+              margin: 0 0 3mm;
+              font-size: 18pt;
+              line-height: 1.2;
+            }
+
+            .session-writing-print-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 2.5mm 8mm;
+            }
+
+            .session-writing-print-field {
+              display: grid;
+              grid-template-columns: 30mm 1fr;
+              gap: 4mm;
+            }
+
+            .session-writing-print-field span:first-child {
+              color: #4b5563;
+              font-weight: 700;
+            }
+
+            .session-writing-print-task {
+              margin-top: 7mm;
+              break-inside: avoid;
+              page-break-inside: avoid;
+            }
+
+            .session-writing-print-task h3 {
+              margin: 0 0 3mm;
+              font-size: 14pt;
+              line-height: 1.2;
+            }
+
+            .session-writing-print-task-summary {
+              display: flex;
+              gap: 8mm;
+              margin-bottom: 4mm;
+              color: #374151;
+              font-size: 10pt;
+            }
+
+            .session-writing-print-block {
+              margin-top: 5mm;
+            }
+
+            .session-writing-print-block h4 {
+              margin: 0 0 2mm;
+              font-size: 10pt;
+              letter-spacing: 0;
+              text-transform: uppercase;
+            }
+
+            .session-writing-print-rich {
+              min-height: 22mm;
+              border: 1px solid #cbd5e1;
+              padding: 4mm;
+              white-space: normal;
+            }
+
+            .session-writing-print-rich p {
+              margin: 0 0 3mm;
+            }
+
+            .session-writing-print-rich p:last-child {
+              margin-bottom: 0;
+            }
+
+            .session-writing-print-assessment {
+              width: 100%;
+              table-layout: fixed;
+              border-collapse: collapse;
+              margin-top: 3mm;
+            }
+
+            .session-writing-print-assessment th,
+            .session-writing-print-assessment td {
+              border: 1px solid #9ca3af;
+              padding: 3mm;
+              vertical-align: top;
+            }
+
+            .session-writing-print-assessment th {
+              background: #f3f4f6;
+              text-align: left;
+              font-size: 9.5pt;
+            }
+
+            .session-writing-print-criterion {
+              width: 30%;
+              font-weight: 700;
+            }
+
+            .session-writing-print-band {
+              width: 13%;
+              text-align: center;
+              font-weight: 700;
+            }
+
+            .session-writing-print-comment {
+              width: 57%;
+              min-height: 16mm;
+            }
+
+            .session-writing-print-empty {
+              border: 1px dashed #9ca3af;
+              color: #6b7280;
+              padding: 6mm;
+            }
+          }
+        `}
+      </style>
+      {writingPrintSession ? (
+        <div className="session-writing-print-root" aria-hidden="true">
+          <section className="session-writing-print-cover">
+            <h1>Writing Results</h1>
+            <dl className="session-writing-print-meta">
+              <dt>Exam</dt>
+              <dd>{writingPrintSession.examTitle}</dd>
+              <dt>Cohort</dt>
+              <dd>{writingPrintSession.cohortName || 'Not specified'}</dd>
+              <dt>Session</dt>
+              <dd>{writingPrintSession.id}</dd>
+              <dt>Generated</dt>
+              <dd>{formatPrintDate(writingPrintGeneratedAt ?? undefined)}</dd>
+              <dt>Total Students</dt>
+              <dd>{writingPrintStudents.length}</dd>
+            </dl>
+          </section>
+
+          {writingPrintStudents.map(({ submission, writing }) => (
+            <section key={submission.id} className="session-writing-print-student">
+              <header className="session-writing-print-student-header">
+                <h2>{submission.studentName}</h2>
+                <div className="session-writing-print-grid">
+                  <div className="session-writing-print-field">
+                    <span>Student ID</span>
+                    <span>{submission.studentId || submission.submissionId}</span>
+                  </div>
+                  <div className="session-writing-print-field">
+                    <span>Email</span>
+                    <span>{submission.studentEmail || 'Not provided'}</span>
+                  </div>
+                  <div className="session-writing-print-field">
+                    <span>Submitted</span>
+                    <span>{formatPrintDate(submission.submittedAt)}</span>
+                  </div>
+                  <div className="session-writing-print-field">
+                    <span>Status</span>
+                    <span>{submission.sectionStatuses.writing}</span>
+                  </div>
+                </div>
+              </header>
+
+              {writing.length > 0 ? (
+                writing.map((task, index) => (
+                  <article key={task.id} className="session-writing-print-task">
+                    <h3>{getTaskDisplayLabel(task, index)}</h3>
+                    <div className="session-writing-print-task-summary">
+                      <span>Word count: {task.wordCount}</span>
+                      <span>Submitted: {formatPrintDate(task.submittedAt)}</span>
+                      <span>Status: {task.gradingStatus}</span>
+                    </div>
+
+                    <div className="session-writing-print-block">
+                      <h4>Prompt</h4>
+                      <div
+                        className="session-writing-print-rich"
+                        dangerouslySetInnerHTML={{
+                          __html: sanitizeHtml(task.prompt || '<p>No prompt recorded.</p>'),
+                        }}
+                      />
+                    </div>
+
+                    <div className="session-writing-print-block">
+                      <h4>Student Response</h4>
+                      <div
+                        className="session-writing-print-rich"
+                        dangerouslySetInnerHTML={{
+                          __html: sanitizeHtml(task.studentText || '<p>No writing response recorded.</p>'),
+                        }}
+                      />
+                    </div>
+
+                    <div className="session-writing-print-block">
+                      <h4>Assessment Form</h4>
+                      <table className="session-writing-print-assessment">
+                        <thead>
+                          <tr>
+                            <th className="session-writing-print-criterion">Criterion</th>
+                            <th className="session-writing-print-band">Band</th>
+                            <th className="session-writing-print-comment">Comments</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {getAssessmentRows(task).map((row) => (
+                            <tr key={row.criterion}>
+                              <td className="session-writing-print-criterion">{row.criterion}</td>
+                              <td className="session-writing-print-band">{row.band ?? ''}</td>
+                              <td className="session-writing-print-comment">{row.notes || ''}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div className="session-writing-print-empty">No writing submissions recorded for this student.</div>
+              )}
+            </section>
+          ))}
+        </div>
+      ) : null}
       {/* Header */}
       <div className="flex items-center gap-4">
         <button 
