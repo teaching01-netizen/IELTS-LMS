@@ -59,13 +59,18 @@ export function RichTextHighlighter({
     }
   };
 
+  const handleTouchSelection = () => {
+    window.setTimeout(handleSelection, 180);
+  };
+
   return (
     <Tag
       ref={containerRef as any}
       className={className}
+      style={enabled ? { WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'manipulation' } : undefined}
       onMouseUp={enabled ? handleSelection : undefined}
       onKeyUp={enabled ? handleSelection : undefined}
-      onTouchEnd={enabled ? handleSelection : undefined}
+      onTouchEnd={enabled ? handleTouchSelection : undefined}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

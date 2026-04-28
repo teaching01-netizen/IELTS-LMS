@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ExamState, QuestionAnswer } from '../../types';
 import { QuestionRenderer } from './QuestionRenderer';
-import { ArrowLeft, ArrowRight, ArrowLeftRight, Flag } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowLeftRight, ChevronDown, ChevronUp, Flag } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
@@ -41,6 +41,7 @@ export function StudentReading({
 }: StudentReadingProps) {
   const isTabletMode = Boolean(tabletMode);
   const [leftWidth, setLeftWidth] = useState(50);
+  const [collapsedInstructions, setCollapsedInstructions] = useState<Record<string, boolean>>({});
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, 'reading'), [state]);
   const currentQ = allQuestions.find((question) => question.id === currentQuestionId) || allQuestions[0];
@@ -59,11 +60,46 @@ export function StudentReading({
   const splitPaneStyle = useMemo(
     () =>
       ({
-        ['--reading-pane-width' as string]: `${leftWidth}%`,
-        ['--question-pane-width' as string]: `calc(${100 - leftWidth}% - 16px)`,
+        ['--reading-pane-width' as string]: isTabletMode ? '48%' : `${leftWidth}%`,
+        ['--question-pane-width' as string]: isTabletMode ? '52%' : `calc(${100 - leftWidth}% - 16px)`,
       }) as React.CSSProperties,
-    [leftWidth],
+    [isTabletMode, leftWidth],
   );
+
+  const renderBlockInstruction = (blockId: string, instruction: string) => {
+    const isLong = instruction.trim().length > 140;
+    const isCollapsed = isLong && collapsedInstructions[blockId] !== false;
+
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+        <div className="flex items-start justify-between gap-3">
+          <FormattedText
+            as="p"
+            className={`text-sm leading-relaxed text-gray-800 md:text-base ${isCollapsed ? 'line-clamp-2' : ''}`}
+            text={instruction}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+          />
+          {isLong ? (
+            <button
+              type="button"
+              onClick={() =>
+                setCollapsedInstructions((prev) => ({
+                  ...prev,
+                  [blockId]: !isCollapsed,
+                }))
+              }
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-600 shadow-sm"
+              aria-expanded={!isCollapsed}
+            >
+              {isCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+              {isCollapsed ? 'Show' : 'Hide'}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
 
   const renderPassageImageAnnotations = (annotations: StimulusAnnotation[], zoom = 1) => (
     <>
@@ -175,13 +211,14 @@ export function StudentReading({
     <div className="flex flex-col h-full w-full bg-white">
       <div
         className={`relative flex flex-1 overflow-hidden border-t border-gray-300 ${
-          isTabletMode ? 'flex-col' : 'flex-col md:flex-row'
+          isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
         }`}
-        style={isTabletMode ? undefined : splitPaneStyle}
+        style={splitPaneStyle}
+        data-testid="reading-split-workspace"
       >
         <div
           className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-gray-900 md:p-6 md:pr-6 ${
-            isTabletMode ? 'max-h-[42dvh] border-b border-gray-200' : 'lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
+            isTabletMode ? 'w-[var(--reading-pane-width)] min-w-[260px] border-r border-gray-200' : 'lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
           }`}
           style={{
             fontSize: 'var(--student-passage-font-size)',
@@ -201,6 +238,11 @@ export function StudentReading({
               highlightColor={highlightColor}
               highlightClassName={highlightClassName}
             />
+            {highlightEnabled && isTabletMode ? (
+              <p className="rounded-md bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
+                Select passage text to highlight it.
+              </p>
+            ) : null}
             {(activePassage.images ?? []).map((image) => (
               <div key={image.id} className={isTabletMode ? '' : 'lg:sticky lg:top-0 lg:z-10 lg:bg-white lg:py-2'}>
                 <StudentZoomableMedia
@@ -219,16 +261,16 @@ export function StudentReading({
         <div 
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          className="hidden lg:flex w-4 bg-gray-400 relative flex items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors"
+          className={`${isTabletMode ? 'hidden' : 'hidden lg:flex'} w-4 bg-gray-400 relative flex items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors`}
         >
           <div className="w-8 h-8 bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none">
             <ArrowLeftRight size={14} className="text-gray-600" />
           </div>
         </div>
 
-        <div className="relative flex h-full w-full min-w-0 flex-col md:min-w-[320px] lg:w-[var(--question-pane-width)] min-h-0">
+        <div className={`relative flex h-full min-w-0 flex-col md:min-w-[320px] min-h-0 ${isTabletMode ? 'w-[var(--question-pane-width)]' : 'w-full lg:w-[var(--question-pane-width)]'}`}>
           <div
-            className={`flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10 ${
+            className={`flex-1 overflow-y-auto p-4 md:p-5 lg:p-8 pb-20 md:pb-24 space-y-6 md:space-y-8 ${
               isTabletMode ? 'pb-28 md:pb-28' : ''
             }`}
             ref={questionContainerRef}
@@ -253,12 +295,7 @@ export function StudentReading({
                     <h3 className="font-bold text-gray-900 mb-1 md:mb-2 text-base md:text-lg">
                       Questions {formatQuestionRange(blockStartQ, blockEndQ)}
                     </h3>
-                    <FormattedText
-                      as="p"
-                      className="text-gray-900 text-sm md:text-base"
-                      text={block.instruction}
-                      highlightEnabled={highlightEnabled}
-                    />
+                    {renderBlockInstruction(block.id, block.instruction)}
                   </div>
                   
                   <div className="space-y-8 md:space-y-10">

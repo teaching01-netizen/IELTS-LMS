@@ -360,6 +360,71 @@ describe('student question experience', () => {
     expect(passageTitle.nextElementSibling?.className).toContain('--student-passage-h1-font-size');
   });
 
+  it('keeps reading split-screen side by side in tablet mode with simple highlight guidance', () => {
+    const state = {
+      title: 'Reading Test',
+      type: 'Academic',
+      activeModule: 'reading',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: { enabled: false, order: 1, duration: 30, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          reading: { enabled: true, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+        },
+      },
+      reading: {
+        passages: [
+          {
+            id: 'passage-1',
+            title: 'Passage 1',
+            content: 'Read this passage carefully.',
+            images: [],
+            blocks: [
+              {
+                id: 'reading-block-1',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer the question.',
+                questions: [{ id: 'reading-q1', prompt: 'What?', correctAnswer: 'answer', answerRule: 'ONE_WORD' }],
+              },
+            ],
+          },
+        ],
+      },
+      listening: { parts: [] },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    } as ExamState;
+
+    render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="reading-q1"
+        onNavigate={() => {}}
+        tabletMode
+        highlightEnabled
+      />,
+    );
+
+    const workspace = screen.getByTestId('reading-split-workspace');
+    expect(workspace).toHaveClass('flex-row');
+    expect(workspace).toHaveStyle({
+      '--reading-pane-width': '48%',
+      '--question-pane-width': '52%',
+    });
+    expect(screen.getByText(/select passage text to highlight it/i)).toBeInTheDocument();
+  });
+
   it('shows a single reading question number without a repeated range', () => {
     const state = {
       title: 'Reading Test',
@@ -607,7 +672,6 @@ describe('student question experience', () => {
       />,
     );
 
-    expect(screen.queryByRole('button', { name: /open tablet controls/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId('zoom-controls')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open zoom controls/i })).toHaveTextContent('Zoom');
     expect(screen.getByRole('button', { name: /open highlight options/i })).toHaveTextContent('Highlight');
@@ -1009,7 +1073,86 @@ describe('student question experience', () => {
 
     expect(document.querySelector('audio')).toBeNull();
     expect(screen.getByText(/staff instructions/i)).toBeInTheDocument();
+    expect(screen.queryByText(/use the invigilator audio system/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /show/i }));
     expect(screen.getByText(/use the invigilator audio system/i)).toBeInTheDocument();
     expect(screen.queryByText(/listening audio track/i)).toBeNull();
+  });
+
+  it('keeps listening split-screen side by side in tablet mode and collapses staff instructions', () => {
+    const longInstruction = 'Answer the question using the words you hear. '.repeat(6);
+    const state: ExamState = {
+      title: 'Listening Test',
+      type: 'Academic',
+      activeModule: 'listening',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: {
+            enabled: true,
+            order: 1,
+            duration: 30,
+            autoContinue: true,
+            allowedQuestionTypes: ['SHORT_ANSWER'],
+            audioPlaybackEnabled: false,
+            staffInstructions: 'Use the invigilator audio system.',
+          },
+          reading: { enabled: false, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+        },
+      },
+      reading: { passages: [] },
+      listening: {
+        parts: [
+          {
+            id: 'part-1',
+            title: 'Part 1',
+            audioUrl: '',
+            transcript: 'Reference transcript text.',
+            pins: [],
+            blocks: [
+              {
+                id: 'listening-block-1',
+                type: 'SHORT_ANSWER',
+                instruction: longInstruction,
+                questions: [{ id: 'q1', prompt: 'What?', correctAnswer: 'answer', answerRule: 'ONE_WORD' }],
+              },
+            ],
+          },
+        ],
+      },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    };
+
+    render(
+      <StudentListening
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+        tabletMode
+        highlightEnabled
+      />,
+    );
+
+    const workspace = screen.getByTestId('listening-split-workspace');
+    expect(workspace).toHaveClass('flex-row');
+    expect(workspace).toHaveStyle({
+      '--listening-pane-width': '48%',
+      '--question-pane-width': '52%',
+    });
+    expect(screen.queryByText(/use the invigilator audio system/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/select reference text to highlight it/i)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /show/i }).length).toBeGreaterThanOrEqual(2);
   });
 });
