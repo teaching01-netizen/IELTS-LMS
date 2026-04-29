@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DiagramLabelingBlock, ExamState, MultiMCQBlock, SentenceCompletionBlock } from '../../../types';
+import type { ClassificationBlock, DiagramLabelingBlock, ExamState, MatchingFeaturesBlock, MultiMCQBlock, SentenceCompletionBlock } from '../../../types';
 import { QuestionRenderer } from '../QuestionRenderer';
 import { StudentFooter } from '../StudentFooter';
 import { StudentHeader } from '../StudentHeader';
@@ -53,6 +53,60 @@ describe('student question experience', () => {
     expect(screen.getByRole('button', { name: '1' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '2-4' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '5' })).toBeInTheDocument();
+  });
+
+  it('does not show decorative category tags for classification questions', () => {
+    const block: ClassificationBlock = {
+      id: 'classify-1',
+      type: 'CLASSIFICATION',
+      instruction: 'Classify each item.',
+      categories: ['Category A', 'Category B'],
+      items: [
+        { id: 'item-1', text: 'First item', correctAnswer: 'Category A' },
+      ],
+    };
+
+    const { container } = render(
+      <QuestionRenderer
+        question={null}
+        block={block}
+        number={1}
+        answer={[]}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('.rounded-full.bg-blue-50')).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Category selection for question 1' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Category A' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Category B' })).toBeInTheDocument();
+  });
+
+  it('does not show decorative option tags for matching feature questions', () => {
+    const block: MatchingFeaturesBlock = {
+      id: 'features-1',
+      type: 'MATCHING_FEATURES',
+      instruction: 'Match each feature.',
+      options: ['Writer A', 'Writer B'],
+      features: [
+        { id: 'feature-1', text: 'First feature', correctAnswer: 'Writer A' },
+      ],
+    };
+
+    const { container } = render(
+      <QuestionRenderer
+        question={null}
+        block={block}
+        number={1}
+        answer={[]}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('.rounded-full.bg-gray-100')).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Matching selection for question 1' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Writer A' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Writer B' })).toBeInTheDocument();
   });
 
   it('allows jumping to another part from the footer progress pill', () => {

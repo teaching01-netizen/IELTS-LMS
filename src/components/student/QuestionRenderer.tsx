@@ -649,13 +649,6 @@ export function QuestionRenderer({
 
   const renderClassification = (classificationBlock: ClassificationBlock) => (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        {classificationBlock.categories.map((category) => (
-          <span key={category} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-            <FormattedText as="span" className="text-blue-700" text={category} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
-          </span>
-        ))}
-      </div>
       <div className="space-y-3">
         {classificationBlock.items.map((item, index) => {
           const slotId = getSlotId(index, `${classificationBlock.id}:${item.id}`);
@@ -692,13 +685,6 @@ export function QuestionRenderer({
 
   const renderMatchingFeatures = (matchingFeaturesBlock: MatchingFeaturesBlock) => (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        {matchingFeaturesBlock.options.map((option) => (
-          <span key={option} className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
-            <FormattedText as="span" className="text-gray-700" text={option} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
-          </span>
-        ))}
-      </div>
       <div className="space-y-3">
         {matchingFeaturesBlock.features.map((feature, index) => {
           const slotId = getSlotId(index, `${matchingFeaturesBlock.id}:${feature.id}`);
