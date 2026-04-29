@@ -1501,7 +1501,7 @@ impl ProctoringService {
                 candidate_id,
                 candidate_name,
                 candidate_email,
-                schedule_id,
+                student_attempts.schedule_id,
                 current_module,
                 phase,
                 integrity,

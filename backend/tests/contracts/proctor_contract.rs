@@ -56,6 +56,7 @@ async fn list_sessions_and_detail_include_runtime_and_attempts() {
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
     let attempt_id = bootstrap_attempt(database.pool(), schedule_id, "alice").await;
+    insert_attempt_presence(database.pool(), schedule_id, attempt_id).await;
     let auth = create_authenticated_user(
         database.pool(),
         UserRole::Proctor,
@@ -125,6 +126,7 @@ async fn dashboard_detail_mode_bounds_audit_logs_and_alerts() {
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
     let attempt_id = bootstrap_attempt(database.pool(), schedule_id, "alice").await;
+    insert_attempt_presence(database.pool(), schedule_id, attempt_id).await;
     let auth = create_authenticated_user(
         database.pool(),
         UserRole::Proctor,
@@ -1167,6 +1169,23 @@ async fn bootstrap_attempt(pool: &sqlx::MySqlPool, schedule_id: Uuid, candidate_
 
     let attempt_id = context.attempt.expect("attempt").id;
     Uuid::parse_str(&attempt_id).expect("attempt id")
+}
+
+async fn insert_attempt_presence(pool: &sqlx::MySqlPool, schedule_id: Uuid, attempt_id: Uuid) {
+    sqlx::query(
+        r#"
+        INSERT INTO student_attempt_presence (
+            attempt_id, schedule_id, client_session_id, last_heartbeat_status
+        )
+        VALUES (?, ?, ?, 'ok')
+        "#,
+    )
+    .bind(attempt_id.to_string())
+    .bind(schedule_id.to_string())
+    .bind(Uuid::new_v4().to_string())
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule::ExamSchedule {
