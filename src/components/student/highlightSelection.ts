@@ -10,7 +10,7 @@ export function escapeHtml(text: string): string {
 export function applySelectionHighlight(
   container: HTMLElement,
   selection: Selection,
-  highlightClassName = 'rounded-sm bg-yellow-200/80 px-0.5 text-gray-900',
+  highlightClassName = 'rounded-sm bg-yellow-200/80 text-gray-900',
 ): string | null {
   if (selection.rangeCount === 0) {
     return null;

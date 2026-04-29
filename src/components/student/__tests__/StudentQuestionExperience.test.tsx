@@ -451,8 +451,10 @@ describe('student question experience', () => {
       '--question-pane-width': 'calc(50% - 16px)',
     });
     expect(screen.getByTestId('reading-pane-resizer')).toBeInTheDocument();
-    expect(screen.getByText(/select passage text to highlight it/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /highlight selected text/i })).toBeInTheDocument();
+    expect(screen.getByTestId('reading-pane-resizer')).toHaveClass('w-8');
+    expect(screen.getByRole('button', { name: /material wider/i })).toHaveClass('min-h-11');
+    expect(screen.queryByText(/select passage text to highlight it/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
   });
 
   it('shows a single reading question number without a repeated range', () => {
@@ -1183,8 +1185,10 @@ describe('student question experience', () => {
     expect(screen.queryByText(/staff instructions/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/use the invigilator audio system/i)).not.toBeInTheDocument();
     expect(screen.queryByText(longInstruction.trim())).not.toBeInTheDocument();
-    expect(screen.getByText(/select reference text to highlight it/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /highlight selected text/i })).toBeInTheDocument();
+    expect(screen.getByTestId('listening-pane-resizer')).toHaveClass('w-8');
+    expect(screen.getByRole('button', { name: /material wider/i })).toHaveClass('min-h-11');
+    expect(screen.queryByText(/select reference text to highlight it/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
   });
 
   it('places listening diagram material on the left and answers on the right', () => {

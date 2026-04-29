@@ -54,7 +54,7 @@ export function FormattedText({
       container,
       selection,
       highlightClassName ??
-        (highlightColor ? getStudentHighlightClassName(highlightColor) : 'rounded-sm bg-yellow-200/80 px-0.5 text-gray-900'),
+        (highlightColor ? getStudentHighlightClassName(highlightColor) : 'rounded-sm bg-yellow-200/80 text-gray-900'),
     );
 
     if (nextHtml) {

@@ -290,14 +290,14 @@ export function StudentListening({
           }`}
           data-student-zoom-scroll
         >
-          <div className="mb-3 flex flex-wrap gap-2 text-xs font-bold" data-testid="listening-split-presets">
-            <button type="button" onClick={() => setSplitPreset(60)} className="rounded-md border border-gray-200 bg-white px-2 py-1 text-gray-700 shadow-sm">
+          <div className="mb-4 flex flex-wrap gap-2 text-sm font-bold" data-testid="listening-split-presets">
+            <button type="button" onClick={() => setSplitPreset(60)} className="min-h-11 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-gray-700 shadow-sm active:bg-gray-100">
               Material wider
             </button>
-            <button type="button" onClick={() => setSplitPreset(50)} className="rounded-md border border-gray-200 bg-white px-2 py-1 text-gray-700 shadow-sm">
+            <button type="button" onClick={() => setSplitPreset(50)} className="min-h-11 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-gray-700 shadow-sm active:bg-gray-100">
               Equal
             </button>
-            <button type="button" onClick={() => setSplitPreset(40)} className="rounded-md border border-gray-200 bg-white px-2 py-1 text-gray-700 shadow-sm">
+            <button type="button" onClick={() => setSplitPreset(40)} className="min-h-11 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-gray-700 shadow-sm active:bg-gray-100">
               Answers wider
             </button>
           </div>
@@ -441,13 +441,7 @@ export function StudentListening({
                 className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800 md:text-base"
                 highlightColor={highlightColor}
                 highlightClassName={highlightClassName}
-                showHighlightButton={isTabletMode}
               />
-              {highlightEnabled && isTabletMode ? (
-                <p className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
-                  Select reference text to highlight it.
-                </p>
-              ) : null}
             </div>
           ) : null}
         </div>
@@ -455,13 +449,13 @@ export function StudentListening({
         <div 
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          className={`${isTabletMode ? 'flex w-5' : 'hidden w-4 lg:flex'} bg-gray-400 relative items-center justify-center cursor-col-resize flex-shrink-0 touch-none hover:bg-gray-600 transition-colors`}
+          className={`${isTabletMode ? 'flex w-8' : 'hidden w-4 lg:flex'} bg-gray-400 relative items-center justify-center cursor-col-resize flex-shrink-0 touch-none hover:bg-gray-600 transition-colors`}
           role="separator"
           aria-label="Resize listening material and answer panels"
           aria-orientation="vertical"
           data-testid="listening-pane-resizer"
         >
-          <div className="w-8 h-10 bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none">
+          <div className={`${isTabletMode ? 'h-16 w-10' : 'h-10 w-8'} bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none`}>
             <ArrowLeftRight size={14} className="text-gray-600" />
           </div>
         </div>
