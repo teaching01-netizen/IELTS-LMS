@@ -13,7 +13,10 @@ pub struct OutboxRunReport {
 }
 
 #[tracing::instrument(skip(pool, notify_channel), fields(notify_channel = notify_channel))]
-pub async fn run_once(pool: MySqlPool, notify_channel: &str) -> Result<OutboxRunReport, sqlx::Error> {
+pub async fn run_once(
+    pool: MySqlPool,
+    notify_channel: &str,
+) -> Result<OutboxRunReport, sqlx::Error> {
     let started = Instant::now();
     let repository = OutboxRepository::new(pool);
     let events = repository.claim_batch(100).await?;

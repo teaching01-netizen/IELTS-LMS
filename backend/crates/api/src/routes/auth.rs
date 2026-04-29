@@ -50,7 +50,10 @@ pub async fn login(
                     return Err(ApiError::new(
                         StatusCode::TOO_MANY_REQUESTS,
                         "RATE_LIMIT_EXCEEDED",
-                        &format!("Too many login attempts. Retry after {} seconds.", retry_after.as_secs()),
+                        &format!(
+                            "Too many login attempts. Retry after {} seconds.",
+                            retry_after.as_secs()
+                        ),
                     ));
                 }
             }
@@ -213,7 +216,10 @@ pub async fn request_password_reset(
                     return Err(ApiError::new(
                         StatusCode::TOO_MANY_REQUESTS,
                         "RATE_LIMIT_EXCEEDED",
-                        &format!("Too many password reset attempts. Retry after {} seconds.", retry_after.as_secs()),
+                        &format!(
+                            "Too many password reset attempts. Retry after {} seconds.",
+                            retry_after.as_secs()
+                        ),
                     ));
                 }
             }
@@ -301,7 +307,11 @@ pub async fn student_entry(
         state.config.rate_limit_student_entry_per_ip,
         state.config.rate_limit_student_entry_per_ip_window_secs,
     );
-    match state.rate_limiter.check_with_config(&ip_key, &ip_config).await {
+    match state
+        .rate_limiter
+        .check_with_config(&ip_key, &ip_config)
+        .await
+    {
         RateLimitResult::Allowed { .. } => {}
         RateLimitResult::Denied { retry_after } => {
             return Err(ApiError::new(
@@ -318,7 +328,9 @@ pub async fn student_entry(
     let schedule_key = RateLimitKey::Custom(format!("student_entry:schedule:{schedule_id}"));
     let schedule_config = RateLimitConfig::new(
         state.config.rate_limit_student_entry_per_schedule,
-        state.config.rate_limit_student_entry_per_schedule_window_secs,
+        state
+            .config
+            .rate_limit_student_entry_per_schedule_window_secs,
     );
     match state
         .rate_limiter
@@ -344,21 +356,26 @@ pub async fn student_entry(
         student_email: Option<String>,
     }
 
-    let existing_registration =
-        sqlx::query_as::<_, RegistrationIdentityRow>(
-            r#"
+    let existing_registration = sqlx::query_as::<_, RegistrationIdentityRow>(
+        r#"
             SELECT student_name, student_email
             FROM schedule_registrations
             WHERE schedule_id = ? AND wcode = ?
             ORDER BY updated_at DESC
             LIMIT 1
             "#,
+    )
+    .bind(schedule_id.to_string())
+    .bind(&normalized_wcode)
+    .fetch_optional(&state.db_pool())
+    .await
+    .map_err(|err| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &err.to_string(),
         )
-        .bind(schedule_id.to_string())
-        .bind(&normalized_wcode)
-        .fetch_optional(&state.db_pool())
-        .await
-        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?;
+    })?;
 
     let normalized_name = req.student_name.trim();
     let normalized_email = req.email.trim().to_ascii_lowercase();

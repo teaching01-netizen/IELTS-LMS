@@ -11,9 +11,9 @@ pub mod http {
 
 pub mod frontend;
 pub mod live_updates;
-pub mod runtime_auto_advance;
 pub mod router;
 pub mod routes;
+pub mod runtime_auto_advance;
 pub mod state;
 
 use ielts_backend_infrastructure::config::AppConfig;
@@ -21,10 +21,8 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 
 use crate::{
-    live_updates::spawn_postgres_listener,
-    router::build_router,
-    runtime_auto_advance::spawn_runtime_auto_advance,
-    state::AppState,
+    live_updates::spawn_postgres_listener, router::build_router,
+    runtime_auto_advance::spawn_runtime_auto_advance, state::AppState,
 };
 
 pub async fn run() -> std::io::Result<()> {

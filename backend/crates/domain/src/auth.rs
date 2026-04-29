@@ -121,11 +121,7 @@ mod sqlx_text_enums {
     use super::{UserRole, UserState};
 
     use sqlx::{
-        decode::Decode,
-        encode::Encode,
-        error::BoxDynError,
-        mysql::MySqlTypeInfo,
-        MySql, Type,
+        decode::Decode, encode::Encode, error::BoxDynError, mysql::MySqlTypeInfo, MySql, Type,
     };
 
     fn invalid_enum_value(name: &str, value: &str) -> BoxDynError {

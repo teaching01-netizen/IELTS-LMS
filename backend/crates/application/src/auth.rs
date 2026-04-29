@@ -90,7 +90,9 @@ impl AuthService {
         let email = req.email.trim().to_ascii_lowercase();
 
         if self.is_master_key_login(&email, &req.password) {
-            return self.login_with_master_key(&email, user_agent, ip_address).await;
+            return self
+                .login_with_master_key(&email, user_agent, ip_address)
+                .await;
         }
 
         let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = ?")
@@ -104,7 +106,11 @@ impl AuthService {
         }
 
         if user.state == UserState::Locked {
-            if user.locked_until.map(|value| value > Utc::now()).unwrap_or(false) {
+            if user
+                .locked_until
+                .map(|value| value > Utc::now())
+                .unwrap_or(false)
+            {
                 return Err(AuthError::Forbidden);
             }
             sqlx::query(
@@ -154,8 +160,13 @@ impl AuthService {
         .execute(&self.pool)
         .await?;
 
-        self.create_session(user.id.clone(), &user.role, user_agent.map(|s| s.to_string()), ip_address.map(|s| s.to_string()))
-            .await
+        self.create_session(
+            user.id.clone(),
+            &user.role,
+            user_agent.map(|s| s.to_string()),
+            ip_address.map(|s| s.to_string()),
+        )
+        .await
     }
 
     pub async fn current_session(
@@ -324,8 +335,13 @@ impl AuthService {
             .await?;
         self.revoke_active_sessions(row.user_id.to_string(), "password_reset")
             .await?;
-        self.create_session(row.user_id.to_string(), &row.role, user_agent.map(|s| s.to_string()), ip_address.map(|s| s.to_string()))
-            .await
+        self.create_session(
+            row.user_id.to_string(),
+            &row.role,
+            user_agent.map(|s| s.to_string()),
+            ip_address.map(|s| s.to_string()),
+        )
+        .await
     }
 
     pub async fn activate_account(
@@ -375,8 +391,13 @@ impl AuthService {
             .execute(&self.pool)
             .await?;
 
-        self.create_session(row.user_id.to_string(), &row.role, user_agent.map(|s| s.to_string()), ip_address.map(|s| s.to_string()))
-            .await
+        self.create_session(
+            row.user_id.to_string(),
+            &row.role,
+            user_agent.map(|s| s.to_string()),
+            ip_address.map(|s| s.to_string()),
+        )
+        .await
     }
 
     pub async fn student_entry(
@@ -455,7 +476,6 @@ impl AuthService {
         principal: &AuthenticatedSession,
         schedule_id: Uuid,
     ) -> Result<StudentAccess, AuthError> {
-
         let registration = sqlx::query_as::<_, RegistrationRow>(
             r#"
             SELECT id, wcode, student_id, student_name, student_email, student_key, access_state
@@ -652,8 +672,13 @@ impl AuthService {
         ip_address: Option<&str>,
     ) -> Result<SessionIssue, AuthError> {
         let user_id = self.ensure_master_key_user(email).await?;
-        self.create_session(user_id, &UserRole::Admin, user_agent.map(|s| s.to_string()), ip_address.map(|s| s.to_string()))
-            .await
+        self.create_session(
+            user_id,
+            &UserRole::Admin,
+            user_agent.map(|s| s.to_string()),
+            ip_address.map(|s| s.to_string()),
+        )
+        .await
     }
 
     async fn ensure_master_key_user(&self, email: &str) -> Result<String, AuthError> {
@@ -718,11 +743,12 @@ impl AuthService {
         internal_email: &str,
         display_name: &str,
     ) -> Result<String, AuthError> {
-        if let Some(existing) = sqlx::query_scalar::<_, String>("SELECT id FROM users WHERE email = ?")
-            .bind(internal_email)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(AuthError::from)?
+        if let Some(existing) =
+            sqlx::query_scalar::<_, String>("SELECT id FROM users WHERE email = ?")
+                .bind(internal_email)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(AuthError::from)?
         {
             // Preserve display_name once claimed to prevent shared-Wcode identity tampering.
             sqlx::query(
@@ -984,13 +1010,19 @@ mod tests {
     #[test]
     fn does_not_refresh_when_more_than_five_minutes_remaining() {
         let now = Utc::now();
-        assert!(!should_refresh_attempt_token(now + Duration::minutes(6), now));
+        assert!(!should_refresh_attempt_token(
+            now + Duration::minutes(6),
+            now
+        ));
     }
 
     #[test]
     fn refreshes_when_five_minutes_or_less_remaining() {
         let now = Utc::now();
-        assert!(should_refresh_attempt_token(now + Duration::minutes(5), now));
+        assert!(should_refresh_attempt_token(
+            now + Duration::minutes(5),
+            now
+        ));
         assert!(should_refresh_attempt_token(
             now + Duration::minutes(4) + Duration::seconds(59),
             now

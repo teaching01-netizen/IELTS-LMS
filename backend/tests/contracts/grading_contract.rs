@@ -15,8 +15,8 @@ use ielts_backend_application::{
     builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
 };
 use ielts_backend_domain::{
-    auth::UserRole,
     attempt::{StudentBootstrapRequest, StudentSubmitRequest},
+    auth::UserRole,
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
     grading::StartReviewRequest,
     schedule::CreateScheduleRequest,
@@ -108,8 +108,7 @@ async fn grading_review_and_result_release_flow_round_trips() {
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StartReviewRequest {})
-                    .unwrap(),
+                    serde_json::to_vec(&StartReviewRequest {}).unwrap(),
                 ))
                 .unwrap(),
         )
@@ -117,7 +116,10 @@ async fn grading_review_and_result_release_flow_round_trips() {
         .unwrap();
     assert_eq!(start_review.status(), StatusCode::OK);
     let start_review_json = json_body(start_review).await;
-    assert_eq!(start_review_json["data"]["teacherId"], auth.user_id.to_string());
+    assert_eq!(
+        start_review_json["data"]["teacherId"],
+        auth.user_id.to_string()
+    );
 
     let save_draft_missing_revision = app
         .clone()
@@ -157,7 +159,10 @@ async fn grading_review_and_result_release_flow_round_trips() {
         )
         .await
         .unwrap();
-    assert_eq!(save_draft_missing_revision.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        save_draft_missing_revision.status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
 
     let save_draft = app
         .clone()
@@ -332,11 +337,9 @@ async fn grading_review_and_result_release_flow_round_trips() {
     let result_detail = app
         .clone()
         .oneshot(
-            auth.with_auth(
-                Request::builder().uri(format!("/api/v1/results/{}", result_id)),
-            )
-            .body(Body::empty())
-            .unwrap(),
+            auth.with_auth(Request::builder().uri(format!("/api/v1/results/{}", result_id)))
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -366,11 +369,10 @@ async fn grading_review_and_result_release_flow_round_trips() {
     let forbidden_result_detail = app
         .clone()
         .oneshot(
-            unauthorized_grader.with_auth(
-                Request::builder().uri(format!("/api/v1/results/{}", result_id)),
-            )
-            .body(Body::empty())
-            .unwrap(),
+            unauthorized_grader
+                .with_auth(Request::builder().uri(format!("/api/v1/results/{}", result_id)))
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -379,11 +381,10 @@ async fn grading_review_and_result_release_flow_round_trips() {
     let forbidden_result_events = app
         .clone()
         .oneshot(
-            unauthorized_grader.with_auth(
-                Request::builder().uri(format!("/api/v1/results/{}/events", result_id)),
-            )
-            .body(Body::empty())
-            .unwrap(),
+            unauthorized_grader
+                .with_auth(Request::builder().uri(format!("/api/v1/results/{}/events", result_id)))
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -406,11 +407,9 @@ async fn grading_review_and_result_release_flow_round_trips() {
     let events = app
         .clone()
         .oneshot(
-            auth.with_auth(
-                Request::builder().uri(format!("/api/v1/results/{}/events", result_id)),
-            )
-            .body(Body::empty())
-            .unwrap(),
+            auth.with_auth(Request::builder().uri(format!("/api/v1/results/{}/events", result_id)))
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -523,7 +522,11 @@ async fn media_upload_intent_and_completion_round_trip() {
     database.shutdown().await;
 }
 
-async fn bootstrap_and_submit(pool: &sqlx::MySqlPool, schedule_id: Uuid, candidate_id: &str) -> Uuid {
+async fn bootstrap_and_submit(
+    pool: &sqlx::MySqlPool,
+    schedule_id: Uuid,
+    candidate_id: &str,
+) -> Uuid {
     let service = DeliveryService::new(pool.clone());
     let context = service
         .bootstrap(

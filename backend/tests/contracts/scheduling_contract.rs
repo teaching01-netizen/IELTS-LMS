@@ -133,8 +133,8 @@ async fn get_runtime_returns_a_not_started_projection_before_commands_run() {
             auth.with_auth(
                 Request::builder().uri(format!("/api/v1/schedules/{}/runtime", schedule.id)),
             )
-                .body(Body::empty())
-                .unwrap(),
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -169,7 +169,13 @@ async fn runtime_commands_transition_the_runtime_state_machine() {
         database.pool().clone(),
     ));
 
-    let start = command_request(&app, &auth, schedule_id, json!({ "action": "start_runtime" })).await;
+    let start = command_request(
+        &app,
+        &auth,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
     assert_eq!(start.status(), StatusCode::OK);
     let start_json = json_body(start).await;
     assert_eq!(start_json["data"]["status"], "live");
@@ -188,7 +194,13 @@ async fn runtime_commands_transition_the_runtime_state_machine() {
     assert_eq!(pause_json["data"]["status"], "paused");
     assert_eq!(pause_json["data"]["sections"][0]["status"], "paused");
 
-    let resume = command_request(&app, &auth, schedule_id, json!({ "action": "resume_runtime" })).await;
+    let resume = command_request(
+        &app,
+        &auth,
+        schedule_id,
+        json!({ "action": "resume_runtime" }),
+    )
+    .await;
     assert_eq!(resume.status(), StatusCode::OK);
     let resume_json = json_body(resume).await;
     assert_eq!(resume_json["data"]["status"], "live");
@@ -224,7 +236,13 @@ async fn delete_schedule_removes_the_schedule_and_runtime() {
         database.pool().clone(),
     ));
 
-    let start = command_request(&app, &auth, schedule_id, json!({ "action": "start_runtime" })).await;
+    let start = command_request(
+        &app,
+        &auth,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
     assert_eq!(start.status(), StatusCode::OK);
 
     let delete_response = app
@@ -252,13 +270,12 @@ async fn delete_schedule_removes_the_schedule_and_runtime() {
         .unwrap();
     assert_eq!(get_schedule.status(), StatusCode::NOT_FOUND);
 
-    let runtime = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM exam_session_runtimes WHERE schedule_id = ?",
-    )
-    .bind(schedule_id)
-    .fetch_optional(database.pool())
-    .await
-    .expect("runtime lookup");
+    let runtime =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM exam_session_runtimes WHERE schedule_id = ?")
+            .bind(schedule_id)
+            .fetch_optional(database.pool())
+            .await
+            .expect("runtime lookup");
     assert_eq!(runtime, None);
 
     database.shutdown().await;

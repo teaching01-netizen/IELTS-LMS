@@ -74,7 +74,9 @@ pub async fn ping_database(pool: &MySqlPool) -> Result<Duration, sqlx::Error> {
     Ok(started.elapsed())
 }
 
-pub async fn inspect_outbox_backlog(pool: &MySqlPool) -> Result<OutboxBacklogSnapshot, sqlx::Error> {
+pub async fn inspect_outbox_backlog(
+    pool: &MySqlPool,
+) -> Result<OutboxBacklogSnapshot, sqlx::Error> {
     let row = sqlx::query_as::<_, OutboxBacklogRow>(
         r#"
         SELECT

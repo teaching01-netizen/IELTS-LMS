@@ -157,7 +157,10 @@ impl FromRequestParts<AppState> for VerifiedCsrf {
     }
 }
 
-pub fn parse_cookie<'a>(header: Option<&'a axum::http::HeaderValue>, name: &str) -> Option<&'a str> {
+pub fn parse_cookie<'a>(
+    header: Option<&'a axum::http::HeaderValue>,
+    name: &str,
+) -> Option<&'a str> {
     let header = header?.to_str().ok()?;
     header.split(';').find_map(|pair| {
         let (key, value) = pair.trim().split_once('=')?;

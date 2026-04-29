@@ -11,7 +11,11 @@ use ielts_backend_domain::grading::{
 #[tokio::test]
 async fn grading_enums_decode_and_encode_as_text() {
     if env::var("TEST_DATABASE_URL").is_err()
-        && TcpStream::connect_timeout(&"127.0.0.1:4000".parse().expect("socket addr"), Duration::from_secs(1)).is_err()
+        && TcpStream::connect_timeout(
+            &"127.0.0.1:4000".parse().expect("socket addr"),
+            Duration::from_secs(1),
+        )
+        .is_err()
     {
         eprintln!("Skipping: no TEST_DATABASE_URL and no local MySQL/TiDB on 127.0.0.1:4000");
         return;
@@ -100,10 +104,11 @@ async fn grading_enums_decode_and_encode_as_text() {
         ("released", ReleaseStatus::Released),
         ("reopened", ReleaseStatus::Reopened),
     ] {
-        let decoded: ReleaseStatus = sqlx::query_scalar::<_, ReleaseStatus>(&format!("SELECT '{raw}'"))
-            .fetch_one(pool)
-            .await
-            .expect("decode release status");
+        let decoded: ReleaseStatus =
+            sqlx::query_scalar::<_, ReleaseStatus>(&format!("SELECT '{raw}'"))
+                .fetch_one(pool)
+                .await
+                .expect("decode release status");
         assert_eq!(decoded, expected);
 
         let encoded: String = sqlx::query_scalar("SELECT ?")
@@ -129,10 +134,11 @@ async fn grading_enums_decode_and_encode_as_text() {
         ("release_now", ReviewAction::ReleaseNow),
         ("mark_ready_to_release", ReviewAction::MarkReadyToRelease),
     ] {
-        let decoded: ReviewAction = sqlx::query_scalar::<_, ReviewAction>(&format!("SELECT '{raw}'"))
-            .fetch_one(pool)
-            .await
-            .expect("decode review action");
+        let decoded: ReviewAction =
+            sqlx::query_scalar::<_, ReviewAction>(&format!("SELECT '{raw}'"))
+                .fetch_one(pool)
+                .await
+                .expect("decode review action");
         assert_eq!(decoded, expected);
 
         let encoded: String = sqlx::query_scalar("SELECT ?")

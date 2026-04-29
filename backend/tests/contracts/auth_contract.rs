@@ -16,8 +16,8 @@ use ielts_backend_domain::{
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
     schedule::CreateScheduleRequest,
 };
-use ielts_backend_infrastructure::config::AppConfig;
 use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
+use ielts_backend_infrastructure::config::AppConfig;
 
 const AUTH_MIGRATIONS: &[&str] = &[
     "0001_roles.sql",
@@ -258,7 +258,7 @@ async fn login_returns_session_and_sets_secure_cookie() {
     assert!(set_cookie_combined.contains("SameSite=Lax"));
     assert!(set_cookie_combined.contains("Secure"));
     assert!(set_cookie_combined.contains("Max-Age=604800"));
-    
+
     // Verify response contains user and csrf_token
     let json = json_body(response).await;
     assert_eq!(json["success"], true);
@@ -765,13 +765,18 @@ async fn login_is_rate_limited_per_account_even_across_different_ips() {
     database.shutdown().await;
 }
 
-async fn create_test_user(pool: &sqlx::MySqlPool, email: &str, password: &str) -> mysql::TestAuthContext {
+async fn create_test_user(
+    pool: &sqlx::MySqlPool,
+    email: &str,
+    password: &str,
+) -> mysql::TestAuthContext {
     use ielts_backend_domain::auth::UserRole;
-    
+
     let user_id = uuid::Uuid::new_v4();
     let session_token = ielts_backend_infrastructure::auth::random_token(32);
     let csrf_token = ielts_backend_infrastructure::auth::random_token(24);
-    let password_hash = ielts_backend_infrastructure::auth::hash_password(password).expect("hash password");
+    let password_hash =
+        ielts_backend_infrastructure::auth::hash_password(password).expect("hash password");
     let now = chrono::Utc::now();
 
     sqlx::query(
@@ -829,7 +834,9 @@ async fn create_test_user(pool: &sqlx::MySqlPool, email: &str, password: &str) -
     )
     .bind(uuid::Uuid::new_v4())
     .bind(user_id)
-    .bind(ielts_backend_infrastructure::auth::sha256_hex(&session_token))
+    .bind(ielts_backend_infrastructure::auth::sha256_hex(
+        &session_token,
+    ))
     .bind(&csrf_token)
     .bind("builder")
     .bind(now)
@@ -855,10 +862,7 @@ async fn json_body(response: axum::response::Response) -> serde_json::Value {
     serde_json::from_slice(&body).unwrap()
 }
 
-fn extract_set_cookie(
-    response: &axum::response::Response,
-    cookie_name: &str,
-) -> Option<String> {
+fn extract_set_cookie(response: &axum::response::Response, cookie_name: &str) -> Option<String> {
     let prefix = format!("{cookie_name}=");
     response
         .headers()
@@ -926,10 +930,7 @@ async fn seed_schedule_with_slug(
         .expect("save draft");
 
     let exam_after_draft = builder_service
-        .get_exam(
-            &actor,
-            exam_id.clone(),
-        )
+        .get_exam(&actor, exam_id.clone())
         .await
         .expect("exam after draft");
 

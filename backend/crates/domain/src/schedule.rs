@@ -171,11 +171,7 @@ mod sqlx_text_enums {
     };
 
     use sqlx::{
-        decode::Decode,
-        encode::Encode,
-        error::BoxDynError,
-        mysql::MySqlTypeInfo,
-        MySql, Type,
+        decode::Decode, encode::Encode, error::BoxDynError, mysql::MySqlTypeInfo, MySql, Type,
     };
 
     fn invalid_enum_value(name: &str, value: &str) -> BoxDynError {
@@ -463,8 +459,7 @@ pub struct AttemptCommandRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AlertAckRequest {
-}
+pub struct AlertAckRequest {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

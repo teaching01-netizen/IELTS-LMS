@@ -65,10 +65,12 @@ impl LibraryService {
         .execute(&self.pool)
         .await?;
 
-        let passage = sqlx::query_as::<_, PassageLibraryItem>("SELECT * FROM passage_library_items WHERE id = ?")
-            .bind(id.to_string())
-            .fetch_one(&self.pool)
-            .await?;
+        let passage = sqlx::query_as::<_, PassageLibraryItem>(
+            "SELECT * FROM passage_library_items WHERE id = ?",
+        )
+        .bind(id.to_string())
+        .fetch_one(&self.pool)
+        .await?;
 
         Ok(passage)
     }
@@ -128,10 +130,12 @@ impl LibraryService {
         .execute(&self.pool)
         .await?;
 
-        let passage = sqlx::query_as::<_, PassageLibraryItem>("SELECT * FROM passage_library_items WHERE id = ?")
-            .bind(id.to_string())
-            .fetch_one(&self.pool)
-            .await?;
+        let passage = sqlx::query_as::<_, PassageLibraryItem>(
+            "SELECT * FROM passage_library_items WHERE id = ?",
+        )
+        .bind(id.to_string())
+        .fetch_one(&self.pool)
+        .await?;
 
         Ok(passage)
     }
@@ -218,10 +222,11 @@ impl LibraryService {
         .execute(&self.pool)
         .await?;
 
-        let question = sqlx::query_as::<_, QuestionBankItem>("SELECT * FROM question_bank_items WHERE id = ?")
-            .bind(id.to_string())
-            .fetch_one(&self.pool)
-            .await?;
+        let question =
+            sqlx::query_as::<_, QuestionBankItem>("SELECT * FROM question_bank_items WHERE id = ?")
+                .bind(id.to_string())
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(question)
     }
@@ -277,10 +282,11 @@ impl LibraryService {
         .execute(&self.pool)
         .await?;
 
-        let question = sqlx::query_as::<_, QuestionBankItem>("SELECT * FROM question_bank_items WHERE id = ?")
-            .bind(id.to_string())
-            .fetch_one(&self.pool)
-            .await?;
+        let question =
+            sqlx::query_as::<_, QuestionBankItem>("SELECT * FROM question_bank_items WHERE id = ?")
+                .bind(id.to_string())
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(question)
     }

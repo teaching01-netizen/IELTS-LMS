@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use ielts_backend_infrastructure::{
-    config::AppConfig, pool::DatabasePool, rate_limit::{RateLimitConfig, RateLimiter}, telemetry::Telemetry,
+    config::AppConfig,
+    pool::DatabasePool,
+    rate_limit::{RateLimitConfig, RateLimiter},
+    telemetry::Telemetry,
 };
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::MySqlPool;

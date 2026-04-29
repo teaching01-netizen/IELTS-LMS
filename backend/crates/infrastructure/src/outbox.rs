@@ -210,11 +210,9 @@ impl OutboxRepository {
     }
 
     async fn fetch_one(&self, id: Hyphenated) -> Result<OutboxEvent, sqlx::Error> {
-        sqlx::query_as::<_, OutboxEvent>(
-            "SELECT * FROM outbox_events WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_one(&self.pool)
-        .await
+        sqlx::query_as::<_, OutboxEvent>("SELECT * FROM outbox_events WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
     }
 }

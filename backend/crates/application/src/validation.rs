@@ -377,8 +377,15 @@ fn validate_passage(passage: &serde_json::Value, idx: usize, result: &mut Valida
         Some(blocks) => {
             let mut question_count = 0;
             for (block_idx, block) in blocks.iter().enumerate() {
-                let block_questions =
-                    validate_question_block(block, idx, block_idx, "reading", "passages", blocks_field, result);
+                let block_questions = validate_question_block(
+                    block,
+                    idx,
+                    block_idx,
+                    "reading",
+                    "passages",
+                    blocks_field,
+                    result,
+                );
                 question_count += block_questions;
             }
             question_count
@@ -415,25 +422,13 @@ fn validate_question_block(
     match block_type {
         "SINGLE_MCQ" => validate_single_mcq(block_obj, &field_prefix, result),
         "SHORT_ANSWER" => validate_short_answer(block_obj, &field_prefix, result),
-        "SENTENCE_COMPLETION" => {
-            validate_sentence_completion(block_obj, &field_prefix, result)
-        }
-        "DIAGRAM_LABELING" => {
-            validate_diagram_labeling(block_obj, &field_prefix, result)
-        }
+        "SENTENCE_COMPLETION" => validate_sentence_completion(block_obj, &field_prefix, result),
+        "DIAGRAM_LABELING" => validate_diagram_labeling(block_obj, &field_prefix, result),
         "FLOW_CHART" => validate_flow_chart(block_obj, &field_prefix, result),
-        "TABLE_COMPLETION" => {
-            validate_table_completion(block_obj, &field_prefix, result)
-        }
-        "NOTE_COMPLETION" => {
-            validate_note_completion(block_obj, &field_prefix, result)
-        }
-        "CLASSIFICATION" => {
-            validate_classification(block_obj, &field_prefix, result)
-        }
-        "MATCHING_FEATURES" => {
-            validate_matching_features(block_obj, &field_prefix, result)
-        }
+        "TABLE_COMPLETION" => validate_table_completion(block_obj, &field_prefix, result),
+        "NOTE_COMPLETION" => validate_note_completion(block_obj, &field_prefix, result),
+        "CLASSIFICATION" => validate_classification(block_obj, &field_prefix, result),
+        "MATCHING_FEATURES" => validate_matching_features(block_obj, &field_prefix, result),
         "TFNG" | "CLOZE" | "MATCHING" | "MAP" | "MULTI_MCQ" => count_questions_in_block(block_obj),
         _ => {
             result.add_warning(
@@ -1230,8 +1225,15 @@ fn validate_listening_part(
         Some(blocks) => {
             let mut question_count = 0;
             for (block_idx, block) in blocks.iter().enumerate() {
-                let block_questions =
-                    validate_question_block(block, idx, block_idx, "listening", "parts", blocks_field, result);
+                let block_questions = validate_question_block(
+                    block,
+                    idx,
+                    block_idx,
+                    "listening",
+                    "parts",
+                    blocks_field,
+                    result,
+                );
                 question_count += block_questions;
             }
             question_count

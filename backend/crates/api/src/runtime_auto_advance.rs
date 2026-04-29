@@ -42,4 +42,3 @@ pub fn spawn_runtime_auto_advance(state: AppState) -> Option<tokio::task::JoinHa
         }
     }))
 }
-

@@ -2,12 +2,11 @@ use chrono::{DateTime, Duration, Utc};
 use ielts_backend_domain::schedule::{
     validate_email, validate_wcode, CreateScheduleRequest, DeliveryMode, ExamSchedule,
     ExamSessionRuntime, RecurrenceType, RuntimeCommandAction, RuntimeCommandEvent,
-    RuntimeCommandRequest, RuntimeSectionState, RuntimeStatus, ScheduleSectionPlanEntry,
-    ScheduleRegistration, ScheduleStatus, SectionRuntimeStatus, UpdateScheduleRequest,
+    RuntimeCommandRequest, RuntimeSectionState, RuntimeStatus, ScheduleRegistration,
+    ScheduleSectionPlanEntry, ScheduleStatus, SectionRuntimeStatus, UpdateScheduleRequest,
 };
 use ielts_backend_infrastructure::{
-    actor_context::ActorContext,
-    authorization::AuthorizationService,
+    actor_context::ActorContext, authorization::AuthorizationService,
 };
 use serde_json::Value;
 use sqlx::{FromRow, MySql, MySqlPool};
@@ -158,7 +157,9 @@ impl SchedulingService {
         req: CreateScheduleRequest,
     ) -> Result<ExamSchedule, SchedulingError> {
         let exam = self.load_exam_context(req.exam_id.clone()).await?;
-        let version = self.load_version_context(req.published_version_id.clone()).await?;
+        let version = self
+            .load_version_context(req.published_version_id.clone())
+            .await?;
 
         if version.exam_id.to_string() != req.exam_id {
             return Err(SchedulingError::Validation(
@@ -203,10 +204,11 @@ impl SchedulingService {
         .execute(&self.pool)
         .await?;
 
-        let schedule = sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
-            .bind(schedule_id.to_string())
-            .fetch_one(&self.pool)
-            .await?;
+        let schedule =
+            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+                .bind(schedule_id.to_string())
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(schedule)
     }
@@ -226,7 +228,8 @@ impl SchedulingService {
         } else if let Some(ref org_id) = ctx.organization_id {
             "SELECT * FROM exam_schedules WHERE organization_id = ? ORDER BY start_time ASC, created_at DESC"
         } else {
-            "SELECT * FROM exam_schedules WHERE 1=0 ORDER BY start_time ASC, created_at DESC" // No access
+            "SELECT * FROM exam_schedules WHERE 1=0 ORDER BY start_time ASC, created_at DESC"
+            // No access
         };
 
         let schedules = if let Some(org_id) = ctx.organization_id.clone() {
@@ -248,16 +251,24 @@ impl SchedulingService {
         ctx: &ActorContext,
         schedule_id: Uuid,
     ) -> Result<ExamSchedule, SchedulingError> {
-        let schedule = sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
-            .bind(schedule_id.to_string())
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(SchedulingError::NotFound)?;
+        let schedule =
+            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+                .bind(schedule_id.to_string())
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(SchedulingError::NotFound)?;
 
         // Check authorization: user must have access to this schedule
-        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule
+            .organization_id
+            .as_ref()
+            .and_then(|s| Uuid::parse_str(s).ok());
         if let Some(org_id) = organization_id {
-            if !AuthorizationService::can_access_schedule(ctx, schedule_id.to_string(), org_id.to_string()) {
+            if !AuthorizationService::can_access_schedule(
+                ctx,
+                schedule_id.to_string(),
+                org_id.to_string(),
+            ) {
                 return Err(SchedulingError::NotFound);
             }
         }
@@ -274,7 +285,10 @@ impl SchedulingService {
         let existing = self.get_schedule(ctx, schedule_id).await?;
 
         // Check if user can modify this schedule
-        let organization_id = existing.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = existing
+            .organization_id
+            .as_ref()
+            .and_then(|s| Uuid::parse_str(s).ok());
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
                 return Err(SchedulingError::NotFound);
@@ -301,13 +315,12 @@ impl SchedulingService {
         let next_start_time = req.start_time.unwrap_or(existing.start_time);
         let next_end_time = req.end_time.unwrap_or(existing.end_time);
 
-        let time_window_changed =
-            req.start_time.is_some() || req.end_time.is_some();
+        let time_window_changed = req.start_time.is_some() || req.end_time.is_some();
 
         let (published_version_id_update, planned_duration_minutes_update) = if version_changed {
-            let next_version_id = requested_version_id
-                .clone()
-                .ok_or_else(|| SchedulingError::Validation("Missing publishedVersionId".to_owned()))?;
+            let next_version_id = requested_version_id.clone().ok_or_else(|| {
+                SchedulingError::Validation("Missing publishedVersionId".to_owned())
+            })?;
             let version = self.load_version_context(next_version_id.clone()).await?;
 
             if version.exam_id.to_string() != existing.exam_id {
@@ -363,10 +376,11 @@ impl SchedulingService {
         .execute(&self.pool)
         .await?;
 
-        let updated = sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
-            .bind(schedule_id.to_string())
-            .fetch_one(&self.pool)
-            .await?;
+        let updated =
+            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+                .bind(schedule_id.to_string())
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(updated)
     }
@@ -379,7 +393,10 @@ impl SchedulingService {
         let schedule = self.get_schedule(ctx, schedule_id).await?;
 
         // Check if user can delete this schedule
-        let organization_id = schedule.organization_id.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule
+            .organization_id
+            .as_ref()
+            .and_then(|s| Uuid::parse_str(s).ok());
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
                 return Err(SchedulingError::NotFound);
@@ -417,7 +434,10 @@ impl SchedulingService {
                 && schedule.status != ScheduleStatus::Cancelled
                 && schedule.status != ScheduleStatus::Completed
                 && Utc::now() >= schedule.end_time
-                && !matches!(runtime_row.status, RuntimeStatus::Completed | RuntimeStatus::Cancelled)
+                && !matches!(
+                    runtime_row.status,
+                    RuntimeStatus::Completed | RuntimeStatus::Cancelled
+                )
             {
                 self.end_runtime(&system_actor(), schedule_id, "auto_stop")
                     .await?;
@@ -1168,7 +1188,9 @@ fn compute_runtime_remaining_seconds(
     now: DateTime<Utc>,
 ) -> Option<ComputedSectionTime> {
     let section_key = current_section_key.or(active_section_key)?;
-    let section = sections.iter().find(|section| section.section_key == section_key)?;
+    let section = sections
+        .iter()
+        .find(|section| section.section_key == section_key)?;
     let actual_start_at = section.actual_start_at?;
 
     Some(compute_section_remaining_seconds(
@@ -1191,8 +1213,8 @@ fn compute_section_remaining_seconds(
     status: SectionRuntimeStatus,
     now: DateTime<Utc>,
 ) -> ComputedSectionTime {
-    let duration_seconds = i64::from(planned_duration_minutes.saturating_add(extension_minutes))
-        .saturating_mul(60);
+    let duration_seconds =
+        i64::from(planned_duration_minutes.saturating_add(extension_minutes)).saturating_mul(60);
 
     let time_base = if status == SectionRuntimeStatus::Paused || paused_at.is_some() {
         paused_at.unwrap_or(now)
@@ -1201,7 +1223,8 @@ fn compute_section_remaining_seconds(
     };
 
     let raw_elapsed_seconds = (time_base - actual_start_at).num_seconds().max(0);
-    let elapsed_seconds = raw_elapsed_seconds.saturating_sub(i64::from(accumulated_paused_seconds.max(0)));
+    let elapsed_seconds =
+        raw_elapsed_seconds.saturating_sub(i64::from(accumulated_paused_seconds.max(0)));
 
     let remaining_seconds = (duration_seconds - elapsed_seconds).clamp(0, duration_seconds);
 

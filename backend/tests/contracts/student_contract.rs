@@ -668,7 +668,10 @@ async fn heartbeat_defaults_to_ack_response_without_touching_attempt_revision() 
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
                 .method("POST")
-                .uri(format!("/api/v1/student/sessions/{}/heartbeat", schedule_id))
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/heartbeat",
+                    schedule_id
+                ))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&StudentHeartbeatRequest {

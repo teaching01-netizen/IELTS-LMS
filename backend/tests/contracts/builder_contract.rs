@@ -295,12 +295,9 @@ async fn patch_draft_prunes_old_draft_versions_to_three() {
     let response = app
         .clone()
         .oneshot(
-            auth.with_auth(
-                Request::builder()
-                    .uri(format!("/api/v1/exams/{}/versions", seeded.id)),
-            )
-            .body(Body::empty())
-            .unwrap(),
+            auth.with_auth(Request::builder().uri(format!("/api/v1/exams/{}/versions", seeded.id)))
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -489,19 +486,19 @@ async fn publish_revalidates_the_current_draft_before_marking_it_published() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["success"], false);
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
-    assert!(
-        json["error"]["message"]
-            .as_str()
-            .expect("validation error message")
-            .contains("not ready for publication")
-    );
+    assert!(json["error"]["message"]
+        .as_str()
+        .expect("validation error message")
+        .contains("not ready for publication"));
 
     let exam_after_publish_attempt = service
         .get_exam(&contract_actor(), seeded.id.clone())
         .await
         .expect("exam after rejected publish");
     assert_eq!(exam_after_publish_attempt.status, "draft");
-    assert!(exam_after_publish_attempt.current_published_version_id.is_none());
+    assert!(exam_after_publish_attempt
+        .current_published_version_id
+        .is_none());
 
     database.shutdown().await;
 }

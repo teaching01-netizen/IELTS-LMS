@@ -97,9 +97,16 @@ async fn run_outbox_cycle(
     cycle_started: Instant,
 ) -> Result<(), sqlx::Error> {
     let outbox = drain_outbox_until_empty(pool.clone(), &config.live_mode_notify_channel).await?;
-    let retention = jobs::retention::run_once_with_config(pool.clone(), config).await?;
+    let storage_budget =
+        inspect_storage_budget(pool, config.storage_budget_thresholds.clone()).await?;
+    let retention = jobs::retention::run_once_with_config_and_budget(
+        pool.clone(),
+        config,
+        storage_budget.level,
+    )
+    .await?;
     let media = jobs::media::run_once(pool.clone()).await?;
-    log_storage_budget(pool, config).await?;
+    log_storage_budget_snapshot(&storage_budget);
 
     tracing::info!(
         trigger = trigger.as_str(),
@@ -160,9 +167,16 @@ async fn run_maintenance_cycle(
     config: &AppConfig,
     cycle_started: Instant,
 ) -> Result<(), sqlx::Error> {
-    let retention = jobs::retention::run_once_with_config(pool.clone(), config).await?;
+    let storage_budget =
+        inspect_storage_budget(pool, config.storage_budget_thresholds.clone()).await?;
+    let retention = jobs::retention::run_once_with_config_and_budget(
+        pool.clone(),
+        config,
+        storage_budget.level,
+    )
+    .await?;
     let media = jobs::media::run_once(pool.clone()).await?;
-    log_storage_budget(pool, config).await?;
+    log_storage_budget_snapshot(&storage_budget);
 
     tracing::info!(
         cycle_duration_ms = cycle_started.elapsed().as_millis() as u64,
@@ -217,9 +231,9 @@ async fn drain_outbox_until_empty(
     Ok(total)
 }
 
-async fn log_storage_budget(pool: &sqlx::MySqlPool, config: &AppConfig) -> Result<(), sqlx::Error> {
-    let snapshot = inspect_storage_budget(pool, config.storage_budget_thresholds.clone()).await?;
-
+fn log_storage_budget_snapshot(
+    snapshot: &ielts_backend_infrastructure::database_monitor::StorageBudgetSnapshot,
+) {
     match snapshot.level {
         StorageBudgetLevel::Normal => tracing::info!(
             total_bytes = snapshot.total_bytes,
@@ -242,8 +256,6 @@ async fn log_storage_budget(pool: &sqlx::MySqlPool, config: &AppConfig) -> Resul
             "storage budget critical threshold reached"
         ),
     }
-
-    Ok(())
 }
 
 #[cfg(unix)]

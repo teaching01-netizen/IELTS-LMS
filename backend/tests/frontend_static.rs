@@ -6,10 +6,7 @@ use std::{
 
 use axum::{
     body::{to_bytes, Body},
-    http::{
-        header::CACHE_CONTROL,
-        Request, StatusCode,
-    },
+    http::{header::CACHE_CONTROL, Request, StatusCode},
 };
 use ielts_backend_api::{router::build_router, state::AppState};
 use ielts_backend_infrastructure::config::AppConfig;

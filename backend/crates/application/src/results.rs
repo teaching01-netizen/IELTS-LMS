@@ -18,7 +18,10 @@ impl ResultsService {
         }
     }
 
-    pub async fn list_results(&self, ctx: &ActorContext) -> Result<Vec<StudentResult>, GradingError> {
+    pub async fn list_results(
+        &self,
+        ctx: &ActorContext,
+    ) -> Result<Vec<StudentResult>, GradingError> {
         self.grading.list_results(ctx).await
     }
 

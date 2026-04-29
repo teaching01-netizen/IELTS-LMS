@@ -83,7 +83,9 @@ async fn revision_increments_and_mutations_record_applied_revision() {
         )
         .await
         .expect("apply first batch");
-    let first_attempt = first.attempt.expect("full mutation response includes attempt");
+    let first_attempt = first
+        .attempt
+        .expect("full mutation response includes attempt");
     assert_eq!(first_attempt.revision, 1);
     let attempt_id = first_attempt.id.clone();
 
@@ -117,7 +119,9 @@ async fn revision_increments_and_mutations_record_applied_revision() {
         )
         .await
         .expect("apply second batch");
-    let second_attempt = second.attempt.expect("full mutation response includes attempt");
+    let second_attempt = second
+        .attempt
+        .expect("full mutation response includes attempt");
     assert_eq!(second_attempt.revision, 2);
 
     let applied_2: i64 = sqlx::query_scalar(

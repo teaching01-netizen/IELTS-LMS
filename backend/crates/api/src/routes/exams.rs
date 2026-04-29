@@ -191,10 +191,18 @@ pub async fn get_validation(
     state
         .telemetry
         .observe_db_operation("builder.validate_exam", duration);
-    state
-        .telemetry
-        .observe_publish_validation(if validation.can_publish { "ok" } else { "blocked" }, duration);
-    Ok(ApiResponse::success_with_request_id(validation, request_id.0))
+    state.telemetry.observe_publish_validation(
+        if validation.can_publish {
+            "ok"
+        } else {
+            "blocked"
+        },
+        duration,
+    );
+    Ok(ApiResponse::success_with_request_id(
+        validation,
+        request_id.0,
+    ))
 }
 
 impl From<BuilderError> for ApiError {

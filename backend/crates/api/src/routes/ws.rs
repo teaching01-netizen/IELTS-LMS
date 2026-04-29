@@ -17,10 +17,7 @@ use std::{
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 
 use crate::{
-    http::{
-        auth::parse_cookie,
-        response::ApiError,
-    },
+    http::{auth::parse_cookie, response::ApiError},
     state::AppState,
 };
 use ielts_backend_application::auth::AuthService;
@@ -40,11 +37,7 @@ struct DisconnectReason {
     reason: String,
 }
 
-async fn send_with_timeout<S>(
-    sink: &mut S,
-    msg: Message,
-    timeout: Duration,
-) -> Result<(), ()>
+async fn send_with_timeout<S>(sink: &mut S, msg: Message, timeout: Duration) -> Result<(), ()>
 where
     S: futures_util::Sink<Message> + Unpin,
     <S as futures_util::Sink<Message>>::Error: std::fmt::Debug,
@@ -71,17 +64,18 @@ pub async fn websocket_live(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     // Extract and validate session from cookie for WebSocket authentication
-    let session_token = match extract_ws_session_token(&headers, &state.config.auth_session_cookie_name) {
-        Some(token) => token,
-        None => {
-            return ApiError::new(
-                StatusCode::UNAUTHORIZED,
-                "UNAUTHORIZED",
-                "Authentication is required for WebSocket connections.",
-            )
-            .into_response();
-        }
-    };
+    let session_token =
+        match extract_ws_session_token(&headers, &state.config.auth_session_cookie_name) {
+            Some(token) => token,
+            None => {
+                return ApiError::new(
+                    StatusCode::UNAUTHORIZED,
+                    "UNAUTHORIZED",
+                    "Authentication is required for WebSocket connections.",
+                )
+                .into_response();
+            }
+        };
 
     // Validate the session
     let service = AuthService::new(state.db_pool(), state.config.clone());
@@ -308,17 +302,17 @@ async fn handle_socket(
     match tokio::time::timeout(write_timeout, connected_ack_rx).await {
         Ok(Ok(())) => {}
         _ => {
-        *disconnect_reason.lock().unwrap() = Some(DisconnectReason {
-            code: 1008,
-            reason: "slow client".to_owned(),
-        });
-        notify.notify_one();
-        let remaining = state.live_updates.connection_closed(&user_id);
-        if let Some(ref sid) = schedule_id {
-            state.live_updates.unsubscribe_from_schedule(sid, &user_id);
-        }
-        state.telemetry.set_websocket_connections(remaining);
-        return;
+            *disconnect_reason.lock().unwrap() = Some(DisconnectReason {
+                code: 1008,
+                reason: "slow client".to_owned(),
+            });
+            notify.notify_one();
+            let remaining = state.live_updates.connection_closed(&user_id);
+            if let Some(ref sid) = schedule_id {
+                state.live_updates.unsubscribe_from_schedule(sid, &user_id);
+            }
+            state.telemetry.set_websocket_connections(remaining);
+            return;
         }
     }
 

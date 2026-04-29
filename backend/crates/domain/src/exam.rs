@@ -35,11 +35,11 @@ impl ExamEntity {
     pub fn get_exam_type(&self) -> Result<ExamType, String> {
         ExamType::from_str(&self.exam_type)
     }
-    
+
     pub fn get_status(&self) -> Result<ExamStatus, String> {
         ExamStatus::from_str(&self.status)
     }
-    
+
     pub fn get_visibility(&self) -> Result<Visibility, String> {
         Visibility::from_str(&self.visibility)
     }
@@ -59,7 +59,7 @@ impl ExamType {
             ExamType::GeneralTraining => "General Training",
         }
     }
-    
+
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s {
             "Academic" => Ok(ExamType::Academic),
@@ -130,7 +130,7 @@ impl Visibility {
             _ => Err(format!("Invalid Visibility: {}", s)),
         }
     }
-    
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Visibility::Private => "private",

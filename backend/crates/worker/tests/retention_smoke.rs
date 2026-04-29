@@ -2,6 +2,7 @@
 mod mysql;
 
 use chrono::{Duration, Utc};
+use ielts_backend_infrastructure::{config::AppConfig, database_monitor::StorageBudgetLevel};
 use ielts_backend_worker::jobs::{media, retention};
 use mysql::TestDatabase;
 use sqlx::MySqlPool;
@@ -117,6 +118,32 @@ async fn retention_prunes_only_expired_non_live_operational_rows_in_batches() {
 
     assert_eq!(live_heartbeat_count, 1);
     assert_eq!(live_mutation_count, 1);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn retention_purges_recent_invalidated_cache_when_storage_is_high_water() {
+    let database = TestDatabase::new(MIGRATIONS).await;
+    let pool = database.pool().clone();
+
+    insert_cache_rows(&pool).await;
+
+    let report = retention::run_once_with_config_and_budget(
+        pool.clone(),
+        &AppConfig::default(),
+        StorageBudgetLevel::HighWater,
+    )
+    .await
+    .expect("run high-water retention");
+
+    assert_eq!(report.cache_rows, 3);
+
+    let cache_count = count_rows(&pool, "shared_cache_entries").await;
+    assert_eq!(
+        cache_count, 1,
+        "only the fresh non-invalidated cache entry remains under high storage pressure"
+    );
 
     database.shutdown().await;
 }
@@ -329,10 +356,11 @@ async fn insert_user_sessions(pool: &MySqlPool) {
     .await
     .expect("insert retention user");
 
-    let user_id: String = sqlx::query_scalar("SELECT id FROM users WHERE email = 'retention-user@example.com'")
-        .fetch_one(pool)
-        .await
-        .expect("load retention user");
+    let user_id: String =
+        sqlx::query_scalar("SELECT id FROM users WHERE email = 'retention-user@example.com'")
+            .fetch_one(pool)
+            .await
+            .expect("load retention user");
 
     sqlx::query(
         r#"

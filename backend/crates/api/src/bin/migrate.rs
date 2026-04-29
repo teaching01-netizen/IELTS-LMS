@@ -12,7 +12,11 @@ fn migration_database_url() -> Option<String> {
                 .ok()
                 .filter(|value| !value.trim().is_empty())
         })
-        .or_else(|| env::var("DATABASE_URL").ok().filter(|value| !value.trim().is_empty()))
+        .or_else(|| {
+            env::var("DATABASE_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
 }
 
 fn migrations_dir() -> PathBuf {

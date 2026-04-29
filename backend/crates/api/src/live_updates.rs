@@ -95,11 +95,7 @@ impl LiveUpdateHub {
 
     pub fn can_user_connect(&self, user_id: &str) -> bool {
         let users = self.user_connections.lock().unwrap();
-        users
-            .get(user_id)
-            .map(|c| *c)
-            .unwrap_or(0)
-            < self.connections_per_user_cap
+        users.get(user_id).map(|c| *c).unwrap_or(0) < self.connections_per_user_cap
     }
 
     pub fn is_at_capacity(&self) -> bool {

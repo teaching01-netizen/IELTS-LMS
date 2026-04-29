@@ -9,10 +9,7 @@ use axum::{
 use ielts_backend_infrastructure::rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult};
 use std::net::SocketAddr;
 
-use crate::{
-    http::response::ApiError,
-    state::AppState,
-};
+use crate::{http::response::ApiError, state::AppState};
 
 /// Rate limit check result that allows the request through.
 #[derive(Debug, Clone)]

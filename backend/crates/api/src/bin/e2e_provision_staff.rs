@@ -1,6 +1,5 @@
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -72,10 +71,8 @@ Notes:
 
 fn parse_args() -> Args {
     let mut schedule_id: Option<String> = None;
-    let mut target_path: PathBuf =
-        PathBuf::from("e2e/prod-data/prod-target.json");
-    let mut output_creds_path: PathBuf =
-        PathBuf::from("e2e/prod-data/prod-creds.json");
+    let mut target_path: PathBuf = PathBuf::from("e2e/prod-data/prod-target.json");
+    let mut output_creds_path: PathBuf = PathBuf::from("e2e/prod-data/prod-creds.json");
     let mut granted_by: String = "e2e_provision_staff".to_owned();
 
     let mut iter = env::args().skip(1);
@@ -149,9 +146,7 @@ fn normalize_database_url(url: &str) -> String {
     // sqlx will treat `db&ssl-mode=REQUIRED` as the database name, causing "Unknown database".
     let mut url = url.to_owned();
     if !url.contains('?') {
-        let ssl_param_pos = url
-            .find("&ssl-mode=")
-            .or_else(|| url.find("&sslmode="));
+        let ssl_param_pos = url.find("&ssl-mode=").or_else(|| url.find("&sslmode="));
         if let Some(pos) = ssl_param_pos {
             let last_slash = url.rfind('/').unwrap_or(0);
             if pos > last_slash {
@@ -202,10 +197,11 @@ async fn ensure_user(
 ) -> Result<String, sqlx::Error> {
     let email_norm = email.trim().to_ascii_lowercase();
 
-    let existing_id: Option<String> = sqlx::query_scalar("SELECT id FROM users WHERE email = ? LIMIT 1")
-        .bind(&email_norm)
-        .fetch_optional(pool)
-        .await?;
+    let existing_id: Option<String> =
+        sqlx::query_scalar("SELECT id FROM users WHERE email = ? LIMIT 1")
+            .bind(&email_norm)
+            .fetch_optional(pool)
+            .await?;
 
     let user_id = existing_id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
@@ -395,7 +391,10 @@ Set E2E_ALLOW_PROD_DB_MUTATIONS=true if and only if this is a dedicated E2E data
             )
             .await
             .unwrap_or_else(|err| {
-                eprintln!("Failed to assign proctor {} to schedule: {err}", proctor.email);
+                eprintln!(
+                    "Failed to assign proctor {} to schedule: {err}",
+                    proctor.email
+                );
                 std::process::exit(1);
             });
         }

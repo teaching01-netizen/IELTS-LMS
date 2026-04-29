@@ -76,11 +76,19 @@ pub async fn get_submission(
 ) -> Result<ApiResponse<SubmissionReviewBundle>, ApiError> {
     let schedule_id: String =
         query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
-        .bind(submission_id.to_string())
-        .fetch_optional(&state.db_pool())
-        .await
-        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+            .bind(submission_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|err| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &err.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -110,11 +118,19 @@ pub async fn start_review(
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
     let schedule_id: String =
         query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
-        .bind(submission_id.to_string())
-        .fetch_optional(&state.db_pool())
-        .await
-        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+            .bind(submission_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|err| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &err.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -127,9 +143,7 @@ pub async fn start_review(
         .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = Instant::now();
-    let draft = service
-        .start_review(&ctx, submission_id, req)
-        .await?;
+    let draft = service.start_review(&ctx, submission_id, req).await?;
     state
         .telemetry
         .observe_db_operation("grading.start_review", started.elapsed());
@@ -142,14 +156,21 @@ pub async fn get_review_draft(
     principal: AuthenticatedUser,
     Path(submission_id): Path<Uuid>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
-    let schedule_id: String = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = ?",
-    )
-    .bind(submission_id.to_string())
-    .fetch_optional(&state.db_pool())
-    .await
-    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
-    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    let schedule_id: String =
+        query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
+            .bind(submission_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|err| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &err.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -175,14 +196,21 @@ pub async fn save_review_draft(
     Path(submission_id): Path<Uuid>,
     Json(req): Json<SaveReviewDraftRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
-    let schedule_id: String = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = ?",
-    )
-    .bind(submission_id.to_string())
-    .fetch_optional(&state.db_pool())
-    .await
-    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
-    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    let schedule_id: String =
+        query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
+            .bind(submission_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|err| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &err.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -195,9 +223,7 @@ pub async fn save_review_draft(
         .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = Instant::now();
-    let draft = service
-        .save_review_draft(&ctx, submission_id, req)
-        .await?;
+    let draft = service.save_review_draft(&ctx, submission_id, req).await?;
     state
         .telemetry
         .observe_db_operation("grading.save_review_draft", started.elapsed());
@@ -212,14 +238,21 @@ pub async fn mark_grading_complete(
     Path(submission_id): Path<Uuid>,
     Json(req): Json<ActorActionRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
-    let schedule_id: String = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = ?",
-    )
-    .bind(submission_id.to_string())
-    .fetch_optional(&state.db_pool())
-    .await
-    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
-    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    let schedule_id: String =
+        query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
+            .bind(submission_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|err| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &err.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -249,14 +282,21 @@ pub async fn mark_ready_to_release(
     Path(submission_id): Path<Uuid>,
     Json(req): Json<ActorActionRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
-    let schedule_id: String = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = ?",
-    )
-    .bind(submission_id.to_string())
-    .fetch_optional(&state.db_pool())
-    .await
-    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
-    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    let schedule_id: String =
+        query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
+            .bind(submission_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|err| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &err.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -286,14 +326,21 @@ pub async fn release_now(
     Path(submission_id): Path<Uuid>,
     Json(req): Json<ReleaseNowRequest>,
 ) -> Result<ApiResponse<StudentResult>, ApiError> {
-    let schedule_id: String = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = ?",
-    )
-    .bind(submission_id.to_string())
-    .fetch_optional(&state.db_pool())
-    .await
-    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
-    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    let schedule_id: String =
+        query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
+            .bind(submission_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|err| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &err.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -306,9 +353,7 @@ pub async fn release_now(
         .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = std::time::Instant::now();
-    let result = service
-        .release_now(&ctx, submission_id, req)
-        .await?;
+    let result = service.release_now(&ctx, submission_id, req).await?;
     state
         .telemetry
         .observe_db_operation("grading.release_now", started.elapsed());
@@ -323,14 +368,21 @@ pub async fn schedule_release(
     Path(submission_id): Path<Uuid>,
     Json(req): Json<ScheduleReleaseRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
-    let schedule_id: String = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = ?",
-    )
-    .bind(submission_id.to_string())
-    .fetch_optional(&state.db_pool())
-    .await
-    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
-    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    let schedule_id: String =
+        query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
+            .bind(submission_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|err| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &err.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -343,9 +395,7 @@ pub async fn schedule_release(
         .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = std::time::Instant::now();
-    let draft = service
-        .schedule_release(&ctx, submission_id, req)
-        .await?;
+    let draft = service.schedule_release(&ctx, submission_id, req).await?;
     state
         .telemetry
         .observe_db_operation("grading.schedule_release", started.elapsed());
@@ -360,14 +410,21 @@ pub async fn reopen_review(
     Path(submission_id): Path<Uuid>,
     Json(req): Json<ActorActionRequest>,
 ) -> Result<ApiResponse<ReviewDraft>, ApiError> {
-    let schedule_id: String = query_scalar(
-        "SELECT schedule_id FROM student_submissions WHERE id = ?",
-    )
-    .bind(submission_id.to_string())
-    .fetch_optional(&state.db_pool())
-    .await
-    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
-    .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    let schedule_id: String =
+        query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
+            .bind(submission_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|err| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &err.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -380,9 +437,7 @@ pub async fn reopen_review(
         .with_schedule_scope_id(schedule_id.to_string());
     let service = GradingService::new(state.db_pool());
     let started = std::time::Instant::now();
-    let draft = service
-        .reopen_review(&ctx, submission_id, req)
-        .await?;
+    let draft = service.reopen_review(&ctx, submission_id, req).await?;
     state
         .telemetry
         .observe_db_operation("grading.reopen_review", started.elapsed());
@@ -407,7 +462,13 @@ pub async fn get_result_events(
     .bind(result_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
-    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
+    .map_err(|err| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &err.to_string(),
+        )
+    })?
     .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
@@ -471,7 +532,13 @@ async fn assigned_schedule_ids(
     .bind(user_id)
     .fetch_all(&state.db_pool())
     .await
-    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?;
+    .map_err(|err| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &err.to_string(),
+        )
+    })?;
     Ok(rows.into_iter().collect())
 }
 

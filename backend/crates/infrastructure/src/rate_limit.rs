@@ -1,6 +1,6 @@
 //! Rate limiting infrastructure for API protection.
 //!
-//! Provides sliding window rate limiting with configurable limits per route category.
+//! Provides token-bucket rate limiting with configurable limits per route category.
 //! Supports limiting by IP address, user ID, attempt ID, and custom keys.
 
 use std::collections::HashMap;
@@ -26,7 +26,10 @@ pub enum RateLimitKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RateLimitResult {
     /// Request is allowed, remaining requests and reset time included.
-    Allowed { remaining: u32, reset_after: Duration },
+    Allowed {
+        remaining: u32,
+        reset_after: Duration,
+    },
     /// Request is denied, retry after duration provided.
     Denied { retry_after: Duration },
 }
@@ -59,10 +62,11 @@ impl RateLimitConfig {
     }
 }
 
-/// A single bucket tracking request history for sliding window.
+/// A single bucket tracking request capacity.
 #[derive(Debug)]
 struct Bucket {
-    requests: Vec<Instant>,
+    tokens: f64,
+    last_refill: Instant,
     window: Duration,
     max_requests: u32,
     burst: u32,
@@ -71,8 +75,10 @@ struct Bucket {
 
 impl Bucket {
     fn new(config: &RateLimitConfig, now: Instant) -> Self {
+        let capacity = config.max_requests.saturating_add(config.burst);
         Self {
-            requests: Vec::with_capacity((config.max_requests + config.burst) as usize),
+            tokens: capacity as f64,
+            last_refill: now,
             window: config.window,
             max_requests: config.max_requests,
             burst: config.burst,
@@ -82,33 +88,91 @@ impl Bucket {
 
     fn check_and_record(&mut self, now: Instant) -> RateLimitResult {
         self.last_seen = now;
-        // Remove expired entries outside the window
-        let cutoff = now - self.window;
-        self.requests.retain(|&t| t > cutoff);
+        self.refill(now);
 
-        let effective_limit = self.max_requests + self.burst;
+        let effective_limit = self.capacity();
 
-        if self.requests.len() >= effective_limit as usize {
-            // Rate limit exceeded
-            let oldest = self.requests.first().copied().unwrap_or(now);
-            let retry_after = (oldest + self.window) - now;
-            return RateLimitResult::Denied { retry_after };
+        if self.tokens < 1.0 {
+            return RateLimitResult::Denied {
+                retry_after: self.retry_after(),
+            };
         }
 
-        // Record this request
-        self.requests.push(now);
+        self.tokens -= 1.0;
 
-        let remaining = effective_limit - self.requests.len() as u32;
-        let reset_after = self.window;
+        let remaining = self.tokens.floor().min(effective_limit as f64) as u32;
+        let reset_after = self.reset_after();
 
         RateLimitResult::Allowed {
             remaining,
             reset_after,
         }
     }
+
+    fn peek(&self, now: Instant) -> RateLimitResult {
+        let mut projected = self.clone_for_peek();
+        projected.refill(now);
+        let effective_limit = projected.capacity();
+
+        if projected.tokens < 1.0 {
+            RateLimitResult::Denied {
+                retry_after: projected.retry_after(),
+            }
+        } else {
+            RateLimitResult::Allowed {
+                remaining: projected.tokens.floor().min(effective_limit as f64) as u32,
+                reset_after: projected.reset_after(),
+            }
+        }
+    }
+
+    fn refill(&mut self, now: Instant) {
+        let elapsed = now.saturating_duration_since(self.last_refill);
+        if elapsed.is_zero() {
+            return;
+        }
+
+        let capacity = self.capacity() as f64;
+        let refill_per_second = capacity / self.window.as_secs_f64().max(1.0);
+        self.tokens = (self.tokens + elapsed.as_secs_f64() * refill_per_second).min(capacity);
+        self.last_refill = now;
+    }
+
+    fn is_idle(&mut self, now: Instant) -> bool {
+        self.refill(now);
+        self.tokens >= self.capacity() as f64
+    }
+
+    fn capacity(&self) -> u32 {
+        self.max_requests.saturating_add(self.burst).max(1)
+    }
+
+    fn retry_after(&self) -> Duration {
+        let capacity = self.capacity() as f64;
+        let refill_per_second = capacity / self.window.as_secs_f64().max(1.0);
+        Duration::from_secs_f64(((1.0 - self.tokens).max(0.0)) / refill_per_second)
+    }
+
+    fn reset_after(&self) -> Duration {
+        let capacity = self.capacity() as f64;
+        let missing_tokens = (capacity - self.tokens).max(0.0);
+        let refill_per_second = capacity / self.window.as_secs_f64().max(1.0);
+        Duration::from_secs_f64(missing_tokens / refill_per_second)
+    }
+
+    fn clone_for_peek(&self) -> Self {
+        Self {
+            tokens: self.tokens,
+            last_refill: self.last_refill,
+            window: self.window,
+            max_requests: self.max_requests,
+            burst: self.burst,
+            last_seen: self.last_seen,
+        }
+    }
 }
 
-/// In-memory sliding window rate limiter.
+/// In-memory token-bucket rate limiter.
 #[derive(Debug, Clone)]
 pub struct RateLimiter {
     buckets: Arc<RwLock<HashMap<RateLimitKey, Bucket>>>,
@@ -169,23 +233,7 @@ impl RateLimiter {
         let now = Instant::now();
         let buckets = self.buckets.read().await;
 
-        buckets.get(key).map(|bucket| {
-            let cutoff = now - bucket.window;
-            let active_requests = bucket.requests.iter().filter(|&&t| t > cutoff).count() as u32;
-            let effective_limit = bucket.max_requests + bucket.burst;
-
-            if active_requests >= effective_limit {
-                let oldest = bucket.requests.first().copied().unwrap_or(now);
-                let retry_after = (oldest + bucket.window) - now;
-                RateLimitResult::Denied { retry_after }
-            } else {
-                let remaining = effective_limit - active_requests;
-                RateLimitResult::Allowed {
-                    remaining,
-                    reset_after: bucket.window,
-                }
-            }
-        })
+        buckets.get(key).map(|bucket| bucket.peek(now))
     }
 
     /// Clean up expired buckets to prevent memory growth.
@@ -193,11 +241,7 @@ impl RateLimiter {
         let now = Instant::now();
         let mut buckets = self.buckets.write().await;
 
-        buckets.retain(|_, bucket| {
-            let cutoff = now - bucket.window;
-            bucket.requests.retain(|&t| t > cutoff);
-            !bucket.requests.is_empty()
-        });
+        buckets.retain(|_, bucket| !bucket.is_idle(now));
     }
 
     /// Returns the number of active buckets currently stored.
@@ -215,11 +259,7 @@ impl RateLimiter {
             return;
         }
 
-        buckets.retain(|_, bucket| {
-            let cutoff = now - bucket.window;
-            bucket.requests.retain(|&t| t > cutoff);
-            !bucket.requests.is_empty()
-        });
+        buckets.retain(|_, bucket| !bucket.is_idle(now));
 
         while buckets.len() >= self.bucket_cap {
             let Some(oldest_key) = buckets
@@ -263,8 +303,14 @@ mod tests {
         let key = RateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
 
         // First 2 requests allowed
-        assert!(matches!(limiter.check(&key).await, RateLimitResult::Allowed { .. }));
-        assert!(matches!(limiter.check(&key).await, RateLimitResult::Allowed { .. }));
+        assert!(matches!(
+            limiter.check(&key).await,
+            RateLimitResult::Allowed { .. }
+        ));
+        assert!(matches!(
+            limiter.check(&key).await,
+            RateLimitResult::Allowed { .. }
+        ));
 
         // Third request denied
         let result = limiter.check(&key).await;
@@ -304,11 +350,20 @@ mod tests {
         let key2 = RateLimitKey::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)));
 
         // First IP uses its only request
-        assert!(matches!(limiter.check(&key1).await, RateLimitResult::Allowed { .. }));
-        assert!(matches!(limiter.check(&key1).await, RateLimitResult::Denied { .. }));
+        assert!(matches!(
+            limiter.check(&key1).await,
+            RateLimitResult::Allowed { .. }
+        ));
+        assert!(matches!(
+            limiter.check(&key1).await,
+            RateLimitResult::Denied { .. }
+        ));
 
         // Second IP still has its request available
-        assert!(matches!(limiter.check(&key2).await, RateLimitResult::Allowed { .. }));
+        assert!(matches!(
+            limiter.check(&key2).await,
+            RateLimitResult::Allowed { .. }
+        ));
     }
 
     #[tokio::test]
@@ -326,7 +381,10 @@ mod tests {
             );
         }
 
-        assert!(matches!(limiter.check(&key).await, RateLimitResult::Denied { .. }));
+        assert!(matches!(
+            limiter.check(&key).await,
+            RateLimitResult::Denied { .. }
+        ));
     }
 
     #[tokio::test]
@@ -337,11 +395,17 @@ mod tests {
 
         // Simulate many heartbeats/mutations
         for _ in 0..150 {
-            assert!(matches!(limiter.check(&key).await, RateLimitResult::Allowed { .. }));
+            assert!(matches!(
+                limiter.check(&key).await,
+                RateLimitResult::Allowed { .. }
+            ));
         }
 
         // Should eventually rate limit
-        assert!(matches!(limiter.check(&key).await, RateLimitResult::Denied { .. }));
+        assert!(matches!(
+            limiter.check(&key).await,
+            RateLimitResult::Denied { .. }
+        ));
     }
 
     #[tokio::test]
@@ -356,7 +420,10 @@ mod tests {
 
         // Should still have full limit available
         let result = limiter.check(&key).await;
-        assert!(matches!(result, RateLimitResult::Allowed { remaining: 0, .. }));
+        assert!(matches!(
+            result,
+            RateLimitResult::Allowed { remaining: 0, .. }
+        ));
     }
 
     #[tokio::test]
@@ -375,7 +442,10 @@ mod tests {
 
         // Should be allowed again (new bucket)
         let result = limiter.check(&key).await;
-        assert!(matches!(result, RateLimitResult::Allowed { remaining: 0, .. }));
+        assert!(matches!(
+            result,
+            RateLimitResult::Allowed { remaining: 0, .. }
+        ));
     }
 
     #[tokio::test]

@@ -18,7 +18,11 @@ impl AuthorizationService {
     }
 
     /// Check if the actor can access a specific schedule
-    pub fn can_access_schedule(actor: &ActorContext, schedule_id: String, organization_id: String) -> bool {
+    pub fn can_access_schedule(
+        actor: &ActorContext,
+        schedule_id: String,
+        organization_id: String,
+    ) -> bool {
         match actor.role {
             ActorRole::Admin | ActorRole::AdminObserver => true,
             ActorRole::Builder | ActorRole::Proctor | ActorRole::Grader => {
@@ -60,7 +64,11 @@ impl AuthorizationService {
     }
 
     /// Check if the actor can grade submissions
-    pub fn can_grade_submissions(actor: &ActorContext, schedule_id: String, organization_id: String) -> bool {
+    pub fn can_grade_submissions(
+        actor: &ActorContext,
+        schedule_id: String,
+        organization_id: String,
+    ) -> bool {
         match actor.role {
             ActorRole::Admin | ActorRole::AdminObserver => true,
             ActorRole::Grader | ActorRole::Proctor => {
@@ -72,7 +80,11 @@ impl AuthorizationService {
     }
 
     /// Check if the actor can proctor a schedule
-    pub fn can_proctor_schedule(actor: &ActorContext, schedule_id: String, organization_id: String) -> bool {
+    pub fn can_proctor_schedule(
+        actor: &ActorContext,
+        schedule_id: String,
+        organization_id: String,
+    ) -> bool {
         match actor.role {
             ActorRole::Admin | ActorRole::AdminObserver => true,
             ActorRole::Proctor => {

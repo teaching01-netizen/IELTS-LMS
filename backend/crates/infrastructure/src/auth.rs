@@ -152,6 +152,9 @@ mod tests {
         };
 
         let token = sign_attempt_token(&config, &claims);
-        assert_eq!(verify_attempt_token(&config, &token), Err(AttemptTokenError::Expired));
+        assert_eq!(
+            verify_attempt_token(&config, &token),
+            Err(AttemptTokenError::Expired)
+        );
     }
 }

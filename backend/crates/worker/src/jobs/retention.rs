@@ -1,7 +1,8 @@
 use std::time::Instant;
 
 use ielts_backend_infrastructure::{
-    config::AppConfig, idempotency::IdempotencyRepository, outbox::OutboxRepository,
+    config::AppConfig, database_monitor::StorageBudgetLevel, idempotency::IdempotencyRepository,
+    outbox::OutboxRepository,
 };
 use sqlx::MySqlPool;
 
@@ -37,10 +38,20 @@ pub async fn run_once_with_config(
     pool: MySqlPool,
     config: &AppConfig,
 ) -> Result<RetentionRunReport, sqlx::Error> {
+    run_once_with_config_and_budget(pool, config, StorageBudgetLevel::Normal).await
+}
+
+#[tracing::instrument(skip(pool, config))]
+pub async fn run_once_with_config_and_budget(
+    pool: MySqlPool,
+    config: &AppConfig,
+    storage_budget_level: StorageBudgetLevel,
+) -> Result<RetentionRunReport, sqlx::Error> {
     let started = Instant::now();
     let idempotency = IdempotencyRepository::new(pool.clone());
     let outbox = OutboxRepository::new(pool.clone());
-    let cleanup_batch_limit = config.retention_cleanup_batch_limit.max(1);
+    let cleanup_batch_limit = cleanup_batch_limit(config, storage_budget_level);
+    let cache_grace_hours = cache_grace_hours(config, storage_budget_level);
 
     let cache_rows = sqlx::query(
         r#"
@@ -58,8 +69,8 @@ pub async fn run_once_with_config(
         )
         "#,
     )
-    .bind(config.retention_shared_cache_grace_hours.max(0))
-    .bind(config.retention_shared_cache_grace_hours.max(0))
+    .bind(cache_grace_hours)
+    .bind(cache_grace_hours)
     .bind(cleanup_batch_limit)
     .execute(&pool)
     .await?
@@ -142,4 +153,60 @@ pub async fn run_once_with_config(
         outbox_rows,
         duration_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+fn cleanup_batch_limit(config: &AppConfig, storage_budget_level: StorageBudgetLevel) -> i64 {
+    let base = config.retention_cleanup_batch_limit.max(1);
+    match storage_budget_level {
+        StorageBudgetLevel::Normal | StorageBudgetLevel::Warning => base,
+        StorageBudgetLevel::HighWater => base.saturating_mul(2),
+        StorageBudgetLevel::Critical => base.saturating_mul(5),
+    }
+}
+
+fn cache_grace_hours(config: &AppConfig, storage_budget_level: StorageBudgetLevel) -> i64 {
+    match storage_budget_level {
+        StorageBudgetLevel::Normal => config.retention_shared_cache_grace_hours.max(0),
+        StorageBudgetLevel::Warning => config.retention_shared_cache_grace_hours.min(1).max(0),
+        StorageBudgetLevel::HighWater | StorageBudgetLevel::Critical => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn high_storage_pressure_increases_cleanup_batch_limit() {
+        let config = AppConfig {
+            retention_cleanup_batch_limit: 100,
+            ..AppConfig::default()
+        };
+
+        assert_eq!(
+            cleanup_batch_limit(&config, StorageBudgetLevel::Normal),
+            100
+        );
+        assert_eq!(
+            cleanup_batch_limit(&config, StorageBudgetLevel::HighWater),
+            200
+        );
+        assert_eq!(
+            cleanup_batch_limit(&config, StorageBudgetLevel::Critical),
+            500
+        );
+    }
+
+    #[test]
+    fn high_storage_pressure_drops_cache_grace_to_zero() {
+        let config = AppConfig {
+            retention_shared_cache_grace_hours: 24,
+            ..AppConfig::default()
+        };
+
+        assert_eq!(cache_grace_hours(&config, StorageBudgetLevel::Normal), 24);
+        assert_eq!(cache_grace_hours(&config, StorageBudgetLevel::Warning), 1);
+        assert_eq!(cache_grace_hours(&config, StorageBudgetLevel::HighWater), 0);
+        assert_eq!(cache_grace_hours(&config, StorageBudgetLevel::Critical), 0);
+    }
 }

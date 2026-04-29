@@ -50,7 +50,11 @@ enum FrontendCacheKind {
     Revalidate,
 }
 
-fn cache_kind_for_path(request_path: &str, target_path: &Path, index_path: &Path) -> FrontendCacheKind {
+fn cache_kind_for_path(
+    request_path: &str,
+    target_path: &Path,
+    index_path: &Path,
+) -> FrontendCacheKind {
     if target_path == index_path || request_path == "/index.html" {
         return FrontendCacheKind::EntryHtml;
     }

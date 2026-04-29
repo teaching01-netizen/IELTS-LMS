@@ -3,9 +3,7 @@ use axum::http::StatusCode;
 use ielts_backend_application::auth::AuthService;
 use ielts_backend_application::results::ResultsService;
 use ielts_backend_domain::auth::UserRole;
-use ielts_backend_infrastructure::{
-    rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult},
-};
+use ielts_backend_infrastructure::rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult};
 use sqlx::query_scalar;
 use uuid::Uuid;
 
@@ -77,7 +75,10 @@ pub async fn export_results(
             return Err(ApiError::new(
                 StatusCode::TOO_MANY_REQUESTS,
                 "RATE_LIMIT_EXCEEDED",
-                &format!("Too many export attempts. Retry after {} seconds.", retry_after.as_secs()),
+                &format!(
+                    "Too many export attempts. Retry after {} seconds.",
+                    retry_after.as_secs()
+                ),
             ));
         }
     }
@@ -121,7 +122,13 @@ async fn authorize_result_access(
     .bind(result_id.to_string())
     .fetch_optional(&state.db_pool())
     .await
-    .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
+    .map_err(|err| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &err.to_string(),
+        )
+    })?
     .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
 
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {

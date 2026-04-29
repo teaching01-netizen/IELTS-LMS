@@ -10,9 +10,7 @@ use ielts_backend_domain::{
     schedule::{ExamSchedule, ScheduleStatus},
 };
 use ielts_backend_infrastructure::{
-    actor_context::ActorContext,
-    actor_context::ActorRole,
-    authorization::AuthorizationService,
+    actor_context::ActorContext, actor_context::ActorRole, authorization::AuthorizationService,
 };
 use serde_json::{json, Map, Value};
 use sqlx::{FromRow, MySqlPool};
@@ -68,7 +66,10 @@ impl GradingService {
         }
     }
 
-    pub async fn list_sessions(&self, ctx: &ActorContext) -> Result<Vec<GradingSession>, GradingError> {
+    pub async fn list_sessions(
+        &self,
+        ctx: &ActorContext,
+    ) -> Result<Vec<GradingSession>, GradingError> {
         self.ensure_materialized_state().await?;
 
         // Admins and AdminObservers can see all grading sessions
@@ -82,7 +83,8 @@ impl GradingService {
         } else if let Some(ref schedule_id) = ctx.schedule_scope_id {
             "SELECT * FROM grading_sessions WHERE schedule_id = ? ORDER BY updated_at DESC, start_time DESC"
         } else {
-            "SELECT * FROM grading_sessions WHERE 1=0 ORDER BY updated_at DESC, start_time DESC" // No access
+            "SELECT * FROM grading_sessions WHERE 1=0 ORDER BY updated_at DESC, start_time DESC"
+            // No access
         };
 
         let sessions = if let Some(schedule_id) = ctx.schedule_scope_id.clone() {
@@ -113,11 +115,12 @@ impl GradingService {
                 .await?
                 .ok_or(GradingError::NotFound)?;
 
-        let schedule = sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
-            .bind(&session.schedule_id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(GradingError::NotFound)?;
+        let schedule =
+            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+                .bind(&session.schedule_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(GradingError::NotFound)?;
         Self::ensure_can_grade_schedule(
             ctx,
             &session.schedule_id,
@@ -154,13 +157,12 @@ impl GradingService {
         .ok_or(GradingError::NotFound)?;
 
         // Get the schedule to get organization_id
-        let schedule = sqlx::query_as::<_, ExamSchedule>(
-            "SELECT * FROM exam_schedules WHERE id = ?",
-        )
-        .bind(&submission.schedule_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let schedule =
+            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+                .bind(&submission.schedule_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(GradingError::NotFound)?;
 
         // Check authorization: user must have access to grade this schedule
         Self::ensure_can_grade_schedule(
@@ -181,12 +183,11 @@ impl GradingService {
         .bind(&submission_id)
         .fetch_all(&self.pool)
         .await?;
-        let review_draft = sqlx::query_as::<_, ReviewDraft>(
-            "SELECT * FROM review_drafts WHERE submission_id = ?",
-        )
-        .bind(&submission_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let review_draft =
+            sqlx::query_as::<_, ReviewDraft>("SELECT * FROM review_drafts WHERE submission_id = ?")
+                .bind(&submission_id)
+                .fetch_optional(&self.pool)
+                .await?;
 
         Ok(SubmissionReviewBundle {
             submission,
@@ -216,13 +217,12 @@ impl GradingService {
         .ok_or(GradingError::NotFound)?;
 
         // Get the schedule to get organization_id
-        let schedule = sqlx::query_as::<_, ExamSchedule>(
-            "SELECT * FROM exam_schedules WHERE id = ?",
-        )
-        .bind(&submission.schedule_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let schedule =
+            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+                .bind(&submission.schedule_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(GradingError::NotFound)?;
 
         // Check authorization: user must have access to grade this schedule
         Self::ensure_can_grade_schedule(
@@ -332,13 +332,12 @@ impl GradingService {
         .ok_or(GradingError::NotFound)?;
 
         // Get the schedule to get organization_id
-        let schedule = sqlx::query_as::<_, ExamSchedule>(
-            "SELECT * FROM exam_schedules WHERE id = ?",
-        )
-        .bind(&submission.schedule_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let schedule =
+            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+                .bind(&submission.schedule_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(GradingError::NotFound)?;
 
         // Check authorization: user must have access to grade this schedule
         Self::ensure_can_grade_schedule(
@@ -399,10 +398,11 @@ impl GradingService {
         .execute(&self.pool)
         .await?;
 
-        let draft = sqlx::query_as::<_, ReviewDraft>("SELECT * FROM review_drafts WHERE submission_id = ?")
-            .bind(&submission_id_db)
-            .fetch_one(&self.pool)
-            .await?;
+        let draft =
+            sqlx::query_as::<_, ReviewDraft>("SELECT * FROM review_drafts WHERE submission_id = ?")
+                .bind(&submission_id_db)
+                .fetch_one(&self.pool)
+                .await?;
 
         self.insert_review_event(
             submission_id,
@@ -486,13 +486,12 @@ impl GradingService {
         .ok_or(GradingError::NotFound)?;
 
         // Get the schedule to get organization_id
-        let schedule = sqlx::query_as::<_, ExamSchedule>(
-            "SELECT * FROM exam_schedules WHERE id = ?",
-        )
-        .bind(&submission.schedule_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let schedule =
+            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+                .bind(&submission.schedule_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(GradingError::NotFound)?;
 
         // Check authorization: user must have access to grade this schedule
         Self::ensure_can_grade_schedule(
@@ -647,13 +646,12 @@ impl GradingService {
         .ok_or(GradingError::NotFound)?;
 
         // Get the schedule to get organization_id
-        let schedule = sqlx::query_as::<_, ExamSchedule>(
-            "SELECT * FROM exam_schedules WHERE id = ?",
-        )
-        .bind(&submission.schedule_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let schedule =
+            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+                .bind(&submission.schedule_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(GradingError::NotFound)?;
 
         // Check authorization: user must have access to grade this schedule
         Self::ensure_can_grade_schedule(
@@ -742,10 +740,11 @@ impl GradingService {
         .bind(&submission_id_db)
         .execute(&self.pool)
         .await?;
-        let updated_draft = sqlx::query_as::<_, ReviewDraft>("SELECT * FROM review_drafts WHERE submission_id = ?")
-            .bind(&submission_id_db)
-            .fetch_one(&self.pool)
-            .await?;
+        let updated_draft =
+            sqlx::query_as::<_, ReviewDraft>("SELECT * FROM review_drafts WHERE submission_id = ?")
+                .bind(&submission_id_db)
+                .fetch_one(&self.pool)
+                .await?;
         sqlx::query(
             "UPDATE student_submissions SET grading_status = 'ready_to_release', updated_at = NOW() WHERE id = ?",
         )
@@ -783,7 +782,10 @@ impl GradingService {
         Ok(updated_draft)
     }
 
-    pub async fn list_results(&self, ctx: &ActorContext) -> Result<Vec<StudentResult>, GradingError> {
+    pub async fn list_results(
+        &self,
+        ctx: &ActorContext,
+    ) -> Result<Vec<StudentResult>, GradingError> {
         self.ensure_materialized_state().await?;
 
         // Admins and AdminObservers can see all results
@@ -797,7 +799,8 @@ impl GradingService {
         } else if let Some(ref schedule_id) = ctx.schedule_scope_id {
             "SELECT * FROM student_results WHERE schedule_id = ? ORDER BY updated_at DESC, created_at DESC"
         } else {
-            "SELECT * FROM student_results WHERE 1=0 ORDER BY updated_at DESC, created_at DESC" // No access
+            "SELECT * FROM student_results WHERE 1=0 ORDER BY updated_at DESC, created_at DESC"
+            // No access
         };
 
         let results = if let Some(schedule_id) = ctx.schedule_scope_id.clone() {
@@ -898,11 +901,12 @@ impl GradingService {
         .bind(&submission_id_db)
         .execute(&self.pool)
         .await?;
-        let draft = sqlx::query_as::<_, ReviewDraft>("SELECT * FROM review_drafts WHERE submission_id = ?")
-            .bind(&submission_id_db)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(GradingError::NotFound)?;
+        let draft =
+            sqlx::query_as::<_, ReviewDraft>("SELECT * FROM review_drafts WHERE submission_id = ?")
+                .bind(&submission_id_db)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(GradingError::NotFound)?;
         sqlx::query(
             "UPDATE student_submissions SET grading_status = ?, updated_at = NOW() WHERE id = ?",
         )
@@ -933,7 +937,10 @@ impl GradingService {
             (current, next),
             (ReleaseStatus::Draft, ReleaseStatus::GradingComplete)
                 | (ReleaseStatus::Reopened, ReleaseStatus::GradingComplete)
-                | (ReleaseStatus::GradingComplete, ReleaseStatus::ReadyToRelease)
+                | (
+                    ReleaseStatus::GradingComplete,
+                    ReleaseStatus::ReadyToRelease
+                )
                 | (ReleaseStatus::ReadyToRelease, ReleaseStatus::Reopened)
                 | (ReleaseStatus::Released, ReleaseStatus::Reopened)
         );
@@ -1100,7 +1107,8 @@ impl GradingService {
             .bind(&attempt_id)
             .fetch_optional(&self.pool)
             .await?;
-            let submission_id = existing_submission_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+            let submission_id =
+                existing_submission_id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
             sqlx::query(
                 r#"
@@ -1229,20 +1237,15 @@ impl GradingService {
             .await?;
 
             if section == "writing" {
-                let tasks = writing_task_entries(&writing_answers, content_snapshot, config_snapshot);
+                let tasks =
+                    writing_task_entries(&writing_answers, content_snapshot, config_snapshot);
                 for (task_id, value) in tasks {
                     let task_label = value
                         .get("label")
                         .and_then(Value::as_str)
                         .unwrap_or(&task_id);
-                    let prompt = value
-                        .get("prompt")
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
-                    let student_text = value
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
+                    let prompt = value.get("prompt").and_then(Value::as_str).unwrap_or("");
+                    let student_text = value.get("text").and_then(Value::as_str).unwrap_or("");
                     let word_count = value
                         .get("wordCount")
                         .and_then(Value::as_i64)
@@ -1285,8 +1288,8 @@ impl GradingService {
 
     async fn refresh_session_counters(&self) -> Result<(), GradingError> {
         let rows = sqlx::query_as::<_, SessionCounterRow>(REFRESH_SESSION_COUNTERS_SQL)
-        .fetch_all(&self.pool)
-        .await?;
+            .fetch_all(&self.pool)
+            .await?;
 
         for row in rows {
             sqlx::query(
@@ -1395,10 +1398,7 @@ fn writing_task_array(
         writing_task_entries(writing_answers, content_snapshot, config_snapshot)
             .into_iter()
             .map(|(task_id, value)| {
-                let text_value = value
-                    .get("text")
-                    .cloned()
-                    .unwrap_or_else(|| value.clone());
+                let text_value = value.get("text").cloned().unwrap_or_else(|| value.clone());
                 json!({
                     "taskId": task_id,
                     "text": text_value,
@@ -1861,7 +1861,10 @@ mod tests {
 
         let (task_id, value) = &entries[0];
         assert_eq!(task_id, "task1");
-        assert_eq!(value.get("text").and_then(Value::as_str), Some("Hello world"));
+        assert_eq!(
+            value.get("text").and_then(Value::as_str),
+            Some("Hello world")
+        );
         assert_eq!(value.get("label").and_then(Value::as_str), Some("task1"));
         assert_eq!(value.get("prompt").and_then(Value::as_str), Some(""));
         assert_eq!(value.get("wordCount").and_then(Value::as_i64), Some(2));

@@ -188,10 +188,12 @@ impl AppConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.websocket_connections_per_user_cap),
-            websocket_connections_per_schedule_cap: env::var("WEBSOCKET_CONNECTIONS_PER_SCHEDULE_CAP")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.websocket_connections_per_schedule_cap),
+            websocket_connections_per_schedule_cap: env::var(
+                "WEBSOCKET_CONNECTIONS_PER_SCHEDULE_CAP",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.websocket_connections_per_schedule_cap),
             websocket_outbound_queue_cap: env::var("WEBSOCKET_OUTBOUND_QUEUE_CAP")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -227,19 +229,23 @@ impl AppConfig {
                 global_rate_limit,
                 default.rate_limit_login_per_account,
             ),
-            rate_limit_login_per_account_window_secs: env::var("RATE_LIMIT_LOGIN_PER_ACCOUNT_WINDOW_SECS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_login_per_account_window_secs),
+            rate_limit_login_per_account_window_secs: env::var(
+                "RATE_LIMIT_LOGIN_PER_ACCOUNT_WINDOW_SECS",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.rate_limit_login_per_account_window_secs),
             rate_limit_password_reset_per_ip: resolve_rate_limit_count(
                 env::var("RATE_LIMIT_PASSWORD_RESET_PER_IP").ok().as_deref(),
                 global_rate_limit,
                 default.rate_limit_password_reset_per_ip,
             ),
-            rate_limit_password_reset_per_ip_window_secs: env::var("RATE_LIMIT_PASSWORD_RESET_PER_IP_WINDOW_SECS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_password_reset_per_ip_window_secs),
+            rate_limit_password_reset_per_ip_window_secs: env::var(
+                "RATE_LIMIT_PASSWORD_RESET_PER_IP_WINDOW_SECS",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.rate_limit_password_reset_per_ip_window_secs),
             rate_limit_student_entry_per_ip: resolve_rate_limit_count(
                 env::var("RATE_LIMIT_STUDENT_ENTRY_PER_IP").ok().as_deref(),
                 global_rate_limit,
@@ -252,7 +258,9 @@ impl AppConfig {
             .and_then(|value| value.parse().ok())
             .unwrap_or(default.rate_limit_student_entry_per_ip_window_secs),
             rate_limit_student_entry_per_schedule: resolve_rate_limit_count(
-                env::var("RATE_LIMIT_STUDENT_ENTRY_PER_SCHEDULE").ok().as_deref(),
+                env::var("RATE_LIMIT_STUDENT_ENTRY_PER_SCHEDULE")
+                    .ok()
+                    .as_deref(),
                 global_rate_limit,
                 default.rate_limit_student_entry_per_schedule,
             ),
@@ -263,59 +271,73 @@ impl AppConfig {
             .and_then(|value| value.parse().ok())
             .unwrap_or(default.rate_limit_student_entry_per_schedule_window_secs),
             rate_limit_student_bootstrap_per_user: resolve_rate_limit_count(
-                env::var("RATE_LIMIT_STUDENT_BOOTSTRAP_PER_USER").ok().as_deref(),
+                env::var("RATE_LIMIT_STUDENT_BOOTSTRAP_PER_USER")
+                    .ok()
+                    .as_deref(),
                 global_rate_limit,
                 default.rate_limit_student_bootstrap_per_user,
             ),
-            rate_limit_student_bootstrap_per_user_window_secs: env::var("RATE_LIMIT_STUDENT_BOOTSTRAP_PER_USER_WINDOW_SECS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_student_bootstrap_per_user_window_secs),
+            rate_limit_student_bootstrap_per_user_window_secs: env::var(
+                "RATE_LIMIT_STUDENT_BOOTSTRAP_PER_USER_WINDOW_SECS",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.rate_limit_student_bootstrap_per_user_window_secs),
             rate_limit_mutation_per_attempt: resolve_rate_limit_count(
                 env::var("RATE_LIMIT_MUTATION_PER_ATTEMPT").ok().as_deref(),
                 global_rate_limit,
                 default.rate_limit_mutation_per_attempt,
             ),
-            rate_limit_mutation_per_attempt_window_secs: env::var("RATE_LIMIT_MUTATION_PER_ATTEMPT_WINDOW_SECS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_mutation_per_attempt_window_secs),
+            rate_limit_mutation_per_attempt_window_secs: env::var(
+                "RATE_LIMIT_MUTATION_PER_ATTEMPT_WINDOW_SECS",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.rate_limit_mutation_per_attempt_window_secs),
             rate_limit_heartbeat_per_attempt: resolve_rate_limit_count(
                 env::var("RATE_LIMIT_HEARTBEAT_PER_ATTEMPT").ok().as_deref(),
                 global_rate_limit,
                 default.rate_limit_heartbeat_per_attempt,
             ),
-            rate_limit_heartbeat_per_attempt_window_secs: env::var("RATE_LIMIT_HEARTBEAT_PER_ATTEMPT_WINDOW_SECS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_heartbeat_per_attempt_window_secs),
+            rate_limit_heartbeat_per_attempt_window_secs: env::var(
+                "RATE_LIMIT_HEARTBEAT_PER_ATTEMPT_WINDOW_SECS",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.rate_limit_heartbeat_per_attempt_window_secs),
             rate_limit_audit_per_attempt: resolve_rate_limit_count(
                 env::var("RATE_LIMIT_AUDIT_PER_ATTEMPT").ok().as_deref(),
                 global_rate_limit,
                 default.rate_limit_audit_per_attempt,
             ),
-            rate_limit_audit_per_attempt_window_secs: env::var("RATE_LIMIT_AUDIT_PER_ATTEMPT_WINDOW_SECS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_audit_per_attempt_window_secs),
+            rate_limit_audit_per_attempt_window_secs: env::var(
+                "RATE_LIMIT_AUDIT_PER_ATTEMPT_WINDOW_SECS",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.rate_limit_audit_per_attempt_window_secs),
             rate_limit_submit_per_attempt: resolve_rate_limit_count(
                 env::var("RATE_LIMIT_SUBMIT_PER_ATTEMPT").ok().as_deref(),
                 global_rate_limit,
                 default.rate_limit_submit_per_attempt,
             ),
-            rate_limit_submit_per_attempt_window_secs: env::var("RATE_LIMIT_SUBMIT_PER_ATTEMPT_WINDOW_SECS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_submit_per_attempt_window_secs),
+            rate_limit_submit_per_attempt_window_secs: env::var(
+                "RATE_LIMIT_SUBMIT_PER_ATTEMPT_WINDOW_SECS",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.rate_limit_submit_per_attempt_window_secs),
             rate_limit_export_per_user: resolve_rate_limit_count(
                 env::var("RATE_LIMIT_EXPORT_PER_USER").ok().as_deref(),
                 global_rate_limit,
                 default.rate_limit_export_per_user,
             ),
-            rate_limit_export_per_user_window_secs: env::var("RATE_LIMIT_EXPORT_PER_USER_WINDOW_SECS")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(default.rate_limit_export_per_user_window_secs),
+            rate_limit_export_per_user_window_secs: env::var(
+                "RATE_LIMIT_EXPORT_PER_USER_WINDOW_SECS",
+            )
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default.rate_limit_export_per_user_window_secs),
             rate_limiter_bucket_cap: env::var("RATE_LIMITER_BUCKET_CAP")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -373,10 +395,43 @@ impl AppConfig {
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or(default.master_key_password),
         }
+        .with_resource_profile_from_env()
     }
 
     pub fn bind_address(&self) -> String {
         format!("{}:{}", self.api_host, self.api_port)
+    }
+
+    /// Tune defaults for a single tiny instance.
+    ///
+    /// This keeps the same backend behavior while reducing memory, CPU, and disk pressure for
+    /// deployments around 1 CPU, 1 GiB RAM, and 5 GiB disk.
+    pub fn apply_low_resource_profile(&mut self) {
+        self.db_pool_max_connections = self.db_pool_max_connections.min(3);
+        self.worker_fallback_interval_secs = self.worker_fallback_interval_secs.max(60);
+        self.websocket_connection_cap = self.websocket_connection_cap.min(100);
+        self.websocket_connections_per_schedule_cap =
+            self.websocket_connections_per_schedule_cap.min(100);
+        self.rate_limiter_bucket_cap = self.rate_limiter_bucket_cap.min(1_000);
+        self.retention_cleanup_batch_limit = self.retention_cleanup_batch_limit.min(200);
+        self.retention_shared_cache_grace_hours = self.retention_shared_cache_grace_hours.min(1);
+        self.retention_idempotency_usable_hours = self.retention_idempotency_usable_hours.min(24);
+        self.retention_idempotency_grace_hours = self.retention_idempotency_grace_hours.min(6);
+        self.retention_heartbeat_days = self.retention_heartbeat_days.min(1);
+        self.retention_mutation_days = self.retention_mutation_days.min(7);
+        self.retention_user_session_days = self.retention_user_session_days.min(7);
+    }
+
+    fn with_resource_profile_from_env(mut self) -> Self {
+        if env::var("RESOURCE_PROFILE")
+            .ok()
+            .map(|value| value.trim().eq_ignore_ascii_case("low"))
+            .unwrap_or(false)
+        {
+            self.apply_low_resource_profile();
+        }
+
+        self
     }
 }
 
@@ -507,6 +562,25 @@ mod tests {
         assert_eq!(config.retention_mutation_days, 30);
         assert_eq!(config.retention_user_session_days, 30);
         assert_eq!(config.rate_limiter_bucket_cap, 10_000);
+    }
+
+    #[test]
+    fn low_resource_profile_reduces_backend_pressure() {
+        let mut config = AppConfig::default();
+        config.apply_low_resource_profile();
+
+        assert_eq!(config.db_pool_max_connections, 3);
+        assert_eq!(config.worker_fallback_interval_secs, 60);
+        assert_eq!(config.websocket_connection_cap, 100);
+        assert_eq!(config.websocket_connections_per_schedule_cap, 100);
+        assert_eq!(config.rate_limiter_bucket_cap, 1_000);
+        assert_eq!(config.retention_cleanup_batch_limit, 200);
+        assert_eq!(config.retention_shared_cache_grace_hours, 1);
+        assert_eq!(config.retention_idempotency_usable_hours, 24);
+        assert_eq!(config.retention_idempotency_grace_hours, 6);
+        assert_eq!(config.retention_heartbeat_days, 1);
+        assert_eq!(config.retention_mutation_days, 7);
+        assert_eq!(config.retention_user_session_days, 7);
     }
 
     #[test]

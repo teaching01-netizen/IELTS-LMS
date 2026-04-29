@@ -20,65 +20,70 @@ pub struct TestDatabase {
 
 impl TestDatabase {
     pub async fn new(migrations: &[&str]) -> Self {
-        let (db_name, pool, drop_on_shutdown) = if let Ok(database_url) = env::var("TEST_DATABASE_URL") {
-            eprintln!("TEST_DATABASE_URL found (redacted)");
+        let (db_name, pool, drop_on_shutdown) =
+            if let Ok(database_url) = env::var("TEST_DATABASE_URL") {
+                eprintln!("TEST_DATABASE_URL found (redacted)");
 
-            let base_db = database_name_from_url(&database_url).unwrap_or_else(|| "test".to_owned());
-            let db_name = format!("{base_db}_codex_test_{}", Uuid::new_v4().simple());
-            let server_url = server_url_from_database_url(&database_url);
+                let base_db =
+                    database_name_from_url(&database_url).unwrap_or_else(|| "test".to_owned());
+                let db_name = format!("{base_db}_codex_test_{}", Uuid::new_v4().simple());
+                let server_url = server_url_from_database_url(&database_url);
 
-            let admin_pool = MySqlPoolOptions::new()
-                .max_connections(1)
-                .connect(&server_url)
-                .await
-                .expect("connect to TiDB/MySQL server");
+                let admin_pool = MySqlPoolOptions::new()
+                    .max_connections(1)
+                    .connect(&server_url)
+                    .await
+                    .expect("connect to TiDB/MySQL server");
 
-            let created = sqlx::query(&format!("CREATE DATABASE {}", db_name))
-                .execute(&admin_pool)
-                .await
-                .is_ok();
+                let created = sqlx::query(&format!("CREATE DATABASE {}", db_name))
+                    .execute(&admin_pool)
+                    .await
+                    .is_ok();
 
-            let effective_db = if created { db_name.clone() } else { base_db };
-            let effective_url = if created {
-                format!("{}/{}", server_url, effective_db)
+                let effective_db = if created { db_name.clone() } else { base_db };
+                let effective_url = if created {
+                    format!("{}/{}", server_url, effective_db)
+                } else {
+                    database_url.clone()
+                };
+
+                drop(admin_pool);
+                let pool = MySqlPoolOptions::new()
+                    .max_connections(1)
+                    .connect(&effective_url)
+                    .await
+                    .expect("connect to test database");
+
+                eprintln!("Connected to database: {}", effective_db);
+                (effective_db, pool, created)
             } else {
-                database_url.clone()
+                eprintln!("TEST_DATABASE_URL not found, using local MySQL");
+                // Local testing - create a new database
+                let db_name = format!(
+                    "codex_test_{}",
+                    Uuid::new_v4().hyphenated().to_string().replace("-", "_")
+                );
+                let admin_options = connect_options("root", "ielts");
+                let admin_pool = MySqlPoolOptions::new()
+                    .max_connections(1)
+                    .connect_with(admin_options)
+                    .await
+                    .expect("connect to local MySQL/TiDB");
+
+                admin_pool
+                    .execute(format!("CREATE DATABASE {}", db_name).as_str())
+                    .await
+                    .expect("create test database");
+
+                let database_options = connect_options("root", &db_name);
+                let pool = MySqlPoolOptions::new()
+                    .max_connections(1)
+                    .connect_with(database_options)
+                    .await
+                    .expect("connect to test database");
+
+                (db_name, pool, true)
             };
-
-            drop(admin_pool);
-            let pool = MySqlPoolOptions::new()
-                .max_connections(1)
-                .connect(&effective_url)
-                .await
-                .expect("connect to test database");
-
-            eprintln!("Connected to database: {}", effective_db);
-            (effective_db, pool, created)
-        } else {
-            eprintln!("TEST_DATABASE_URL not found, using local MySQL");
-            // Local testing - create a new database
-            let db_name = format!("codex_test_{}", Uuid::new_v4().hyphenated().to_string().replace("-", "_"));
-            let admin_options = connect_options("root", "ielts");
-            let admin_pool = MySqlPoolOptions::new()
-                .max_connections(1)
-                .connect_with(admin_options)
-                .await
-                .expect("connect to local MySQL/TiDB");
-
-            admin_pool
-                .execute(format!("CREATE DATABASE {}", db_name).as_str())
-                .await
-                .expect("create test database");
-
-            let database_options = connect_options("root", &db_name);
-            let pool = MySqlPoolOptions::new()
-                .max_connections(1)
-                .connect_with(database_options)
-                .await
-                .expect("connect to test database");
-            
-            (db_name, pool, true)
-        };
 
         for migration in migrations {
             let sql = fs::read_to_string(migration_path(migration)).expect("read migration");
@@ -111,10 +116,7 @@ impl TestDatabase {
 
     #[allow(dead_code)]
     pub fn database_url(&self) -> String {
-        format!(
-            "mysql://root:root@127.0.0.1:4000/{}",
-            self.db_name
-        )
+        format!("mysql://root:root@127.0.0.1:4000/{}", self.db_name)
     }
 
     pub async fn shutdown(self) {
@@ -161,18 +163,13 @@ pub struct TestAuthContext {
 }
 
 impl TestAuthContext {
-    pub fn with_auth(
-        &self,
-        builder: axum::http::request::Builder,
-    ) -> axum::http::request::Builder {
+    pub fn with_auth(&self, builder: axum::http::request::Builder) -> axum::http::request::Builder {
         builder.header("cookie", format!("__Host-session={}", self.session_token))
     }
 
-    pub fn with_csrf(
-        &self,
-        builder: axum::http::request::Builder,
-    ) -> axum::http::request::Builder {
-        self.with_auth(builder).header("x-csrf-token", self.csrf_token.clone())
+    pub fn with_csrf(&self, builder: axum::http::request::Builder) -> axum::http::request::Builder {
+        self.with_auth(builder)
+            .header("x-csrf-token", self.csrf_token.clone())
     }
 }
 
@@ -393,18 +390,22 @@ fn connect_options(user: &str, database: &str) -> MySqlConnectOptions {
         let url = database_url
             .strip_prefix("mysql://")
             .expect("invalid database URL");
-        
+
         let parts: Vec<&str> = url.split('@').collect();
         let auth_parts: Vec<&str> = parts[0].split(':').collect();
         let host_parts: Vec<&str> = parts[1].split('/').collect();
         let host_port: Vec<&str> = host_parts[0].split(':').collect();
-        
+
         let username = auth_parts[0];
         let password = auth_parts[1];
         let host = host_port[0];
         let port = host_port[1].parse::<u16>().unwrap_or(4000);
-        let db = if host_parts.len() > 1 { host_parts[1] } else { database };
-        
+        let db = if host_parts.len() > 1 {
+            host_parts[1]
+        } else {
+            database
+        };
+
         return MySqlConnectOptions::new()
             .host(host)
             .port(port)
@@ -412,7 +413,7 @@ fn connect_options(user: &str, database: &str) -> MySqlConnectOptions {
             .password(password)
             .database(db);
     }
-    
+
     // Default local connection
     MySqlConnectOptions::new()
         .host("127.0.0.1")

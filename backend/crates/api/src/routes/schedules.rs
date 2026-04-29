@@ -4,8 +4,8 @@ use axum::{
     Json,
 };
 use ielts_backend_application::scheduling::{SchedulingError, SchedulingService};
-use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::attempt::StudentRegistrationRequest;
+use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::schedule::{
     CreateScheduleRequest, ExamSchedule, ExamSessionRuntime, RuntimeCommandRequest,
     UpdateScheduleRequest,
@@ -137,12 +137,14 @@ pub async fn apply_runtime_command(
         ielts_backend_domain::schedule::RuntimeCommandAction::EndRuntime => "complete_runtime",
     };
     let runtime = service.apply_runtime_command(&ctx, id, req).await?;
-    state.live_updates.publish(ielts_backend_domain::schedule::LiveUpdateEvent {
-        kind: "schedule_runtime".to_owned(),
-        id: id.to_string(),
-        revision: i64::from(runtime.revision),
-        event: event.to_owned(),
-    });
+    state
+        .live_updates
+        .publish(ielts_backend_domain::schedule::LiveUpdateEvent {
+            kind: "schedule_runtime".to_owned(),
+            id: id.to_string(),
+            revision: i64::from(runtime.revision),
+            event: event.to_owned(),
+        });
     Ok(ApiResponse::success_with_request_id(runtime, request_id.0))
 }
 
@@ -161,11 +163,16 @@ pub async fn create_student_registration(
     ])?;
     let ctx = principal.actor_context();
     let service = SchedulingService::new(state.db_pool());
-    
+
     // Use the authenticated user's ID for registration
-    let user_id = Uuid::parse_str(&principal.user.id)
-        .map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", "Invalid user ID format"))?;
-    
+    let user_id = Uuid::parse_str(&principal.user.id).map_err(|_| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            "Invalid user ID format",
+        )
+    })?;
+
     let registration = service
         .create_student_registration(
             &ctx,

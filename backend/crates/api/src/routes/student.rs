@@ -10,9 +10,9 @@ use ielts_backend_application::delivery::{
 };
 use ielts_backend_domain::attempt::{
     StudentAuditLogRequest, StudentBootstrapRequest, StudentHeartbeatRequest,
-    StudentHeartbeatResponse, StudentMutationBatchRequest, StudentMutationBatchResponse,
-    StudentLiveSessionContext, StudentPrecheckRequest, StudentSessionContext, StudentSessionQuery,
-    StudentStaticSessionContext, StudentSubmitRequest, StudentSubmitResponse,
+    StudentHeartbeatResponse, StudentLiveSessionContext, StudentMutationBatchRequest,
+    StudentMutationBatchResponse, StudentPrecheckRequest, StudentSessionContext,
+    StudentSessionQuery, StudentStaticSessionContext, StudentSubmitRequest, StudentSubmitResponse,
 };
 use ielts_backend_domain::auth::UserRole;
 use serde_json::{json, Value};
@@ -525,8 +525,8 @@ pub async fn record_heartbeat(
     let service = delivery_service(&state);
     let started = Instant::now();
     let event_type = req.event_type.clone();
-    let ack_only = event_type == "heartbeat"
-        && query.response_mode != Some(HeartbeatResponseMode::Full);
+    let ack_only =
+        event_type == "heartbeat" && query.response_mode != Some(HeartbeatResponseMode::Full);
     let attempt = service.record_heartbeat(schedule_id, req).await?;
     let auth_service = AuthService::new(state.db_pool(), state.config.clone());
     state

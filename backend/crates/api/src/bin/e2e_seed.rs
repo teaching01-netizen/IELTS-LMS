@@ -1,14 +1,10 @@
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
 use chrono::{Duration, Utc};
-use ielts_backend_application::{
-    builder::BuilderService,
-    scheduling::SchedulingService,
-};
+use ielts_backend_application::{builder::BuilderService, scheduling::SchedulingService};
 use ielts_backend_domain::{
     auth::{UserRole, UserState},
     exam::{CreateExamRequest, PublishExamRequest, SaveDraftRequest},
@@ -252,8 +248,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let admin_lifecycle = create_admin_lifecycle_user(&pool).await?;
 
     let builder_fixture = seed_builder_fixture(&pool, builder_auth.user_id).await?;
-    let student_fixture = seed_student_fixture(&pool, builder_auth.user_id, student_auth.user_id)
-        .await?;
+    let student_fixture =
+        seed_student_fixture(&pool, builder_auth.user_id, student_auth.user_id).await?;
 
     write_storage_state(
         &args.builder_storage_path,
@@ -324,10 +320,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
 
-    fs::write(
-        &args.manifest_path,
-        serde_json::to_vec_pretty(&manifest)?,
-    )?;
+    fs::write(&args.manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
 
     println!(
         "Seeded backend E2E fixtures: builder exam {}, student schedule {}",
@@ -356,7 +349,9 @@ fn parse_args(args: Vec<String>) -> Result<SeedArgs, Box<dyn std::error::Error>>
             "--manifest" => manifest_path = Some(PathBuf::from(value)),
             "--builder-storage" => builder_storage_path = Some(PathBuf::from(value)),
             "--student-storage" => student_storage_path = Some(PathBuf::from(value)),
-            "--unregistered-student-storage" => unregistered_student_storage_path = Some(PathBuf::from(value)),
+            "--unregistered-student-storage" => {
+                unregistered_student_storage_path = Some(PathBuf::from(value))
+            }
             "--admin-storage" => admin_storage_path = Some(PathBuf::from(value)),
             "--frontend-origin" => frontend_origin = value.clone(),
             _ => return Err(format!("Unsupported argument: {flag}").into()),
@@ -369,7 +364,8 @@ fn parse_args(args: Vec<String>) -> Result<SeedArgs, Box<dyn std::error::Error>>
         manifest_path: manifest_path.ok_or("--manifest is required")?,
         builder_storage_path: builder_storage_path.ok_or("--builder-storage is required")?,
         student_storage_path: student_storage_path.ok_or("--student-storage is required")?,
-        unregistered_student_storage_path: unregistered_student_storage_path.ok_or("--unregistered-student-storage is required")?,
+        unregistered_student_storage_path: unregistered_student_storage_path
+            .ok_or("--unregistered-student-storage is required")?,
         admin_storage_path: admin_storage_path.ok_or("--admin-storage is required")?,
         frontend_origin,
     })
@@ -377,7 +373,7 @@ fn parse_args(args: Vec<String>) -> Result<SeedArgs, Box<dyn std::error::Error>>
 
 async fn cleanup_existing_fixtures(pool: &MySqlPool) -> Result<(), sqlx::Error> {
     eprintln!("Starting cleanup of existing fixtures...");
-    
+
     eprintln!("Deleting exam_entities...");
     let result = sqlx::query(
         r#"
@@ -389,7 +385,7 @@ async fn cleanup_existing_fixtures(pool: &MySqlPool) -> Result<(), sqlx::Error> 
     .bind(STUDENT_EXAM_SLUG.to_owned())
     .execute(pool)
     .await;
-    
+
     match result {
         Ok(_) => eprintln!("✓ Deleted exam_entities"),
         Err(e) => {
@@ -412,7 +408,7 @@ async fn cleanup_existing_fixtures(pool: &MySqlPool) -> Result<(), sqlx::Error> 
     .bind(ADMIN_EMAIL.to_owned())
     .execute(pool)
     .await;
-    
+
     match result {
         Ok(_) => eprintln!("✓ Deleted users"),
         Err(e) => {
@@ -432,7 +428,7 @@ async fn seed_builder_fixture(
     eprintln!("Seeding builder fixture...");
     let actor = ActorContext::new(builder_user_id.to_string(), ActorRole::Builder);
     let service = BuilderService::new(pool.clone());
-    
+
     eprintln!("Creating exam via BuilderService...");
     let exam = service
         .create_exam(
@@ -518,7 +514,9 @@ async fn seed_student_fixture(
         )
         .await?;
 
-    let exam_after_draft = builder_service.get_exam(&builder_actor, exam_id.clone()).await?;
+    let exam_after_draft = builder_service
+        .get_exam(&builder_actor, exam_id.clone())
+        .await?;
     let published_version = builder_service
         .publish_exam(
             &builder_actor,
@@ -605,8 +603,12 @@ async fn create_authenticated_user(
     display_name: &str,
     student_id: Option<&str>,
 ) -> Result<AuthFixture, Box<dyn std::error::Error>> {
-    eprintln!("Creating authenticated user: {} ({})", email, role_sql(&role));
-    
+    eprintln!(
+        "Creating authenticated user: {} ({})",
+        email,
+        role_sql(&role)
+    );
+
     let user_id = Uuid::new_v4();
     let session_token = random_token(32);
     let csrf_token = random_token(24);
@@ -633,7 +635,7 @@ async fn create_authenticated_user(
     .bind(now)
     .execute(pool)
     .await;
-    
+
     match result {
         Ok(_) => eprintln!("✓ Inserted user record"),
         Err(e) => {
@@ -654,7 +656,7 @@ async fn create_authenticated_user(
     .bind(now)
     .execute(pool)
     .await;
-    
+
     match result {
         Ok(_) => eprintln!("✓ Inserted password credentials"),
         Err(e) => {
@@ -682,7 +684,7 @@ async fn create_authenticated_user(
             .bind(now)
             .execute(pool)
             .await;
-            
+
             match result {
                 Ok(_) => eprintln!("✓ Inserted student profile"),
                 Err(e) => {
@@ -706,7 +708,7 @@ async fn create_authenticated_user(
             .bind(now)
             .execute(pool)
             .await;
-            
+
             match result {
                 Ok(_) => eprintln!("✓ Inserted staff profile"),
                 Err(e) => {
@@ -738,7 +740,7 @@ async fn create_authenticated_user(
     .bind(idle_timeout_at)
     .execute(pool)
     .await;
-    
+
     match result {
         Ok(_) => eprintln!("✓ Inserted user session"),
         Err(e) => {
@@ -759,7 +761,7 @@ async fn create_admin_lifecycle_user(
     pool: &MySqlPool,
 ) -> Result<AdminLifecycleFixture, Box<dyn std::error::Error>> {
     eprintln!("Creating admin lifecycle user...");
-    
+
     let user_id = Uuid::new_v4();
     let now = Utc::now();
     let password_hash = hash_password(ADMIN_ACTIVATION_PASSWORD)
@@ -781,7 +783,7 @@ async fn create_admin_lifecycle_user(
     .bind(now)
     .execute(pool)
     .await;
-    
+
     match result {
         Ok(_) => eprintln!("✓ Inserted admin user"),
         Err(e) => {
@@ -802,7 +804,7 @@ async fn create_admin_lifecycle_user(
     .bind(now)
     .execute(pool)
     .await;
-    
+
     match result {
         Ok(_) => eprintln!("✓ Inserted admin password credentials"),
         Err(e) => {
@@ -825,7 +827,7 @@ async fn create_admin_lifecycle_user(
     .bind(now)
     .execute(pool)
     .await;
-    
+
     match result {
         Ok(_) => eprintln!("✓ Inserted admin staff profile"),
         Err(e) => {
@@ -864,7 +866,7 @@ async fn insert_token(
     lifetime: Duration,
 ) -> Result<String, Box<dyn std::error::Error>> {
     eprintln!("Inserting token into table: {}", table);
-    
+
     let token = random_token(32);
     let expires_at = Utc::now() + lifetime;
     let id = Uuid::new_v4();
@@ -882,7 +884,7 @@ async fn insert_token(
         .bind(expires_at)
         .execute(pool)
         .await;
-    
+
     match result {
         Ok(_) => eprintln!("✓ Inserted token into {}", table),
         Err(e) => {
@@ -934,7 +936,8 @@ fn minimal_exam_state(
 ) -> Value {
     let config = minimal_reading_config(title);
     // Very small silent WAV for deterministic, offline-friendly playback.
-    let audio_url = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+    let audio_url =
+        "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
     json!({
         "title": title,
         "type": "Academic",
@@ -1281,8 +1284,8 @@ fn write_storage_state(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let domain = parse_frontend_origin(frontend_origin)?;
     let secure = config.auth_cookie_secure;
-    let expires = (Utc::now() + Duration::hours(config.session_absolute_lifetime_hours)).timestamp()
-        as f64;
+    let expires =
+        (Utc::now() + Duration::hours(config.session_absolute_lifetime_hours)).timestamp() as f64;
 
     let state = StorageState {
         cookies: vec![

@@ -8,7 +8,10 @@ use sqlx::{Executor, MySqlPool};
 
 const ROLE_MIGRATION: &str = "0001_roles.sql";
 
-pub async fn run_startup_migrations(pool: &MySqlPool, migrations_dir: &Path) -> Result<(), sqlx::Error> {
+pub async fn run_startup_migrations(
+    pool: &MySqlPool,
+    migrations_dir: &Path,
+) -> Result<(), sqlx::Error> {
     let migrations = load_migrations(migrations_dir).map_err(sqlx::Error::Io)?;
 
     ensure_schema_migrations_table(pool).await?;
@@ -21,7 +24,9 @@ pub async fn run_startup_migrations(pool: &MySqlPool, migrations_dir: &Path) -> 
     }
 
     for migration in migrations {
-        if migration.filename == ROLE_MIGRATION || is_migration_applied(pool, &migration.filename).await? {
+        if migration.filename == ROLE_MIGRATION
+            || is_migration_applied(pool, &migration.filename).await?
+        {
             continue;
         }
 
@@ -119,20 +124,19 @@ async fn maybe_backfill_schema_migrations(
 // Note: roles_exist removed - MySQL uses standard user management
 
 async fn is_migration_applied(pool: &MySqlPool, filename: &str) -> Result<bool, sqlx::Error> {
-    let value: Option<i32> = sqlx::query_scalar("select 1 from schema_migrations where filename = ?")
-        .bind(filename)
-        .fetch_optional(pool)
-        .await?;
+    let value: Option<i32> =
+        sqlx::query_scalar("select 1 from schema_migrations where filename = ?")
+            .bind(filename)
+            .fetch_optional(pool)
+            .await?;
     Ok(value.is_some())
 }
 
 async fn record_migration(pool: &MySqlPool, filename: &str) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "insert ignore into schema_migrations (filename) values (?)",
-    )
-    .bind(filename)
-    .execute(pool)
-    .await?;
+    sqlx::query("insert ignore into schema_migrations (filename) values (?)")
+        .bind(filename)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
