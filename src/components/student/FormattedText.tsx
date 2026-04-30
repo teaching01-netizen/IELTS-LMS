@@ -1,8 +1,9 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { parseBoldMarkdown } from '../../utils/boldMarkdown';
 import { applySelectionHighlight, escapeHtml } from './highlightSelection';
 import { getStudentHighlightClassName, type StudentHighlightColor } from './highlightPalette';
 import { usePersistedStudentHighlightHtml } from './highlightPersistence';
+import { useDeferredSelectionHighlight } from './useDeferredSelectionHighlight';
 
 type FormattedTextProps = {
   text: string;
@@ -39,7 +40,7 @@ export function FormattedText({
     highlightPersistenceKey,
   );
 
-  const handleSelection = () => {
+  const handleSelection = useCallback(() => {
     if (!highlightEnabled) {
       return;
     }
@@ -60,15 +61,22 @@ export function FormattedText({
     if (nextHtml) {
       setHtml(nextHtml);
     }
-  };
+  }, [highlightClassName, highlightColor, highlightEnabled, setHtml]);
+  const scheduleSelectionHighlight = useDeferredSelectionHighlight({
+    enabled: highlightEnabled,
+    containerRef,
+    applySelection: handleSelection,
+  });
 
   if (highlightEnabled || hasPersistedHtml) {
     return (
       <Tag
         ref={containerRef as any}
         className={classes}
+        data-student-highlightable="true"
         style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
         onMouseUp={highlightEnabled ? handleSelection : undefined}
+        onTouchEnd={highlightEnabled ? scheduleSelectionHighlight : undefined}
         onKeyUp={highlightEnabled ? handleSelection : undefined}
         dangerouslySetInnerHTML={{ __html: html }}
       />

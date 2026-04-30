@@ -9,6 +9,7 @@ import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
 import { WritingChartPreview } from '../writing/WritingChartPreview';
+import { useSplitPaneResize } from './useSplitPaneResize';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -47,38 +48,18 @@ export function StudentWriting({
   const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
   const writingConfig = state.config.sections.writing;
   const [activeTaskId, setActiveTaskId] = useState<string>(currentQuestionId || writingConfig.tasks[0]?.id || 'task1');
-  const [leftWidth, setLeftWidth] = useState(50);
   const [isEditorFocused, setIsEditorFocused] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const lastKeydownRef = useRef<number>(0);
   const previousValueRef = useRef<string>('');
   const editorHasFocusRef = useRef(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
-
-  const handleDrag = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-      const firstTouch = 'touches' in e ? e.touches[0] : undefined;
-      if ('touches' in e && !firstTouch) {
-        return;
-      }
-      const clientX = firstTouch ? firstTouch.clientX : (e as MouseEvent).clientX;
-      const newWidth = (clientX / window.innerWidth) * 100;
-      if (newWidth > 30 && newWidth < 70) {
-        setLeftWidth(newWidth);
-      }
-    };
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('touchmove', handleMouseMove);
-      document.removeEventListener('touchend', handleMouseUp);
-    };
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('touchmove', handleMouseMove);
-    document.addEventListener('touchend', handleMouseUp);
-  };
+  const { handleDrag, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+    isTabletMode: false,
+    materialPaneWidthProperty: '--writing-prompt-pane-width',
+    answerPaneWidthProperty: '--writing-editor-pane-width',
+    defaultLeftWidth: 50,
+  });
 
   const currentTask = writingConfig.tasks.find(t => t.id === activeTaskId) || writingConfig.tasks[0];
   const currentText = writingAnswers[activeTaskId] || '';
@@ -276,8 +257,13 @@ export function StudentWriting({
 
 	return (
     <div className="flex flex-col h-full w-full bg-white">
-      <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden relative border-t border-gray-300">
-        <div style={{ width: `${leftWidth}%` }} className="h-full flex flex-col relative min-w-[260px] md:min-w-[280px] lg:min-w-[300px]">
+      <div
+        className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden relative border-t border-gray-300"
+        ref={workspaceRef}
+        style={splitPaneStyle}
+        data-testid="writing-split-workspace"
+      >
+        <div className="h-full flex flex-col relative min-w-[260px] md:min-w-[280px] lg:w-[var(--writing-prompt-pane-width)] lg:min-w-[300px]">
           {/* Timer Bar */}
           <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-500' : isTimeWarning ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
 
@@ -328,13 +314,17 @@ export function StudentWriting({
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
           className="hidden lg:flex w-4 bg-gray-400 relative flex items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors"
+          role="separator"
+          aria-label="Resize writing prompt and answer panels"
+          aria-orientation="vertical"
+          data-testid="writing-pane-resizer"
         >
           <div className="w-8 h-8 bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none">
             <ArrowLeftRight size={14} className="text-gray-600" />
           </div>
         </div>
 
-        <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
+        <div className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px] lg:w-[var(--writing-editor-pane-width)]">
           <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
             <div className="relative flex-1 w-full">
               <div className="flex flex-col gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-600 sm:flex-row sm:items-center sm:justify-between">

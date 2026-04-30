@@ -1,8 +1,9 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { applySelectionHighlight, escapeHtml } from './highlightSelection';
 import { getStudentHighlightClassName, type StudentHighlightColor } from './highlightPalette';
 import { usePersistedStudentHighlightHtml } from './highlightPersistence';
+import { useDeferredSelectionHighlight } from './useDeferredSelectionHighlight';
 
 interface RichTextHighlighterProps {
   content: string;
@@ -40,7 +41,7 @@ export function RichTextHighlighter({
     highlightPersistenceKey,
   );
 
-  const handleSelection = () => {
+  const handleSelection = useCallback(() => {
     if (!enabled) {
       return;
     }
@@ -61,15 +62,22 @@ export function RichTextHighlighter({
     if (nextHtml) {
       setHtml(nextHtml);
     }
-  };
+  }, [enabled, highlightClassName, highlightColor, setHtml]);
+  const scheduleSelectionHighlight = useDeferredSelectionHighlight({
+    enabled,
+    containerRef,
+    applySelection: handleSelection,
+  });
 
   return (
     <>
       <Tag
         ref={containerRef as any}
         className={className}
+        data-student-highlightable="true"
         style={enabled ? { WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' } : undefined}
         onMouseUp={enabled && !showHighlightButton ? handleSelection : undefined}
+        onTouchEnd={enabled && !showHighlightButton ? scheduleSelectionHighlight : undefined}
         onKeyUp={enabled ? handleSelection : undefined}
         dangerouslySetInnerHTML={{ __html: html }}
       />

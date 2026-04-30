@@ -507,9 +507,10 @@ describe('student question experience', () => {
     });
     expect(screen.getByTestId('reading-pane-resizer')).toBeInTheDocument();
     expect(screen.getByTestId('reading-pane-resizer')).toHaveClass('w-8');
-    expect(screen.getByRole('button', { name: /set split to material wider/i })).toHaveClass('h-9');
-    expect(screen.getByRole('button', { name: /set split to equal/i })).toHaveClass('h-9');
-    expect(screen.getByRole('button', { name: /set split to answers wider/i })).toHaveClass('h-9');
+    expect(screen.queryByTestId('reading-split-presets')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /set split to material wider/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /set split to equal/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /set split to answers wider/i })).not.toBeInTheDocument();
     expect(screen.queryByText('Material wider')).not.toBeInTheDocument();
     expect(screen.queryByText('Equal')).not.toBeInTheDocument();
     expect(screen.queryByText('Answers wider')).not.toBeInTheDocument();
@@ -1266,9 +1267,10 @@ describe('student question experience', () => {
     expect(screen.queryByText(/use the invigilator audio system/i)).not.toBeInTheDocument();
     expect(screen.queryByText(longInstruction.trim())).not.toBeInTheDocument();
     expect(screen.getByTestId('listening-pane-resizer')).toHaveClass('w-8');
-    expect(screen.getByRole('button', { name: /set split to material wider/i })).toHaveClass('h-9');
-    expect(screen.getByRole('button', { name: /set split to equal/i })).toHaveClass('h-9');
-    expect(screen.getByRole('button', { name: /set split to answers wider/i })).toHaveClass('h-9');
+    expect(screen.queryByTestId('listening-split-presets')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /set split to material wider/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /set split to equal/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /set split to answers wider/i })).not.toBeInTheDocument();
     expect(screen.queryByText('Material wider')).not.toBeInTheDocument();
     expect(screen.queryByText('Equal')).not.toBeInTheDocument();
     expect(screen.queryByText('Answers wider')).not.toBeInTheDocument();

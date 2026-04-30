@@ -43,7 +43,7 @@ export function StudentReading({
   const isTabletMode = Boolean(tabletMode);
   const [collapsedInstructions, setCollapsedInstructions] = useState<Record<string, boolean>>({});
   const questionContainerRef = useRef<HTMLDivElement>(null);
-  const { handleDrag, setPresetWidth, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+  const { handleDrag, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: '--reading-pane-width',
   });
@@ -197,19 +197,6 @@ export function StudentReading({
           }}
           data-student-zoom-scroll
         >
-          {isTabletMode ? (
-            <div className="mb-3 inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 p-1 shadow-sm" data-testid="reading-split-presets">
-              <button type="button" onClick={() => setPresetWidth(60)} className="flex h-9 w-9 items-center justify-center rounded bg-white text-gray-700 shadow-sm active:bg-gray-100" title="Material wider" aria-label="Set split to material wider">
-                <ArrowRight size={15} />
-              </button>
-              <button type="button" onClick={() => setPresetWidth(50)} className="flex h-9 w-9 items-center justify-center rounded bg-white text-gray-700 shadow-sm active:bg-gray-100" title="Equal split" aria-label="Set split to equal">
-                <ArrowLeftRight size={15} />
-              </button>
-              <button type="button" onClick={() => setPresetWidth(40)} className="flex h-9 w-9 items-center justify-center rounded bg-white text-gray-700 shadow-sm active:bg-gray-100" title="Answers wider" aria-label="Set split to answers wider">
-                <ArrowLeft size={15} />
-              </button>
-            </div>
-          ) : null}
           <h2 className="mb-4 font-bold leading-tight text-gray-950 md:mb-6" style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
             {activePassage.title}
           </h2>
