@@ -13,6 +13,7 @@ import type { StudentHighlightColor } from './highlightPalette';
 import type { StimulusAnnotation } from '../../types';
 import { formatQuestionRange } from './questionRangeLabel';
 import { useSplitPaneResize } from './useSplitPaneResize';
+import { normalizeReadingPlainTextForDisplay } from './normalizeReadingPassageText';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -83,6 +84,13 @@ export function StudentReading({
     () => /<\/?[a-z][\s\S]*>/i.test(activePassage?.content ?? ''),
     [activePassage?.content],
   );
+  const renderedPassageContent = useMemo(() => {
+    const content = activePassage?.content ?? '';
+    return passageHasHtml ? content : normalizeReadingPlainTextForDisplay(content);
+  }, [activePassage?.content, passageHasHtml]);
+  const passageContentClassName = passageHasHtml
+    ? 'whitespace-normal break-words [overflow-wrap:anywhere]'
+    : 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]';
   const currentIndex = allQuestions.findIndex((question) => question.id === currentQuestionId);
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < allQuestions.length - 1;
@@ -232,10 +240,10 @@ export function StudentReading({
           </h2>
           <div className={`${materialCompact ? 'space-y-3' : 'space-y-5'} break-words [overflow-wrap:anywhere] text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7`}>
             <RichTextHighlighter
-              content={activePassage.content}
+              content={renderedPassageContent}
               contentType={passageHasHtml ? 'html' : 'text'}
               enabled={highlightEnabled}
-              className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+              className={passageContentClassName}
               highlightColor={highlightColor}
               highlightClassName={highlightClassName}
             />

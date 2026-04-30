@@ -521,6 +521,131 @@ describe('student question experience', () => {
     expect(passageTitle.nextElementSibling?.className).toContain('--student-passage-h1-font-size');
   });
 
+  it('renders HTML reading passages with normal whitespace handling', () => {
+    const state = {
+      title: 'Reading Test',
+      type: 'Academic',
+      activeModule: 'reading',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: { enabled: false, order: 1, duration: 30, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          reading: { enabled: true, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+        },
+      },
+      reading: {
+        passages: [
+          {
+            id: 'passage-1',
+            title: 'Passage 1',
+            content:
+              '<p>You\nshould spend about 20 minutes on <strong>Questions 1-13</strong>, which are based on Reading Passage 1 below.</p><h3>Frozen\nFood</h3>',
+            images: [],
+            blocks: [
+              {
+                id: 'q-block',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer.',
+                questions: [{ id: 'q1', prompt: 'What?', correctAnswer: 'answer', answerRule: 'ONE_WORD' }],
+              },
+            ],
+          },
+        ],
+      },
+      listening: { parts: [] },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    } as ExamState;
+
+    const { container } = render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+      />,
+    );
+
+    const readingHighlighter = container.querySelector('[data-student-highlightable="true"]');
+    expect(readingHighlighter).not.toBeNull();
+    expect(readingHighlighter).toHaveClass('whitespace-normal');
+    expect(readingHighlighter).not.toHaveClass('whitespace-pre-wrap');
+  });
+
+  it('normalizes hard-wrapped plain-text reading passages while preserving paragraph breaks', () => {
+    const state = {
+      title: 'Reading Test',
+      type: 'Academic',
+      activeModule: 'reading',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: { enabled: false, order: 1, duration: 30, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          reading: { enabled: true, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+        },
+      },
+      reading: {
+        passages: [
+          {
+            id: 'passage-1',
+            title: 'Passage 1',
+            content:
+              'You\nshould spend about 20 minutes on Questions 1-13,\nwhich are based on Reading Passage 1 below.\n\nFrozen\nFood',
+            images: [],
+            blocks: [
+              {
+                id: 'q-block',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer.',
+                questions: [{ id: 'q1', prompt: 'What?', correctAnswer: 'answer', answerRule: 'ONE_WORD' }],
+              },
+            ],
+          },
+        ],
+      },
+      listening: { parts: [] },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    } as ExamState;
+
+    const { container } = render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+      />,
+    );
+
+    const readingHighlighter = container.querySelector('[data-student-highlightable="true"]') as HTMLElement | null;
+    expect(readingHighlighter).not.toBeNull();
+    expect(readingHighlighter).toHaveClass('whitespace-pre-wrap');
+    expect(readingHighlighter).not.toHaveClass('whitespace-normal');
+    expect(readingHighlighter?.textContent).toBe(
+      'You should spend about 20 minutes on Questions 1-13, which are based on Reading Passage 1 below.\n\nFrozen Food',
+    );
+  });
+
   it('keeps reading split-screen side by side in tablet mode with simple highlight guidance', () => {
     const state = {
       title: 'Reading Test',
