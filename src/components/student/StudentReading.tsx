@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ExamState, QuestionAnswer } from '../../types';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { QuestionRenderer } from './QuestionRenderer';
-import { ArrowLeft, ArrowRight, ArrowLeftRight, ChevronDown, ChevronUp, Flag } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowLeftRight, Flag } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
@@ -68,7 +68,6 @@ export function StudentReading({
       minHeight: `${inverseZoom * 100}%`,
     };
   }, [clampedContentZoom, isTabletMode, supportsCssZoom]);
-  const [collapsedInstructions, setCollapsedInstructions] = useState<Record<string, boolean>>({});
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const { answerCompact, handleDrag, leftWidth, materialCompact, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
@@ -96,37 +95,16 @@ export function StudentReading({
   const hasNext = currentIndex >= 0 && currentIndex < allQuestions.length - 1;
   const previousQuestion = hasPrev ? allQuestions[currentIndex - 1] : undefined;
   const nextQuestion = hasNext ? allQuestions[currentIndex + 1] : undefined;
-  const renderBlockInstruction = (blockId: string, instruction: string) => {
-    const isLong = instruction.trim().length > 140;
-    const isCollapsed = isLong && collapsedInstructions[blockId] !== false;
-
+  const renderBlockInstruction = (instruction: string) => {
     return (
       <div className={`rounded-lg border border-gray-200 bg-gray-50 ${answerCompact ? 'px-2 py-1.5' : 'px-3 py-2'}`}>
-        <div className="flex items-start justify-between gap-3">
-          <FormattedText
-            as="p"
-            className={`${answerCompact ? 'text-xs md:text-sm' : 'text-sm md:text-base'} leading-relaxed text-gray-800 break-words [overflow-wrap:anywhere] ${isCollapsed ? 'line-clamp-2' : ''}`}
-            text={instruction}
-            highlightEnabled={highlightEnabled}
-            highlightColor={highlightColor}
-          />
-          {isLong ? (
-            <button
-              type="button"
-              onClick={() =>
-                setCollapsedInstructions((prev) => ({
-                  ...prev,
-                  [blockId]: !isCollapsed,
-                }))
-              }
-              className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white ${answerCompact ? 'px-1.5 py-0.5 text-[11px]' : 'px-2 py-1 text-xs'} font-semibold text-gray-600 shadow-sm`}
-              aria-expanded={!isCollapsed}
-            >
-              {isCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-              {isCollapsed ? 'Show' : 'Hide'}
-            </button>
-          ) : null}
-        </div>
+        <FormattedText
+          as="p"
+          className={`${answerCompact ? 'text-xs md:text-sm' : 'text-sm md:text-base'} leading-relaxed text-gray-800 break-words [overflow-wrap:anywhere]`}
+          text={instruction}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+        />
       </div>
     );
   };
@@ -308,7 +286,7 @@ export function StudentReading({
                     <h3 className={`font-bold text-gray-900 break-words [overflow-wrap:anywhere] ${answerCompact ? 'mb-1 text-sm md:text-base' : 'mb-1 md:mb-2 text-base md:text-lg'}`}>
                       Questions {formatQuestionRange(blockStartQ, blockEndQ)}
                     </h3>
-                    {renderBlockInstruction(block.id, block.instruction)}
+                    {renderBlockInstruction(block.instruction)}
                   </div>
                   
                   <div className={answerCompact ? 'space-y-5' : 'space-y-8 md:space-y-10'}>
