@@ -86,6 +86,18 @@ function storeAttemptCredential(attempt: Pick<StudentAttempt, 'id' | 'scheduleId
   );
 }
 
+function seedCachedAttempts(attempts: StudentAttempt[]): void {
+  window.localStorage.setItem('ielts_student_attempts_v1', JSON.stringify(attempts));
+}
+
+async function getCachedAttempt(
+  attemptId: string,
+  scheduleId = 'schedule-1',
+): Promise<StudentAttempt | null> {
+  const attempts = await studentAttemptRepository.getAttemptsByScheduleId(scheduleId);
+  return attempts.find((attempt) => attempt.id === attemptId) ?? null;
+}
+
 describe('studentAttemptRepository', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -279,6 +291,119 @@ describe('studentAttemptRepository', () => {
     const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId(attempt.scheduleId);
     expect(cachedAttempts[0]?.answers).toEqual({ q1: 'A' });
     expect(cachedAttempts[0]?.recovery.serverAcceptedThroughSeq).toBe(1);
+  });
+
+  it('preserves cached local answers when local accepted sequence is newer than incoming', async () => {
+    const localAttempt = makeAttempt({
+      answers: { q1: 'LOCAL' },
+      updatedAt: '2026-01-10T09:40:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        lastPersistedAt: '2026-01-10T09:40:00.000Z',
+        serverAcceptedThroughSeq: 10,
+      },
+    });
+    const incomingAttempt = makeAttempt({
+      answers: { q1: 'SERVER_OLD' },
+      updatedAt: '2026-01-10T09:45:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        lastPersistedAt: '2026-01-10T09:45:00.000Z',
+        serverAcceptedThroughSeq: 3,
+      },
+    });
+    seedCachedAttempts([localAttempt]);
+
+    await studentAttemptRepository.saveAttempt(incomingAttempt);
+
+    const cached = await getCachedAttempt(localAttempt.id);
+    expect(cached?.answers.q1).toBe('LOCAL');
+    expect(cached?.recovery.serverAcceptedThroughSeq).toBe(10);
+    expect(vi.mocked(backendPost)).not.toHaveBeenCalled();
+  });
+
+  it('preserves cached local answers when accepted sequence is tied but local timestamps are newer', async () => {
+    const localAttempt = makeAttempt({
+      answers: { q1: 'LOCAL_TS' },
+      updatedAt: '2026-01-10T09:50:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        lastPersistedAt: '2026-01-10T09:49:00.000Z',
+        serverAcceptedThroughSeq: 7,
+      },
+    });
+    const incomingAttempt = makeAttempt({
+      answers: { q1: 'SERVER_OLD_TS' },
+      updatedAt: '2026-01-10T09:00:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        lastPersistedAt: '2026-01-10T09:00:00.000Z',
+        serverAcceptedThroughSeq: 7,
+      },
+    });
+    seedCachedAttempts([localAttempt]);
+
+    await studentAttemptRepository.saveAttempt(incomingAttempt);
+
+    const cached = await getCachedAttempt(localAttempt.id);
+    expect(cached?.answers.q1).toBe('LOCAL_TS');
+    expect(cached?.recovery.serverAcceptedThroughSeq).toBe(7);
+  });
+
+  it('accepts incoming answers when incoming snapshot is fresher than cached local state', async () => {
+    const localAttempt = makeAttempt({
+      answers: { q1: 'LOCAL_OLD' },
+      updatedAt: '2026-01-10T09:00:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        lastPersistedAt: '2026-01-10T09:00:00.000Z',
+        serverAcceptedThroughSeq: 7,
+      },
+    });
+    const incomingAttempt = makeAttempt({
+      answers: { q1: 'SERVER_FRESH' },
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        lastPersistedAt: '2099-01-01T00:00:00.000Z',
+        serverAcceptedThroughSeq: 7,
+      },
+    });
+    seedCachedAttempts([localAttempt]);
+
+    await studentAttemptRepository.saveAttempt(incomingAttempt);
+
+    const cached = await getCachedAttempt(localAttempt.id);
+    expect(cached?.answers.q1).toBe('SERVER_FRESH');
+    expect(cached?.recovery.serverAcceptedThroughSeq).toBe(7);
+  });
+
+  it('prefers incoming answers when local and incoming freshness signals are equal', async () => {
+    const localAttempt = makeAttempt({
+      answers: { q1: 'LOCAL_EQUAL' },
+      updatedAt: '2026-01-10T09:00:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        lastPersistedAt: '2026-01-10T09:00:00.000Z',
+        serverAcceptedThroughSeq: 7,
+      },
+    });
+    const incomingAttempt = makeAttempt({
+      answers: { q1: 'SERVER_EQUAL' },
+      updatedAt: '2026-01-10T09:00:00.000Z',
+      recovery: {
+        ...makeAttempt().recovery,
+        lastPersistedAt: '2026-01-10T09:00:00.000Z',
+        serverAcceptedThroughSeq: 7,
+      },
+    });
+    seedCachedAttempts([localAttempt]);
+
+    await studentAttemptRepository.saveAttempt(incomingAttempt);
+
+    const cached = await getCachedAttempt(localAttempt.id);
+    expect(cached?.answers.q1).toBe('SERVER_EQUAL');
+    expect(cached?.recovery.serverAcceptedThroughSeq).toBe(7);
   });
 
   it('chunks pending mutation flushes to respect server caps', async () => {

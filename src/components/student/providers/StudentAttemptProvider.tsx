@@ -205,6 +205,46 @@ function createObservedSnapshot(attempt: StudentAttempt | null): ObservedSnapsho
   };
 }
 
+function parseIsoTimestamp(value: string | null | undefined): number {
+  if (!value) {
+    return Number.NaN;
+  }
+  return Date.parse(value);
+}
+
+function shouldPreferLocalAttemptState(
+  localAttempt: StudentAttempt,
+  incomingAttempt: StudentAttempt,
+): boolean {
+  const localAcceptedSeq = localAttempt.recovery.serverAcceptedThroughSeq ?? 0;
+  const incomingAcceptedSeq = incomingAttempt.recovery.serverAcceptedThroughSeq ?? 0;
+  if (localAcceptedSeq > incomingAcceptedSeq) {
+    return true;
+  }
+
+  const localUpdatedAt = parseIsoTimestamp(localAttempt.updatedAt);
+  const incomingUpdatedAt = parseIsoTimestamp(incomingAttempt.updatedAt);
+  if (
+    Number.isFinite(localUpdatedAt) &&
+    Number.isFinite(incomingUpdatedAt) &&
+    localUpdatedAt > incomingUpdatedAt
+  ) {
+    return true;
+  }
+
+  const localPersistedAt = parseIsoTimestamp(localAttempt.recovery.lastPersistedAt);
+  const incomingPersistedAt = parseIsoTimestamp(incomingAttempt.recovery.lastPersistedAt);
+  if (
+    Number.isFinite(localPersistedAt) &&
+    Number.isFinite(incomingPersistedAt) &&
+    localPersistedAt > incomingPersistedAt
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export function StudentAttemptProvider({
   children,
   scheduleId,
@@ -465,11 +505,17 @@ export function StudentAttemptProvider({
       return;
     }
 
-    if (attemptRef.current?.id === attemptSnapshot.id && pendingMutationsRef.current.length > 0) {
-      const currentAttempt = attemptRef.current;
-      if (!currentAttempt) {
-        return;
-      }
+    const currentAttempt = attemptRef.current;
+    const sameAttempt = currentAttempt?.id === attemptSnapshot.id;
+    const shouldKeepLocalAttempt =
+      sameAttempt &&
+      !!currentAttempt &&
+      (
+        pendingMutationsRef.current.length > 0 ||
+        shouldPreferLocalAttemptState(currentAttempt, attemptSnapshot)
+      );
+
+    if (shouldKeepLocalAttempt && currentAttempt) {
       const mergedViolations = mergeViolationsById(
         currentAttempt.violations ?? [],
         attemptSnapshot.violations ?? [],

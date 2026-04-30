@@ -779,7 +779,15 @@ function attemptAcceptedSeq(attempt: StudentAttempt): number {
   return attempt.recovery.serverAcceptedThroughSeq ?? 0;
 }
 
-function hasNewerAcceptedLocalState(
+function parseIsoTimestamp(value: string | null | undefined): number {
+  if (!value) {
+    return Number.NaN;
+  }
+
+  return Date.parse(value);
+}
+
+function shouldPreferLocalAcceptedState(
   localAttempt: StudentAttempt | null,
   incomingAttempt: StudentAttempt,
 ): localAttempt is StudentAttempt {
@@ -787,14 +795,38 @@ function hasNewerAcceptedLocalState(
     return false;
   }
 
-  return attemptAcceptedSeq(localAttempt) > attemptAcceptedSeq(incomingAttempt);
+  if (attemptAcceptedSeq(localAttempt) > attemptAcceptedSeq(incomingAttempt)) {
+    return true;
+  }
+
+  const localUpdatedAt = parseIsoTimestamp(localAttempt.updatedAt);
+  const incomingUpdatedAt = parseIsoTimestamp(incomingAttempt.updatedAt);
+  if (
+    Number.isFinite(localUpdatedAt) &&
+    Number.isFinite(incomingUpdatedAt) &&
+    localUpdatedAt > incomingUpdatedAt
+  ) {
+    return true;
+  }
+
+  const localPersistedAt = parseIsoTimestamp(localAttempt.recovery.lastPersistedAt);
+  const incomingPersistedAt = parseIsoTimestamp(incomingAttempt.recovery.lastPersistedAt);
+  if (
+    Number.isFinite(localPersistedAt) &&
+    Number.isFinite(incomingPersistedAt) &&
+    localPersistedAt > incomingPersistedAt
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function preserveNewerAcceptedLocalState(
   incomingAttempt: StudentAttempt,
   localAttempt: StudentAttempt | null,
 ): StudentAttempt {
-  if (!hasNewerAcceptedLocalState(localAttempt, incomingAttempt)) {
+  if (!shouldPreferLocalAcceptedState(localAttempt, incomingAttempt)) {
     return incomingAttempt;
   }
 

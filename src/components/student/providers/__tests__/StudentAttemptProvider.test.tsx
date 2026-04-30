@@ -487,6 +487,101 @@ describe('StudentAttemptProvider', () => {
     });
   });
 
+  it('keeps only the latest objective answer mutation during super-fast typing bursts', async () => {
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q-typing', 'M');
+      result.current.actions.persistAnswer('q-typing', 'MA');
+      result.current.actions.persistAnswer('q-typing', 'MAR');
+      result.current.actions.persistAnswer('q-typing', 'MARS');
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(1);
+    });
+
+    const pendingMutations = vi
+      .mocked(studentAttemptRepository.savePendingMutations)
+      .mock.calls.at(-1)?.[1];
+
+    expect(result.current.state.attempt?.answers['q-typing']).toBe('MARS');
+    expect(pendingMutations).toHaveLength(1);
+    expect(pendingMutations?.[0]?.payload).toMatchObject({
+      questionId: 'q-typing',
+      value: 'MARS',
+    });
+  });
+
+  it('coalesces fast typing per slot index while preserving each slot mutation', async () => {
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+    const questionId = 'blk-af811567-c9aa-4a4d-8775-44b529b499fd';
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer(
+        questionId,
+        ['C', '', ''],
+        { slotIndex: 0 },
+      );
+      result.current.actions.persistAnswer(
+        questionId,
+        ['CA', '', ''],
+        { slotIndex: 0 },
+      );
+      result.current.actions.persistAnswer(
+        questionId,
+        ['CA', 'T', ''],
+        { slotIndex: 1 },
+      );
+      result.current.actions.persistAnswer(
+        questionId,
+        ['CA', 'TE', ''],
+        { slotIndex: 1 },
+      );
+      result.current.actions.persistAnswer(
+        questionId,
+        ['CA', 'TE', 'S'],
+        { slotIndex: 2 },
+      );
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(3);
+    });
+
+    const pendingMutations = vi
+      .mocked(studentAttemptRepository.savePendingMutations)
+      .mock.calls.at(-1)?.[1] ?? [];
+    const bySlot = new Map(
+      pendingMutations
+        .filter((mutation) => mutation.type === 'answer')
+        .map((mutation) => [mutation.payload['slotIndex'], mutation]),
+    );
+
+    expect(pendingMutations).toHaveLength(3);
+    expect(bySlot.get(0)?.payload['value']).toEqual(['CA', '', '']);
+    expect(bySlot.get(1)?.payload['value']).toEqual(['CA', 'TE', '']);
+    expect(bySlot.get(2)?.payload['value']).toEqual(['CA', 'TE', 'S']);
+  });
+
   it('does not coalesce array answer mutations across different slot indexes', async () => {
     const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
 
@@ -651,6 +746,148 @@ describe('StudentAttemptProvider', () => {
     expect(vi.mocked(studentAttemptRepository.saveAttempt).mock.calls.at(-1)?.[0].answers.q1)
       .toBe('second');
     expect(result.current.state.pendingMutationCount).toBe(0);
+  });
+
+  it('preserves the final answer when latency overlaps a rapid typing burst', async () => {
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    let resolveFirstSave: (() => void) | null = null;
+    vi.mocked(studentAttemptRepository.saveAttempt)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirstSave = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'A');
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(1);
+    });
+
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+
+    let flushPromise: Promise<boolean>;
+    await act(async () => {
+      flushPromise = result.current.actions.flushPending();
+    });
+
+    await waitFor(() => {
+      expect(studentAttemptRepository.saveAttempt).toHaveBeenCalledTimes(1);
+    });
+
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'AB');
+      result.current.actions.persistAnswer('q1', 'ABC');
+      result.current.actions.persistAnswer('q1', 'ABCD');
+    });
+
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+
+    await act(async () => {
+      resolveFirstSave?.();
+      const flushed = await flushPromise;
+      expect(flushed).toBe(true);
+    });
+
+    expect(studentAttemptRepository.saveAttempt).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(studentAttemptRepository.saveAttempt).mock.calls.at(-1)?.[0].answers.q1)
+      .toBe('ABCD');
+    expect(result.current.state.pendingMutationCount).toBe(0);
+  });
+
+  it('keeps pending mutations when connection drops mid-flush and recovers on retry', async () => {
+    let resolveFirstSave: (() => void) | null = null;
+    vi.mocked(studentAttemptRepository.saveAttempt)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirstSave = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'first');
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(1);
+    });
+
+    let firstFlushPromise: Promise<boolean>;
+    await act(async () => {
+      firstFlushPromise = result.current.actions.flushPending();
+    });
+
+    await waitFor(() => {
+      expect(studentAttemptRepository.saveAttempt).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'second');
+    });
+
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    await act(async () => {
+      resolveFirstSave?.();
+      const flushed = await firstFlushPromise;
+      expect(flushed).toBe(false);
+    });
+
+    expect(studentAttemptRepository.saveAttempt).toHaveBeenCalledTimes(1);
+    expect(result.current.state.pendingMutationCount).toBe(1);
+    expect(result.current.state.attempt?.recovery.syncState).toBe('offline');
+    expect(studentAttemptRepository.clearPendingMutations).not.toHaveBeenCalled();
+
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+
+    await act(async () => {
+      const flushed = await result.current.actions.flushPending();
+      expect(flushed).toBe(true);
+    });
+
+    expect(studentAttemptRepository.saveAttempt).toHaveBeenCalledTimes(2);
+    expect(result.current.state.pendingMutationCount).toBe(0);
+    expect(vi.mocked(studentAttemptRepository.saveAttempt).mock.calls.at(-1)?.[0].answers.q1)
+      .toBe('second');
   });
 
   it('does not submit the attempt when flushing pending mutations fails', async () => {
@@ -883,6 +1120,220 @@ describe('StudentAttemptProvider', () => {
         ),
       ).toBe(true);
       expect(result.current.state.attempt?.answers.q1).toBe('A');
+    });
+  });
+
+  it('keeps local answers when a stale backend snapshot arrives after a successful flush', async () => {
+    const state = createExamState();
+    const initialAttempt = createAttemptSnapshot();
+    let updateAttemptSnapshot: ((next: StudentAttempt) => void) | null = null;
+
+    const Wrapper = ({ children }: { children: React.ReactNode }) => {
+      const [attemptSnapshot, setAttemptSnapshot] = React.useState(initialAttempt);
+
+      React.useEffect(() => {
+        updateAttemptSnapshot = setAttemptSnapshot;
+        return () => {
+          updateAttemptSnapshot = null;
+        };
+      }, []);
+
+      return (
+        <StudentRuntimeProvider state={state} onExit={vi.fn()} attemptSnapshot={attemptSnapshot}>
+          <StudentAttemptProvider
+            scheduleId={attemptSnapshot.scheduleId}
+            attemptSnapshot={attemptSnapshot}
+          >
+            {children}
+          </StudentAttemptProvider>
+        </StudentRuntimeProvider>
+      );
+    };
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.state.attemptId).toBe('attempt-1');
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'LOCAL');
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(1);
+      expect(result.current.state.attempt?.answers.q1).toBe('LOCAL');
+    });
+
+    await act(async () => {
+      const flushed = await result.current.actions.flushPending();
+      expect(flushed).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(0);
+    });
+
+    const staleAttempt: StudentAttempt = {
+      ...initialAttempt,
+      updatedAt: '2026-01-01T00:00:00.500Z',
+      answers: {},
+    };
+
+    await act(async () => {
+      updateAttemptSnapshot?.(staleAttempt);
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.attempt?.answers.q1).toBe('LOCAL');
+    });
+  });
+
+  it('uses a fresher backend snapshot when incoming attempt state is newer', async () => {
+    const state = createExamState();
+    const initialAttempt = createAttemptSnapshot();
+    let updateAttemptSnapshot: ((next: StudentAttempt) => void) | null = null;
+
+    const Wrapper = ({ children }: { children: React.ReactNode }) => {
+      const [attemptSnapshot, setAttemptSnapshot] = React.useState(initialAttempt);
+
+      React.useEffect(() => {
+        updateAttemptSnapshot = setAttemptSnapshot;
+        return () => {
+          updateAttemptSnapshot = null;
+        };
+      }, []);
+
+      return (
+        <StudentRuntimeProvider state={state} onExit={vi.fn()} attemptSnapshot={attemptSnapshot}>
+          <StudentAttemptProvider
+            scheduleId={attemptSnapshot.scheduleId}
+            attemptSnapshot={attemptSnapshot}
+          >
+            {children}
+          </StudentAttemptProvider>
+        </StudentRuntimeProvider>
+      );
+    };
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.state.attemptId).toBe('attempt-1');
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'LOCAL');
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(1);
+      expect(result.current.state.attempt?.answers.q1).toBe('LOCAL');
+    });
+
+    await act(async () => {
+      const flushed = await result.current.actions.flushPending();
+      expect(flushed).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(0);
+    });
+
+    const freshServerAttempt: StudentAttempt = {
+      ...initialAttempt,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      answers: { q1: 'SERVER_NEW' },
+      recovery: {
+        ...initialAttempt.recovery,
+        serverAcceptedThroughSeq: 99,
+        syncState: 'saved',
+      },
+    };
+
+    await act(async () => {
+      updateAttemptSnapshot?.(freshServerAttempt);
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.attempt?.answers.q1).toBe('SERVER_NEW');
+    });
+  });
+
+  it('prefers incoming snapshot when freshness signals are equal', async () => {
+    const state = createExamState();
+    const initialAttempt = createAttemptSnapshot();
+    let updateAttemptSnapshot: ((next: StudentAttempt) => void) | null = null;
+
+    const Wrapper = ({ children }: { children: React.ReactNode }) => {
+      const [attemptSnapshot, setAttemptSnapshot] = React.useState(initialAttempt);
+
+      React.useEffect(() => {
+        updateAttemptSnapshot = setAttemptSnapshot;
+        return () => {
+          updateAttemptSnapshot = null;
+        };
+      }, []);
+
+      return (
+        <StudentRuntimeProvider state={state} onExit={vi.fn()} attemptSnapshot={attemptSnapshot}>
+          <StudentAttemptProvider
+            scheduleId={attemptSnapshot.scheduleId}
+            attemptSnapshot={attemptSnapshot}
+          >
+            {children}
+          </StudentAttemptProvider>
+        </StudentRuntimeProvider>
+      );
+    };
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(result.current.state.attemptId).toBe('attempt-1');
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'LOCAL');
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(1);
+      expect(result.current.state.attempt?.answers.q1).toBe('LOCAL');
+    });
+
+    await act(async () => {
+      const flushed = await result.current.actions.flushPending();
+      expect(flushed).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(0);
+    });
+
+    const localAttemptAfterFlush = result.current.state.attempt;
+    expect(localAttemptAfterFlush).not.toBeNull();
+
+    const equalFreshnessServerAttempt: StudentAttempt = {
+      ...initialAttempt,
+      answers: { q1: 'SERVER_EQUAL' },
+      updatedAt: localAttemptAfterFlush?.updatedAt ?? initialAttempt.updatedAt,
+      recovery: {
+        ...initialAttempt.recovery,
+        lastPersistedAt: localAttemptAfterFlush?.recovery.lastPersistedAt ?? null,
+        serverAcceptedThroughSeq:
+          localAttemptAfterFlush?.recovery.serverAcceptedThroughSeq ??
+          initialAttempt.recovery.serverAcceptedThroughSeq,
+        syncState: 'saved',
+      },
+    };
+
+    await act(async () => {
+      updateAttemptSnapshot?.(equalFreshnessServerAttempt);
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.attempt?.answers.q1).toBe('SERVER_EQUAL');
     });
   });
 

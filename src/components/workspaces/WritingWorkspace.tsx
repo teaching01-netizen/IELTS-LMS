@@ -110,11 +110,21 @@ export function WritingWorkspace({
     writingConfig.tasks.forEach((task) => {
       const editor = promptEditorRefs.current[task.id];
       const content = writingTaskContentMap.get(task.id);
-      if (editor && content && content.prompt !== editor.innerHTML) {
-        editor.innerHTML = content.prompt;
+      if (!editor || !content) {
+        return;
+      }
+
+      // Do not rewrite the DOM while the user is typing in this editor, or the caret jumps.
+      if (activePromptEditor === task.id) {
+        return;
+      }
+
+      const sanitizedPrompt = sanitizeHtml(content.prompt);
+      if (sanitizedPrompt !== editor.innerHTML) {
+        editor.innerHTML = sanitizedPrompt;
       }
     });
-  }, [writingTaskContentMap, writingConfig.tasks]);
+  }, [activePromptEditor, writingTaskContentMap, writingConfig.tasks]);
 
   useEffect(() => {
     localStorage.setItem('writing-task-panel-collapsed', isTaskPanelCollapsed.toString());
@@ -323,9 +333,14 @@ export function WritingWorkspace({
                           promptEditorRefs.current[task.id] = el;
                         }}
                         contentEditable
+                        suppressContentEditableWarning
+                        role="textbox"
+                        aria-multiline="true"
+                        aria-label={`Prompt editor for ${task.label}`}
                         onInput={() => handlePromptInput(task.id)}
+                        onFocus={() => setActivePromptEditor(task.id)}
+                        onBlur={() => setActivePromptEditor((current) => (current === task.id ? null : current))}
                         className="p-6 text-lg text-gray-800 min-h-[200px] outline-none font-serif leading-relaxed prose prose-sm max-w-none"
-                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(taskContent.prompt) }}
                       />
                     </div>
                   </div>
