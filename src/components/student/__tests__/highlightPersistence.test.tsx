@@ -112,7 +112,7 @@ describe('student highlight persistence', () => {
     expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
 
     await act(async () => {
-      vi.advanceTimersByTime(1999);
+      vi.advanceTimersByTime(179);
     });
     expect(container.querySelector('mark')).toBeNull();
 
@@ -158,7 +158,7 @@ describe('student highlight persistence', () => {
     getSelectionSpy.mockReturnValue(collapsedSelection);
 
     await act(async () => {
-      vi.advanceTimersByTime(2000);
+      vi.advanceTimersByTime(180);
     });
 
     expect(container.querySelector('mark')).not.toBeNull();
@@ -185,17 +185,17 @@ describe('student highlight persistence', () => {
     }
 
     currentTextNode = textElement.firstChild;
-    fireEvent(document, new Event('selectionchange'));
+    fireEvent.touchEnd(textElement);
 
     expect(container.querySelector('mark')).toBeNull();
     expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
 
     await act(async () => {
-      vi.advanceTimersByTime(1000);
+      vi.advanceTimersByTime(100);
     });
     fireEvent(document, new Event('selectionchange'));
     await act(async () => {
-      vi.advanceTimersByTime(999);
+      vi.advanceTimersByTime(79);
     });
     expect(container.querySelector('mark')).toBeNull();
 
@@ -205,6 +205,86 @@ describe('student highlight persistence', () => {
 
     expect(container.querySelector('mark')).not.toBeNull();
     expect(container.querySelector('mark')).toHaveTextContent('beta gamma delta');
+
+    getSelectionSpy.mockRestore();
+  });
+
+  it('forces auto-highlight by the max wait cap during continuous touch selection changes', async () => {
+    vi.useFakeTimers();
+    let currentTextNode: ChildNode | null = null;
+    let start = 6;
+    let end = 10;
+    let text = 'beta';
+    const selectionMock = {
+      rangeCount: 1,
+      getRangeAt: () => {
+        const textNode = currentTextNode;
+        if (!textNode) {
+          throw new Error('Expected a text node');
+        }
+
+        const range = document.createRange();
+        range.setStart(textNode, start);
+        range.setEnd(textNode, end);
+        return range;
+      },
+      toString: () => text,
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(selectionMock);
+
+    const { container } = render(<RichTextHighlighter content="Alpha beta gamma delta epsilon zeta eta theta" enabled />);
+    const textElement = container.querySelector('[data-student-highlightable="true"]');
+    if (!textElement) {
+      throw new Error('Expected a rendered highlight container');
+    }
+
+    currentTextNode = textElement.firstChild;
+    fireEvent.touchEnd(textElement);
+
+    const changeSelection = (nextEnd: number, nextText: string) => {
+      end = nextEnd;
+      text = nextText;
+      fireEvent(document, new Event('selectionchange'));
+    };
+
+    await act(async () => {
+      vi.advanceTimersByTime(120);
+    });
+    changeSelection(16, 'beta gamma');
+
+    await act(async () => {
+      vi.advanceTimersByTime(120);
+    });
+    changeSelection(22, 'beta gamma delta');
+
+    await act(async () => {
+      vi.advanceTimersByTime(120);
+    });
+    changeSelection(30, 'beta gamma delta epsilon');
+
+    await act(async () => {
+      vi.advanceTimersByTime(120);
+    });
+    changeSelection(35, 'beta gamma delta epsilon zeta');
+
+    await act(async () => {
+      vi.advanceTimersByTime(120);
+    });
+    changeSelection(39, 'beta gamma delta epsilon zeta eta');
+
+    await act(async () => {
+      vi.advanceTimersByTime(99);
+    });
+    expect(container.querySelector('mark')).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(container.querySelector('mark')).not.toBeNull();
+    expect(container.querySelector('mark')).toHaveTextContent('beta gamma delta epsilon zeta eta');
 
     getSelectionSpy.mockRestore();
   });

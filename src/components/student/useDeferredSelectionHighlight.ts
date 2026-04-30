@@ -9,7 +9,8 @@ interface UseDeferredSelectionHighlightOptions {
   applySelectionFromSnapshot?: ((snapshot: HighlightSelectionSnapshot) => boolean) | undefined;
 }
 
-const TOUCH_SELECTION_SETTLE_MS = 2000;
+const FAST_TOUCH_APPLY_MS = 180;
+const TOUCH_MAX_WAIT_MS = 700;
 
 export function useDeferredSelectionHighlight({
   enabled,
@@ -17,44 +18,83 @@ export function useDeferredSelectionHighlight({
   applySelection,
   applySelectionFromSnapshot,
 }: UseDeferredSelectionHighlightOptions) {
-  const selectionTimerRef = useRef<number | null>(null);
+  const fastApplyTimerRef = useRef<number | null>(null);
+  const maxWaitTimerRef = useRef<number | null>(null);
+  const touchWindowStartedAtRef = useRef<number | null>(null);
+  const touchSessionActiveRef = useRef(false);
   const pendingSnapshotRef = useRef<HighlightSelectionSnapshot | null>(null);
   const pendingSignatureRef = useRef<string | null>(null);
 
+  const clearPending = useCallback(() => {
+    if (fastApplyTimerRef.current) {
+      window.clearTimeout(fastApplyTimerRef.current);
+      fastApplyTimerRef.current = null;
+    }
+    if (maxWaitTimerRef.current) {
+      window.clearTimeout(maxWaitTimerRef.current);
+      maxWaitTimerRef.current = null;
+    }
+    touchWindowStartedAtRef.current = null;
+    pendingSnapshotRef.current = null;
+    pendingSignatureRef.current = null;
+    touchSessionActiveRef.current = false;
+  }, []);
+
+  const applyPending = useCallback(() => {
+    const pendingSnapshot = pendingSnapshotRef.current;
+    clearPending();
+
+    if (pendingSnapshot && applySelectionFromSnapshot?.(pendingSnapshot)) {
+      return;
+    }
+
+    applySelection();
+  }, [applySelection, applySelectionFromSnapshot, clearPending]);
+
   const queueSelectionHighlight = useCallback(
     (snapshot: HighlightSelectionSnapshot) => {
-      const hasPendingTimer = selectionTimerRef.current !== null;
-      if (hasPendingTimer && pendingSignatureRef.current === snapshot.signature) {
+      const hasPendingWindow = touchWindowStartedAtRef.current !== null;
+      if (hasPendingWindow && pendingSignatureRef.current === snapshot.signature) {
         return;
+      }
+
+      const now = Date.now();
+      const windowStartedAt = touchWindowStartedAtRef.current ?? now;
+
+      if (touchWindowStartedAtRef.current === null) {
+        touchWindowStartedAtRef.current = now;
+        maxWaitTimerRef.current = window.setTimeout(() => {
+          applyPending();
+        }, TOUCH_MAX_WAIT_MS);
       }
 
       pendingSnapshotRef.current = snapshot;
       pendingSignatureRef.current = snapshot.signature;
 
-      if (selectionTimerRef.current) {
-        window.clearTimeout(selectionTimerRef.current);
+      if (fastApplyTimerRef.current) {
+        window.clearTimeout(fastApplyTimerRef.current);
       }
 
-      selectionTimerRef.current = window.setTimeout(() => {
-        const pendingSnapshot = pendingSnapshotRef.current;
-        selectionTimerRef.current = null;
-        pendingSnapshotRef.current = null;
-        pendingSignatureRef.current = null;
+      const elapsed = now - windowStartedAt;
+      const remainingBeforeCap = Math.max(0, TOUCH_MAX_WAIT_MS - elapsed);
+      const nextDelay = Math.min(FAST_TOUCH_APPLY_MS, remainingBeforeCap);
+      if (nextDelay <= 0) {
+        applyPending();
+        return;
+      }
 
-        if (pendingSnapshot && applySelectionFromSnapshot?.(pendingSnapshot)) {
-          return;
-        }
-
-        applySelection();
-      }, TOUCH_SELECTION_SETTLE_MS);
+      fastApplyTimerRef.current = window.setTimeout(() => {
+        applyPending();
+      }, nextDelay);
     },
-    [applySelection, applySelectionFromSnapshot],
+    [applyPending],
   );
 
   const scheduleSelectionHighlight = useCallback(() => {
     if (!enabled) {
       return;
     }
+    touchSessionActiveRef.current = true;
 
     const container = containerRef.current;
     const selection = window.getSelection();
@@ -72,20 +112,21 @@ export function useDeferredSelectionHighlight({
 
   useEffect(() => {
     return () => {
-      if (selectionTimerRef.current) {
-        window.clearTimeout(selectionTimerRef.current);
-      }
-      pendingSnapshotRef.current = null;
-      pendingSignatureRef.current = null;
+      clearPending();
     };
-  }, []);
+  }, [clearPending]);
 
   useEffect(() => {
     if (!enabled) {
+      clearPending();
       return;
     }
 
     const handleSelectionChange = () => {
+      if (!touchSessionActiveRef.current) {
+        return;
+      }
+
       const container = containerRef.current;
       const selection = window.getSelection();
       if (!container || !selection) {
@@ -105,7 +146,7 @@ export function useDeferredSelectionHighlight({
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
     };
-  }, [containerRef, enabled, queueSelectionHighlight]);
+  }, [clearPending, containerRef, enabled, queueSelectionHighlight]);
 
   return scheduleSelectionHighlight;
 }
