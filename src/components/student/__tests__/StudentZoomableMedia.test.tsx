@@ -27,5 +27,17 @@ describe('StudentZoomableMedia', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /zoom in image/i }));
     expect(screen.getByRole('button', { name: /reset image zoom/i })).toHaveTextContent('155%');
+
+    const viewport = screen.getByTestId('zoomable-media-viewport');
+    viewport.scrollLeft = 40;
+    viewport.scrollTop = 25;
+    expect(viewport).toHaveStyle({ cursor: 'grab' });
+
+    fireEvent.mouseDown(viewport, { button: 0, clientX: 280, clientY: 200 });
+    fireEvent.mouseMove(window, { clientX: 250, clientY: 155 });
+    fireEvent.mouseUp(window);
+
+    expect(viewport.scrollLeft).toBe(70);
+    expect(viewport.scrollTop).toBe(70);
   });
 });

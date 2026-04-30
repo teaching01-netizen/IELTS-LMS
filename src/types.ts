@@ -238,6 +238,7 @@ export interface DiagramLabel {
   id: string;
   x: number;
   y: number;
+  prompt?: string;
   correctAnswer: string;
 }
 

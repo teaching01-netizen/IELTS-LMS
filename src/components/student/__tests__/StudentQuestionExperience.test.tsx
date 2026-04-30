@@ -275,14 +275,14 @@ describe('student question experience', () => {
     expect(onChange).toHaveBeenCalledWith(['existing', 'wheel']);
   });
 
-  it('shows diagram-labeling fallback fields with label prompts', () => {
+  it('shows diagram-labeling fallback fields with top prompts and supports custom label text', () => {
     const block: DiagramLabelingBlock = {
       id: 'diagram-1',
       type: 'DIAGRAM_LABELING',
       instruction: 'Label the diagram.',
       imageUrl: '',
       labels: [
-        { id: 'label-a', x: 25, y: 35, correctAnswer: 'engine' },
+        { id: 'label-a', x: 25, y: 35, prompt: 'Engine label', correctAnswer: 'engine' },
         { id: 'label-b', x: 70, y: 62, correctAnswer: 'wheel' },
       ],
     };
@@ -298,9 +298,11 @@ describe('student question experience', () => {
     );
 
     expect(screen.getByText(/add a diagram/i)).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Answer for question 12' })).toBeInTheDocument();
+    const firstAnswer = screen.getByRole('textbox', { name: 'Answer for question 12' });
     expect(screen.getByRole('textbox', { name: 'Answer for question 13' })).toBeInTheDocument();
-    expect(screen.getByText(/label 1/i)).toBeInTheDocument();
+    const customPrompt = screen.getByText('Engine label');
+    expect(customPrompt.compareDocumentPosition(firstAnswer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText(/^Label 1$/i)).not.toBeInTheDocument();
     expect(screen.getByText(/label 2/i)).toBeInTheDocument();
   });
 
@@ -1597,6 +1599,77 @@ describe('student question experience', () => {
     expect(screen.getByTestId('diagram-answer-panel')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Answer for question 1' })).toBeInTheDocument();
     expect(screen.getAllByAltText('Diagram reference')).toHaveLength(1);
+  });
+
+  it('supports drag-to-pan for zoomed listening diagrams', () => {
+    const state: ExamState = {
+      title: 'Listening Test',
+      type: 'Academic',
+      activeModule: 'listening',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: { enabled: true, order: 1, duration: 30, autoContinue: true, allowedQuestionTypes: ['DIAGRAM_LABELING'], audioPlaybackEnabled: false },
+          reading: { enabled: false, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+        },
+      },
+      reading: { passages: [] },
+      listening: {
+        parts: [
+          {
+            id: 'part-1',
+            title: 'Part 1',
+            audioUrl: '',
+            pins: [],
+            blocks: [
+              {
+                id: 'diagram-1',
+                type: 'DIAGRAM_LABELING',
+                instruction: 'Label the diagram.',
+                imageUrl: '/diagram.jpg',
+                labels: [{ id: 'label-a', x: 25, y: 35, correctAnswer: 'engine' }],
+              },
+            ],
+          },
+        ],
+      },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    };
+
+    render(
+      <StudentListening
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="diagram-1:label-a"
+        onNavigate={() => {}}
+        tabletMode
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /zoom diagram in/i }));
+
+    const reference = screen.getByTestId('listening-diagram-reference');
+    reference.scrollLeft = 48;
+    reference.scrollTop = 32;
+    expect(reference.style.cursor).toBe('grab');
+
+    fireEvent.mouseDown(reference, { button: 0, clientX: 300, clientY: 180 });
+    fireEvent.mouseMove(window, { clientX: 270, clientY: 140 });
+    fireEvent.mouseUp(window);
+
+    expect(reference.scrollLeft).toBe(78);
+    expect(reference.scrollTop).toBe(72);
   });
 
   it('shows the active listening diagram when the diagram is not in the first part', () => {

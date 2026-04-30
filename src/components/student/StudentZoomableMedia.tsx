@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Minus, Plus, X } from 'lucide-react';
+import { useDragToPan } from './useDragToPan';
 
 type StudentZoomableMediaProps = {
   sources: string[];
@@ -38,6 +39,7 @@ export function StudentZoomableMedia({
   const [isOpen, setIsOpen] = useState(false);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const zoomViewportPan = useDragToPan<HTMLDivElement>(zoom > 1);
 
   const currentSource = normalizedSources[sourceIndex] ?? '';
   const hasMultipleSources = normalizedSources.length > 1;
@@ -252,7 +254,12 @@ export function StudentZoomableMedia({
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto bg-gray-100 p-4 md:p-6">
+            <div
+              className="flex-1 overflow-auto bg-gray-100 p-4 md:p-6"
+              data-testid="zoomable-media-viewport"
+              style={zoomViewportPan.dragStyle}
+              {...zoomViewportPan.dragHandlers}
+            >
               <div className="mx-auto flex min-h-full w-full justify-center">
                 <div
                   className="relative"
