@@ -265,8 +265,8 @@ describe('student question experience', () => {
     expect(screen.getByText('Answers')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Answer for question 12' })).toHaveValue('existing');
     expect(screen.getByRole('textbox', { name: 'Answer for question 13' })).toBeInTheDocument();
-    expect(screen.queryByText(/label 1/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/label 2/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/label 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/label 2/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Answer for question 13' }), {
       target: { value: 'wheel' },
@@ -275,7 +275,7 @@ describe('student question experience', () => {
     expect(onChange).toHaveBeenCalledWith(['existing', 'wheel']);
   });
 
-  it('keeps diagram-labeling fallback fields free of label helper text', () => {
+  it('shows diagram-labeling fallback fields with label prompts', () => {
     const block: DiagramLabelingBlock = {
       id: 'diagram-1',
       type: 'DIAGRAM_LABELING',
@@ -300,8 +300,8 @@ describe('student question experience', () => {
     expect(screen.getByText(/add a diagram/i)).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Answer for question 12' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Answer for question 13' })).toBeInTheDocument();
-    expect(screen.queryByText(/label 1/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/label 2/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/label 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/label 2/i)).toBeInTheDocument();
   });
 
   it('can render diagram-labeling answers without duplicating the diagram reference', () => {
@@ -1252,7 +1252,7 @@ describe('student question experience', () => {
     expect(screen.queryByText(/listening audio track/i)).toBeNull();
   });
 
-  it('keeps listening split-screen side by side in tablet mode and hides instruction clutter', () => {
+  it('keeps listening split-screen side by side in tablet mode and shows question instructions', () => {
     const longInstruction = 'Answer the question using the words you hear. '.repeat(6);
     const state: ExamState = {
       title: 'Listening Test',
@@ -1328,7 +1328,7 @@ describe('student question experience', () => {
     expect(screen.getByTestId('listening-pane-resizer')).toBeInTheDocument();
     expect(screen.queryByText(/staff instructions/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/use the invigilator audio system/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(longInstruction.trim())).not.toBeInTheDocument();
+    expect(screen.getByText(/answer the question using the words you hear/i)).toBeInTheDocument();
     expect(screen.getByTestId('listening-pane-resizer')).toHaveClass('w-11');
     expect(screen.getByTestId('listening-pane-resizer')).toHaveClass('absolute');
     expect(screen.getByTestId('listening-pane-resizer').querySelector('.w-14')).toBeInTheDocument();

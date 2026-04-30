@@ -5,6 +5,7 @@ import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight, ArrowLeft,
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
+import { FormattedText } from './FormattedText';
 import { RichTextHighlighter } from './RichTextHighlighter';
 import type { StudentHighlightColor } from './highlightPalette';
 import { formatQuestionRange } from './questionRangeLabel';
@@ -259,6 +260,23 @@ export function StudentListening({
       ? audioRef.current.duration
       : 0;
   const currentSeconds = totalSeconds > 0 ? (progress / 100) * totalSeconds : 0;
+  const renderBlockInstruction = (instruction: string) => {
+    if (!instruction.trim()) {
+      return null;
+    }
+
+    return (
+      <div className={`rounded-lg border border-gray-200 bg-gray-50 ${answerCompact ? 'px-2 py-1.5' : 'px-3 py-2'}`}>
+        <FormattedText
+          as="p"
+          className={`${answerCompact ? 'text-xs md:text-sm' : 'text-sm md:text-base'} leading-relaxed text-gray-800 break-words [overflow-wrap:anywhere]`}
+          text={instruction}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+        />
+      </div>
+    );
+  };
 
   if (!activePart) {
     return null;
@@ -474,6 +492,7 @@ export function StudentListening({
                     <h3 className={`font-bold text-gray-900 break-words [overflow-wrap:anywhere] ${answerCompact ? 'mb-1 text-sm md:text-base' : 'mb-1 md:mb-2 text-base md:text-lg'}`}>
                       Questions {formatQuestionRange(blockStartQ, blockEndQ)}
                     </h3>
+                    {renderBlockInstruction(block.instruction)}
                   </div>
                   
                   <div className={answerCompact ? 'space-y-5' : 'space-y-8'}>
