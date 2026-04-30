@@ -50,7 +50,7 @@ function isEditingTarget(target: EventTarget | null) {
 export function KeyboardProvider({ children }: KeyboardProviderProps) {
   const { state: runtimeState, actions: runtimeActions, examState } = useStudentRuntime();
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
-  const { actions: uiActions } = useStudentUI();
+  const { state: uiState, actions: uiActions } = useStudentUI();
   const { handleViolation } = useProctoring();
 
   const sessionId = attemptState.attempt?.scheduleId;
@@ -256,6 +256,21 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
         return;
       }
 
+      if (event.type === 'dragstart') {
+        const target = event.target;
+        const targetElement = target instanceof HTMLElement ? target : null;
+        const highlightModeEnabled = uiState.accessibilitySettings.highlightMode;
+        const moduleAllowsHighlightDrag =
+          runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening';
+        const withinHighlightableContainer = Boolean(
+          targetElement?.closest('[data-student-highlightable="true"]'),
+        );
+
+        if (highlightModeEnabled && moduleAllowsHighlightDrag && withinHighlightableContainer) {
+          return;
+        }
+      }
+
       handleRestrictedInteraction(
         event,
         'DRAG_DROP_BLOCKED',
@@ -288,6 +303,7 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
     handleViolation,
     runtimeActions,
     runtimeState,
+    uiState.accessibilitySettings.highlightMode,
     uiActions,
   ]);
 

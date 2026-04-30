@@ -113,7 +113,7 @@ describe('student highlight persistence', () => {
     expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
 
     await act(async () => {
-      vi.advanceTimersByTime(319);
+      vi.advanceTimersByTime(419);
     });
     expect(container.querySelector('mark')).toBeNull();
 
@@ -159,7 +159,7 @@ describe('student highlight persistence', () => {
     getSelectionSpy.mockReturnValue(collapsedSelection);
 
     await act(async () => {
-      vi.advanceTimersByTime(320);
+      vi.advanceTimersByTime(420);
     });
 
     expect(container.querySelector('mark')).not.toBeNull();
@@ -196,7 +196,7 @@ describe('student highlight persistence', () => {
     });
     fireEvent(document, new Event('selectionchange'));
     await act(async () => {
-      vi.advanceTimersByTime(219);
+      vi.advanceTimersByTime(319);
     });
     expect(container.querySelector('mark')).toBeNull();
 
@@ -286,6 +286,49 @@ describe('student highlight persistence', () => {
 
     expect(container.querySelector('mark')).not.toBeNull();
     expect(container.querySelector('mark')).toHaveTextContent('beta gamma delta epsilon zeta eta');
+
+    getSelectionSpy.mockRestore();
+  });
+
+  it('does not remove a highlight on the immediate post-auto-apply tap but allows removal after the guard window', async () => {
+    vi.useFakeTimers();
+    let currentTextNode: ChildNode | null = null;
+    const selectionMock = createSelectionMock(() => currentTextNode, {
+      start: 6,
+      end: 10,
+      text: 'beta',
+    });
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(selectionMock);
+
+    const { container } = render(<RichTextHighlighter content="Alpha beta gamma" enabled />);
+    const textElement = container.querySelector('[data-student-highlightable="true"]');
+    if (!textElement) {
+      throw new Error('Expected a rendered highlight container');
+    }
+
+    currentTextNode = textElement.firstChild;
+    fireEvent.touchStart(textElement);
+    fireEvent.touchEnd(textElement);
+
+    await act(async () => {
+      vi.advanceTimersByTime(420);
+    });
+
+    const highlight = container.querySelector('mark[data-highlighted="true"]');
+    expect(highlight).not.toBeNull();
+    if (!highlight) {
+      throw new Error('Expected a highlight to be created');
+    }
+
+    fireEvent.click(highlight);
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(701);
+    });
+
+    fireEvent.click(highlight);
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(0);
 
     getSelectionSpy.mockRestore();
   });

@@ -8,7 +8,7 @@ import { KeyboardProvider } from '../StudentKeyboardProvider';
 import { ProctoringProvider } from '../StudentProctoringProvider';
 import { StudentAttemptProvider } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
-import { StudentUIProvider } from '../StudentUIProvider';
+import { StudentUIProvider, useStudentUI } from '../StudentUIProvider';
 
 function createExamState(): ExamState {
   return {
@@ -102,17 +102,22 @@ describe('StudentKeyboardProvider', () => {
 
   function renderHarness(overrideState?: (nextState: ExamState) => void) {
     let runtimeContext: ReturnType<typeof useStudentRuntime> | null = null;
+    let uiContext: ReturnType<typeof useStudentUI> | null = null;
     const state = createExamState();
     overrideState?.(state);
     const attemptSnapshot = createAttemptSnapshot();
 
     function Probe() {
       runtimeContext = useStudentRuntime();
+      uiContext = useStudentUI();
 
       return (
         <>
           <textarea data-testid="editor" />
           <input data-testid="objective-input" />
+          <div data-testid="highlight-target" data-student-highlightable="true">
+            Passage text
+          </div>
         </>
       );
     }
@@ -146,8 +151,12 @@ describe('StudentKeyboardProvider', () => {
       get runtime() {
         return runtimeContext!;
       },
+      get ui() {
+        return uiContext!;
+      },
       editor: screen.getByTestId('editor'),
       objectiveInput: screen.getByTestId('objective-input'),
+      highlightTarget: screen.getByTestId('highlight-target'),
     };
   }
 
@@ -234,6 +243,27 @@ describe('StudentKeyboardProvider', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(harness.runtime.state.violations.at(-1)?.type).toBe('DRAG_DROP_BLOCKED');
+  });
+
+  it('allows dragstart inside highlightable reading/listening text when highlight mode is active', () => {
+    const harness = renderHarness();
+
+    act(() => {
+      harness.runtime.actions.setCurrentModule('reading');
+      harness.ui.actions.toggleHighlightMode();
+    });
+
+    const event = new Event('dragstart', {
+      bubbles: true,
+      cancelable: true,
+    });
+
+    act(() => {
+      harness.highlightTarget.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(harness.runtime.state.violations).toHaveLength(0);
   });
 
   it('allows same-editor select-all shortcuts', () => {

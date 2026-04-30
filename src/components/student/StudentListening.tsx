@@ -23,6 +23,7 @@ interface StudentListeningProps {
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
   tabletMode?: boolean | undefined;
+  contentZoom?: number | undefined;
 }
 
 function getDiagramSlotIds(block: DiagramLabelingBlock): string[] {
@@ -96,17 +97,38 @@ export function StudentListening({
   highlightColor,
   highlightClassName,
   tabletMode = false,
+  contentZoom = 1,
 }: StudentListeningProps) {
   const isTabletMode = Boolean(tabletMode);
+  const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
+  const supportsCssZoom = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('zoom', '1.01');
+  const tabletContentZoomStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!isTabletMode || clampedContentZoom === 1) {
+      return undefined;
+    }
+
+    if (supportsCssZoom) {
+      return { zoom: clampedContentZoom };
+    }
+
+    const inverseZoom = 1 / clampedContentZoom;
+    return {
+      transform: `scale(${clampedContentZoom})`,
+      transformOrigin: 'top left',
+      width: `${inverseZoom * 100}%`,
+      minHeight: `${inverseZoom * 100}%`,
+    };
+  }, [clampedContentZoom, isTabletMode, supportsCssZoom]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(70);
   const [diagramZoom, setDiagramZoom] = useState(1);
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const { handleDrag, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+  const { answerCompact, handleDrag, leftWidth, materialCompact, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: '--listening-pane-width',
+    dividerMode: isTabletMode ? 'overlay' : 'consumes-space',
   });
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, 'listening'), [state]);
   const currentQ = allQuestions.find((question) => question.id === currentQuestionId) || allQuestions[0];
@@ -253,12 +275,15 @@ export function StudentListening({
         data-testid="listening-split-workspace"
       >
         <div
-          className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base ${
+          className={`h-full overflow-y-auto font-sans leading-relaxed text-gray-900 ${
+            materialCompact ? 'p-2 pr-2 text-xs md:p-3 md:pr-3 md:text-sm' : 'p-4 pr-4 text-sm md:p-6 md:pr-6 md:text-base'
+          } ${
             isTabletMode ? 'w-[var(--listening-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
           }`}
           data-student-zoom-scroll
+          style={tabletContentZoomStyle}
         >
-          <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePart.title}</h2>
+          <h2 className={`${materialCompact ? 'mb-2 text-base md:text-lg' : 'mb-4 text-lg md:mb-6 md:text-xl'} font-bold break-words [overflow-wrap:anywhere]`}>{activePart.title}</h2>
 
           {canPlayAudio ? (
             <audio
@@ -365,7 +390,7 @@ export function StudentListening({
             </div>
           )}
           {activeDiagramBlocks.length > 0 ? (
-            <div className="mt-4 space-y-4" data-testid="listening-material-pane">
+            <div className={`${materialCompact ? 'mt-3 space-y-3' : 'mt-4 space-y-4'} break-words [overflow-wrap:anywhere]`} data-testid="listening-material-pane">
               {activeDiagramBlocks.map((diagramBlock) => (
                   <div key={diagramBlock.id} className="rounded-xl border border-gray-200 bg-white p-3">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -389,13 +414,13 @@ export function StudentListening({
             </div>
           ) : null}
           {activeTranscript ? (
-            <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
-              <h3 className="mb-2 text-sm font-semibold text-gray-700">Transcript / Reference</h3>
+            <div className={`${materialCompact ? 'mt-3 p-2' : 'mt-4 p-3'} rounded-xl border border-gray-200 bg-white break-words [overflow-wrap:anywhere]`}>
+              <h3 className={`${materialCompact ? 'mb-1 text-xs' : 'mb-2 text-sm'} font-semibold text-gray-700`}>Transcript / Reference</h3>
               <RichTextHighlighter
                 content={activeTranscript}
                 contentType="text"
                 enabled={highlightEnabled}
-                className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800 md:text-base"
+                className={`${materialCompact ? 'text-xs md:text-sm' : 'text-sm md:text-base'} whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed text-gray-800`}
                 highlightColor={highlightColor}
                 highlightClassName={highlightClassName}
               />
@@ -406,7 +431,8 @@ export function StudentListening({
         <div 
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          className={`${isTabletMode ? 'flex w-11' : 'hidden w-4 lg:flex'} bg-gray-400 relative items-center justify-center cursor-col-resize flex-shrink-0 touch-none hover:bg-gray-600 transition-colors`}
+          className={`${isTabletMode ? 'absolute inset-y-0 z-20 flex w-11 items-center justify-center' : 'hidden w-4 lg:flex relative items-center justify-center flex-shrink-0'} bg-gray-400 cursor-col-resize touch-none hover:bg-gray-600 transition-colors`}
+          style={isTabletMode ? { left: `calc(${leftWidth}% - 22px)` } : undefined}
           role="separator"
           aria-label="Resize listening material and answer panels"
           aria-orientation="vertical"
@@ -419,11 +445,15 @@ export function StudentListening({
 
         <div className={`relative flex h-full min-w-0 flex-col min-h-0 ${isTabletMode ? 'w-[var(--question-pane-width)] min-w-[48px]' : 'w-full md:min-w-[320px] lg:w-[var(--question-pane-width)]'}`}>
           <div
-            className={`flex-1 overflow-y-auto p-4 md:p-5 lg:p-8 pb-20 md:pb-24 space-y-6 md:space-y-8 ${
+            className={`flex-1 overflow-y-auto break-words [overflow-wrap:anywhere] ${
+              answerCompact ? 'p-2.5 md:p-3 space-y-4 md:space-y-5' : 'p-4 md:p-5 lg:p-8 space-y-6 md:space-y-8'
+            } pb-20 md:pb-24 ${
               isTabletMode ? 'pb-28 md:pb-28' : ''
             }`}
             ref={questionContainerRef}
             data-student-zoom-scroll
+            data-testid="listening-question-scroll"
+            style={tabletContentZoomStyle}
           >
             {activePart.blocks.map((block) => {
               const blockQuestions = allQuestions.filter((question) => question.blockId === block.id);
@@ -439,14 +469,14 @@ export function StudentListening({
               const blockEndQ = blockStartQ + getBlockQuestionCount(block) - 1;
 
               return (
-                <div key={block.id} className="space-y-4 md:space-y-6 mb-4 md:mb-6">
-                  <div className="mb-3 md:mb-4">
-                    <h3 className="font-bold text-gray-900 mb-1 md:mb-2 text-base md:text-lg">
+                <div key={block.id} className={`${answerCompact ? 'space-y-3 mb-3 md:mb-4' : 'space-y-4 md:space-y-6 mb-4 md:mb-6'}`}>
+                  <div className={answerCompact ? 'mb-2' : 'mb-3 md:mb-4'}>
+                    <h3 className={`font-bold text-gray-900 break-words [overflow-wrap:anywhere] ${answerCompact ? 'mb-1 text-sm md:text-base' : 'mb-1 md:mb-2 text-base md:text-lg'}`}>
                       Questions {formatQuestionRange(blockStartQ, blockEndQ)}
                     </h3>
                   </div>
                   
-                  <div className="space-y-8">
+                  <div className={answerCompact ? 'space-y-5' : 'space-y-8'}>
                     {('questions' in block) ? (
                       block.questions.map((q, qIdx) => {
                         const questionEntries = blockQuestions.filter((entry) => entry.question?.id === q.id);
@@ -505,6 +535,7 @@ export function StudentListening({
                               flags={flags}
                               onToggleFlag={onToggleFlag}
                               tabletMode={isTabletMode}
+                              compactPane={answerCompact}
                               highlightEnabled={highlightEnabled}
                               highlightColor={highlightColor}
                               hideDiagramReference={hiddenDiagramReferenceBlockIds.has(block.id)}
@@ -560,6 +591,7 @@ export function StudentListening({
                           flags={flags}
                           onToggleFlag={onToggleFlag}
                           tabletMode={isTabletMode}
+                          compactPane={answerCompact}
                           highlightEnabled={highlightEnabled}
                           highlightColor={highlightColor}
                           hideDiagramReference={hiddenDiagramReferenceBlockIds.has(block.id)}

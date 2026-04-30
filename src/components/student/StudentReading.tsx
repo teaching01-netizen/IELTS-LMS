@@ -25,6 +25,7 @@ interface StudentReadingProps {
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
   tabletMode?: boolean | undefined;
+  contentZoom?: number | undefined;
 }
 
 export function StudentReading({
@@ -39,13 +40,34 @@ export function StudentReading({
   highlightColor,
   highlightClassName,
   tabletMode = false,
+  contentZoom = 1,
 }: StudentReadingProps) {
   const isTabletMode = Boolean(tabletMode);
+  const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
+  const supportsCssZoom = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('zoom', '1.01');
+  const tabletContentZoomStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!isTabletMode || clampedContentZoom === 1) {
+      return undefined;
+    }
+
+    if (supportsCssZoom) {
+      return { zoom: clampedContentZoom };
+    }
+
+    const inverseZoom = 1 / clampedContentZoom;
+    return {
+      transform: `scale(${clampedContentZoom})`,
+      transformOrigin: 'top left',
+      width: `${inverseZoom * 100}%`,
+      minHeight: `${inverseZoom * 100}%`,
+    };
+  }, [clampedContentZoom, isTabletMode, supportsCssZoom]);
   const [collapsedInstructions, setCollapsedInstructions] = useState<Record<string, boolean>>({});
   const questionContainerRef = useRef<HTMLDivElement>(null);
-  const { handleDrag, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+  const { answerCompact, handleDrag, leftWidth, materialCompact, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: '--reading-pane-width',
+    dividerMode: isTabletMode ? 'overlay' : 'consumes-space',
   });
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, 'reading'), [state]);
   const currentQ = allQuestions.find((question) => question.id === currentQuestionId) || allQuestions[0];
@@ -66,11 +88,11 @@ export function StudentReading({
     const isCollapsed = isLong && collapsedInstructions[blockId] !== false;
 
     return (
-      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+      <div className={`rounded-lg border border-gray-200 bg-gray-50 ${answerCompact ? 'px-2 py-1.5' : 'px-3 py-2'}`}>
         <div className="flex items-start justify-between gap-3">
           <FormattedText
             as="p"
-            className={`text-sm leading-relaxed text-gray-800 md:text-base ${isCollapsed ? 'line-clamp-2' : ''}`}
+            className={`${answerCompact ? 'text-xs md:text-sm' : 'text-sm md:text-base'} leading-relaxed text-gray-800 break-words [overflow-wrap:anywhere] ${isCollapsed ? 'line-clamp-2' : ''}`}
             text={instruction}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
@@ -84,7 +106,7 @@ export function StudentReading({
                   [blockId]: !isCollapsed,
                 }))
               }
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-600 shadow-sm"
+              className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white ${answerCompact ? 'px-1.5 py-0.5 text-[11px]' : 'px-2 py-1 text-xs'} font-semibold text-gray-600 shadow-sm`}
               aria-expanded={!isCollapsed}
             >
               {isCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
@@ -188,24 +210,27 @@ export function StudentReading({
         data-testid="reading-split-workspace"
       >
         <div
-          className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-gray-900 md:p-6 md:pr-6 ${
+          className={`h-full overflow-y-auto font-sans text-gray-900 ${
+            materialCompact ? 'p-2 pr-2 md:p-3 md:pr-3' : 'p-4 pr-4 md:p-6 md:pr-6'
+          } ${
             isTabletMode ? 'w-[var(--reading-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
           }`}
           style={{
+            ...(tabletContentZoomStyle ?? {}),
             fontSize: 'var(--student-passage-font-size)',
             lineHeight: 'var(--student-passage-line-height)',
           }}
           data-student-zoom-scroll
         >
-          <h2 className="mb-4 font-bold leading-tight text-gray-950 md:mb-6" style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
+          <h2 className={`${materialCompact ? 'mb-2' : 'mb-4 md:mb-6'} font-bold leading-tight text-gray-950 break-words [overflow-wrap:anywhere]`} style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
             {activePassage.title}
           </h2>
-          <div className="space-y-5 text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7">
+          <div className={`${materialCompact ? 'space-y-3' : 'space-y-5'} break-words [overflow-wrap:anywhere] text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7`}>
             <RichTextHighlighter
               content={activePassage.content}
               contentType={passageHasHtml ? 'html' : 'text'}
               enabled={highlightEnabled}
-              className="whitespace-pre-wrap"
+              className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
               highlightColor={highlightColor}
               highlightClassName={highlightClassName}
             />
@@ -227,7 +252,8 @@ export function StudentReading({
         <div 
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          className={`${isTabletMode ? 'flex w-11' : 'hidden w-4 lg:flex'} bg-gray-400 relative items-center justify-center cursor-col-resize flex-shrink-0 touch-none hover:bg-gray-600 transition-colors`}
+          className={`${isTabletMode ? 'absolute inset-y-0 z-20 flex w-11 items-center justify-center' : 'hidden w-4 lg:flex relative items-center justify-center flex-shrink-0'} bg-gray-400 cursor-col-resize touch-none hover:bg-gray-600 transition-colors`}
+          style={isTabletMode ? { left: `calc(${leftWidth}% - 22px)` } : undefined}
           role="separator"
           aria-label="Resize reading passage and answer panels"
           aria-orientation="vertical"
@@ -240,11 +266,15 @@ export function StudentReading({
 
         <div className={`relative flex h-full min-w-0 flex-col min-h-0 ${isTabletMode ? 'w-[var(--question-pane-width)] min-w-[48px]' : 'w-full md:min-w-[320px] lg:w-[var(--question-pane-width)]'}`}>
           <div
-            className={`flex-1 overflow-y-auto p-4 md:p-5 lg:p-8 pb-20 md:pb-24 space-y-6 md:space-y-8 ${
+            className={`flex-1 overflow-y-auto break-words [overflow-wrap:anywhere] ${
+              answerCompact ? 'p-2.5 md:p-3 space-y-4 md:space-y-5' : 'p-4 md:p-5 lg:p-8 space-y-6 md:space-y-8'
+            } pb-20 md:pb-24 ${
               isTabletMode ? 'pb-28 md:pb-28' : ''
             }`}
             ref={questionContainerRef}
             data-student-zoom-scroll
+            data-testid="reading-question-scroll"
+            style={tabletContentZoomStyle}
           >
             {activePassage.blocks.map((block) => {
               const blockQuestions = allQuestions.filter((question) => question.blockId === block.id);
@@ -260,15 +290,15 @@ export function StudentReading({
               const blockEndQ = blockStartQ + getBlockQuestionCount(block) - 1;
 
               return (
-                <div key={block.id} className="space-y-4 md:space-y-6 mb-4 md:mb-6">
-                  <div className="mb-3 md:mb-4">
-                    <h3 className="font-bold text-gray-900 mb-1 md:mb-2 text-base md:text-lg">
+                <div key={block.id} className={`${answerCompact ? 'space-y-3 mb-3 md:mb-4' : 'space-y-4 md:space-y-6 mb-4 md:mb-6'}`}>
+                  <div className={answerCompact ? 'mb-2' : 'mb-3 md:mb-4'}>
+                    <h3 className={`font-bold text-gray-900 break-words [overflow-wrap:anywhere] ${answerCompact ? 'mb-1 text-sm md:text-base' : 'mb-1 md:mb-2 text-base md:text-lg'}`}>
                       Questions {formatQuestionRange(blockStartQ, blockEndQ)}
                     </h3>
                     {renderBlockInstruction(block.id, block.instruction)}
                   </div>
                   
-                  <div className="space-y-8 md:space-y-10">
+                  <div className={answerCompact ? 'space-y-5' : 'space-y-8 md:space-y-10'}>
                     {('questions' in block) ? (
                       block.questions.map((q, qIdx) => {
                         const questionEntries = blockQuestions.filter((entry) => entry.question?.id === q.id);
@@ -329,6 +359,7 @@ export function StudentReading({
                               flags={flags}
                               onToggleFlag={onToggleFlag}
                               tabletMode={isTabletMode}
+                              compactPane={answerCompact}
                               highlightEnabled={highlightEnabled}
                               highlightColor={highlightColor}
                             />
@@ -383,6 +414,7 @@ export function StudentReading({
                           flags={flags}
                           onToggleFlag={onToggleFlag}
                           tabletMode={isTabletMode}
+                          compactPane={answerCompact}
                           highlightEnabled={highlightEnabled}
                           highlightColor={highlightColor}
                         />
