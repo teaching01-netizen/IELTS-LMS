@@ -1,4 +1,4 @@
-import { 
+import {
   QuestionBlock, 
   SingleMCQBlock, 
   MCQOption, 
@@ -22,6 +22,7 @@ import {
   MatchingFeature
 } from '../types';
 import { countBlankPlaceholders } from './blankPlaceholders';
+import { resolveAcceptedAnswers } from './acceptedAnswers';
 
 export interface ValidationError {
   field: string;
@@ -108,7 +109,7 @@ function validateShortAnswer(block: ShortAnswerBlock): ValidationError[] {
     if (!q.prompt || q.prompt.trim() === '') {
       errors.push({ field: `question-${index}-prompt`, message: `Question ${index + 1} prompt is required` });
     }
-    if (!q.correctAnswer || q.correctAnswer.trim() === '') {
+    if (resolveAcceptedAnswers(q).length === 0) {
       errors.push({ field: `question-${index}-answer`, message: `Question ${index + 1} correct answer is required` });
     }
   });
@@ -134,7 +135,7 @@ function validateSentenceCompletion(block: SentenceCompletionBlock): ValidationE
       errors.push({ field: `sentence-${index}-blanks`, message: `Sentence ${index + 1} blanks must match the number of ____ placeholders` });
     }
     q.blanks?.forEach((blank: SentenceBlank, blankIndex: number) => {
-      if (!blank.correctAnswer || blank.correctAnswer.trim() === '') {
+      if (resolveAcceptedAnswers(blank).length === 0) {
         errors.push({ field: `sentence-${index}-blank-${blankIndex}`, message: `Blank ${blankIndex + 1} answer is required` });
       }
     });
@@ -232,7 +233,7 @@ function validateNoteCompletion(block: NoteCompletionBlock): ValidationError[] {
       errors.push({ field: `note-${index}-blanks`, message: `Note ${index + 1} blanks must match the number of ____ placeholders` });
     }
     q.blanks?.forEach((blank: NoteBlank, blankIndex: number) => {
-      if (!blank.correctAnswer || blank.correctAnswer.trim() === '') {
+      if (resolveAcceptedAnswers(blank).length === 0) {
         errors.push({ field: `note-${index}-blank-${blankIndex}`, message: `Blank ${blankIndex + 1} answer is required` });
       }
     });

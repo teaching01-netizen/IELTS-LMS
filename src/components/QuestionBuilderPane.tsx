@@ -185,7 +185,7 @@ export function QuestionBuilderPane({
             ...currentBlock,
             questions: [
               ...(currentBlock as ClozeBlockType).questions,
-              { id: createId('q'), prompt: 'The ____ is important.', correctAnswer: '' },
+              { id: createId('q'), prompt: 'The ____ is important.', correctAnswer: '', acceptedAnswers: [] },
             ],
           };
           break;
@@ -212,7 +212,7 @@ export function QuestionBuilderPane({
             ...currentBlock,
             questions: [
               ...(currentBlock as ShortAnswerBlockType).questions,
-              { id: createId('q'), prompt: '', correctAnswer: '', answerRule: 'ONE_WORD' as const },
+              { id: createId('q'), prompt: '', correctAnswer: '', acceptedAnswers: [], answerRule: 'ONE_WORD' as const },
             ],
           };
           break;
@@ -252,7 +252,7 @@ export function QuestionBuilderPane({
           type: 'CLOZE',
           answerRule: 'TWO_WORDS',
           instruction: 'Complete the summary below. Choose NO MORE THAN TWO WORDS from the passage for each answer.',
-          questions: [{ id: createId('q'), prompt: 'The ____ is important.', correctAnswer: '' }]
+          questions: [{ id: createId('q'), prompt: 'The ____ is important.', correctAnswer: '', acceptedAnswers: [] }]
         } as ClozeBlockType;
         break;
       case 'MATCHING':
@@ -305,7 +305,7 @@ export function QuestionBuilderPane({
           id: createId('blk'),
           type: 'SHORT_ANSWER',
           instruction: 'Answer the questions below using words from the passage.',
-          questions: [{ id: createId('q'), prompt: 'What is described?', correctAnswer: '', answerRule: 'TWO_WORDS' }]
+          questions: [{ id: createId('q'), prompt: 'What is described?', correctAnswer: '', acceptedAnswers: [], answerRule: 'TWO_WORDS' }]
         } as ShortAnswerBlockType;
         break;
       case 'SENTENCE_COMPLETION':
@@ -313,7 +313,7 @@ export function QuestionBuilderPane({
           id: createId('blk'),
           type: 'SENTENCE_COMPLETION',
           instruction: 'Complete the sentences below using words from the passage.',
-          questions: [{ id: createId('q'), sentence: 'The ____ is important.', blanks: [{ id: createId('blank'), correctAnswer: '', position: 0 }], answerRule: 'TWO_WORDS' }]
+          questions: [{ id: createId('q'), sentence: 'The ____ is important.', blanks: [{ id: createId('blank'), correctAnswer: '', acceptedAnswers: [], position: 0 }], answerRule: 'TWO_WORDS' }]
         } as SentenceCompletionBlockType;
         break;
       case 'DIAGRAM_LABELING':
@@ -349,7 +349,7 @@ export function QuestionBuilderPane({
           id: createId('blk'),
           type: 'NOTE_COMPLETION',
           instruction: 'Complete the notes below.',
-          questions: [{ id: createId('q'), noteText: 'The ____ is important.', blanks: [{ id: createId('blank'), correctAnswer: '', position: 0 }], answerRule: 'TWO_WORDS' }]
+          questions: [{ id: createId('q'), noteText: 'The ____ is important.', blanks: [{ id: createId('blank'), correctAnswer: '', acceptedAnswers: [], position: 0 }], answerRule: 'TWO_WORDS' }]
         } as NoteCompletionBlockType;
         break;
       case 'CLASSIFICATION':

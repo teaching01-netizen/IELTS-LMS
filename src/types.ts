@@ -37,6 +37,7 @@ export interface ClozeQuestion {
   id: string;
   prompt: string;
   correctAnswer: string;
+  acceptedAnswers?: string[];
 }
 
 export interface MatchingQuestion {
@@ -208,6 +209,7 @@ export interface ShortAnswerQuestion {
   id: string;
   prompt: string;
   correctAnswer: string;
+  acceptedAnswers?: string[];
   answerRule: AnswerRule;
 }
 
@@ -219,6 +221,7 @@ export interface ShortAnswerBlock extends BaseQuestionBlock {
 export interface SentenceBlank {
   id: string;
   correctAnswer: string;
+  acceptedAnswers?: string[];
   position: number;
 }
 
@@ -277,6 +280,7 @@ export interface TableCompletionBlock extends BaseQuestionBlock {
 export interface NoteBlank {
   id: string;
   correctAnswer: string;
+  acceptedAnswers?: string[];
   position: number;
 }
 

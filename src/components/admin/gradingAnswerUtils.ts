@@ -2,6 +2,7 @@ import type {
   StudentQuestionDescriptor,
 } from '../../services/examAdapterService';
 import { getQuestionAnswer } from '../../services/examAdapterService';
+import { normalizeAnswerForMatching, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -20,7 +21,7 @@ export function extractObjectiveAnswerMap(sectionAnswers: unknown): Record<strin
 }
 
 function normalizeComparable(value: string): string {
-  return value.trim().toLowerCase();
+  return normalizeAnswerForMatching(value);
 }
 
 function stringifyFallback(value: unknown): string {
@@ -163,6 +164,11 @@ export function getCorrectAnswerValue(descriptor: StudentQuestionDescriptor): un
 }
 
 export function getCorrectAnswerDisplay(descriptor: StudentQuestionDescriptor): string {
+  const acceptedAnswers = getAcceptedAnswersForDescriptor(descriptor);
+  if (acceptedAnswers && acceptedAnswers.length > 0) {
+    return acceptedAnswers.join(' | ');
+  }
+
   const correct = getCorrectAnswerValue(descriptor);
   const { block } = descriptor;
 
@@ -183,6 +189,30 @@ export function getCorrectAnswerDisplay(descriptor: StudentQuestionDescriptor): 
   }
 
   return formatAnswerValue(correct);
+}
+
+function getAcceptedAnswersForDescriptor(descriptor: StudentQuestionDescriptor): string[] | null {
+  const { block, question, answerIndex } = descriptor;
+
+  switch (block.type) {
+    case 'CLOZE':
+    case 'SHORT_ANSWER':
+      return question && 'correctAnswer' in question ? resolveAcceptedAnswers(question) : null;
+    case 'SENTENCE_COMPLETION': {
+      if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) return null;
+      if (typeof answerIndex !== 'number') return null;
+      const blank = question.blanks[answerIndex];
+      return blank ? resolveAcceptedAnswers(blank) : null;
+    }
+    case 'NOTE_COMPLETION': {
+      if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) return null;
+      if (typeof answerIndex !== 'number') return null;
+      const blank = question.blanks[answerIndex];
+      return blank ? resolveAcceptedAnswers(blank) : null;
+    }
+    default:
+      return null;
+  }
 }
 
 export function getStudentAnswerDisplay(
@@ -230,6 +260,7 @@ export function isStudentAnswerCorrect(
 ): boolean | null {
   const correct = getCorrectAnswerValue(descriptor);
   const student = getQuestionAnswer(descriptor, answerMap);
+  const acceptedAnswers = getAcceptedAnswersForDescriptor(descriptor);
 
   if (correct === null || correct === undefined) {
     return null;
@@ -246,9 +277,18 @@ export function isStudentAnswerCorrect(
     return true;
   }
 
+  if (acceptedAnswers && acceptedAnswers.length > 0) {
+    const studentText = normalizeComparable(formatAnswerValue(student));
+    if (studentText === '') {
+      return false;
+    }
+    return acceptedAnswers.some(
+      (answer) => normalizeComparable(answer) === studentText,
+    );
+  }
+
   const correctText = normalizeComparable(formatAnswerValue(correct));
   const studentText = normalizeComparable(formatAnswerValue(student));
   if (correctText === '' && studentText === '') return true;
   return correctText !== '' && correctText === studentText;
 }
-

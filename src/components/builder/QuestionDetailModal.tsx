@@ -17,6 +17,7 @@ import {
   MatchingFeature
 } from '../../types';
 import { X, Clock, User, Tag, BookOpen, Plus } from 'lucide-react';
+import { resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 
 interface QuestionDetailModalProps {
   item: QuestionBankItem | null;
@@ -221,6 +222,9 @@ function QuestionContentRenderer({ block }: { block: QuestionBlock }) {
               <div key={q.id} className="p-2 bg-gray-50 rounded text-sm">
                 <span className="font-medium">{idx + 1}. </span>
                 {q.prompt}
+                <div className="text-xs text-gray-500 mt-1">
+                  Answers: {resolveAcceptedAnswers(q).join(' | ')}
+                </div>
               </div>
             ))}
             {block.questions.length > 3 && (
@@ -293,7 +297,9 @@ function QuestionContentRenderer({ block }: { block: QuestionBlock }) {
               <div key={q.id} className="p-2 bg-gray-50 rounded text-sm">
                 <span className="font-medium">{idx + 1}. </span>
                 {q.prompt}
-                <div className="text-xs text-gray-500 mt-1">Answer: {q.correctAnswer}</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Answers: {resolveAcceptedAnswers(q).join(' | ')}
+                </div>
               </div>
             ))}
             {block.questions.length > 3 && (
@@ -314,6 +320,9 @@ function QuestionContentRenderer({ block }: { block: QuestionBlock }) {
                 {q.sentence}
                 <div className="text-xs text-gray-500 mt-1">
                   Blanks: {q.blanks.length} | Answer rule: {q.answerRule}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {q.blanks.map((blank, blankIndex) => `B${blankIndex + 1}: ${resolveAcceptedAnswers(blank).join(' | ')}`).join(' ; ')}
                 </div>
               </div>
             ))}
@@ -400,6 +409,9 @@ function QuestionContentRenderer({ block }: { block: QuestionBlock }) {
                 <pre className="whitespace-pre-wrap font-sans">{q.noteText}</pre>
                 <div className="text-xs text-gray-500 mt-1">
                   Blanks: {q.blanks.length} | Answer rule: {q.answerRule}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {q.blanks.map((blank, blankIndex) => `B${blankIndex + 1}: ${resolveAcceptedAnswers(blank).join(' | ')}`).join(' ; ')}
                 </div>
               </div>
             ))}

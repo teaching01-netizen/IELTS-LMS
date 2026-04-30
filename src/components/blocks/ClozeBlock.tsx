@@ -1,8 +1,15 @@
 import React, { useState } from 'react';
-import { QuestionBlock, ClozeBlock as ClozeBlockType, AnswerRule } from '../../types';
+import {
+  QuestionBlock,
+  ClozeBlock as ClozeBlockType,
+  ClozeQuestion,
+  AnswerRule,
+} from '../../types';
 import { MoreVertical, Plus, Trash2, GripVertical, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
+import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import { buildAcceptedAnswerFields, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 
 interface Props {
   block: QuestionBlock;
@@ -28,15 +35,15 @@ export const ClozeBlock: React.FC<Props> = ({ block, startNum, endNum, updateBlo
   
   const getFieldError = (field: string) => errors.find(e => e.field.includes(field));
 
-  const updateQuestion = (qId: string, field: 'prompt' | 'correctAnswer', value: string) => {
+  const updateQuestion = (qId: string, updates: Partial<ClozeQuestion>) => {
     const newQuestions = clozeBlock.questions.map(q => 
-      q.id === qId ? { ...q, [field]: value } : q
+      q.id === qId ? { ...q, ...updates } : q
     );
     updateBlock({ ...clozeBlock, questions: newQuestions });
   };
 
   const addQuestion = () => {
-    const newQ = { id: createId('q'), prompt: '', correctAnswer: '' };
+    const newQ = { id: createId('q'), prompt: '', correctAnswer: '', acceptedAnswers: [] };
     updateBlock({ ...clozeBlock, questions: [...clozeBlock.questions, newQ] });
   };
 
@@ -105,10 +112,15 @@ export const ClozeBlock: React.FC<Props> = ({ block, startNum, endNum, updateBlo
             <div key={q.id} className="flex items-start gap-3 group/item">
               <div className="font-semibold text-gray-500 mt-2 w-8 text-right text-sm">{startNum + i}</div>
               <div className={`flex-1 bg-white border rounded-sm p-3 relative shadow-sm transition-colors hover:border-gray-200 ${getFieldError(`questions[${i}].prompt`) ? 'border-red-500 bg-red-50/30' : 'border-gray-100'}`}>
+                {(() => {
+                  const acceptedAnswers = resolveAcceptedAnswers(q);
+
+                  return (
+                    <>
                 <textarea 
                   value={q.prompt} 
-                  onChange={(e) => updateQuestion(q.id, 'prompt', e.target.value)}
-                  onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateQuestion(q.id, 'prompt', nextValue))}
+                  onChange={(e) => updateQuestion(q.id, { prompt: e.target.value })}
+                  onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateQuestion(q.id, { prompt: nextValue }))}
                   className="w-full bg-transparent outline-none text-sm resize-none mb-2 text-gray-800 placeholder:text-gray-400 focus:ring-1 focus:ring-blue-700 rounded-sm px-1" 
                   placeholder="Enter sentence with blank (e.g., The ____ is important.)" 
                   rows={2}
@@ -117,13 +129,15 @@ export const ClozeBlock: React.FC<Props> = ({ block, startNum, endNum, updateBlo
                   <p className="text-xs text-red-600 mb-2 flex items-center gap-1"><AlertCircle size={10} /> {getFieldError(`questions[${i}].prompt`)!.message}</p>
                 )}
                 <div className="flex items-center gap-2 border-t border-gray-50 pt-2">
-                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Correct Answer ({ANSWER_RULE_LABELS[answerRule]}):</span>
-                  <input 
-                    type="text" 
-                    value={q.correctAnswer} 
-                    onChange={(e) => updateQuestion(q.id, 'correctAnswer', e.target.value)}
-                    className={`border rounded-sm px-2 py-1 text-sm w-48 focus:ring-1 focus:ring-blue-700 outline-none transition-colors text-gray-800 ${getFieldError(`questions[${i}].correctAnswer`) ? 'border-red-500 bg-red-50' : 'border-gray-100'}`}
-                    placeholder="e.g., factories" 
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Accepted Answers ({ANSWER_RULE_LABELS[answerRule]}):</span>
+                </div>
+                <div className={`mt-2 ${getFieldError(`questions[${i}].correctAnswer`) ? 'rounded border border-red-300 bg-red-50 p-2' : ''}`}>
+                  <AcceptedAnswersEditor
+                    value={acceptedAnswers}
+                    onChange={(next) =>
+                      updateQuestion(q.id, buildAcceptedAnswerFields(next))
+                    }
+                    placeholder="e.g., factories"
                   />
                 </div>
                 {getFieldError(`questions[${i}].correctAnswer`) && (
@@ -135,6 +149,9 @@ export const ClozeBlock: React.FC<Props> = ({ block, startNum, endNum, updateBlo
                 >
                   <Trash2 size={14} />
                 </button>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           ))}
