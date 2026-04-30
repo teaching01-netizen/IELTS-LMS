@@ -80,6 +80,11 @@ export function useDragToPan<T extends HTMLElement>(enabled: boolean) {
         return;
       }
 
+      if (event.touches.length !== 1) {
+        endDrag();
+        return;
+      }
+
       const trackedTouch =
         stateRef.current.touchId === null
           ? event.touches[0]
@@ -132,6 +137,9 @@ export function useDragToPan<T extends HTMLElement>(enabled: boolean) {
       if (!enabled) {
         return;
       }
+      if (event.touches.length !== 1) {
+        return;
+      }
       const touch = event.touches[0];
       if (!touch) {
         return;
@@ -146,12 +154,13 @@ export function useDragToPan<T extends HTMLElement>(enabled: boolean) {
   const dragStyle: React.CSSProperties | undefined = enabled
     ? {
         cursor: isDragging ? 'grabbing' : 'grab',
-        touchAction: 'none',
+        touchAction: 'manipulation',
       }
     : undefined;
 
   return {
     isDragging,
+    cancelDrag: endDrag,
     dragHandlers: {
       onMouseDown,
       onTouchStart,
