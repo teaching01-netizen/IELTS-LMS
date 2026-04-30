@@ -1,6 +1,12 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { parseBoldMarkdown } from '../../utils/boldMarkdown';
-import { applySelectionHighlight, escapeHtml, removeHighlightAtIndex } from './highlightSelection';
+import {
+  applyHighlightFromSnapshot,
+  applySelectionHighlight,
+  escapeHtml,
+  removeHighlightAtIndex,
+  type HighlightSelectionSnapshot,
+} from './highlightSelection';
 import { getStudentHighlightClassName, type StudentHighlightColor } from './highlightPalette';
 import { usePersistedStudentHighlightHtml } from './highlightPersistence';
 import { useDeferredSelectionHighlight } from './useDeferredSelectionHighlight';
@@ -62,10 +68,39 @@ export function FormattedText({
       setHtml(nextHtml);
     }
   }, [highlightClassName, highlightColor, highlightEnabled, setHtml]);
-  const scheduleSelectionHighlight = useDeferredSelectionHighlight({
+  const applySelectionFromSnapshot = useCallback(
+    (snapshot: HighlightSelectionSnapshot) => {
+      if (!highlightEnabled) {
+        return false;
+      }
+
+      const container = containerRef.current;
+      if (!container) {
+        return false;
+      }
+
+      const nextHtml = applyHighlightFromSnapshot(
+        container,
+        snapshot,
+        highlightClassName ??
+          (highlightColor ? getStudentHighlightClassName(highlightColor) : 'rounded-sm bg-yellow-200/80 text-gray-900'),
+      );
+
+      if (!nextHtml) {
+        return false;
+      }
+
+      setHtml(nextHtml);
+      window.getSelection()?.removeAllRanges();
+      return true;
+    },
+    [highlightClassName, highlightColor, highlightEnabled, setHtml],
+  );
+  const { startTouchSelectionSession, scheduleSelectionHighlight } = useDeferredSelectionHighlight({
     enabled: highlightEnabled,
     containerRef,
     applySelection: handleSelection,
+    applySelectionFromSnapshot,
   });
 
   const removeTappedHighlight = useCallback(
@@ -102,6 +137,7 @@ export function FormattedText({
           style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
           onClick={removeTappedHighlight}
           onMouseUp={highlightEnabled ? handleSelection : undefined}
+          onTouchStart={highlightEnabled ? startTouchSelectionSession : undefined}
           onTouchEnd={highlightEnabled ? scheduleSelectionHighlight : undefined}
           onKeyUp={highlightEnabled ? handleSelection : undefined}
           dangerouslySetInnerHTML={{ __html: html }}
