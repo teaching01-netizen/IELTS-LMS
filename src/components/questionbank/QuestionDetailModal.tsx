@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Plus } from 'lucide-react';
 import { QuestionBankItem } from '../../types';
 import { Button } from '../ui/Button';
+import { resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 
 interface QuestionDetailModalProps {
   item: QuestionBankItem;
@@ -135,7 +136,9 @@ function renderBlockPreview(item: QuestionBankItem) {
             {block.questions.slice(0, 3).map((q, i) => (
               <div key={q.id} className="bg-gray-50 p-3 rounded">
                 <p className="text-sm text-gray-900">{i + 1}. {q.prompt}</p>
-                <p className="text-xs text-gray-500 mt-1">Answer: {q.correctAnswer} ({block.answerRule})</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Answers: {resolveAcceptedAnswers(q).join(' | ')} ({block.answerRule})
+                </p>
               </div>
             ))}
             {block.questions.length > 3 && (
@@ -227,7 +230,43 @@ function renderBlockPreview(item: QuestionBankItem) {
             {block.questions.slice(0, 3).map((q, i) => (
               <div key={q.id} className="bg-gray-50 p-3 rounded">
                 <p className="text-sm text-gray-900">{i + 1}. {q.prompt}</p>
-                <p className="text-xs text-gray-500 mt-1">Answer: {q.correctAnswer} ({q.answerRule})</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Answers: {resolveAcceptedAnswers(q).join(' | ')} ({q.answerRule})
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+
+    case 'SENTENCE_COMPLETION':
+      return (
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Sentences ({block.questions.length})</h3>
+          <div className="space-y-2">
+            {block.questions.slice(0, 2).map((q, i) => (
+              <div key={q.id} className="bg-gray-50 p-3 rounded">
+                <p className="text-sm text-gray-900">{i + 1}. {q.sentence}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {q.blanks.map((blank, blankIndex) => `B${blankIndex + 1}: ${resolveAcceptedAnswers(blank).join(' | ')}`).join(' ; ')}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+
+    case 'NOTE_COMPLETION':
+      return (
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Notes ({block.questions.length})</h3>
+          <div className="space-y-2">
+            {block.questions.slice(0, 2).map((q, i) => (
+              <div key={q.id} className="bg-gray-50 p-3 rounded">
+                <pre className="whitespace-pre-wrap font-sans text-sm text-gray-900">{i + 1}. {q.noteText}</pre>
+                <p className="text-xs text-gray-500 mt-1">
+                  {q.blanks.map((blank, blankIndex) => `B${blankIndex + 1}: ${resolveAcceptedAnswers(blank).join(' | ')}`).join(' ; ')}
+                </p>
               </div>
             ))}
           </div>

@@ -10,6 +10,7 @@ import {
 } from '../types';
 import { createDefaultConfig, normalizeExamConfig } from '../constants/examDefaults';
 import { hydrateExamState } from '../services/examAdapterService';
+import { resolveAcceptedAnswers } from './acceptedAnswers';
 
 export const getBlockQuestionCount = (block: QuestionBlock): number => {
   switch (block.type) {
@@ -151,7 +152,7 @@ const validateClozeBlock = (block: ClozeBlock): ValidationError[] => {
     if (!q.prompt.trim()) {
       errors.push({ blockId: block.id, field: `questions[${i}].prompt`, message: `Question ${i + 1} prompt is empty`, type: 'error' });
     }
-    if (!q.correctAnswer.trim()) {
+    if (resolveAcceptedAnswers(q).length === 0) {
       errors.push({ blockId: block.id, field: `questions[${i}].correctAnswer`, message: `Question ${i + 1} has no correct answer`, type: 'error' });
     }
   });
@@ -319,7 +320,7 @@ const validateShortAnswerBlock = (block: ShortAnswerBlock): ValidationError[] =>
     if (!q.prompt.trim()) {
       errors.push({ blockId: block.id, field: `questions[${i}].prompt`, message: `Question ${i + 1} prompt is empty`, type: 'error' });
     }
-    if (!q.correctAnswer.trim()) {
+    if (resolveAcceptedAnswers(q).length === 0) {
       errors.push({ blockId: block.id, field: `questions[${i}].correctAnswer`, message: `Question ${i + 1} has no correct answer`, type: 'error' });
     }
   });
@@ -342,7 +343,7 @@ const validateSentenceCompletionBlock = (block: SentenceCompletionBlock): Valida
       errors.push({ blockId: block.id, field: `questions[${i}].blanks`, message: `Sentence ${i + 1} has no blanks`, type: 'error' });
     }
     q.blanks.forEach((blank, j) => {
-      if (!blank.correctAnswer.trim()) {
+      if (resolveAcceptedAnswers(blank).length === 0) {
         errors.push({ blockId: block.id, field: `questions[${i}].blanks[${j}].correctAnswer`, message: `Blank ${j + 1} in sentence ${i + 1} has no answer`, type: 'error' });
       }
     });
@@ -431,7 +432,7 @@ const validateNoteCompletionBlock = (block: NoteCompletionBlock): ValidationErro
       errors.push({ blockId: block.id, field: `questions[${i}].blanks`, message: `Note ${i + 1} has no blanks`, type: 'error' });
     }
     q.blanks.forEach((blank, j) => {
-      if (!blank.correctAnswer.trim()) {
+      if (resolveAcceptedAnswers(blank).length === 0) {
         errors.push({ blockId: block.id, field: `questions[${i}].blanks[${j}].correctAnswer`, message: `Blank ${j + 1} in note ${i + 1} has no answer`, type: 'error' });
       }
     });

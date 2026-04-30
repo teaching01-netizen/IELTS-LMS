@@ -4,6 +4,11 @@ import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { countBlankPlaceholders } from '../../utils/blankPlaceholders';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
+import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import {
+  buildAcceptedAnswerFields,
+  resolveAcceptedAnswers,
+} from '../../utils/acceptedAnswers';
 
 interface NoteCompletionBlockProps {
   block: NoteCompletionBlockType;
@@ -36,6 +41,7 @@ export function NoteCompletionBlock({ block, startNum, endNum, updateBlock, dele
             {
               id: createId('blank'),
               correctAnswer: '',
+              acceptedAnswers: [],
               position: nextBlanks.length,
             },
           ];
@@ -50,7 +56,11 @@ export function NoteCompletionBlock({ block, startNum, endNum, updateBlock, dele
     updateBlock({ ...block, questions: newQuestions });
   };
 
-  const updateBlank = (questionId: string, blankId: string, updates: { correctAnswer?: string }) => {
+  const updateBlank = (
+    questionId: string,
+    blankId: string,
+    updates: { correctAnswer?: string; acceptedAnswers?: string[] },
+  ) => {
     const newQuestions = block.questions.map(q => {
       if (q.id !== questionId) return q;
       const newBlanks = q.blanks.map(b =>
@@ -65,7 +75,7 @@ export function NoteCompletionBlock({ block, startNum, endNum, updateBlock, dele
     const newQuestion = {
       id: createId('q'),
       noteText: 'The ____ is important.',
-      blanks: [{ id: createId('blank'), correctAnswer: '', position: 0 }],
+      blanks: [{ id: createId('blank'), correctAnswer: '', acceptedAnswers: [], position: 0 }],
       answerRule: 'TWO_WORDS' as AnswerRule
     };
     updateBlock({ ...block, questions: [...block.questions, newQuestion] });
@@ -155,8 +165,16 @@ export function NoteCompletionBlock({ block, startNum, endNum, updateBlock, dele
                     <div className="space-y-2">
                       {question.blanks.map((blank, blankIndex) => (
                         <div key={blank.id} className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500 w-16">Blank {blankIndex + 1}:</span>
-                          <input type="text" value={blank.correctAnswer} onChange={(e) => updateBlank(question.id, blank.id, { correctAnswer: e.target.value })} className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Answer..." />
+                          <span className="text-xs text-gray-500 w-16 self-start pt-1">Blank {blankIndex + 1}:</span>
+                          <div className="flex-1">
+                            <AcceptedAnswersEditor
+                              value={resolveAcceptedAnswers(blank)}
+                              onChange={(next) =>
+                                updateBlank(question.id, blank.id, buildAcceptedAnswerFields(next))
+                              }
+                              placeholder="Answer..."
+                            />
+                          </div>
                         </div>
                       ))}
                     </div>

@@ -3,6 +3,11 @@ import { ShortAnswerBlock as ShortAnswerBlockType, AnswerRule } from '../../type
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
+import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import {
+  buildAcceptedAnswerFields,
+  resolveAcceptedAnswers,
+} from '../../utils/acceptedAnswers';
 
 interface ShortAnswerBlockProps {
   block: ShortAnswerBlockType;
@@ -19,7 +24,10 @@ export function ShortAnswerBlock({ block, startNum, endNum, updateBlock, deleteB
     updateBlock({ ...block, instruction });
   };
 
-  const updateQuestion = (questionId: string, updates: { prompt?: string; correctAnswer?: string; answerRule?: AnswerRule }) => {
+  const updateQuestion = (
+    questionId: string,
+    updates: { prompt?: string; correctAnswer?: string; acceptedAnswers?: string[]; answerRule?: AnswerRule },
+  ) => {
     const newQuestions = block.questions.map(q =>
       q.id === questionId ? { ...q, ...updates } : q
     );
@@ -31,6 +39,7 @@ export function ShortAnswerBlock({ block, startNum, endNum, updateBlock, deleteB
       id: createId('q'),
       prompt: '',
       correctAnswer: '',
+      acceptedAnswers: [],
       answerRule: 'TWO_WORDS' as AnswerRule
     };
     updateBlock({ ...block, questions: [...block.questions, newQuestion] });
@@ -134,15 +143,11 @@ export function ShortAnswerBlock({ block, startNum, endNum, updateBlock, deleteB
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Correct Answer
-                  </label>
-                  <input
-                    type="text"
-                    value={question.correctAnswer}
-                    onChange={(e) => updateQuestion(question.id, { correctAnswer: e.target.value })}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter the correct answer..."
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Accepted Answers</label>
+                  <AcceptedAnswersEditor
+                    value={resolveAcceptedAnswers(question)}
+                    onChange={(next) => updateQuestion(question.id, buildAcceptedAnswerFields(next))}
+                    placeholder="Enter the accepted answer..."
                   />
                 </div>
               </div>
