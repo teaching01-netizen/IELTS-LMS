@@ -40,7 +40,7 @@ export function StudentReading({
   tabletMode = false,
 }: StudentReadingProps) {
   const isTabletMode = Boolean(tabletMode);
-  const [leftWidth, setLeftWidth] = useState(50);
+  const [leftWidth, setLeftWidth] = useState(40);
   const [collapsedInstructions, setCollapsedInstructions] = useState<Record<string, boolean>>({});
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, 'reading'), [state]);
@@ -187,7 +187,7 @@ export function StudentReading({
       }
       const clientX = firstTouch ? firstTouch.clientX : (e as MouseEvent).clientX;
       const newWidth = (clientX / window.innerWidth) * 100;
-      if (newWidth >= 34 && newWidth <= 66) {
+      if (newWidth >= 20 && newWidth <= 80) {
         setLeftWidth(newWidth);
       }
     };
@@ -226,17 +226,6 @@ export function StudentReading({
           }}
           data-student-zoom-scroll
         >
-          <div className="mb-4 flex flex-wrap gap-2 text-sm font-bold" data-testid="reading-split-presets">
-            <button type="button" onClick={() => setLeftWidth(60)} className="min-h-11 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-gray-700 shadow-sm active:bg-gray-100">
-              Material wider
-            </button>
-            <button type="button" onClick={() => setLeftWidth(50)} className="min-h-11 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-gray-700 shadow-sm active:bg-gray-100">
-              Equal
-            </button>
-            <button type="button" onClick={() => setLeftWidth(40)} className="min-h-11 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-gray-700 shadow-sm active:bg-gray-100">
-              Answers wider
-            </button>
-          </div>
           <h2 className="mb-4 font-bold leading-tight text-gray-950 md:mb-6" style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
             {activePassage.title}
           </h2>

@@ -501,12 +501,14 @@ describe('student question experience', () => {
     const workspace = screen.getByTestId('reading-split-workspace');
     expect(workspace).toHaveClass('flex-row');
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '50%',
-      '--question-pane-width': 'calc(50% - 16px)',
+      '--reading-pane-width': '40%',
+      '--question-pane-width': 'calc(60% - 16px)',
     });
     expect(screen.getByTestId('reading-pane-resizer')).toBeInTheDocument();
     expect(screen.getByTestId('reading-pane-resizer')).toHaveClass('w-8');
-    expect(screen.getByRole('button', { name: /material wider/i })).toHaveClass('min-h-11');
+    expect(screen.queryByRole('button', { name: /material wider/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /equal/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /answers wider/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/select passage text to highlight it/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
   });
@@ -1232,15 +1234,17 @@ describe('student question experience', () => {
     const workspace = screen.getByTestId('listening-split-workspace');
     expect(workspace).toHaveClass('flex-row');
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '50%',
-      '--question-pane-width': 'calc(50% - 16px)',
+      '--listening-pane-width': '40%',
+      '--question-pane-width': 'calc(60% - 16px)',
     });
     expect(screen.getByTestId('listening-pane-resizer')).toBeInTheDocument();
     expect(screen.queryByText(/staff instructions/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/use the invigilator audio system/i)).not.toBeInTheDocument();
     expect(screen.queryByText(longInstruction.trim())).not.toBeInTheDocument();
     expect(screen.getByTestId('listening-pane-resizer')).toHaveClass('w-8');
-    expect(screen.getByRole('button', { name: /material wider/i })).toHaveClass('min-h-11');
+    expect(screen.queryByRole('button', { name: /material wider/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /equal/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /answers wider/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/select reference text to highlight it/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
   });

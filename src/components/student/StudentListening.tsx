@@ -100,7 +100,7 @@ export function StudentListening({
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(70);
-  const [leftWidth, setLeftWidth] = useState(50);
+  const [leftWidth, setLeftWidth] = useState(40);
   const [diagramZoom, setDiagramZoom] = useState(1);
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -155,10 +155,6 @@ export function StudentListening({
     () => new Set(activeDiagramBlocks.map((block) => block.id)),
     [activeDiagramBlocks],
   );
-
-  const setSplitPreset = (nextWidth: number) => {
-    setLeftWidth(Math.min(66, Math.max(34, nextWidth)));
-  };
 
   const adjustDiagramZoom = (delta: number) => {
     setDiagramZoom((current) => Math.min(1.8, Math.max(0.8, Math.round((current + delta) * 100) / 100)));
@@ -243,7 +239,7 @@ export function StudentListening({
       }
       const clientX = firstTouch ? firstTouch.clientX : (e as MouseEvent).clientX;
       const newWidth = (clientX / window.innerWidth) * 100;
-      if (newWidth >= 34 && newWidth <= 66) {
+      if (newWidth >= 20 && newWidth <= 80) {
         setLeftWidth(newWidth);
       }
     };
@@ -290,17 +286,6 @@ export function StudentListening({
           }`}
           data-student-zoom-scroll
         >
-          <div className="mb-4 flex flex-wrap gap-2 text-sm font-bold" data-testid="listening-split-presets">
-            <button type="button" onClick={() => setSplitPreset(60)} className="min-h-11 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-gray-700 shadow-sm active:bg-gray-100">
-              Material wider
-            </button>
-            <button type="button" onClick={() => setSplitPreset(50)} className="min-h-11 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-gray-700 shadow-sm active:bg-gray-100">
-              Equal
-            </button>
-            <button type="button" onClick={() => setSplitPreset(40)} className="min-h-11 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-gray-700 shadow-sm active:bg-gray-100">
-              Answers wider
-            </button>
-          </div>
           <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePart.title}</h2>
 
           {canPlayAudio ? (
