@@ -1,13 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { ExamState, QuestionAnswer } from '../../types';
+import { DiagramLabelingBlock, ExamState, QuestionAnswer } from '../../types';
 import { QuestionRenderer } from './QuestionRenderer';
-import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight, ArrowLeft, ArrowRight, Flag } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight, ArrowLeft, ArrowRight, Flag, Minus, Plus, RotateCcw } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
-import { FormattedText } from './FormattedText';
 import { RichTextHighlighter } from './RichTextHighlighter';
 import type { StudentHighlightColor } from './highlightPalette';
+import { formatQuestionRange } from './questionRangeLabel';
+import { getImageUrlCandidates } from '../../utils/imageUrl';
+import { useSplitPaneResize } from './useSplitPaneResize';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -21,6 +23,65 @@ interface StudentListeningProps {
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
   tabletMode?: boolean | undefined;
+}
+
+function getDiagramSlotIds(block: DiagramLabelingBlock): string[] {
+  return block.labels.map((label) => `${block.id}:${label.id}`);
+}
+
+function isCurrentDiagramBlock(block: DiagramLabelingBlock, currentQuestionId: string | null, currentBlockId?: string): boolean {
+  if (currentBlockId === block.id || currentQuestionId === block.id) {
+    return true;
+  }
+
+  return Boolean(currentQuestionId && getDiagramSlotIds(block).includes(currentQuestionId));
+}
+
+function ListeningDiagramReference({
+  block,
+  zoom,
+}: {
+  block: DiagramLabelingBlock;
+  zoom: number;
+}) {
+  const sources = useMemo(() => getImageUrlCandidates(block.imageUrl ?? ''), [block.imageUrl]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const source = sources[sourceIndex] ?? '';
+
+  useEffect(() => {
+    setSourceIndex(0);
+  }, [block.imageUrl]);
+
+  if (!source) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
+        Add a diagram to support this question.
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-auto rounded-lg border border-gray-200 bg-gray-50" data-testid="listening-diagram-reference">
+      <img
+        src={source}
+        alt="Diagram reference"
+        className="h-auto max-h-[72dvh] max-w-none object-contain select-none"
+        style={{
+          width: `${Math.round(zoom * 100)}%`,
+          WebkitTouchCallout: 'none',
+          WebkitUserSelect: 'none',
+          userSelect: 'none',
+        }}
+        draggable={false}
+        referrerPolicy="no-referrer"
+        onContextMenu={(event) => event.preventDefault()}
+        onDragStart={(event) => event.preventDefault()}
+        onError={() => {
+          setSourceIndex((currentIndex) => Math.min(currentIndex + 1, sources.length - 1));
+        }}
+      />
+    </div>
+  );
 }
 
 export function StudentListening({
@@ -40,31 +101,60 @@ export function StudentListening({
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(70);
-  const [leftWidth, setLeftWidth] = useState(50);
+  const [diagramZoom, setDiagramZoom] = useState(1);
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const { handleDrag, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+    isTabletMode,
+    materialPaneWidthProperty: '--listening-pane-width',
+  });
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, 'listening'), [state]);
   const currentQ = allQuestions.find((question) => question.id === currentQuestionId) || allQuestions[0];
-  const activePartId = currentQ?.groupId || state.listening.parts[0]?.id;
-  const activePart = state.listening.parts.find((part) => part.id === activePartId) || state.listening.parts[0];
+  const activePart = useMemo(() => {
+    const partByQuestionGroup = currentQ
+      ? state.listening.parts.find((part) => part.id === currentQ.groupId)
+      : undefined;
+
+    if (partByQuestionGroup) {
+      return partByQuestionGroup;
+    }
+
+    const partByCurrentQuestion = state.listening.parts.find((part) =>
+      part.blocks.some((block) => {
+        if (block.id === currentQuestionId || block.id === currentQ?.blockId) {
+          return true;
+        }
+
+        return block.type === 'DIAGRAM_LABELING' && isCurrentDiagramBlock(block, currentQuestionId, currentQ?.blockId);
+      }),
+    );
+
+    return partByCurrentQuestion || state.listening.parts.find((part) => part.id === state.activeListeningPartId) || state.listening.parts[0];
+  }, [currentQ, currentQuestionId, state.activeListeningPartId, state.listening.parts]);
   const currentIndex = allQuestions.findIndex((question) => question.id === currentQuestionId);
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < allQuestions.length - 1;
   const previousQuestion = hasPrev ? allQuestions[currentIndex - 1] : undefined;
   const nextQuestion = hasNext ? allQuestions[currentIndex + 1] : undefined;
-  const splitPaneStyle = useMemo(
-    () =>
-      ({
-        ['--listening-pane-width' as string]: `${leftWidth}%`,
-        ['--question-pane-width' as string]: `calc(${100 - leftWidth}% - 16px)`,
-      }) as React.CSSProperties,
-    [leftWidth],
-  );
   const audioPlaybackEnabled = state.config.sections.listening.audioPlaybackEnabled ?? true;
-  const staffInstructions = (state.config.sections.listening.staffInstructions ?? '').trim();
+  const activeTranscript = ((activePart as { transcript?: string | undefined }).transcript ?? '').trim();
   const hasAudioSource = Boolean(activePart?.audioUrl);
   const canPlayAudio = audioPlaybackEnabled && hasAudioSource;
   const shouldShowAudioPanel = audioPlaybackEnabled;
+  const activeDiagramBlocks = useMemo(() => {
+    const diagramBlocks = (activePart?.blocks ?? []).filter((block): block is DiagramLabelingBlock => block.type === 'DIAGRAM_LABELING');
+    const currentDiagramBlocks = diagramBlocks.filter((block) => isCurrentDiagramBlock(block, currentQuestionId, currentQ?.blockId));
+
+    return currentDiagramBlocks.length > 0 ? currentDiagramBlocks : diagramBlocks;
+  }, [activePart?.blocks, currentQ?.blockId, currentQuestionId]);
+  const hiddenDiagramReferenceBlockIds = useMemo(
+    () => new Set(activeDiagramBlocks.map((block) => block.id)),
+    [activeDiagramBlocks],
+  );
+
+  const adjustDiagramZoom = (delta: number) => {
+    setDiagramZoom((current) => Math.min(1.8, Math.max(0.8, Math.round((current + delta) * 100) / 100)));
+  };
 
   useEffect(() => {
     if (currentQuestionId && questionContainerRef.current) {
@@ -136,31 +226,6 @@ export function StudentListening({
     setIsPlaying(false);
   };
   
-  const handleDrag = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-      const firstTouch = 'touches' in e ? e.touches[0] : undefined;
-      if ('touches' in e && !firstTouch) {
-        return;
-      }
-      const clientX = firstTouch ? firstTouch.clientX : (e as MouseEvent).clientX;
-      const newWidth = (clientX / window.innerWidth) * 100;
-      if (newWidth > 30 && newWidth < 70) {
-        setLeftWidth(newWidth);
-      }
-    };
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('touchmove', handleMouseMove);
-      document.removeEventListener('touchend', handleMouseUp);
-    };
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('touchmove', handleMouseMove);
-    document.addEventListener('touchend', handleMouseUp);
-  };
-
   const formatTime = (seconds: number) => {
     const bounded = Math.max(0, Math.floor(seconds));
     const m = Math.floor(bounded / 60);
@@ -181,31 +246,19 @@ export function StudentListening({
     <div className="flex flex-col h-full w-full bg-white">
       <div
         className={`relative flex flex-1 overflow-hidden border-t border-gray-300 ${
-          isTabletMode ? 'flex-col' : 'flex-col md:flex-row'
+          isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
         }`}
-        style={isTabletMode ? undefined : splitPaneStyle}
+        ref={workspaceRef}
+        style={splitPaneStyle}
+        data-testid="listening-split-workspace"
       >
         <div
           className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base ${
-            isTabletMode ? 'max-h-[42dvh] border-b border-gray-200' : 'lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
+            isTabletMode ? 'w-[var(--listening-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
           }`}
           data-student-zoom-scroll
         >
           <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePart.title}</h2>
-
-          {staffInstructions ? (
-            <div className="mb-4 md:mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
-              <p className="text-xs font-bold uppercase tracking-wider text-amber-800 mb-2">Staff Instructions</p>
-              <RichTextHighlighter
-                content={staffInstructions}
-                contentType="text"
-                enabled={highlightEnabled}
-                className="text-sm md:text-base text-amber-900 whitespace-pre-wrap"
-                highlightColor={highlightColor}
-                highlightClassName={highlightClassName}
-              />
-            </div>
-          ) : null}
 
           {canPlayAudio ? (
             <audio
@@ -311,21 +364,62 @@ export function StudentListening({
               </div>
             </div>
           )}
+          {activeDiagramBlocks.length > 0 ? (
+            <div className="mt-4 space-y-4" data-testid="listening-material-pane">
+              {activeDiagramBlocks.map((diagramBlock) => (
+                  <div key={diagramBlock.id} className="rounded-xl border border-gray-200 bg-white p-3">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold text-gray-700">Diagram reference</h3>
+                      <div className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 p-1">
+                        <button type="button" onClick={() => adjustDiagramZoom(-0.15)} className="flex h-8 w-8 items-center justify-center rounded bg-white text-gray-700" aria-label="Zoom diagram out">
+                          <Minus size={14} />
+                        </button>
+                        <span className="min-w-12 text-center text-xs font-bold text-gray-700">{Math.round(diagramZoom * 100)}%</span>
+                        <button type="button" onClick={() => adjustDiagramZoom(0.15)} className="flex h-8 w-8 items-center justify-center rounded bg-white text-gray-700" aria-label="Zoom diagram in">
+                          <Plus size={14} />
+                        </button>
+                        <button type="button" onClick={() => setDiagramZoom(1)} className="flex h-8 w-8 items-center justify-center rounded bg-white text-gray-700" aria-label="Reset diagram zoom">
+                          <RotateCcw size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <ListeningDiagramReference block={diagramBlock} zoom={diagramZoom} />
+                  </div>
+                ))}
+            </div>
+          ) : null}
+          {activeTranscript ? (
+            <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
+              <h3 className="mb-2 text-sm font-semibold text-gray-700">Transcript / Reference</h3>
+              <RichTextHighlighter
+                content={activeTranscript}
+                contentType="text"
+                enabled={highlightEnabled}
+                className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800 md:text-base"
+                highlightColor={highlightColor}
+                highlightClassName={highlightClassName}
+              />
+            </div>
+          ) : null}
         </div>
 
         <div 
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          className="hidden lg:flex w-4 bg-gray-400 relative flex items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors"
+          className={`${isTabletMode ? 'flex w-11' : 'hidden w-4 lg:flex'} bg-gray-400 relative items-center justify-center cursor-col-resize flex-shrink-0 touch-none hover:bg-gray-600 transition-colors`}
+          role="separator"
+          aria-label="Resize listening material and answer panels"
+          aria-orientation="vertical"
+          data-testid="listening-pane-resizer"
         >
-          <div className="w-8 h-8 bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none">
-            <ArrowLeftRight size={14} className="text-gray-600" />
+          <div className={`${isTabletMode ? 'h-[5.5rem] w-14' : 'h-10 w-8'} bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none`}>
+            <ArrowLeftRight size={isTabletMode ? 22 : 14} className="text-gray-600" />
           </div>
         </div>
 
-        <div className="relative flex h-full w-full min-w-0 flex-col md:min-w-[320px] lg:w-[var(--question-pane-width)] min-h-0">
+        <div className={`relative flex h-full min-w-0 flex-col min-h-0 ${isTabletMode ? 'w-[var(--question-pane-width)] min-w-[48px]' : 'w-full md:min-w-[320px] lg:w-[var(--question-pane-width)]'}`}>
           <div
-            className={`flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10 ${
+            className={`flex-1 overflow-y-auto p-4 md:p-5 lg:p-8 pb-20 md:pb-24 space-y-6 md:space-y-8 ${
               isTabletMode ? 'pb-28 md:pb-28' : ''
             }`}
             ref={questionContainerRef}
@@ -348,14 +442,8 @@ export function StudentListening({
                 <div key={block.id} className="space-y-4 md:space-y-6 mb-4 md:mb-6">
                   <div className="mb-3 md:mb-4">
                     <h3 className="font-bold text-gray-900 mb-1 md:mb-2 text-base md:text-lg">
-                      Questions {blockStartQ}–{blockEndQ}
+                      Questions {formatQuestionRange(blockStartQ, blockEndQ)}
                     </h3>
-                    <FormattedText
-                      as="p"
-                      className="text-gray-900 text-sm md:text-base"
-                      text={block.instruction}
-                      highlightEnabled={highlightEnabled}
-                    />
                   </div>
                   
                   <div className="space-y-8">
@@ -419,6 +507,7 @@ export function StudentListening({
                               tabletMode={isTabletMode}
                               highlightEnabled={highlightEnabled}
                               highlightColor={highlightColor}
+                              hideDiagramReference={hiddenDiagramReferenceBlockIds.has(block.id)}
                             />
                           </div>
                         );
@@ -473,6 +562,7 @@ export function StudentListening({
                           tabletMode={isTabletMode}
                           highlightEnabled={highlightEnabled}
                           highlightColor={highlightColor}
+                          hideDiagramReference={hiddenDiagramReferenceBlockIds.has(block.id)}
                         />
                       </div>
                     )}

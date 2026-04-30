@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ExamState, QuestionAnswer } from '../../types';
 import { QuestionRenderer } from './QuestionRenderer';
-import { ArrowLeft, ArrowRight, ArrowLeftRight, Flag } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowLeftRight, ChevronDown, ChevronUp, Flag } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
@@ -10,6 +10,8 @@ import { RichTextHighlighter } from './RichTextHighlighter';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StimulusAnnotation } from '../../types';
+import { formatQuestionRange } from './questionRangeLabel';
+import { useSplitPaneResize } from './useSplitPaneResize';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -39,8 +41,12 @@ export function StudentReading({
   tabletMode = false,
 }: StudentReadingProps) {
   const isTabletMode = Boolean(tabletMode);
-  const [leftWidth, setLeftWidth] = useState(50);
+  const [collapsedInstructions, setCollapsedInstructions] = useState<Record<string, boolean>>({});
   const questionContainerRef = useRef<HTMLDivElement>(null);
+  const { handleDrag, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+    isTabletMode,
+    materialPaneWidthProperty: '--reading-pane-width',
+  });
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, 'reading'), [state]);
   const currentQ = allQuestions.find((question) => question.id === currentQuestionId) || allQuestions[0];
   const activePassageId = currentQ?.groupId || state.reading.passages[0]?.id;
@@ -55,14 +61,40 @@ export function StudentReading({
   const hasNext = currentIndex >= 0 && currentIndex < allQuestions.length - 1;
   const previousQuestion = hasPrev ? allQuestions[currentIndex - 1] : undefined;
   const nextQuestion = hasNext ? allQuestions[currentIndex + 1] : undefined;
-  const splitPaneStyle = useMemo(
-    () =>
-      ({
-        ['--reading-pane-width' as string]: `${leftWidth}%`,
-        ['--question-pane-width' as string]: `calc(${100 - leftWidth}% - 16px)`,
-      }) as React.CSSProperties,
-    [leftWidth],
-  );
+  const renderBlockInstruction = (blockId: string, instruction: string) => {
+    const isLong = instruction.trim().length > 140;
+    const isCollapsed = isLong && collapsedInstructions[blockId] !== false;
+
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+        <div className="flex items-start justify-between gap-3">
+          <FormattedText
+            as="p"
+            className={`text-sm leading-relaxed text-gray-800 md:text-base ${isCollapsed ? 'line-clamp-2' : ''}`}
+            text={instruction}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+          />
+          {isLong ? (
+            <button
+              type="button"
+              onClick={() =>
+                setCollapsedInstructions((prev) => ({
+                  ...prev,
+                  [blockId]: !isCollapsed,
+                }))
+              }
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-600 shadow-sm"
+              aria-expanded={!isCollapsed}
+            >
+              {isCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+              {isCollapsed ? 'Show' : 'Hide'}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
 
   const renderPassageImageAnnotations = (annotations: StimulusAnnotation[], zoom = 1) => (
     <>
@@ -141,31 +173,6 @@ export function StudentReading({
     }
   }, [currentQuestionId]);
   
-  const handleDrag = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-      const firstTouch = 'touches' in e ? e.touches[0] : undefined;
-      if ('touches' in e && !firstTouch) {
-        return;
-      }
-      const clientX = firstTouch ? firstTouch.clientX : (e as MouseEvent).clientX;
-      const newWidth = (clientX / window.innerWidth) * 100;
-      if (newWidth > 30 && newWidth < 70) {
-        setLeftWidth(newWidth);
-      }
-    };
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('touchmove', handleMouseMove);
-      document.removeEventListener('touchend', handleMouseUp);
-    };
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-      document.addEventListener('touchmove', handleMouseMove);
-      document.addEventListener('touchend', handleMouseUp);
-    };
-
   if (!activePassage) {
     return null;
   }
@@ -174,18 +181,26 @@ export function StudentReading({
     <div className="flex flex-col h-full w-full bg-white">
       <div
         className={`relative flex flex-1 overflow-hidden border-t border-gray-300 ${
-          isTabletMode ? 'flex-col' : 'flex-col md:flex-row'
+          isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
         }`}
-        style={isTabletMode ? undefined : splitPaneStyle}
+        ref={workspaceRef}
+        style={splitPaneStyle}
+        data-testid="reading-split-workspace"
       >
         <div
-          className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base ${
-            isTabletMode ? 'max-h-[42dvh] border-b border-gray-200' : 'lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
+          className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-gray-900 md:p-6 md:pr-6 ${
+            isTabletMode ? 'w-[var(--reading-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
           }`}
+          style={{
+            fontSize: 'var(--student-passage-font-size)',
+            lineHeight: 'var(--student-passage-line-height)',
+          }}
           data-student-zoom-scroll
         >
-          <h2 className="text-lg md:text-xl font-bold mb-4 md:mb-6">{activePassage.title}</h2>
-          <div className="leading-relaxed text-gray-900 space-y-4 [&_h1]:text-2xl [&_h1]:font-black [&_h2]:text-xl [&_h2]:font-bold [&_h3]:text-lg [&_h3]:font-bold [&_img]:max-w-full [&_img]:rounded-2xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6">
+          <h2 className="mb-4 font-bold leading-tight text-gray-950 md:mb-6" style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
+            {activePassage.title}
+          </h2>
+          <div className="space-y-5 text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7">
             <RichTextHighlighter
               content={activePassage.content}
               contentType={passageHasHtml ? 'html' : 'text'}
@@ -212,16 +227,20 @@ export function StudentReading({
         <div 
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          className="hidden lg:flex w-4 bg-gray-400 relative flex items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors"
+          className={`${isTabletMode ? 'flex w-11' : 'hidden w-4 lg:flex'} bg-gray-400 relative items-center justify-center cursor-col-resize flex-shrink-0 touch-none hover:bg-gray-600 transition-colors`}
+          role="separator"
+          aria-label="Resize reading passage and answer panels"
+          aria-orientation="vertical"
+          data-testid="reading-pane-resizer"
         >
-          <div className="w-8 h-8 bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none">
-            <ArrowLeftRight size={14} className="text-gray-600" />
+          <div className={`${isTabletMode ? 'h-[5.5rem] w-14' : 'h-10 w-8'} bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none`}>
+            <ArrowLeftRight size={isTabletMode ? 22 : 14} className="text-gray-600" />
           </div>
         </div>
 
-        <div className="relative flex h-full w-full min-w-0 flex-col md:min-w-[320px] lg:w-[var(--question-pane-width)] min-h-0">
+        <div className={`relative flex h-full min-w-0 flex-col min-h-0 ${isTabletMode ? 'w-[var(--question-pane-width)] min-w-[48px]' : 'w-full md:min-w-[320px] lg:w-[var(--question-pane-width)]'}`}>
           <div
-            className={`flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pb-20 md:pb-24 space-y-8 md:space-y-10 ${
+            className={`flex-1 overflow-y-auto p-4 md:p-5 lg:p-8 pb-20 md:pb-24 space-y-6 md:space-y-8 ${
               isTabletMode ? 'pb-28 md:pb-28' : ''
             }`}
             ref={questionContainerRef}
@@ -244,14 +263,9 @@ export function StudentReading({
                 <div key={block.id} className="space-y-4 md:space-y-6 mb-4 md:mb-6">
                   <div className="mb-3 md:mb-4">
                     <h3 className="font-bold text-gray-900 mb-1 md:mb-2 text-base md:text-lg">
-                      Questions {blockStartQ}–{blockEndQ}
+                      Questions {formatQuestionRange(blockStartQ, blockEndQ)}
                     </h3>
-                    <FormattedText
-                      as="p"
-                      className="text-gray-900 text-sm md:text-base"
-                      text={block.instruction}
-                      highlightEnabled={highlightEnabled}
-                    />
+                    {renderBlockInstruction(block.id, block.instruction)}
                   </div>
                   
                   <div className="space-y-8 md:space-y-10">
