@@ -25,14 +25,14 @@ PREPARE idx_slots_stmt FROM @idx_slots_sql;
 EXECUTE idx_slots_stmt;
 DEALLOCATE PREPARE idx_slots_stmt;
 
-SET @dup_session_mutation_count := (
-    SELECT COUNT(*)
-    FROM (
+-- Keep startup migrations lightweight on live systems. If mutations already exist,
+-- defer this unique index to a dedicated offline/backfill procedure.
+SET @student_attempt_mutations_has_rows := (
+    SELECT EXISTS(
         SELECT 1
         FROM student_attempt_mutations
-        GROUP BY attempt_id, client_session_id, client_mutation_id
-        HAVING COUNT(*) > 1
-    ) duplicate_groups
+        LIMIT 1
+    )
 );
 
 SET @idx_session_mut_exists := (
@@ -43,7 +43,7 @@ SET @idx_session_mut_exists := (
       AND index_name = 'idx_student_attempt_mutations_attempt_session_mutation_id'
 );
 SET @idx_session_mut_sql := IF(
-    @idx_session_mut_exists = 0 AND @dup_session_mutation_count = 0,
+    @idx_session_mut_exists = 0 AND @student_attempt_mutations_has_rows = 0,
     'CREATE UNIQUE INDEX idx_student_attempt_mutations_attempt_session_mutation_id ON student_attempt_mutations(attempt_id, client_session_id, client_mutation_id)',
     'SELECT 1'
 );
