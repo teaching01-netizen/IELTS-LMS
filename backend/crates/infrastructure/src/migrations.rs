@@ -49,10 +49,25 @@ async fn run_startup_migrations_on_connection(
         }
 
         let sql = sanitize_migration_sql(&migration.sql);
-        conn.execute(sql.as_ref()).await?;
+        execute_migration_statements(conn, sql.as_ref()).await?;
         record_migration(conn, &migration.filename).await?;
     }
 
+    Ok(())
+}
+
+async fn execute_migration_statements(
+    conn: &mut MySqlConnection,
+    sql: &str,
+) -> Result<(), sqlx::Error> {
+    for statement in split_sql_statements(sql) {
+        let trimmed = statement.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        conn.execute(trimmed).await?;
+    }
     Ok(())
 }
 
@@ -196,6 +211,144 @@ fn sanitize_migration_sql<'a>(sql: &'a str) -> Cow<'a, str> {
     Cow::Borrowed(sql)
 }
 
+fn split_sql_statements(sql: &str) -> Vec<String> {
+    let mut statements = Vec::new();
+    let mut current = String::new();
+
+    let mut chars = sql.chars().peekable();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut in_backtick = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+
+    while let Some(ch) = chars.next() {
+        if in_line_comment {
+            current.push(ch);
+            if ch == '\n' {
+                in_line_comment = false;
+            }
+            continue;
+        }
+
+        if in_block_comment {
+            current.push(ch);
+            if ch == '*' && matches!(chars.peek(), Some('/')) {
+                current.push(chars.next().unwrap_or('/'));
+                in_block_comment = false;
+            }
+            continue;
+        }
+
+        if in_single_quote {
+            current.push(ch);
+            if ch == '\\' {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+                continue;
+            }
+            if ch == '\'' {
+                if matches!(chars.peek(), Some('\'')) {
+                    current.push(chars.next().unwrap_or('\''));
+                    continue;
+                }
+                in_single_quote = false;
+            }
+            continue;
+        }
+
+        if in_double_quote {
+            current.push(ch);
+            if ch == '\\' {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+                continue;
+            }
+            if ch == '"' {
+                if matches!(chars.peek(), Some('"')) {
+                    current.push(chars.next().unwrap_or('"'));
+                    continue;
+                }
+                in_double_quote = false;
+            }
+            continue;
+        }
+
+        if in_backtick {
+            current.push(ch);
+            if ch == '`' {
+                in_backtick = false;
+            }
+            continue;
+        }
+
+        if ch == '-' && matches!(chars.peek(), Some('-')) {
+            let mut lookahead = chars.clone();
+            lookahead.next();
+            if matches!(
+                lookahead.peek(),
+                Some(' ' | '\t' | '\n' | '\r' | '\u{000C}' | '\u{000B}')
+            ) {
+                current.push(ch);
+                current.push(chars.next().unwrap_or('-'));
+                in_line_comment = true;
+                continue;
+            }
+        }
+
+        if ch == '#' {
+            current.push(ch);
+            in_line_comment = true;
+            continue;
+        }
+
+        if ch == '/' && matches!(chars.peek(), Some('*')) {
+            current.push(ch);
+            current.push(chars.next().unwrap_or('*'));
+            in_block_comment = true;
+            continue;
+        }
+
+        if ch == '\'' {
+            in_single_quote = true;
+            current.push(ch);
+            continue;
+        }
+
+        if ch == '"' {
+            in_double_quote = true;
+            current.push(ch);
+            continue;
+        }
+
+        if ch == '`' {
+            in_backtick = true;
+            current.push(ch);
+            continue;
+        }
+
+        if ch == ';' {
+            let stmt = current.trim();
+            if !stmt.is_empty() {
+                statements.push(stmt.to_owned());
+            }
+            current.clear();
+            continue;
+        }
+
+        current.push(ch);
+    }
+
+    let trailing = current.trim();
+    if !trailing.is_empty() {
+        statements.push(trailing.to_owned());
+    }
+
+    statements
+}
+
 fn resolve_default_migrations_dir(current_exe: Option<&Path>, manifest_dir: &Path) -> PathBuf {
     if let Some(executable) = current_exe {
         if let Some(parent) = executable.parent() {
@@ -217,7 +370,7 @@ fn resolve_default_migrations_dir(current_exe: Option<&Path>, manifest_dir: &Pat
 mod tests {
     use std::path::Path;
 
-    use super::{resolve_default_migrations_dir, sanitize_migration_sql};
+    use super::{resolve_default_migrations_dir, sanitize_migration_sql, split_sql_statements};
 
     #[test]
     fn leaves_sql_unchanged() {
@@ -228,6 +381,33 @@ CREATE INDEX idx_foo_id ON foo(id);\n";
         let filtered = sanitize_migration_sql(sql);
 
         assert_eq!(filtered.as_ref(), sql);
+    }
+
+    #[test]
+    fn splits_multiple_statements_and_trims_empty_entries() {
+        let sql = "SET @a = 1;;\nSELECT @a;\n";
+        let statements = split_sql_statements(sql);
+        assert_eq!(statements, vec!["SET @a = 1", "SELECT @a"]);
+    }
+
+    #[test]
+    fn does_not_split_semicolons_inside_strings_or_comments() {
+        let sql = "\
+SET @q := 'CREATE INDEX idx ON t(c);';\n\
+-- comment with ; inside\n\
+SET @x := \"a;b\";\n\
+/* block ; comment */\n\
+SELECT @q, @x;\n";
+
+        let statements = split_sql_statements(sql);
+        assert_eq!(
+            statements,
+            vec![
+                "SET @q := 'CREATE INDEX idx ON t(c);'",
+                "-- comment with ; inside\nSET @x := \"a;b\"",
+                "/* block ; comment */\nSELECT @q, @x",
+            ]
+        );
     }
 
     #[test]
