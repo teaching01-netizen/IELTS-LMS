@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { DiagramLabelingBlock, ExamState, QuestionAnswer } from '../../types';
 import { QuestionRenderer } from './QuestionRenderer';
-import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight, ArrowLeft, ArrowRight, Flag, Minus, Plus, RotateCcw } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight, ArrowLeft, ArrowRight, Flag } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
@@ -11,7 +11,7 @@ import type { StudentHighlightColor } from './highlightPalette';
 import { formatQuestionRange } from './questionRangeLabel';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
 import { useSplitPaneResize } from './useSplitPaneResize';
-import { useDragToPan } from './useDragToPan';
+import { StudentZoomableMedia } from './StudentZoomableMedia';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -42,21 +42,11 @@ function isCurrentDiagramBlock(block: DiagramLabelingBlock, currentQuestionId: s
 
 function ListeningDiagramReference({
   block,
-  zoom,
 }: {
   block: DiagramLabelingBlock;
-  zoom: number;
 }) {
-  const diagramPan = useDragToPan<HTMLDivElement>(zoom > 1);
   const sources = useMemo(() => getImageUrlCandidates(block.imageUrl ?? ''), [block.imageUrl]);
-  const [sourceIndex, setSourceIndex] = useState(0);
-  const source = sources[sourceIndex] ?? '';
-
-  useEffect(() => {
-    setSourceIndex(0);
-  }, [block.imageUrl]);
-
-  if (!source) {
+  if (!sources[0]) {
     return (
       <div className="rounded-lg border border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
         Add a diagram to support this question.
@@ -65,30 +55,14 @@ function ListeningDiagramReference({
   }
 
   return (
-    <div
-      className="overflow-auto rounded-lg border border-gray-200 bg-gray-50"
-      data-testid="listening-diagram-reference"
-      style={diagramPan.dragStyle}
-      {...diagramPan.dragHandlers}
-    >
-      <img
-        src={source}
+    <div data-testid="listening-diagram-reference">
+      <StudentZoomableMedia
+        sources={sources}
         alt="Diagram reference"
-        className="h-auto max-h-[72dvh] max-w-none object-contain select-none"
-        style={{
-          width: `${Math.round(zoom * 100)}%`,
-          WebkitTouchCallout: 'none',
-          WebkitUserSelect: 'none',
-          userSelect: 'none',
-          touchAction: zoom > 1 ? 'none' : 'manipulation',
-        }}
-        draggable={false}
-        referrerPolicy="no-referrer"
-        onContextMenu={(event) => event.preventDefault()}
-        onDragStart={(event) => event.preventDefault()}
-        onError={() => {
-          setSourceIndex((currentIndex) => Math.min(currentIndex + 1, sources.length - 1));
-        }}
+        label="Diagram reference image"
+        hint="Tap to zoom the diagram"
+        className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+        imageClassName="max-h-[72dvh]"
       />
     </div>
   );
@@ -131,7 +105,6 @@ export function StudentListening({
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(70);
-  const [diagramZoom, setDiagramZoom] = useState(1);
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const { answerCompact, handleDrag, leftWidth, materialCompact, splitPaneStyle, workspaceRef } = useSplitPaneResize({
@@ -182,10 +155,6 @@ export function StudentListening({
     () => new Set(activeDiagramBlocks.map((block) => block.id)),
     [activeDiagramBlocks],
   );
-
-  const adjustDiagramZoom = (delta: number) => {
-    setDiagramZoom((current) => Math.min(1.8, Math.max(0.8, Math.round((current + delta) * 100) / 100)));
-  };
 
   useEffect(() => {
     if (currentQuestionId && questionContainerRef.current) {
@@ -419,22 +388,10 @@ export function StudentListening({
             <div className={`${materialCompact ? 'mt-3 space-y-3' : 'mt-4 space-y-4'} break-words [overflow-wrap:anywhere]`} data-testid="listening-material-pane">
               {activeDiagramBlocks.map((diagramBlock) => (
                   <div key={diagramBlock.id} className="rounded-xl border border-gray-200 bg-white p-3">
-                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="mb-3">
                       <h3 className="text-sm font-semibold text-gray-700">Diagram reference</h3>
-                      <div className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 p-1">
-                        <button type="button" onClick={() => adjustDiagramZoom(-0.15)} className="flex h-8 w-8 items-center justify-center rounded bg-white text-gray-700" aria-label="Zoom diagram out">
-                          <Minus size={14} />
-                        </button>
-                        <span className="min-w-12 text-center text-xs font-bold text-gray-700">{Math.round(diagramZoom * 100)}%</span>
-                        <button type="button" onClick={() => adjustDiagramZoom(0.15)} className="flex h-8 w-8 items-center justify-center rounded bg-white text-gray-700" aria-label="Zoom diagram in">
-                          <Plus size={14} />
-                        </button>
-                        <button type="button" onClick={() => setDiagramZoom(1)} className="flex h-8 w-8 items-center justify-center rounded bg-white text-gray-700" aria-label="Reset diagram zoom">
-                          <RotateCcw size={14} />
-                        </button>
-                      </div>
                     </div>
-                    <ListeningDiagramReference block={diagramBlock} zoom={diagramZoom} />
+                    <ListeningDiagramReference block={diagramBlock} />
                   </div>
                 ))}
             </div>

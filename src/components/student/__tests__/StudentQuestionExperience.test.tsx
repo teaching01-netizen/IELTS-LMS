@@ -1595,13 +1595,14 @@ describe('student question experience', () => {
 
     const materialPane = screen.getByTestId('listening-material-pane');
     expect(within(materialPane).getByAltText('Diagram reference')).toBeInTheDocument();
-    expect(within(materialPane).getByRole('button', { name: /zoom diagram in/i })).toBeInTheDocument();
+    expect(within(materialPane).queryByRole('button', { name: /zoom diagram in/i })).not.toBeInTheDocument();
+    expect(within(materialPane).getByRole('button', { name: /tap to zoom the diagram/i })).toBeInTheDocument();
     expect(screen.getByTestId('diagram-answer-panel')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Answer for question 1' })).toBeInTheDocument();
     expect(screen.getAllByAltText('Diagram reference')).toHaveLength(1);
   });
 
-  it('supports drag-to-pan for zoomed listening diagrams', () => {
+  it('opens listening diagram zoom in the shared modal viewer', () => {
     const state: ExamState = {
       title: 'Listening Test',
       type: 'Academic',
@@ -1657,19 +1658,12 @@ describe('student question experience', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /zoom diagram in/i }));
+    const openZoomButton = screen.getByRole('button', { name: /tap to zoom the diagram/i });
+    fireEvent.click(openZoomButton);
 
-    const reference = screen.getByTestId('listening-diagram-reference');
-    reference.scrollLeft = 48;
-    reference.scrollTop = 32;
-    expect(reference.style.cursor).toBe('grab');
-
-    fireEvent.mouseDown(reference, { button: 0, clientX: 300, clientY: 180 });
-    fireEvent.mouseMove(window, { clientX: 270, clientY: 140 });
-    fireEvent.mouseUp(window);
-
-    expect(reference.scrollLeft).toBe(78);
-    expect(reference.scrollTop).toBe(72);
+    const zoomDialog = screen.getByRole('dialog', { name: /diagram reference image zoomed view/i });
+    expect(zoomDialog.parentElement).toBe(document.body);
+    expect(screen.getByTestId('zoomable-media-viewport')).toBeInTheDocument();
   });
 
   it('shows the active listening diagram when the diagram is not in the first part', () => {
