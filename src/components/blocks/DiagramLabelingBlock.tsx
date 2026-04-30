@@ -34,7 +34,7 @@ export function DiagramLabelingBlock({ block, startNum, endNum, updateBlock, del
     updateBlock({ ...block, imageUrl });
   };
 
-  const updateLabel = (labelId: string, updates: { correctAnswer?: string }) => {
+  const updateLabel = (labelId: string, updates: { prompt?: string; correctAnswer?: string }) => {
     const newLabels = block.labels.map(l =>
       l.id === labelId ? { ...l, ...updates } : l
     );
@@ -46,6 +46,7 @@ export function DiagramLabelingBlock({ block, startNum, endNum, updateBlock, del
       id: createId('lbl'),
       x: 50,
       y: 50,
+      prompt: '',
       correctAnswer: ''
     };
     updateBlock({ ...block, labels: [...block.labels, newLabel] });
@@ -143,7 +144,24 @@ export function DiagramLabelingBlock({ block, startNum, endNum, updateBlock, del
           {block.labels.map((label, index) => (
             <div key={label.id} className="border rounded-md p-3 flex items-center gap-3">
               <span className="text-sm font-medium text-gray-700 w-16">{startNum + index}.</span>
-              <input type="text" value={label.correctAnswer} onChange={(e) => updateLabel(label.id, { correctAnswer: e.target.value })} className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Answer..." />
+              <div className="flex-1 grid gap-2 sm:grid-cols-2">
+                <input
+                  type="text"
+                  value={label.prompt ?? ''}
+                  onChange={(e) => updateLabel(label.id, { prompt: e.target.value })}
+                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                  placeholder={`Label ${index + 1}`}
+                  aria-label={`Prompt for label ${startNum + index}`}
+                />
+                <input
+                  type="text"
+                  value={label.correctAnswer}
+                  onChange={(e) => updateLabel(label.id, { correctAnswer: e.target.value })}
+                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                  placeholder="Answer..."
+                  aria-label={`Correct answer for label ${startNum + index}`}
+                />
+              </div>
               <button onClick={() => removeLabel(label.id)} className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
             </div>
           ))}

@@ -132,8 +132,18 @@ export function QuestionRenderer({
     value: string,
     changeValue: (nextValue: string) => void,
     extraCopy?: string,
+    extraCopyPosition: 'top' | 'bottom' = 'bottom',
   ) => (
     <div id={`question-${slotId}`} className={getSlotClassName(slotId)}>
+      {extraCopy && extraCopyPosition === 'top' ? (
+        <FormattedText
+          as="p"
+          className={`mb-2 text-sm text-gray-600 ${tabletMode ? 'pl-0' : 'pl-11'}`}
+          text={extraCopy}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+        />
+      ) : null}
       <div className={isCompactPane ? 'flex flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
         <span className="min-w-[2rem] font-bold text-gray-900">{slotNumber}.</span>
         <ProtectedInput
@@ -150,7 +160,7 @@ export function QuestionRenderer({
         />
         {renderFlagButton(slotId)}
       </div>
-      {extraCopy ? (
+      {extraCopy && extraCopyPosition === 'bottom' ? (
         <FormattedText
           as="p"
           className={`mt-2 text-sm text-gray-600 ${tabletMode ? 'pl-0' : 'pl-11'}`}
@@ -515,17 +525,21 @@ export function QuestionRenderer({
 
   const renderDiagramFallbackFields = (diagramBlock: DiagramLabelingBlock) => (
     <div className="space-y-3" data-testid="diagram-answer-panel">
-      {diagramBlock.labels.map((label, index) => (
-        <React.Fragment key={label.id}>
-          {renderTextField(
-            getSlotId(index, `${diagramBlock.id}:${label.id}`),
-            number + index,
-            stringArrayAnswer[index] ?? '',
-            (nextValue) => updateIndexedAnswer(index, nextValue, diagramBlock.labels.length),
-            `Label ${index + 1}`,
-          )}
-        </React.Fragment>
-      ))}
+      {diagramBlock.labels.map((label, index) => {
+        const prompt = label.prompt?.trim() ? label.prompt : `Label ${index + 1}`;
+        return (
+          <React.Fragment key={label.id}>
+            {renderTextField(
+              getSlotId(index, `${diagramBlock.id}:${label.id}`),
+              number + index,
+              stringArrayAnswer[index] ?? '',
+              (nextValue) => updateIndexedAnswer(index, nextValue, diagramBlock.labels.length),
+              prompt,
+              'top',
+            )}
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 

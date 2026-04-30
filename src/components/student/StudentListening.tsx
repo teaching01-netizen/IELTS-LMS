@@ -11,6 +11,7 @@ import type { StudentHighlightColor } from './highlightPalette';
 import { formatQuestionRange } from './questionRangeLabel';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
 import { useSplitPaneResize } from './useSplitPaneResize';
+import { useDragToPan } from './useDragToPan';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -46,6 +47,7 @@ function ListeningDiagramReference({
   block: DiagramLabelingBlock;
   zoom: number;
 }) {
+  const diagramPan = useDragToPan<HTMLDivElement>(zoom > 1);
   const sources = useMemo(() => getImageUrlCandidates(block.imageUrl ?? ''), [block.imageUrl]);
   const [sourceIndex, setSourceIndex] = useState(0);
   const source = sources[sourceIndex] ?? '';
@@ -63,7 +65,12 @@ function ListeningDiagramReference({
   }
 
   return (
-    <div className="overflow-auto rounded-lg border border-gray-200 bg-gray-50" data-testid="listening-diagram-reference">
+    <div
+      className="overflow-auto rounded-lg border border-gray-200 bg-gray-50"
+      data-testid="listening-diagram-reference"
+      style={diagramPan.dragStyle}
+      {...diagramPan.dragHandlers}
+    >
       <img
         src={source}
         alt="Diagram reference"
@@ -73,6 +80,7 @@ function ListeningDiagramReference({
           WebkitTouchCallout: 'none',
           WebkitUserSelect: 'none',
           userSelect: 'none',
+          touchAction: zoom > 1 ? 'none' : 'manipulation',
         }}
         draggable={false}
         referrerPolicy="no-referrer"
