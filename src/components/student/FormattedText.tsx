@@ -11,6 +11,8 @@ import { getStudentHighlightClassName, type StudentHighlightColor } from './high
 import { usePersistedStudentHighlightHtml } from './highlightPersistence';
 import { useDeferredSelectionHighlight } from './useDeferredSelectionHighlight';
 
+const MOUSE_SELECTION_REMOVE_GUARD_MS = 450;
+
 type FormattedTextProps = {
   text: string;
   className?: string | undefined;
@@ -34,6 +36,7 @@ export function FormattedText({
   const segments = useMemo(() => parseBoldMarkdown(text), [text]);
   const classes = ['whitespace-pre-wrap', 'break-words', className].filter(Boolean).join(' ');
   const containerRef = useRef<HTMLElement | null>(null);
+  const lastMouseSelectionIntentAtRef = useRef<number | null>(null);
   const initialHtml = useMemo(
     () =>
       segments
@@ -55,6 +58,13 @@ export function FormattedText({
     const selection = window.getSelection();
     if (!container || !selection) {
       return false;
+    }
+    const hasSelectionIntent =
+      selection.rangeCount > 0 &&
+      !selection.isCollapsed &&
+      selection.toString().trim().length > 0;
+    if (hasSelectionIntent) {
+      lastMouseSelectionIntentAtRef.current = Date.now();
     }
 
     const nextHtml = applySelectionHighlight(
@@ -113,6 +123,13 @@ export function FormattedText({
         return;
       }
       if (isWithinRecentTouchAutoApplyGuard()) {
+        return;
+      }
+      const lastMouseSelectionIntentAt = lastMouseSelectionIntentAtRef.current;
+      if (
+        lastMouseSelectionIntentAt &&
+        Date.now() - lastMouseSelectionIntentAt < MOUSE_SELECTION_REMOVE_GUARD_MS
+      ) {
         return;
       }
       const activeSelection = window.getSelection();

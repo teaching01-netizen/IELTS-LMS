@@ -386,4 +386,60 @@ describe('student highlight persistence', () => {
     expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(2);
     getSelectionSpy.mockRestore();
   });
+
+  it('does not remove a highlight immediately after a mouse selection attempt that cannot be highlighted', async () => {
+    const outsideHost = document.createElement('div');
+    outsideHost.textContent = 'outside text';
+    document.body.appendChild(outsideHost);
+    const outsideTextNode = outsideHost.firstChild;
+    if (!outsideTextNode) {
+      throw new Error('Expected outside text node');
+    }
+    const outsideRange = document.createRange();
+    outsideRange.setStart(outsideTextNode, 0);
+    outsideRange.setEnd(outsideTextNode, 7);
+
+    const selectionIntent = {
+      rangeCount: 1,
+      isCollapsed: false,
+      getRangeAt: () => outsideRange,
+      toString: () => 'outside',
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+    const collapsedSelection = {
+      rangeCount: 0,
+      isCollapsed: true,
+      toString: () => '',
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+    let currentSelection: Selection = selectionIntent;
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockImplementation(() => currentSelection);
+
+    const { container } = render(
+      <RichTextHighlighter
+        content={'Alpha <mark data-highlighted="true" class="bg-yellow-200">beta</mark> gamma <mark data-highlighted="true" class="bg-yellow-200">delta</mark>'}
+        contentType="html"
+        enabled
+      />,
+    );
+
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(2);
+    const textContainer = container.querySelector('[data-student-highlightable="true"]');
+    if (!textContainer) {
+      throw new Error('Expected highlightable container');
+    }
+    fireEvent.mouseUp(textContainer);
+
+    currentSelection = collapsedSelection;
+    const firstHighlight = container.querySelector('mark[data-highlighted="true"]');
+    if (!firstHighlight) {
+      throw new Error('Expected a highlighted phrase');
+    }
+    fireEvent.click(firstHighlight);
+
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(2);
+
+    getSelectionSpy.mockRestore();
+    document.body.removeChild(outsideHost);
+  });
 });

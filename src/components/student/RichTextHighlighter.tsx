@@ -11,6 +11,8 @@ import { getStudentHighlightClassName, type StudentHighlightColor } from './high
 import { usePersistedStudentHighlightHtml } from './highlightPersistence';
 import { useDeferredSelectionHighlight } from './useDeferredSelectionHighlight';
 
+const MOUSE_SELECTION_REMOVE_GUARD_MS = 450;
+
 interface RichTextHighlighterProps {
   content: string;
   contentType?: 'html' | 'text';
@@ -38,6 +40,7 @@ export function RichTextHighlighter({
 }: RichTextHighlighterProps) {
   const Tag = as as any;
   const containerRef = useRef<HTMLElement | null>(null);
+  const lastMouseSelectionIntentAtRef = useRef<number | null>(null);
   const initialHtml = useMemo(
     () => (contentType === 'html' ? sanitizeHtml(content) : escapeHtml(content)),
     [content, contentType],
@@ -56,6 +59,13 @@ export function RichTextHighlighter({
     const selection = window.getSelection();
     if (!container || !selection) {
       return false;
+    }
+    const hasSelectionIntent =
+      selection.rangeCount > 0 &&
+      !selection.isCollapsed &&
+      selection.toString().trim().length > 0;
+    if (hasSelectionIntent) {
+      lastMouseSelectionIntentAtRef.current = Date.now();
     }
 
     const nextHtml = applySelectionHighlight(
@@ -114,6 +124,13 @@ export function RichTextHighlighter({
         return;
       }
       if (isWithinRecentTouchAutoApplyGuard()) {
+        return;
+      }
+      const lastMouseSelectionIntentAt = lastMouseSelectionIntentAtRef.current;
+      if (
+        lastMouseSelectionIntentAt &&
+        Date.now() - lastMouseSelectionIntentAt < MOUSE_SELECTION_REMOVE_GUARD_MS
+      ) {
         return;
       }
       const activeSelection = window.getSelection();
