@@ -15,6 +15,7 @@ import type { StudentAttempt, StudentAttemptMutation } from '../../types/student
 import {
   compactSubmittedAttempt,
   pruneStudentAttemptCache,
+  resetStudentAttemptPendingMutationIndexedDbForTests,
   studentLocalCachePolicy,
   studentAttemptRepository,
 } from '../studentAttemptRepository';
@@ -99,10 +100,11 @@ async function getCachedAttempt(
 }
 
 describe('studentAttemptRepository', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     vi.clearAllMocks();
+    await resetStudentAttemptPendingMutationIndexedDbForTests();
   });
 
   it('prunes heartbeat events to a bounded ring buffer per attempt', async () => {

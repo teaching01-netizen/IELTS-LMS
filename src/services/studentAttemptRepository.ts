@@ -24,6 +24,9 @@ const STORAGE_KEY_PENDING_MUTATIONS = 'ielts_student_attempt_pending_mutations_v
 const STORAGE_KEY_HEARTBEAT_EVENTS = 'ielts_student_attempt_heartbeat_events_v1';
 const STORAGE_KEY_ATTEMPT_CREDENTIALS = 'ielts_student_attempt_credentials_v1';
 const STORAGE_KEY_ATTEMPT_RECEIPTS = 'ielts_student_attempt_receipts_v1';
+const STUDENT_ATTEMPT_IDB_NAME = 'ielts_student_attempt_cache_v1';
+const STUDENT_ATTEMPT_IDB_VERSION = 1;
+const STUDENT_ATTEMPT_IDB_PENDING_STORE = 'pending_mutations';
 const STORAGE_KEY_CLIENT_SESSION_PREFIX = 'ielts-student-client-session:v1:';
 const STORAGE_KEY_MUTATION_WATERMARK_PREFIX = 'ielts-student-mutation-watermark:v1:';
 const MAX_HEARTBEAT_EVENTS_PER_ATTEMPT = 200;
@@ -165,6 +168,7 @@ const mutationSequenceWatermarks = createTtlLruCache<string, number>({
   maxEntries: 500,
   ttlMs: 2 * 60 * 60 * 1000,
 });
+let pendingMutationDbPromise: Promise<IDBDatabase | null> | null = null;
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -190,6 +194,163 @@ function getBrowserStorage(type: 'localStorage' | 'sessionStorage'): Storage | n
     return storage ?? null;
   } catch {
     return null;
+  }
+}
+
+function getIndexedDbFactory(): IDBFactory | null {
+  try {
+    const owner =
+      typeof window !== 'undefined'
+        ? (window as any)
+        : typeof globalThis !== 'undefined'
+          ? (globalThis as any)
+          : null;
+    const indexedDb = owner?.indexedDB as IDBFactory | undefined;
+    return indexedDb ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function idbRequestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed.'));
+  });
+}
+
+function waitForIdbTransaction(transaction: IDBTransaction): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB transaction failed.'));
+    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted.'));
+  });
+}
+
+function isPendingAttemptMutationRecord(candidate: unknown): candidate is PendingAttemptMutationRecord {
+  if (!candidate || typeof candidate !== 'object') {
+    return false;
+  }
+
+  const record = candidate as Partial<PendingAttemptMutationRecord>;
+  return typeof record.attemptId === 'string' && Array.isArray(record.mutations);
+}
+
+function arePendingMutationRecordSetsEqual(
+  left: PendingAttemptMutationRecord[],
+  right: PendingAttemptMutationRecord[],
+): boolean {
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
+async function openPendingMutationDatabase(): Promise<IDBDatabase | null> {
+  if (pendingMutationDbPromise) {
+    return pendingMutationDbPromise;
+  }
+
+  const indexedDb = getIndexedDbFactory();
+  if (!indexedDb) {
+    return null;
+  }
+
+  pendingMutationDbPromise = new Promise<IDBDatabase | null>((resolve) => {
+    const request = indexedDb.open(STUDENT_ATTEMPT_IDB_NAME, STUDENT_ATTEMPT_IDB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(STUDENT_ATTEMPT_IDB_PENDING_STORE)) {
+        database.createObjectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE, { keyPath: 'attemptId' });
+      }
+    };
+
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => {
+        database.close();
+      };
+      resolve(database);
+    };
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+
+  return pendingMutationDbPromise;
+}
+
+async function getPendingMutationRecordsFromIndexedDb(): Promise<PendingAttemptMutationRecord[] | null> {
+  const database = await openPendingMutationDatabase();
+  if (!database) {
+    return null;
+  }
+
+  try {
+    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, 'readonly');
+    const store = transaction.objectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE);
+    const records = await idbRequestToPromise(store.getAll() as IDBRequest<unknown[]>);
+    await waitForIdbTransaction(transaction);
+    return records.filter(isPendingAttemptMutationRecord);
+  } catch {
+    return null;
+  }
+}
+
+async function writePendingMutationRecordsToIndexedDb(
+  records: PendingAttemptMutationRecord[],
+): Promise<boolean> {
+  const database = await openPendingMutationDatabase();
+  if (!database) {
+    return false;
+  }
+
+  try {
+    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, 'readwrite');
+    const store = transaction.objectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE);
+    store.clear();
+    for (const record of records) {
+      store.put(record);
+    }
+    await waitForIdbTransaction(transaction);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function putPendingMutationRecordInIndexedDb(
+  record: PendingAttemptMutationRecord,
+): Promise<boolean> {
+  const database = await openPendingMutationDatabase();
+  if (!database) {
+    return false;
+  }
+
+  try {
+    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, 'readwrite');
+    transaction.objectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE).put(record);
+    await waitForIdbTransaction(transaction);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function deletePendingMutationRecordInIndexedDb(attemptId: string): Promise<boolean> {
+  const database = await openPendingMutationDatabase();
+  if (!database) {
+    return false;
+  }
+
+  try {
+    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, 'readwrite');
+    transaction.objectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE).delete(attemptId);
+    await waitForIdbTransaction(transaction);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -488,6 +649,25 @@ export function getStudentAttemptLocalCacheStats(): StudentAttemptLocalCacheStat
     pendingMutationCount: pending.reduce((total, entry) => total + entry.mutations.length, 0),
     heartbeatEventCount: heartbeats.length,
   };
+}
+
+export async function resetStudentAttemptPendingMutationIndexedDbForTests(): Promise<void> {
+  const indexedDb = getIndexedDbFactory();
+  if (!indexedDb) {
+    pendingMutationDbPromise = null;
+    return;
+  }
+
+  const openDatabase = await pendingMutationDbPromise;
+  openDatabase?.close();
+  pendingMutationDbPromise = null;
+
+  await new Promise<void>((resolve) => {
+    const request = indexedDb.deleteDatabase(STUDENT_ATTEMPT_IDB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+    request.onblocked = () => resolve();
+  });
 }
 
 function clearAttemptCredential(attempt: Pick<StudentAttempt, 'id' | 'scheduleId'>): void {
@@ -797,6 +977,9 @@ function shouldPreferLocalAcceptedState(
 
   if (attemptAcceptedSeq(localAttempt) > attemptAcceptedSeq(incomingAttempt)) {
     return true;
+  }
+  if (attemptAcceptedSeq(localAttempt) < attemptAcceptedSeq(incomingAttempt)) {
+    return false;
   }
 
   const localUpdatedAt = parseIsoTimestamp(localAttempt.updatedAt);
@@ -1493,11 +1676,28 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     }
 
     this.setItem(STORAGE_KEY_PENDING_MUTATIONS, pending);
+    await putPendingMutationRecordInIndexedDb(nextEntry);
   }
 
   async getPendingMutations(attemptId: string): Promise<StudentAttemptMutation[]> {
-    const pending = this.getItem<PendingAttemptMutationRecord>(STORAGE_KEY_PENDING_MUTATIONS);
-    return pending.find((entry) => entry.attemptId === attemptId)?.mutations ?? [];
+    const localPending = this.getItem<PendingAttemptMutationRecord>(STORAGE_KEY_PENDING_MUTATIONS);
+    const indexedDbPending = await getPendingMutationRecordsFromIndexedDb();
+
+    if (indexedDbPending !== null) {
+      if (indexedDbPending.length === 0 && localPending.length > 0) {
+        const migrated = await writePendingMutationRecordsToIndexedDb(localPending);
+        if (migrated) {
+          return localPending.find((entry) => entry.attemptId === attemptId)?.mutations ?? [];
+        }
+      } else {
+        if (!arePendingMutationRecordSetsEqual(localPending, indexedDbPending)) {
+          this.setItem(STORAGE_KEY_PENDING_MUTATIONS, indexedDbPending);
+        }
+        return indexedDbPending.find((entry) => entry.attemptId === attemptId)?.mutations ?? [];
+      }
+    }
+
+    return localPending.find((entry) => entry.attemptId === attemptId)?.mutations ?? [];
   }
 
   async clearPendingMutations(attemptId: string): Promise<void> {
@@ -1506,6 +1706,7 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
       STORAGE_KEY_PENDING_MUTATIONS,
       pending.filter((entry) => entry.attemptId !== attemptId),
     );
+    await deletePendingMutationRecordInIndexedDb(attemptId);
   }
 
   async saveHeartbeatEvent(event: StudentHeartbeatEvent): Promise<void> {

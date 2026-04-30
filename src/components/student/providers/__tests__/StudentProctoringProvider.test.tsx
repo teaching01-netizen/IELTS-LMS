@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProctoringProvider, useProctoring } from '../StudentProctoringProvider';
 import { StudentAttemptProvider } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
+import { resetStudentAttemptPendingMutationIndexedDbForTests } from '../../../../services/studentAttemptRepository';
 import type { ExamConfig, ExamState } from '../../../../types';
 import type { StudentAttempt } from '../../../../types/studentAttempt';
 
@@ -130,8 +131,11 @@ const mockExamState: ExamState = {
   },
 };
 
-function renderHarness(config: ExamConfig = mockConfig) {
-  const attemptSnapshot: StudentAttempt = {
+function renderHarness(
+  config: ExamConfig = mockConfig,
+  attemptOverrides: Partial<StudentAttempt> = {},
+) {
+  const baseAttemptSnapshot: StudentAttempt = {
     id: 'attempt-1',
     scheduleId: 'sched-1',
     studentKey: 'student-sched-1-alice',
@@ -170,6 +174,18 @@ function renderHarness(config: ExamConfig = mockConfig) {
     },
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const attemptSnapshot: StudentAttempt = {
+    ...baseAttemptSnapshot,
+    ...attemptOverrides,
+    integrity: {
+      ...baseAttemptSnapshot.integrity,
+      ...(attemptOverrides.integrity ?? {}),
+    },
+    recovery: {
+      ...baseAttemptSnapshot.recovery,
+      ...(attemptOverrides.recovery ?? {}),
+    },
   };
 
   const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -274,10 +290,12 @@ function renderRuntimeBackedPreCheckHarness(config: ExamConfig = mockConfig) {
 }
 
 describe('StudentProctoringProvider', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    localStorage.clear();
     sessionStorage.clear();
+    await resetStudentAttemptPendingMutationIndexedDbForTests();
 
     Object.defineProperty(navigator, 'userAgent', {
       value:
@@ -599,6 +617,36 @@ describe('StudentProctoringProvider', () => {
     expect(
       harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
     ).toBe(false);
+  });
+
+  it('warns before unload when unsynced attempt changes exist', () => {
+    renderHarness(
+      mockConfig,
+      {
+        recovery: {
+          pendingMutationCount: 2,
+          syncState: 'saving',
+        },
+      },
+    );
+
+    const beforeUnloadEvent = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+    act(() => {
+      window.dispatchEvent(beforeUnloadEvent);
+    });
+
+    expect(beforeUnloadEvent.defaultPrevented).toBe(true);
+  });
+
+  it('does not warn before unload when attempt is already saved', () => {
+    renderHarness();
+
+    const beforeUnloadEvent = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+    act(() => {
+      window.dispatchEvent(beforeUnloadEvent);
+    });
+
+    expect(beforeUnloadEvent.defaultPrevented).toBe(false);
   });
 
   it('requests fullscreen re-entry when fullscreen is lost', async () => {

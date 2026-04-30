@@ -94,6 +94,23 @@ type ObservedSnapshot = {
 };
 
 const StudentAttemptContext = createContext<StudentAttemptContextValue | null>(null);
+const ANSWER_DURABLE_WRITE_DEBOUNCE_MS = 100;
+
+function isAnswerMutationType(type: StudentAttemptMutationType): boolean {
+  return type === 'answer' || type === 'writing_answer';
+}
+
+function isEditableDomTarget(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof Element)) {
+    return false;
+  }
+
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target.getAttribute('contenteditable') === 'true'
+  );
+}
 
 function getMutationCoalesceKey(mutation: StudentAttemptMutation): string | null {
   switch (mutation.type) {
@@ -221,6 +238,9 @@ function shouldPreferLocalAttemptState(
   if (localAcceptedSeq > incomingAcceptedSeq) {
     return true;
   }
+  if (localAcceptedSeq < incomingAcceptedSeq) {
+    return false;
+  }
 
   const localUpdatedAt = parseIsoTimestamp(localAttempt.updatedAt);
   const incomingUpdatedAt = parseIsoTimestamp(incomingAttempt.updatedAt);
@@ -259,6 +279,11 @@ export function StudentAttemptProvider({
   const observedRef = useRef<ObservedSnapshot>(createObservedSnapshot(attemptSnapshot));
   const objectiveFlushTimeoutRef = useRef<number | null>(null);
   const writingFlushTimeoutRef = useRef<number | null>(null);
+  const durablePendingWriteTimeoutRef = useRef<number | null>(null);
+  const pendingMutationVersionRef = useRef(0);
+  const durablePersistedMutationVersionRef = useRef(0);
+  const latestAnswerMutationVersionRef = useRef(0);
+  const durablePersistChainRef = useRef<Promise<boolean>>(Promise.resolve(true));
   const flushPendingRef = useRef<() => Promise<boolean>>(async () => true);
   const flushInFlightRef = useRef<Promise<boolean> | null>(null);
 
@@ -268,34 +293,135 @@ export function StudentAttemptProvider({
     setRuntimeAttemptSyncState(nextAttempt.recovery.syncState);
   }, [setRuntimeAttemptSyncState]);
 
-  const setPendingMutations = useCallback((nextMutations: StudentAttemptMutation[]) => {
+  const recordPendingMutationPersistenceError = useCallback((
+    error: unknown,
+    pendingMutationCountForError: number,
+    fallbackAttempt: StudentAttempt,
+  ) => {
+    const erroredAttempt = mergeAttempt(attemptRef.current ?? fallbackAttempt, {
+      recovery: {
+        syncState: 'error',
+        pendingMutationCount: pendingMutationCountForError,
+      },
+    });
+    syncAttemptState(erroredAttempt);
+    void saveStudentAuditEvent(
+      scheduleId ?? fallbackAttempt.scheduleId,
+      'PERSISTENCE_STORAGE_ERROR',
+      {
+        message: error instanceof Error ? error.message : 'Failed to persist pending mutations',
+        pendingMutationCount: pendingMutationCountForError,
+      },
+      fallbackAttempt.id,
+    );
+  }, [scheduleId, syncAttemptState]);
+
+  const updatePendingMutationsRamState = useCallback((
+    nextMutations: StudentAttemptMutation[],
+    options?: {
+      includesAnswerMutation?: boolean;
+    },
+  ) => {
     pendingMutationsRef.current = nextMutations;
     setPendingMutationCount(nextMutations.length);
+    pendingMutationVersionRef.current += 1;
 
-    if (attemptRef.current) {
-      const attempt = attemptRef.current;
-      void studentAttemptRepository
-        .savePendingMutations(attempt.id, nextMutations)
-        .catch((error) => {
-          const erroredAttempt = mergeAttempt(attemptRef.current ?? attempt, {
-            recovery: {
-              syncState: 'error',
-              pendingMutationCount: nextMutations.length,
-            },
-          });
-          syncAttemptState(erroredAttempt);
-          void saveStudentAuditEvent(
-            scheduleId ?? attempt.scheduleId,
-            'PERSISTENCE_STORAGE_ERROR',
-            {
-              message: error instanceof Error ? error.message : 'Failed to persist pending mutations',
-              pendingMutationCount: nextMutations.length,
-            },
-            attempt.id,
-          );
-        });
+    if (options?.includesAnswerMutation) {
+      latestAnswerMutationVersionRef.current = pendingMutationVersionRef.current;
     }
-  }, [scheduleId, syncAttemptState]);
+  }, []);
+
+  const clearDurablePendingWriteTimeout = useCallback(() => {
+    if (durablePendingWriteTimeoutRef.current) {
+      window.clearTimeout(durablePendingWriteTimeoutRef.current);
+      durablePendingWriteTimeoutRef.current = null;
+    }
+  }, []);
+
+  const persistPendingMutationsMirrorNow = useCallback((): Promise<boolean> => {
+    const persistTask = durablePersistChainRef.current.then(async () => {
+      const attempt = attemptRef.current;
+      if (!attempt) {
+        return true;
+      }
+
+      const mutationVersion = pendingMutationVersionRef.current;
+      if (mutationVersion <= durablePersistedMutationVersionRef.current) {
+        return true;
+      }
+
+      try {
+        const pendingMutations = pendingMutationsRef.current;
+        if (pendingMutations.length > 0) {
+          await studentAttemptRepository.savePendingMutations(attempt.id, pendingMutations);
+        } else {
+          await studentAttemptRepository.clearPendingMutations(attempt.id);
+        }
+      } catch (error) {
+        recordPendingMutationPersistenceError(error, pendingMutationsRef.current.length, attempt);
+        return false;
+      }
+
+      durablePersistedMutationVersionRef.current = Math.max(
+        durablePersistedMutationVersionRef.current,
+        mutationVersion,
+      );
+      return true;
+    });
+
+    durablePersistChainRef.current = persistTask;
+    return persistTask;
+  }, [recordPendingMutationPersistenceError]);
+
+  const scheduleDebouncedPendingMutationMirrorPersist = useCallback(() => {
+    clearDurablePendingWriteTimeout();
+    durablePendingWriteTimeoutRef.current = window.setTimeout(() => {
+      void persistPendingMutationsMirrorNow();
+    }, ANSWER_DURABLE_WRITE_DEBOUNCE_MS);
+  }, [clearDurablePendingWriteTimeout, persistPendingMutationsMirrorNow]);
+
+  const flushAnswerDurableMirrorNow = useCallback(() => {
+    if (durablePersistedMutationVersionRef.current >= latestAnswerMutationVersionRef.current) {
+      return;
+    }
+
+    clearDurablePendingWriteTimeout();
+    void persistPendingMutationsMirrorNow();
+  }, [clearDurablePendingWriteTimeout, persistPendingMutationsMirrorNow]);
+
+  const setPendingMutations = useCallback((
+    nextMutations: StudentAttemptMutation[],
+    options?: {
+      durableWriteMode?: 'immediate' | 'debounced';
+      includesAnswerMutation?: boolean;
+      awaitPersistence?: boolean;
+    },
+  ): Promise<boolean> | void => {
+    updatePendingMutationsRamState(nextMutations, {
+      includesAnswerMutation: options?.includesAnswerMutation,
+    });
+
+    if (options?.durableWriteMode === 'debounced') {
+      scheduleDebouncedPendingMutationMirrorPersist();
+      if (options?.awaitPersistence) {
+        clearDurablePendingWriteTimeout();
+        return persistPendingMutationsMirrorNow();
+      }
+      return;
+    }
+
+    clearDurablePendingWriteTimeout();
+    const persistence = persistPendingMutationsMirrorNow();
+    if (options?.awaitPersistence) {
+      return persistence;
+    }
+    void persistence;
+  }, [
+    clearDurablePendingWriteTimeout,
+    persistPendingMutationsMirrorNow,
+    scheduleDebouncedPendingMutationMirrorPersist,
+    updatePendingMutationsRamState,
+  ]);
 
   const scheduleFlush = useCallback((kind: 'objective' | 'writing', delayMs: number) => {
     const timeoutRef =
@@ -336,7 +462,11 @@ export function StudentAttemptProvider({
       payload: payloadWithModule,
     };
     const nextPendingMutations = coalescePendingMutations(pendingMutationsRef.current, mutation);
-    setPendingMutations(nextPendingMutations);
+    const mutationIsAnswer = isAnswerMutationType(mutationType);
+    setPendingMutations(nextPendingMutations, {
+      durableWriteMode: mutationIsAnswer ? 'debounced' : 'immediate',
+      includesAnswerMutation: mutationIsAnswer,
+    });
 
     const syncState: AttemptSyncState =
       patch.recovery?.syncState ?? (navigator.onLine ? 'saving' : 'offline');
@@ -430,12 +560,15 @@ export function StudentAttemptProvider({
           );
 
           if (remainingMutations.length > 0) {
-            pendingMutationsRef.current = remainingMutations;
-            setPendingMutationCount(remainingMutations.length);
-            await studentAttemptRepository.savePendingMutations(
-              persistedAttempt.id,
-              remainingMutations,
+            const persistedMirror = await (
+              setPendingMutations(remainingMutations, {
+                durableWriteMode: 'immediate',
+                awaitPersistence: true,
+              }) ?? Promise.resolve(true)
             );
+            if (!persistedMirror) {
+              return false;
+            }
             const stillSavingAttempt = mergeAttempt(attemptRef.current ?? persistedAttempt, {
               recovery: {
                 lastPersistedAt: persistedAt,
@@ -452,9 +585,11 @@ export function StudentAttemptProvider({
             continue;
           }
 
+          clearDurablePendingWriteTimeout();
           await studentAttemptRepository.clearPendingMutations(persistedAttempt.id);
-          pendingMutationsRef.current = [];
-          setPendingMutationCount(0);
+          updatePendingMutationsRamState([]);
+          durablePersistedMutationVersionRef.current = pendingMutationVersionRef.current;
+          latestAnswerMutationVersionRef.current = pendingMutationVersionRef.current;
           const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId(
             persistedAttempt.scheduleId,
           );
@@ -486,11 +621,53 @@ export function StudentAttemptProvider({
         flushInFlightRef.current = null;
       }
     }
-  }, [setRuntimeAttemptSyncState, syncAttemptState]);
+  }, [
+    clearDurablePendingWriteTimeout,
+    setPendingMutations,
+    setRuntimeAttemptSyncState,
+    syncAttemptState,
+    updatePendingMutationsRamState,
+  ]);
 
   useEffect(() => {
     flushPendingRef.current = flushPending;
   }, [flushPending]);
+
+  useEffect(() => {
+    const handleFocusOut = (event: FocusEvent) => {
+      if (!isEditableDomTarget(event.target)) {
+        return;
+      }
+      flushAnswerDurableMirrorNow();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'hidden') {
+        return;
+      }
+      flushAnswerDurableMirrorNow();
+    };
+
+    const handlePageHide = () => {
+      flushAnswerDurableMirrorNow();
+    };
+
+    const handleBeforeUnload = () => {
+      flushAnswerDurableMirrorNow();
+    };
+
+    document.addEventListener('focusout', handleFocusOut, true);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('focusout', handleFocusOut, true);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [flushAnswerDurableMirrorNow]);
 
   useEffect(() => {
     let cancelled = false;
@@ -502,6 +679,11 @@ export function StudentAttemptProvider({
       setAttempt(null);
       setPendingMutationCount(0);
       pendingMutationsRef.current = [];
+      pendingMutationVersionRef.current = 0;
+      durablePersistedMutationVersionRef.current = 0;
+      latestAnswerMutationVersionRef.current = 0;
+      durablePersistChainRef.current = Promise.resolve(true);
+      clearDurablePendingWriteTimeout();
       return;
     }
 
@@ -557,8 +739,18 @@ export function StudentAttemptProvider({
         return;
       }
 
-      pendingMutationsRef.current = pendingMutations;
-      setPendingMutationCount(pendingMutations.length);
+      // Local edits that happen during mount hydration are authoritative for this tab.
+      // Do not replace them with a stale durable snapshot that resolved later.
+      if (pendingMutationsRef.current.length > 0) {
+        return;
+      }
+
+      updatePendingMutationsRamState(pendingMutations, {
+        includesAnswerMutation: pendingMutations.some(
+          (mutation) => mutation.type === 'answer' || mutation.type === 'writing_answer',
+        ),
+      });
+      durablePersistedMutationVersionRef.current = pendingMutationVersionRef.current;
 
       if (pendingMutations.length > 0) {
         const replayAnswers: Record<string, StudentAnswerValue> = {};
@@ -639,7 +831,14 @@ export function StudentAttemptProvider({
     return () => {
       cancelled = true;
     };
-  }, [attemptSnapshot, flushPending, runtimeState.runtimeSnapshot, setRuntimeAttemptSyncState]);
+  }, [
+    attemptSnapshot,
+    clearDurablePendingWriteTimeout,
+    flushPending,
+    runtimeState.runtimeSnapshot,
+    setRuntimeAttemptSyncState,
+    updatePendingMutationsRamState,
+  ]);
 
   useEffect(() => {
     const currentAttempt = attemptRef.current;
@@ -719,6 +918,9 @@ export function StudentAttemptProvider({
       }
       if (writingFlushTimeoutRef.current) {
         window.clearTimeout(writingFlushTimeoutRef.current);
+      }
+      if (durablePendingWriteTimeoutRef.current) {
+        window.clearTimeout(durablePendingWriteTimeoutRef.current);
       }
     };
   }, []);

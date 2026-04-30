@@ -478,8 +478,27 @@ export function ProctoringProvider({
       recordCloseSignal('pagehide');
     };
 
-    const handleBeforeUnload = () => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       recordCloseSignal('beforeunload');
+
+      if (runtimeState.phase !== 'exam') {
+        return;
+      }
+
+      const syncState = attemptState.attempt?.recovery.syncState;
+      const hasUnsyncedAttemptState =
+        attemptState.pendingMutationCount > 0 ||
+        syncState === 'saving' ||
+        syncState === 'offline' ||
+        syncState === 'syncing_reconnect' ||
+        syncState === 'error';
+
+      if (!hasUnsyncedAttemptState) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue = 'Unsynced answers may be lost.';
     };
 
     const isIosWebKit = isAppleMobileDevice(navigator.userAgent);
@@ -731,9 +750,11 @@ export function ProctoringProvider({
       }
     };
   }, [
+    attemptState.attempt?.recovery.syncState,
     config.security,
     detectSecondaryScreens,
     handleViolation,
+    attemptState.pendingMutationCount,
     requestFullscreen,
     runtimeActions,
     runtimeState.fullscreenViolationCount,

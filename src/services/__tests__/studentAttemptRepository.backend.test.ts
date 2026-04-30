@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mapBackendStudentAttempt, studentAttemptRepository } from '../studentAttemptRepository';
+import {
+  mapBackendStudentAttempt,
+  resetStudentAttemptPendingMutationIndexedDbForTests,
+  studentAttemptRepository,
+} from '../studentAttemptRepository';
 import type { StudentAttemptMutation } from '../../types/studentAttempt';
 
 const originalFetch = global.fetch;
@@ -156,9 +160,10 @@ function buildAttemptCredential(token = 'attempt-token-1') {
 }
 
 describe('studentAttemptRepository backend mode', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.clear();
     sessionStorage.clear();
+    await resetStudentAttemptPendingMutationIndexedDbForTests();
   });
 
   afterEach(() => {

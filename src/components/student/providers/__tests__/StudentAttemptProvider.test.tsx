@@ -13,6 +13,8 @@ import type {
 import { StudentAttemptProvider, useStudentAttempt } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
 
+const ANSWER_DURABLE_WRITE_DEBOUNCE_MS = 100;
+
 function createExamState(): ExamState {
   return {
     title: 'Test Exam',
@@ -154,6 +156,7 @@ function createRuntimeSnapshot(currentSectionKey: 'listening' | 'reading' = 'rea
 
 describe('StudentAttemptProvider', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
 
     window.sessionStorage.clear();
@@ -204,6 +207,13 @@ describe('StudentAttemptProvider', () => {
         </StudentAttemptProvider>
       </StudentRuntimeProvider>
     );
+  }
+
+  async function flushAnswerDurableDebounceWindow() {
+    await act(async () => {
+      vi.advanceTimersByTime(ANSWER_DURABLE_WRITE_DEBOUNCE_MS);
+      await Promise.resolve();
+    });
   }
 
   function createRuntimeBackedWrapper(attemptSnapshot: StudentAttempt, runtimeSnapshot: ExamSessionRuntime) {
@@ -509,6 +519,9 @@ describe('StudentAttemptProvider', () => {
     await waitFor(() => {
       expect(result.current.state.pendingMutationCount).toBe(1);
     });
+    await waitFor(() => {
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalled();
+    });
 
     const pendingMutations = vi
       .mocked(studentAttemptRepository.savePendingMutations)
@@ -565,6 +578,9 @@ describe('StudentAttemptProvider', () => {
 
     await waitFor(() => {
       expect(result.current.state.pendingMutationCount).toBe(3);
+    });
+    await waitFor(() => {
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalled();
     });
 
     const pendingMutations = vi
@@ -981,13 +997,127 @@ describe('StudentAttemptProvider', () => {
       const pendingMutations = vi
         .mocked(studentAttemptRepository.savePendingMutations)
         .mock.calls.at(-1)?.[1];
-      expect(pendingMutations).toHaveLength(1);
-      expect(pendingMutations?.[0]?.payload).toMatchObject({
+      const answerMutation = pendingMutations?.find((mutation) => mutation.type === 'answer');
+      expect(answerMutation).toBeDefined();
+      expect(answerMutation?.payload).toMatchObject({
         questionId: 'reading-q1',
         value: 'mars',
         module: 'reading',
       });
     });
+  });
+
+  it('batches durable answer persistence within a 100ms debounce while keeping RAM updates immediate', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'A');
+      result.current.actions.persistAnswer('q1', 'AB');
+      result.current.actions.persistAnswer('q1', 'ABC');
+    });
+
+    expect(result.current.state.attempt?.answers.q1).toBe('ABC');
+    expect(result.current.state.pendingMutationCount).toBe(1);
+    expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(ANSWER_DURABLE_WRITE_DEBOUNCE_MS - 1);
+    });
+    expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+    await flushAnswerDurableDebounceWindow();
+
+    expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(studentAttemptRepository.savePendingMutations).mock.calls[0]?.[1]?.[0]?.payload)
+      .toMatchObject({
+        questionId: 'q1',
+        value: 'ABC',
+      });
+    vi.useRealTimers();
+  });
+
+  it('forces an immediate durable answer flush on input blur before the debounce window elapses', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'A');
+    });
+
+    expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+
+    await act(async () => {
+      input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+    input.remove();
+    vi.useRealTimers();
+  });
+
+  it('forces an immediate durable answer flush on pagehide and beforeunload', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'A');
+    });
+    expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+      await Promise.resolve();
+    });
+    expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+
+    vi.mocked(studentAttemptRepository.savePendingMutations).mockClear();
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'AB');
+    });
+    expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeunload'));
+      await Promise.resolve();
+    });
+    expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('keeps non-answer mutation durability immediate (no debounce)', async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      result.current.actions.persistFlag('q1', true);
+      await Promise.resolve();
+    });
+
+    expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+
+    await flushAnswerDurableDebounceWindow();
+    expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 
   it('reloads durable pending mutations on refresh', async () => {
