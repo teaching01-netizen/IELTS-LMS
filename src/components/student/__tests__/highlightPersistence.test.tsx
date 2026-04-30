@@ -11,8 +11,14 @@ describe('student highlight persistence', () => {
     vi.restoreAllMocks();
   });
 
-  const createSelectionMock = (getTextNode: () => ChildNode | null) => {
+  const createSelectionMock = (
+    getTextNode: () => ChildNode | null,
+    selection: { start?: number; end?: number; text?: string } = {},
+  ) => {
     let selectionCleared = false;
+    const start = selection.start ?? 6;
+    const end = selection.end ?? 10;
+    const text = selection.text ?? 'beta';
 
     return {
       get rangeCount() {
@@ -25,11 +31,11 @@ describe('student highlight persistence', () => {
         }
 
         const range = document.createRange();
-        range.setStart(textNode, 6);
-        range.setEnd(textNode, 10);
+        range.setStart(textNode, start);
+        range.setEnd(textNode, end);
         return range;
       },
-      toString: () => (selectionCleared ? '' : 'beta'),
+      toString: () => (selectionCleared ? '' : text),
       removeAllRanges: vi.fn(() => {
         selectionCleared = true;
       }),
@@ -83,11 +89,15 @@ describe('student highlight persistence', () => {
 
   it('applies highlights after touch selection on iPad', async () => {
     let currentTextNode: ChildNode | null = null;
-    const selectionMock = createSelectionMock(() => currentTextNode);
+    const selectionMock = createSelectionMock(() => currentTextNode, {
+      start: 6,
+      end: 22,
+      text: 'beta gamma delta',
+    });
 
     const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(selectionMock);
 
-    const { container } = render(<FormattedText text="Alpha beta gamma" highlightEnabled />);
+    const { container } = render(<FormattedText text="Alpha beta gamma delta" highlightEnabled />);
     const textElement = container.querySelector('span');
     if (!textElement) {
       throw new Error('Expected a rendered text span');
@@ -98,18 +108,23 @@ describe('student highlight persistence', () => {
 
     await waitFor(() => {
       expect(container.querySelector('mark')).not.toBeNull();
+      expect(container.querySelector('mark')).toHaveTextContent('beta gamma delta');
     });
 
     getSelectionSpy.mockRestore();
   });
 
-  it('uses selectionchange as a touch fallback inside rich text containers', async () => {
+  it('uses settled selectionchange as a touch fallback inside rich text containers', async () => {
     let currentTextNode: ChildNode | null = null;
-    const selectionMock = createSelectionMock(() => currentTextNode);
+    const selectionMock = createSelectionMock(() => currentTextNode, {
+      start: 6,
+      end: 22,
+      text: 'beta gamma delta',
+    });
 
     const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(selectionMock);
 
-    const { container } = render(<RichTextHighlighter content="Alpha beta gamma" enabled />);
+    const { container } = render(<RichTextHighlighter content="Alpha beta gamma delta" enabled />);
     const textElement = container.querySelector('[data-student-highlightable="true"]');
     if (!textElement) {
       throw new Error('Expected a rendered highlight container');
@@ -120,6 +135,7 @@ describe('student highlight persistence', () => {
 
     await waitFor(() => {
       expect(container.querySelector('mark')).not.toBeNull();
+      expect(container.querySelector('mark')).toHaveTextContent('beta gamma delta');
     });
 
     getSelectionSpy.mockRestore();

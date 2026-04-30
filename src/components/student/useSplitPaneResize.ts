@@ -4,8 +4,8 @@ import type { CSSProperties, MouseEvent as ReactMouseEvent, TouchEvent as ReactT
 const DEFAULT_LEFT_WIDTH = 40;
 const TABLET_DIVIDER_WIDTH = 32;
 const DESKTOP_DIVIDER_WIDTH = 16;
-const TABLET_MIN_MATERIAL_WIDTH = 180;
-const TABLET_MIN_ANSWER_WIDTH = 280;
+const TABLET_MIN_MATERIAL_WIDTH = 120;
+const TABLET_MIN_ANSWER_WIDTH = 180;
 const DESKTOP_MIN_MATERIAL_WIDTH = 300;
 const DESKTOP_MIN_ANSWER_WIDTH = 320;
 
@@ -40,8 +40,8 @@ export function useSplitPaneResize({
       const workspaceWidth = workspaceRef.current?.getBoundingClientRect().width || window.innerWidth;
       const minMaterialWidth = isTabletMode ? TABLET_MIN_MATERIAL_WIDTH : DESKTOP_MIN_MATERIAL_WIDTH;
       const minAnswerWidth = isTabletMode ? TABLET_MIN_ANSWER_WIDTH : DESKTOP_MIN_ANSWER_WIDTH;
-      const minPercent = isTabletMode ? 24 : 20;
-      const maxPercent = isTabletMode ? 76 : 80;
+      const minPercent = isTabletMode ? 12 : 20;
+      const maxPercent = isTabletMode ? 84 : 80;
       const minByPixels = (minMaterialWidth / workspaceWidth) * 100;
       const maxByPixels = 100 - ((minAnswerWidth + dividerWidth) / workspaceWidth) * 100;
       let lowerBound = Math.max(minPercent, minByPixels);

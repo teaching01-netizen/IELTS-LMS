@@ -7,6 +7,8 @@ interface UseDeferredSelectionHighlightOptions {
   applySelection: () => void;
 }
 
+const TOUCH_SELECTION_SETTLE_MS = 450;
+
 export function useDeferredSelectionHighlight({
   enabled,
   containerRef,
@@ -26,7 +28,7 @@ export function useDeferredSelectionHighlight({
     selectionTimerRef.current = window.setTimeout(() => {
       applySelection();
       selectionTimerRef.current = null;
-    }, 80);
+    }, TOUCH_SELECTION_SETTLE_MS);
   }, [applySelection, enabled]);
 
   useEffect(() => {

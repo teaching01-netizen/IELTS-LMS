@@ -507,6 +507,8 @@ describe('student question experience', () => {
     });
     expect(screen.getByTestId('reading-pane-resizer')).toBeInTheDocument();
     expect(screen.getByTestId('reading-pane-resizer')).toHaveClass('w-8');
+    expect(workspace.querySelector('.min-w-\\[120px\\]')).toBeInTheDocument();
+    expect(workspace.querySelector('.min-w-\\[180px\\]')).toBeInTheDocument();
     expect(screen.queryByTestId('reading-split-presets')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /set split to material wider/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /set split to equal/i })).not.toBeInTheDocument();
@@ -517,7 +519,7 @@ describe('student question experience', () => {
     expect(screen.queryByText(/select passage text to highlight it/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
 
-    vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
+    const readingWorkspaceRect = vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,
       height: 600,
       left: 100,
@@ -534,6 +536,33 @@ describe('student question experience', () => {
     expect(workspace).toHaveStyle({
       '--reading-pane-width': '60%',
       '--question-pane-width': 'calc(40% - var(--split-divider-width))',
+    });
+
+    fireEvent.mouseDown(screen.getByTestId('reading-pane-resizer'), { clientX: 580 });
+    fireEvent.mouseMove(document, { clientX: 200 });
+    fireEvent.mouseUp(document);
+    expect(workspace).toHaveStyle({
+      '--reading-pane-width': '15%',
+      '--question-pane-width': 'calc(85% - var(--split-divider-width))',
+    });
+
+    readingWorkspaceRect.mockReturnValue({
+      bottom: 600,
+      height: 600,
+      left: 100,
+      right: 1700,
+      top: 0,
+      width: 1600,
+      x: 100,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    fireEvent.mouseDown(screen.getByTestId('reading-pane-resizer'), { clientX: 200 });
+    fireEvent.mouseMove(document, { clientX: 1500 });
+    fireEvent.mouseUp(document);
+    expect(workspace).toHaveStyle({
+      '--reading-pane-width': '84%',
+      '--question-pane-width': 'calc(16% - var(--split-divider-width))',
     });
   });
 
@@ -1267,6 +1296,8 @@ describe('student question experience', () => {
     expect(screen.queryByText(/use the invigilator audio system/i)).not.toBeInTheDocument();
     expect(screen.queryByText(longInstruction.trim())).not.toBeInTheDocument();
     expect(screen.getByTestId('listening-pane-resizer')).toHaveClass('w-8');
+    expect(workspace.querySelector('.min-w-\\[120px\\]')).toBeInTheDocument();
+    expect(workspace.querySelector('.min-w-\\[180px\\]')).toBeInTheDocument();
     expect(screen.queryByTestId('listening-split-presets')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /set split to material wider/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /set split to equal/i })).not.toBeInTheDocument();
@@ -1277,7 +1308,7 @@ describe('student question experience', () => {
     expect(screen.queryByText(/select reference text to highlight it/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
 
-    vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
+    const listeningWorkspaceRect = vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,
       height: 600,
       left: 100,
@@ -1294,6 +1325,33 @@ describe('student question experience', () => {
     expect(workspace).toHaveStyle({
       '--listening-pane-width': '60%',
       '--question-pane-width': 'calc(40% - var(--split-divider-width))',
+    });
+
+    fireEvent.mouseDown(screen.getByTestId('listening-pane-resizer'), { clientX: 580 });
+    fireEvent.mouseMove(document, { clientX: 200 });
+    fireEvent.mouseUp(document);
+    expect(workspace).toHaveStyle({
+      '--listening-pane-width': '15%',
+      '--question-pane-width': 'calc(85% - var(--split-divider-width))',
+    });
+
+    listeningWorkspaceRect.mockReturnValue({
+      bottom: 600,
+      height: 600,
+      left: 100,
+      right: 1700,
+      top: 0,
+      width: 1600,
+      x: 100,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    fireEvent.mouseDown(screen.getByTestId('listening-pane-resizer'), { clientX: 200 });
+    fireEvent.mouseMove(document, { clientX: 1500 });
+    fireEvent.mouseUp(document);
+    expect(workspace).toHaveStyle({
+      '--listening-pane-width': '84%',
+      '--question-pane-width': 'calc(16% - var(--split-divider-width))',
     });
   });
 

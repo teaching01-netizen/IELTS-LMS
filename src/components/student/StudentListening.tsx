@@ -254,7 +254,7 @@ export function StudentListening({
       >
         <div
           className={`h-full w-full overflow-y-auto p-4 pr-4 font-sans text-sm leading-relaxed text-gray-900 md:p-6 md:pr-6 md:text-base ${
-            isTabletMode ? 'w-[var(--listening-pane-width)] min-w-[180px] border-r border-gray-200' : 'lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
+            isTabletMode ? 'w-[var(--listening-pane-width)] min-w-[120px] border-r border-gray-200' : 'lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
           }`}
           data-student-zoom-scroll
         >
@@ -417,7 +417,7 @@ export function StudentListening({
           </div>
         </div>
 
-        <div className={`relative flex h-full min-w-0 flex-col min-h-0 ${isTabletMode ? 'w-[var(--question-pane-width)] min-w-[280px]' : 'w-full md:min-w-[320px] lg:w-[var(--question-pane-width)]'}`}>
+        <div className={`relative flex h-full min-w-0 flex-col min-h-0 ${isTabletMode ? 'w-[var(--question-pane-width)] min-w-[180px]' : 'w-full md:min-w-[320px] lg:w-[var(--question-pane-width)]'}`}>
           <div
             className={`flex-1 overflow-y-auto p-4 md:p-5 lg:p-8 pb-20 md:pb-24 space-y-6 md:space-y-8 ${
               isTabletMode ? 'pb-28 md:pb-28' : ''
