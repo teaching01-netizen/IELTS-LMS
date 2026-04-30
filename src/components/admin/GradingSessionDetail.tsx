@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, Filter, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight } from 'lucide-react';
 import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus, WritingTaskSubmission } from '../../types/grading';
 import { gradingService } from '../../services/gradingService';
@@ -23,6 +23,41 @@ interface SessionWritingPrintStudent {
   writing: WritingTaskSubmission[];
 }
 
+interface SessionWritingPrintDocument {
+  session: GradingSession;
+  students: SessionWritingPrintStudent[];
+  generatedAt: string;
+  requestId: number;
+}
+
+const waitForPrintPaint = () =>
+  new Promise<void>((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve();
+      return;
+    }
+
+    if (typeof window.requestAnimationFrame !== 'function') {
+      window.setTimeout(resolve, 0);
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+
+const waitForFontsReady = async () => {
+  if (typeof document === 'undefined' || !document.fonts?.ready) {
+    return;
+  }
+
+  try {
+    await document.fonts.ready;
+  } catch {
+    // Continue printing even if font readiness cannot be observed.
+  }
+};
 const formatPrintDate = (value?: string) => {
   if (!value) {
     return 'Not submitted';
@@ -77,11 +112,11 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
   const [loading, setLoading] = useState(true);
   const [exportingSection, setExportingSection] = useState<GradingExportSection | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [writingPrintSession, setWritingPrintSession] = useState<GradingSession | null>(null);
-  const [writingPrintStudents, setWritingPrintStudents] = useState<SessionWritingPrintStudent[]>([]);
-  const [writingPrintGeneratedAt, setWritingPrintGeneratedAt] = useState<string | null>(null);
+  const [writingPrintDocument, setWritingPrintDocument] = useState<SessionWritingPrintDocument | null>(null);
   const [filters, setFilters] = useState<SessionDetailFilters>({});
   const [searchQuery, setSearchQuery] = useState('');
+  const writingPrintRequestIdRef = useRef(0);
+  const lastPrintedRequestIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,12 +233,50 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       })),
     );
 
-    setWritingPrintSession(fullSession);
-    setWritingPrintStudents(printStudents);
-    setWritingPrintGeneratedAt(new Date().toISOString());
-    window.setTimeout(() => window.print(), 0);
+    const requestId = writingPrintRequestIdRef.current + 1;
+    writingPrintRequestIdRef.current = requestId;
+
+    setWritingPrintDocument({
+      session: fullSession,
+      students: printStudents,
+      generatedAt: new Date().toISOString(),
+      requestId,
+    });
   };
 
+  useEffect(() => {
+    if (!writingPrintDocument) {
+      return;
+    }
+
+    if (lastPrintedRequestIdRef.current === writingPrintDocument.requestId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const printWhenReady = async () => {
+      await waitForFontsReady();
+      await waitForPrintPaint();
+
+      if (cancelled) {
+        return;
+      }
+
+      if (lastPrintedRequestIdRef.current === writingPrintDocument.requestId) {
+        return;
+      }
+
+      lastPrintedRequestIdRef.current = writingPrintDocument.requestId;
+      window.print();
+    };
+
+    void printWhenReady();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [writingPrintDocument]);
   const handleExportSection = async (section: GradingExportSection) => {
     setExportError(null);
     setExportingSection(section);
@@ -461,25 +534,25 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           }
         `}
       </style>
-      {writingPrintSession ? (
+      {writingPrintDocument ? (
         <div className="session-writing-print-root" aria-hidden="true">
           <section className="session-writing-print-summary">
             <h1>Writing Results</h1>
             <dl className="session-writing-print-meta">
               <dt>Exam</dt>
-              <dd>{writingPrintSession.examTitle}</dd>
+              <dd>{writingPrintDocument.session.examTitle}</dd>
               <dt>Cohort</dt>
-              <dd>{writingPrintSession.cohortName || 'Not specified'}</dd>
+              <dd>{writingPrintDocument.session.cohortName || 'Not specified'}</dd>
               <dt>Session</dt>
-              <dd>{writingPrintSession.id}</dd>
+              <dd>{writingPrintDocument.session.id}</dd>
               <dt>Generated</dt>
-              <dd>{formatPrintDate(writingPrintGeneratedAt ?? undefined)}</dd>
+              <dd>{formatPrintDate(writingPrintDocument.generatedAt)}</dd>
               <dt>Total Students</dt>
-              <dd>{writingPrintStudents.length}</dd>
+              <dd>{writingPrintDocument.students.length}</dd>
             </dl>
           </section>
 
-          {writingPrintStudents.map(({ submission, writing }) => (
+          {writingPrintDocument.students.map(({ submission, writing }) => (
             <section key={submission.id} className="session-writing-print-student">
               <header className="session-writing-print-student-header">
                 <h2>{submission.studentName}</h2>

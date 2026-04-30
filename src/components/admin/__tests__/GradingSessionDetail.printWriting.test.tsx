@@ -104,10 +104,14 @@ const makeWritingTask = (submissionId: string, taskId: string, response: string)
 describe('GradingSessionDetail print writing', () => {
   const studentOne = makeSubmission('sub-1', 'Ada Student');
   const studentTwo = makeSubmission('sub-2', 'Ben Student');
-  const printSpy = vi.fn();
+  let printedSnapshot = '';
+  const printSpy = vi.fn(() => {
+    printedSnapshot = document.querySelector('.session-writing-print-root')?.textContent ?? '';
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    printedSnapshot = '';
     vi.spyOn(window, 'print').mockImplementation(printSpy);
 
     (gradingRepository.getSessionById as any).mockResolvedValue(baseSession);
@@ -142,6 +146,9 @@ describe('GradingSessionDetail print writing', () => {
     await waitFor(() => expect(printSpy).toHaveBeenCalledTimes(1));
     expect(downloadCsvFile).not.toHaveBeenCalled();
     expect(gradingRepository.getWritingSubmissionsBySubmissionId).toHaveBeenCalledTimes(2);
+    expect(printedSnapshot).toContain('Ada Student');
+    expect(printedSnapshot).toContain('Ben Student');
+    expect(printedSnapshot).toContain('Assessment Form');
     expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Ada Student');
     expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Ben Student');
     expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Assessment Form');
