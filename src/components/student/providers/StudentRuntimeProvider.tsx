@@ -363,17 +363,23 @@ function runtimeReducer(
         state.proctorStatus === 'terminated' ||
         Boolean(state.submittedAt) ||
         isRuntimeStructurallyCompleted(action.snapshot);
+      const runtimeStatus = action.snapshot?.status ?? null;
+      const hasActiveSection = Boolean(action.snapshot?.currentSectionKey);
+      const shouldPromoteToExamPhase =
+        !terminalVerified && (runtimeStatus === 'live' || runtimeStatus === 'paused' || hasActiveSection);
       if (action.preserveLocalAdvance && !terminalVerified) {
         return state;
       }
       const nextPhase =
         terminalVerified
           ? 'post-exam'
-          : state.phase === 'pre-check'
-            ? 'pre-check'
-            : state.phase === 'lobby'
-              ? 'lobby'
-              : 'exam';
+          : shouldPromoteToExamPhase
+            ? 'exam'
+            : state.phase === 'pre-check'
+              ? 'pre-check'
+              : state.phase === 'lobby'
+                ? 'lobby'
+                : 'exam';
       const nextQuestionId = moduleChanged ? action.nextQuestionId : state.currentQuestionId;
       const snapshotTimeRemaining = action.snapshot?.currentSectionRemainingSeconds;
       const nextTimeRemaining =

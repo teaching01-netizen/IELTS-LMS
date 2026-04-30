@@ -913,6 +913,41 @@ describe('StudentRuntimeProvider - Runtime timer smoothing', () => {
     vi.useRealTimers();
   });
 
+  it('promotes a runtime-backed pre-check attempt to exam phase when the section is already live', async () => {
+    const attemptSnapshot: StudentAttempt = {
+      ...hydratedAttempt,
+      phase: 'pre-check',
+      integrity: {
+        ...hydratedAttempt.integrity,
+        preCheck: null,
+      },
+    };
+    const runtimeSnapshot = createRuntimeSnapshot('reading', 615);
+
+    const runtimeBackedWrapper = ({ children }: { children: React.ReactNode }) => (
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        runtimeBacked
+        runtimeSnapshot={runtimeSnapshot}
+        attemptSnapshot={attemptSnapshot}
+      >
+        {children}
+      </StudentRuntimeProvider>
+    );
+
+    const { result } = renderHook(() => useStudentRuntime(), {
+      wrapper: runtimeBackedWrapper,
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+
+    expect(result.current.state.phase).toBe('exam');
+    expect(result.current.state.displayTimeRemaining).toBe(615);
+  });
+
   it('syncs down when a runtime snapshot reports a lower backend remaining time in the same section', async () => {
     const attemptSnapshot: StudentAttempt = {
       ...hydratedAttempt,

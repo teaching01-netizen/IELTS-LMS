@@ -357,4 +357,33 @@ describe('student highlight persistence', () => {
       expect(container.querySelector('mark[data-highlighted="true"]')).toHaveTextContent('delta');
     });
   });
+
+  it('does not remove a highlight while a non-collapsed text selection is active', async () => {
+    const activeSelection = {
+      rangeCount: 1,
+      isCollapsed: false,
+      toString: () => 'beta gamma',
+    } as Selection;
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(activeSelection);
+
+    const { container } = render(
+      <RichTextHighlighter
+        content={'Alpha <mark data-highlighted="true" class="bg-yellow-200">beta</mark> gamma <mark data-highlighted="true" class="bg-yellow-200">delta</mark>'}
+        contentType="html"
+        enabled
+      />,
+    );
+
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(2);
+
+    const firstHighlight = container.querySelector('mark[data-highlighted="true"]');
+    if (!firstHighlight) {
+      throw new Error('Expected a highlighted phrase');
+    }
+
+    fireEvent.click(firstHighlight);
+
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(2);
+    getSelectionSpy.mockRestore();
+  });
 });

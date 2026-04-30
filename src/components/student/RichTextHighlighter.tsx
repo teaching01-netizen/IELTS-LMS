@@ -116,6 +116,15 @@ export function RichTextHighlighter({
       if (isWithinRecentTouchAutoApplyGuard()) {
         return;
       }
+      const activeSelection = window.getSelection();
+      if (
+        activeSelection &&
+        activeSelection.rangeCount > 0 &&
+        !activeSelection.isCollapsed &&
+        activeSelection.toString().trim().length > 0
+      ) {
+        return;
+      }
 
       const container = containerRef.current;
       const target = event.target instanceof HTMLElement ? event.target : null;
