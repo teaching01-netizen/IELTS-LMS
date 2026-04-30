@@ -19,6 +19,7 @@ type StudentZoomableMediaProps = {
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 2.8;
 const DEFAULT_ZOOM = 1.35;
+const TOUCH_OPEN_GUARD_MS = 650;
 
 const INITIAL_PINCH_STATE = {
   active: false,
@@ -50,6 +51,7 @@ export function StudentZoomableMedia({
   const [isOpen, setIsOpen] = useState(false);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const ignoreBackdropClickUntilRef = useRef(0);
   const pinchStateRef = useRef(INITIAL_PINCH_STATE);
   const zoomViewportPan = useDragToPan<HTMLDivElement>(zoom > 1);
 
@@ -89,20 +91,25 @@ export function StudentZoomableMedia({
     event.preventDefault();
   };
 
-  const handleOpen = () => {
+  const handleOpen = useCallback((reason: 'tap' | 'gesture' = 'tap') => {
     if (!currentSource) {
       return;
+    }
+
+    if (reason === 'gesture') {
+      ignoreBackdropClickUntilRef.current = Date.now() + TOUCH_OPEN_GUARD_MS;
     }
 
     setZoom(DEFAULT_ZOOM);
     pinchStateRef.current = INITIAL_PINCH_STATE;
     setIsOpen(true);
-  };
+  }, [currentSource]);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     pinchStateRef.current = INITIAL_PINCH_STATE;
+    ignoreBackdropClickUntilRef.current = 0;
     setIsOpen(false);
-  };
+  }, []);
 
   const handleImageError = () => {
     if (!hasMultipleSources) {
@@ -116,6 +123,26 @@ export function StudentZoomableMedia({
     (nextZoom: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(nextZoom * 100) / 100)),
     [],
   );
+
+  const handleThumbnailTouchStart = useCallback(
+    (event: React.TouchEvent<HTMLElement>) => {
+      if (event.touches.length < 2) {
+        return;
+      }
+
+      event.preventDefault();
+      handleOpen('gesture');
+    },
+    [handleOpen],
+  );
+
+  const handleThumbnailTouchMove = useCallback((event: React.TouchEvent<HTMLElement>) => {
+    if (event.touches.length < 2) {
+      return;
+    }
+
+    event.preventDefault();
+  }, []);
 
   const adjustZoom = (delta: number) => {
     setZoom((currentZoom) => clampZoom(currentZoom + delta));
@@ -181,13 +208,15 @@ export function StudentZoomableMedia({
       {renderInteractiveOverlay ? (
         <div
           onContextMenu={handleContextMenu}
+          onTouchStart={handleThumbnailTouchStart}
+          onTouchMove={handleThumbnailTouchMove}
           className={`group relative block w-full overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 text-left ${className ?? ''}`}
         >
           {imageContent}
           <div className="border-t border-gray-200 bg-white px-3 py-2">
             <button
               type="button"
-              onClick={handleOpen}
+              onClick={() => handleOpen('tap')}
               className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-[length:var(--student-meta-font-size)] font-bold text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
               aria-label={`${label}. ${hint}`}
               title={hint}
@@ -199,8 +228,10 @@ export function StudentZoomableMedia({
       ) : (
         <button
           type="button"
-          onClick={handleOpen}
+          onClick={() => handleOpen('tap')}
           onContextMenu={handleContextMenu}
+          onTouchStart={handleThumbnailTouchStart}
+          onTouchMove={handleThumbnailTouchMove}
           className={`group relative block w-full overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 text-left ${className ?? ''}`}
           aria-label={`${label}. ${hint}`}
           title={hint}
@@ -216,7 +247,13 @@ export function StudentZoomableMedia({
               role="dialog"
               aria-modal="true"
               aria-label={`${label} zoomed view`}
-              onClick={handleClose}
+              onClick={(event) => {
+                if (Date.now() < ignoreBackdropClickUntilRef.current) {
+                  event.preventDefault();
+                  return;
+                }
+                handleClose();
+              }}
               onContextMenu={handleContextMenu}
             >
               <div

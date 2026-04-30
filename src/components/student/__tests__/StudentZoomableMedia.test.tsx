@@ -58,4 +58,25 @@ describe('StudentZoomableMedia', () => {
 
     expect(screen.getByRole('button', { name: /reset image zoom/i })).toHaveTextContent('248%');
   });
+
+  it('opens the zoom viewer on a two-finger gesture from the thumbnail', () => {
+    render(
+      <StudentZoomableMedia
+        sources={['/diagram-preview.png']}
+        alt="Listening diagram"
+        label="Listening diagram"
+        hint="Tap to zoom"
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: /listening diagram\. tap to zoom/i });
+    fireEvent.touchStart(trigger, {
+      touches: [
+        { clientX: 30, clientY: 30 },
+        { clientX: 120, clientY: 30 },
+      ],
+    });
+
+    expect(screen.getByRole('dialog', { name: /listening diagram zoomed view/i })).toBeInTheDocument();
+  });
 });
