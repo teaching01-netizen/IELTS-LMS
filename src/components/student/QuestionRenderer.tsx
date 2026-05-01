@@ -646,7 +646,7 @@ export function QuestionRenderer({
 
                   if (!slot) {
                     return (
-                      <td key={`cell-${rowIndex}-${cellIndex}`} className="border border-gray-200 px-3 py-2 text-gray-800">
+                      <td key={`cell-${rowIndex}-${cellIndex}`} className="border border-gray-200 px-3 py-2 align-middle text-gray-800">
                         <FormattedText as="span" className="text-gray-800" text={cellValue} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                       </td>
                     );
@@ -656,11 +656,11 @@ export function QuestionRenderer({
                     <td
                       key={slot.cell.id}
                       id={`question-${slot.slotId}`}
-                      className="border border-gray-200 px-3 py-2 align-top"
+                      className="border border-gray-200 px-3 py-2 align-middle"
                     >
                       {useInlineBlanks ? (
-                        <>
-                          <div className="flex flex-wrap items-center gap-2 text-gray-800">
+                        <div className={`text-gray-800 ${isCompactPane ? 'space-y-2' : 'flex items-center justify-between gap-3'}`}>
+                          <div className={`${isCompactPane ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap items-center gap-2'}`}>
                             <FormattedText
                               as="span"
                               className="text-gray-800"
@@ -697,11 +697,11 @@ export function QuestionRenderer({
                               highlightColor={highlightColor}
                             />
                           </div>
-                          <div className="mt-2 flex justify-end">{renderFlagButton(slot.slotId)}</div>
-                        </>
+                          <div className={isCompactPane ? 'flex justify-end' : 'flex-shrink-0'}>{renderFlagButton(slot.slotId)}</div>
+                        </div>
                       ) : (
-                        <>
-                          <div className="mb-2 text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
+                        <div className={isCompactPane ? 'space-y-2' : 'flex items-center gap-3'}>
+                          <div className="text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
                             {number + slot.index}
                           </div>
                           <ProtectedInput
@@ -711,15 +711,15 @@ export function QuestionRenderer({
                             onChange={(event) =>
                               updateIndexedAnswer(slot.index, event.target.value, canonicalCells.length)
                             }
-                            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            className={`${isCompactPane ? 'w-full' : 'min-w-[10rem]'} rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100`}
                             placeholder="Enter answer..."
                             security={security}
                             sessionId={sessionId}
                             studentId={studentId}
                             aria-label={`Answer for question ${number + slot.index}`}
                           />
-                          <div className="mt-2 flex justify-end">{renderFlagButton(slot.slotId)}</div>
-                        </>
+                          <div className={isCompactPane ? 'flex justify-end' : 'flex-shrink-0'}>{renderFlagButton(slot.slotId)}</div>
+                        </div>
                       )}
                     </td>
                   );
