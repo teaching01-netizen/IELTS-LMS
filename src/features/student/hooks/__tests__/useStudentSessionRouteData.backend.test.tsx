@@ -1,8 +1,12 @@
 import type { ReactNode } from 'react';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthSessionProvider } from '../../../auth/authSession';
 import { authService, type AuthSession } from '../../../../services/authService';
+import {
+  mapBackendStudentAttempt,
+  studentAttemptRepository,
+} from '../../../../services/studentAttemptRepository';
 import { useStudentSessionRouteData } from '../useStudentSessionRouteData';
 
 const originalFetch = global.fetch;
@@ -32,6 +36,20 @@ function jsonResponse(data: unknown) {
     status: 200,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+function createDeferredResponse() {
+  let resolve: ((response: Response) => void) | null = null;
+  const promise = new Promise<Response>((resolver) => {
+    resolve = resolver;
+  });
+
+  return {
+    promise,
+    resolve(response: Response) {
+      resolve?.(response);
+    },
+  };
 }
 
 function buildStaticSessionContext(versionId = 'ver-1') {
@@ -191,11 +209,13 @@ function buildAttempt(publishedVersionId = 'ver-1') {
 function buildLiveSessionContext(
   attempt: Record<string, unknown> | null,
   publishedVersionId: string | null = 'ver-1',
+  rollout: Record<string, unknown> | null = null,
 ) {
   return {
     runtime: buildRuntime(),
     attempt,
     publishedVersionId,
+    rollout,
     degradedLiveMode: false,
   };
 }
@@ -282,6 +302,51 @@ describe('useStudentSessionRouteData backend mode', () => {
     ).toBe(false);
   });
 
+  it('uses the reconciled cached attempt snapshot after saving a live backend attempt', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+
+    const backendAttempt = buildAttempt('ver-1');
+    backendAttempt.revision = 9;
+    backendAttempt.answers = { q1: 'SERVER_RAW' };
+    backendAttempt.updatedAt = '2026-01-01T09:10:00.000Z';
+    const mappedAttempt = mapBackendStudentAttempt(backendAttempt);
+    const reconciledAttempt = {
+      ...mappedAttempt,
+      answers: { q1: 'RECONCILED_LOCAL' },
+      updatedAt: '2026-01-01T09:10:01.000Z',
+    };
+
+    vi.spyOn(studentAttemptRepository as any, 'saveAttempt').mockResolvedValue(undefined);
+    vi.spyOn(studentAttemptRepository as any, 'getAttemptsByScheduleId').mockResolvedValue([
+      reconciledAttempt,
+    ]);
+
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildLiveSessionContext(backendAttempt)));
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await waitFor(() => {
+      expect(result.current.attemptSnapshot?.answers.q1).toBe('RECONCILED_LOCAL');
+      expect(result.current.attemptSnapshot?.revision).toBe(9);
+    });
+  });
+
   it('waits for auth session hydration before bootstrapping the backend student attempt', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
 
@@ -331,6 +396,324 @@ describe('useStudentSessionRouteData backend mode', () => {
         '/api/v1/student/sessions/sched-1/bootstrap',
         expect.objectContaining({ method: 'POST' }),
       );
+    });
+  });
+
+  it('discards stale out-of-order refresh responses and keeps the newest snapshot', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    const metricEvents: Record<string, unknown>[] = [];
+    const metricListener = (event: Event) => {
+      const customEvent = event as CustomEvent<Record<string, unknown>>;
+      metricEvents.push(customEvent.detail);
+    };
+    let cachedAttempt: Record<string, unknown> | null = null;
+    vi.spyOn(studentAttemptRepository as any, 'saveAttempt').mockImplementation(async (attempt) => {
+      cachedAttempt = attempt as Record<string, unknown>;
+    });
+    vi.spyOn(studentAttemptRepository as any, 'getAttemptsByScheduleId').mockImplementation(async () => {
+      return cachedAttempt ? [cachedAttempt] : [];
+    });
+
+    const buildAttemptRevision = (revision: number, answer: string, updatedAt: string) => ({
+      ...buildAttempt('ver-1'),
+      revision,
+      answers: { q1: answer },
+      updatedAt,
+    });
+
+    const olderRefresh = createDeferredResponse();
+    const newerRefresh = createDeferredResponse();
+    let liveCallCount = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        liveCallCount += 1;
+        if (liveCallCount === 1) {
+          return Promise.resolve(
+            jsonResponse(
+              buildLiveSessionContext(
+                buildAttemptRevision(1, 'INITIAL', '2026-01-01T09:00:00.000Z'),
+              ),
+            ),
+          );
+        }
+        if (liveCallCount === 2) {
+          return olderRefresh.promise;
+        }
+        if (liveCallCount === 3) {
+          return newerRefresh.promise;
+        }
+        return Promise.resolve(
+          jsonResponse(
+            buildLiveSessionContext(
+              buildAttemptRevision(3, 'LATEST', '2026-01-01T09:00:03.000Z'),
+            ),
+          ),
+        );
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    window.addEventListener('student-observability-metric', metricListener as EventListener);
+    try {
+      const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+        expect(result.current.attemptSnapshot?.revision).toBe(1);
+      });
+
+      const firstRefresh = result.current.refreshRuntime();
+      const secondRefresh = result.current.refreshRuntime();
+
+      newerRefresh.resolve(
+        jsonResponse(
+          buildLiveSessionContext(buildAttemptRevision(3, 'LATEST', '2026-01-01T09:00:03.000Z')),
+        ),
+      );
+      await act(async () => {
+        await secondRefresh;
+      });
+
+      olderRefresh.resolve(
+        jsonResponse(
+          buildLiveSessionContext(buildAttemptRevision(2, 'STALE', '2026-01-01T09:00:02.000Z')),
+        ),
+      );
+      await act(async () => {
+        await firstRefresh;
+      });
+
+      await waitFor(() => {
+        expect(result.current.attemptSnapshot?.revision).toBe(3);
+        expect(result.current.attemptSnapshot?.answers.q1).toBe('LATEST');
+      });
+
+      const staleDiscardMetric = metricEvents.find(
+        (metric) =>
+          metric.name === 'student_refresh_stale_discard_total' &&
+          metric.reason === 'epoch_superseded',
+      );
+      expect(staleDiscardMetric).toMatchObject({
+        scheduleId: 'sched-1',
+        attemptId: 'attempt-1',
+        endpoint: '/v1/student/sessions/sched-1/live',
+        statusCode: 200,
+        reason: 'epoch_superseded',
+        syncState: 'idle',
+      });
+      expect(staleDiscardMetric?.version).toEqual(expect.any(String));
+    } finally {
+      window.removeEventListener('student-observability-metric', metricListener as EventListener);
+    }
+  });
+
+  it('applies fresher attempt snapshots even when runtime freshness regresses', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+
+    const initialAttempt = {
+      ...buildAttempt('ver-1'),
+      revision: 1,
+      answers: { q1: 'INITIAL' },
+      updatedAt: '2026-01-01T09:00:01.000Z',
+    };
+    const initialLive = buildLiveSessionContext(initialAttempt);
+    initialLive.runtime = {
+      ...buildRuntime(),
+      revision: 10,
+      updatedAt: '2026-01-01T09:00:10.000Z',
+      currentSectionKey: 'reading',
+      activeSectionKey: 'reading',
+    };
+
+    const fresherAttemptWithOlderRuntime = {
+      ...buildAttempt('ver-1'),
+      revision: 2,
+      answers: { q1: 'SERVER_FRESH_ATTEMPT' },
+      updatedAt: '2026-01-01T09:00:02.000Z',
+    };
+    const regressedRuntimeLive = buildLiveSessionContext(fresherAttemptWithOlderRuntime);
+    regressedRuntimeLive.runtime = {
+      ...buildRuntime(),
+      revision: 9,
+      updatedAt: '2026-01-01T09:00:09.000Z',
+      currentSectionKey: 'writing',
+      activeSectionKey: 'writing',
+    };
+
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        if (fetchMock.mock.calls.filter(([calledUrl]) => calledUrl === url).length <= 1) {
+          return Promise.resolve(jsonResponse(initialLive));
+        }
+        return Promise.resolve(jsonResponse(regressedRuntimeLive));
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await waitFor(() => {
+      expect(result.current.attemptSnapshot?.revision).toBe(2);
+      expect(result.current.attemptSnapshot?.answers.q1).toBe('SERVER_FRESH_ATTEMPT');
+    });
+    expect(result.current.runtimeSnapshot?.currentSectionKey).toBe('reading');
+  });
+
+  it('does not apply a revisionless attempt snapshot over an already-applied revisioned snapshot', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+
+    const initialAttempt = {
+      ...buildAttempt('ver-1'),
+      revision: 10,
+      answers: { q1: 'REVISION_10' },
+      updatedAt: '2026-01-01T09:00:10.000Z',
+    };
+
+    const revisionlessAttempt = {
+      ...buildAttempt('ver-1'),
+      answers: { q1: 'REVISIONLESS_STALE' },
+      updatedAt: '2026-01-01T09:00:20.000Z',
+    };
+    delete (revisionlessAttempt as { revision?: unknown }).revision;
+
+    let liveCallCount = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        liveCallCount += 1;
+        if (liveCallCount === 1) {
+          return Promise.resolve(jsonResponse(buildLiveSessionContext(initialAttempt)));
+        }
+        return Promise.resolve(jsonResponse(buildLiveSessionContext(revisionlessAttempt)));
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.attemptSnapshot?.answers.q1).toBe('REVISION_10');
+      expect(result.current.attemptSnapshot?.revision).toBe(10);
+    });
+
+    await act(async () => {
+      await result.current.refreshRuntime();
+    });
+
+    await waitFor(() => {
+      expect(result.current.attemptSnapshot?.answers.q1).toBe('REVISION_10');
+      expect(result.current.attemptSnapshot?.revision).toBe(10);
+    });
+  });
+
+  it('uses cached local attempt when live payload temporarily omits attempt instead of immediately bootstrapping', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+
+    const cachedAttempt = mapBackendStudentAttempt({
+      ...buildAttempt('ver-1'),
+      revision: 7,
+      answers: { q1: 'CACHED_LOCAL' },
+      updatedAt: '2026-01-01T09:07:00.000Z',
+    });
+    vi
+      .spyOn(studentAttemptRepository as any, 'getAttemptsByScheduleId')
+      .mockResolvedValue([cachedAttempt]);
+
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildLiveSessionContext(null)));
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.attemptSnapshot?.answers.q1).toBe('CACHED_LOCAL');
+      expect(result.current.attemptSnapshot?.revision).toBe(7);
+    });
+
+    expect(
+      fetchMock.mock.calls.some(([url, init]) => {
+        return (
+          url === '/api/v1/student/sessions/sched-1/bootstrap' &&
+          (init as { method?: string } | undefined)?.method === 'POST'
+        );
+      }),
+    ).toBe(false);
+  });
+
+  it('reads runtime-delivered rollout canary and kill-switch flags for answer invariant behavior', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        return Promise.resolve(
+          jsonResponse(
+            buildLiveSessionContext(buildAttempt('ver-1'), 'ver-1', {
+              localWriterAnswerInvariantEnabled: false,
+              localWriterAnswerInvariantKillSwitch: true,
+              localWriterAnswerInvariantCohort: 'legacy-control',
+              localWriterAnswerInvariantConfigFingerprint: 'cfg-legacy-control',
+            }),
+          ),
+        );
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.answerInvariantRollout).toMatchObject({
+      enabled: false,
+      killSwitch: true,
+      cohort: 'legacy-control',
+      configFingerprint: 'cfg-legacy-control',
+      source: 'runtime',
     });
   });
 

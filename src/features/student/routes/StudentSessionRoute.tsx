@@ -16,6 +16,7 @@ export function StudentSessionRoute() {
   const navigate = useNavigate();
   const { logoutAll } = useAuthSession();
   const {
+    answerInvariantRollout,
     attemptSnapshot,
     error,
     isLoading,
@@ -89,6 +90,7 @@ export function StudentSessionRoute() {
       attemptSnapshot={attemptSnapshot}
       onRuntimeRefresh={refreshRuntime}
       runtimeSnapshot={runtimeSnapshot}
+      answerInvariantRollout={answerInvariantRollout}
       showSubmitControls={false}
     />
   );

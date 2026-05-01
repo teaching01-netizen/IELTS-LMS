@@ -15,6 +15,19 @@ function jsonResponse(data: unknown) {
   });
 }
 
+function createDeferredResponse() {
+  let resolve: ((value: Response) => void) | null = null;
+  const promise = new Promise<Response>((resolver) => {
+    resolve = resolver;
+  });
+  return {
+    promise,
+    resolve(response: Response) {
+      resolve?.(response);
+    },
+  };
+}
+
 function jsonError(status: number, message: string) {
   return new Response(JSON.stringify({ error: { message } }), {
     status,
@@ -383,6 +396,101 @@ describe('studentAttemptRepository backend mode', () => {
     expect(cachedAttempts[0]?.answers).toEqual({ q1: 'A' });
   });
 
+  it('serializes concurrent saveAttempt flushes for the same attempt to avoid duplicate mutation batches', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    const deferredBatch = createDeferredResponse();
+    let mutationBatchCallCount = 0;
+    let resolveFirstBatchCall: (() => void) | null = null;
+    const firstBatchCalled = new Promise<void>((resolve) => {
+      resolveFirstBatchCall = resolve;
+    });
+
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/bootstrap') {
+        return Promise.resolve(
+          jsonResponse({
+            schedule: buildSchedule(),
+            version: buildVersion(),
+            runtime: null,
+            attempt: buildBackendAttempt(),
+            attemptCredential: buildAttemptCredential(),
+            degradedLiveMode: false,
+          }),
+        );
+      }
+      if (url === '/api/v1/student/sessions/sched-1/mutations:batch') {
+        mutationBatchCallCount += 1;
+        if (mutationBatchCallCount === 1) {
+          resolveFirstBatchCall?.();
+          return deferredBatch.promise;
+        }
+        return Promise.resolve(
+          jsonResponse({
+            attempt: buildBackendAttempt({
+              answers: { q1: 'A' },
+              updatedAt: '2026-01-01T09:01:00.000Z',
+              revision: 2,
+            }),
+            appliedMutationCount: 1,
+            serverAcceptedThroughSeq: 1,
+          }),
+        );
+      }
+      throw new Error(`Unexpected URL in test: ${url}`);
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const attempt = await studentAttemptRepository.createAttempt({
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      currentModule: 'reading',
+    });
+
+    await studentAttemptRepository.savePendingMutations(attempt.id, [
+      {
+        id: 'mutation-1',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-01T09:00:30.000Z',
+        type: 'answer',
+        payload: { questionId: 'q1', value: 'A' },
+      } satisfies StudentAttemptMutation,
+    ]);
+
+    const firstSave = studentAttemptRepository.saveAttempt({
+      ...attempt,
+      answers: { q1: 'A' },
+    });
+    await firstBatchCalled;
+
+    const secondSave = studentAttemptRepository.saveAttempt({
+      ...attempt,
+      answers: { q1: 'A' },
+    });
+
+    deferredBatch.resolve(
+      jsonResponse({
+        attempt: buildBackendAttempt({
+          answers: { q1: 'A' },
+          updatedAt: '2026-01-01T09:01:00.000Z',
+          revision: 2,
+        }),
+        appliedMutationCount: 1,
+        serverAcceptedThroughSeq: 1,
+      }),
+    );
+
+    await Promise.all([firstSave, secondSave]);
+
+    expect(mutationBatchCallCount).toBe(1);
+    expect(await studentAttemptRepository.getPendingMutations(attempt.id)).toEqual([]);
+  });
+
   it('maps an explicitly cleared slot to a ClearSlot command', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
     const fetchMock = vi
@@ -623,6 +731,11 @@ describe('studentAttemptRepository backend mode', () => {
 
   it('drops stale objective mutations on SECTION_MISMATCH, retries flush, and records lastDroppedMutations', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    const metricEvents: Record<string, unknown>[] = [];
+    const metricListener = (event: Event) => {
+      const customEvent = event as CustomEvent<Record<string, unknown>>;
+      metricEvents.push(customEvent.detail);
+    };
 
     const fetchMock = vi
       .fn()
@@ -660,6 +773,119 @@ describe('studentAttemptRepository backend mode', () => {
         }),
       );
     global.fetch = fetchMock as typeof fetch;
+    window.addEventListener('student-observability-metric', metricListener as EventListener);
+
+    try {
+      const attempt = await studentAttemptRepository.createAttempt({
+        scheduleId: 'sched-1',
+        studentKey: 'student-sched-1-alice',
+        examId: 'exam-1',
+        examTitle: 'Mock Exam',
+        candidateId: 'alice',
+        candidateName: 'Alice Roe',
+        candidateEmail: 'alice@example.com',
+        currentModule: 'reading',
+      });
+
+      await studentAttemptRepository.savePendingMutations(attempt.id, [
+        {
+          id: 'mutation-stale',
+          attemptId: attempt.id,
+          scheduleId: attempt.scheduleId,
+          timestamp: '2026-01-01T09:00:10.000Z',
+          type: 'answer',
+          payload: { questionId: 'qOld', value: 'B', module: 'listening' },
+        },
+        {
+          id: 'mutation-live',
+          attemptId: attempt.id,
+          scheduleId: attempt.scheduleId,
+          timestamp: '2026-01-01T09:00:20.000Z',
+          type: 'answer',
+          payload: { questionId: 'q1', value: 'A', module: 'reading' },
+        },
+      ]);
+
+      await studentAttemptRepository.saveAttempt(attempt);
+
+      const firstBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+      expect(firstBody.mutations).toHaveLength(2);
+
+      const secondBody = JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body));
+      expect(secondBody.mutations).toHaveLength(1);
+      expect(secondBody.mutations[0]).toMatchObject({
+        type: 'SetScalar',
+        questionId: 'q1',
+        value: 'A',
+      });
+
+      const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
+      const cached = cachedAttempts.find((candidate) => candidate.id === attempt.id) ?? null;
+      expect(cached?.recovery.lastDroppedMutations).toMatchObject({
+        count: 1,
+        fromModule: 'listening',
+        toModule: 'reading',
+        reason: 'SECTION_MISMATCH',
+      });
+
+      const droppedMetric = metricEvents.find(
+        (metric) => metric.name === 'student_attempt_dropped_mutation_total',
+      );
+      expect(droppedMetric).toMatchObject({
+        scheduleId: 'sched-1',
+        attemptId: 'attempt-1',
+        endpoint: '/v1/student/sessions/sched-1/mutations:batch',
+        statusCode: 409,
+        reason: 'SECTION_MISMATCH',
+      });
+      expect(droppedMetric?.version).toEqual(expect.any(String));
+      expect(droppedMetric?.syncState).toEqual(expect.any(String));
+    } finally {
+      window.removeEventListener('student-observability-metric', metricListener as EventListener);
+    }
+  });
+
+  it('records dropped slot mutations as slot-scoped reconcile targets', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          schedule: buildSchedule(),
+          version: buildVersion(),
+          runtime: null,
+          attempt: buildBackendAttempt(),
+          attemptCredential: buildAttemptCredential(),
+          degradedLiveMode: false,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonConflict('SECTION_MISMATCH', 'Mutation does not belong to the current section.'),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          schedule: buildSchedule(),
+          version: buildVersion(),
+          runtime: { status: 'live', currentSectionKey: 'reading' },
+          attempt: buildBackendAttempt(),
+          attemptCredential: buildAttemptCredential(),
+          degradedLiveMode: false,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          attempt: buildBackendAttempt({
+            answers: { 'q-slot': ['A', 'B'] },
+            updatedAt: '2026-01-01T09:01:00.000Z',
+            revision: 2,
+          }),
+          appliedMutationCount: 1,
+          serverAcceptedThroughSeq: 1,
+        }),
+      );
+    global.fetch = fetchMock as typeof fetch;
 
     const attempt = await studentAttemptRepository.createAttempt({
       scheduleId: 'sched-1',
@@ -674,12 +900,17 @@ describe('studentAttemptRepository backend mode', () => {
 
     await studentAttemptRepository.savePendingMutations(attempt.id, [
       {
-        id: 'mutation-stale',
+        id: 'mutation-stale-slot',
         attemptId: attempt.id,
         scheduleId: attempt.scheduleId,
         timestamp: '2026-01-01T09:00:10.000Z',
         type: 'answer',
-        payload: { questionId: 'qOld', value: 'B', module: 'listening' },
+        payload: {
+          questionId: 'q-slot',
+          slotIndex: 1,
+          value: ['A', 'LOCAL_SLOT_1'],
+          module: 'listening',
+        },
       },
       {
         id: 'mutation-live',
@@ -693,25 +924,17 @@ describe('studentAttemptRepository backend mode', () => {
 
     await studentAttemptRepository.saveAttempt(attempt);
 
-    const firstBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
-    expect(firstBody.mutations).toHaveLength(2);
-
-    const secondBody = JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body));
-    expect(secondBody.mutations).toHaveLength(1);
-    expect(secondBody.mutations[0]).toMatchObject({
-      type: 'SetScalar',
-      questionId: 'q1',
-      value: 'A',
-    });
-
     const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
     const cached = cachedAttempts.find((candidate) => candidate.id === attempt.id) ?? null;
+
     expect(cached?.recovery.lastDroppedMutations).toMatchObject({
       count: 1,
       fromModule: 'listening',
       toModule: 'reading',
       reason: 'SECTION_MISMATCH',
+      affectedAnswerSlots: [{ questionId: 'q-slot', slotIndex: 1 }],
     });
+    expect(cached?.recovery.lastDroppedMutations?.affectedAnswers ?? []).not.toContain('q-slot');
   });
 
   it('marks the local attempt unsynced and preserves pending mutations on ACTIVE_SESSION_SUPERSEDED', async () => {

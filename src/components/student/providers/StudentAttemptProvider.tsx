@@ -222,13 +222,6 @@ function createObservedSnapshot(attempt: StudentAttempt | null): ObservedSnapsho
   };
 }
 
-function parseIsoTimestamp(value: string | null | undefined): number {
-  if (!value) {
-    return Number.NaN;
-  }
-  return Date.parse(value);
-}
-
 function shouldPreferLocalAttemptState(
   localAttempt: StudentAttempt,
   incomingAttempt: StudentAttempt,
@@ -242,26 +235,61 @@ function shouldPreferLocalAttemptState(
     return false;
   }
 
-  const localUpdatedAt = parseIsoTimestamp(localAttempt.updatedAt);
-  const incomingUpdatedAt = parseIsoTimestamp(incomingAttempt.updatedAt);
-  if (
-    Number.isFinite(localUpdatedAt) &&
-    Number.isFinite(incomingUpdatedAt) &&
-    localUpdatedAt > incomingUpdatedAt
-  ) {
+  const localRevision =
+    typeof localAttempt.revision === 'number' && Number.isFinite(localAttempt.revision)
+      ? localAttempt.revision
+      : null;
+  const incomingRevision =
+    typeof incomingAttempt.revision === 'number' && Number.isFinite(incomingAttempt.revision)
+      ? incomingAttempt.revision
+      : null;
+
+  if (localRevision !== null || incomingRevision !== null) {
+    if (localRevision !== null && incomingRevision === null) {
+      return true;
+    }
+    if (localRevision === null && incomingRevision !== null) {
+      return false;
+    }
+    if (localRevision !== null && incomingRevision !== null) {
+      if (localRevision > incomingRevision) {
+        return true;
+      }
+      if (localRevision < incomingRevision) {
+        return false;
+      }
+    }
+  }
+
+  const hasLocalMutationSignal =
+    Boolean(localAttempt.recovery.lastLocalMutationAt) ||
+    localAttempt.recovery.pendingMutationCount > 0;
+  if (hasLocalMutationSignal) {
     return true;
   }
 
-  const localPersistedAt = parseIsoTimestamp(localAttempt.recovery.lastPersistedAt);
-  const incomingPersistedAt = parseIsoTimestamp(incomingAttempt.recovery.lastPersistedAt);
-  if (
-    Number.isFinite(localPersistedAt) &&
-    Number.isFinite(incomingPersistedAt) &&
-    localPersistedAt > incomingPersistedAt
-  ) {
+  const localFingerprint = JSON.stringify({
+    phase: localAttempt.phase,
+    currentModule: localAttempt.currentModule,
+    currentQuestionId: localAttempt.currentQuestionId,
+    answers: localAttempt.answers,
+    writingAnswers: localAttempt.writingAnswers,
+    flags: localAttempt.flags,
+  });
+  const incomingFingerprint = JSON.stringify({
+    phase: incomingAttempt.phase,
+    currentModule: incomingAttempt.currentModule,
+    currentQuestionId: incomingAttempt.currentQuestionId,
+    answers: incomingAttempt.answers,
+    writingAnswers: incomingAttempt.writingAnswers,
+    flags: incomingAttempt.flags,
+  });
+  if (localFingerprint !== incomingFingerprint) {
     return true;
   }
 
+  // When accepted sequence is tied and no authoritative revision breaks the tie,
+  // keep local state to avoid regressing visible student answers.
   return false;
 }
 
@@ -517,6 +545,20 @@ export function StudentAttemptProvider({
         return true;
       }
 
+      if (durablePersistedMutationVersionRef.current < pendingMutationVersionRef.current) {
+        const persistedMirror = await persistPendingMutationsMirrorNow();
+        if (!persistedMirror) {
+          const erroredAttempt = mergeAttempt(currentAttempt, {
+            recovery: {
+              syncState: 'error',
+              pendingMutationCount: pendingMutationsRef.current.length,
+            },
+          });
+          syncAttemptState(erroredAttempt);
+          return false;
+        }
+      }
+
       if (!hasAttemptCredential(currentAttempt.scheduleId, currentAttempt.id)) {
         const refreshed = await refreshAttemptCredentialForAttempt(currentAttempt).catch(() => false);
         if (!refreshed) {
@@ -623,6 +665,7 @@ export function StudentAttemptProvider({
     }
   }, [
     clearDurablePendingWriteTimeout,
+    persistPendingMutationsMirrorNow,
     setPendingMutations,
     setRuntimeAttemptSyncState,
     syncAttemptState,

@@ -18,6 +18,10 @@ import {
 import type { ModuleType } from '../types';
 import type { ExamSchedule } from '../types/domain';
 import { createTtlLruCache } from '../utils/ttlLruCache';
+import {
+  emitStudentObservabilityMetric,
+  withStudentObservabilityDimensions,
+} from '../utils/studentObservability';
 
 const STORAGE_KEY_ATTEMPTS = 'ielts_student_attempts_v1';
 const STORAGE_KEY_PENDING_MUTATIONS = 'ielts_student_attempt_pending_mutations_v1';
@@ -982,26 +986,6 @@ function shouldPreferLocalAcceptedState(
     return false;
   }
 
-  const localUpdatedAt = parseIsoTimestamp(localAttempt.updatedAt);
-  const incomingUpdatedAt = parseIsoTimestamp(incomingAttempt.updatedAt);
-  if (
-    Number.isFinite(localUpdatedAt) &&
-    Number.isFinite(incomingUpdatedAt) &&
-    localUpdatedAt > incomingUpdatedAt
-  ) {
-    return true;
-  }
-
-  const localPersistedAt = parseIsoTimestamp(localAttempt.recovery.lastPersistedAt);
-  const incomingPersistedAt = parseIsoTimestamp(incomingAttempt.recovery.lastPersistedAt);
-  if (
-    Number.isFinite(localPersistedAt) &&
-    Number.isFinite(incomingPersistedAt) &&
-    localPersistedAt > incomingPersistedAt
-  ) {
-    return true;
-  }
-
   return false;
 }
 
@@ -1746,7 +1730,33 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
 }
 
 class BackendStudentAttemptRepository implements IStudentAttemptRepository {
+  private readonly saveAttemptLocks = new Map<string, Promise<void>>();
+
   constructor(private readonly cache: LocalStorageStudentAttemptCache) {}
+
+  private async withSaveAttemptLock<T>(attemptId: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.saveAttemptLocks.get(attemptId) ?? Promise.resolve();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const lock = previous.then(
+      () => gate,
+      () => gate,
+    );
+
+    this.saveAttemptLocks.set(attemptId, lock);
+
+    await previous.catch(() => undefined);
+    try {
+      return await work();
+    } finally {
+      release();
+      if (this.saveAttemptLocks.get(attemptId) === lock) {
+        this.saveAttemptLocks.delete(attemptId);
+      }
+    }
+  }
 
   private async refreshAttemptCredential(attempt: StudentAttempt): Promise<boolean> {
     try {
@@ -1950,165 +1960,225 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
   }
 
   async saveAttempt(attempt: StudentAttempt): Promise<void> {
-    const pendingMutations = await this.cache.getPendingMutations(attempt.id);
-    let currentAttempt = await this.reconcileAttemptWithCachedState(attempt, pendingMutations);
-    await this.cache.saveAttempt(currentAttempt);
-    primeMutationSequenceWatermark(currentAttempt);
+    await this.withSaveAttemptLock(attempt.id, async () => {
+      const pendingMutations = await this.cache.getPendingMutations(attempt.id);
+      let currentAttempt = await this.reconcileAttemptWithCachedState(attempt, pendingMutations);
+      await this.cache.saveAttempt(currentAttempt);
+      primeMutationSequenceWatermark(currentAttempt);
 
-    if (pendingMutations.length === 0) {
-      return;
-    }
+      if (pendingMutations.length === 0) {
+        return;
+      }
 
-    if (!(await this.ensureAttemptCredential(currentAttempt))) {
-      return;
-    }
+      if (!(await this.ensureAttemptCredential(currentAttempt))) {
+        return;
+      }
 
-    const clientSessionId = ensureClientSessionIdForAttempt(currentAttempt);
-    const watermarkKey = mutationWatermarkKey(currentAttempt.id, clientSessionId);
-    const startSeq = readOrPrimeMutationSequenceWatermark(currentAttempt.id, clientSessionId);
+      const clientSessionId = ensureClientSessionIdForAttempt(currentAttempt);
+      const watermarkKey = mutationWatermarkKey(currentAttempt.id, clientSessionId);
+      const startSeq = readOrPrimeMutationSequenceWatermark(currentAttempt.id, clientSessionId);
 
-    const first = await this.flushMutationQueue({
-      attempt: currentAttempt,
-      clientSessionId,
-      watermarkKey,
-      startSeq,
-      mutations: pendingMutations,
-    });
-    if (first.ok) {
-      return;
-    }
+      const first = await this.flushMutationQueue({
+        attempt: currentAttempt,
+        clientSessionId,
+        watermarkKey,
+        startSeq,
+        mutations: pendingMutations,
+      });
+      if (first.ok) {
+        return;
+      }
 
-    currentAttempt = first.attempt;
-    const statusCode = (first.error as { statusCode?: number }).statusCode;
-    const reason = statusCode === 409 ? backendConflictReason(first.error) : null;
-    const latestRevision = statusCode === 409 ? backendConflictLatestRevision(first.error) : null;
+      currentAttempt = first.attempt;
+      const statusCode = (first.error as { statusCode?: number }).statusCode;
+      const reason = statusCode === 409 ? backendConflictReason(first.error) : null;
+      const latestRevision = statusCode === 409 ? backendConflictLatestRevision(first.error) : null;
 
-    if (statusCode === 409 && reason === 'BASE_REVISION_MISMATCH') {
+      if (statusCode === 409 && reason === 'BASE_REVISION_MISMATCH') {
+        const session = await backendGet<BackendStudentSessionContext>(
+          `/v1/student/sessions/${currentAttempt.scheduleId}`,
+          { retries: 0 },
+        );
+        if (!session.attempt) {
+          throw first.error;
+        }
+        const refreshedAttempt = mapBackendStudentAttempt(session.attempt);
+        storeAttemptCredential(refreshedAttempt, session.attemptCredential);
+        primeMutationSequenceWatermark(refreshedAttempt);
+        await this.cache.saveAttempt(refreshedAttempt);
+
+        const rebasedMutations = first.remainingMutations.map((mutation) => ({
+          ...mutation,
+          id: generateId('mutation'),
+        }));
+        await this.cache.savePendingMutations(refreshedAttempt.id, rebasedMutations);
+
+        const rebasedAttempt = mergeStudentAttemptRecovery(refreshedAttempt, {
+          pendingMutationCount: rebasedMutations.length,
+          syncState: rebasedMutations.length > 0 ? 'saving' : 'saved',
+        });
+        await this.cache.saveAttempt(rebasedAttempt);
+
+        const second = await this.flushMutationQueue({
+          attempt: rebasedAttempt,
+          clientSessionId,
+          watermarkKey,
+          startSeq: latestRevision ?? first.nextSeq,
+          mutations: rebasedMutations,
+        });
+        if (second.ok) {
+          return;
+        }
+        throw second.error;
+      }
+
+      if (statusCode === 409 && reason === 'ACTIVE_SESSION_SUPERSEDED') {
+        const staleAttempt = mergeStudentAttemptRecovery(currentAttempt, {
+          syncState: 'error',
+        });
+        await this.cache.saveAttempt(staleAttempt);
+        throw first.error;
+      }
+
+      const shouldAttemptPrune =
+        statusCode === 409 && (reason === 'SECTION_MISMATCH' || reason === 'OBJECTIVE_LOCKED');
+      if (!shouldAttemptPrune) {
+        throw first.error;
+      }
+
       const session = await backendGet<BackendStudentSessionContext>(
         `/v1/student/sessions/${currentAttempt.scheduleId}`,
         { retries: 0 },
       );
-      if (!session.attempt) {
-        throw first.error;
-      }
-      const refreshedAttempt = mapBackendStudentAttempt(session.attempt);
-      storeAttemptCredential(refreshedAttempt, session.attemptCredential);
-      primeMutationSequenceWatermark(refreshedAttempt);
-      await this.cache.saveAttempt(refreshedAttempt);
+      const runtimeStatus = session.runtime?.status ?? null;
+      const runtimeSectionKey = session.runtime?.currentSectionKey ?? null;
+      const runtimeTerminal = runtimeStatus === 'completed' || runtimeStatus === 'cancelled';
 
-      const rebasedMutations = first.remainingMutations.map((mutation) => ({
-        ...mutation,
-        id: generateId('mutation'),
-      }));
-      await this.cache.savePendingMutations(refreshedAttempt.id, rebasedMutations);
-
-      const rebasedAttempt = mergeStudentAttemptRecovery(refreshedAttempt, {
-        pendingMutationCount: rebasedMutations.length,
-        syncState: rebasedMutations.length > 0 ? 'saving' : 'saved',
+      const dropped = first.remainingMutations.filter((mutation) => {
+        if (!isObjectiveMutation(mutation)) {
+          return false;
+        }
+        if (runtimeTerminal) {
+          return true;
+        }
+        const moduleKey = mutationModuleKey(mutation);
+        return !runtimeSectionKey || !moduleKey || moduleKey !== runtimeSectionKey;
       });
-      await this.cache.saveAttempt(rebasedAttempt);
+      const prunedMutations = first.remainingMutations.filter((mutation) => !dropped.includes(mutation));
+
+      if (dropped.length > 0) {
+        const droppedModuleKeys = new Set(
+          dropped
+            .map(mutationModuleKey)
+            .filter((value): value is ModuleType => typeof value === 'string' && value.length > 0),
+        );
+        const affectedAnswers = new Set<string>();
+        const affectedAnswerSlots = new Map<string, { questionId: string; slotIndex: number }>();
+        const affectedWritingAnswers = new Set<string>();
+        const affectedFlags = new Set<string>();
+
+        for (const mutation of dropped) {
+          if (mutation.type === 'answer') {
+            const questionId = mutation.payload['questionId'];
+            if (typeof questionId === 'string' && questionId.trim().length > 0) {
+              const slotIndex = mutation.payload['slotIndex'];
+              if (typeof slotIndex === 'number' && Number.isInteger(slotIndex) && slotIndex >= 0) {
+                affectedAnswerSlots.set(`${questionId}:${slotIndex}`, { questionId, slotIndex });
+              } else {
+                affectedAnswers.add(questionId);
+              }
+            }
+            continue;
+          }
+
+          if (mutation.type === 'writing_answer') {
+            const taskId = mutation.payload['taskId'];
+            if (typeof taskId === 'string' && taskId.trim().length > 0) {
+              affectedWritingAnswers.add(taskId);
+            }
+            continue;
+          }
+
+          if (mutation.type === 'flag') {
+            const questionId = mutation.payload['questionId'];
+            if (typeof questionId === 'string' && questionId.trim().length > 0) {
+              affectedFlags.add(questionId);
+            }
+          }
+        }
+        const fromModule =
+          droppedModuleKeys.size === 0
+            ? null
+            : droppedModuleKeys.size === 1
+              ? ([...droppedModuleKeys][0] ?? null)
+              : 'multiple';
+        const summary = {
+          at: new Date().toISOString(),
+          count: dropped.length,
+          fromModule,
+          toModule: runtimeSectionKey,
+          reason: reason ?? 'UNKNOWN',
+          ...(affectedAnswers.size > 0
+            ? { affectedAnswers: [...affectedAnswers] }
+            : {}),
+          ...(affectedAnswerSlots.size > 0
+            ? { affectedAnswerSlots: [...affectedAnswerSlots.values()] }
+            : {}),
+          ...(affectedWritingAnswers.size > 0
+            ? { affectedWritingAnswers: [...affectedWritingAnswers] }
+            : {}),
+          ...(affectedFlags.size > 0
+            ? { affectedFlags: [...affectedFlags] }
+            : {}),
+        } satisfies StudentAttempt['recovery']['lastDroppedMutations'];
+
+        currentAttempt = mergeStudentAttemptRecovery(currentAttempt, {
+          lastDroppedMutations: summary,
+          pendingMutationCount: prunedMutations.length,
+        });
+        await this.cache.saveAttempt(currentAttempt);
+        emitStudentObservabilityMetric(
+          'student_attempt_dropped_mutation_total',
+          withStudentObservabilityDimensions({
+            scheduleId: currentAttempt.scheduleId,
+            attemptId: currentAttempt.id,
+            endpoint: `/v1/student/sessions/${currentAttempt.scheduleId}/mutations:batch`,
+            statusCode,
+            count: summary.count,
+            reason: summary.reason,
+            syncState: currentAttempt.recovery.syncState,
+          }),
+        );
+        void this.recordDroppedMutationsAudit(currentAttempt, {
+          at: summary.at,
+          count: summary.count,
+          fromModule: summary.fromModule,
+          toModule: summary.toModule,
+          reason: summary.reason,
+          runtimeStatus,
+        });
+      } else {
+        currentAttempt = mergeStudentAttemptRecovery(currentAttempt, {
+          pendingMutationCount: prunedMutations.length,
+        });
+        await this.cache.saveAttempt(currentAttempt);
+      }
+
+      await this.cache.savePendingMutations(currentAttempt.id, prunedMutations);
 
       const second = await this.flushMutationQueue({
-        attempt: rebasedAttempt,
+        attempt: currentAttempt,
         clientSessionId,
         watermarkKey,
-        startSeq: latestRevision ?? first.nextSeq,
-        mutations: rebasedMutations,
+        startSeq: first.nextSeq,
+        mutations: prunedMutations,
       });
       if (second.ok) {
         return;
       }
+
       throw second.error;
-    }
-
-    if (statusCode === 409 && reason === 'ACTIVE_SESSION_SUPERSEDED') {
-      const staleAttempt = mergeStudentAttemptRecovery(currentAttempt, {
-        syncState: 'error',
-      });
-      await this.cache.saveAttempt(staleAttempt);
-      throw first.error;
-    }
-
-    const shouldAttemptPrune =
-      statusCode === 409 && (reason === 'SECTION_MISMATCH' || reason === 'OBJECTIVE_LOCKED');
-    if (!shouldAttemptPrune) {
-      throw first.error;
-    }
-
-    const session = await backendGet<BackendStudentSessionContext>(
-      `/v1/student/sessions/${currentAttempt.scheduleId}`,
-      { retries: 0 },
-    );
-    const runtimeStatus = session.runtime?.status ?? null;
-    const runtimeSectionKey = session.runtime?.currentSectionKey ?? null;
-    const runtimeTerminal = runtimeStatus === 'completed' || runtimeStatus === 'cancelled';
-
-    const dropped = first.remainingMutations.filter((mutation) => {
-      if (!isObjectiveMutation(mutation)) {
-        return false;
-      }
-      if (runtimeTerminal) {
-        return true;
-      }
-      const moduleKey = mutationModuleKey(mutation);
-      return !runtimeSectionKey || !moduleKey || moduleKey !== runtimeSectionKey;
     });
-    const prunedMutations = first.remainingMutations.filter((mutation) => !dropped.includes(mutation));
-
-    if (dropped.length > 0) {
-      const droppedModuleKeys = new Set(
-        dropped
-          .map(mutationModuleKey)
-          .filter((value): value is ModuleType => typeof value === 'string' && value.length > 0),
-      );
-      const fromModule =
-        droppedModuleKeys.size === 0
-          ? null
-          : droppedModuleKeys.size === 1
-            ? ([...droppedModuleKeys][0] ?? null)
-            : 'multiple';
-      const summary = {
-        at: new Date().toISOString(),
-        count: dropped.length,
-        fromModule,
-        toModule: runtimeSectionKey,
-        reason: reason ?? 'UNKNOWN',
-      } satisfies StudentAttempt['recovery']['lastDroppedMutations'];
-
-      currentAttempt = mergeStudentAttemptRecovery(currentAttempt, {
-        lastDroppedMutations: summary,
-        pendingMutationCount: prunedMutations.length,
-      });
-      await this.cache.saveAttempt(currentAttempt);
-      void this.recordDroppedMutationsAudit(currentAttempt, {
-        at: summary.at,
-        count: summary.count,
-        fromModule: summary.fromModule,
-        toModule: summary.toModule,
-        reason: summary.reason,
-        runtimeStatus,
-      });
-    } else {
-      currentAttempt = mergeStudentAttemptRecovery(currentAttempt, {
-        pendingMutationCount: prunedMutations.length,
-      });
-      await this.cache.saveAttempt(currentAttempt);
-    }
-
-    await this.cache.savePendingMutations(currentAttempt.id, prunedMutations);
-
-    const second = await this.flushMutationQueue({
-      attempt: currentAttempt,
-      clientSessionId,
-      watermarkKey,
-      startSeq: first.nextSeq,
-      mutations: prunedMutations,
-    });
-    if (second.ok) {
-      return;
-    }
-
-    throw second.error;
   }
 
   async submitAttempt(attempt: StudentAttempt): Promise<StudentAttempt> {

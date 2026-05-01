@@ -529,6 +529,383 @@ describe('StudentRuntimeProvider - Violation Tracking', () => {
       ).toBe(true);
     });
 
+    it('preserves local objective answers on same-attempt refresh', () => {
+      let attemptSnapshot = hydratedAttempt;
+      const wrapperWithAttempt = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: wrapperWithAttempt });
+
+      act(() => {
+        result.current.actions.setAnswer('q1', 'LOCAL_OBJECTIVE');
+      });
+
+      act(() => {
+        attemptSnapshot = {
+          ...hydratedAttempt,
+          answers: { q1: 'SERVER_OBJECTIVE' },
+          updatedAt: '2026-01-01T00:00:03.000Z',
+        };
+        rerender();
+      });
+
+      expect(result.current.state.answers.q1).toBe('LOCAL_OBJECTIVE');
+    });
+
+    it('preserves local writing answers on same-attempt refresh', () => {
+      let attemptSnapshot = hydratedAttempt;
+      const wrapperWithAttempt = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: wrapperWithAttempt });
+
+      act(() => {
+        result.current.actions.setWritingAnswer('task-2', '<p>Local draft</p>');
+      });
+
+      act(() => {
+        attemptSnapshot = {
+          ...hydratedAttempt,
+          writingAnswers: { 'task-2': '<p>Server draft</p>' },
+          updatedAt: '2026-01-01T00:00:04.000Z',
+        };
+        rerender();
+      });
+
+      expect(result.current.state.writingAnswers['task-2']).toBe('<p>Local draft</p>');
+    });
+
+    it('preserves local flags on same-attempt refresh', () => {
+      let attemptSnapshot = hydratedAttempt;
+      const wrapperWithAttempt = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: wrapperWithAttempt });
+
+      act(() => {
+        result.current.actions.toggleFlag('q1');
+      });
+
+      expect(result.current.state.flags.q1).toBe(false);
+
+      act(() => {
+        attemptSnapshot = {
+          ...hydratedAttempt,
+          flags: { q1: true },
+          updatedAt: '2026-01-01T00:00:05.000Z',
+        };
+        rerender();
+      });
+
+      expect(result.current.state.flags.q1).toBe(false);
+    });
+
+    it('fully hydrates answer fields when attempt id changes', () => {
+      let attemptSnapshot = hydratedAttempt;
+      const wrapperWithAttempt = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: wrapperWithAttempt });
+
+      act(() => {
+        result.current.actions.setAnswer('q1', 'LOCAL_OBJECTIVE');
+        result.current.actions.setWritingAnswer('task-2', '<p>Local draft</p>');
+        result.current.actions.toggleFlag('q1');
+      });
+
+      act(() => {
+        attemptSnapshot = {
+          ...hydratedAttempt,
+          id: 'attempt-2',
+          answers: { q1: 'SERVER_OBJECTIVE' },
+          writingAnswers: { 'task-2': '<p>Server draft</p>' },
+          flags: { q1: true },
+          updatedAt: '2026-01-01T00:00:06.000Z',
+        };
+        rerender();
+      });
+
+      expect(result.current.state.answers.q1).toBe('SERVER_OBJECTIVE');
+      expect(result.current.state.writingAnswers['task-2']).toBe('<p>Server draft</p>');
+      expect(result.current.state.flags.q1).toBe(true);
+    });
+
+    it('hydrates non-answer fields after saving while preserving local same-attempt answers', () => {
+      let attemptSnapshot = hydratedAttempt;
+      const wrapperWithAttempt = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: wrapperWithAttempt });
+
+      act(() => {
+        result.current.actions.setAnswer('q1', 'LOCAL_DURING_SAVE');
+        result.current.actions.setAttemptSyncState('saving');
+      });
+
+      act(() => {
+        attemptSnapshot = {
+          ...hydratedAttempt,
+          currentModule: 'reading',
+          currentQuestionId: 'reading-q1',
+          answers: { q1: 'SERVER_DURING_SAVE' },
+          updatedAt: '2026-01-01T00:00:07.000Z',
+        };
+        rerender();
+      });
+
+      expect(result.current.state.currentModule).toBe('writing');
+      expect(result.current.state.answers.q1).toBe('LOCAL_DURING_SAVE');
+
+      act(() => {
+        result.current.actions.setAttemptSyncState('saved');
+      });
+
+      act(() => {
+        rerender();
+      });
+
+      expect(result.current.state.currentModule).toBe('reading');
+      expect(result.current.state.currentQuestionId).toBe('reading-q1');
+      expect(result.current.state.answers.q1).toBe('LOCAL_DURING_SAVE');
+    });
+
+    it('applies one authoritative server answer reconciliation for a new dropped-mutation marker', () => {
+      let attemptSnapshot = hydratedAttempt;
+      const metricEvents: Record<string, unknown>[] = [];
+      const metricListener = (event: Event) => {
+        const customEvent = event as CustomEvent<Record<string, unknown>>;
+        metricEvents.push(customEvent.detail);
+      };
+      const droppedMarker = {
+        at: '2026-01-01T00:00:08.000Z',
+        count: 1,
+        fromModule: 'reading' as const,
+        toModule: 'writing' as const,
+        reason: 'SECTION_MISMATCH',
+        affectedAnswers: ['q1'],
+      };
+      const wrapperWithAttempt = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: wrapperWithAttempt });
+
+      window.addEventListener('student-observability-metric', metricListener as EventListener);
+      try {
+        act(() => {
+          result.current.actions.setAnswer('q1', 'LOCAL_BEFORE_RECONCILE');
+          result.current.actions.setWritingAnswer('task-2', '<p>LOCAL_WRITING_STAYS</p>');
+        });
+
+        act(() => {
+          attemptSnapshot = {
+            ...hydratedAttempt,
+            answers: { q1: 'SERVER_RECONCILED' },
+            writingAnswers: { 'task-2': '<p>SERVER_WRITING_OLD</p>' },
+            updatedAt: '2026-01-01T00:00:08.000Z',
+            recovery: {
+              ...hydratedAttempt.recovery,
+              lastDroppedMutations: droppedMarker,
+            },
+          };
+          rerender();
+        });
+
+        expect(result.current.state.answers.q1).toBe('SERVER_RECONCILED');
+        expect(result.current.state.writingAnswers['task-2']).toBe('<p>LOCAL_WRITING_STAYS</p>');
+
+        const reconcileMetric = metricEvents.find(
+          (metric) => metric.name === 'student_answer_reconcile_from_server_total',
+        );
+        expect(reconcileMetric).toMatchObject({
+          scheduleId: hydratedAttempt.scheduleId,
+          attemptId: hydratedAttempt.id,
+          endpoint: `/v1/student/sessions/${hydratedAttempt.scheduleId}/live`,
+          statusCode: 200,
+          reason: 'SECTION_MISMATCH',
+          syncState: 'saved',
+        });
+        expect(reconcileMetric?.version).toEqual(expect.any(String));
+
+        act(() => {
+          result.current.actions.setAnswer('q1', 'LOCAL_AFTER_RECONCILE');
+        });
+
+        act(() => {
+          attemptSnapshot = {
+            ...attemptSnapshot,
+            answers: { q1: 'SERVER_LATER' },
+            updatedAt: '2026-01-01T00:00:09.000Z',
+            recovery: {
+              ...attemptSnapshot.recovery,
+              lastDroppedMutations: droppedMarker,
+            },
+          };
+          rerender();
+        });
+
+        expect(result.current.state.answers.q1).toBe('LOCAL_AFTER_RECONCILE');
+      } finally {
+        window.removeEventListener('student-observability-metric', metricListener as EventListener);
+      }
+    });
+
+    it('keeps local answer when dropped-mutation reconcile key is missing from snapshot payload', () => {
+      let attemptSnapshot = hydratedAttempt;
+      const droppedMarker = {
+        at: '2026-01-01T00:00:12.000Z',
+        count: 1,
+        fromModule: 'reading' as const,
+        toModule: 'writing' as const,
+        reason: 'SECTION_MISMATCH',
+        affectedAnswers: ['q1'],
+      };
+      const wrapperWithAttempt = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: wrapperWithAttempt });
+
+      act(() => {
+        result.current.actions.setAnswer('q1', 'LOCAL_MUST_STAY');
+      });
+
+      act(() => {
+        attemptSnapshot = {
+          ...hydratedAttempt,
+          answers: {},
+          updatedAt: '2026-01-01T00:00:12.000Z',
+          recovery: {
+            ...hydratedAttempt.recovery,
+            lastDroppedMutations: droppedMarker as any,
+          },
+        };
+        rerender();
+      });
+
+      expect(result.current.state.answers.q1).toBe('LOCAL_MUST_STAY');
+    });
+
+    it('reconciles only dropped answer slots and preserves unrelated local slots', () => {
+      let attemptSnapshot = hydratedAttempt;
+      const droppedMarker = {
+        at: '2026-01-01T00:00:13.000Z',
+        count: 1,
+        fromModule: 'reading' as const,
+        toModule: 'writing' as const,
+        reason: 'SECTION_MISMATCH',
+        affectedAnswerSlots: [{ questionId: 'q-array', slotIndex: 0 }],
+      };
+      const wrapperWithAttempt = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: wrapperWithAttempt });
+
+      act(() => {
+        result.current.actions.setAnswer('q-array', ['LOCAL_SLOT_0', 'LOCAL_SLOT_1'] as any);
+      });
+
+      act(() => {
+        attemptSnapshot = {
+          ...hydratedAttempt,
+          answers: { ...hydratedAttempt.answers, 'q-array': ['SERVER_SLOT_0'] },
+          updatedAt: '2026-01-01T00:00:13.000Z',
+          recovery: {
+            ...hydratedAttempt.recovery,
+            lastDroppedMutations: droppedMarker as any,
+          },
+        };
+        rerender();
+      });
+
+      expect(result.current.state.answers['q-array']).toEqual(['SERVER_SLOT_0', 'LOCAL_SLOT_1']);
+    });
+
+    it('supports mixed-version rollout by disabling local answer freeze with the runtime kill switch', () => {
+      let attemptSnapshot = hydratedAttempt;
+      const wrapperWithAttempt = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+          answerInvariantEnabled={false}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: wrapperWithAttempt });
+
+      act(() => {
+        result.current.actions.setAnswer('q1', 'LOCAL_OBJECTIVE');
+      });
+
+      act(() => {
+        attemptSnapshot = {
+          ...hydratedAttempt,
+          answers: { q1: 'SERVER_OBJECTIVE' },
+          updatedAt: '2026-01-01T00:00:10.000Z',
+        };
+        rerender();
+      });
+
+      expect(result.current.state.answers.q1).toBe('SERVER_OBJECTIVE');
+    });
+
     it('supports explicit blocking reasons and sync-state updates', () => {
       const { result } = renderHook(() => useStudentRuntime(), { wrapper: hydratedWrapper });
 

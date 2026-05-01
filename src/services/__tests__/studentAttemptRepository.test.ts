@@ -324,7 +324,7 @@ describe('studentAttemptRepository', () => {
     expect(vi.mocked(backendPost)).not.toHaveBeenCalled();
   });
 
-  it('preserves cached local answers when accepted sequence is tied but local timestamps are newer', async () => {
+  it('prefers incoming answers when accepted sequence is tied even if local timestamps are newer', async () => {
     const localAttempt = makeAttempt({
       answers: { q1: 'LOCAL_TS' },
       updatedAt: '2026-01-10T09:50:00.000Z',
@@ -335,7 +335,7 @@ describe('studentAttemptRepository', () => {
       },
     });
     const incomingAttempt = makeAttempt({
-      answers: { q1: 'SERVER_OLD_TS' },
+      answers: { q1: 'SERVER_TIED_SEQ' },
       updatedAt: '2026-01-10T09:00:00.000Z',
       recovery: {
         ...makeAttempt().recovery,
@@ -348,7 +348,7 @@ describe('studentAttemptRepository', () => {
     await studentAttemptRepository.saveAttempt(incomingAttempt);
 
     const cached = await getCachedAttempt(localAttempt.id);
-    expect(cached?.answers.q1).toBe('LOCAL_TS');
+    expect(cached?.answers.q1).toBe('SERVER_TIED_SEQ');
     expect(cached?.recovery.serverAcceptedThroughSeq).toBe(7);
   });
 

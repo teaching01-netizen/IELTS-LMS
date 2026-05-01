@@ -1070,6 +1070,40 @@ describe('StudentAttemptProvider', () => {
     vi.useRealTimers();
   });
 
+  it('does not flush or clear RAM pending answers when durable pending-mutation persist fails', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+    vi.mocked(studentAttemptRepository.savePendingMutations).mockRejectedValue(
+      new Error('quota exceeded'),
+    );
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'LOCAL_TYPED');
+    });
+
+    await flushAnswerDurableDebounceWindow();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.state.attempt?.recovery.syncState).toBe('error');
+
+    await act(async () => {
+      const flushed = await result.current.actions.flushPending();
+      expect(flushed).toBe(false);
+    });
+
+    expect(studentAttemptRepository.saveAttempt).not.toHaveBeenCalled();
+    expect(studentAttemptRepository.clearPendingMutations).not.toHaveBeenCalled();
+    expect(result.current.state.pendingMutationCount).toBeGreaterThan(0);
+    expect(result.current.state.attempt?.answers.q1).toBe('LOCAL_TYPED');
+    vi.useRealTimers();
+  });
+
   it('forces an immediate durable answer flush on pagehide and beforeunload', async () => {
     vi.useFakeTimers();
     Object.defineProperty(window.navigator, 'onLine', {
@@ -1390,7 +1424,7 @@ describe('StudentAttemptProvider', () => {
     });
   });
 
-  it('prefers incoming snapshot when freshness signals are equal', async () => {
+  it('keeps local answers when freshness signals are equal but local mutation signals exist', async () => {
     const state = createExamState();
     const initialAttempt = createAttemptSnapshot();
     let updateAttemptSnapshot: ((next: StudentAttempt) => void) | null = null;
@@ -1463,7 +1497,7 @@ describe('StudentAttemptProvider', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.state.attempt?.answers.q1).toBe('SERVER_EQUAL');
+      expect(result.current.state.attempt?.answers.q1).toBe('LOCAL');
     });
   });
 

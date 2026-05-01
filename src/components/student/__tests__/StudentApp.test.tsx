@@ -204,6 +204,450 @@ describe('StudentApp runtime-backed mode', () => {
     expect(editor).toHaveAttribute('autocapitalize', 'off');
   });
 
+  it('keeps local objective text input stable during same-attempt refresh', async () => {
+    const user = userEvent.setup();
+
+    const objectiveState: ExamState = {
+      ...state,
+      activeModule: 'reading',
+      reading: {
+        passages: [
+          {
+            id: 'p1',
+            title: 'Passage 1',
+            content: 'Seeded passage',
+            blocks: [
+              {
+                id: 'reading-block-1',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer the question using one word from the passage.',
+                questions: [
+                  {
+                    id: 'q1',
+                    prompt: 'Question 1',
+                    correctAnswer: 'seeded answer',
+                    answerRule: 'ONE_WORD',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    let attemptSnapshot: StudentAttempt = {
+      id: 'attempt-1',
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      phase: 'exam',
+      currentModule: 'reading',
+      currentQuestionId: 'q1',
+      answers: { q1: 'SERVER_SEED' },
+      writingAnswers: {},
+      flags: {},
+      violations: [],
+      proctorStatus: 'active',
+      proctorNote: null,
+      proctorUpdatedAt: null,
+      proctorUpdatedBy: null,
+      lastWarningId: null,
+      lastAcknowledgedWarningId: null,
+      integrity: {
+        preCheck: {
+          completedAt: '2026-01-01T00:00:00.000Z',
+          browserFamily: 'chrome',
+          browserVersion: 120,
+          screenDetailsSupported: true,
+          heartbeatReady: true,
+          acknowledgedSafariLimitation: false,
+          checks: [],
+        },
+        deviceFingerprintHash: null,
+        lastDisconnectAt: null,
+        lastReconnectAt: null,
+        lastHeartbeatAt: null,
+        lastHeartbeatStatus: 'idle',
+      },
+      recovery: {
+        lastRecoveredAt: null,
+        lastLocalMutationAt: null,
+        lastPersistedAt: null,
+        lastDroppedMutations: null,
+        pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
+        syncState: 'saved',
+      },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const runtimeSnapshot: ExamSessionRuntime = {
+      id: 'runtime-1',
+      scheduleId: 'sched-1',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start',
+      status: 'live',
+      actualStartAt: '2026-01-01T00:00:00.000Z',
+      actualEndAt: null,
+      activeSectionKey: 'reading',
+      currentSectionKey: 'reading',
+      currentSectionRemainingSeconds: 1800,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      sections: [
+        {
+          sectionKey: 'reading',
+          label: 'Reading',
+          order: 1,
+          plannedDurationMinutes: 60,
+          gapAfterMinutes: 0,
+          status: 'live',
+          availableAt: '2026-01-01T00:00:00.000Z',
+          actualStartAt: '2026-01-01T00:00:00.000Z',
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 0,
+          completionReason: undefined,
+          projectedStartAt: '2026-01-01T00:00:00.000Z',
+          projectedEndAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const { rerender } = render(
+      <StudentAppWrapper
+        state={objectiveState}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={runtimeSnapshot}
+      />,
+    );
+
+    const objectiveInput = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+    await user.clear(objectiveInput);
+    await user.type(objectiveInput, 'LOCAL_TYPED');
+    expect(objectiveInput.value).toBe('LOCAL_TYPED');
+
+    attemptSnapshot = {
+      ...attemptSnapshot,
+      answers: { q1: 'SERVER_REFRESH' },
+      updatedAt: '2026-01-01T00:00:02.000Z',
+    };
+    rerender(
+      <StudentAppWrapper
+        state={objectiveState}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={runtimeSnapshot}
+      />,
+    );
+
+    expect((screen.getByLabelText('Answer for question 1') as HTMLInputElement).value).toBe('LOCAL_TYPED');
+  });
+
+  it('keeps local writing editor content stable during same-attempt refresh', async () => {
+    const writingState: ExamState = {
+      ...state,
+      activeModule: 'writing',
+    };
+
+    let attemptSnapshot: StudentAttempt = {
+      id: 'attempt-1',
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      phase: 'exam',
+      currentModule: 'writing',
+      currentQuestionId: 'task1',
+      answers: {},
+      writingAnswers: { task1: '<p>Server seed</p>' },
+      flags: {},
+      violations: [],
+      proctorStatus: 'active',
+      proctorNote: null,
+      proctorUpdatedAt: null,
+      proctorUpdatedBy: null,
+      lastWarningId: null,
+      lastAcknowledgedWarningId: null,
+      integrity: {
+        preCheck: {
+          completedAt: '2026-01-01T00:00:00.000Z',
+          browserFamily: 'chrome',
+          browserVersion: 120,
+          screenDetailsSupported: true,
+          heartbeatReady: true,
+          acknowledgedSafariLimitation: false,
+          checks: [],
+        },
+        deviceFingerprintHash: null,
+        lastDisconnectAt: null,
+        lastReconnectAt: null,
+        lastHeartbeatAt: null,
+        lastHeartbeatStatus: 'idle',
+      },
+      recovery: {
+        lastRecoveredAt: null,
+        lastLocalMutationAt: null,
+        lastPersistedAt: null,
+        lastDroppedMutations: null,
+        pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
+        syncState: 'saved',
+      },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const runtimeSnapshot: ExamSessionRuntime = {
+      id: 'runtime-1',
+      scheduleId: 'sched-1',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start',
+      status: 'live',
+      actualStartAt: '2026-01-01T00:00:00.000Z',
+      actualEndAt: null,
+      activeSectionKey: 'writing',
+      currentSectionKey: 'writing',
+      currentSectionRemainingSeconds: 1800,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      sections: [
+        {
+          sectionKey: 'writing',
+          label: 'Writing',
+          order: 1,
+          plannedDurationMinutes: 60,
+          gapAfterMinutes: 0,
+          status: 'live',
+          availableAt: '2026-01-01T00:00:00.000Z',
+          actualStartAt: '2026-01-01T00:00:00.000Z',
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 0,
+          completionReason: undefined,
+          projectedStartAt: '2026-01-01T00:00:00.000Z',
+          projectedEndAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const { rerender } = render(
+      <StudentAppWrapper
+        state={writingState}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={runtimeSnapshot}
+      />,
+    );
+
+    const editor = await screen.findByRole('textbox', { name: /writing response/i });
+    fireEvent.input(editor, {
+      target: { innerHTML: 'Server seed LOCAL_TYPED' },
+      currentTarget: { innerHTML: 'Server seed LOCAL_TYPED' },
+    });
+    expect(editor).toHaveTextContent(/LOCAL_TYPED/);
+
+    attemptSnapshot = {
+      ...attemptSnapshot,
+      writingAnswers: { task1: '<p>Server refresh</p>' },
+      updatedAt: '2026-01-01T00:00:03.000Z',
+    };
+    rerender(
+      <StudentAppWrapper
+        state={writingState}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={runtimeSnapshot}
+      />,
+    );
+
+    expect(await screen.findByRole('textbox', { name: /writing response/i })).toHaveTextContent(/LOCAL_TYPED/);
+  });
+
+  it('keeps local choice selection stable during same-attempt refresh', async () => {
+    const user = userEvent.setup();
+
+    const tfngState: ExamState = {
+      ...state,
+      activeModule: 'reading',
+      reading: {
+        passages: [
+          {
+            id: 'p1',
+            title: 'Passage 1',
+            content: 'Seeded passage',
+            blocks: [
+              {
+                id: 'tfng-1',
+                type: 'TFNG',
+                instruction: 'Answer the question.',
+                mode: 'TFNG',
+                questions: [
+                  {
+                    id: 'q1',
+                    statement: 'The statement is true.',
+                    correctAnswer: 'T',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    let attemptSnapshot: StudentAttempt = {
+      id: 'attempt-1',
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      phase: 'exam',
+      currentModule: 'reading',
+      currentQuestionId: 'q1',
+      answers: { q1: 'T' },
+      writingAnswers: {},
+      flags: {},
+      violations: [],
+      proctorStatus: 'active',
+      proctorNote: null,
+      proctorUpdatedAt: null,
+      proctorUpdatedBy: null,
+      lastWarningId: null,
+      lastAcknowledgedWarningId: null,
+      integrity: {
+        preCheck: {
+          completedAt: '2026-01-01T00:00:00.000Z',
+          browserFamily: 'chrome',
+          browserVersion: 120,
+          screenDetailsSupported: true,
+          heartbeatReady: true,
+          acknowledgedSafariLimitation: false,
+          checks: [],
+        },
+        deviceFingerprintHash: null,
+        lastDisconnectAt: null,
+        lastReconnectAt: null,
+        lastHeartbeatAt: null,
+        lastHeartbeatStatus: 'idle',
+      },
+      recovery: {
+        lastRecoveredAt: null,
+        lastLocalMutationAt: null,
+        lastPersistedAt: null,
+        lastDroppedMutations: null,
+        pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
+        syncState: 'saved',
+      },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const runtimeSnapshot: ExamSessionRuntime = {
+      id: 'runtime-1',
+      scheduleId: 'sched-1',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start',
+      status: 'live',
+      actualStartAt: '2026-01-01T00:00:00.000Z',
+      actualEndAt: null,
+      activeSectionKey: 'reading',
+      currentSectionKey: 'reading',
+      currentSectionRemainingSeconds: 1800,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      sections: [
+        {
+          sectionKey: 'reading',
+          label: 'Reading',
+          order: 1,
+          plannedDurationMinutes: 60,
+          gapAfterMinutes: 0,
+          status: 'live',
+          availableAt: '2026-01-01T00:00:00.000Z',
+          actualStartAt: '2026-01-01T00:00:00.000Z',
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 0,
+          completionReason: undefined,
+          projectedStartAt: '2026-01-01T00:00:00.000Z',
+          projectedEndAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const { rerender } = render(
+      <StudentAppWrapper
+        state={tfngState}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={runtimeSnapshot}
+      />,
+    );
+
+    const radioOptions = screen.getAllByRole('radio') as HTMLInputElement[];
+    await user.click(radioOptions[1]!);
+    const falseOption = radioOptions[1]!;
+    expect(falseOption.checked).toBe(true);
+
+    attemptSnapshot = {
+      ...attemptSnapshot,
+      answers: { q1: 'T' },
+      updatedAt: '2026-01-01T00:00:04.000Z',
+    };
+    rerender(
+      <StudentAppWrapper
+        state={tfngState}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={runtimeSnapshot}
+      />,
+    );
+
+    expect((screen.getAllByRole('radio') as HTMLInputElement[])[1]?.checked).toBe(true);
+  });
+
   it('does not render the completion screen when attempt phase is post-exam but terminal is unverified (fullscreen exit regression)', async () => {
     vi.useFakeTimers();
 

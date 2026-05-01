@@ -137,6 +137,7 @@ type BackendExamSessionRuntime = {
   scheduleId: string;
   examId: string;
   status: ExamSessionRuntime['status'];
+  revision?: number | null | undefined;
   actualStartAt?: string | null | undefined;
   actualEndAt?: string | null | undefined;
   activeSectionKey?: ModuleType | null | undefined;

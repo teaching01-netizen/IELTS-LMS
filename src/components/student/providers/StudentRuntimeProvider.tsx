@@ -23,6 +23,10 @@ import type {
   StudentAnswerValue,
   StudentAttempt,
 } from '../../../types/studentAttempt';
+import {
+  emitStudentObservabilityMetric,
+  withStudentObservabilityDimensions,
+} from '../../../utils/studentObservability';
 import { isRuntimeStructurallyCompleted } from './verifiedTerminalState';
 
 export type ExamPhase = 'pre-check' | 'lobby' | 'exam' | 'post-exam';
@@ -111,6 +115,7 @@ interface StudentRuntimeProviderProps {
   children: ReactNode;
   state: ExamState;
   onExit: () => void;
+  answerInvariantEnabled?: boolean;
   runtimeBacked?: boolean;
   runtimeSnapshot?: ExamSessionRuntime | null;
   attemptSnapshot?: StudentAttempt | null;
@@ -136,6 +141,18 @@ type RuntimeAction =
       runtimeBacked: boolean;
       runtimeSnapshot: ExamSessionRuntime | null;
       runtimeFirstQuestionId: string | null;
+      hydrateAnswerFields: boolean;
+      reconcileTarget:
+        | {
+            answers: string[];
+            answerSlots: Array<{
+              questionId: string;
+              slotIndex: number;
+            }>;
+            writingAnswers: string[];
+            flags: string[];
+          }
+        | null;
     }
   | { type: 'set_phase'; phase: ExamPhase }
   | { type: 'set_current_module'; module: ModuleType; firstQuestionId: string | null }
@@ -167,6 +184,16 @@ type RuntimeAction =
 
 function countFullscreenViolations(violations: Violation[]) {
   return violations.filter((violation) => violation.type === 'FULLSCREEN_EXIT').length;
+}
+
+function getDroppedMutationMarker(
+  dropped: StudentAttempt['recovery']['lastDroppedMutations'],
+): string | null {
+  if (!dropped) {
+    return null;
+  }
+
+  return `${dropped.at}:${dropped.count}:${dropped.fromModule ?? ''}:${dropped.toModule ?? ''}:${dropped.reason}`;
 }
 
 function deriveBlockingState(
@@ -352,6 +379,56 @@ function mergeViolations(snapshot: Violation[], local: Violation[]): Violation[]
   return merged;
 }
 
+function applyTargetedRecordHydration<T>(
+  local: Record<string, T>,
+  snapshot: Record<string, T>,
+  keys: string[],
+): Record<string, T> {
+  if (keys.length === 0) {
+    return local;
+  }
+
+  const dedupedKeys = [...new Set(keys)];
+  const next = { ...local };
+  for (const key of dedupedKeys) {
+    if (Object.prototype.hasOwnProperty.call(snapshot, key)) {
+      next[key] = snapshot[key] as T;
+    }
+  }
+  return next;
+}
+
+function applyTargetedAnswerSlotHydration(
+  local: Record<string, StudentAnswer | undefined>,
+  snapshot: Record<string, StudentAnswer | undefined>,
+  slots: Array<{ questionId: string; slotIndex: number }>,
+): Record<string, StudentAnswer | undefined> {
+  if (slots.length === 0) {
+    return local;
+  }
+
+  const next = { ...local };
+  const dedupedSlots = new Map<string, { questionId: string; slotIndex: number }>();
+  for (const slot of slots) {
+    dedupedSlots.set(`${slot.questionId}:${slot.slotIndex}`, slot);
+  }
+
+  for (const { questionId, slotIndex } of dedupedSlots.values()) {
+    const snapshotValue = snapshot[questionId];
+    if (!Array.isArray(snapshotValue) || slotIndex >= snapshotValue.length) {
+      continue;
+    }
+
+    const localValue = next[questionId];
+    const merged = Array.isArray(localValue) ? [...localValue] : [];
+    const snapshotSlotValue = snapshotValue[slotIndex];
+    merged[slotIndex] = typeof snapshotSlotValue === 'string' ? snapshotSlotValue : '';
+    next[questionId] = merged;
+  }
+
+  return next;
+}
+
 function runtimeReducer(
   state: RuntimeReducerState,
   action: RuntimeAction,
@@ -472,14 +549,43 @@ function runtimeReducer(
             : 'post-exam'
           : action.snapshot.phase;
       const mergedViolations = mergeViolations(action.snapshot.violations, state.violations);
+      const nextAnswers = action.hydrateAnswerFields
+        ? action.reconcileTarget
+          ? applyTargetedAnswerSlotHydration(
+              applyTargetedRecordHydration(
+                state.answers,
+                action.snapshot.answers,
+                action.reconcileTarget.answers,
+              ),
+              action.snapshot.answers,
+              action.reconcileTarget.answerSlots,
+            )
+          : action.snapshot.answers
+        : state.answers;
+      const nextWritingAnswers = action.hydrateAnswerFields
+        ? action.reconcileTarget
+          ? applyTargetedRecordHydration(
+              state.writingAnswers,
+              action.snapshot.writingAnswers,
+              action.reconcileTarget.writingAnswers,
+            )
+          : action.snapshot.writingAnswers
+        : state.writingAnswers;
+      const nextFlags = action.hydrateAnswerFields
+        ? action.reconcileTarget
+          ? applyTargetedRecordHydration(state.flags, action.snapshot.flags, action.reconcileTarget.flags)
+          : action.snapshot.flags
+        : state.flags;
+      const answerFieldsEquivalent =
+        JSON.stringify(state.answers) === JSON.stringify(nextAnswers) &&
+        JSON.stringify(state.writingAnswers) === JSON.stringify(nextWritingAnswers) &&
+        JSON.stringify(state.flags) === JSON.stringify(nextFlags);
 
       if (
         state.phase === nextPhase &&
         state.currentModule === nextCurrentModule &&
         state.currentQuestionId === nextCurrentQuestionId &&
-        JSON.stringify(state.answers) === JSON.stringify(action.snapshot.answers) &&
-        JSON.stringify(state.writingAnswers) === JSON.stringify(action.snapshot.writingAnswers) &&
-        JSON.stringify(state.flags) === JSON.stringify(action.snapshot.flags) &&
+        answerFieldsEquivalent &&
         JSON.stringify(state.violations) === JSON.stringify(mergedViolations) &&
         state.proctorStatus === action.snapshot.proctorStatus &&
         state.proctorNote === action.snapshot.proctorNote &&
@@ -494,9 +600,9 @@ function runtimeReducer(
         phase: nextPhase,
         currentModule: nextCurrentModule,
         currentQuestionId: nextCurrentQuestionId,
-        answers: action.snapshot.answers,
-        writingAnswers: action.snapshot.writingAnswers,
-        flags: action.snapshot.flags,
+        answers: nextAnswers,
+        writingAnswers: nextWritingAnswers,
+        flags: nextFlags,
         violations: mergedViolations,
         fullscreenViolationCount: countFullscreenViolations(mergedViolations),
         proctorStatus: action.snapshot.proctorStatus,
@@ -678,6 +784,7 @@ export function StudentRuntimeProvider({
   children,
   state,
   onExit,
+  answerInvariantEnabled = true,
   runtimeBacked = false,
   runtimeSnapshot = null,
   attemptSnapshot = null,
@@ -688,9 +795,15 @@ export function StudentRuntimeProvider({
     createInitialRuntimeState(state, runtimeBacked, runtimeSnapshot, attemptSnapshot),
   );
   const lastHydratedAttemptRef = useRef<string | null>(
-    attemptSnapshot ? `${attemptSnapshot.id}:${attemptSnapshot.updatedAt}` : null,
+    attemptSnapshot
+      ? `${attemptSnapshot.id}:${attemptSnapshot.updatedAt}:${getDroppedMutationMarker(attemptSnapshot.recovery.lastDroppedMutations) ?? ''}`
+      : null,
   );
   const lastHydratedProctorRef = useRef<string | null>(null);
+  const lastHydratedAttemptIdRef = useRef<string | null>(attemptSnapshot?.id ?? null);
+  const lastDroppedReconcileMarkerRef = useRef<string | null>(
+    getDroppedMutationMarker(attemptSnapshot?.recovery.lastDroppedMutations ?? null),
+  );
 
   useEffect(() => {
     if (!attemptSnapshot) {
@@ -733,12 +846,54 @@ export function StudentRuntimeProvider({
       return;
     }
 
-    const attemptFingerprint = `${attemptSnapshot.id}:${attemptSnapshot.updatedAt}`;
+    const droppedMarker = getDroppedMutationMarker(attemptSnapshot.recovery.lastDroppedMutations);
+    const sameAttempt = lastHydratedAttemptIdRef.current === attemptSnapshot.id;
+    const shouldForceServerReconcile =
+      sameAttempt &&
+      Boolean(droppedMarker) &&
+      droppedMarker !== lastDroppedReconcileMarkerRef.current;
+    const droppedReconcileTarget = shouldForceServerReconcile
+      ? {
+          answers: attemptSnapshot.recovery.lastDroppedMutations?.affectedAnswers ?? [],
+          answerSlots: attemptSnapshot.recovery.lastDroppedMutations?.affectedAnswerSlots ?? [],
+          writingAnswers: attemptSnapshot.recovery.lastDroppedMutations?.affectedWritingAnswers ?? [],
+          flags: attemptSnapshot.recovery.lastDroppedMutations?.affectedFlags ?? [],
+        }
+      : null;
+    const hasDroppedReconcileTarget = Boolean(
+      droppedReconcileTarget &&
+      (
+        droppedReconcileTarget.answers.length > 0 ||
+        droppedReconcileTarget.answerSlots.length > 0 ||
+        droppedReconcileTarget.writingAnswers.length > 0 ||
+        droppedReconcileTarget.flags.length > 0
+      ),
+    );
+    const attemptFingerprint = `${attemptSnapshot.id}:${attemptSnapshot.updatedAt}:${droppedMarker ?? ''}`;
     if (lastHydratedAttemptRef.current === attemptFingerprint) {
       return;
     }
 
     lastHydratedAttemptRef.current = attemptFingerprint;
+    lastHydratedAttemptIdRef.current = attemptSnapshot.id;
+    if (!sameAttempt || shouldForceServerReconcile) {
+      lastDroppedReconcileMarkerRef.current = droppedMarker;
+    }
+    if (shouldForceServerReconcile) {
+      emitStudentObservabilityMetric(
+        'student_answer_reconcile_from_server_total',
+        withStudentObservabilityDimensions({
+          scheduleId: attemptSnapshot.scheduleId,
+          attemptId: attemptSnapshot.id,
+          endpoint: `/v1/student/sessions/${attemptSnapshot.scheduleId}/live`,
+          statusCode: 200,
+          reason: attemptSnapshot.recovery.lastDroppedMutations?.reason ?? 'UNKNOWN',
+          syncState: runtimeState.attemptSyncState,
+          answerInvariantEnabled,
+          answerInvariantSource: 'runtime_provider',
+        }),
+      );
+    }
     dispatch({
       type: 'hydrate_attempt',
       snapshot: attemptSnapshot,
@@ -747,8 +902,23 @@ export function StudentRuntimeProvider({
       runtimeFirstQuestionId: runtimeSnapshot?.currentSectionKey
         ? getFirstQuestionIdForModule(state, runtimeSnapshot.currentSectionKey)
         : null,
+      hydrateAnswerFields:
+        !answerInvariantEnabled ||
+        !sameAttempt ||
+        (shouldForceServerReconcile && hasDroppedReconcileTarget),
+      reconcileTarget:
+        shouldForceServerReconcile && hasDroppedReconcileTarget
+          ? droppedReconcileTarget
+          : null,
     });
-  }, [attemptSnapshot, runtimeBacked, runtimeSnapshot, runtimeState.attemptSyncState, state]);
+  }, [
+    answerInvariantEnabled,
+    attemptSnapshot,
+    runtimeBacked,
+    runtimeSnapshot,
+    runtimeState.attemptSyncState,
+    state,
+  ]);
 
   useEffect(() => {
     if (!runtimeBacked) {

@@ -97,6 +97,15 @@ export interface StudentAttempt {
       fromModule: ModuleType | 'multiple' | null;
       toModule: ModuleType | null;
       reason: string;
+      affectedAnswers?: string[] | undefined;
+      affectedAnswerSlots?:
+        | Array<{
+            questionId: string;
+            slotIndex: number;
+          }>
+        | undefined;
+      affectedWritingAnswers?: string[] | undefined;
+      affectedFlags?: string[] | undefined;
     } | null;
     pendingMutationCount: number;
     serverAcceptedThroughSeq: number;

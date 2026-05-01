@@ -58,6 +58,43 @@ export function normalizeStudentAttempt(attempt: StudentAttempt): StudentAttempt
       .find((violation) => WARNING_VIOLATION_TYPES.has(violation.type))?.id ??
     null;
 
+  const normalizedDroppedMutations = attempt.recovery?.lastDroppedMutations
+    ? {
+        ...attempt.recovery.lastDroppedMutations,
+        affectedAnswers: Array.isArray(attempt.recovery.lastDroppedMutations.affectedAnswers)
+          ? attempt.recovery.lastDroppedMutations.affectedAnswers.filter(
+              (value): value is string => typeof value === 'string' && value.trim().length > 0,
+            )
+          : undefined,
+        affectedAnswerSlots: Array.isArray(attempt.recovery.lastDroppedMutations.affectedAnswerSlots)
+          ? attempt.recovery.lastDroppedMutations.affectedAnswerSlots.filter((value): value is {
+              questionId: string;
+              slotIndex: number;
+            } => {
+              return (
+                typeof value === 'object' &&
+                value !== null &&
+                typeof value.questionId === 'string' &&
+                value.questionId.trim().length > 0 &&
+                typeof value.slotIndex === 'number' &&
+                Number.isInteger(value.slotIndex) &&
+                value.slotIndex >= 0
+              );
+            })
+          : undefined,
+        affectedWritingAnswers: Array.isArray(attempt.recovery.lastDroppedMutations.affectedWritingAnswers)
+          ? attempt.recovery.lastDroppedMutations.affectedWritingAnswers.filter(
+              (value): value is string => typeof value === 'string' && value.trim().length > 0,
+            )
+          : undefined,
+        affectedFlags: Array.isArray(attempt.recovery.lastDroppedMutations.affectedFlags)
+          ? attempt.recovery.lastDroppedMutations.affectedFlags.filter(
+              (value): value is string => typeof value === 'string' && value.trim().length > 0,
+            )
+          : undefined,
+      }
+    : null;
+
   return {
     ...attempt,
     revision,
@@ -88,7 +125,7 @@ export function normalizeStudentAttempt(attempt: StudentAttempt): StudentAttempt
       lastRecoveredAt: attempt.recovery?.lastRecoveredAt ?? null,
       lastLocalMutationAt: attempt.recovery?.lastLocalMutationAt ?? null,
       lastPersistedAt: attempt.recovery?.lastPersistedAt ?? null,
-      lastDroppedMutations: attempt.recovery?.lastDroppedMutations ?? null,
+      lastDroppedMutations: normalizedDroppedMutations,
       pendingMutationCount: attempt.recovery?.pendingMutationCount ?? 0,
       serverAcceptedThroughSeq: attempt.recovery?.serverAcceptedThroughSeq ?? 0,
       clientSessionId: attempt.recovery?.clientSessionId ?? null,
