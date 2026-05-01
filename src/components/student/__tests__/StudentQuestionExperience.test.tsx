@@ -2,7 +2,15 @@ import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ClassificationBlock, DiagramLabelingBlock, ExamState, MatchingFeaturesBlock, MultiMCQBlock, SentenceCompletionBlock } from '../../../types';
+import type {
+  ClassificationBlock,
+  DiagramLabelingBlock,
+  ExamState,
+  MatchingFeaturesBlock,
+  MultiMCQBlock,
+  SentenceCompletionBlock,
+  TableCompletionBlock,
+} from '../../../types';
 import { QuestionRenderer } from '../QuestionRenderer';
 import { StudentFooter } from '../StudentFooter';
 import { StudentHeader } from '../StudentHeader';
@@ -315,6 +323,50 @@ describe('student question experience', () => {
       expect.objectContaining({
         slotIndex: 0,
         slotId: 'sentence-block-1:0',
+        slotCount: 2,
+      }),
+    );
+  });
+
+  it('renders table blanks inline and keeps row-major numbering stable', () => {
+    const onChange = vi.fn();
+    const block: TableCompletionBlock = {
+      id: 'table-inline-1',
+      type: 'TABLE_COMPLETION',
+      instruction: 'Complete the table.',
+      answerRule: 'ONE_WORD',
+      headers: ['Field', 'Value'],
+      rows: [['Name: ____', 'Country: ____']],
+      cells: [
+        { id: 'cell-country', row: 0, col: 1, correctAnswer: 'India' },
+        { id: 'cell-name', row: 0, col: 0, correctAnswer: 'Anu' },
+      ],
+    };
+
+    render(
+      <QuestionRenderer
+        question={null}
+        block={block}
+        number={10}
+        answer={['anu', 'india']}
+        onChange={onChange}
+      />,
+    );
+
+    expect(screen.getByText('Name:')).toBeInTheDocument();
+    expect(screen.getByText('Country:')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Answer for question 10' })).toHaveValue('anu');
+    expect(screen.getByRole('textbox', { name: 'Answer for question 11' })).toHaveValue('india');
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Answer for question 11' }), {
+      target: { value: 'thai' },
+    });
+
+    expect(onChange).toHaveBeenCalledWith(
+      ['anu', 'thai'],
+      expect.objectContaining({
+        slotIndex: 1,
+        slotId: 'table-inline-1:1',
         slotCount: 2,
       }),
     );

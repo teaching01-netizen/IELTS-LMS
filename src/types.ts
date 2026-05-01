@@ -265,6 +265,7 @@ export interface FlowChartBlock extends BaseQuestionBlock {
 export interface TableCell {
   id: string;
   correctAnswer: string;
+  acceptedAnswers?: string[];
   row: number;
   col: number;
 }

@@ -340,8 +340,8 @@ export function QuestionBuilderPane({
           instruction: 'Complete the table below.',
           answerRule: 'TWO_WORDS',
           headers: ['Column 1', 'Column 2'],
-          rows: [['', '']],
-          cells: [{ id: createId('cell'), correctAnswer: '', row: 0, col: 0 }]
+          rows: [['', '____']],
+          cells: [{ id: createId('cell'), correctAnswer: '', acceptedAnswers: [], row: 0, col: 1 }]
         } as TableCompletionBlockType;
         break;
       case 'NOTE_COMPLETION':

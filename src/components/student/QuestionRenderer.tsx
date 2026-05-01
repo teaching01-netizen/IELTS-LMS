@@ -28,6 +28,7 @@ import { ProtectedInput } from './ProtectedInput';
 import { FormattedText } from './FormattedText';
 import { stripBoldMarkdown } from '../../utils/boldMarkdown';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
+import { analyzeTablePlaceholders, getCanonicalTableCells } from '../../utils/tableCompletion';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
 import type { StudentHighlightColor } from './highlightPalette';
 
@@ -614,8 +615,12 @@ export function QuestionRenderer({
       slotId: string;
     };
 
+    const canonicalCells = getCanonicalTableCells(tableBlock);
+    const placeholderAnalysis = analyzeTablePlaceholders(tableBlock.rows, tableBlock.headers.length);
+    const useInlineBlanks = placeholderAnalysis.slots.length > 0;
+
     const cellMap = new Map<string, TableSlot>(
-      tableBlock.cells.map((cell, index): [string, TableSlot] => [
+      canonicalCells.map((cell, index): [string, TableSlot] => [
         `${cell.row}:${cell.col}`,
         { cell, index, slotId: getSlotId(index, `${tableBlock.id}:${cell.id}`) },
       ]),
@@ -651,24 +656,71 @@ export function QuestionRenderer({
                     <td
                       key={slot.cell.id}
                       id={`question-${slot.slotId}`}
-                      className={`border border-gray-200 px-3 py-2 align-top ${getSlotClassName(slot.slotId)}`}
+                      className="border border-gray-200 px-3 py-2 align-top"
                     >
-                      <div className="mb-2 text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
-                        {number + slot.index}
-                      </div>
-                      <ProtectedInput
-                        type="text"
-                        name={slot.slotId}
-                        value={stringArrayAnswer[slot.index] ?? ''}
-                        onChange={(event) => updateIndexedAnswer(slot.index, event.target.value, tableBlock.cells.length)}
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                        placeholder="Enter answer..."
-                        security={security}
-                        sessionId={sessionId}
-                        studentId={studentId}
-                        aria-label={`Answer for question ${number + slot.index}`}
-                      />
-                      <div className="mt-2 flex justify-end">{renderFlagButton(slot.slotId)}</div>
+                      {useInlineBlanks ? (
+                        <>
+                          <div className="flex flex-wrap items-center gap-2 text-gray-800">
+                            <FormattedText
+                              as="span"
+                              className="text-gray-800"
+                              text={cellValue.split(/_{2,}/)[0] ?? ''}
+                              highlightEnabled={highlightEnabled}
+                              highlightColor={highlightColor}
+                            />
+                            <span
+                              className={`inline-flex max-w-full items-center gap-2 ${getSlotClassName(slot.slotId)}`}
+                            >
+                              <span className="min-w-[1.75rem] text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
+                                {number + slot.index}
+                              </span>
+                              <ProtectedInput
+                                type="text"
+                                name={slot.slotId}
+                                value={stringArrayAnswer[slot.index] ?? ''}
+                                onChange={(event) =>
+                                  updateIndexedAnswer(slot.index, event.target.value, canonicalCells.length)
+                                }
+                                className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-[9rem]' : 'w-36'}`}
+                                placeholder="Answer..."
+                                security={security}
+                                sessionId={sessionId}
+                                studentId={studentId}
+                                aria-label={`Answer for question ${number + slot.index}`}
+                              />
+                            </span>
+                            <FormattedText
+                              as="span"
+                              className="text-gray-800"
+                              text={cellValue.split(/_{2,}/).slice(1).join('____')}
+                              highlightEnabled={highlightEnabled}
+                              highlightColor={highlightColor}
+                            />
+                          </div>
+                          <div className="mt-2 flex justify-end">{renderFlagButton(slot.slotId)}</div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="mb-2 text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
+                            {number + slot.index}
+                          </div>
+                          <ProtectedInput
+                            type="text"
+                            name={slot.slotId}
+                            value={stringArrayAnswer[slot.index] ?? ''}
+                            onChange={(event) =>
+                              updateIndexedAnswer(slot.index, event.target.value, canonicalCells.length)
+                            }
+                            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            placeholder="Enter answer..."
+                            security={security}
+                            sessionId={sessionId}
+                            studentId={studentId}
+                            aria-label={`Answer for question ${number + slot.index}`}
+                          />
+                          <div className="mt-2 flex justify-end">{renderFlagButton(slot.slotId)}</div>
+                        </>
+                      )}
                     </td>
                   );
                 })}

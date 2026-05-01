@@ -10,6 +10,7 @@ import type {
 } from '../types';
 import { resolveAcceptedAnswers } from './acceptedAnswers';
 import { htmlToPlainText } from './htmlText';
+import { getCanonicalTableCells } from './tableCompletion';
 
 const EXAM_SEPARATOR = '='.repeat(92);
 const SUBSECTION_SEPARATOR = '-'.repeat(68);
@@ -225,9 +226,9 @@ function renderBlock(
         const normalizedRow = row.map((cell) => toPlainText(cell)).join(' | ');
         context.lines.push(`Row ${rowIndex + 1}: ${normalizedRow}`);
       });
-      block.cells.forEach((cell) => {
+      getCanonicalTableCells(block).forEach((cell) => {
         const body = `Cell row ${cell.row + 1}, col ${cell.col + 1}`;
-        const answer = toPlainText(cell.correctAnswer);
+        const answer = resolveAcceptedAnswers(cell).join(' | ');
         pushQuestion(context, body, answer);
       });
       break;

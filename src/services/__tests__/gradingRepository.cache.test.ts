@@ -72,17 +72,16 @@ describe('gradingRepository bundle cache', () => {
   });
 
   it('reloads a submission bundle after saving a review draft', async () => {
+    const initialDraft = buildBundle().reviewDraft;
+    const updatedDraft = {
+      ...buildBundle().reviewDraft,
+      overallFeedback: 'Updated feedback',
+      revision: 1,
+    };
+
     backendGet
-      .mockResolvedValueOnce(buildBundle())
-      .mockResolvedValueOnce(
-        buildBundle({
-          reviewDraft: {
-            ...buildBundle().reviewDraft,
-            overallFeedback: 'Updated feedback',
-            revision: 1,
-          },
-        }),
-      );
+      .mockResolvedValueOnce(initialDraft)
+      .mockResolvedValueOnce(updatedDraft);
 
     const firstDraft = await gradingRepository.getReviewDraftBySubmission('sub-1');
     expect(firstDraft?.overallFeedback).toBe('Initial feedback');

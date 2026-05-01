@@ -18,6 +18,7 @@ import {
 } from '../../types';
 import { X, Clock, User, Tag, BookOpen, Plus } from 'lucide-react';
 import { resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
+import { getCanonicalTableCells } from '../../utils/tableCompletion';
 
 interface QuestionDetailModalProps {
   item: QuestionBankItem | null;
@@ -368,6 +369,8 @@ function QuestionContentRenderer({ block }: { block: QuestionBlock }) {
       );
 
     case 'TABLE_COMPLETION':
+      {
+        const canonicalCells = getCanonicalTableCells(block);
       return (
         <div>
           <p className="text-sm text-gray-700 mb-2">{block.instruction}</p>
@@ -395,8 +398,19 @@ function QuestionContentRenderer({ block }: { block: QuestionBlock }) {
               </tbody>
             </table>
           </div>
+          <div className="mt-3 space-y-1">
+            {canonicalCells.slice(0, 5).map((cell, idx) => (
+              <div key={cell.id} className="text-xs text-gray-500">
+                {`Q${idx + 1} (row ${cell.row + 1}, col ${cell.col + 1}): ${resolveAcceptedAnswers(cell).join(' | ') || '(no answer)'}`}
+              </div>
+            ))}
+            {canonicalCells.length > 5 && (
+              <p className="text-xs text-gray-500">+ {canonicalCells.length - 5} more blanks</p>
+            )}
+          </div>
         </div>
       );
+      }
 
     case 'NOTE_COMPLETION':
       return (
@@ -482,7 +496,7 @@ function getQuestionCount(block: QuestionBlock): number {
     case 'FLOW_CHART':
       return block.steps?.length || 0;
     case 'TABLE_COMPLETION':
-      return block.cells?.length || 0;
+      return getCanonicalTableCells(block).length;
     case 'CLASSIFICATION':
       return block.items?.length || 0;
     case 'MATCHING_FEATURES':

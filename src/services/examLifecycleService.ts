@@ -33,6 +33,7 @@ import {
   getReadingTotalQuestions,
   getListeningTotalQuestions
 } from '../utils/examUtils';
+import { normalizeExamStateTableCompletionBlocks } from '../utils/tableCompletion';
 import { hydrateExamState } from './examAdapterService';
 import { getWritingTaskContent } from '../utils/writingTaskUtils';
 import { getExamIdCollisionIssues } from '../utils/examIdCollisionCheck';
@@ -221,6 +222,8 @@ export class ExamLifecycleService {
     content: ExamState,
     actor: string = 'System'
   ): Promise<TransitionResult> {
+    const normalizedContent = normalizeExamStateTableCompletionBlocks(content);
+
     if (this.useBackendBuilder()) {
       try {
         const revision = await this.ensureBackendExamRevision(examId);
@@ -229,12 +232,12 @@ export class ExamLifecycleService {
         }
 
         const savedVersion = await backendPatch<any>(`/v1/exams/${examId}/draft`, {
-          contentSnapshot: content,
-          configSnapshot: content.config,
+          contentSnapshot: normalizedContent,
+          configSnapshot: normalizedContent.config,
           revision,
         });
         const exam = await this.repository.getExamById(examId);
-        const desiredTitle = (content.config?.general?.title ?? content.title ?? '').trim();
+        const desiredTitle = (normalizedContent.config?.general?.title ?? normalizedContent.title ?? '').trim();
 
         if (exam && desiredTitle && exam.title !== desiredTitle) {
           const nextRevision = getExamRevision(examId);
@@ -288,8 +291,8 @@ export class ExamLifecycleService {
       examId,
       versionNumber: maxVersion + 1,
       parentVersionId,
-      contentSnapshot: content,
-      configSnapshot: content.config,
+      contentSnapshot: normalizedContent,
+      configSnapshot: normalizedContent.config,
       validationSnapshot: {
         isValid: true,
         errorCount: 0,

@@ -3,6 +3,7 @@ import { X, Plus } from 'lucide-react';
 import { QuestionBankItem } from '../../types';
 import { Button } from '../ui/Button';
 import { resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
+import { getCanonicalTableCells } from '../../utils/tableCompletion';
 
 interface QuestionDetailModalProps {
   item: QuestionBankItem;
@@ -272,6 +273,50 @@ function renderBlockPreview(item: QuestionBankItem) {
           </div>
         </div>
       );
+
+    case 'TABLE_COMPLETION': {
+      const canonicalCells = getCanonicalTableCells(block);
+      return (
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Table Preview</h3>
+          <div className="overflow-x-auto rounded border">
+            <table className="min-w-full border-collapse text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  {block.headers.map((header, index) => (
+                    <th key={`${header}-${index}`} className="border px-2 py-1 text-left">
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {block.rows.slice(0, 3).map((row, rowIndex) => (
+                  <tr key={`row-${rowIndex}`}>
+                    {row.map((cell, cellIndex) => (
+                      <td key={`${rowIndex}-${cellIndex}`} className="border px-2 py-1 text-gray-900">
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 space-y-1">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-600">Blank Answers</h4>
+            {canonicalCells.slice(0, 5).map((cell, index) => (
+              <p key={cell.id} className="text-xs text-gray-600">
+                {`Q${index + 1} (row ${cell.row + 1}, col ${cell.col + 1}): ${resolveAcceptedAnswers(cell).join(' | ') || '(no answer)'}`}
+              </p>
+            ))}
+            {canonicalCells.length > 5 && (
+              <p className="text-xs text-gray-500">+{canonicalCells.length - 5} more blanks</p>
+            )}
+          </div>
+        </div>
+      );
+    }
 
     default:
       return (

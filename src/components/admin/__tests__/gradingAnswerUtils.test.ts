@@ -294,4 +294,37 @@ describe('gradingAnswerUtils', () => {
     expect(getCorrectAnswerDisplay(descriptor)).toBe('dog | cat');
     expect(isStudentAnswerCorrect(descriptor, { 'sa-1': 'cat' })).toBe(true);
   });
+
+  test('TABLE_COMPLETION: matches accepted alternatives using canonical row-major slot ordering', () => {
+    const descriptor = {
+      id: 'tbl-1:cell-b',
+      blockId: 'tbl-1',
+      groupId: 'p1',
+      groupLabel: 'Passage 1',
+      isMulti: false,
+      correctCount: 1,
+      answerKey: 'tbl-1',
+      answerIndex: 0,
+      block: {
+        id: 'tbl-1',
+        type: 'TABLE_COMPLETION',
+        instruction: 'Complete the table.',
+        answerRule: 'ONE_WORD',
+        headers: ['Key', 'Value'],
+        rows: [
+          ['Name', '____'],
+          ['Country', '____'],
+        ],
+        cells: [
+          { id: 'cell-country', row: 1, col: 1, correctAnswer: 'India', acceptedAnswers: ['India', 'IND'] },
+          { id: 'cell-name', row: 0, col: 1, correctAnswer: 'Anu', acceptedAnswers: ['Anu', 'Anupama'] },
+        ],
+      },
+      question: null,
+    } as unknown as StudentQuestionDescriptor;
+
+    expect(getQuestionPrompt(descriptor)).toBe('Table cell row 1, col 2');
+    expect(getCorrectAnswerDisplay(descriptor)).toBe('Anu | Anupama');
+    expect(isStudentAnswerCorrect(descriptor, { 'tbl-1': ['anupama', 'india'] })).toBe(true);
+  });
 });

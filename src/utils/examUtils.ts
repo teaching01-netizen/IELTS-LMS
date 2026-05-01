@@ -11,6 +11,7 @@ import {
 import { createDefaultConfig, normalizeExamConfig } from '../constants/examDefaults';
 import { hydrateExamState } from '../services/examAdapterService';
 import { resolveAcceptedAnswers } from './acceptedAnswers';
+import { analyzeTablePlaceholders, getCanonicalTableCells } from './tableCompletion';
 
 export const getBlockQuestionCount = (block: QuestionBlock): number => {
   switch (block.type) {
@@ -35,7 +36,7 @@ export const getBlockQuestionCount = (block: QuestionBlock): number => {
     case 'FLOW_CHART':
       return block.steps.length;
     case 'TABLE_COMPLETION':
-      return block.cells.length;
+      return getCanonicalTableCells(block).length;
     case 'NOTE_COMPLETION':
       return block.questions.reduce((acc, q) => acc + q.blanks.length, 0);
     case 'CLASSIFICATION':
@@ -404,12 +405,41 @@ const validateTableCompletionBlock = (block: TableCompletionBlock): ValidationEr
     errors.push({ blockId: block.id, field: 'rows', message: 'At least one row is required', type: 'error' });
   }
   
-  if (block.cells.length === 0) {
+  const placeholderAnalysis = analyzeTablePlaceholders(block.rows, block.headers.length);
+  if (placeholderAnalysis.slots.length === 0) {
+    errors.push({
+      blockId: block.id,
+      field: 'rows',
+      message: 'At least one blank placeholder (____) is required',
+      type: 'error',
+    });
+  }
+
+  placeholderAnalysis.multiPlaceholderSlots.forEach((slot) => {
+    errors.push({
+      blockId: block.id,
+      field: `rows[${slot.row}][${slot.col}]`,
+      message: 'Each answer cell must contain only one blank placeholder',
+      type: 'error',
+    });
+  });
+
+  const canonicalCells = getCanonicalTableCells(block);
+  if (canonicalCells.length === 0) {
     errors.push({ blockId: block.id, field: 'cells', message: 'At least one cell to complete is required', type: 'error' });
   }
-  
-  block.cells.forEach((cell, i) => {
-    if (!cell.correctAnswer.trim()) {
+
+  if (canonicalCells.length !== placeholderAnalysis.slots.length) {
+    errors.push({
+      blockId: block.id,
+      field: 'cells',
+      message: 'Table answer cells must match the blank placeholders',
+      type: 'error',
+    });
+  }
+
+  canonicalCells.forEach((cell, i) => {
+    if (resolveAcceptedAnswers(cell).length === 0) {
       errors.push({ blockId: block.id, field: `cells[${i}].correctAnswer`, message: `Cell ${i + 1} has no answer`, type: 'error' });
     }
   });

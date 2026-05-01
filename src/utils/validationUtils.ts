@@ -23,6 +23,7 @@ import {
 } from '../types';
 import { countBlankPlaceholders } from './blankPlaceholders';
 import { resolveAcceptedAnswers } from './acceptedAnswers';
+import { analyzeTablePlaceholders, getCanonicalTableCells } from './tableCompletion';
 
 export interface ValidationError {
   field: string;
@@ -200,8 +201,28 @@ function validateTableCompletion(block: TableCompletionBlock): ValidationError[]
     }
   });
 
-  block.cells?.forEach((cell: TableCell, index: number) => {
-    if (!cell.correctAnswer || cell.correctAnswer.trim() === '') {
+  const placeholderAnalysis = analyzeTablePlaceholders(block.rows ?? [], block.headers?.length ?? 0);
+  if (placeholderAnalysis.slots.length === 0) {
+    errors.push({ field: 'rows-placeholders', message: 'At least one blank placeholder (____) is required' });
+  }
+
+  placeholderAnalysis.multiPlaceholderSlots.forEach((slot) => {
+    errors.push({
+      field: `row-${slot.row}-col-${slot.col}-placeholder`,
+      message: `Row ${slot.row + 1}, column ${slot.col + 1} must contain only one blank placeholder`,
+    });
+  });
+
+  const canonicalCells = getCanonicalTableCells(block);
+  if (canonicalCells.length !== placeholderAnalysis.slots.length) {
+    errors.push({
+      field: 'cells-mismatch',
+      message: 'Answer cells must match table placeholders',
+    });
+  }
+
+  canonicalCells.forEach((cell: TableCell, index: number) => {
+    if (resolveAcceptedAnswers(cell).length === 0) {
       errors.push({ field: `cell-${index}`, message: `Cell ${index + 1} answer is required` });
     }
     if (cell.row < 0 || cell.row >= block.rows.length) {

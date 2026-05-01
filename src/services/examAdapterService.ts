@@ -29,6 +29,7 @@ import {
   OFFICIAL_SPEAKING_RUBRIC,
   OFFICIAL_WRITING_RUBRIC,
 } from '../utils/builderEnhancements';
+import { getCanonicalTableCells, normalizeExamStateTableCompletionBlocks } from '../utils/tableCompletion';
 import { replaceWritingTaskContents } from '../utils/writingTaskUtils';
 
 const MODULE_ORDER: ModuleType[] = ['listening', 'reading', 'writing', 'speaking'];
@@ -319,7 +320,7 @@ export function hydrateExamState(state: ExamState): ExamState {
     mergedState.writing.tasks ?? [],
   );
 
-  return {
+  const hydrated: ExamState = {
     ...mergedState,
     config,
     reading: {
@@ -354,6 +355,8 @@ export function hydrateExamState(state: ExamState): ExamState {
       gradeHistory: Array.isArray(mergedState.speaking.gradeHistory) ? mergedState.speaking.gradeHistory : [],
     },
   };
+
+  return normalizeExamStateTableCompletionBlocks(hydrated);
 }
 
 export function getStudentQuestionsForModule(
@@ -590,7 +593,7 @@ function buildStudentQuestionDescriptors(
       }));
 
     case 'TABLE_COMPLETION':
-      return block.cells.map((cell, cellIndex) => ({
+      return getCanonicalTableCells(block).map((cell, cellIndex) => ({
         id: `${block.id}:${cell.id}`,
         blockId: block.id,
         groupId,

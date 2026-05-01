@@ -3,6 +3,7 @@ import type {
 } from '../../services/examAdapterService';
 import { getQuestionAnswer } from '../../services/examAdapterService';
 import { normalizeAnswerForMatching, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
+import { getCanonicalTableCells } from '../../utils/tableCompletion';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -94,8 +95,14 @@ export function getQuestionPrompt(descriptor: StudentQuestionDescriptor): string
       return typeof answerIndex === 'number' ? `Diagram label ${answerIndex + 1}` : block.instruction || '';
     case 'FLOW_CHART':
       return typeof answerIndex === 'number' ? `Flow step ${answerIndex + 1}` : block.instruction || '';
-    case 'TABLE_COMPLETION':
-      return typeof answerIndex === 'number' ? `Table cell ${answerIndex + 1}` : block.instruction || '';
+    case 'TABLE_COMPLETION': {
+      if (typeof answerIndex !== 'number') return block.instruction || '';
+      const canonicalCell = getCanonicalTableCells(block)[answerIndex];
+      if (!canonicalCell) {
+        return `Table cell ${answerIndex + 1}`;
+      }
+      return `Table cell row ${canonicalCell.row + 1}, col ${canonicalCell.col + 1}`;
+    }
     case 'CLASSIFICATION':
       return typeof answerIndex === 'number' ? `Classification item ${answerIndex + 1}` : block.instruction || '';
     case 'MATCHING_FEATURES':
@@ -146,9 +153,8 @@ export function getCorrectAnswerValue(descriptor: StudentQuestionDescriptor): un
       return block.steps[answerIndex]?.correctAnswer ?? null;
     }
     case 'TABLE_COMPLETION': {
-      if (!('cells' in block) || !Array.isArray(block.cells)) return null;
       if (typeof answerIndex !== 'number') return null;
-      return block.cells[answerIndex]?.correctAnswer ?? null;
+      return getCanonicalTableCells(block)[answerIndex]?.correctAnswer ?? null;
     }
     case 'CLASSIFICATION': {
       if (!('items' in block) || !Array.isArray(block.items)) return null;
@@ -209,6 +215,11 @@ function getAcceptedAnswersForDescriptor(descriptor: StudentQuestionDescriptor):
       if (typeof answerIndex !== 'number') return null;
       const blank = question.blanks[answerIndex];
       return blank ? resolveAcceptedAnswers(blank) : null;
+    }
+    case 'TABLE_COMPLETION': {
+      if (typeof answerIndex !== 'number') return null;
+      const cell = getCanonicalTableCells(block)[answerIndex];
+      return cell ? resolveAcceptedAnswers(cell) : null;
     }
     default:
       return null;

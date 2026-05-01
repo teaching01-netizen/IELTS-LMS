@@ -111,8 +111,8 @@ function buildAllQuestionTypesBlocks(): QuestionBlock[] {
       type: 'TABLE_COMPLETION',
       instruction: 'Complete table',
       headers: ['Col A', 'Col B'],
-      rows: [['R1C1', 'R1C2']],
-      cells: [{ id: 'cell-1', correctAnswer: 'Cell Answer', row: 0, col: 1 }],
+      rows: [['R1C1', '____']],
+      cells: [{ id: 'cell-1', correctAnswer: 'Cell Answer', acceptedAnswers: ['Cell Answer', 'Alt Cell'], row: 0, col: 1 }],
       answerRule: 'ONE_WORD',
     },
     {
@@ -248,6 +248,14 @@ describe('examTextExport', () => {
     expect(output).toContain('ANSWER KEY (READING)');
     expect(output).toContain('ANSWER KEY (LISTENING)');
     expect(output).toMatch(/Q1 -> /);
+  });
+
+  it('exports table completion accepted alternatives in inline rows and answer key', () => {
+    const exam = createExamFixture('exam-1', 'Table Alternatives');
+    const output = buildExamTextExport([exam], new Date('2026-04-30T12:00:00.000Z'));
+
+    expect(output).toContain('Cell row 1, col 2');
+    expect(output).toContain('Cell Answer | Alt Cell');
   });
 
   it('normalizes HTML-rich content into plain text', () => {

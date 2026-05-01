@@ -92,4 +92,46 @@ describe('validateQuestionBlock - placeholder/blanks alignment', () => {
 
     expect(errors.some((e) => e.field.includes('question-0-answer'))).toBe(false);
   });
+
+  it('flags table completion when placeholders are missing', () => {
+    const errors = validateQuestionBlock({
+      id: 'blk-6',
+      type: 'TABLE_COMPLETION',
+      instruction: 'Complete the table.',
+      answerRule: 'ONE_WORD',
+      headers: ['Key', 'Value'],
+      rows: [['Name', 'Anu'], ['Country', 'India']],
+      cells: [{ id: 'cell-1', row: 0, col: 1, correctAnswer: 'Anu' }],
+    });
+
+    expect(errors.some((e) => e.field.includes('rows-placeholders'))).toBe(true);
+  });
+
+  it('flags table completion when a single cell has multiple placeholders', () => {
+    const errors = validateQuestionBlock({
+      id: 'blk-7',
+      type: 'TABLE_COMPLETION',
+      instruction: 'Complete the table.',
+      answerRule: 'ONE_WORD',
+      headers: ['Key', 'Value'],
+      rows: [['Name', '____ ____']],
+      cells: [{ id: 'cell-1', row: 0, col: 1, correctAnswer: 'Anu' }],
+    });
+
+    expect(errors.some((e) => e.field.includes('placeholder'))).toBe(true);
+  });
+
+  it('accepts table completion answers when alternatives are provided', () => {
+    const errors = validateQuestionBlock({
+      id: 'blk-8',
+      type: 'TABLE_COMPLETION',
+      instruction: 'Complete the table.',
+      answerRule: 'ONE_WORD',
+      headers: ['Key', 'Value'],
+      rows: [['Name', '____']],
+      cells: [{ id: 'cell-1', row: 0, col: 1, correctAnswer: '', acceptedAnswers: ['Anu', 'Anupama'] }],
+    });
+
+    expect(errors.some((e) => e.field.includes('cell-0'))).toBe(false);
+  });
 });

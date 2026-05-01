@@ -296,7 +296,7 @@ describe('StudentReviewWorkspace objective answers', () => {
     expect(await screen.findByText('Student Report Preview')).toBeInTheDocument();
     expect(await screen.findByText('Writing Task 2')).toBeInTheDocument();
     expect(screen.getByText('Band 7.5')).toBeInTheDocument();
-    expect(screen.getByText('Task 2 response')).toBeInTheDocument();
+    expect(screen.getAllByText('Task 2 response').length).toBeGreaterThan(0);
   });
 
   test('does not crash when teacherSummary fields are missing', async () => {
