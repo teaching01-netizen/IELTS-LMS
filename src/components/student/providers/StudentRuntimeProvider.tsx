@@ -481,7 +481,15 @@ function runtimeReducer(
         typeof action.currentSectionExtensionMinutes === 'number' &&
         (state.currentSectionExtensionMinutes === null ||
           action.currentSectionExtensionMinutes > state.currentSectionExtensionMinutes);
-      const allowUpwardCorrection = moduleChanged || extensionIncreased;
+      const runtimeStatusSupportsCountdown = runtimeStatus === 'live' || runtimeStatus === 'paused';
+      const sameSection = !moduleChanged && action.nextModule === state.currentModule;
+      const recoveringFromLocalZero =
+        runtimeStatusSupportsCountdown &&
+        sameSection &&
+        state.timeRemaining === 0 &&
+        typeof snapshotTimeRemaining === 'number' &&
+        snapshotTimeRemaining > 0;
+      const allowUpwardCorrection = moduleChanged || extensionIncreased || recoveringFromLocalZero;
       const nextTimeRemaining =
         typeof snapshotTimeRemaining === 'number'
           ? snapshotTimeRemaining > state.timeRemaining && !allowUpwardCorrection
