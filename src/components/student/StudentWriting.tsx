@@ -2,7 +2,6 @@ import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { ExamState } from '../../types';
 import { ArrowLeftRight, Check, X } from 'lucide-react';
 import { getWritingTaskContent } from '../../utils/writingTaskUtils';
-import { stripHtml } from '../../utils/builderEnhancements';
 import { MIN_HEIGHTS } from '../../constants/uiConstants';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
@@ -319,7 +318,8 @@ export function StudentWriting({
 
   const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
   const currentPrompt = currentTaskContent?.prompt ?? '';
-  const currentPromptText = stripHtml(currentPrompt);
+  const currentPromptContainsMarkup = /<[^>]+>/.test(currentPrompt);
+  const sanitizedPromptHtml = sanitizeHtml(currentPrompt);
   const minWords = currentTask.minWords || 150;
   const currentChart = currentTaskContent?.chart;
 
@@ -465,8 +465,15 @@ export function StudentWriting({
               </div>
             )}
             
-            <div className="prose prose-sm md:prose-lg max-w-none text-gray-900 whitespace-pre-wrap leading-relaxed">
-              {currentPromptText}
+            <div
+              data-testid="writing-task-prompt"
+              className="prose prose-sm md:prose-lg max-w-none text-gray-900 leading-relaxed whitespace-break-spaces"
+            >
+              {currentPromptContainsMarkup ? (
+                <div dangerouslySetInnerHTML={{ __html: sanitizedPromptHtml }} />
+              ) : (
+                currentPrompt
+              )}
             </div>
           </div>
         </div>

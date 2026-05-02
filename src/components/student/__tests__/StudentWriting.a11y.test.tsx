@@ -127,11 +127,15 @@ describe('StudentWriting a11y', () => {
     expect(resizer.querySelector('.h-\\[5\\.5rem\\]')).toBeInTheDocument();
   });
 
-  it('shows builder-authored HTML prompts as plain text in the writing exam', () => {
+  it('preserves builder-authored HTML prompt formatting in the writing exam', () => {
     const state = createExamState();
-    state.writing.task1Prompt = '<p>Describe the chart <strong>in detail</strong>.</p>';
+    state.writing.task1Prompt = [
+      '<p>You should spend about 20 minutes on this task.</p>',
+      '<p><strong>Describe the chart in detail.</strong></p>',
+      '<p>Write at least 150 words.</p>',
+    ].join('');
 
-    const { container } = render(
+    render(
       <StudentWriting
         state={state}
         writingAnswers={{}}
@@ -142,9 +146,27 @@ describe('StudentWriting a11y', () => {
       />,
     );
 
-    expect(screen.getByText(/Describe the chart in detail\./)).toBeInTheDocument();
-    expect(container).not.toHaveTextContent('<p>');
-    expect(container).not.toHaveTextContent('<strong>');
+    const prompt = screen.getByTestId('writing-task-prompt');
+    expect(prompt.querySelectorAll('p')).toHaveLength(3);
+    expect(prompt.querySelector('strong')).toHaveTextContent('Describe the chart in detail.');
+  });
+
+  it('keeps line breaks and whitespace for plain-text prompts', () => {
+    const state = createExamState();
+    state.writing.task1Prompt = 'Line 1\n\nLine 2 with  two spaces';
+
+    render(
+      <StudentWriting
+        state={state}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    expect(screen.getByTestId('writing-task-prompt').textContent).toContain('Line 1\n\nLine 2 with  two spaces');
   });
 
   it('renders writing task navigation and review inside a footer', () => {
