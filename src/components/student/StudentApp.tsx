@@ -1084,10 +1084,6 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
         timeRemaining={runtimeState.displayTimeRemaining}
         tabletMode={tabletMode}
         onClearHighlights={clearHighlights}
-        zoom={uiState.accessibilitySettings.zoom}
-        onZoomIn={uiActions.zoomIn}
-        onZoomOut={uiActions.zoomOut}
-        onZoomReset={uiActions.resetZoom}
         highlightEnabled={uiState.accessibilitySettings.highlightMode}
         highlightColor={highlightColor}
         onHighlightModeToggle={
@@ -1187,6 +1183,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
             registerDraftCommit={registerWritingDraftCommit}
             security={examState.config.security}
             showSubmitButton={showSubmitControls}
+            tabletMode={tabletMode}
           />
         ) : null}
         {runtimeState.currentModule === 'speaking' ? (

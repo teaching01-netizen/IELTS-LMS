@@ -100,6 +100,33 @@ describe('StudentWriting a11y', () => {
     });
   });
 
+  it('matches tablet resizer dimensions used in reading and listening', () => {
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+        tabletMode
+      />,
+    );
+
+    const workspace = screen.getByTestId('writing-split-workspace');
+    const resizer = screen.getByTestId('writing-pane-resizer');
+
+    expect(workspace).toHaveStyle({
+      '--writing-prompt-pane-width': '50%',
+      '--writing-editor-pane-width': 'calc(50%)',
+      '--split-divider-width': '32px',
+    });
+    expect(resizer).toHaveClass('w-11');
+    expect(resizer).toHaveClass('absolute');
+    expect(resizer.querySelector('.w-14')).toBeInTheDocument();
+    expect(resizer.querySelector('.h-\\[5\\.5rem\\]')).toBeInTheDocument();
+  });
+
   it('shows builder-authored HTML prompts as plain text in the writing exam', () => {
     const state = createExamState();
     state.writing.task1Prompt = '<p>Describe the chart <strong>in detail</strong>.</p>';

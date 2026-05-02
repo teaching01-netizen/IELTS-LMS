@@ -29,6 +29,7 @@ interface StudentWritingProps {
   sessionId?: string | undefined;
   studentId?: string | undefined;
   showSubmitButton?: boolean | undefined;
+  tabletMode?: boolean | undefined;
 }
 
 export function StudentWriting({
@@ -45,7 +46,9 @@ export function StudentWriting({
   sessionId,
   studentId,
   showSubmitButton = true,
+  tabletMode = false,
 }: StudentWritingProps) {
+  const isTabletMode = Boolean(tabletMode);
   const attemptContext = useOptionalStudentAttempt();
   const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
   const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
@@ -60,11 +63,12 @@ export function StudentWriting({
   const deferredBlurCommitTimerRef = useRef<number | null>(null);
   const editorHasFocusRef = useRef(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
-  const { handleDrag, splitPaneStyle, workspaceRef } = useSplitPaneResize({
-    isTabletMode: false,
+  const { handleDrag, leftWidth, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+    isTabletMode,
     materialPaneWidthProperty: '--writing-prompt-pane-width',
     answerPaneWidthProperty: '--writing-editor-pane-width',
     defaultLeftWidth: 50,
+    dividerMode: isTabletMode ? 'overlay' : 'consumes-space',
   });
 
   const currentTask = writingConfig.tasks.find(t => t.id === activeTaskId) || writingConfig.tasks[0];
@@ -407,12 +411,20 @@ export function StudentWriting({
 	return (
     <div className="flex flex-col h-full w-full bg-white">
       <div
-        className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden relative border-t border-gray-300"
+        className={`relative flex flex-1 min-h-0 overflow-hidden border-t border-gray-300 ${
+          isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
+        }`}
         ref={workspaceRef}
         style={splitPaneStyle}
         data-testid="writing-split-workspace"
       >
-        <div className="h-full flex flex-col relative min-w-[260px] md:min-w-[280px] lg:w-[var(--writing-prompt-pane-width)] lg:min-w-[300px]">
+        <div
+          className={`h-full flex flex-col relative ${
+            isTabletMode
+              ? 'w-[var(--writing-prompt-pane-width)] min-w-[48px] border-r border-gray-200'
+              : 'min-w-[260px] md:min-w-[280px] lg:w-[var(--writing-prompt-pane-width)] lg:min-w-[300px]'
+          }`}
+        >
           {/* Timer Bar */}
           <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-500' : isTimeWarning ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
 
@@ -462,18 +474,25 @@ export function StudentWriting({
         <div 
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          className="hidden lg:flex w-4 bg-gray-400 relative flex items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors"
+          className={`${isTabletMode ? 'absolute inset-y-0 z-20 flex w-11 items-center justify-center' : 'hidden w-4 lg:flex relative items-center justify-center flex-shrink-0'} bg-gray-400 cursor-col-resize touch-none hover:bg-gray-600 transition-colors`}
+          style={isTabletMode ? { left: `calc(${leftWidth}% - 22px)` } : undefined}
           role="separator"
           aria-label="Resize writing prompt and answer panels"
           aria-orientation="vertical"
           data-testid="writing-pane-resizer"
         >
-          <div className="w-8 h-8 bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none">
-            <ArrowLeftRight size={14} className="text-gray-600" />
+          <div className={`${isTabletMode ? 'h-[5.5rem] w-14' : 'w-8 h-8'} bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none`}>
+            <ArrowLeftRight size={isTabletMode ? 22 : 14} className="text-gray-600" />
           </div>
         </div>
 
-        <div className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px] lg:w-[var(--writing-editor-pane-width)]">
+        <div
+          className={`h-full flex flex-col relative ${
+            isTabletMode
+              ? 'w-[var(--writing-editor-pane-width)] min-w-[48px]'
+              : 'min-w-[280px] md:min-w-[320px] lg:w-[var(--writing-editor-pane-width)]'
+          }`}
+        >
           <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
             <div className="relative flex-1 w-full">
               <div className="flex flex-col gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-600 sm:flex-row sm:items-center sm:justify-between">

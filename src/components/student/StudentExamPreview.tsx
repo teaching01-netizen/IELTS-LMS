@@ -257,10 +257,6 @@ function StudentExamPreviewInner({
         timeRemaining={timeRemaining}
         tabletMode={tabletMode}
         onClearHighlights={clearHighlights}
-        zoom={uiState.accessibilitySettings.zoom}
-        onZoomIn={uiActions.zoomIn}
-        onZoomOut={uiActions.zoomOut}
-        onZoomReset={uiActions.resetZoom}
         highlightEnabled={uiState.accessibilitySettings.highlightMode}
         highlightColor={highlightColor}
         onHighlightModeToggle={
@@ -320,6 +316,7 @@ function StudentExamPreviewInner({
             currentQuestionId={currentQuestionId}
             onNavigate={setCurrentQuestionId}
             timeRemaining={timeRemaining}
+            tabletMode={tabletMode}
           />
         ) : null}
 
