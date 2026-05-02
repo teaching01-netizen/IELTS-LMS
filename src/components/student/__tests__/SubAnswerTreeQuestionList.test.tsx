@@ -62,7 +62,7 @@ describe('SubAnswerTreeQuestionList', () => {
 
     const promptParagraph = container.querySelector('p.text-gray-800');
     expect(promptParagraph).toBeNull();
-    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Answer for question 1' })).toBeInTheDocument();
   });
 
   it('shows root number when a root has only one leaf', () => {
@@ -81,7 +81,7 @@ describe('SubAnswerTreeQuestionList', () => {
       />,
     );
 
-    expect(screen.getByText('21')).toBeInTheDocument();
+    expect(screen.getByText('21.')).toBeInTheDocument();
     expect(screen.queryByText('21.1')).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Answer for question 21' })).toBeInTheDocument();
   });

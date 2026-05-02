@@ -86,7 +86,8 @@ export function SubAnswerTreeQuestionList({
               const value = typeof answers[slotId] === 'string' ? (answers[slotId] as string) : '';
               const isCurrent = currentQuestionId === slotId;
               const isFlagged = Boolean(flags[slotId]);
-              const displayNumber = group.leaves.length > 1 ? leaf.numberLabel : String(group.rootNumber);
+              const showLeafNumber = group.leaves.length > 1;
+              const displayNumber = showLeafNumber ? leaf.numberLabel : String(group.rootNumber);
 
               return (
                 <div
@@ -97,7 +98,9 @@ export function SubAnswerTreeQuestionList({
                   } ${isFlagged ? 'bg-amber-50' : ''}`}
                 >
                   <div className={tabletMode ? 'flex flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
-                    <span className="min-w-[2.5rem] font-bold text-blue-700">{displayNumber}</span>
+                    {showLeafNumber ? (
+                      <span className="min-w-[2.5rem] font-bold text-gray-900">{displayNumber}</span>
+                    ) : null}
                     <div className="flex-1">
                       <ProtectedInput
                         type="text"
