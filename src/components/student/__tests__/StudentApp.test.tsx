@@ -108,6 +108,7 @@ function createWritingAttemptSnapshot(): StudentAttempt {
 function installVisualViewportMock(initialHeight: number) {
   const visualViewportTarget = new EventTarget();
   let height = initialHeight;
+  let scale = 1;
   const originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
 
   Object.defineProperty(window, 'visualViewport', {
@@ -115,6 +116,9 @@ function installVisualViewportMock(initialHeight: number) {
     value: {
       get height() {
         return height;
+      },
+      get scale() {
+        return scale;
       },
       get offsetTop() {
         return 0;
@@ -127,6 +131,9 @@ function installVisualViewportMock(initialHeight: number) {
   return {
     setHeight(nextHeight: number) {
       height = nextHeight;
+    },
+    setScale(nextScale: number) {
+      scale = nextScale;
     },
     dispatchResize() {
       visualViewportTarget.dispatchEvent(new Event('resize'));
@@ -281,6 +288,65 @@ describe('StudentApp runtime-backed mode', () => {
       });
 
       expect(root.style.getPropertyValue('--student-viewport-height')).toBe('600px');
+    } finally {
+      visualViewport.restore();
+      window.matchMedia = originalMatchMedia;
+      if (originalInnerWidth) {
+        Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      if (originalMaxTouchPoints) {
+        Object.defineProperty(window.navigator, 'maxTouchPoints', originalMaxTouchPoints);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints');
+      }
+    }
+  });
+
+  it('keeps tablet footer viewport height stable while pinch zoom is active and resumes after zoom ends', async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const originalMatchMedia = window.matchMedia;
+    const originalMaxTouchPoints = Object.getOwnPropertyDescriptor(window.navigator, 'maxTouchPoints');
+    const visualViewport = installVisualViewportMock(900);
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    window.matchMedia = vi.fn(createMatchMediaMock(true)) as unknown as typeof window.matchMedia;
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: 5 });
+
+    try {
+      render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createWritingAttemptSnapshot()}
+          runtimeSnapshot={createWritingRuntimeSnapshot()}
+        />,
+      );
+
+      const root = document.documentElement;
+      await waitFor(() => {
+        expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      });
+
+      act(() => {
+        visualViewport.setScale(1.35);
+        visualViewport.setHeight(620);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+
+      act(() => {
+        visualViewport.setScale(1);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('620px');
     } finally {
       visualViewport.restore();
       window.matchMedia = originalMatchMedia;

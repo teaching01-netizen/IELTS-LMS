@@ -486,6 +486,11 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
       const nextViewportHeight = visualViewport
         ? Math.min(window.innerHeight, Math.round(visualViewport.height + visualViewport.offsetTop))
         : Math.round(window.innerHeight);
+      const nextViewportScale =
+        typeof visualViewport?.scale === 'number' && Number.isFinite(visualViewport.scale)
+          ? visualViewport.scale
+          : 1;
+      const isPinchZooming = nextViewportScale > 1.01;
 
       if (!tabletMode) {
         applyViewportHeight(nextViewportHeight);
@@ -497,7 +502,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
       if (layoutWidthChanged) {
         stableViewportWidth = nextViewportWidth;
         stableViewportHeight = nextViewportHeight;
-      } else if (!editableFocused) {
+      } else if (!editableFocused && !isPinchZooming) {
         stableViewportHeight = nextViewportHeight;
       }
 
