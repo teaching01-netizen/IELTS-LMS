@@ -207,4 +207,110 @@ describe('ProtectedInput', () => {
     expect(flushAnswerDurabilityNowMock).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
+
+  it('blocks historyUndo in beforeinput and emits undo-blocked telemetry', () => {
+    render(
+      <ProtectedInput
+        security={{ preventAutofill: true, preventAutocorrect: true } as any}
+        name="answer"
+        value="LATEST"
+        onChange={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const undoBeforeInput = new Event('beforeinput', { bubbles: true, cancelable: true });
+    Object.assign(undoBeforeInput, { inputType: 'historyUndo' });
+    const preventDefaultSpy = vi.spyOn(undoBeforeInput, 'preventDefault');
+    const stopPropagationSpy = vi.spyOn(undoBeforeInput, 'stopPropagation');
+
+    fireEvent(input, undoBeforeInput);
+
+    expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
+    expect(stopPropagationSpy).toHaveBeenCalledTimes(1);
+    expect(saveStudentAuditEventMock).toHaveBeenCalledWith(
+      'sched-ctx',
+      'UNDO_BLOCKED',
+      expect.objectContaining({
+        surface: 'objective',
+        targetName: 'answer',
+        via: 'beforeinput',
+      }),
+      'attempt-ctx',
+    );
+  });
+
+  it('blocks keyboard undo shortcuts and emits undo-blocked telemetry', () => {
+    render(
+      <ProtectedInput
+        security={{ preventAutofill: true, preventAutocorrect: true } as any}
+        name="answer"
+        value="LATEST"
+        onChange={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const undoShortcut = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      key: 'z',
+      metaKey: true,
+    });
+    const preventDefaultSpy = vi.spyOn(undoShortcut, 'preventDefault');
+    const stopPropagationSpy = vi.spyOn(undoShortcut, 'stopPropagation');
+
+    fireEvent(input, undoShortcut);
+
+    expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
+    expect(stopPropagationSpy).toHaveBeenCalledTimes(1);
+    expect(saveStudentAuditEventMock).toHaveBeenCalledWith(
+      'sched-ctx',
+      'UNDO_BLOCKED',
+      expect.objectContaining({
+        surface: 'objective',
+        targetName: 'answer',
+        via: 'keydown',
+      }),
+      'attempt-ctx',
+    );
+  });
+
+  it('restores latest snapshot on historyUndo input fallback and flushes durability', async () => {
+    const handleChange = vi.fn();
+    render(
+      <ProtectedInput
+        security={{ preventAutofill: true, preventAutocorrect: true } as any}
+        name="answer"
+        value="LATEST"
+        onChange={handleChange}
+      />,
+    );
+
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    input.value = 'older-browser-history-value';
+
+    const undoBeforeInput = new Event('beforeinput', { bubbles: true, cancelable: false });
+    Object.assign(undoBeforeInput, { inputType: 'historyUndo' });
+    fireEvent(input, undoBeforeInput);
+
+    const undoInput = new Event('input', { bubbles: true, cancelable: false });
+    Object.assign(undoInput, { inputType: 'historyUndo' });
+    fireEvent(input, undoInput);
+    await Promise.resolve();
+
+    expect(input.value).toBe('LATEST');
+    expect(handleChange).toHaveBeenCalledTimes(1);
+    expect(flushAnswerDurabilityNowMock).toHaveBeenCalledTimes(1);
+    expect(saveStudentAuditEventMock).toHaveBeenCalledWith(
+      'sched-ctx',
+      'UNDO_RESTORED',
+      expect.objectContaining({
+        surface: 'objective',
+        targetName: 'answer',
+        via: 'input',
+      }),
+      'attempt-ctx',
+    );
+  });
 });

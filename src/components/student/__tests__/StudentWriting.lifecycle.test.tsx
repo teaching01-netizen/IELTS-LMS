@@ -49,6 +49,7 @@ function createExamState(): ExamState {
 
 describe('StudentWriting lifecycle durability', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -180,5 +181,113 @@ describe('StudentWriting lifecycle durability', () => {
     fireEvent.click(screen.getByRole('button', { name: /review & submit/i }));
 
     expect(onWritingChange).toHaveBeenCalledWith('task1', '<p>Final visible draft</p>');
+  });
+
+  it('commits a deferred blur draft when iPad applies a late editor value', () => {
+    vi.useFakeTimers();
+    const onWritingChange = vi.fn();
+
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={onWritingChange}
+        onSubmit={() => undefined}
+        currentQuestionId="task1"
+        onNavigate={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    editor.innerHTML = '<p>blur value</p>';
+    fireEvent.blur(editor);
+
+    editor.innerHTML = '<p>late iPad value</p>';
+    vi.runAllTimers();
+
+    expect(onWritingChange).toHaveBeenNthCalledWith(1, 'task1', '<p>blur value</p>');
+    expect(onWritingChange).toHaveBeenNthCalledWith(2, 'task1', '<p>late iPad value</p>');
+  });
+
+  it('dedupes deferred blur commit when editor value does not change', () => {
+    vi.useFakeTimers();
+    const onWritingChange = vi.fn();
+
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={onWritingChange}
+        onSubmit={() => undefined}
+        currentQuestionId="task1"
+        onNavigate={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    editor.innerHTML = '<p>stable value</p>';
+    fireEvent.blur(editor);
+
+    vi.runAllTimers();
+
+    expect(onWritingChange).toHaveBeenCalledTimes(1);
+    expect(onWritingChange).toHaveBeenCalledWith('task1', '<p>stable value</p>');
+  });
+
+  it('blocks historyUndo in writing beforeinput and preserves the latest snapshot', async () => {
+    const onWritingChange = vi.fn();
+
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{ task1: '<p>LATEST</p>' }}
+        onWritingChange={onWritingChange}
+        onSubmit={() => undefined}
+        currentQuestionId="task1"
+        onNavigate={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    editor.innerHTML = '<p>older history value</p>';
+
+    const undoBeforeInput = new Event('beforeinput', { bubbles: true, cancelable: true });
+    Object.assign(undoBeforeInput, { inputType: 'historyUndo' });
+    const preventDefaultSpy = vi.spyOn(undoBeforeInput, 'preventDefault');
+    fireEvent(editor, undoBeforeInput);
+    expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
+
+    const undoInput = new Event('input', { bubbles: true, cancelable: false });
+    Object.assign(undoInput, { inputType: 'historyUndo' });
+    fireEvent(editor, undoInput);
+    await Promise.resolve();
+
+    expect(editor.innerHTML).toBe('<p>LATEST</p>');
+  });
+
+  it('blocks keyboard undo shortcut in writing editor', () => {
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{ task1: '<p>LATEST</p>' }}
+        onWritingChange={vi.fn()}
+        onSubmit={() => undefined}
+        currentQuestionId="task1"
+        onNavigate={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    const undoShortcut = new KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      key: 'z',
+      metaKey: true,
+    });
+    const preventDefaultSpy = vi.spyOn(undoShortcut, 'preventDefault');
+
+    fireEvent(editor, undoShortcut);
+
+    expect(preventDefaultSpy).toHaveBeenCalledTimes(1);
   });
 });

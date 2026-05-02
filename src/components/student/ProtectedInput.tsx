@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { ExamConfig } from '../../types';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
+import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 
 type ProtectedInputSecurity = Pick<
   ExamConfig['security'],
@@ -127,6 +128,67 @@ export function ProtectedInput({
       maybeCommitDomValue();
     };
 
+    const releaseUndoRedoGuard = registerAnswerUndoRedoGuard({
+      element: input,
+      readLatestSnapshot: () => {
+        if (typeof controlledValueRef.current === 'string') {
+          return controlledValueRef.current;
+        }
+        return latestDomValueRef.current || input.value;
+      },
+      restoreLatestSnapshot: (snapshot) => {
+        const controlledValue =
+          typeof controlledValueRef.current === 'string' ? controlledValueRef.current : null;
+        const domValueBeforeRestore = input.value;
+        const requiresSync =
+          domValueBeforeRestore !== snapshot || controlledValue !== snapshot;
+
+        if (input.value !== snapshot) {
+          input.value = snapshot;
+        }
+        latestDomValueRef.current = snapshot;
+        previousValueRef.current = snapshot;
+        lastRescuedDomValueRef.current = snapshot;
+
+        if (requiresSync && typeof onChangeRef.current === 'function') {
+          (onChangeRef.current as unknown as (event: unknown) => void)({
+            target: input,
+            currentTarget: input,
+            type: 'change',
+          });
+        }
+      },
+      flushPersist: () => {
+        flushAnswerDurabilityNowRef.current?.();
+      },
+      onBlocked: (signal) => {
+        saveStudentAuditEvent(
+          resolvedSessionId,
+          signal.kind === 'undo' ? 'UNDO_BLOCKED' : 'REDO_BLOCKED',
+          {
+            surface: 'objective',
+            targetName: input.name || input.id || 'unknown',
+            via: signal.via,
+            cancelable: signal.cancelable,
+          },
+          resolvedStudentId,
+        );
+      },
+      onRestored: (signal) => {
+        saveStudentAuditEvent(
+          resolvedSessionId,
+          signal.kind === 'undo' ? 'UNDO_RESTORED' : 'REDO_RESTORED',
+          {
+            surface: 'objective',
+            targetName: input.name || input.id || 'unknown',
+            via: signal.via,
+            cancelable: signal.cancelable,
+          },
+          resolvedStudentId,
+        );
+      },
+    });
+
     input.addEventListener('input', handleNativeInput);
     input.addEventListener('change', handleNativeChange);
     document.addEventListener('focusout', handleFocusOut, true);
@@ -149,8 +211,9 @@ export function ProtectedInput({
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('freeze', handleFreeze as EventListener);
+      releaseUndoRedoGuard();
     };
-  }, []);
+  }, [resolvedSessionId, resolvedStudentId]);
 
   useEffect(() => {
     const input = inputRef.current;

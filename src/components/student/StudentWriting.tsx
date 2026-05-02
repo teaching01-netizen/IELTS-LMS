@@ -10,6 +10,7 @@ import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
 import { WritingChartPreview } from '../writing/WritingChartPreview';
 import { useSplitPaneResize } from './useSplitPaneResize';
+import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -54,6 +55,9 @@ export function StudentWriting({
   const editorRef = useRef<HTMLDivElement>(null);
   const lastKeydownRef = useRef<number>(0);
   const previousValueRef = useRef<string>('');
+  const latestEditorHtmlRef = useRef<string>('');
+  const lastCommittedDraftByTaskRef = useRef<Record<string, string>>({});
+  const deferredBlurCommitTimerRef = useRef<number | null>(null);
   const editorHasFocusRef = useRef(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const { handleDrag, splitPaneStyle, workspaceRef } = useSplitPaneResize({
@@ -68,19 +72,52 @@ export function StudentWriting({
   const currentPlainText = currentText.replace(/<[^>]*>/g, '').trim();
   const showEditorPlaceholder = !isEditorFocused && currentPlainText.length === 0;
 
+  const commitDraftHtml = useCallback(
+    (taskId: string, rawHtml: string, options?: { flushDurability?: boolean }) => {
+      const sanitized = sanitizeHtml(rawHtml);
+      const previous = lastCommittedDraftByTaskRef.current[taskId] ?? '';
+      if (sanitized !== previous) {
+        onWritingChange(taskId, sanitized);
+        lastCommittedDraftByTaskRef.current[taskId] = sanitized;
+      }
+      latestEditorHtmlRef.current = sanitized;
+      if (options?.flushDurability !== false) {
+        attemptContext?.actions.flushAnswerDurabilityNow?.();
+      }
+      return sanitized;
+    },
+    [attemptContext, onWritingChange],
+  );
+
   const commitEditorDraft = useCallback(() => {
     if (!editorRef.current) {
       return;
     }
 
-    const sanitized = sanitizeHtml(editorRef.current.innerHTML);
-    if (sanitized !== editorRef.current.innerHTML) {
-      editorRef.current.innerHTML = sanitized;
+    const committed = commitDraftHtml(activeTaskId, editorRef.current.innerHTML);
+    if (committed !== editorRef.current.innerHTML) {
+      editorRef.current.innerHTML = committed;
     }
+  }, [activeTaskId, commitDraftHtml]);
 
-    onWritingChange(activeTaskId, editorRef.current.innerHTML);
-    attemptContext?.actions.flushAnswerDurabilityNow?.();
-  }, [activeTaskId, attemptContext, onWritingChange]);
+  const scheduleDeferredBlurCommit = useCallback(
+    (taskId: string) => {
+      if (deferredBlurCommitTimerRef.current !== null) {
+        window.clearTimeout(deferredBlurCommitTimerRef.current);
+      }
+      deferredBlurCommitTimerRef.current = window.setTimeout(() => {
+        deferredBlurCommitTimerRef.current = null;
+        if (!editorRef.current) {
+          return;
+        }
+        const committed = commitDraftHtml(taskId, editorRef.current.innerHTML);
+        if (committed !== editorRef.current.innerHTML) {
+          editorRef.current.innerHTML = committed;
+        }
+      }, 0);
+    },
+    [commitDraftHtml],
+  );
 
   useEffect(() => {
     if (!registerDraftCommit) {
@@ -108,7 +145,18 @@ export function StudentWriting({
       editor.innerHTML = currentText;
       previousValueRef.current = editor.innerHTML;
     }
+    latestEditorHtmlRef.current = editor.innerHTML;
+    lastCommittedDraftByTaskRef.current[activeTaskId] = editor.innerHTML;
   }, [activeTaskId, currentText]);
+
+  useEffect(() => {
+    return () => {
+      if (deferredBlurCommitTimerRef.current !== null) {
+        window.clearTimeout(deferredBlurCommitTimerRef.current);
+        deferredBlurCommitTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (timeRemaining === 0) {
@@ -200,6 +248,55 @@ export function StudentWriting({
       lastKeydownRef.current = Date.now();
     };
 
+    const releaseUndoRedoGuard = registerAnswerUndoRedoGuard({
+      element: editor,
+      readLatestSnapshot: () => {
+        const committedForTask = lastCommittedDraftByTaskRef.current[activeTaskId];
+        if (typeof committedForTask === 'string') {
+          return committedForTask;
+        }
+        return latestEditorHtmlRef.current || editor.innerHTML;
+      },
+      restoreLatestSnapshot: (snapshot) => {
+        const normalized = sanitizeHtml(snapshot);
+        if (editor.innerHTML !== normalized) {
+          editor.innerHTML = normalized;
+        }
+        latestEditorHtmlRef.current = normalized;
+        previousValueRef.current = normalized;
+        void commitDraftHtml(activeTaskId, normalized, { flushDurability: false });
+      },
+      flushPersist: () => {
+        attemptContext?.actions.flushAnswerDurabilityNow?.();
+      },
+      onBlocked: (signal) => {
+        saveStudentAuditEvent(
+          resolvedSessionId,
+          signal.kind === 'undo' ? 'UNDO_BLOCKED' : 'REDO_BLOCKED',
+          {
+            surface: 'writing',
+            taskId: activeTaskId,
+            via: signal.via,
+            cancelable: signal.cancelable,
+          },
+          resolvedStudentId,
+        );
+      },
+      onRestored: (signal) => {
+        saveStudentAuditEvent(
+          resolvedSessionId,
+          signal.kind === 'undo' ? 'UNDO_RESTORED' : 'REDO_RESTORED',
+          {
+            surface: 'writing',
+            taskId: activeTaskId,
+            via: signal.via,
+            cancelable: signal.cancelable,
+          },
+          resolvedStudentId,
+        );
+      },
+    });
+
     editor.addEventListener('beforeinput', handleBeforeInput);
     editor.addEventListener('input', handleInput);
     editor.addEventListener('keydown', handleKeydown);
@@ -208,8 +305,9 @@ export function StudentWriting({
       editor.removeEventListener('beforeinput', handleBeforeInput);
       editor.removeEventListener('input', handleInput);
       editor.removeEventListener('keydown', handleKeydown);
+      releaseUndoRedoGuard();
     };
-  }, [resolvedSessionId, resolvedStudentId]);
+  }, [activeTaskId, attemptContext, commitDraftHtml, resolvedSessionId, resolvedStudentId]);
 
   if (!currentTask) {
     return null;
@@ -252,14 +350,15 @@ export function StudentWriting({
     document.execCommand(command, false, value);
     if (editorRef.current) {
       const htmlContent = editorRef.current.innerHTML;
-      onWritingChange(activeTaskId, htmlContent);
+      commitDraftHtml(activeTaskId, htmlContent, { flushDurability: false });
     }
   };
 
   const handleEditorInput = () => {
     if (editorRef.current) {
       const htmlContent = editorRef.current.innerHTML;
-      onWritingChange(activeTaskId, htmlContent);
+      latestEditorHtmlRef.current = htmlContent;
+      commitDraftHtml(activeTaskId, htmlContent, { flushDurability: false });
     }
   };
 
@@ -415,6 +514,7 @@ export function StudentWriting({
                     editorHasFocusRef.current = false;
                     setIsEditorFocused(false);
                     commitEditorDraft();
+                    scheduleDeferredBlurCommit(activeTaskId);
                   }}
                   onPaste={blockWritingEditorInteraction}
                   onCopy={blockWritingEditorInteraction}
