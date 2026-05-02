@@ -15,6 +15,19 @@ function buildBlock(answerTree: SubAnswerTreeNode[]): QuestionBlock {
   } as unknown as QuestionBlock;
 }
 
+function buildLegacyShortAnswerBlock(): QuestionBlock {
+  return {
+    id: 'short-block',
+    type: 'SHORT_ANSWER',
+    instruction: 'Answer questions',
+    questions: [
+      { id: 'q-1', prompt: 'Prompt 1', correctAnswer: 'alpha', answerRule: 'ONE_WORD', acceptedAnswers: ['alpha'] },
+      { id: 'q-2', prompt: 'Prompt 2', correctAnswer: 'beta', answerRule: 'ONE_WORD', acceptedAnswers: ['beta'] },
+      { id: 'q-3', prompt: 'Prompt 3', correctAnswer: 'gamma', answerRule: 'ONE_WORD', acceptedAnswers: ['gamma'] },
+    ],
+  } as unknown as QuestionBlock;
+}
+
 function Harness({ initialTree }: { initialTree: SubAnswerTreeNode[] }) {
   const [tree, setTree] = React.useState<SubAnswerTreeNode[]>(initialTree);
   const [enabled, setEnabled] = React.useState(true);
@@ -23,6 +36,25 @@ function Harness({ initialTree }: { initialTree: SubAnswerTreeNode[] }) {
     <SubAnswerTreeEditor
       block={buildBlock(tree)}
       startNumber={1}
+      enabled={enabled}
+      onToggle={setEnabled}
+      onChangeTree={setTree}
+    />
+  );
+}
+
+function LegacyHarness() {
+  const [tree, setTree] = React.useState<SubAnswerTreeNode[]>([]);
+  const [enabled, setEnabled] = React.useState(false);
+
+  return (
+    <SubAnswerTreeEditor
+      block={{
+        ...buildLegacyShortAnswerBlock(),
+        subAnswerModeEnabled: enabled,
+        answerTree: tree,
+      } as QuestionBlock}
+      startNumber={18}
       enabled={enabled}
       onToggle={setEnabled}
       onChangeTree={setTree}
@@ -89,5 +121,22 @@ describe('SubAnswerTreeEditor', () => {
 
     expect(new Set(childIds).size).toBe(childIds.length);
     expect(childIds.every((id) => id.trim().length > 0)).toBe(true);
+  });
+
+  it('shows per-question quick add icons before enabling tree mode', () => {
+    render(<LegacyHarness />);
+
+    expect(screen.getByRole('button', { name: 'Add sub-answer to question 18.1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add sub-answer to question 19.1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add sub-answer to question 20.1' })).toBeInTheDocument();
+  });
+
+  it('adding sub-answer from one slot keeps other legacy questions as roots', () => {
+    const { container } = render(<LegacyHarness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add sub-answer to question 18.1' }));
+
+    const answerAreas = container.querySelectorAll('textarea');
+    expect(answerAreas.length).toBeGreaterThanOrEqual(4);
   });
 });

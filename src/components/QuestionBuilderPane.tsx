@@ -640,7 +640,6 @@ export function QuestionBuilderPane({
         onClick={() => setSelectedBlockId(block.id)}
         className={`cursor-pointer transition-all ${isSelected ? 'ring-2 ring-green-500 ring-offset-2' : 'hover:ring-2 hover:ring-gray-300 hover:ring-offset-1'}`}
       >
-        {blockContent}
         {SUB_ANSWER_SUPPORTED_BLOCK_TYPES.has(block.type) ? (
           <SubAnswerTreeEditor
             block={block}
@@ -669,6 +668,7 @@ export function QuestionBuilderPane({
             }}
           />
         ) : null}
+        {blockContent}
         {INLINE_ADD_SUPPORTED_BLOCK_TYPES.has(block.type) ? (
           <button
             onClick={(e) => {
