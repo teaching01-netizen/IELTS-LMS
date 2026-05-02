@@ -310,25 +310,14 @@ export function SubAnswerTreeEditor({
   };
 
   const slotSeeds = useMemo(() => buildSubAnswerSlotSeeds(block, startNumber), [block, startNumber]);
-
-  const addRoot = () => {
-    onChangeTree([
-      ...answerTree,
-      {
-        id: createId('root'),
-        label: '',
-        required: true,
-        children: [
-          {
-            id: createId('leaf'),
-            label: '',
-            acceptedAnswers: [],
-            required: true,
-          },
-        ],
-      },
-    ]);
-  };
+  const editedRootIndexes = useMemo(
+    () =>
+      answerTree
+        .map((root, index) => ({ root, index }))
+        .filter(({ root }) => (root.children?.length ?? 0) > 1)
+        .map(({ index }) => index),
+    [answerTree],
+  );
 
   const addChild = (path: number[]) => {
     const currentNode = getNodeByPath(answerTree, path);
@@ -422,34 +411,34 @@ export function SubAnswerTreeEditor({
             >
               {isExpanded ? 'Hide tree editor' : 'Open tree editor'}
             </button>
-            <button
-              type="button"
-              onClick={addRoot}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-            >
-              Add root
-            </button>
           </div>
+          <p className="text-xs text-gray-600">
+            Editing only questions that currently have extra sub-answers.
+          </p>
 
           {!isExpanded ? (
             <p className="text-xs text-gray-600">Tree editor is collapsed. Use row icons or open the editor.</p>
-          ) : answerTree.length === 0 ? (
-            <p className="text-xs text-gray-600">No roots yet. Add a root to start.</p>
+          ) : editedRootIndexes.length === 0 ? (
+            <p className="text-xs text-gray-600">No sub-answer rows yet. Use the + icon on a question to add one.</p>
           ) : (
-            answerTree.map((root, index) => (
-              <NodeRow
-                key={root.id || `root-${index}`}
-                node={root}
-                path={[index]}
-                depth={1}
-                rootNumber={startNumber + index}
-                siblingCount={answerTree.length}
-                onUpdateNode={updateNode}
-                onRemoveNode={removeNode}
-                onMoveNode={moveNode}
-                onAddChild={addChild}
-              />
-            ))
+            editedRootIndexes.map((index) => {
+              const root = answerTree[index];
+              if (!root) return null;
+              return (
+                <NodeRow
+                  key={root.id || `root-${index}`}
+                  node={root}
+                  path={[index]}
+                  depth={1}
+                  rootNumber={startNumber + index}
+                  siblingCount={answerTree.length}
+                  onUpdateNode={updateNode}
+                  onRemoveNode={removeNode}
+                  onMoveNode={moveNode}
+                  onAddChild={addChild}
+                />
+              );
+            })
           )}
         </div>
       ) : (

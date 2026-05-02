@@ -83,15 +83,14 @@ describe('SubAnswerTreeEditor', () => {
     expect(screen.queryByPlaceholderText('Node ID')).toBeNull();
   });
 
-  it('creates new roots and leaves with empty labels', () => {
+  it('shows empty-state guidance when no sub-answer rows exist yet', () => {
     render(<Harness initialTree={[]} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open tree editor' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Add root' }));
 
-    const promptInputs = screen.getAllByPlaceholderText('Prompt / label') as HTMLInputElement[];
-    expect(promptInputs.length).toBeGreaterThanOrEqual(2);
-    expect(promptInputs.every((input) => input.value === '')).toBe(true);
+    expect(
+      screen.getByText('No sub-answer rows yet. Use the + icon on a question to add one.'),
+    ).toBeInTheDocument();
   });
 
   it('auto-repairs missing and duplicate legacy node ids on mount', () => {
@@ -132,7 +131,7 @@ describe('SubAnswerTreeEditor', () => {
     expect(screen.getByRole('button', { name: 'Add sub-answer to question 20.1' })).toBeInTheDocument();
   });
 
-  it('adding sub-answer from one slot keeps other legacy questions as roots', () => {
+  it('adding sub-answer from one slot only shows edited question roots in tree editor', () => {
     render(<LegacyHarness />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Add sub-answer to question 18.1' }));
@@ -140,7 +139,7 @@ describe('SubAnswerTreeEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open tree editor' }));
 
     expect(screen.getByText('18')).toBeInTheDocument();
-    expect(screen.getByText('19')).toBeInTheDocument();
-    expect(screen.getByText('20')).toBeInTheDocument();
+    expect(screen.queryByText('19')).toBeNull();
+    expect(screen.queryByText('20')).toBeNull();
   });
 });
