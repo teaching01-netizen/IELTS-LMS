@@ -227,4 +227,37 @@ describe('subAnswerTreeSlots', () => {
     expect(next[0]?.children?.length).toBe(2);
     expect(next[1]?.children?.length).toBe(1);
   });
+
+  it('syncs canonical root first leaf content from slot seeds when root label is empty', () => {
+    const block = asBlock({
+      id: 'short-4',
+      type: 'SHORT_ANSWER',
+      instruction: '',
+      questions: [
+        { id: 'q1', prompt: 'Updated prompt 1', correctAnswer: 'a', answerRule: 'ONE_WORD', acceptedAnswers: ['a1'] },
+        { id: 'q2', prompt: 'Updated prompt 2', correctAnswer: 'b', answerRule: 'ONE_WORD', acceptedAnswers: ['b1', 'b2'] },
+      ],
+      subAnswerModeEnabled: true,
+    });
+
+    const raw: SubAnswerTreeNode[] = [
+      {
+        id: 'root-a',
+        label: '',
+        children: [{ id: 'leaf-a', label: '', acceptedAnswers: [], required: true }],
+      },
+      {
+        id: 'root-b',
+        label: '',
+        children: [{ id: 'leaf-b', label: 'stale', acceptedAnswers: ['old'], required: true }],
+      },
+    ];
+
+    const healed = healSubAnswerTreeForBlock(block, 21, raw);
+
+    expect(healed[0]?.children?.[0]?.label).toBe('Updated prompt 1');
+    expect(healed[0]?.children?.[0]?.acceptedAnswers).toEqual(['a1']);
+    expect(healed[1]?.children?.[0]?.label).toBe('Updated prompt 2');
+    expect(healed[1]?.children?.[0]?.acceptedAnswers).toEqual(['b1', 'b2']);
+  });
 });

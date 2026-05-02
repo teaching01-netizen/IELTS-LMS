@@ -64,4 +64,25 @@ describe('SubAnswerTreeQuestionList', () => {
     expect(promptParagraph).toBeNull();
     expect(screen.getByText('1.1')).toBeInTheDocument();
   });
+
+  it('shows root number when a root has only one leaf', () => {
+    const question = buildTreeDescriptor({
+      rootNumber: 21,
+      numberLabel: '21.1',
+      rootLeafQuestionIds: ['tree-block::tree::root-a::leaf-a'],
+    });
+
+    render(
+      <SubAnswerTreeQuestionList
+        questions={[question]}
+        answers={{ [question.id]: '' }}
+        currentQuestionId={question.id}
+        onAnswerChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('21')).toBeInTheDocument();
+    expect(screen.queryByText('21.1')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Answer for question 21' })).toBeInTheDocument();
+  });
 });

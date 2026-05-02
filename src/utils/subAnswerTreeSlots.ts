@@ -134,6 +134,45 @@ function buildSeededRoot(seed: SubAnswerSlotSeed): SubAnswerTreeNode {
   };
 }
 
+function syncCanonicalRootWithSeed(root: SubAnswerTreeNode, seed: SubAnswerSlotSeed): SubAnswerTreeNode {
+  const rootLabel = typeof root.label === 'string' ? root.label.trim() : '';
+  if (rootLabel.length > 0) {
+    return root;
+  }
+
+  const children = Array.isArray(root.children) ? [...root.children] : [];
+  const firstChild = children[0];
+  if (!firstChild) {
+    return {
+      ...root,
+      children: [
+        {
+          id: `${root.id}::seed-leaf`,
+          label: seed.prompt,
+          acceptedAnswers: seed.acceptedAnswers,
+          required: true,
+        },
+      ],
+    };
+  }
+
+  const firstChildHasChildren = Array.isArray(firstChild.children) && firstChild.children.length > 0;
+  if (firstChildHasChildren) {
+    return root;
+  }
+
+  children[0] = {
+    ...firstChild,
+    label: seed.prompt,
+    acceptedAnswers: seed.acceptedAnswers,
+  };
+
+  return {
+    ...root,
+    children,
+  };
+}
+
 export function healSubAnswerTreeForBlock(
   block: QuestionBlock,
   startNumber: number,
@@ -142,7 +181,13 @@ export function healSubAnswerTreeForBlock(
   const normalized = normalizeSubAnswerTree(answerTree);
   const seeds = buildSubAnswerSlotSeeds(block, startNumber);
 
-  const canonicalRoots = seeds.map((seed, index) => normalized[index] ?? buildSeededRoot(seed));
+  const canonicalRoots = seeds.map((seed, index) => {
+    const existingRoot = normalized[index];
+    if (!existingRoot) {
+      return buildSeededRoot(seed);
+    }
+    return syncCanonicalRootWithSeed(existingRoot, seed);
+  });
   const extraRoots = normalized.slice(seeds.length);
 
   return [...canonicalRoots, ...extraRoots];

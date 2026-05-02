@@ -36,6 +36,10 @@ export function SubAnswerTreeQuestionList({
         const isCurrent = currentQuestionId === slotId;
         const isFlagged = Boolean(flags[slotId]);
         const prompt = typeof question.treePrompt === 'string' ? question.treePrompt.trim() : '';
+        const displayNumber =
+          Array.isArray(question.rootLeafQuestionIds) && question.rootLeafQuestionIds.length === 1
+            ? String(question.rootNumber)
+            : question.numberLabel;
 
         return (
           <div
@@ -48,7 +52,7 @@ export function SubAnswerTreeQuestionList({
             <div className="space-y-2">
               {prompt ? <p className="text-sm text-gray-800">{prompt}</p> : null}
               <div className="flex items-start gap-3">
-                <span className="min-w-[2.5rem] font-bold text-blue-700">{question.numberLabel}</span>
+                <span className="min-w-[2.5rem] font-bold text-blue-700">{displayNumber}</span>
                 <div className="flex-1">
                   <ProtectedInput
                     type="text"
@@ -66,7 +70,7 @@ export function SubAnswerTreeQuestionList({
                     }
                     className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                     placeholder="Enter answer..."
-                    aria-label={`Answer for question ${question.numberLabel}`}
+                    aria-label={`Answer for question ${displayNumber}`}
                   />
                 </div>
                 {onToggleFlag ? (

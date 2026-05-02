@@ -230,4 +230,40 @@ describe('student question descriptors (student exam core logic)', () => {
     expect(questions.map((question) => question.rootNumber)).toEqual([1, 2, 3]);
     expect(questions.map((question) => question.numberLabel)).toEqual(['1.1', '2.1', '3.1']);
   });
+
+  it('hydrates tree prompts from block questions when canonical roots contain stale empty leaf labels', () => {
+    const state = createInitialExamState('Exam', 'Academic');
+    state.reading.passages[0].blocks = [
+      {
+        id: 'short-tree-stale-prompts',
+        type: 'SHORT_ANSWER',
+        instruction: 'Tree mode stale prompts',
+        insertedImages: [],
+        subAnswerModeEnabled: true,
+        questions: [
+          { id: 'q1', prompt: 'Question 18 prompt', correctAnswer: 'a', answerRule: 'ONE_WORD', acceptedAnswers: ['a'] },
+          { id: 'q2', prompt: 'Question 19 prompt', correctAnswer: 'b', answerRule: 'ONE_WORD', acceptedAnswers: ['b'] },
+        ],
+        answerTree: [
+          {
+            id: 'root-1',
+            label: '',
+            children: [{ id: 'leaf-1', label: '', acceptedAnswers: [], required: true }],
+          },
+          {
+            id: 'root-2',
+            label: '',
+            children: [{ id: 'leaf-2', label: 'outdated', acceptedAnswers: ['old'], required: true }],
+          },
+        ],
+      },
+    ] as any;
+
+    const questions = getStudentQuestionsForModule(state, 'reading');
+
+    expect(questions.map((question) => question.treePrompt)).toEqual([
+      'Question 18 prompt',
+      'Question 19 prompt',
+    ]);
+  });
 });
