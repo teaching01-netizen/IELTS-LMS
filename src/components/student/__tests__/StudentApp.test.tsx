@@ -9,6 +9,159 @@ import type { ExamState } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 
+function createWritingRuntimeSnapshot(): ExamSessionRuntime {
+  return {
+    id: 'runtime-1',
+    scheduleId: 'sched-1',
+    examId: 'exam-1',
+    examTitle: 'Mock Exam',
+    cohortName: 'Cohort A',
+    deliveryMode: 'proctor_start',
+    status: 'live',
+    actualStartAt: '2026-01-01T00:00:00.000Z',
+    actualEndAt: null,
+    activeSectionKey: 'writing',
+    currentSectionKey: 'writing',
+    currentSectionRemainingSeconds: 300,
+    waitingForNextSection: false,
+    isOverrun: false,
+    totalPausedSeconds: 0,
+    sections: [
+      {
+        sectionKey: 'writing',
+        label: 'Writing',
+        order: 1,
+        plannedDurationMinutes: 60,
+        gapAfterMinutes: 0,
+        status: 'live',
+        availableAt: '2026-01-01T00:00:00.000Z',
+        actualStartAt: '2026-01-01T00:00:00.000Z',
+        actualEndAt: null,
+        pausedAt: null,
+        accumulatedPausedSeconds: 0,
+        extensionMinutes: 0,
+        completionReason: undefined,
+        projectedStartAt: '2026-01-01T00:00:00.000Z',
+        projectedEndAt: '2026-01-01T01:00:00.000Z',
+      },
+    ],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+function createWritingAttemptSnapshot(): StudentAttempt {
+  return {
+    id: 'attempt-1',
+    scheduleId: 'sched-1',
+    studentKey: 'student-sched-1-alice',
+    examId: 'exam-1',
+    examTitle: 'Mock Exam',
+    candidateId: 'alice',
+    candidateName: 'Alice Roe',
+    candidateEmail: 'alice@example.com',
+    phase: 'exam',
+    currentModule: 'writing',
+    currentQuestionId: 'task1',
+    answers: {},
+    writingAnswers: {},
+    flags: {},
+    violations: [],
+    proctorStatus: 'active',
+    proctorNote: null,
+    proctorUpdatedAt: null,
+    proctorUpdatedBy: null,
+    lastWarningId: null,
+    lastAcknowledgedWarningId: null,
+    submittedAt: null,
+    integrity: {
+      preCheck: {
+        completedAt: '2026-01-01T00:00:00.000Z',
+        browserFamily: 'chrome',
+        browserVersion: 120,
+        screenDetailsSupported: true,
+        heartbeatReady: true,
+        acknowledgedSafariLimitation: false,
+        checks: [],
+      },
+      deviceFingerprintHash: null,
+      lastDisconnectAt: null,
+      lastReconnectAt: null,
+      lastHeartbeatAt: null,
+      lastHeartbeatStatus: 'idle',
+    },
+    recovery: {
+      lastRecoveredAt: null,
+      lastLocalMutationAt: null,
+      lastPersistedAt: null,
+      lastDroppedMutations: null,
+      pendingMutationCount: 0,
+      serverAcceptedThroughSeq: 0,
+      clientSessionId: null,
+      syncState: 'saved',
+    },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+function installVisualViewportMock(initialHeight: number) {
+  const visualViewportTarget = new EventTarget();
+  let height = initialHeight;
+  let scale = 1;
+  const originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+
+  Object.defineProperty(window, 'visualViewport', {
+    configurable: true,
+    value: {
+      get height() {
+        return height;
+      },
+      get scale() {
+        return scale;
+      },
+      addEventListener: visualViewportTarget.addEventListener.bind(visualViewportTarget),
+      removeEventListener: visualViewportTarget.removeEventListener.bind(visualViewportTarget),
+    },
+  });
+
+  return {
+    setHeight(nextHeight: number) {
+      height = nextHeight;
+    },
+    setScale(nextScale: number) {
+      scale = nextScale;
+    },
+    dispatchResize() {
+      visualViewportTarget.dispatchEvent(new Event('resize'));
+    },
+    restore() {
+      if (originalVisualViewport) {
+        Object.defineProperty(window, 'visualViewport', originalVisualViewport);
+      } else {
+        Reflect.deleteProperty(window, 'visualViewport');
+      }
+    },
+  };
+}
+
+function createMatchMediaMock(coarsePointerMatches: boolean) {
+  return (query: string): MediaQueryList =>
+    ({
+      matches:
+        query === '(pointer: coarse)' || query === '(any-pointer: coarse)'
+          ? coarsePointerMatches
+          : false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn().mockReturnValue(true),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    }) as unknown as MediaQueryList;
+}
+
 describe('StudentApp runtime-backed mode', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -40,6 +193,174 @@ describe('StudentApp runtime-backed mode', () => {
       part3Discussion: [],
     },
   };
+
+  it('keeps tablet footer viewport height stable while an editable field is focused', async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const originalMatchMedia = window.matchMedia;
+    const originalMaxTouchPoints = Object.getOwnPropertyDescriptor(window.navigator, 'maxTouchPoints');
+    const visualViewport = installVisualViewportMock(900);
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    window.matchMedia = vi.fn(createMatchMediaMock(true)) as unknown as typeof window.matchMedia;
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: 5 });
+
+    try {
+      render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createWritingAttemptSnapshot()}
+          runtimeSnapshot={createWritingRuntimeSnapshot()}
+        />,
+      );
+
+      const root = document.documentElement;
+      await waitFor(() => {
+        expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      });
+
+      const editor = await screen.findByRole('textbox', { name: /writing response/i });
+      fireEvent.focus(editor);
+
+      act(() => {
+        visualViewport.setHeight(600);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+    } finally {
+      visualViewport.restore();
+      window.matchMedia = originalMatchMedia;
+      if (originalInnerWidth) {
+        Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      if (originalMaxTouchPoints) {
+        Object.defineProperty(window.navigator, 'maxTouchPoints', originalMaxTouchPoints);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints');
+      }
+    }
+  });
+
+  it('still updates viewport height during editable focus outside tablet mode', async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const originalMatchMedia = window.matchMedia;
+    const originalMaxTouchPoints = Object.getOwnPropertyDescriptor(window.navigator, 'maxTouchPoints');
+    const visualViewport = installVisualViewportMock(900);
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1366 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    window.matchMedia = vi.fn(createMatchMediaMock(false)) as unknown as typeof window.matchMedia;
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: 0 });
+
+    try {
+      render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createWritingAttemptSnapshot()}
+          runtimeSnapshot={createWritingRuntimeSnapshot()}
+        />,
+      );
+
+      const root = document.documentElement;
+      await waitFor(() => {
+        expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      });
+
+      const editor = await screen.findByRole('textbox', { name: /writing response/i });
+      fireEvent.focus(editor);
+
+      act(() => {
+        visualViewport.setHeight(600);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('600px');
+    } finally {
+      visualViewport.restore();
+      window.matchMedia = originalMatchMedia;
+      if (originalInnerWidth) {
+        Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      if (originalMaxTouchPoints) {
+        Object.defineProperty(window.navigator, 'maxTouchPoints', originalMaxTouchPoints);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints');
+      }
+    }
+  });
+
+  it('keeps tablet footer viewport height stable while pinch zoom is active and resumes after zoom ends', async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const originalMatchMedia = window.matchMedia;
+    const originalMaxTouchPoints = Object.getOwnPropertyDescriptor(window.navigator, 'maxTouchPoints');
+    const visualViewport = installVisualViewportMock(900);
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    window.matchMedia = vi.fn(createMatchMediaMock(true)) as unknown as typeof window.matchMedia;
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: 5 });
+
+    try {
+      render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createWritingAttemptSnapshot()}
+          runtimeSnapshot={createWritingRuntimeSnapshot()}
+        />,
+      );
+
+      const root = document.documentElement;
+      await waitFor(() => {
+        expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      });
+
+      act(() => {
+        visualViewport.setScale(1.35);
+        visualViewport.setHeight(620);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+
+      act(() => {
+        visualViewport.setScale(1);
+        visualViewport.setHeight(620);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('620px');
+    } finally {
+      visualViewport.restore();
+      window.matchMedia = originalMatchMedia;
+      if (originalInnerWidth) {
+        Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      if (originalMaxTouchPoints) {
+        Object.defineProperty(window.navigator, 'maxTouchPoints', originalMaxTouchPoints);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints');
+      }
+    }
+  });
 
   it('shows the waiting overlay when the runtime locks the student between sections', () => {
     const runtimeSnapshot: ExamSessionRuntime = {
