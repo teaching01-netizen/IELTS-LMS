@@ -159,6 +159,7 @@ describe('QuestionBuilderPane', () => {
     fireEvent.click(screen.getAllByTitle('Add sub-answer')[0]!);
 
     await waitFor(() => {
+      expect(screen.getByPlaceholderText('Sub-answer prompt')).toBeInTheDocument();
       expect(screen.getByText('Questions 18-23')).toBeInTheDocument();
       expect(screen.getByDisplayValue('Q19')).toBeInTheDocument();
       expect(screen.getByDisplayValue('Q23')).toBeInTheDocument();

@@ -18,13 +18,11 @@ import { MatchingFeaturesBlock } from './blocks/MatchingFeaturesBlock';
 import { getBlockQuestionCount } from '../utils/examUtils';
 import { QuestionBankLibrary } from './builder/QuestionBankLibrary';
 import { QuestionDetailModal } from './builder/QuestionDetailModal';
-import { SubAnswerTreeEditor } from './builder/SubAnswerTreeEditor';
 import { questionBankService } from '../services/questionBankService';
 import { cloneQuestionBlockWithNewIds } from '../utils/cloneExamContent';
 import { createId } from '../utils/idUtils';
 import {
   appendSubAnswerLeafAtSlot,
-  SUB_ANSWER_SUPPORTED_BLOCK_TYPES,
 } from '../utils/subAnswerTreeSlots';
 
 interface BlockWithNumbers {
@@ -656,35 +654,6 @@ export function QuestionBuilderPane({
         onClick={() => setSelectedBlockId(block.id)}
         className={`cursor-pointer transition-all ${isSelected ? 'ring-2 ring-green-500 ring-offset-2' : 'hover:ring-2 hover:ring-gray-300 hover:ring-offset-1'}`}
       >
-        {SUB_ANSWER_SUPPORTED_BLOCK_TYPES.has(block.type) ? (
-          <SubAnswerTreeEditor
-            block={block}
-            startNumber={startNum}
-            enabled={Boolean(
-              (block as QuestionBlock & { subAnswerModeEnabled?: boolean }).subAnswerModeEnabled,
-            )}
-            onToggle={(enabled) => {
-              updateBlock({
-                ...(block as QuestionBlock & {
-                  subAnswerModeEnabled?: boolean;
-                  answerTree?: unknown;
-                }),
-                subAnswerModeEnabled: enabled,
-              } as QuestionBlock);
-            }}
-            onChangeTree={(nextTree) => {
-              updateBlock({
-                ...(block as QuestionBlock & {
-                  subAnswerModeEnabled?: boolean;
-                  answerTree?: unknown;
-                }),
-                subAnswerModeEnabled: true,
-                answerTree: nextTree,
-              } as QuestionBlock);
-            }}
-            onAddSubAnswerAtSlot={addSubAnswerToSlot}
-          />
-        ) : null}
         {blockContent}
         {INLINE_ADD_SUPPORTED_BLOCK_TYPES.has(block.type) ? (
           <button

@@ -4,6 +4,7 @@ import {
   ClozeBlock as ClozeBlockType,
   ClozeQuestion,
   AnswerRule,
+  SubAnswerTreeNode,
 } from '../../types';
 import { MoreVertical, Plus, Trash2, GripVertical, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
@@ -61,6 +62,41 @@ export const ClozeBlock: React.FC<Props> = ({
   const removeQuestion = (qId: string) => {
     const newQuestions = clozeBlock.questions.filter(q => q.id !== qId);
     updateBlock({ ...clozeBlock, questions: newQuestions });
+  };
+
+  const updateSubAnswerTree = (nextTree: SubAnswerTreeNode[]) => {
+    updateBlock({
+      ...clozeBlock,
+      subAnswerModeEnabled: true,
+      answerTree: nextTree,
+    });
+  };
+
+  const updateSubAnswerLeaf = (
+    slotIndex: number,
+    leafIndex: number,
+    updates: Partial<SubAnswerTreeNode>,
+  ) => {
+    const roots = [...(clozeBlock.answerTree ?? [])];
+    const root = roots[slotIndex];
+    if (!root) return;
+    const children = [...(root.children ?? [])];
+    const targetLeaf = children[leafIndex];
+    if (!targetLeaf) return;
+    children[leafIndex] = { ...targetLeaf, ...updates };
+    roots[slotIndex] = { ...root, children };
+    updateSubAnswerTree(roots);
+  };
+
+  const removeSubAnswerLeaf = (slotIndex: number, leafIndex: number) => {
+    const roots = [...(clozeBlock.answerTree ?? [])];
+    const root = roots[slotIndex];
+    if (!root) return;
+    const children = [...(root.children ?? [])];
+    if (leafIndex <= 0 || leafIndex >= children.length) return;
+    children.splice(leafIndex, 1);
+    roots[slotIndex] = { ...root, children };
+    updateSubAnswerTree(roots);
   };
 
   return (
@@ -162,7 +198,43 @@ export const ClozeBlock: React.FC<Props> = ({
                 {getFieldError(`questions[${i}].correctAnswer`) && (
                   <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle size={10} /> {getFieldError(`questions[${i}].correctAnswer`)!.message}</p>
                 )}
-                <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-all group-hover/item:opacity-100">
+                {clozeBlock.subAnswerModeEnabled && (clozeBlock.answerTree?.[i]?.children?.length ?? 0) > 1 ? (
+                  <div className="mt-3 space-y-2 rounded-sm border border-blue-100 bg-blue-50/40 p-2">
+                    {(clozeBlock.answerTree?.[i]?.children ?? []).slice(1).map((leaf, leafOffset) => {
+                      const leafIndex = leafOffset + 1;
+                      return (
+                        <div key={`${leaf.id}-${leafIndex}`} className="rounded border border-blue-200 bg-white p-2">
+                          <div className="mb-1 flex items-center justify-between">
+                            <span className="text-[11px] font-semibold text-blue-700">{startNum + i}.{leafIndex + 1}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeSubAnswerLeaf(i, leafIndex)}
+                              className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-700"
+                              title="Remove sub-answer"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            value={leaf.label ?? ''}
+                            onChange={(event) => updateSubAnswerLeaf(i, leafIndex, { label: event.target.value })}
+                            className="mb-2 w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                            placeholder="Sub-answer prompt"
+                          />
+                          <AcceptedAnswersEditor
+                            value={leaf.acceptedAnswers ?? []}
+                            onChange={(next) =>
+                              updateSubAnswerLeaf(i, leafIndex, buildAcceptedAnswerFields(next))
+                            }
+                            placeholder="Sub-answer accepted answer..."
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                <div className="absolute right-2 top-2 flex items-center gap-1">
                   {onAddSubAnswerAtSlot ? (
                     <button
                       type="button"
