@@ -154,6 +154,51 @@ describe('gradingAnswerUtils', () => {
     expect(isStudentAnswerCorrect(descriptor, { 'block-1': ['C', 'A'] })).toBe(true);
   });
 
+  test('MULTI_MCQ: slot descriptors apply partial-credit correctness by answerIndex', () => {
+    const firstSlotDescriptor = {
+      id: 'block-2:slot:1',
+      blockId: 'block-2',
+      groupId: 'p1',
+      groupLabel: 'Passage 1',
+      rootId: 'block-2:slot:1',
+      rootNumber: 10,
+      numberLabel: '10',
+      isMulti: false,
+      correctCount: 1,
+      answerKey: 'block-2',
+      answerIndex: 0,
+      block: {
+        id: 'block-2',
+        type: 'MULTI_MCQ',
+        instruction: '',
+        stem: 'Choose two',
+        requiredSelections: 2,
+        options: [
+          { id: 'A', text: 'Alpha', isCorrect: true },
+          { id: 'B', text: 'Beta', isCorrect: false },
+          { id: 'C', text: 'Charlie', isCorrect: true },
+        ],
+      },
+      question: null,
+    } as unknown as StudentQuestionDescriptor;
+
+    const secondSlotDescriptor = {
+      ...firstSlotDescriptor,
+      id: 'block-2:slot:2',
+      rootId: 'block-2:slot:2',
+      rootNumber: 11,
+      numberLabel: '11',
+      answerIndex: 1,
+    } as unknown as StudentQuestionDescriptor;
+
+    expect(isStudentAnswerCorrect(firstSlotDescriptor, { 'block-2': ['A'] })).toBe(true);
+    expect(isStudentAnswerCorrect(secondSlotDescriptor, { 'block-2': ['A'] })).toBe(false);
+    expect(isStudentAnswerCorrect(firstSlotDescriptor, { 'block-2': ['A', 'C'] })).toBe(true);
+    expect(isStudentAnswerCorrect(secondSlotDescriptor, { 'block-2': ['A', 'C'] })).toBe(true);
+    expect(isStudentAnswerCorrect(firstSlotDescriptor, { 'block-2': ['B'] })).toBe(false);
+    expect(isStudentAnswerCorrect(secondSlotDescriptor, { 'block-2': ['B'] })).toBe(false);
+  });
+
   test('SENTENCE_COMPLETION: uses answerIndex to resolve correct blank', () => {
     const descriptor = {
       id: 'q1:blank-1',
@@ -398,5 +443,32 @@ describe('gradingAnswerUtils', () => {
     expect(getQuestionPrompt(descriptor)).toBe('Leaf prompt');
     expect(getCorrectAnswerDisplay(descriptor)).toBe('cat | kitty');
     expect(isStudentAnswerCorrect(descriptor, { [descriptor.id]: 'Kitty' })).toBe(true);
+  });
+
+  test('sub-answer tree grading prompt falls back to question number, not node id', () => {
+    const descriptor = {
+      id: 'tree-block::tree::root-a::legacy-node-id',
+      blockId: 'tree-block',
+      groupId: 'p1',
+      groupLabel: 'Passage 1',
+      rootId: 'tree-block::tree::root::root-a',
+      rootNumber: 21,
+      numberLabel: '21.1',
+      isMulti: false,
+      correctCount: 1,
+      answerKey: 'tree-block::tree::root-a::legacy-node-id',
+      isSubAnswerTreeLeaf: true,
+      treePrompt: '   ',
+      treeAcceptedAnswers: ['cat'],
+      block: {
+        id: 'tree-block',
+        type: 'SHORT_ANSWER',
+        instruction: '',
+        questions: [],
+      },
+      question: null,
+    } as unknown as StudentQuestionDescriptor;
+
+    expect(getQuestionPrompt(descriptor)).toBe('21.1');
   });
 });

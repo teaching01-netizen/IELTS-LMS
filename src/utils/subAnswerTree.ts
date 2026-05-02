@@ -42,6 +42,78 @@ function isTreeNode(value: unknown): value is SubAnswerTreeNode {
   return typeof value === 'object' && value !== null && 'id' in value;
 }
 
+function isNodeObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function nextGeneratedNodeId(existingIds: Set<string>): string {
+  let counter = 1;
+  let candidate = `tree-node-${counter}`;
+  while (existingIds.has(candidate)) {
+    counter += 1;
+    candidate = `tree-node-${counter}`;
+  }
+  return candidate;
+}
+
+function collectExistingIds(nodes: unknown, target: Set<string>): void {
+  if (!Array.isArray(nodes)) return;
+  nodes.forEach((node) => {
+    if (!isNodeObject(node)) return;
+    const id = typeof node.id === 'string' ? node.id.trim() : '';
+    if (id) {
+      target.add(id);
+    }
+    collectExistingIds(node.children, target);
+  });
+}
+
+function normalizeNodeTree(
+  node: Record<string, unknown>,
+  assignedIds: Set<string>,
+  forbiddenIds: Set<string>,
+): SubAnswerTreeNode {
+  let id = typeof node.id === 'string' ? node.id.trim() : '';
+  if (!id || assignedIds.has(id)) {
+    id = nextGeneratedNodeId(forbiddenIds);
+  }
+  assignedIds.add(id);
+  forbiddenIds.add(id);
+
+  const label = typeof node.label === 'string' ? node.label : '';
+  const acceptedAnswers = Array.isArray(node.acceptedAnswers)
+    ? node.acceptedAnswers.filter((entry): entry is string => typeof entry === 'string')
+    : undefined;
+  const required = typeof node.required === 'boolean' ? node.required : undefined;
+  const rawChildren = Array.isArray(node.children)
+    ? node.children.filter((child): child is Record<string, unknown> => isNodeObject(child))
+    : [];
+
+  const children = rawChildren.map((child) => normalizeNodeTree(child, assignedIds, forbiddenIds));
+
+  return {
+    id,
+    label,
+    acceptedAnswers,
+    required,
+    children,
+  };
+}
+
+export function normalizeSubAnswerTree(
+  answerTree: readonly SubAnswerTreeNode[] | undefined,
+): SubAnswerTreeNode[] {
+  const forbiddenIds = new Set<string>();
+  collectExistingIds(answerTree, forbiddenIds);
+  const assignedIds = new Set<string>();
+
+  const roots = Array.isArray(answerTree)
+    ? answerTree.filter((entry): entry is Record<string, unknown> => isNodeObject(entry))
+    : [];
+
+  return roots.map((root) => normalizeNodeTree(root, assignedIds, forbiddenIds));
+}
+
 export function hasSubAnswerTreeMode(block: QuestionBlock): boolean {
   if (!('subAnswerModeEnabled' in block)) {
     return false;
@@ -165,7 +237,7 @@ export function flattenSubAnswerTree(
   answerTree: readonly SubAnswerTreeNode[] | undefined,
   startRootNumber: number,
 ): FlattenSubAnswerTreeResult {
-  const roots = Array.isArray(answerTree) ? answerTree.filter(isTreeNode) : [];
+  const roots = normalizeSubAnswerTree(answerTree).filter(isTreeNode);
   const rootDescriptors: SubAnswerTreeRootDescriptor[] = [];
   const leafDescriptors: SubAnswerTreeLeafDescriptor[] = [];
   let currentRootNumber = startRootNumber;
@@ -195,7 +267,7 @@ export function flattenSubAnswerTree(
         rootNumber,
         numberLabel,
         nodeId: node.id,
-        prompt: node.label?.trim() || node.id,
+        prompt: node.label?.trim() || '',
         acceptedAnswers,
         required,
         depth,

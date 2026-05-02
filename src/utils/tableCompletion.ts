@@ -80,6 +80,29 @@ function dedupeByCoordinate(cells: TableCell[]): TableCell[] {
   return deduped;
 }
 
+function ensureUniqueCellIds(cells: TableCell[]): TableCell[] {
+  const seen = new Set<string>();
+
+  return cells.map((cell) => {
+    const rawId = typeof cell.id === 'string' ? cell.id.trim() : '';
+
+    if (rawId && !seen.has(rawId)) {
+      seen.add(rawId);
+      return cell;
+    }
+
+    let nextId = createId('cell');
+    while (seen.has(nextId)) {
+      nextId = createId('cell');
+    }
+    seen.add(nextId);
+    return {
+      ...cell,
+      id: nextId,
+    };
+  });
+}
+
 function injectLegacyPlaceholders(rows: string[][], cells: TableCell[]): string[][] {
   if (rows.length === 0 || cells.length === 0) return rows;
 
@@ -193,17 +216,20 @@ export function normalizeTableCompletionBlock(block: TableCompletionBlock): Tabl
     ...block,
     rows: effectiveRows,
     cells: dedupedCells,
-  }).map((cell) => {
+  })
+    .map((cell) => {
     if (cell.id.startsWith('slot-')) {
       return { ...cell, id: createId('cell') };
     }
     return cell;
   });
 
+  const cellsWithUniqueIds = ensureUniqueCellIds(canonicalCells);
+
   const normalized: TableCompletionBlock = {
     ...block,
     rows: effectiveRows,
-    cells: canonicalCells,
+    cells: cellsWithUniqueIds,
   };
 
   if (rowsEqual(block.rows, normalized.rows) && cellsEqual(block.cells, normalized.cells)) {

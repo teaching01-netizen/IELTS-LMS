@@ -1231,13 +1231,19 @@ fn count_questions_in_block(block: &serde_json::Map<String, serde_json::Value>) 
     if let Some(cells) = block.get("cells").and_then(|c| c.as_array()) {
         return cells.len() as i32;
     }
-    if block
-        .get("type")
-        .and_then(|t| t.as_str())
-        .map(|t| t.contains("MCQ"))
-        .unwrap_or(false)
-    {
-        return 1;
+    if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
+        if block_type == "MULTI_MCQ" {
+            let required = block
+                .get("requiredSelections")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(1)
+                .max(1)
+                .min(i32::MAX as i64);
+            return required as i32;
+        }
+        if block_type.contains("MCQ") {
+            return 1;
+        }
     }
     0
 }
@@ -1463,6 +1469,24 @@ mod tests {
             "expected empty-instruction to be allowed for listening blocks, got errors: {:?}",
             result.errors
         );
+    }
+
+    #[test]
+    fn count_questions_in_block_uses_required_selections_for_multi_mcq() {
+        let block = json!({
+            "id": "multi-1",
+            "type": "MULTI_MCQ",
+            "requiredSelections": 3,
+            "options": [
+                { "id": "A", "text": "A", "isCorrect": true },
+                { "id": "B", "text": "B", "isCorrect": true },
+                { "id": "C", "text": "C", "isCorrect": true },
+                { "id": "D", "text": "D", "isCorrect": false }
+            ]
+        });
+
+        let count = count_questions_in_block(block.as_object().expect("block object"));
+        assert_eq!(count, 3);
     }
 
     #[test]

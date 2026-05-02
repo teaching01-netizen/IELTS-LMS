@@ -84,5 +84,39 @@ describe('examIdCollisionCheck', () => {
     const issues = getExamIdCollisionIssues(state);
     expect(issues.some((issue) => issue.field === 'integrity.answer_key_index_collision')).toBe(true);
   });
-});
 
+  it('warns when table completion cells have duplicate or missing IDs', () => {
+    const state = createInitialExamState('Title', 'Academic', 'Academic');
+
+    const tableBlock: TableCompletionBlock = {
+      id: 'tbl-id-health',
+      type: 'TABLE_COMPLETION',
+      instruction: 'Instruction',
+      answerRule: 'ONE_WORD',
+      headers: ['A', 'B', 'C'],
+      rows: [['____', '', '____']],
+      cells: [
+        { id: 'dup-id', correctAnswer: 'left', row: 0, col: 0 },
+        { id: 'dup-id', correctAnswer: 'right', row: 0, col: 2 },
+      ],
+    };
+
+    state.reading.passages[0]!.blocks = [tableBlock];
+
+    const issues = getExamIdCollisionIssues(state);
+    expect(issues.some((issue) => issue.field === 'integrity.table_cell_id_collision')).toBe(true);
+
+    const withMissing: TableCompletionBlock = {
+      ...tableBlock,
+      cells: [
+        { id: '', correctAnswer: 'left', row: 0, col: 0 },
+        { id: 'ok-id', correctAnswer: 'right', row: 0, col: 2 },
+      ],
+    };
+
+    state.reading.passages[0]!.blocks = [withMissing];
+
+    const missingIssues = getExamIdCollisionIssues(state);
+    expect(missingIssues.some((issue) => issue.field === 'integrity.table_cell_id_missing')).toBe(true);
+  });
+});

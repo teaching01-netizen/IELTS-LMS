@@ -251,7 +251,7 @@ function buildTreeRootCorrectnessLookup(
         rootNumber: leaf.rootNumber,
         numberLabel: leaf.numberLabel,
         nodeId: leaf.id,
-        prompt: leaf.treePrompt ?? leaf.id,
+        prompt: leaf.treePrompt?.trim() ?? '',
         acceptedAnswers: leaf.treeAcceptedAnswers ?? [],
         required: leaf.treeRequired !== false,
         depth: 1,

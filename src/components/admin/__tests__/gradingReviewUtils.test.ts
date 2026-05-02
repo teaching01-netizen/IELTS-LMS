@@ -306,9 +306,11 @@ describe('gradingReviewUtils', () => {
 
     const groups = buildQuestionTracebackGroups(examState, sectionSubmission, 'reading');
     expect(groups).toHaveLength(1);
-    expect(groups[0]?.items).toHaveLength(1);
+    expect(groups[0]?.items).toHaveLength(2);
     expect(groups[0]?.items[0]?.studentAnswerSlots).toEqual(storedAnswer);
+    expect(groups[0]?.items[1]?.studentAnswerSlots).toEqual(storedAnswer);
     expect(groups[0]?.items[0]?.studentAnswer).toBe('[" A ","","C,C"]');
+    expect(groups[0]?.items[1]?.studentAnswer).toBe('[" A ","","C,C"]');
 
     const exportData = buildWideObjectiveExport({
       session: { sessionId: 'session-1', examTitle: 'Exam' },
@@ -318,7 +320,54 @@ describe('gradingReviewUtils', () => {
       moduleType: 'reading',
     });
 
-    expect(exportData.rows[0]?.['answer:mcq-block-1']).toBe(groups[0]?.items[0]?.studentAnswer);
+    expect(exportData.rows[0]?.['answer:mcq-block-1:slot:1']).toBe(groups[0]?.items[0]?.studentAnswer);
+    expect(exportData.rows[0]?.['answer:mcq-block-1:slot:2']).toBe(groups[0]?.items[1]?.studentAnswer);
+  });
+
+  test('scores MULTI_MCQ with partial credit across slot descriptors in wide export totals', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages = [
+      {
+        id: 'passage-1',
+        title: 'Passage 1',
+        content: 'Content',
+        blocks: [
+          {
+            id: 'mcq-block-2',
+            type: 'MULTI_MCQ',
+            instruction: 'Choose two',
+            stem: 'Choose two',
+            requiredSelections: 2,
+            options: [
+              { id: 'A', text: 'Alpha', isCorrect: true },
+              { id: 'B', text: 'Beta', isCorrect: false },
+              { id: 'C', text: 'Charlie', isCorrect: true },
+            ],
+          },
+        ],
+        images: [],
+        wordCount: 1,
+      },
+    ];
+
+    const sectionSubmission = createSectionSubmission(
+      'sub-1',
+      'reading',
+      { 'mcq-block-2': ['A'] },
+      [],
+    );
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      sectionSubmissions: [{ submissionId: 'sub-1', sectionSubmission }],
+      examState,
+      moduleType: 'reading',
+    });
+
+    expect(exportData.rows[0]?.totalScore).toBe(1);
+    expect(exportData.rows[0]?.maxScore).toBe(2);
+    expect(exportData.rows[0]?.correctCount).toBe(1);
   });
 
   test('uses root-only scoring for sub-answer tree mode with unordered leaf matching', () => {
@@ -374,6 +423,47 @@ describe('gradingReviewUtils', () => {
     expect(exportData.rows[0]?.totalScore).toBe(1);
     expect(exportData.rows[0]?.maxScore).toBe(1);
     expect(exportData.rows[0]?.correctCount).toBe(1);
+  });
+
+  test('tree traceback prompt does not expose legacy node ids when label is empty', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages = [
+      {
+        id: 'passage-1',
+        title: 'Passage 1',
+        content: 'Content',
+        blocks: [
+          {
+            id: 'tree-blank-prompt',
+            type: 'SHORT_ANSWER',
+            instruction: 'Tree mode',
+            subAnswerModeEnabled: true,
+            answerTree: [
+              {
+                id: 'root-a',
+                label: '',
+                children: [
+                  { id: 'legacy-node-id', label: '   ', acceptedAnswers: ['cat'], required: true },
+                ],
+              },
+            ],
+            questions: [],
+          } as any,
+        ],
+        images: [],
+        wordCount: 1,
+      },
+    ];
+
+    const answers = {
+      'tree-blank-prompt::tree::root-a::legacy-node-id': 'cat',
+    };
+    const sectionSubmission = createSectionSubmission('sub-1', 'reading', answers, []);
+
+    const groups = buildQuestionTracebackGroups(examState, sectionSubmission, 'reading');
+    expect(groups[0]?.items).toHaveLength(1);
+    expect(groups[0]?.items[0]?.prompt).toBe('1.1');
+    expect(groups[0]?.items[0]?.prompt).not.toContain('legacy-node-id');
   });
 
   test('prefers stored objective correctness when it differs from the raw answer', () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   evaluateSubAnswerRootUnordered,
   flattenSubAnswerTree,
+  normalizeSubAnswerTree,
   SUB_ANSWER_TREE_MAX_DEPTH,
   validateSubAnswerTree,
 } from '../subAnswerTree';
@@ -40,6 +41,49 @@ describe('subAnswerTree', () => {
     expect(flattened.roots[0]?.numberLabel).toBe('21');
     expect(flattened.leaves.map((leaf) => leaf.numberLabel)).toEqual(['21.1.1', '21.2']);
     expect(flattened.nextRootNumber).toBe(22);
+  });
+
+  it('normalizes legacy nodes with missing or duplicate ids', () => {
+    const normalized = normalizeSubAnswerTree([
+      {
+        id: 'dup',
+        label: 'Root',
+        children: [
+          { id: 'dup', label: 'Leaf A', acceptedAnswers: ['A'] },
+          { id: '', label: 'Leaf B', acceptedAnswers: ['B'] },
+        ],
+      } as any,
+    ]);
+
+    const root = normalized[0];
+    expect(root?.id).toBe('dup');
+    expect(root?.children).toHaveLength(2);
+    const childIds = (root?.children ?? []).map((child) => child.id);
+    expect(new Set(childIds).size).toBe(2);
+    expect(childIds.every((id) => id.trim().length > 0)).toBe(true);
+  });
+
+  it('keeps empty leaf labels as empty prompts when flattening', () => {
+    const flattened = flattenSubAnswerTree(
+      'block-blank',
+      [
+        {
+          id: 'root-1',
+          label: '',
+          children: [
+            {
+              id: 'leaf-1',
+              label: '   ',
+              acceptedAnswers: ['A'],
+            },
+          ],
+        },
+      ],
+      3,
+    );
+
+    expect(flattened.leaves).toHaveLength(1);
+    expect(flattened.leaves[0]?.prompt).toBe('');
   });
 
   it('rejects trees that exceed depth guard', () => {

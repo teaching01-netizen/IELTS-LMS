@@ -197,7 +197,7 @@ describe('validateQuestionBlock - placeholder/blanks alignment', () => {
     ).toBe(true);
   });
 
-  it('rejects duplicate tree node ids', () => {
+  it('auto-repairs duplicate tree node ids for legacy tree blocks', () => {
     const errors = validateQuestionBlock({
       id: 'blk-tree-2',
       type: 'SHORT_ANSWER',
@@ -216,7 +216,7 @@ describe('validateQuestionBlock - placeholder/blanks alignment', () => {
       questions: [],
     } as any);
 
-    expect(errors.some((error) => error.message.includes('Duplicate node id'))).toBe(true);
+    expect(errors.some((error) => error.message.includes('Duplicate node id'))).toBe(false);
   });
 
   it('keeps legacy validation behavior when sub-answer mode is disabled', () => {

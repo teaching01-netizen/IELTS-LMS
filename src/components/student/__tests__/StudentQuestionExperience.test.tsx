@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getStudentQuestionsForModule } from '../../../services/examAdapterService';
 
 import type {
   ClassificationBlock,
@@ -31,24 +32,63 @@ describe('student question experience', () => {
             blockId: 'q1',
             groupId: 'group-1',
             groupLabel: 'Section 1',
+            rootId: 'q1',
+            rootNumber: 1,
+            numberLabel: '1',
             isMulti: false,
             correctCount: 1,
+            answerKey: 'q1',
           },
           {
-            id: 'multi-1',
+            id: 'multi-1:slot:1',
             blockId: 'multi-1',
             groupId: 'group-1',
             groupLabel: 'Section 1',
-            isMulti: true,
-            correctCount: 3,
+            rootId: 'multi-1:slot:1',
+            rootNumber: 2,
+            numberLabel: '2',
+            isMulti: false,
+            correctCount: 1,
+            answerKey: 'multi-1',
+            answerIndex: 0,
+          },
+          {
+            id: 'multi-1:slot:2',
+            blockId: 'multi-1',
+            groupId: 'group-1',
+            groupLabel: 'Section 1',
+            rootId: 'multi-1:slot:2',
+            rootNumber: 3,
+            numberLabel: '3',
+            isMulti: false,
+            correctCount: 1,
+            answerKey: 'multi-1',
+            answerIndex: 1,
+          },
+          {
+            id: 'multi-1:slot:3',
+            blockId: 'multi-1',
+            groupId: 'group-1',
+            groupLabel: 'Section 1',
+            rootId: 'multi-1:slot:3',
+            rootNumber: 4,
+            numberLabel: '4',
+            isMulti: false,
+            correctCount: 1,
+            answerKey: 'multi-1',
+            answerIndex: 2,
           },
           {
             id: 'q5',
             blockId: 'q5',
             groupId: 'group-1',
             groupLabel: 'Section 1',
+            rootId: 'q5',
+            rootNumber: 5,
+            numberLabel: '5',
             isMulti: false,
             correctCount: 1,
+            answerKey: 'q5',
           },
         ]}
         currentQuestionId="q1"
@@ -62,7 +102,9 @@ describe('student question experience', () => {
       screen.getByRole('contentinfo', { name: /question navigation and progress/i }),
     ).toHaveClass('student-exam-footer');
     expect(screen.getByRole('button', { name: '1' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '2-4' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '3' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '4' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '5' })).toBeInTheDocument();
   });
 
@@ -226,6 +268,86 @@ describe('student question experience', () => {
 
     fireEvent.click(jumpButton);
     expect(onNavigate).toHaveBeenCalledWith('q2');
+  });
+
+  it('renders separate footer numbers for MULTI_MCQ slots and navigates to the selected slot', () => {
+    const onNavigate = vi.fn();
+    const state = {
+      title: 'Reading Test',
+      type: 'Academic',
+      activeModule: 'reading',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: { enabled: false, order: 1, duration: 30, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          reading: { enabled: true, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER', 'MULTI_MCQ'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+        },
+      },
+      reading: {
+        passages: [
+          {
+            id: 'passage-1',
+            title: 'Passage 1',
+            content: 'Read the passage.',
+            images: [],
+            blocks: [
+              {
+                id: 'reading-pre',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer question 1.',
+                questions: [{ id: 'reading-q1', prompt: 'Question 1', correctAnswer: 'answer', answerRule: 'ONE_WORD' }],
+              },
+              {
+                id: 'reading-multi',
+                type: 'MULTI_MCQ',
+                instruction: 'Choose two letters.',
+                stem: 'Pick two',
+                requiredSelections: 2,
+                options: [
+                  { id: 'a', text: 'A', isCorrect: true },
+                  { id: 'b', text: 'B', isCorrect: true },
+                  { id: 'c', text: 'C', isCorrect: false },
+                ],
+              },
+              {
+                id: 'reading-post',
+                type: 'SHORT_ANSWER',
+                instruction: 'Answer question 4.',
+                questions: [{ id: 'reading-q4', prompt: 'Question 4', correctAnswer: 'answer', answerRule: 'ONE_WORD' }],
+              },
+            ],
+          },
+        ],
+      },
+      listening: { parts: [] },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    } as unknown as ExamState;
+
+    const questions = getStudentQuestionsForModule(state, 'reading');
+    render(
+      <StudentFooter
+        questions={questions}
+        currentQuestionId="reading-q1"
+        onNavigate={onNavigate}
+        answers={{}}
+        onSubmit={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '3' }));
+    expect(onNavigate).toHaveBeenCalledWith('reading-multi:slot:2');
+    expect(screen.getByRole('button', { name: '2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '4' })).toBeInTheDocument();
   });
 
   it('renders semantic checkbox inputs for multi-select questions', () => {

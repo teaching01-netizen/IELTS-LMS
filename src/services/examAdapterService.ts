@@ -32,7 +32,7 @@ import {
 } from '../utils/builderEnhancements';
 import { getCanonicalTableCells, normalizeExamStateTableCompletionBlocks } from '../utils/tableCompletion';
 import { replaceWritingTaskContents } from '../utils/writingTaskUtils';
-import { flattenSubAnswerTree, hasSubAnswerTreeMode } from '../utils/subAnswerTree';
+import { flattenSubAnswerTree, hasSubAnswerTreeMode, normalizeSubAnswerTree } from '../utils/subAnswerTree';
 
 const MODULE_ORDER: ModuleType[] = ['listening', 'reading', 'writing', 'speaking'];
 
@@ -570,7 +570,8 @@ function buildStudentQuestionDescriptors(
   };
 
   if (hasSubAnswerTreeMode(treeBlock)) {
-    const flattened = flattenSubAnswerTree(block.id, treeBlock.answerTree, startRootNumber);
+    const normalizedTree = normalizeSubAnswerTree(treeBlock.answerTree);
+    const flattened = flattenSubAnswerTree(block.id, normalizedTree, startRootNumber);
     const rootLookup = new Map(flattened.roots.map((root) => [root.rootId, root] as const));
     return {
       descriptors: flattened.leaves.map((leaf) => ({
@@ -669,7 +670,7 @@ function buildStudentQuestionDescriptors(
       break;
 
     case 'MULTI_MCQ':
-      descriptors.push(buildMultiQuestionDescriptor(block, groupId, groupLabel));
+      descriptors.push(...buildMultiQuestionDescriptors(block, groupId, groupLabel));
       break;
 
     case 'SINGLE_MCQ':
@@ -792,29 +793,31 @@ function buildStudentQuestionDescriptors(
   return { descriptors, nextRootNumber };
 }
 
-function buildMultiQuestionDescriptor(
+function buildMultiQuestionDescriptors(
   block: MultiMCQBlock,
   groupId: string,
   groupLabel: string,
-): StudentQuestionDescriptor {
+): StudentQuestionDescriptor[] {
   const requiredSelections = Number.isFinite(block.requiredSelections)
     ? Math.floor(block.requiredSelections)
     : 0;
+  const slotCount = Math.max(1, requiredSelections);
 
-  return {
-    id: block.id,
+  return Array.from({ length: slotCount }, (_, slotIndex) => ({
+    id: `${block.id}:slot:${slotIndex + 1}`,
     blockId: block.id,
     groupId,
     groupLabel,
-    rootId: block.id,
+    rootId: `${block.id}:slot:${slotIndex + 1}`,
     rootNumber: 0,
     numberLabel: '',
-    isMulti: true,
-    correctCount: Math.max(1, requiredSelections),
+    isMulti: false,
+    correctCount: 1,
     answerKey: block.id,
+    answerIndex: slotIndex,
     block,
     question: null,
-  };
+  }));
 }
 
 function buildSingleQuestionDescriptor(

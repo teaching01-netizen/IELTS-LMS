@@ -84,6 +84,36 @@ describe('tableCompletion utils', () => {
     expect(canonical[1]).toMatchObject({ row: 1, col: 1, correctAnswer: 'second' });
   });
 
+  it('auto-heals duplicate and missing cell IDs while preserving slot answers', () => {
+    const block = buildTableBlock({
+      headers: ['A', 'B', 'C'],
+      rows: [['____', '', '____']],
+      cells: [
+        { id: 'dup-id', row: 0, col: 0, correctAnswer: 'left', acceptedAnswers: ['left', 'LEFT'] },
+        { id: 'dup-id', row: 0, col: 2, correctAnswer: 'right', acceptedAnswers: ['right'] },
+      ],
+    });
+
+    const normalized = normalizeTableCompletionBlock(block);
+
+    expect(normalized.cells).toHaveLength(2);
+    expect(normalized.cells[0]?.correctAnswer).toBe('left');
+    expect(normalized.cells[1]?.correctAnswer).toBe('right');
+    expect(normalized.cells.map((cell) => cell.id)).toEqual(expect.arrayContaining(['dup-id']));
+    expect(new Set(normalized.cells.map((cell) => cell.id)).size).toBe(2);
+
+    const withMissingId = normalizeTableCompletionBlock({
+      ...block,
+      cells: [
+        { id: '', row: 0, col: 0, correctAnswer: 'left' },
+        { id: 'valid-id', row: 0, col: 2, correctAnswer: 'right' },
+      ],
+    });
+
+    expect(withMissingId.cells[0]?.id).not.toBe('');
+    expect(withMissingId.cells[0]?.id).toBeTruthy();
+  });
+
   it('normalizes table blocks across reading and listening state trees', () => {
     const state = createInitialExamState('Table Normalization', 'Academic');
     state.reading.passages[0].blocks = [

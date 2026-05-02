@@ -654,9 +654,16 @@ export function StudentListening({
                     ) : (
                       <div
                         key={block.id}
-                        id={singleBlockQuestion ? `question-${singleBlockQuestion.id}` : undefined}
                         className="relative"
                       >
+                        {blockQuestions.map((entry) => (
+                          <div
+                            key={entry.id}
+                            id={`question-${entry.id}`}
+                            className="h-0 overflow-hidden"
+                            aria-hidden="true"
+                          />
+                        ))}
                         {isTabletMode && onToggleFlag && singleBlockQuestion ? (
                           <div className="mb-2 flex justify-end">
                             <button

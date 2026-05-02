@@ -29,7 +29,7 @@ export type AnswerRule = 'ONE_WORD' | 'TWO_WORDS' | 'THREE_WORDS';
 
 export interface SubAnswerTreeNode {
   id: string;
-  label: string;
+  label?: string;
   acceptedAnswers?: string[];
   children?: SubAnswerTreeNode[];
   required?: boolean;

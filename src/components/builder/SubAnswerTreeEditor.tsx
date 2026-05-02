@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import type { QuestionBlock, SubAnswerTreeNode } from '../../types';
 import { createId } from '../../utils/idUtils';
+import { normalizeSubAnswerTree } from '../../utils/subAnswerTree';
 
 interface SubAnswerTreeEditorProps {
   block: QuestionBlock;
@@ -164,19 +165,7 @@ function NodeRow({
         </span>
         <input
           type="text"
-          value={node.id}
-          onChange={(event) =>
-            onUpdateNode(path, (current) => ({
-              ...current,
-              id: event.target.value,
-            }))
-          }
-          className="w-40 rounded border border-gray-300 px-2 py-1 text-xs"
-          placeholder="Node ID"
-        />
-        <input
-          type="text"
-          value={node.label}
+          value={node.label ?? ''}
           onChange={(event) =>
             onUpdateNode(path, (current) => ({
               ...current,
@@ -284,7 +273,14 @@ export function SubAnswerTreeEditor({
   onChangeTree,
 }: SubAnswerTreeEditorProps) {
   const treeBlock = block as QuestionBlock & { answerTree?: SubAnswerTreeNode[] };
-  const answerTree = useMemo(() => treeBlock.answerTree ?? [], [treeBlock.answerTree]);
+  const answerTree = useMemo(() => normalizeSubAnswerTree(treeBlock.answerTree), [treeBlock.answerTree]);
+
+  useEffect(() => {
+    const rawTree = treeBlock.answerTree ?? [];
+    if (JSON.stringify(rawTree) !== JSON.stringify(answerTree)) {
+      onChangeTree(answerTree);
+    }
+  }, [answerTree, onChangeTree, treeBlock.answerTree]);
 
   const updateNode = (path: number[], updater: (node: SubAnswerTreeNode) => SubAnswerTreeNode) => {
     onChangeTree(updateNodeByPath(answerTree, path, updater));
@@ -303,12 +299,12 @@ export function SubAnswerTreeEditor({
       ...answerTree,
       {
         id: createId('root'),
-        label: 'Root prompt',
+        label: '',
         required: true,
         children: [
           {
             id: createId('leaf'),
-            label: 'Leaf prompt',
+            label: '',
             acceptedAnswers: [],
             required: true,
           },
@@ -330,7 +326,7 @@ export function SubAnswerTreeEditor({
           ...(node.children ?? []),
           {
             id: createId('node'),
-            label: 'Child prompt',
+            label: '',
             acceptedAnswers: [],
             required: true,
           },

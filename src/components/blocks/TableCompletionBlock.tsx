@@ -29,6 +29,35 @@ const rowEditorGridStyle = {
   gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
 } as const;
 
+type TableCellTarget = Pick<TableCompletionBlockType['cells'][number], 'id' | 'row' | 'col'>;
+
+function resolveCellUpdateIndex(cells: TableCompletionBlockType['cells'], target: TableCellTarget): number {
+  const idMatches: number[] = [];
+  const coordinateMatches: number[] = [];
+
+  cells.forEach((cell, index) => {
+    if (cell.id === target.id) {
+      idMatches.push(index);
+    }
+    if (cell.row === target.row && cell.col === target.col) {
+      coordinateMatches.push(index);
+    }
+  });
+
+  if (idMatches.length === 1) return idMatches[0]!;
+  if (coordinateMatches.length === 1) return coordinateMatches[0]!;
+
+  const coordinateWithinId = idMatches.filter((index) => {
+    const cell = cells[index];
+    return cell?.row === target.row && cell?.col === target.col;
+  });
+  if (coordinateWithinId.length > 0) return coordinateWithinId[0]!;
+
+  if (idMatches.length > 0) return idMatches[0]!;
+  if (coordinateMatches.length > 0) return coordinateMatches[0]!;
+  return -1;
+}
+
 export function TableCompletionBlock({
   block,
   startNum,
@@ -112,9 +141,12 @@ export function TableCompletionBlock({
     });
   };
 
-  const updateCellPrimaryAnswer = (cellId: string, value: string) => {
-    const nextCells = block.cells.map((cell) => {
-      if (cell.id !== cellId) return cell;
+  const updateCellPrimaryAnswer = (target: TableCellTarget, value: string) => {
+    const targetIndex = resolveCellUpdateIndex(block.cells, target);
+    if (targetIndex < 0) return;
+
+    const nextCells = block.cells.map((cell, index) => {
+      if (index !== targetIndex) return cell;
 
       const rest = sanitizeAcceptedAnswers((cell.acceptedAnswers ?? []).slice(1));
       const trimmed = value.trim();
@@ -130,9 +162,12 @@ export function TableCompletionBlock({
     commitBlock({ ...block, cells: nextCells });
   };
 
-  const updateCellAcceptedAnswers = (cellId: string, nextAnswers: string[]) => {
-    const nextCells = block.cells.map((cell) =>
-      cell.id === cellId ? { ...cell, ...buildAcceptedAnswerFields(nextAnswers) } : cell,
+  const updateCellAcceptedAnswers = (target: TableCellTarget, nextAnswers: string[]) => {
+    const targetIndex = resolveCellUpdateIndex(block.cells, target);
+    if (targetIndex < 0) return;
+
+    const nextCells = block.cells.map((cell, index) =>
+      index === targetIndex ? { ...cell, ...buildAcceptedAnswerFields(nextAnswers) } : cell,
     );
     commitBlock({ ...block, cells: nextCells });
   };
@@ -316,12 +351,12 @@ export function TableCompletionBlock({
         </div>
         <div className="space-y-2">
           {canonicalCells.map((cell, index) => (
-            <div key={cell.id} className="rounded-md border border-gray-200 p-3">
+            <div key={`${cell.id}-${cell.row}-${cell.col}-${index}`} className="rounded-md border border-gray-200 p-3">
               <div className="mb-1 text-sm font-medium text-gray-700">{startNum + index}.</div>
               <input
                 type="text"
                 value={cell.correctAnswer}
-                onChange={(event) => updateCellPrimaryAnswer(cell.id, event.target.value)}
+                onChange={(event) => updateCellPrimaryAnswer(cell, event.target.value)}
                 className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Primary answer..."
               />
@@ -341,7 +376,7 @@ export function TableCompletionBlock({
         </summary>
         <div className="mt-3 space-y-3">
           {canonicalCells.map((cell, index) => (
-            <div key={`advanced-${cell.id}`} className="rounded-md border border-gray-200 bg-white p-3">
+            <div key={`advanced-${cell.id}-${cell.row}-${cell.col}-${index}`} className="rounded-md border border-gray-200 bg-white p-3">
               <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
                 <span>Q{startNum + index}</span>
                 <span>
@@ -350,7 +385,7 @@ export function TableCompletionBlock({
               </div>
               <AcceptedAnswersEditor
                 value={resolveAcceptedAnswers(cell)}
-                onChange={(nextAnswers) => updateCellAcceptedAnswers(cell.id, nextAnswers)}
+                onChange={(nextAnswers) => updateCellAcceptedAnswers(cell, nextAnswers)}
                 placeholder="Add accepted answer..."
               />
             </div>

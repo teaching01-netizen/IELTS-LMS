@@ -1,5 +1,5 @@
 import { getStudentQuestionsForModule } from '../services/examAdapterService';
-import type { ExamState } from '../types';
+import type { ExamState, QuestionBlock, TableCompletionBlock } from '../types';
 
 export type ExamIntegrityIssue = {
   field: string;
@@ -39,6 +39,24 @@ function collectEnabledDescriptors(state: ExamState) {
   }
 
   return descriptors;
+}
+
+function collectEnabledBlocks(state: ExamState): QuestionBlock[] {
+  const blocks: QuestionBlock[] = [];
+
+  if (state.config.sections.reading.enabled) {
+    state.reading.passages.forEach((passage) => {
+      passage.blocks.forEach((block) => blocks.push(block));
+    });
+  }
+
+  if (state.config.sections.listening.enabled) {
+    state.listening.parts.forEach((part) => {
+      part.blocks.forEach((block) => blocks.push(block));
+    });
+  }
+
+  return blocks;
 }
 
 export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[] {
@@ -160,6 +178,58 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
     });
   }
 
+  const tableCellIdCollisions: string[] = [];
+  const tableCellIdMissing: string[] = [];
+
+  collectEnabledBlocks(state).forEach((block) => {
+    if (block.type !== 'TABLE_COMPLETION') return;
+
+    const tableBlock = block as TableCompletionBlock;
+    const idCounts = new Map<string, number>();
+    let missingCount = 0;
+
+    tableBlock.cells.forEach((cell) => {
+      const id = typeof cell.id === 'string' ? cell.id.trim() : '';
+      if (!id) {
+        missingCount += 1;
+        return;
+      }
+
+      idCounts.set(id, (idCounts.get(id) ?? 0) + 1);
+    });
+
+    const duplicateIds = Array.from(idCounts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([id]) => id);
+
+    if (duplicateIds.length > 0) {
+      tableCellIdCollisions.push(`${tableBlock.id} (${formatExamples(duplicateIds, 3)})`);
+    }
+
+    if (missingCount > 0) {
+      tableCellIdMissing.push(`${tableBlock.id} (${missingCount} missing)`);
+    }
+  });
+
+  if (tableCellIdCollisions.length > 0) {
+    issues.push({
+      field: 'integrity.table_cell_id_collision',
+      severity: 'warning',
+      message:
+        'Duplicate table cell IDs detected (can link answer editing across blanks): ' +
+        `${formatExamples(tableCellIdCollisions)}.`,
+    });
+  }
+
+  if (tableCellIdMissing.length > 0) {
+    issues.push({
+      field: 'integrity.table_cell_id_missing',
+      severity: 'warning',
+      message:
+        'Missing table cell IDs detected (auto-heal recommended): ' +
+        `${formatExamples(tableCellIdMissing)}.`,
+    });
+  }
+
   return issues;
 }
-

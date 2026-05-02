@@ -9,6 +9,52 @@ import {
 } from '../examAdapterService';
 
 describe('student question descriptors (student exam core logic)', () => {
+  it('expands MULTI_MCQ into required selection slots with progressive answered counts', () => {
+    const state = createInitialExamState('Exam', 'Academic');
+
+    state.reading.passages[0].blocks = [
+      {
+        id: 'short-1',
+        type: 'SHORT_ANSWER',
+        instruction: 'Answer one question.',
+        questions: [{ id: 'q-1', prompt: 'Q1', correctAnswer: 'A', answerRule: 'ONE_WORD' }],
+      },
+      {
+        id: 'multi-1',
+        type: 'MULTI_MCQ',
+        instruction: 'Choose two letters.',
+        stem: 'Pick two answers',
+        requiredSelections: 2,
+        options: [
+          { id: 'A', text: 'A', isCorrect: true },
+          { id: 'B', text: 'B', isCorrect: true },
+          { id: 'C', text: 'C', isCorrect: false },
+        ],
+      },
+      {
+        id: 'short-2',
+        type: 'SHORT_ANSWER',
+        instruction: 'Answer one question.',
+        questions: [{ id: 'q-2', prompt: 'Q2', correctAnswer: 'B', answerRule: 'ONE_WORD' }],
+      },
+    ] as any;
+
+    const questions = getStudentQuestionsForModule(state, 'reading');
+    const multiQuestions = questions.filter((question) => question.blockId === 'multi-1');
+
+    expect(multiQuestions).toHaveLength(2);
+    expect(multiQuestions.map((question) => question.id)).toEqual([
+      'multi-1:slot:1',
+      'multi-1:slot:2',
+    ]);
+    expect(multiQuestions.map((question) => question.numberLabel)).toEqual(['2', '3']);
+    expect(countQuestionSlots(questions)).toBe(4);
+
+    expect(countAnsweredQuestions(questions, {})).toBe(0);
+    expect(countAnsweredQuestions(questions, { 'multi-1': ['A'] })).toBe(1);
+    expect(countAnsweredQuestions(questions, { 'multi-1': ['A', 'B'] })).toBe(2);
+  });
+
   it('does not treat MULTI_MCQ with requiredSelections=0 as fully answered', () => {
     const state = createInitialExamState('Exam', 'Academic');
 
@@ -102,6 +148,32 @@ describe('student question descriptors (student exam core logic)', () => {
 
     answerMap[questions[1].id] = 'dog';
     expect(countAnsweredQuestions(questions, answerMap)).toBe(1);
+  });
+
+  it('keeps empty tree labels as empty prompts in student descriptors', () => {
+    const state = createInitialExamState('Exam', 'Academic');
+    state.reading.passages[0].blocks = [
+      {
+        id: 'short-tree-empty-label',
+        type: 'SHORT_ANSWER',
+        instruction: 'Tree mode block',
+        insertedImages: [],
+        subAnswerModeEnabled: true,
+        answerTree: [
+          {
+            id: 'root-a',
+            label: '',
+            children: [{ id: 'legacy-leaf-id', label: '   ', acceptedAnswers: ['cat'], required: true }],
+          },
+        ],
+        questions: [],
+      },
+    ] as any;
+
+    const questions = getStudentQuestionsForModule(state, 'reading');
+    expect(questions).toHaveLength(1);
+    expect(questions[0]?.treePrompt).toBe('');
+    expect(questions[0]?.treePrompt).not.toBe('legacy-leaf-id');
   });
 
   it('excludes optional-only tree roots from total and answered counts', () => {

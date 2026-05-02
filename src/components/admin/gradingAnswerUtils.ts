@@ -107,7 +107,8 @@ function lookupHeadingText(
 
 export function getQuestionPrompt(descriptor: StudentQuestionDescriptor): string {
   if (descriptor.isSubAnswerTreeLeaf) {
-    return descriptor.treePrompt || descriptor.numberLabel || descriptor.id;
+    const prompt = typeof descriptor.treePrompt === 'string' ? descriptor.treePrompt.trim() : '';
+    return prompt || descriptor.numberLabel || '';
   }
 
   const { block, question, answerIndex } = descriptor;
@@ -286,7 +287,10 @@ export function getStudentAnswerDisplay(
   descriptor: StudentQuestionDescriptor,
   answerMap: Record<string, unknown>,
 ): string {
-  const value = getQuestionAnswer(descriptor, answerMap);
+  const value =
+    descriptor.block.type === 'MULTI_MCQ' && typeof descriptor.answerIndex === 'number'
+      ? answerMap[descriptor.answerKey]
+      : getQuestionAnswer(descriptor, answerMap);
   return projectRawObjectiveAnswer(value).canonical;
 }
 
@@ -294,7 +298,10 @@ export function getStudentAnswerRawProjection(
   descriptor: StudentQuestionDescriptor,
   answerMap: Record<string, unknown>,
 ): RawObjectiveAnswerProjection {
-  const value = getQuestionAnswer(descriptor, answerMap);
+  const value =
+    descriptor.block.type === 'MULTI_MCQ' && typeof descriptor.answerIndex === 'number'
+      ? answerMap[descriptor.answerKey]
+      : getQuestionAnswer(descriptor, answerMap);
   return projectRawObjectiveAnswer(value);
 }
 
@@ -311,6 +318,16 @@ function normalizedSetFromUnknown(value: unknown): Set<string> {
   return new Set(items);
 }
 
+function countIntersection(left: Set<string>, right: Set<string>): number {
+  let count = 0;
+  for (const value of left) {
+    if (right.has(value)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 export function isStudentAnswerCorrect(
   descriptor: StudentQuestionDescriptor,
   answerMap: Record<string, unknown>,
@@ -325,7 +342,13 @@ export function isStudentAnswerCorrect(
 
   if (descriptor.block.type === 'MULTI_MCQ') {
     const correctSet = normalizedSetFromUnknown(correct);
-    const studentSet = normalizedSetFromUnknown(student);
+    const studentSet = normalizedSetFromUnknown(
+      typeof descriptor.answerIndex === 'number' ? answerMap[descriptor.answerKey] : student,
+    );
+    if (typeof descriptor.answerIndex === 'number') {
+      const correctSelections = countIntersection(correctSet, studentSet);
+      return correctSelections > descriptor.answerIndex;
+    }
     if (correctSet.size === 0 && studentSet.size === 0) return true;
     if (correctSet.size !== studentSet.size) return false;
     for (const value of correctSet) {

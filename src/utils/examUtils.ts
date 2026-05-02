@@ -17,7 +17,7 @@ import {
   getInsertedImages,
   supportsInsertedImages,
 } from './insertedImages';
-import { hasSubAnswerTreeMode, validateSubAnswerTree } from './subAnswerTree';
+import { hasSubAnswerTreeMode, normalizeSubAnswerTree, validateSubAnswerTree } from './subAnswerTree';
 
 export const getBlockQuestionCount = (block: QuestionBlock): number => {
   if (hasSubAnswerTreeMode(block)) {
@@ -554,7 +554,9 @@ export const validateBlock = (block: QuestionBlock): BlockValidation => {
   let errors: ValidationError[] = [];
 
   if (hasSubAnswerTreeMode(block)) {
-    const tree = (block as QuestionBlock & { answerTree?: SubAnswerTreeNode[] }).answerTree;
+    const tree = normalizeSubAnswerTree(
+      (block as QuestionBlock & { answerTree?: SubAnswerTreeNode[] }).answerTree,
+    );
     errors = validateSubAnswerTree(tree).map((issue) => ({
       blockId: block.id,
       field: issue.field,
