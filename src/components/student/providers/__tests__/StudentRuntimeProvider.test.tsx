@@ -1054,6 +1054,40 @@ describe('StudentRuntimeProvider - Violation Tracking', () => {
       expect(result.current.state.currentQuestionId).toBe('reading-q1');
       expect(result.current.state.waitingForCohortAdvance).toBe(false);
     });
+
+    it('accepts authoritative same-section runtime time increases from a fresh snapshot', () => {
+      const attemptSnapshot = withCompletedPrecheck({
+        ...hydratedAttempt,
+        currentModule: 'reading',
+      });
+      let runtimeSnapshot = createRuntimeSnapshot('reading', 60);
+      const runtimeBackedWrapper = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={vi.fn()}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={attemptSnapshot}
+        >
+          {children}
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentRuntime(), { wrapper: runtimeBackedWrapper });
+
+      expect(result.current.state.timeRemaining).toBe(60);
+
+      act(() => {
+        runtimeSnapshot = {
+          ...runtimeSnapshot,
+          currentSectionRemainingSeconds: 120,
+          updatedAt: '2026-01-01T00:00:05.000Z',
+        };
+        rerender();
+      });
+
+      expect(result.current.state.timeRemaining).toBe(120);
+    });
   });
 });
 
@@ -1415,7 +1449,7 @@ describe('StudentRuntimeProvider - Runtime timer smoothing', () => {
       vi.advanceTimersByTime(1_000);
     });
 
-    expect(result.current.state.displayTimeRemaining).toBe(73);
+    expect(result.current.state.displayTimeRemaining).toBe(74);
   });
 
   it('jumps up immediately when a runtime snapshot increases remaining time (extension)', async () => {
@@ -1513,7 +1547,7 @@ describe('StudentRuntimeProvider - Runtime timer smoothing', () => {
     expect(result.current.state.displayTimeRemaining).toBe(90);
   });
 
-  it('does not jump up when same-section runtime remaining increases without an extension signal', async () => {
+  it('accepts a same-section runtime remaining increase from the authoritative snapshot', async () => {
     const attemptSnapshot: StudentAttempt = {
       ...hydratedAttempt,
       integrity: {
@@ -1597,7 +1631,7 @@ describe('StudentRuntimeProvider - Runtime timer smoothing', () => {
       rerender();
     });
 
-    expect(result.current.state.displayTimeRemaining).toBe(79);
+    expect(result.current.state.displayTimeRemaining).toBe(90);
   });
 
   it('recovers from zero when runtime-backed server time becomes positive again', async () => {

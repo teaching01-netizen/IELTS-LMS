@@ -85,7 +85,7 @@ export function ProctoringProvider({
   scheduleId,
 }: ProctoringProviderProps) {
   const { state: runtimeState, actions: runtimeActions } = useStudentRuntime();
-  const { state: attemptState } = useStudentAttempt();
+  const { state: attemptState, actions: attemptActions } = useStudentAttempt();
   const shouldPreventTranslation = config.security.preventTranslation !== false;
   const cooldownByTypeRef = useRef<Record<string, number>>({});
   const fullscreenReentryAttempts = useRef(0);
@@ -129,11 +129,24 @@ export function ProctoringProvider({
     violationCountsRef.current[severity]++;
     
     const thresholds = config.security.severityThresholds;
+    const recordViolation = () => {
+      const timestamp = new Date().toISOString();
+      const violationId = `v-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const violation = {
+        id: violationId,
+        type,
+        severity,
+        timestamp,
+        description: message,
+      };
+      runtimeActions.addViolation(type, severity, message, violationId, timestamp);
+      attemptActions.persistViolation(violation);
+    };
     
     // Check severity thresholds
     if (severity === 'critical') {
       // Always terminate on critical
-      runtimeActions.addViolation(type, severity, message);
+      recordViolation();
       void saveStudentAuditEvent(
         scheduleId,
         'VIOLATION_DETECTED',
@@ -152,7 +165,7 @@ export function ProctoringProvider({
     if (severity === 'high') {
       const highLimit = thresholds?.highLimit ?? 2;
       if (violationCountsRef.current.high >= highLimit) {
-        runtimeActions.addViolation(type, severity, message);
+        recordViolation();
         void saveStudentAuditEvent(
           scheduleId,
           'VIOLATION_DETECTED',
@@ -178,7 +191,7 @@ export function ProctoringProvider({
     if (severity === 'medium') {
       const mediumLimit = thresholds?.mediumLimit ?? config.progression.warningThreshold ?? 3;
       if (violationCountsRef.current.medium >= mediumLimit) {
-        runtimeActions.addViolation(type, severity, message);
+        recordViolation();
         void saveStudentAuditEvent(
           scheduleId,
           'VIOLATION_DETECTED',
@@ -199,7 +212,7 @@ export function ProctoringProvider({
     if (severity === 'low') {
       const lowLimit = thresholds?.lowLimit ?? 5;
       if (violationCountsRef.current.low >= lowLimit) {
-        runtimeActions.addViolation(type, severity, message);
+        recordViolation();
         void saveStudentAuditEvent(
           scheduleId,
           'VIOLATION_DETECTED',
@@ -218,7 +231,7 @@ export function ProctoringProvider({
     }
     
     // Default: just log the violation
-    runtimeActions.addViolation(type, severity, message);
+    recordViolation();
     void saveStudentAuditEvent(
       scheduleId,
       'VIOLATION_DETECTED',
@@ -229,7 +242,15 @@ export function ProctoringProvider({
       },
       attemptState.attemptId ?? undefined,
     );
-  }, [attemptState.attemptId, config.security.severityThresholds, runtimeActions, scheduleId]);
+  }, [
+    attemptActions,
+    attemptState.attemptId,
+    config.progression.allowPause,
+    config.progression.warningThreshold,
+    config.security.severityThresholds,
+    runtimeActions,
+    scheduleId,
+  ]);
 
   const requestFullscreen = useCallback(async (): Promise<boolean> => {
     try {

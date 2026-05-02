@@ -25,6 +25,8 @@ import {
 } from '../../types';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { ProtectedInput } from './ProtectedInput';
+import { ProtectedChoiceInput } from './ProtectedChoiceInput';
+import { ProtectedSelect } from './ProtectedSelect';
 import { FormattedText } from './FormattedText';
 import { stripBoldMarkdown } from '../../utils/boldMarkdown';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
@@ -208,7 +210,7 @@ export function QuestionRenderer({
         <div className={`${fieldIndentClass} flex flex-col gap-3`}>
           {options.map((option) => (
             <label key={option} className="flex items-center gap-3 cursor-pointer">
-              <input
+              <ProtectedChoiceInput
                 type="radio"
                 name={`q-${q.id}`}
                 checked={answer === option}
@@ -263,7 +265,7 @@ export function QuestionRenderer({
           Paragraph {q.paragraphLabel}
         </span>
 
-        <select
+        <ProtectedSelect
           value={typeof answer === 'string' ? answer : ''}
           onChange={(event) => onChange(event.target.value, { interactionType: 'discrete' })}
           className={`flex-1 rounded-md border-2 border-gray-300 px-3 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0 max-w-full' : tabletMode ? 'max-w-full' : 'max-w-xs'}`}
@@ -278,7 +280,7 @@ export function QuestionRenderer({
               </option>
             );
           })}
-        </select>
+        </ProtectedSelect>
       </div>
     </div>
   );
@@ -330,7 +332,7 @@ export function QuestionRenderer({
                       : 'border-gray-200 hover:border-blue-300'
                 }`}
               >
-                <input
+                <ProtectedChoiceInput
                   type="checkbox"
                   checked={isSelected}
                   disabled={isDisabled}
@@ -410,7 +412,7 @@ export function QuestionRenderer({
           const letter = String.fromCharCode(65 + index);
           return (
             <label key={option.id} className="flex cursor-pointer items-start gap-3">
-              <input
+              <ProtectedChoiceInput
                 type="radio"
                 name={`q-${mcqBlock.id}`}
                 checked={answer === option.id}
@@ -745,7 +747,7 @@ export function QuestionRenderer({
                   <FormattedText as="span" className="text-gray-800" text={item.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </div>
                 <div className={isCompactPane ? 'flex w-full flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
-                  <select
+                  <ProtectedSelect
                     value={typeof stringArrayAnswer[index] === 'string' ? stringArrayAnswer[index] : ''}
                     onChange={(event) =>
                       updateIndexedAnswer(
@@ -763,7 +765,7 @@ export function QuestionRenderer({
                         {stripBoldMarkdown(category)}
                       </option>
                     ))}
-                  </select>
+                  </ProtectedSelect>
                   {renderFlagButton(slotId)}
                 </div>
               </div>
@@ -787,7 +789,7 @@ export function QuestionRenderer({
                   <FormattedText as="span" className="text-gray-800" text={feature.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </div>
                 <div className={isCompactPane ? 'flex w-full flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
-                  <select
+                  <ProtectedSelect
                     value={typeof stringArrayAnswer[index] === 'string' ? stringArrayAnswer[index] : ''}
                     onChange={(event) =>
                       updateIndexedAnswer(
@@ -805,7 +807,7 @@ export function QuestionRenderer({
                         {stripBoldMarkdown(option)}
                       </option>
                     ))}
-                  </select>
+                  </ProtectedSelect>
                   {renderFlagButton(slotId)}
                 </div>
               </div>

@@ -28,6 +28,80 @@ export function ProtectedInput({
   const inputRef = useRef<HTMLInputElement>(null);
   const lastKeydownRef = useRef<number>(0);
   const previousValueRef = useRef<string>('');
+  const lastRescuedDomValueRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+
+    const maybeCommitDomValue = () => {
+      // Protect against iPad/Safari edge cases where the DOM value has advanced,
+      // but React onChange hasn't fired yet before backgrounding/pagehide.
+      if (typeof inputProps.onChange !== 'function') return;
+      if (typeof inputProps.value !== 'string') return;
+
+      const domValue = input.value;
+      const controlledValue = inputProps.value;
+      if (domValue === controlledValue) {
+        lastRescuedDomValueRef.current = null;
+        return;
+      }
+      if (lastRescuedDomValueRef.current === domValue) {
+        return;
+      }
+
+      // Fire the parent's onChange with a minimal event-like object.
+      // This keeps the controlled value in sync and allows downstream persistence to capture it.
+      (inputProps.onChange as unknown as (event: unknown) => void)({
+        target: input,
+        currentTarget: input,
+        type: 'change',
+      });
+      lastRescuedDomValueRef.current = domValue;
+      attemptContext?.actions.flushAnswerDurabilityNow?.();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'hidden') return;
+      maybeCommitDomValue();
+    };
+
+    const handlePageHide = () => {
+      maybeCommitDomValue();
+    };
+
+    const handleFreeze = () => {
+      maybeCommitDomValue();
+    };
+
+    const handleFocusOut = () => {
+      maybeCommitDomValue();
+    };
+
+    const handleBlur = () => {
+      maybeCommitDomValue();
+    };
+
+    const handleBeforeUnload = () => {
+      maybeCommitDomValue();
+    };
+
+    document.addEventListener('focusout', handleFocusOut, true);
+    input.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('freeze', handleFreeze as EventListener);
+
+    return () => {
+      document.removeEventListener('focusout', handleFocusOut, true);
+      input.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('freeze', handleFreeze as EventListener);
+    };
+  }, [attemptContext, inputProps.onChange, inputProps.value]);
 
   useEffect(() => {
     const input = inputRef.current;

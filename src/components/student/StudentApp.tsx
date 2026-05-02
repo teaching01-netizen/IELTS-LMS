@@ -164,6 +164,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
   const priorTimeRemainingRef = useRef<number | null>(null);
   const runtimeFinalSubmitRef = useRef<string | null>(null);
   const finalSubmitInFlightRef = useRef<Promise<void> | null>(null);
+  const writingDraftCommitRef = useRef<(() => void) | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
   const [warningSeverity, setWarningSeverity] = useState<'medium' | 'high' | 'critical'>(
@@ -246,6 +247,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
             return;
           }
 
+          writingDraftCommitRef.current?.();
           const flushed = await attemptActions.flushPending();
           if (flushed) {
             runtimeActions.setBlockingReason(null);
@@ -551,14 +553,14 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
       const reachedZero = runtimeState.displayTimeRemaining === 0;
       const transitionedToZero =
         reachedZero && typeof priorTimeRemaining === 'number' && priorTimeRemaining > 0;
-      if (!transitionedToZero) {
-        return;
-      }
 
       const serverSectionKey = runtimeState.runtimeSnapshot?.currentSectionKey ?? null;
       const serverRemaining = runtimeState.runtimeSnapshot?.currentSectionRemainingSeconds;
       const serverConfirmedBoundary =
         serverSectionKey !== runtimeState.currentModule || serverRemaining === 0;
+      if (!transitionedToZero && !serverConfirmedBoundary) {
+        return;
+      }
       if (!serverConfirmedBoundary) {
         return;
       }
@@ -668,6 +670,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
         setFinalSubmitStatus(attemptIndex === 0 ? 'submitting' : 'retrying');
 
         try {
+          writingDraftCommitRef.current?.();
           const submitted = await attemptActions.submitAttempt();
           if (submitted) {
             runtimeFinalSubmitRef.current = attemptId;
@@ -727,6 +730,10 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
     runtimeActions.setWritingAnswer(taskId, text);
     attemptActions.persistWritingAnswer(taskId, text);
   };
+
+  const registerWritingDraftCommit = useCallback((commitDraft: (() => void) | null) => {
+    writingDraftCommitRef.current = commitDraft;
+  }, []);
 
   const answeredCount = countAnsweredQuestions(runtimeState.allQuestions, runtimeState.answers);
   const totalQuestions = countQuestionSlots(runtimeState.allQuestions);
@@ -1010,6 +1017,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
             currentQuestionId={runtimeState.currentQuestionId}
             onNavigate={runtimeActions.setCurrentQuestionId}
             timeRemaining={runtimeState.displayTimeRemaining}
+            registerDraftCommit={registerWritingDraftCommit}
             security={examState.config.security}
             showSubmitButton={showSubmitControls}
           />

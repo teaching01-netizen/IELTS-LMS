@@ -15,6 +15,13 @@ function createExamState(): ExamState {
       minWords: 150,
       recommendedTime: 20,
     },
+    {
+      id: 'task2',
+      label: 'Task 2',
+      taskType: 'task2',
+      minWords: 250,
+      recommendedTime: 40,
+    },
   ];
 
   return {
@@ -101,5 +108,77 @@ describe('StudentWriting lifecycle durability', () => {
     if (originalDescriptor) {
       Object.defineProperty(document, 'visibilityState', originalDescriptor);
     }
+  });
+
+  it('commits the current editor draft on freeze and beforeunload', () => {
+    const onWritingChange = vi.fn();
+
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={onWritingChange}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+
+    editor.innerHTML = '<p>Draft before freeze</p>';
+    fireEvent(document, new Event('freeze'));
+    expect(onWritingChange).toHaveBeenCalledWith('task1', '<p>Draft before freeze</p>');
+
+    onWritingChange.mockClear();
+    editor.innerHTML = '<p>Draft before unload</p>';
+    fireEvent(window, new Event('beforeunload'));
+    expect(onWritingChange).toHaveBeenCalledWith('task1', '<p>Draft before unload</p>');
+  });
+
+  it('commits the current editor draft before switching writing tasks', () => {
+    const onWritingChange = vi.fn();
+    const onNavigate = vi.fn();
+
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={onWritingChange}
+        onSubmit={() => undefined}
+        currentQuestionId="task1"
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    editor.innerHTML = '<p>Task 1 visible draft</p>';
+
+    fireEvent.click(screen.getByRole('button', { name: 'Task 2' }));
+
+    expect(onWritingChange).toHaveBeenCalledWith('task1', '<p>Task 1 visible draft</p>');
+    expect(onNavigate).toHaveBeenCalledWith('task2');
+  });
+
+  it('commits the current editor draft before opening submit review', () => {
+    const onWritingChange = vi.fn();
+
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={onWritingChange}
+        onSubmit={() => undefined}
+        currentQuestionId="task1"
+        onNavigate={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    editor.innerHTML = '<p>Final visible draft</p>';
+
+    fireEvent.click(screen.getByRole('button', { name: /review & submit/i }));
+
+    expect(onWritingChange).toHaveBeenCalledWith('task1', '<p>Final visible draft</p>');
   });
 });

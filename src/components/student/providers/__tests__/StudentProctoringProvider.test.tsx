@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProctoringProvider, useProctoring } from '../StudentProctoringProvider';
 import { StudentAttemptProvider } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
+import { studentAttemptRepository as studentAttemptRepositoryInstance } from '../../../../services/studentAttemptRepository';
 import { resetStudentAttemptPendingMutationIndexedDbForTests } from '../../../../services/studentAttemptRepository';
 import type { ExamConfig, ExamState } from '../../../../types';
 import type { StudentAttempt } from '../../../../types/studentAttempt';
@@ -336,6 +337,57 @@ describe('StudentProctoringProvider', () => {
 
     expect(harness.result.current.runtime.state.violations).toHaveLength(1);
     expect(harness.result.current.runtime.state.violations[0]?.type).toBe('TEST_VIOLATION');
+  });
+
+  it('persists the same violation id that is added to runtime state', async () => {
+    sessionStorage.setItem(
+      'ielts_student_attempt_credentials_v1',
+      JSON.stringify([
+        {
+          attemptId: 'attempt-1',
+          scheduleId: 'sched-1',
+          attemptToken: 'token-1',
+          expiresAt: '2026-01-02T00:00:00.000Z',
+        },
+      ]),
+    );
+    const savePendingMutations = vi
+      .spyOn(studentAttemptRepositoryInstance, 'savePendingMutations')
+      .mockResolvedValue();
+    const harness = renderHarness();
+
+    act(() => {
+      harness.result.current.proctoring.handleViolation(
+        'TEST_CRITICAL',
+        'Critical violation',
+        'critical',
+      );
+    });
+
+    const runtimeViolation = harness.result.current.runtime.state.violations[0];
+    expect(runtimeViolation).toBeDefined();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(savePendingMutations).toHaveBeenCalled();
+
+    const violationMutation = savePendingMutations.mock.calls
+      .flatMap(([, mutations]) => mutations)
+      .find((mutation) => mutation.type === 'violation');
+
+    expect(violationMutation?.payload).toMatchObject({
+      violationId: runtimeViolation?.id,
+      violationType: 'TEST_CRITICAL',
+      violations: [
+        expect.objectContaining({
+          id: runtimeViolation?.id,
+          type: 'TEST_CRITICAL',
+          severity: 'critical',
+          description: 'Critical violation',
+        }),
+      ],
+    });
   });
 
   it('applies cooldowns per violation type', () => {

@@ -1,0 +1,80 @@
+-- Exam Builder round-trip optimization contract (frontend-only, phase 1)
+-- Scope: /builder/:examId/builder and preview reuse of builder content loading
+-- Non-goals: review route and config route optimization
+
+actor BuilderUser {
+    identified_by: id
+    id: String
+}
+
+entity BuilderExamLoadContract {
+    exam_id: String
+    draft_version_id: String?
+    published_version_id: String?
+    editable_version_id: String
+
+    -- Track resources needed to render editable builder content.
+    required_reads: Set<String>
+    forbidden_reads: Set<String>
+
+    is_minimal_load: required_reads = { "exam_by_id", "version_by_id" }
+}
+
+entity BuilderDraftSaveContract {
+    exam_id: String
+    actor: String
+    saves_content_snapshot: Boolean
+    refreshes_exam_metadata: Boolean
+    refreshes_version_summaries: Boolean
+    refreshes_publish_readiness: Boolean
+}
+
+rule BuilderLoadsOnlyEditableContent {
+    when: BuilderOpensExam(exam_id)
+    let contract = BuilderExamLoadContract for exam_id = exam_id
+    ensures: contract.required_reads = { "exam_by_id", "version_by_id" }
+    ensures: contract.forbidden_reads = { "version_summaries", "publish_readiness" }
+    ensures: contract.is_minimal_load
+}
+
+rule BuilderSavesDraftWithoutMetadataFanout {
+    when: BuilderUpdatesDraft(exam_id, actor)
+    let contract = BuilderDraftSaveContract for exam_id = exam_id
+    requires: contract.saves_content_snapshot
+    ensures: contract.refreshes_exam_metadata = false
+    ensures: contract.refreshes_version_summaries = false
+    ensures: contract.refreshes_publish_readiness = false
+}
+
+rule BuilderExplicitReloadRefetchesEditableContent {
+    when: BuilderRequestsReload(exam_id)
+    let contract = BuilderExamLoadContract for exam_id = exam_id
+    ensures: contract.required_reads = { "exam_by_id", "version_by_id" }
+    ensures: contract.forbidden_reads = { "version_summaries", "publish_readiness" }
+}
+
+surface BuilderEditingSession {
+    for actor: BuilderUser
+
+    context contract: BuilderExamLoadContract
+
+    exposes:
+        contract.exam_id
+        contract.editable_version_id
+        contract.is_minimal_load
+
+    provides:
+        BuilderUpdatesDraft(contract.exam_id, actor.id)
+        BuilderRequestsReload(contract.exam_id)
+}
+
+surface BuilderPreviewSession {
+    for actor: BuilderUser
+
+    context contract: BuilderExamLoadContract
+
+    exposes:
+        contract.exam_id
+        contract.editable_version_id
+        contract.is_minimal_load
+}

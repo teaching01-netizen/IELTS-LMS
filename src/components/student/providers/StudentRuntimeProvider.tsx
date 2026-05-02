@@ -96,7 +96,13 @@ interface RuntimeActions {
   toggleFlag: (questionId: string) => void;
   submitModule: () => void;
   startExam: () => void;
-  addViolation: (type: string, severity: ViolationSeverity, description: string) => void;
+  addViolation: (
+    type: string,
+    severity: ViolationSeverity,
+    description: string,
+    violationId?: string,
+    timestamp?: string,
+  ) => void;
   clearViolations: () => void;
   pauseExam: () => void;
   terminateExam: () => void;
@@ -176,7 +182,14 @@ type RuntimeAction =
       nextQuestionId: string | null;
       nextDurationSeconds: number;
     }
-  | { type: 'add_violation'; violationType: string; severity: ViolationSeverity; description: string }
+  | {
+      type: 'add_violation';
+      violationType: string;
+      severity: ViolationSeverity;
+      description: string;
+      violationId?: string;
+      timestamp?: string;
+    }
   | { type: 'clear_violations' }
   | { type: 'terminate_exam' }
   | {
@@ -477,25 +490,8 @@ function runtimeReducer(
                 : 'exam';
       const nextQuestionId = moduleChanged ? action.nextQuestionId : state.currentQuestionId;
       const snapshotTimeRemaining = action.snapshot?.currentSectionRemainingSeconds;
-      const extensionIncreased =
-        typeof action.currentSectionExtensionMinutes === 'number' &&
-        (state.currentSectionExtensionMinutes === null ||
-          action.currentSectionExtensionMinutes > state.currentSectionExtensionMinutes);
-      const runtimeStatusSupportsCountdown = runtimeStatus === 'live' || runtimeStatus === 'paused';
-      const sameSection = !moduleChanged && action.nextModule === state.currentModule;
-      const recoveringFromLocalZero =
-        runtimeStatusSupportsCountdown &&
-        sameSection &&
-        state.timeRemaining === 0 &&
-        typeof snapshotTimeRemaining === 'number' &&
-        snapshotTimeRemaining > 0;
-      const allowUpwardCorrection = moduleChanged || extensionIncreased || recoveringFromLocalZero;
       const nextTimeRemaining =
-        typeof snapshotTimeRemaining === 'number'
-          ? snapshotTimeRemaining > state.timeRemaining && !allowUpwardCorrection
-            ? state.timeRemaining
-            : snapshotTimeRemaining
-          : state.timeRemaining;
+        typeof snapshotTimeRemaining === 'number' ? snapshotTimeRemaining : state.timeRemaining;
       const nextCurrentSectionExtensionMinutes =
         typeof action.currentSectionExtensionMinutes === 'number'
           ? action.currentSectionExtensionMinutes
@@ -790,10 +786,10 @@ function runtimeReducer(
     }
     case 'add_violation': {
       const newViolation: Violation = {
-        id: `v-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: action.violationId ?? `v-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         type: action.violationType,
         severity: action.severity,
-        timestamp: new Date().toISOString(),
+        timestamp: action.timestamp ?? new Date().toISOString(),
         description: action.description,
       };
       return {
@@ -1228,8 +1224,17 @@ export function StudentRuntimeProvider({
     type: string,
     severity: ViolationSeverity,
     description: string,
+    violationId?: string,
+    timestamp?: string,
   ) => {
-    dispatch({ type: 'add_violation', violationType: type, severity, description });
+    dispatch({
+      type: 'add_violation',
+      violationType: type,
+      severity,
+      description,
+      ...(violationId ? { violationId } : {}),
+      ...(timestamp ? { timestamp } : {}),
+    });
   }, []);
 
   const clearViolations = useCallback(() => {

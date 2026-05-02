@@ -729,7 +729,7 @@ describe('studentAttemptRepository backend mode', () => {
     });
   });
 
-  it('drops stale objective mutations on SECTION_MISMATCH, retries flush, and records lastDroppedMutations', async () => {
+  it('does not report save success when stale answer pruning would discard a student response', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
     const metricEvents: Record<string, unknown>[] = [];
     const metricListener = (event: Event) => {
@@ -806,18 +806,12 @@ describe('studentAttemptRepository backend mode', () => {
         },
       ]);
 
-      await studentAttemptRepository.saveAttempt(attempt);
+      await expect(studentAttemptRepository.saveAttempt(attempt)).rejects.toThrow(
+        /could not be saved because the exam section changed/i,
+      );
 
       const firstBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
       expect(firstBody.mutations).toHaveLength(2);
-
-      const secondBody = JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body));
-      expect(secondBody.mutations).toHaveLength(1);
-      expect(secondBody.mutations[0]).toMatchObject({
-        type: 'SetScalar',
-        questionId: 'q1',
-        value: 'A',
-      });
 
       const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
       const cached = cachedAttempts.find((candidate) => candidate.id === attempt.id) ?? null;
@@ -827,6 +821,21 @@ describe('studentAttemptRepository backend mode', () => {
         toModule: 'reading',
         reason: 'SECTION_MISMATCH',
       });
+      expect(cached?.recovery.syncState).toBe('error');
+
+      const pendingAfterFailure = await studentAttemptRepository.getPendingMutations(attempt.id);
+      expect(pendingAfterFailure).toEqual([
+        expect.objectContaining({
+          id: 'mutation-stale',
+          type: 'answer',
+          payload: expect.objectContaining({ questionId: 'qOld', value: 'B' }),
+        }),
+        expect.objectContaining({
+          id: 'mutation-live',
+          type: 'answer',
+          payload: expect.objectContaining({ questionId: 'q1', value: 'A' }),
+        }),
+      ]);
 
       const droppedMetric = metricEvents.find(
         (metric) => metric.name === 'student_attempt_dropped_mutation_total',
@@ -991,7 +1000,9 @@ describe('studentAttemptRepository backend mode', () => {
       },
     ]);
 
-    await studentAttemptRepository.saveAttempt(attempt);
+    await expect(studentAttemptRepository.saveAttempt(attempt)).rejects.toThrow(
+      /could not be saved because the exam section changed/i,
+    );
 
     const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
     const cached = cachedAttempts.find((candidate) => candidate.id === attempt.id) ?? null;
@@ -1004,6 +1015,10 @@ describe('studentAttemptRepository backend mode', () => {
       affectedAnswerSlots: [{ questionId: 'q-slot', slotIndex: 1 }],
     });
     expect(cached?.recovery.lastDroppedMutations?.affectedAnswers ?? []).not.toContain('q-slot');
+    expect(cached?.recovery.syncState).toBe('error');
+
+    const pendingAfterFailure = await studentAttemptRepository.getPendingMutations(attempt.id);
+    expect(pendingAfterFailure).toHaveLength(2);
   });
 
   it('marks the local attempt unsynced and preserves pending mutations on ACTIVE_SESSION_SUPERSEDED', async () => {

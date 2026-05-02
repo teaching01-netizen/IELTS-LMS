@@ -2206,9 +2206,16 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
             : {}),
         } satisfies StudentAttempt['recovery']['lastDroppedMutations'];
 
+        const droppedAnswerMutations = dropped.some(
+          (mutation) => mutation.type === 'answer' || mutation.type === 'writing_answer',
+        );
+
         currentAttempt = mergeStudentAttemptRecovery(currentAttempt, {
           lastDroppedMutations: summary,
-          pendingMutationCount: prunedMutations.length,
+          pendingMutationCount: droppedAnswerMutations
+            ? first.remainingMutations.length
+            : prunedMutations.length,
+          syncState: droppedAnswerMutations ? 'error' : currentAttempt.recovery.syncState,
         });
         await this.cache.saveAttempt(currentAttempt);
         emitStudentObservabilityMetric(
@@ -2231,6 +2238,13 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
           reason: summary.reason,
           runtimeStatus,
         });
+
+        if (droppedAnswerMutations) {
+          await this.cache.savePendingMutations(currentAttempt.id, first.remainingMutations);
+          throw new Error(
+            'One or more locally typed answers could not be saved because the exam section changed.',
+          );
+        }
       } else {
         currentAttempt = mergeStudentAttemptRecovery(currentAttempt, {
           pendingMutationCount: prunedMutations.length,

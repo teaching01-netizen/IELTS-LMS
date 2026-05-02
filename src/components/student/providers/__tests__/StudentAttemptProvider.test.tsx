@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultConfig } from '../../../../constants/examDefaults';
 import * as studentAttemptRepoModule from '../../../../services/studentAttemptRepository';
@@ -10,6 +10,7 @@ import type {
   StudentAttempt,
   StudentAttemptMutation,
 } from '../../../../types/studentAttempt';
+import { ProtectedInput } from '../../ProtectedInput';
 import { StudentAttemptProvider, useStudentAttempt } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
 
@@ -758,6 +759,62 @@ describe('StudentAttemptProvider', () => {
     expect(result.current.state.pendingMutationCount).toBe(0);
   });
 
+  it('does not lose new answers queued while clearPendingMutations is still in flight', async () => {
+    let resolveClearPending: (() => void) | null = null;
+    vi.mocked(studentAttemptRepository.clearPendingMutations).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveClearPending = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'first');
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(1);
+    });
+
+    let flushPromise: Promise<boolean>;
+    await act(async () => {
+      flushPromise = result.current.actions.flushPending();
+    });
+
+    await waitFor(() => {
+      expect(studentAttemptRepository.clearPendingMutations).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'second');
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.attempt?.answers.q1).toBe('second');
+      expect(result.current.state.pendingMutationCount).toBe(1);
+    });
+
+    await act(async () => {
+      resolveClearPending?.();
+      const flushed = await flushPromise;
+      expect(flushed).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.pendingMutationCount).toBe(0);
+    });
+
+    expect(studentAttemptRepository.saveAttempt).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(studentAttemptRepository.saveAttempt).mock.calls.at(-1)?.[0].answers.q1)
+      .toBe('second');
+  });
+
   it('preserves the final answer when latency overlaps a rapid typing burst', async () => {
     Object.defineProperty(window.navigator, 'onLine', {
       configurable: true,
@@ -1094,6 +1151,53 @@ describe('StudentAttemptProvider', () => {
 
     expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
     input.remove();
+    vi.useRealTimers();
+  });
+
+  it('creates and flushes an answer mutation from DOM rescue on focusout when no mutation was queued yet', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    function ObjectiveRescueHarness() {
+      const { actions } = useStudentAttempt();
+      const [value, setValue] = React.useState('');
+
+      return (
+        <ProtectedInput
+          security={{ preventAutofill: true, preventAutocorrect: true }}
+          aria-label="objective answer"
+          value={value}
+          onChange={(event) => {
+            const nextValue = (event.target as HTMLInputElement).value;
+            setValue(nextValue);
+            void actions.persistAnswer('q1', nextValue);
+          }}
+        />
+      );
+    }
+
+    render(<ObjectiveRescueHarness />, { wrapper: createWrapper() });
+
+    expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+    const input = screen.getByRole('textbox', { name: 'objective answer' }) as HTMLInputElement;
+    input.value = 'RESCUED_TYPED_VALUE';
+
+    await act(async () => {
+      fireEvent(input, new FocusEvent('focusout', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+    const persistedMutations = vi.mocked(studentAttemptRepository.savePendingMutations).mock.calls[0]?.[1];
+    expect(persistedMutations).toHaveLength(1);
+    expect(persistedMutations?.[0]?.type).toBe('answer');
+    expect(persistedMutations?.[0]?.payload).toMatchObject({
+      questionId: 'q1',
+      value: 'RESCUED_TYPED_VALUE',
+    });
     vi.useRealTimers();
   });
 

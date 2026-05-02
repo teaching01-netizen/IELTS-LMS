@@ -209,8 +209,8 @@ function buildLiveMetricEndpoint(scheduleId: string) {
 
 function extractAttemptSyncState(live: BackendLiveSession): string | null {
   const attempt = asRecord(live.attempt);
-  const recovery = asRecord(attempt?.recovery);
-  return parseNullableString(recovery?.syncState);
+  const recovery = asRecord(attempt?.['recovery']);
+  return parseNullableString(recovery?.['syncState']);
 }
 
 function resolveAnswerInvariantRollout(live: BackendLiveSession): StudentAnswerInvariantRollout {
@@ -220,22 +220,22 @@ function resolveAnswerInvariantRollout(live: BackendLiveSession): StudentAnswerI
     return defaultRollout;
   }
 
-  const nested = asRecord(rolloutRoot.localWriterAnswerInvariant);
+  const nested = asRecord(rolloutRoot['localWriterAnswerInvariant']);
   const enabled = parseNullableBoolean(
-    nested?.enabled ?? rolloutRoot.localWriterAnswerInvariantEnabled ?? rolloutRoot.enabled,
+    nested?.['enabled'] ?? rolloutRoot['localWriterAnswerInvariantEnabled'] ?? rolloutRoot['enabled'],
   );
   const killSwitch = parseNullableBoolean(
-    nested?.killSwitch ??
-      rolloutRoot.localWriterAnswerInvariantKillSwitch ??
-      rolloutRoot.killSwitch,
+    nested?.['killSwitch'] ??
+      rolloutRoot['localWriterAnswerInvariantKillSwitch'] ??
+      rolloutRoot['killSwitch'],
   );
   const cohort = parseNullableString(
-    nested?.cohort ?? rolloutRoot.localWriterAnswerInvariantCohort ?? rolloutRoot.cohort,
+    nested?.['cohort'] ?? rolloutRoot['localWriterAnswerInvariantCohort'] ?? rolloutRoot['cohort'],
   );
   const configFingerprint = parseNullableString(
-    nested?.configFingerprint ??
-      rolloutRoot.localWriterAnswerInvariantConfigFingerprint ??
-      rolloutRoot.configFingerprint,
+    nested?.['configFingerprint'] ??
+      rolloutRoot['localWriterAnswerInvariantConfigFingerprint'] ??
+      rolloutRoot['configFingerprint'],
   );
 
   const hasRuntimeOverride =

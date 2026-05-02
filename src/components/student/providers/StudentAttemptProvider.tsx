@@ -69,6 +69,7 @@ interface StudentAttemptActions {
   submitAttempt: () => Promise<boolean>;
   setDeviceFingerprintHash: (hash: string) => Promise<void>;
   flushPending: () => Promise<boolean>;
+  flushAnswerDurabilityNow: () => void;
   flushHeartbeatEvents: () => Promise<void>;
   dismissDroppedMutationsBanner: () => Promise<void>;
 }
@@ -110,7 +111,8 @@ type DurablePersistTriggerSource =
   | 'beforeunload'
   | 'freeze'
   | 'window_blur'
-  | 'hydrate_checkpoint';
+  | 'hydrate_checkpoint'
+  | 'dom_rescue_commit';
 
 interface AnswerSyncCheckpointRecord {
   attemptId: string;
@@ -881,6 +883,38 @@ export function StudentAttemptProvider({
 
           clearDurablePendingWriteTimeout();
           await studentAttemptRepository.clearPendingMutations(persistedAttempt.id);
+          const postClearMutations = pendingMutationsRef.current.filter(
+            (mutation) => !flushedMutationIds.has(mutation.id),
+          );
+          if (postClearMutations.length > 0) {
+            const persistedMirror = await (
+              setPendingMutations(postClearMutations, {
+                durableWriteMode: 'immediate',
+                includesAnswerMutation: postClearMutations.some(
+                  (mutation) => mutation.type === 'answer' || mutation.type === 'writing_answer',
+                ),
+                awaitPersistence: true,
+                source: 'mutation',
+              }) ?? Promise.resolve(true)
+            );
+            if (!persistedMirror) {
+              return false;
+            }
+            const stillSavingAttempt = mergeAttempt(attemptRef.current ?? persistedAttempt, {
+              recovery: {
+                lastPersistedAt: persistedAt,
+                pendingMutationCount: postClearMutations.length,
+                syncState: navigator.onLine ? 'saving' : 'offline',
+              },
+            });
+            syncAttemptState(stillSavingAttempt);
+
+            if (!navigator.onLine) {
+              return false;
+            }
+
+            continue;
+          }
           updatePendingMutationsRamState([]);
           void writeAnswerSyncCheckpoint(
             persistedAttempt.id,
@@ -1229,7 +1263,10 @@ export function StudentAttemptProvider({
 
     const objectivePatch: AttemptPatch = {};
 
-    if (nextObserved.violations !== observedRef.current.violations) {
+    if (
+      nextObserved.violations !== observedRef.current.violations &&
+      JSON.stringify(currentAttempt.violations) !== nextObserved.violations
+    ) {
       objectivePatch.violations = runtimeState.violations;
     }
 
@@ -1239,7 +1276,7 @@ export function StudentAttemptProvider({
       objectivePatch.currentQuestionId = runtimeState.currentQuestionId;
     }
 
-    if (nextObserved.violations !== observedRef.current.violations) {
+    if (objectivePatch.violations) {
       void applyPatch(objectivePatch, 'violation', 400, {
         changedAreas: ['violation'],
         violations: runtimeState.violations,
@@ -1528,6 +1565,10 @@ export function StudentAttemptProvider({
     return true;
   }, [flushPending, runtimeActions, syncAttemptState]);
 
+  const flushAnswerDurabilityNow = useCallback(() => {
+    flushAnswerDurableMirrorNow('dom_rescue_commit');
+  }, [flushAnswerDurableMirrorNow]);
+
   const setDeviceFingerprintHash = useCallback(async (hash: string) => {
     await applyPatch(
       {
@@ -1592,6 +1633,7 @@ export function StudentAttemptProvider({
       submitAttempt,
       setDeviceFingerprintHash,
       flushPending,
+      flushAnswerDurabilityNow,
       flushHeartbeatEvents,
       dismissDroppedMutationsBanner,
     },
@@ -1611,6 +1653,7 @@ export function StudentAttemptProvider({
     submitAttempt,
     setDeviceFingerprintHash,
     flushHeartbeatEvents,
+    flushAnswerDurabilityNow,
     dismissDroppedMutationsBanner,
   ]);
 

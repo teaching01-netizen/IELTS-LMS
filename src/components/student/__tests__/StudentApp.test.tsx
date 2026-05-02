@@ -204,6 +204,166 @@ describe('StudentApp runtime-backed mode', () => {
     expect(editor).toHaveAttribute('autocapitalize', 'off');
   });
 
+  it('commits the mounted writing editor draft before runtime final submission', async () => {
+    const writingState: ExamState = {
+      ...state,
+      config: createDefaultConfig('Academic', 'Academic'),
+    };
+
+    const liveRuntimeSnapshot: ExamSessionRuntime = {
+      id: 'runtime-1',
+      scheduleId: 'sched-1',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start',
+      status: 'live',
+      actualStartAt: '2026-01-01T00:00:00.000Z',
+      actualEndAt: null,
+      activeSectionKey: 'writing',
+      currentSectionKey: 'writing',
+      currentSectionRemainingSeconds: 120,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      sections: [
+        {
+          sectionKey: 'writing',
+          label: 'Writing',
+          order: 1,
+          plannedDurationMinutes: 60,
+          gapAfterMinutes: 0,
+          status: 'live',
+          availableAt: '2026-01-01T00:00:00.000Z',
+          actualStartAt: '2026-01-01T00:00:00.000Z',
+          actualEndAt: null,
+          pausedAt: null,
+          accumulatedPausedSeconds: 0,
+          extensionMinutes: 0,
+          completionReason: undefined,
+          projectedStartAt: '2026-01-01T00:00:00.000Z',
+          projectedEndAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const completedRuntimeSnapshot: ExamSessionRuntime = {
+      ...liveRuntimeSnapshot,
+      status: 'completed',
+      actualEndAt: '2026-01-01T01:00:00.000Z',
+      activeSectionKey: null,
+      currentSectionRemainingSeconds: 0,
+      sections: liveRuntimeSnapshot.sections.map((section) => ({
+        ...section,
+        status: 'completed',
+        actualEndAt: '2026-01-01T01:00:00.000Z',
+        completionReason: 'auto_timeout',
+      })),
+      updatedAt: '2026-01-01T01:00:00.000Z',
+    };
+    const attemptSnapshot: StudentAttempt = {
+      id: 'attempt-1',
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      phase: 'exam',
+      currentModule: 'writing',
+      currentQuestionId: 'task1',
+      answers: {},
+      writingAnswers: {},
+      flags: {},
+      violations: [],
+      proctorStatus: 'active',
+      proctorNote: null,
+      proctorUpdatedAt: null,
+      proctorUpdatedBy: null,
+      lastWarningId: null,
+      lastAcknowledgedWarningId: null,
+      submittedAt: null,
+      integrity: {
+        preCheck: {
+          completedAt: '2026-01-01T00:00:00.000Z',
+          browserFamily: 'chrome',
+          browserVersion: 120,
+          screenDetailsSupported: true,
+          heartbeatReady: true,
+          acknowledgedSafariLimitation: false,
+          checks: [],
+        },
+        deviceFingerprintHash: null,
+        lastDisconnectAt: null,
+        lastReconnectAt: null,
+        lastHeartbeatAt: null,
+        lastHeartbeatStatus: 'idle',
+      },
+      recovery: {
+        lastRecoveredAt: null,
+        lastLocalMutationAt: null,
+        lastPersistedAt: null,
+        lastDroppedMutations: null,
+        pendingMutationCount: 0,
+        serverAcceptedThroughSeq: 0,
+        clientSessionId: null,
+        syncState: 'saved',
+      },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const submittedAttempt: StudentAttempt = {
+      ...attemptSnapshot,
+      phase: 'post-exam',
+      submittedAt: '2026-01-01T01:00:01.000Z',
+      recovery: {
+        ...attemptSnapshot.recovery,
+        syncState: 'saved',
+      },
+    };
+    vi.spyOn(studentAttemptRepository as any, 'submitAttempt').mockResolvedValue(submittedAttempt);
+
+    const { rerender } = render(
+      <StudentAppWrapper
+        state={writingState}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={liveRuntimeSnapshot}
+      />,
+    );
+
+    const editor = await screen.findByRole('textbox', { name: /writing response/i });
+    editor.innerHTML = '<p>Visible iPad final draft</p>';
+
+    rerender(
+      <StudentAppWrapper
+        state={writingState}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={completedRuntimeSnapshot}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledWith(
+        'attempt-1',
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'writing_answer',
+            payload: expect.objectContaining({
+              taskId: 'task1',
+              value: '<p>Visible iPad final draft</p>',
+            }),
+          }),
+        ]),
+      );
+    });
+  });
+
   it('keeps local objective text input stable during same-attempt refresh', async () => {
     const user = userEvent.setup();
 
@@ -1395,7 +1555,7 @@ describe('StudentApp runtime-backed mode', () => {
     expect(screen.queryByText(/Examination Complete!/i)).not.toBeInTheDocument();
   });
 
-  it('does not auto-submit a runtime-backed section when loading at 00:00 before a server-confirmed transition', async () => {
+  it('auto-submits a runtime-backed section when loading with a server-confirmed 00:00 boundary', async () => {
     const config = createDefaultConfig('Academic', 'Academic');
     config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
@@ -1497,6 +1657,18 @@ describe('StudentApp runtime-backed mode', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
+    window.sessionStorage.setItem(
+      'ielts_student_attempt_credentials_v1',
+      JSON.stringify([
+        {
+          attemptId: attemptSnapshot.id,
+          scheduleId: attemptSnapshot.scheduleId,
+          attemptToken: 'token-1',
+          expiresAt: '2026-01-02T00:00:00.000Z',
+        },
+      ]),
+    );
+    const saveAttempt = vi.spyOn(studentAttemptRepository as any, 'saveAttempt').mockResolvedValue();
 
     render(
       <StudentAppWrapper
@@ -1513,7 +1685,15 @@ describe('StudentApp runtime-backed mode', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('student-time-remaining')).toHaveTextContent('00:00');
+      expect(saveAttempt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentModule: 'writing',
+          phase: 'exam',
+          recovery: expect.objectContaining({
+            syncState: 'saved',
+          }),
+        }),
+      );
     });
   });
 

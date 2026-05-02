@@ -20,6 +20,7 @@ interface StudentWritingProps {
   onNavigate: (id: string) => void;
   timeRemaining?: number | undefined;
   onTimeExpired?: (() => void) | undefined;
+  registerDraftCommit?: ((commitDraft: (() => void) | null) => void) | undefined;
   security?: {
     preventAutofill: boolean;
     preventAutocorrect: boolean;
@@ -38,6 +39,7 @@ export function StudentWriting({
   onNavigate,
   timeRemaining,
   onTimeExpired,
+  registerDraftCommit,
   security = { preventAutofill: false, preventAutocorrect: false },
   sessionId,
   studentId,
@@ -77,7 +79,20 @@ export function StudentWriting({
     }
 
     onWritingChange(activeTaskId, editorRef.current.innerHTML);
-  }, [activeTaskId, onWritingChange]);
+    attemptContext?.actions.flushAnswerDurabilityNow?.();
+  }, [activeTaskId, attemptContext, onWritingChange]);
+
+  useEffect(() => {
+    if (!registerDraftCommit) {
+      return;
+    }
+
+    registerDraftCommit(commitEditorDraft);
+    return () => {
+      commitEditorDraft();
+      registerDraftCommit(null);
+    };
+  }, [commitEditorDraft, registerDraftCommit]);
 
   useEffect(() => {
     if (currentQuestionId && currentQuestionId !== activeTaskId) {
@@ -114,11 +129,23 @@ export function StudentWriting({
       commitEditorDraft();
     };
 
+    const handleBeforeUnload = () => {
+      commitEditorDraft();
+    };
+
+    const handleFreeze = () => {
+      commitEditorDraft();
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('freeze', handleFreeze as EventListener);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('freeze', handleFreeze as EventListener);
     };
   }, [commitEditorDraft]);
 
@@ -264,10 +291,12 @@ export function StudentWriting({
   };
 
   const handleSubmitClick = () => {
+    commitEditorDraft();
     setShowReviewModal(true);
   };
 
   const handleConfirmSubmit = () => {
+    commitEditorDraft();
     setShowReviewModal(false);
     onSubmit();
   };
@@ -415,6 +444,7 @@ export function StudentWriting({
             <button
               key={task.id}
               onClick={() => {
+                commitEditorDraft();
                 setActiveTaskId(task.id);
                 onNavigate(task.id);
               }}

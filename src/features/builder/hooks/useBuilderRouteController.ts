@@ -4,15 +4,13 @@ import { getExamStateFromEntity } from '@services/examAdapterService';
 import { examLifecycleService } from '@services/examLifecycleService';
 import { examRepository } from '@services/examRepository';
 import type { ExamState } from '../../../types';
-import type { ExamEntity, ExamVersionSummary, PublishReadiness } from '../../../types/domain';
+import type { ExamEntity } from '../../../types/domain';
 
 export interface BuilderRouteController {
   error: string | null;
   exam: ExamEntity | undefined;
   isLoading: boolean;
-  publishReadiness: PublishReadiness | undefined;
   state: ExamState | null;
-  versions: ExamVersionSummary[];
   handleArchive: () => Promise<void>;
   handleOpenScheduling: () => void;
   handlePublish: (notes?: string) => Promise<void>;
@@ -33,10 +31,6 @@ export function useBuilderRouteController(
 
   const [state, setState] = useState<ExamState | null>(null);
   const [exam, setExam] = useState<ExamEntity | undefined>(undefined);
-  const [versions, setVersions] = useState<ExamVersionSummary[]>([]);
-  const [publishReadiness, setPublishReadiness] = useState<PublishReadiness | undefined>(
-    undefined,
-  );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,16 +50,10 @@ export function useBuilderRouteController(
         throw new Error('Exam not found');
       }
 
-      const [examState, allVersions, readiness] = await Promise.all([
-        getExamStateFromEntity(entity, examRepository),
-        examRepository.getVersionSummaries(examId),
-        examLifecycleService.getPublishReadiness(examId),
-      ]);
+      const examState = await getExamStateFromEntity(entity, examRepository);
 
       setExam(entity);
       setState(examState);
-      setVersions(allVersions);
-      setPublishReadiness(readiness);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load exam');
     } finally {
@@ -76,22 +64,6 @@ export function useBuilderRouteController(
   useEffect(() => {
     void loadExam();
   }, [loadExam]);
-
-  const refreshMetadata = useCallback(async () => {
-    if (!examId) {
-      return;
-    }
-
-    const [refreshedExam, refreshedVersions, readiness] = await Promise.all([
-      examRepository.getExamById(examId),
-      examRepository.getVersionSummaries(examId),
-      examLifecycleService.getPublishReadiness(examId),
-    ]);
-
-    setExam(refreshedExam ?? undefined);
-    setVersions(refreshedVersions);
-    setPublishReadiness(readiness);
-  }, [examId]);
 
   const handleUpdateExamContent = useCallback(
     async (nextContent: ExamState | ((previous: ExamState) => ExamState)) => {
@@ -108,9 +80,8 @@ export function useBuilderRouteController(
       }
 
       setState(resolvedContent);
-      await refreshMetadata();
     },
-    [examId, refreshMetadata, state],
+    [examId, state],
   );
 
   const handleSaveDraft = useCallback(
@@ -134,9 +105,9 @@ export function useBuilderRouteController(
       }
 
       await examLifecycleService.publishExam(examId, 'System', notes);
-      await refreshMetadata();
+      await loadExam();
     },
-    [examId, refreshMetadata],
+    [examId, loadExam],
   );
 
   const handleSchedulePublish = useCallback(
@@ -146,9 +117,9 @@ export function useBuilderRouteController(
       }
 
       await examLifecycleService.schedulePublish(examId, 'System', scheduledTime);
-      await refreshMetadata();
+      await loadExam();
     },
-    [examId, refreshMetadata],
+    [examId, loadExam],
   );
 
   const handleUnpublish = useCallback(
@@ -158,9 +129,9 @@ export function useBuilderRouteController(
       }
 
       await examLifecycleService.unpublishExam(examId, 'System', reason);
-      await refreshMetadata();
+      await loadExam();
     },
-    [examId, refreshMetadata],
+    [examId, loadExam],
   );
 
   const handleArchive = useCallback(async () => {
@@ -169,16 +140,14 @@ export function useBuilderRouteController(
     }
 
     await examLifecycleService.archiveExam(examId, 'System');
-    await refreshMetadata();
-  }, [examId, refreshMetadata]);
+    await loadExam();
+  }, [examId, loadExam]);
 
   return {
     error,
     exam,
     isLoading,
-    publishReadiness,
     state,
-    versions,
     handleArchive,
     handleOpenScheduling: () => navigate('/admin/scheduling'),
     handlePublish,
