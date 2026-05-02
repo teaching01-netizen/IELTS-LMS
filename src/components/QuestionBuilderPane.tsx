@@ -23,7 +23,9 @@ import { cloneQuestionBlockWithNewIds } from '../utils/cloneExamContent';
 import { createId } from '../utils/idUtils';
 import {
   appendSubAnswerLeafAtSlot,
+  isTreeCapableBlockType,
 } from '../utils/subAnswerTreeSlots';
+import { SubAnswerTreeEditor } from './builder/SubAnswerTreeEditor';
 
 interface BlockWithNumbers {
   block: QuestionBlock;
@@ -655,6 +657,27 @@ export function QuestionBuilderPane({
         className={`cursor-pointer transition-all ${isSelected ? 'ring-2 ring-green-500 ring-offset-2' : 'hover:ring-2 hover:ring-gray-300 hover:ring-offset-1'}`}
       >
         {blockContent}
+        {isTreeCapableBlockType(block.type) ? (
+          <SubAnswerTreeEditor
+            block={block}
+            startNumber={startNum}
+            enabled={Boolean((block as QuestionBlock & { subAnswerModeEnabled?: boolean }).subAnswerModeEnabled)}
+            onToggle={(enabled) => {
+              updateBlock({
+                ...(block as QuestionBlock & { subAnswerModeEnabled?: boolean }),
+                subAnswerModeEnabled: enabled,
+              } as QuestionBlock);
+            }}
+            onChangeTree={(nextTree) => {
+              updateBlock({
+                ...(block as QuestionBlock & { subAnswerModeEnabled?: boolean; answerTree?: SubAnswerTreeNode[] }),
+                subAnswerModeEnabled: true,
+                answerTree: nextTree,
+              } as QuestionBlock);
+            }}
+            onAddSubAnswerAtSlot={addSubAnswerToSlot}
+          />
+        ) : null}
         {INLINE_ADD_SUPPORTED_BLOCK_TYPES.has(block.type) ? (
           <button
             onClick={(e) => {

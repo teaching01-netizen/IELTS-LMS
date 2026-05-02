@@ -226,6 +226,7 @@ describe('subAnswerTreeSlots', () => {
     expect(next).toHaveLength(2);
     expect(next[0]?.children?.length).toBe(2);
     expect(next[1]?.children?.length).toBe(1);
+    expect(next[0]?.children?.[1]?.label).toBe('P1');
   });
 
   it('syncs canonical root first leaf content from slot seeds when root label is empty', () => {

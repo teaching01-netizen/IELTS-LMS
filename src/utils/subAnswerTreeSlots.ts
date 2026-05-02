@@ -208,13 +208,14 @@ export function appendSubAnswerLeafAtSlot(
     if (index !== slotIndex) return root;
 
     const { acceptedAnswers: _unused, ...rest } = root;
+    const seedLabel = root.children?.[0]?.label ?? '';
     return {
       ...rest,
       children: [
         ...(root.children ?? []),
         {
           id: createId('leaf'),
-          label: '',
+          label: seedLabel,
           acceptedAnswers: [],
           required: true,
         },

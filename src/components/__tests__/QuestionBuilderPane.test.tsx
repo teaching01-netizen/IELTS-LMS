@@ -165,4 +165,23 @@ describe('QuestionBuilderPane', () => {
       expect(screen.getByDisplayValue('Q23')).toBeInTheDocument();
     });
   });
+
+  it('shows shared sub-answer editor for tree-capable block types', () => {
+    render(
+      <QuestionBuilderPane
+        title="Reading"
+        blocks={[
+          {
+            id: 'block-short',
+            type: 'SHORT_ANSWER',
+            instruction: 'Answer',
+            questions: [{ id: 'q-1', prompt: 'Prompt 1', correctAnswer: 'A', answerRule: 'ONE_WORD' }],
+          } as any,
+        ]}
+        updateBlocks={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Sub-answer tree mode')).toBeInTheDocument();
+  });
 });

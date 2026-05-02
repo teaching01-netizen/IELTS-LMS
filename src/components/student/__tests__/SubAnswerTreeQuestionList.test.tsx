@@ -45,8 +45,8 @@ describe('SubAnswerTreeQuestionList', () => {
     );
 
     expect(screen.getByText('Top prompt text')).toBeInTheDocument();
-    expect(screen.getByText('1.1')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Answer for question 1.1' })).toBeInTheDocument();
+    expect(screen.getByText('1.')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Answer for question 1' })).toBeInTheDocument();
   });
 
   it('renders no prompt text when prompt is blank', () => {
@@ -60,9 +60,9 @@ describe('SubAnswerTreeQuestionList', () => {
       />,
     );
 
-    const promptParagraph = container.querySelector('p.text-sm.text-gray-800');
+    const promptParagraph = container.querySelector('p.text-gray-800');
     expect(promptParagraph).toBeNull();
-    expect(screen.getByText('1.1')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
   });
 
   it('shows root number when a root has only one leaf', () => {
@@ -84,5 +84,39 @@ describe('SubAnswerTreeQuestionList', () => {
     expect(screen.getByText('21')).toBeInTheDocument();
     expect(screen.queryByText('21.1')).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Answer for question 21' })).toBeInTheDocument();
+  });
+
+  it('keeps root header and adds dotted labels for multiple leaves under same question', () => {
+    const leafOne = buildTreeDescriptor({
+      id: 'tree-block::tree::root-a::leaf-a',
+      rootId: 'tree-block::tree::root::root-a',
+      rootNumber: 31,
+      numberLabel: '31.1',
+      treePrompt: 'Turtles were among the first group.',
+      rootLeafQuestionIds: ['tree-block::tree::root-a::leaf-a', 'tree-block::tree::root-a::leaf-b'],
+    });
+    const leafTwo = buildTreeDescriptor({
+      id: 'tree-block::tree::root-a::leaf-b',
+      rootId: 'tree-block::tree::root::root-a',
+      rootNumber: 31,
+      numberLabel: '31.2',
+      treePrompt: 'Turtles were among the first group.',
+      rootLeafQuestionIds: ['tree-block::tree::root-a::leaf-a', 'tree-block::tree::root-a::leaf-b'],
+    });
+
+    render(
+      <SubAnswerTreeQuestionList
+        questions={[leafOne, leafTwo]}
+        answers={{ [leafOne.id]: '', [leafTwo.id]: '' }}
+        currentQuestionId={leafOne.id}
+        onAnswerChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('31.')).toBeInTheDocument();
+    expect(screen.getByText('31.1')).toBeInTheDocument();
+    expect(screen.getByText('31.2')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Answer for question 31.1' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Answer for question 31.2' })).toBeInTheDocument();
   });
 });
