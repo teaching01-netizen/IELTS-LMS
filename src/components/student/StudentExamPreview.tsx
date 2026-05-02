@@ -113,6 +113,12 @@ function StudentExamPreviewInner({
     ['--student-chip-font-size' as string]: studentTypography.chipFontSize,
     ['--student-control-font-size' as string]: studentTypography.controlFontSize,
     ['--student-preview-font-size' as string]: studentTypography.previewFontSize,
+    ['--student-passage-font-size' as string]: studentTypography.passageFontSize,
+    ['--student-passage-title-font-size' as string]: studentTypography.passageTitleFontSize,
+    ['--student-passage-h1-font-size' as string]: studentTypography.passageH1FontSize,
+    ['--student-passage-h2-font-size' as string]: studentTypography.passageH2FontSize,
+    ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
+    ['--student-passage-line-height' as string]: studentTypography.passageLineHeight,
   } as React.CSSProperties;
 
   const enabledModules = useMemo(() => getEnabledModules(state.config), [state.config]);
@@ -251,10 +257,6 @@ function StudentExamPreviewInner({
         timeRemaining={timeRemaining}
         tabletMode={tabletMode}
         onClearHighlights={clearHighlights}
-        zoom={uiState.accessibilitySettings.zoom}
-        onZoomIn={uiActions.zoomIn}
-        onZoomOut={uiActions.zoomOut}
-        onZoomReset={uiActions.resetZoom}
         highlightEnabled={uiState.accessibilitySettings.highlightMode}
         highlightColor={highlightColor}
         onHighlightModeToggle={
@@ -314,6 +316,7 @@ function StudentExamPreviewInner({
             currentQuestionId={currentQuestionId}
             onNavigate={setCurrentQuestionId}
             timeRemaining={timeRemaining}
+            tabletMode={tabletMode}
           />
         ) : null}
 

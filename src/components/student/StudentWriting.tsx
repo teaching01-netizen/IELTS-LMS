@@ -9,6 +9,7 @@ import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
 import { WritingChartPreview } from '../writing/WritingChartPreview';
+import { useSplitPaneResize } from './useSplitPaneResize';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -26,6 +27,7 @@ interface StudentWritingProps {
   sessionId?: string | undefined;
   studentId?: string | undefined;
   showSubmitButton?: boolean | undefined;
+  tabletMode?: boolean | undefined;
 }
 
 export function StudentWriting({
@@ -41,44 +43,27 @@ export function StudentWriting({
   sessionId,
   studentId,
   showSubmitButton = true,
+  tabletMode = false,
 }: StudentWritingProps) {
+  const isTabletMode = Boolean(tabletMode);
   const attemptContext = useOptionalStudentAttempt();
   const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
   const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
   const writingConfig = state.config.sections.writing;
   const [activeTaskId, setActiveTaskId] = useState<string>(currentQuestionId || writingConfig.tasks[0]?.id || 'task1');
-  const [leftWidth, setLeftWidth] = useState(50);
   const [isEditorFocused, setIsEditorFocused] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const lastKeydownRef = useRef<number>(0);
   const previousValueRef = useRef<string>('');
   const editorHasFocusRef = useRef(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
-
-  const handleDrag = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-      const firstTouch = 'touches' in e ? e.touches[0] : undefined;
-      if ('touches' in e && !firstTouch) {
-        return;
-      }
-      const clientX = firstTouch ? firstTouch.clientX : (e as MouseEvent).clientX;
-      const newWidth = (clientX / window.innerWidth) * 100;
-      if (newWidth > 30 && newWidth < 70) {
-        setLeftWidth(newWidth);
-      }
-    };
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('touchmove', handleMouseMove);
-      document.removeEventListener('touchend', handleMouseUp);
-    };
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('touchmove', handleMouseMove);
-    document.addEventListener('touchend', handleMouseUp);
-  };
+  const { handleDrag, leftWidth, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+    isTabletMode,
+    materialPaneWidthProperty: '--writing-prompt-pane-width',
+    answerPaneWidthProperty: '--writing-editor-pane-width',
+    defaultLeftWidth: 50,
+    dividerMode: isTabletMode ? 'overlay' : 'consumes-space',
+  });
 
   const currentTask = writingConfig.tasks.find(t => t.id === activeTaskId) || writingConfig.tasks[0];
   const currentText = writingAnswers[activeTaskId] || '';
@@ -221,31 +206,31 @@ export function StudentWriting({
     }
   };
 
-  const insertPlainTextAtCursor = (text: string) => {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) {
-      return;
+  const blockWritingEditorInteraction = (
+    event:
+      | React.ClipboardEvent<HTMLDivElement>
+      | React.DragEvent<HTMLDivElement>
+      | React.MouseEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.type === 'paste') {
+      saveStudentAuditEvent(
+        resolvedSessionId,
+        'PASTE_BLOCKED',
+        {
+          targetName: 'DIV',
+          targetType: 'writing-editor',
+          isContentEditable: true,
+        },
+        resolvedStudentId,
+      );
     }
-    const range = selection.getRangeAt(0);
-    range.deleteContents();
-    const textNode = document.createTextNode(text);
-    range.insertNode(textNode);
-    range.setStartAfter(textNode);
-    range.setEndAfter(textNode);
-    selection.removeAllRanges();
-    selection.addRange(range);
   };
 
-  const handleEditorPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+  const blockMediaSaveInteraction = (event: React.SyntheticEvent) => {
     event.preventDefault();
-    const pasted = event.clipboardData?.getData('text/plain') ?? '';
-    if (!pasted) return;
-    insertPlainTextAtCursor(pasted);
-    handleEditorInput();
-  };
-
-  const handleEditorDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
+    event.stopPropagation();
   };
 
   const handleSubmitClick = () => {
@@ -276,8 +261,21 @@ export function StudentWriting({
 
 	return (
     <div className="flex flex-col h-full w-full bg-white">
-      <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden relative border-t border-gray-300">
-        <div style={{ width: `${leftWidth}%` }} className="h-full flex flex-col relative min-w-[260px] md:min-w-[280px] lg:min-w-[300px]">
+      <div
+        className={`relative flex flex-1 min-h-0 overflow-hidden border-t border-gray-300 ${
+          isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
+        }`}
+        ref={workspaceRef}
+        style={splitPaneStyle}
+        data-testid="writing-split-workspace"
+      >
+        <div
+          className={`h-full flex flex-col relative ${
+            isTabletMode
+              ? 'w-[var(--writing-prompt-pane-width)] min-w-[48px] border-r border-gray-200'
+              : 'min-w-[260px] md:min-w-[280px] lg:w-[var(--writing-prompt-pane-width)] lg:min-w-[300px]'
+          }`}
+        >
           {/* Timer Bar */}
           <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-500' : isTimeWarning ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
 
@@ -295,7 +293,12 @@ export function StudentWriting({
               </div>
             </div>
             {currentChart && (
-              <div className="mb-5 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div
+                className="mb-5 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm"
+                onContextMenu={blockMediaSaveInteraction}
+                onDragStart={blockMediaSaveInteraction}
+                onDrop={blockMediaSaveInteraction}
+              >
                 <p className="text-[length:var(--student-meta-font-size)] font-black text-gray-400 uppercase tracking-[0.22em] mb-3">
                   Stimulus Chart
                 </p>
@@ -322,18 +325,42 @@ export function StudentWriting({
         <div 
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
-          className="hidden lg:flex w-4 bg-gray-400 relative flex items-center justify-center cursor-col-resize flex-shrink-0 hover:bg-gray-600 transition-colors"
+          className={`${isTabletMode ? 'absolute inset-y-0 z-20 flex w-11 items-center justify-center' : 'hidden w-4 lg:flex relative items-center justify-center flex-shrink-0'} bg-gray-400 cursor-col-resize touch-none hover:bg-gray-600 transition-colors`}
+          style={isTabletMode ? { left: `calc(${leftWidth}% - 22px)` } : undefined}
+          role="separator"
+          aria-label="Resize writing prompt and answer panels"
+          aria-orientation="vertical"
+          data-testid="writing-pane-resizer"
         >
-          <div className="w-8 h-8 bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none">
-            <ArrowLeftRight size={14} className="text-gray-600" />
+          <div className={`${isTabletMode ? 'h-[5.5rem] w-14' : 'w-8 h-8'} bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none`}>
+            <ArrowLeftRight size={isTabletMode ? 22 : 14} className="text-gray-600" />
           </div>
         </div>
 
-        <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative min-w-[280px] md:min-w-[320px]">
+        <div
+          className={`h-full flex flex-col relative ${
+            isTabletMode
+              ? 'w-[var(--writing-editor-pane-width)] min-w-[48px]'
+              : 'min-w-[280px] md:min-w-[320px] lg:w-[var(--writing-editor-pane-width)]'
+          }`}
+        >
           <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
             <div className="relative flex-1 w-full">
-              <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-600">
+              <div className="flex flex-col gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-600 sm:flex-row sm:items-center sm:justify-between">
                 <span>Writing Response</span>
+                <div className="flex items-center gap-2" aria-label="Current word count">
+                  <span className="text-[length:var(--student-meta-font-size)] font-bold text-gray-400 uppercase tracking-widest">
+                    Word Count
+                  </span>
+                  <span className={`text-lg font-black leading-none ${
+                    isOptimal ? 'text-emerald-600' :
+                    isOverLength ? 'text-red-600' :
+                    isWordCountMet ? 'text-blue-600' :
+                    isWordCountWarning ? 'text-amber-500' : 'text-gray-900'
+                  }`}>
+                    {wordCount}
+                  </span>
+                </div>
               </div>
               {showEditorPlaceholder && (
                   <div className="pointer-events-none absolute left-4 top-14 md:left-6 md:top-16 lg:left-8 lg:top-20 text-base md:text-lg leading-relaxed text-gray-400 font-serif select-none">
@@ -363,8 +390,11 @@ export function StudentWriting({
                       onWritingChange(activeTaskId, editorRef.current.innerHTML);
                     }
                   }}
-                  onPaste={handleEditorPaste}
-                  onDrop={handleEditorDrop}
+                  onPaste={blockWritingEditorInteraction}
+                  onCopy={blockWritingEditorInteraction}
+                  onCut={blockWritingEditorInteraction}
+                  onDrop={blockWritingEditorInteraction}
+                  onContextMenu={blockWritingEditorInteraction}
 	                className="flex-1 w-full p-4 md:p-6 lg:p-8 text-base md:text-lg leading-relaxed text-gray-800 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                   data-student-zoom-scroll
 	                style={{ minHeight: MIN_HEIGHTS.WRITING_EDITOR }}
@@ -373,24 +403,6 @@ export function StudentWriting({
 	                autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
 	              />
               </div>
-            
-	            <div className="border-t border-gray-200 p-3 md:p-5 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs md:text-sm flex-shrink-0">
-	              <div className="flex gap-4 md:gap-8 w-full sm:w-auto">
-	                <div className="flex flex-col">
-	                  <span className="text-[length:var(--student-meta-font-size)] font-bold text-gray-400 uppercase tracking-widest">
-	                    Word Count
-	                  </span>
-	                  <span className={`text-lg md:text-xl font-black ${
-	                    isOptimal ? 'text-emerald-600' :
-	                    isOverLength ? 'text-red-600' :
-	                    isWordCountMet ? 'text-blue-600' :
-	                    isWordCountWarning ? 'text-amber-500' : 'text-gray-900'
-	                  }`}>
-	                    {wordCount}
-	                  </span>
-	                </div>
-	              </div>
-	            </div>
 	          </div>
 
         </div>
