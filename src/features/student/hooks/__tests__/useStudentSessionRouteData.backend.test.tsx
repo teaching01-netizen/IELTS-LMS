@@ -186,6 +186,40 @@ function buildAttempt() {
   };
 }
 
+function buildSessionContextWithMissingDiagramImage() {
+  const context = buildSessionContext(buildAttempt());
+  const contentSnapshot = context.version.contentSnapshot as {
+    listening: {
+      parts: Array<{
+        id: string;
+        title: string;
+        pins: unknown[];
+        blocks: unknown[];
+      }>;
+    };
+  };
+
+  contentSnapshot.listening.parts = [
+    {
+      id: 'l1',
+      title: 'Part 1',
+      pins: [],
+      blocks: [
+        {
+          id: 'diagram-1',
+          type: 'DIAGRAM_LABELING',
+          title: 'Diagram',
+          instructions: '',
+          imageUrl: '  ',
+          labels: [{ id: 'label-1', x: 12, y: 24, correctAnswer: 'A' }],
+        },
+      ],
+    },
+  ];
+
+  return context;
+}
+
 describe('useStudentSessionRouteData backend mode', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -305,5 +339,35 @@ describe('useStudentSessionRouteData backend mode', () => {
 
     expect(result.current.error).toMatch(/invalid access code/i);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('logs published snapshot diagnostics when diagram blocks are missing imageUrl', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(jsonResponse(buildSessionContextWithMissingDiagramImage())));
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[student-session] published version has DIAGRAM_LABELING blocks without imageUrl',
+      expect.objectContaining({
+        routeScheduleId: 'sched-1',
+        scheduleId: 'sched-1',
+        publishedVersionId: 'ver-1',
+        loadedVersionId: 'ver-1',
+        missingImageUrlCount: 1,
+        missingUsableImageCount: 1,
+      }),
+    );
   });
 });

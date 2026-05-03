@@ -44,6 +44,52 @@ const LEGACY_STATUS_MAP: Record<ExamStatus, Exam['status']> = {
   archived: 'Archived',
 };
 
+function readNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeDiagramImageUrl(block: DiagramLabelingBlock): DiagramLabelingBlock {
+  const imageFallbackSource = block as DiagramLabelingBlock & {
+    imageSrc?: unknown;
+    assetUrl?: unknown;
+  };
+  const normalizedImageUrl =
+    readNonEmptyString(block.imageUrl) ??
+    readNonEmptyString(imageFallbackSource.imageSrc) ??
+    readNonEmptyString(imageFallbackSource.assetUrl) ??
+    '';
+
+  if (normalizedImageUrl === block.imageUrl) {
+    return block;
+  }
+
+  return {
+    ...block,
+    imageUrl: normalizedImageUrl,
+  };
+}
+
+function normalizeQuestionBlockDiagram(block: QuestionBlock): QuestionBlock {
+  if (block.type !== 'DIAGRAM_LABELING') {
+    return block;
+  }
+
+  return normalizeDiagramImageUrl(block);
+}
+
+function normalizeQuestionBlocks(blocks: QuestionBlock[] | undefined): QuestionBlock[] {
+  if (!Array.isArray(blocks)) {
+    return [];
+  }
+
+  return blocks.map((block) => normalizeQuestionBlockDiagram(block));
+}
+
 export interface StudentQuestionDescriptor {
   id: string;
   blockId: string;
@@ -326,11 +372,21 @@ export function hydrateExamState(state: ExamState): ExamState {
       ...mergedState.reading,
       passages: Array.isArray(mergedState.reading.passages) ? mergedState.reading.passages.map((passage) => ({
         ...passage,
+        blocks: normalizeQuestionBlocks(passage.blocks),
         images: passage.images ?? [],
         wordCount:
           passage.wordCount ??
           (passage.content.trim() ? passage.content.trim().split(/\s+/).length : 0),
       })) : [],
+    },
+    listening: {
+      ...mergedState.listening,
+      parts: Array.isArray(mergedState.listening.parts)
+        ? mergedState.listening.parts.map((part) => ({
+          ...part,
+          blocks: normalizeQuestionBlocks(part.blocks),
+        }))
+        : [],
     },
     writing,
     speaking: {

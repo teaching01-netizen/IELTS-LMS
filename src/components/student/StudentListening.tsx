@@ -49,7 +49,7 @@ function ListeningDiagramReference({
   if (!sources[0]) {
     return (
       <div className="rounded-lg border border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
-        Add a diagram to support this question.
+        Diagram image URL is missing or inaccessible.
       </div>
     );
   }

@@ -51,4 +51,59 @@ describe('hydrateExamState', () => {
     expect(hydrated.reading.passages.length).toBeGreaterThan(0);
     expect(hydrated.listening.parts.length).toBeGreaterThan(0);
   });
+
+  it('normalizes legacy diagram image fields when imageUrl is empty', () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+
+    const hydrated = hydrateExamState({
+      config,
+      title: 'Diagram Recovery Exam',
+      type: 'Academic',
+      reading: {
+        passages: [],
+      },
+      listening: {
+        parts: [
+          {
+            id: 'l1',
+            title: 'Part 1',
+            pins: [],
+            blocks: [
+              {
+                id: 'd1',
+                type: 'DIAGRAM_LABELING',
+                title: 'Diagram one',
+                instructions: '',
+                imageUrl: '   ',
+                imageSrc: ' /diagram-from-image-src.png ',
+                labels: [{ id: 'label-1', x: 10, y: 20, correctAnswer: 'A' }],
+              },
+              {
+                id: 'd2',
+                type: 'DIAGRAM_LABELING',
+                title: 'Diagram two',
+                instructions: '',
+                imageUrl: '',
+                assetUrl: ' /diagram-from-asset-url.png ',
+                labels: [{ id: 'label-2', x: 30, y: 40, correctAnswer: 'B' }],
+              },
+            ],
+          },
+        ],
+      },
+      writing: {
+        task1Prompt: '',
+        task2Prompt: '',
+      },
+      speaking: {
+        part1Topics: [],
+        cueCard: '',
+        part3Discussion: [],
+      },
+    } as any);
+
+    const [diagramFromImageSrc, diagramFromAssetUrl] = hydrated.listening.parts[0].blocks as any[];
+    expect(diagramFromImageSrc.imageUrl).toBe('/diagram-from-image-src.png');
+    expect(diagramFromAssetUrl.imageUrl).toBe('/diagram-from-asset-url.png');
+  });
 });

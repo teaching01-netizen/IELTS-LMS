@@ -297,7 +297,7 @@ describe('student question experience', () => {
       />,
     );
 
-    expect(screen.getByText(/add a diagram/i)).toBeInTheDocument();
+    expect(screen.getByText(/image url is missing or inaccessible/i)).toBeInTheDocument();
     const firstAnswer = screen.getByRole('textbox', { name: 'Answer for question 12' });
     expect(screen.getByRole('textbox', { name: 'Answer for question 13' })).toBeInTheDocument();
     const customPrompt = screen.getByText('Engine label');

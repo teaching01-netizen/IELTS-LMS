@@ -564,7 +564,7 @@ export function QuestionRenderer({
             />
           ) : (
             <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-              <div className="p-6 text-center text-sm text-gray-500">Add a diagram to support this question.</div>
+              <div className="p-6 text-center text-sm text-gray-500">Diagram image URL is missing or inaccessible.</div>
             </div>
           )}
         </div>

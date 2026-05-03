@@ -333,6 +333,44 @@ describe('student highlight persistence', () => {
     getSelectionSpy.mockRestore();
   });
 
+  it('does not remove a highlight immediately after a successful mouse selection but allows removal after the guard window', async () => {
+    vi.useFakeTimers();
+    let currentTextNode: ChildNode | null = null;
+    const selectionMock = createSelectionMock(() => currentTextNode, {
+      start: 6,
+      end: 10,
+      text: 'beta',
+    });
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(selectionMock);
+
+    const { container } = render(<FormattedText text="Alpha beta gamma" highlightEnabled />);
+    const textElement = container.querySelector('span');
+    if (!textElement) {
+      throw new Error('Expected a rendered text span');
+    }
+
+    currentTextNode = textElement.firstChild;
+    fireEvent.mouseUp(textElement);
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(1);
+
+    const highlight = container.querySelector('mark[data-highlighted="true"]');
+    if (!highlight) {
+      throw new Error('Expected a highlight to be created');
+    }
+
+    fireEvent.click(highlight);
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(451);
+    });
+
+    fireEvent.click(highlight);
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(0);
+
+    getSelectionSpy.mockRestore();
+  });
+
   it('removes one tapped highlight while preserving the rest', async () => {
     const { container } = render(
       <RichTextHighlighter
