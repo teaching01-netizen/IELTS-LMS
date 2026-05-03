@@ -148,22 +148,29 @@ describe('GradingSessionDetail print writing', () => {
     expect(gradingRepository.getWritingSubmissionsBySubmissionId).toHaveBeenCalledTimes(2);
     expect(printedSnapshot).toContain('Ada Student');
     expect(printedSnapshot).toContain('Ben Student');
+    expect(printedSnapshot).toContain('Task 1');
+    expect(printedSnapshot).toContain('Task 2');
     expect(printedSnapshot).toContain('Assessment Form');
     expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Ada Student');
     expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Ben Student');
+    expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Task 1');
+    expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Task 2');
     expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('Assessment Form');
+    expect(document.querySelector('.session-writing-print-root')).toHaveTextContent('No writing response recorded.');
     expect(document.querySelector('.session-writing-print-response')).toHaveTextContent('Ada response text');
     expect(document.querySelector('.session-writing-print-response strong')).toBeNull();
+    expect(document.querySelectorAll('.session-writing-print-task-page')).toHaveLength(4);
+    expect(document.querySelectorAll('.session-writing-print-page-header')).toHaveLength(4);
     const printStyle = Array.from(document.querySelectorAll('style'))
       .map((style) => style.textContent ?? '')
       .find((text) => text.includes('.session-writing-print-root'));
 
-    expect(printStyle).toContain('.session-writing-print-summary');
+    expect(printStyle).toContain('.session-writing-print-task-page');
+    expect(printStyle).toContain('page-break-before: always');
+    expect(printStyle).toContain('.session-writing-print-task-page-first');
     expect(printStyle).toContain('.session-writing-print-response');
-    expect(printStyle).toContain('page-break-after: always');
-    expect(printStyle).toContain('.session-writing-print-student:last-child');
-    expect(printStyle).toContain('page-break-after: auto');
-    expect(printStyle).not.toContain('page-break-before: always');
+    expect(printStyle).toContain('overflow-wrap: anywhere');
+    expect(printStyle).toContain('word-break: break-word');
     expect(printStyle).not.toContain('break-inside: avoid');
   });
 });
