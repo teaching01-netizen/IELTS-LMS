@@ -381,8 +381,11 @@ export function StudentHeader({
     : null;
 
   return (
-    <header className="h-14 md:h-16 border-b border-gray-200 bg-white flex items-center justify-between px-3 md:px-4 lg:px-6 flex-shrink-0 z-10 shadow-sm" role="banner">
-      <div className="flex items-center gap-3 md:gap-4 lg:gap-6 min-w-0">
+    <header
+      className="h-14 md:h-16 border-b border-gray-200 bg-white grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 md:gap-3 px-3 md:px-4 lg:px-6 flex-shrink-0 z-10 shadow-sm"
+      role="banner"
+    >
+      <div className="flex items-center gap-3 md:gap-4 lg:gap-6 min-w-0 justify-self-start">
         <div className="bg-white border-2 border-gray-900 px-1.5 md:px-2 lg:px-3 py-0.5 rounded-sm flex-shrink-0">
           <div className="text-gray-900 font-black text-lg md:text-xl lg:text-2xl tracking-tighter" style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif' }}>IELTS</div>
         </div>
@@ -395,9 +398,12 @@ export function StudentHeader({
           </div>
         </div>
       </div>
-      
-      {timeRemaining !== undefined && (
-        <div className="flex items-center gap-2 md:gap-3 lg:gap-4 overflow-x-auto no-scrollbar">
+
+      <div
+        className="flex min-w-[8rem] items-center justify-center justify-self-center"
+        data-testid="student-header-timer-slot"
+      >
+        {timeRemaining !== undefined ? (
           <div className="flex items-center gap-1.5 md:gap-2 lg:gap-3 flex-shrink-0">
             <div className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-bold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border-2 rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? 'bg-red-100 border-red-700 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-900'}`}>
               <Clock size={14} className={timeRemaining < 300 ? 'text-red-900' : 'text-gray-700'} />
@@ -411,10 +417,13 @@ export function StudentHeader({
               </span>
             </div>
           </div>
-        </div>
-      )}
+        ) : null}
+      </div>
 
-        <div className="flex items-center gap-1.5 md:gap-2 lg:gap-4 text-gray-700 flex-shrink-0 overflow-x-auto no-scrollbar max-w-full">
+      <div
+        className="flex min-w-0 max-w-full items-center justify-end gap-1.5 md:gap-2 lg:gap-4 text-gray-700 flex-shrink-0 overflow-x-auto no-scrollbar justify-self-end"
+        data-testid="student-header-controls-slot"
+      >
           {autoSaveStatus && (
             <div className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-wider hidden sm:flex">
             {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (

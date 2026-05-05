@@ -18,10 +18,10 @@ export const studentHighlightPalette: StudentHighlightPaletteEntry[] = [
   },
   {
     id: 'amber',
-    label: 'Amber',
-    swatchClassName: 'bg-amber-200',
-    highlightClassName: 'rounded-sm bg-amber-200/80 px-0.5 text-gray-900',
-    highlightColorValue: '#fdba74',
+    label: 'Pink',
+    swatchClassName: 'bg-pink-200',
+    highlightClassName: 'rounded-sm bg-pink-200/80 px-0.5 text-gray-900',
+    highlightColorValue: '#f9a8d4',
   },
   {
     id: 'green',

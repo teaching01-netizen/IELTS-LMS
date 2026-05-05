@@ -933,7 +933,7 @@ describe('student question experience', () => {
     fireEvent.click(screen.getByRole('button', { name: /reset zoom/i }));
     fireEvent.click(screen.getByRole('button', { name: /open highlight options/i }));
     expect(screen.getByRole('dialog', { name: /highlight options/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /select amber highlight color/i }));
+    fireEvent.click(screen.getByRole('button', { name: /select pink highlight color/i }));
     fireEvent.click(screen.getByRole('button', { name: /open accessibility settings/i }));
 
     expect(onZoomOut).toHaveBeenCalledTimes(1);
@@ -987,7 +987,7 @@ describe('student question experience', () => {
     expect(within(highlightPanel).queryByTestId('zoom-controls')).not.toBeInTheDocument();
     expect(highlightPanel.parentElement).toBe(document.body);
     expect(highlightPanel).toHaveClass('z-[90]');
-    fireEvent.click(within(highlightPanel).getByRole('button', { name: /select amber highlight color/i }));
+    fireEvent.click(within(highlightPanel).getByRole('button', { name: /select pink highlight color/i }));
     fireEvent.click(screen.getByRole('button', { name: /open accessibility settings/i }));
 
     expect(onZoomIn).toHaveBeenCalledTimes(1);
@@ -996,6 +996,55 @@ describe('student question experience', () => {
     expect(onOpenAccessibility).toHaveBeenCalledTimes(1);
     expect(onZoomOut).not.toHaveBeenCalled();
     expect(onZoomReset).not.toHaveBeenCalled();
+  });
+
+  it('keeps the timer anchored in the same center slot regardless of module-specific controls', () => {
+    const onOpenAccessibility = vi.fn();
+    const onOpenNavigator = vi.fn();
+    const onZoomIn = vi.fn();
+    const onZoomOut = vi.fn();
+    const onZoomReset = vi.fn();
+    const onHighlightModeToggle = vi.fn();
+    const onHighlightColorChange = vi.fn();
+
+    const { rerender } = render(
+      <StudentHeader
+        onExit={() => {}}
+        timeRemaining={1200}
+        isExamActive
+        onOpenAccessibility={onOpenAccessibility}
+      />,
+    );
+
+    const writingHeader = screen.getByRole('banner');
+    const writingTimerSlot = screen.getByTestId('student-header-timer-slot');
+    const timerSlotClassName = writingTimerSlot.className;
+
+    expect(writingHeader).toHaveClass('grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]');
+    expect(writingTimerSlot).toHaveClass('justify-self-center');
+    expect(screen.queryByRole('button', { name: /open question navigator/i })).not.toBeInTheDocument();
+
+    rerender(
+      <StudentHeader
+        onExit={() => {}}
+        timeRemaining={1200}
+        isExamActive
+        zoom={1}
+        highlightEnabled={false}
+        highlightColor="yellow"
+        onOpenAccessibility={onOpenAccessibility}
+        onOpenNavigator={onOpenNavigator}
+        onZoomIn={onZoomIn}
+        onZoomOut={onZoomOut}
+        onZoomReset={onZoomReset}
+        onHighlightModeToggle={onHighlightModeToggle}
+        onHighlightColorChange={onHighlightColorChange}
+      />,
+    );
+
+    const readingTimerSlot = screen.getByTestId('student-header-timer-slot');
+    expect(readingTimerSlot.className).toBe(timerSlotClassName);
+    expect(screen.getByRole('button', { name: /open question navigator/i })).toBeInTheDocument();
   });
 
   it('hides the header exit control when requested', () => {

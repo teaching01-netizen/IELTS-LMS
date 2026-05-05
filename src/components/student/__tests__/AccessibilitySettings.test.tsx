@@ -34,7 +34,7 @@ describe('AccessibilitySettings', () => {
     expect(screen.queryByRole('button', { name: /enable highlight mode/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /disable highlight mode/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /select yellow highlight color/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /select amber highlight color/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /select pink highlight color/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /select green highlight color/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /select blue highlight color/i })).not.toBeInTheDocument();
   });
