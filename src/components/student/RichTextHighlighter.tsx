@@ -1,16 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import {
-  applyHighlightFromSnapshotWithPolicy,
-  applySelectionHighlightWithPolicy,
   escapeHtml,
-  removeHighlightAtIndex,
-  type HighlightPolicyReason,
-  type HighlightSelectionSnapshot,
 } from './highlightSelection';
-import { getStudentHighlightClassName, type StudentHighlightColor } from './highlightPalette';
+import { type StudentHighlightColor } from './highlightPalette';
 import { usePersistedStudentHighlightHtml } from './highlightPersistence';
-import { useDeferredSelectionHighlight } from './useDeferredSelectionHighlight';
+import { useStudentHighlightInteractions } from './useStudentHighlightInteractions';
 
 interface RichTextHighlighterProps {
   content: string;
@@ -24,10 +19,6 @@ interface RichTextHighlighterProps {
   showHighlightButton?: boolean | undefined;
   highlightButtonLabel?: string | undefined;
 }
-const MOUSE_SELECTION_REMOVE_GUARD_MS = 450;
-const HIGHLIGHT_POLICY_HINT_MS = 1800;
-const HIGHLIGHT_POLICY_HINT_THROTTLE_MS = 1200;
-
 export function RichTextHighlighter({
   content,
   contentType = 'text',
@@ -42,10 +33,6 @@ export function RichTextHighlighter({
 }: RichTextHighlighterProps) {
   const Tag = as as any;
   const containerRef = useRef<HTMLElement | null>(null);
-  const lastMouseSelectionIntentAtRef = useRef<number | null>(null);
-  const highlightPolicyHintTimerRef = useRef<number | null>(null);
-  const lastPolicyHintAtRef = useRef<number>(0);
-  const [highlightPolicyHint, setHighlightPolicyHint] = useState<string | null>(null);
   const initialHtml = useMemo(
     () => (contentType === 'html' ? sanitizeHtml(content) : escapeHtml(content)),
     [content, contentType],
@@ -54,149 +41,20 @@ export function RichTextHighlighter({
     initialHtml,
     highlightPersistenceKey,
   );
-
-  const handleSelection = useCallback(() => {
-    if (!enabled) {
-      return false;
-    }
-
-    const container = containerRef.current;
-    const selection = window.getSelection();
-    if (!container || !selection) {
-      return false;
-    }
-
-    const result = applySelectionHighlightWithPolicy(
-      container,
-      selection,
-      highlightClassName ??
-        (highlightColor ? getStudentHighlightClassName(highlightColor) : 'rounded-sm bg-yellow-200/80 text-gray-900'),
-    );
-
-    if (result.html) {
-      setHtml(result.html);
-      return true;
-    }
-
-    maybeShowPolicyHint(result.reason);
-    return false;
-  }, [enabled, highlightClassName, highlightColor, setHtml]);
-
-  const clearHighlightPolicyHintTimer = useCallback(() => {
-    if (highlightPolicyHintTimerRef.current !== null) {
-      window.clearTimeout(highlightPolicyHintTimerRef.current);
-      highlightPolicyHintTimerRef.current = null;
-    }
-  }, []);
-
-  const maybeShowPolicyHint = useCallback((reason: HighlightPolicyReason | null) => {
-    if (reason !== 'cross_block_selection') {
-      return;
-    }
-    const now = Date.now();
-    if (now - lastPolicyHintAtRef.current < HIGHLIGHT_POLICY_HINT_THROTTLE_MS) {
-      return;
-    }
-    lastPolicyHintAtRef.current = now;
-    setHighlightPolicyHint('Highlight works within one paragraph at a time.');
-    clearHighlightPolicyHintTimer();
-    highlightPolicyHintTimerRef.current = window.setTimeout(() => {
-      setHighlightPolicyHint(null);
-      highlightPolicyHintTimerRef.current = null;
-    }, HIGHLIGHT_POLICY_HINT_MS);
-  }, [clearHighlightPolicyHintTimer]);
-
-  const applySelectionFromSnapshot = useCallback(
-    (snapshot: HighlightSelectionSnapshot) => {
-      if (!enabled) {
-        return false;
-      }
-
-      const container = containerRef.current;
-      if (!container) {
-        return false;
-      }
-
-      const result = applyHighlightFromSnapshotWithPolicy(
-        container,
-        snapshot,
-        highlightClassName ??
-          (highlightColor ? getStudentHighlightClassName(highlightColor) : 'rounded-sm bg-yellow-200/80 text-gray-900'),
-      );
-
-      if (!result.html) {
-        maybeShowPolicyHint(result.reason);
-        return false;
-      }
-
-      setHtml(result.html);
-      window.getSelection()?.removeAllRanges();
-      return true;
-    },
-    [enabled, highlightClassName, highlightColor, maybeShowPolicyHint, setHtml],
-  );
-  const handleMouseUp = useCallback(() => {
-    if (!enabled) {
-      return;
-    }
-    const applied = handleSelection();
-    if (applied) {
-      lastMouseSelectionIntentAtRef.current = Date.now();
-    }
-  }, [enabled, handleSelection]);
-  const { isWithinRecentTouchAutoApplyGuard, startTouchSelectionSession, scheduleSelectionHighlight } =
-    useDeferredSelectionHighlight({
+  const {
+    handleSelection,
+    handleMouseUp,
+    removeTappedHighlight,
+    startTouchSelectionSession,
+    scheduleSelectionHighlight,
+    highlightPolicyHint,
+  } = useStudentHighlightInteractions({
     enabled,
     containerRef,
-    applySelection: handleSelection,
-    applySelectionFromSnapshot,
-    });
-
-  const removeTappedHighlight = useCallback(
-    (event: React.MouseEvent<HTMLElement>) => {
-      if (!enabled) {
-        return;
-      }
-      if (isWithinRecentTouchAutoApplyGuard()) {
-        return;
-      }
-      const lastMouseSelectionIntentAt = lastMouseSelectionIntentAtRef.current;
-      if (lastMouseSelectionIntentAt && Date.now() - lastMouseSelectionIntentAt < MOUSE_SELECTION_REMOVE_GUARD_MS) {
-        return;
-      }
-
-      const container = containerRef.current;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      const highlightedNode = target?.closest('mark[data-highlighted="true"]');
-      if (!container || !highlightedNode || !container.contains(highlightedNode)) {
-        return;
-      }
-
-      const highlightIndex = Array.from(container.querySelectorAll('mark[data-highlighted="true"]')).indexOf(highlightedNode);
-      const nextHtml = removeHighlightAtIndex(container, highlightIndex);
-      if (nextHtml) {
-        event.preventDefault();
-        event.stopPropagation();
-        setHtml(nextHtml);
-      }
-    },
-    [enabled, isWithinRecentTouchAutoApplyGuard, setHtml],
-  );
-
-  useEffect(() => {
-    if (!enabled) {
-      clearHighlightPolicyHintTimer();
-    }
-    return () => {
-      clearHighlightPolicyHintTimer();
-    };
-  }, [clearHighlightPolicyHintTimer, enabled]);
-
-  useEffect(() => {
-    return () => {
-      clearHighlightPolicyHintTimer();
-    };
-  }, [clearHighlightPolicyHintTimer]);
+    highlightClassName,
+    highlightColor,
+    onHtmlChange: setHtml,
+  });
 
   return (
     <>
