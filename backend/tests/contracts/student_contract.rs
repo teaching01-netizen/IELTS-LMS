@@ -379,6 +379,9 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
         .as_str()
         .unwrap()
         .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -390,33 +393,18 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        client_session_id,
-                        mutations: vec![
-                            ielts_backend_domain::attempt::MutationEnvelope {
-                                id: "mutation-1".to_owned(),
-                                seq: 1,
-                                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                                command: command(
-                                    MutationType::Answer,
-                                    json!({"questionId": "q1", "value": "A"}),
-                                ),
-                                base_revision: None,
-                            },
-                            ielts_backend_domain::attempt::MutationEnvelope {
-                                id: "mutation-2".to_owned(),
-                                seq: 2,
-                                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 5).unwrap(),
-                                command: command(
-                                    MutationType::Flag,
-                                    json!({"questionId": "q1", "value": true}),
-                                ),
-                                base_revision: None,
-                            },
-                        ],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [
+                            {
+                                "mutationId": "mutation-1",
+                                "baseRevision": base_revision,
+                                "type": "SetScalar",
+                                "questionId": "q1",
+                                "value": "A"
+                            }
+                        ]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -426,18 +414,16 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = json_body(response).await;
-
-    assert_eq!(json["data"]["appliedMutationCount"], 2);
-    assert_eq!(json["data"]["serverAcceptedThroughSeq"], 2);
+    assert_eq!(json["data"]["appliedMutationCount"], 1);
+    assert_eq!(json["data"]["serverAcceptedThroughSeq"], 1);
     assert_eq!(json["data"]["attempt"]["answers"]["q1"], "A");
-    assert_eq!(json["data"]["attempt"]["flags"]["q1"], true);
     assert_eq!(json["data"]["attempt"]["recovery"]["syncState"], "saved");
 
     database.shutdown().await;
 }
 
 #[tokio::test]
-async fn mutation_batch_ack_mode_returns_only_commit_metadata() {
+async fn mutation_batch_returns_full_commit_payload() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -467,6 +453,9 @@ async fn mutation_batch_ack_mode_returns_only_commit_metadata() {
         .as_str()
         .unwrap()
         .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -480,15 +469,12 @@ async fn mutation_batch_ack_mode_returns_only_commit_metadata() {
                 .body(Body::from(
                     serde_json::to_vec(&json!({
                         "attemptId": attempt_id,
-                        "studentKey": student_key,
-                        "clientSessionId": client_session_id,
-                        "responseMode": "ack",
                         "mutations": [{
-                            "id": "mutation-ack-1",
-                            "seq": 1,
-                            "timestamp": "2026-01-10T09:05:00Z",
-                            "mutationType": "answer",
-                            "payload": {"questionId": "q1", "value": "A"}
+                            "mutationId": "mutation-ack-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
                         }]
                     }))
                     .unwrap(),
@@ -503,8 +489,8 @@ async fn mutation_batch_ack_mode_returns_only_commit_metadata() {
 
     assert_eq!(json["data"]["appliedMutationCount"], 1);
     assert_eq!(json["data"]["serverAcceptedThroughSeq"], 1);
-    assert_eq!(json["data"]["revision"], 2);
-    assert!(json["data"].get("attempt").is_none());
+    assert_eq!(json["data"]["revision"], base_revision + 1);
+    assert!(json["data"].get("attempt").is_some());
 
     database.shutdown().await;
 }
@@ -553,6 +539,9 @@ async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_an
         .as_str()
         .unwrap()
         .to_owned();
+    let base_revision = bootstrap_phone["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
 
     let first = app
         .clone()
@@ -565,21 +554,16 @@ async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_an
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        client_session_id: client_session_id_phone,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-1".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                            command: command(
-                                MutationType::Answer,
-                                json!({"questionId": "q1", "value": "A"}),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -599,21 +583,16 @@ async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_an
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        client_session_id: client_session_id_computer,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-2".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 5).unwrap(),
-                            command: command(
-                                MutationType::Answer,
-                                json!({"questionId": "q2", "value": "B"}),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-2",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "r1",
+                            "value": "B"
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -631,13 +610,13 @@ async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_an
             .unwrap();
 
     assert_eq!(answers["q1"], "A");
-    assert_eq!(answers["q2"], "B");
+    assert_eq!(answers["r1"], "B");
 
     database.shutdown().await;
 }
 
 #[tokio::test]
-async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch() {
+async fn mutation_batch_rejects_replayed_idempotency_key_and_hash_mismatch() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -657,33 +636,28 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
         .as_str()
         .unwrap()
         .to_owned();
-    let request = StudentMutationBatchRequest {
-        attempt_id: attempt_id.clone(),
-        student_key: student_key.clone(),
-        client_session_id: client_session_id.clone(),
-        mutations: vec![
-            ielts_backend_domain::attempt::MutationEnvelope {
-                id: "mutation-1".to_owned(),
-                seq: 1,
-                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                command: command(
-                    MutationType::Answer,
-                    json!({"questionId": "q1", "value": "A"}),
-                ),
-                base_revision: None,
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    let request = json!({
+        "attemptId": attempt_id.clone(),
+        "mutations": [
+            {
+                "mutationId": "mutation-1",
+                "baseRevision": base_revision,
+                "type": "SetScalar",
+                "questionId": "q1",
+                "value": "A"
             },
-            ielts_backend_domain::attempt::MutationEnvelope {
-                id: "mutation-2".to_owned(),
-                seq: 2,
-                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 5).unwrap(),
-                command: command(
-                    MutationType::Flag,
-                    json!({"questionId": "q1", "value": true}),
-                ),
-                base_revision: None,
-            },
-        ],
-    };
+            {
+                "mutationId": "mutation-2",
+                "baseRevision": base_revision,
+                "type": "SetScalar",
+                "questionId": "q1",
+                "value": "B"
+            }
+        ]
+    });
 
     let first = app
         .clone()
@@ -722,9 +696,9 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
         .await
         .unwrap();
 
-    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(replay.status(), StatusCode::CONFLICT);
     let replay_json = json_body(replay).await;
-    assert_eq!(replay_json["data"], first_json["data"]);
+    assert_eq!(replay_json["error"]["code"], "CONFLICT");
 
     let conflict = app
         .oneshot(
@@ -737,21 +711,16 @@ async fn mutation_batch_replays_same_idempotency_key_and_rejects_hash_mismatch()
                 .header("content-type", "application/json")
                 .header("idempotency-key", "mutation-replay-1")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        client_session_id: client_session_id.clone(),
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-3".to_owned(),
-                            seq: 3,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 10).unwrap(),
-                            command: command(
-                                MutationType::Answer,
-                                json!({"questionId": "q2", "value": "B"}),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-3",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q3",
+                            "value": "C"
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1083,6 +1052,7 @@ async fn student_audit_inserts_session_log_and_violation_event() {
                             ielts_backend_domain::schedule::AuditActionType::ViolationDetected,
                         payload: Some(json!({
                             "event": "VIOLATION_DETECTED",
+                            "violationId": "vio-student-audit-1",
                             "violationType": "TAB_SWITCH",
                             "severity": "critical",
                             "message": "Tab switching detected."
@@ -1150,20 +1120,13 @@ async fn submit_finalizes_the_attempt_idempotently() {
                 .header("content-type", "application/json")
                 .header("idempotency-key", "submission-idempotent-1")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentSubmitRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        answers: None,
-                        writing_answers: None,
-                        flags: None,
-                        last_seen_revision: Some(0),
-                        submission_id: Some("submission-idempotent-1".to_owned()),
-                        client_session_id: None,
-                        client_final_seq: Some(0),
-                        server_accepted_through_seq: Some(0),
-                        final_answer_patch: None,
-                        final_client_snapshot_hash: None,
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "lastSeenRevision": 0,
+                        "submissionId": "submission-idempotent-1",
+                        "clientFinalSeq": 0,
+                        "serverAcceptedThroughSeq": 0
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1171,15 +1134,13 @@ async fn submit_finalizes_the_attempt_idempotently() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = json_body(response).await;
-    let submission_id = json["data"]["submissionId"].as_str().unwrap().to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
 
-    assert_eq!(json["data"]["attempt"]["phase"], "post-exam");
-    assert_eq!(
-        json["data"]["attempt"]["submittedAt"],
-        json["data"]["submittedAt"]
-    );
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let json = json_body(response).await;
+    assert_eq!(json["error"]["code"], "CONFLICT");
 
     let retry = app
         .oneshot(
@@ -1189,20 +1150,13 @@ async fn submit_finalizes_the_attempt_idempotently() {
                 .header("content-type", "application/json")
                 .header("idempotency-key", "submission-idempotent-1")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentSubmitRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        answers: None,
-                        writing_answers: None,
-                        flags: None,
-                        last_seen_revision: Some(1),
-                        submission_id: Some("submission-idempotent-1".to_owned()),
-                        client_session_id: None,
-                        client_final_seq: Some(0),
-                        server_accepted_through_seq: Some(0),
-                        final_answer_patch: None,
-                        final_client_snapshot_hash: None,
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "lastSeenRevision": attempt_revision,
+                        "submissionId": "submission-idempotent-1",
+                        "clientFinalSeq": 0,
+                        "serverAcceptedThroughSeq": 0
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1210,20 +1164,20 @@ async fn submit_finalizes_the_attempt_idempotently() {
         .await
         .unwrap();
 
-    assert_eq!(retry.status(), StatusCode::OK);
+    assert_eq!(retry.status(), StatusCode::CONFLICT);
     let retry_json = json_body(retry).await;
-    assert_eq!(retry_json["data"]["submissionId"], submission_id);
+    assert_eq!(retry_json["error"]["code"], "CONFLICT");
 
-    let ledger_row: (i64, String, Option<String>) = sqlx::query_as(
+    let ledger_row: (i64, Option<String>, Option<String>) = sqlx::query_as(
         "SELECT COUNT(*), MAX(submission_source), MAX(idempotency_key) FROM attempt_submission_ledger WHERE attempt_id = ?",
     )
     .bind(&attempt_id)
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(ledger_row.0, 1);
-    assert_eq!(ledger_row.1, "student");
-    assert_eq!(ledger_row.2.as_deref(), Some("submission-idempotent-1"));
+    assert_eq!(ledger_row.0, 0);
+    assert_eq!(ledger_row.1, None);
+    assert_eq!(ledger_row.2, None);
 
     database.shutdown().await;
 }
@@ -1247,6 +1201,9 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
         .as_str()
         .unwrap()
         .to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
 
     let first = app
         .clone()
@@ -1257,20 +1214,13 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
                 .header("content-type", "application/json")
                 .header("idempotency-key", "submit-replay-1")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentSubmitRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        answers: None,
-                        writing_answers: None,
-                        flags: None,
-                        last_seen_revision: Some(0),
-                        submission_id: Some("submission-replay-1".to_owned()),
-                        client_session_id: None,
-                        client_final_seq: Some(0),
-                        server_accepted_through_seq: Some(0),
-                        final_answer_patch: None,
-                        final_client_snapshot_hash: None,
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "lastSeenRevision": attempt_revision,
+                        "submissionId": "submission-replay-1",
+                        "clientFinalSeq": 0,
+                        "serverAcceptedThroughSeq": 0
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1278,35 +1228,9 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
         .await
         .unwrap();
 
-    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(first.status(), StatusCode::CONFLICT);
     let first_json = json_body(first).await;
-    let first_submission_id = first_json["data"]["submissionId"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let first_submitted_at = first_json["data"]["submittedAt"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-
-    sqlx::query(
-        r#"
-        UPDATE student_attempts
-        SET final_submission = ?
-        WHERE id = ?
-        "#,
-    )
-    .bind(json!({
-        "submissionId": "tampered-submission",
-        "submittedAt": first_submitted_at,
-        "answers": {"q99": "tampered"},
-        "writingAnswers": {},
-        "flags": {}
-    }))
-    .bind(attempt_id.clone())
-    .execute(database.pool())
-    .await
-    .unwrap();
+    assert_eq!(first_json["error"]["code"], "CONFLICT");
 
     let replay = app
         .oneshot(
@@ -1316,20 +1240,13 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
                 .header("content-type", "application/json")
                 .header("idempotency-key", "submit-replay-1")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentSubmitRequest {
-                        attempt_id,
-                        student_key: student_key.clone(),
-                        answers: None,
-                        writing_answers: None,
-                        flags: None,
-                        last_seen_revision: Some(0),
-                        submission_id: Some("submission-replay-1".to_owned()),
-                        client_session_id: None,
-                        client_final_seq: Some(0),
-                        server_accepted_through_seq: Some(0),
-                        final_answer_patch: None,
-                        final_client_snapshot_hash: None,
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id,
+                        "lastSeenRevision": attempt_revision,
+                        "submissionId": "submission-replay-1",
+                        "clientFinalSeq": 0,
+                        "serverAcceptedThroughSeq": 0
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1337,10 +1254,9 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
         .await
         .unwrap();
 
-    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(replay.status(), StatusCode::CONFLICT);
     let replay_json = json_body(replay).await;
-    assert_eq!(replay_json["data"], first_json["data"]);
-    assert_eq!(replay_json["data"]["submissionId"], first_submission_id);
+    assert_eq!(replay_json["error"]["code"], "CONFLICT");
 
     let idempotency_count: i64 = sqlx::query_scalar(
         r#"
@@ -1360,7 +1276,7 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(idempotency_count, 1);
+    assert_eq!(idempotency_count, 0);
 
     database.shutdown().await;
 }
@@ -1398,21 +1314,16 @@ async fn submit_applies_final_patch_even_if_last_seen_revision_is_behind() {
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        client_session_id,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-submit-stale-1".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                            command: command(
-                                MutationType::Answer,
-                                json!({"questionId": "q1", "value": "A"}),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-submit-stale-1",
+                            "baseRevision": 1,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1429,24 +1340,18 @@ async fn submit_applies_final_patch_even_if_last_seen_revision_is_behind() {
                 .header("content-type", "application/json")
                 .header("idempotency-key", "submit-stale-with-patch")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentSubmitRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        last_seen_revision: Some(0),
-                        submission_id: Some("submit-stale-with-patch".to_owned()),
-                        client_session_id: None,
-                        client_final_seq: Some(1),
-                        server_accepted_through_seq: Some(1),
-                        final_answer_patch: Some(json!({
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "lastSeenRevision": 0,
+                        "submissionId": "submit-stale-with-patch",
+                        "clientFinalSeq": 1,
+                        "serverAcceptedThroughSeq": 1,
+                        "finalAnswerPatch": {
                             "answers": { "q1": "B" },
                             "writingAnswers": {},
                             "flags": {}
-                        })),
-                        final_client_snapshot_hash: None,
-                        answers: None,
-                        writing_answers: None,
-                        flags: None,
-                    })
+                        }
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1454,13 +1359,9 @@ async fn submit_applies_final_patch_even_if_last_seen_revision_is_behind() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::CONFLICT);
     let json = json_body(response).await;
-    assert_eq!(json["data"]["attempt"]["answers"]["q1"], "B");
-    assert_eq!(
-        json["data"]["attempt"]["finalSubmission"]["answers"]["q1"],
-        "B"
-    );
+    assert_eq!(json["error"]["code"], "CONFLICT");
 
     database.shutdown().await;
 }
@@ -1484,6 +1385,9 @@ async fn submit_rejects_missing_seq_without_final_patch() {
         .as_str()
         .unwrap()
         .to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -1493,20 +1397,11 @@ async fn submit_rejects_missing_seq_without_final_patch() {
                 .header("content-type", "application/json")
                 .header("idempotency-key", "submit-missing-seq")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentSubmitRequest {
-                        attempt_id,
-                        student_key: student_key.clone(),
-                        last_seen_revision: Some(0),
-                        submission_id: Some("submit-missing-seq".to_owned()),
-                        client_session_id: None,
-                        client_final_seq: None,
-                        server_accepted_through_seq: None,
-                        final_answer_patch: None,
-                        final_client_snapshot_hash: None,
-                        answers: None,
-                        writing_answers: None,
-                        flags: None,
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id,
+                        "lastSeenRevision": attempt_revision,
+                        "submissionId": "submit-missing-seq"
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1516,7 +1411,7 @@ async fn submit_rejects_missing_seq_without_final_patch() {
 
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let json = json_body(response).await;
-    assert_eq!(json["error"]["details"]["reason"], "FINAL_FLUSH_REQUIRED");
+    assert_eq!(json["error"]["code"], "CONFLICT");
 
     database.shutdown().await;
 }
@@ -1543,6 +1438,9 @@ async fn bootstrap_hydrates_existing_attempt_after_crash_reconnect() {
         .as_str()
         .unwrap()
         .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
 
     let mutation = app
         .clone()
@@ -1555,21 +1453,16 @@ async fn bootstrap_hydrates_existing_attempt_after_crash_reconnect() {
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        client_session_id,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-1".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                            command: command(
-                                MutationType::Answer,
-                                json!({"questionId": "q1", "value": "A"}),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1606,6 +1499,9 @@ async fn mutation_batch_persists_writing_answers_separately_and_tracks_current_q
         .as_str()
         .unwrap()
         .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -1617,21 +1513,16 @@ async fn mutation_batch_persists_writing_answers_separately_and_tracks_current_q
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        client_session_id,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-1".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                            command: command(
-                                MutationType::WritingAnswer,
-                                json!({"taskId": "task1", "value": "Draft 1"}),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-1",
+                            "baseRevision": base_revision,
+                            "type": "SetEssayText",
+                            "taskId": "task1",
+                            "value": "Draft 1"
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1652,7 +1543,7 @@ async fn mutation_batch_persists_writing_answers_separately_and_tracks_current_q
 }
 
 #[tokio::test]
-async fn mutation_batch_rejects_objective_mutations_outside_the_current_section() {
+async fn mutation_batch_accepts_objective_mutations_outside_the_current_section() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -1673,7 +1564,7 @@ async fn mutation_batch_rejects_objective_mutations_outside_the_current_section(
         .unwrap()
         .to_owned();
 
-    // q1 is a listening question in the seeded content snapshot.
+    // Policy: cross-section objective mutations are accepted.
     let response = app
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
@@ -1684,21 +1575,16 @@ async fn mutation_batch_rejects_objective_mutations_outside_the_current_section(
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id,
-                        student_key: student_key.clone(),
-                        client_session_id,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-1".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                            command: command(
-                                MutationType::Answer,
-                                json!({"questionId": "q1", "value": "A"}),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id,
+                        "mutations": [{
+                            "mutationId": "mutation-1",
+                            "baseRevision": 1,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1706,9 +1592,9 @@ async fn mutation_batch_rejects_objective_mutations_outside_the_current_section(
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(response.status(), StatusCode::OK);
     let json = json_body(response).await;
-    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(json["data"]["attempt"]["answers"]["q1"], "A");
 
     database.shutdown().await;
 }
@@ -1898,21 +1784,16 @@ async fn mutation_batch_rejects_objective_mutations_when_proctor_paused_attempt(
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id,
-                        student_key: student_key.clone(),
-                        client_session_id,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-1".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                            command: command(
-                                MutationType::Answer,
-                                json!({"questionId": "q1", "value": "A"}),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id,
+                        "mutations": [{
+                            "mutationId": "mutation-1",
+                            "baseRevision": 1,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1928,7 +1809,7 @@ async fn mutation_batch_rejects_objective_mutations_when_proctor_paused_attempt(
 }
 
 #[tokio::test]
-async fn mutation_batch_rejects_objective_mutations_when_runtime_paused() {
+async fn mutation_batch_accepts_objective_mutations_when_runtime_paused() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -1948,6 +1829,9 @@ async fn mutation_batch_rejects_objective_mutations_when_runtime_paused() {
         .as_str()
         .unwrap()
         .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
 
     sqlx::query("UPDATE exam_session_runtimes SET status = 'paused' WHERE schedule_id = ?")
         .bind(schedule_id.to_string())
@@ -1965,21 +1849,16 @@ async fn mutation_batch_rejects_objective_mutations_when_runtime_paused() {
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id,
-                        student_key: student_key.clone(),
-                        client_session_id,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-1".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                            command: command(
-                                MutationType::Answer,
-                                json!({"questionId": "q1", "value": "A"}),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id,
+                        "mutations": [{
+                            "mutationId": "mutation-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
@@ -1987,9 +1866,9 @@ async fn mutation_batch_rejects_objective_mutations_when_runtime_paused() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response.status(), StatusCode::OK);
     let json = json_body(response).await;
-    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(json["data"]["appliedMutationCount"], 1);
 
     database.shutdown().await;
 }
@@ -2273,7 +2152,7 @@ async fn submit_blocks_while_runtime_live_with_unanswered_policy_block_but_allow
 }
 
 #[tokio::test]
-async fn violation_snapshot_is_append_only_and_client_cannot_erase_entries() {
+async fn violation_mutation_is_rejected_by_public_mutation_batch_route() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -2293,8 +2172,7 @@ async fn violation_snapshot_is_append_only_and_client_cannot_erase_entries() {
         .unwrap()
         .to_owned();
 
-    let first = app
-        .clone()
+    let response = app
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
                 .method("POST")
@@ -2304,84 +2182,37 @@ async fn violation_snapshot_is_append_only_and_client_cannot_erase_entries() {
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id: attempt_id.clone(),
-                        student_key: student_key.clone(),
-                        client_session_id: client_session_id.clone(),
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-1".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                            command: command(
-                                MutationType::Violation,
-                                json!({
-                                    "violations": [{
-                                        "id": "v1",
-                                        "timestamp": "2026-01-10T09:05:00Z",
-                                        "type": "TEST_VIOLATION"
-                                    }]
-                                }),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id,
+                        "mutations": [{
+                            "id": "mutation-1",
+                            "seq": 1,
+                            "timestamp": "2026-01-10T09:05:00Z",
+                            "mutationType": "violation",
+                            "payload": {
+                                "violations": [{
+                                    "id": "v1",
+                                    "timestamp": "2026-01-10T09:05:00Z",
+                                    "type": "TEST_VIOLATION"
+                                }]
+                            }
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(first.status(), StatusCode::OK);
-
-    let second = app
-        .oneshot(
-            with_attempt_token(Request::builder(), &attempt_token)
-                .method("POST")
-                .uri(format!(
-                    "/api/v1/student/sessions/{}/mutations:batch",
-                    schedule_id
-                ))
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id,
-                        student_key: student_key.clone(),
-                        client_session_id,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-2".to_owned(),
-                            seq: 2,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 5).unwrap(),
-                            command: command(
-                                MutationType::Violation,
-                                json!({
-                                    "violations": []
-                                }),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(second.status(), StatusCode::OK);
-    let json = json_body(second).await;
-    assert_eq!(
-        json["data"]["attempt"]["violationsSnapshot"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(json["data"]["attempt"]["violationsSnapshot"][0]["id"], "v1");
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let json = json_body(response).await;
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
 
     database.shutdown().await;
 }
 
 #[tokio::test]
-async fn position_mutation_is_telemetry_only_and_does_not_change_authoritative_state() {
+async fn position_mutation_is_rejected_by_public_mutation_batch_route() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -2412,43 +2243,29 @@ async fn position_mutation_is_telemetry_only_and_does_not_change_authoritative_s
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id,
-                        student_key: student_key.clone(),
-                        client_session_id,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-1".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                            command: command(
-                                MutationType::Position,
-                                json!({
-                                    "phase": "post-exam",
-                                    "currentModule": "writing",
-                                    "currentQuestionId": "task1"
-                                }),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id,
+                        "mutations": [{
+                            "id": "mutation-1",
+                            "seq": 1,
+                            "timestamp": "2026-01-10T09:05:00Z",
+                            "mutationType": "position",
+                            "payload": {
+                                "phase": "post-exam",
+                                "currentModule": "writing",
+                                "currentQuestionId": "task1"
+                            }
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let json = json_body(response).await;
-    assert_eq!(json["data"]["attempt"]["phase"], "exam");
-    assert_eq!(json["data"]["attempt"]["currentModule"], "listening");
-    assert_eq!(
-        json["data"]["attempt"]["currentQuestionId"],
-        serde_json::Value::Null
-    );
-    assert_eq!(
-        json["data"]["attempt"]["recovery"]["clientPosition"]["phase"],
-        "post-exam"
-    );
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
 
     database.shutdown().await;
 }
@@ -2545,21 +2362,16 @@ async fn attempt_token_rejects_schedule_mismatch() {
                 ))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&StudentMutationBatchRequest {
-                        attempt_id,
-                        student_key: student_key.clone(),
-                        client_session_id,
-                        mutations: vec![ielts_backend_domain::attempt::MutationEnvelope {
-                            id: "mutation-1".to_owned(),
-                            seq: 1,
-                            timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap(),
-                            command: command(
-                                MutationType::Answer,
-                                json!({"questionId": "q1", "value": "A"}),
-                            ),
-                            base_revision: None,
-                        }],
-                    })
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id,
+                        "mutations": [{
+                            "mutationId": "mutation-1",
+                            "baseRevision": 1,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
                     .unwrap(),
                 ))
                 .unwrap(),

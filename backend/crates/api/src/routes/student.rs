@@ -175,8 +175,7 @@ pub async fn get_student_live_session(
         state
             .config
             .rate_limit_student_live_per_schedule_window_secs,
-    )
-    .with_burst(25);
+    );
     if let RateLimitResult::Denied { retry_after } = state
         .check_exam_rate_limit(
             "student.live.schedule",
@@ -278,12 +277,37 @@ struct ApiMutationBatchRequest {
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ApiLegacyMutationBatchRequest {
+    attempt_id: String,
+    #[serde(default)]
+    student_key: Option<String>,
+    #[serde(default)]
+    client_session_id: Option<String>,
+    mutations: Vec<ApiLegacyMutationEnvelope>,
+}
+
+#[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ApiMutationCommand {
     mutation_id: String,
     base_revision: i32,
     #[serde(flatten)]
     command: ApiMutationCommandPayload,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiLegacyMutationEnvelope {
+    id: String,
+    #[serde(default)]
+    seq: Option<i64>,
+    #[serde(default)]
+    timestamp: Option<chrono::DateTime<Utc>>,
+    #[serde(default)]
+    base_revision: Option<i32>,
+    #[serde(flatten)]
+    command: MutationCommand,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -384,6 +408,79 @@ impl ApiMutationCommandPayload {
                 })
             }
         }
+    }
+}
+
+fn parse_mutation_batch_request(
+    payload: Value,
+) -> Result<(String, Vec<MutationEnvelope>), ApiError> {
+    if let Ok(parsed_new) = serde_json::from_value::<ApiMutationBatchRequest>(payload.clone()) {
+        let mutations = parsed_new
+            .mutations
+            .iter()
+            .enumerate()
+            .map(|(index, mutation)| MutationEnvelope {
+                id: mutation.mutation_id.clone(),
+                seq: (index + 1) as i64,
+                timestamp: Utc::now(),
+                command: mutation.command.command(),
+                base_revision: Some(mutation.base_revision),
+            })
+            .collect();
+        return Ok((parsed_new.attempt_id, mutations));
+    }
+
+    let parsed_legacy =
+        serde_json::from_value::<ApiLegacyMutationBatchRequest>(payload).map_err(|err| {
+            ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VALIDATION_ERROR",
+                &format!("Invalid mutation batch payload: {err}"),
+            )
+        })?;
+
+    // Intentional: keep optional legacy keys accepted but unused here so older clients remain compatible.
+    let _ = &parsed_legacy.student_key;
+    let _ = &parsed_legacy.client_session_id;
+
+    let mutations = parsed_legacy
+        .mutations
+        .into_iter()
+        .enumerate()
+        .map(|(index, mutation)| {
+            let _legacy_client_timestamp = mutation.timestamp;
+            let command = allowlisted_legacy_command(mutation.command)?;
+            Ok(MutationEnvelope {
+                id: mutation.id,
+                seq: mutation.seq.unwrap_or((index + 1) as i64),
+                timestamp: Utc::now(),
+                command,
+                base_revision: mutation.base_revision,
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+
+    Ok((parsed_legacy.attempt_id, mutations))
+}
+
+fn allowlisted_legacy_command(command: MutationCommand) -> Result<MutationCommand, ApiError> {
+    match command {
+        MutationCommand::SetSlot(_)
+        | MutationCommand::ClearSlot(_)
+        | MutationCommand::SetScalar(_)
+        | MutationCommand::ClearScalar(_)
+        | MutationCommand::SetChoice(_)
+        | MutationCommand::ClearChoice(_)
+        | MutationCommand::SetEssayText(_)
+        | MutationCommand::ClearEssayText(_) => Ok(command),
+        other => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            &format!(
+                "Legacy mutation type `{}` is not allowed for mutation batch.",
+                other.mutation_type().as_str()
+            ),
+        )),
     }
 }
 
@@ -544,13 +641,7 @@ pub async fn apply_mutation_batch(
     Path((schedule_id, _batch)): Path<(Uuid, String)>,
     Json(payload): Json<Value>,
 ) -> Result<ApiResponse<StudentMutationBatchResponse>, ApiError> {
-    let api_req: ApiMutationBatchRequest = serde_json::from_value(payload).map_err(|err| {
-        ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "VALIDATION_ERROR",
-            &format!("Invalid mutation batch payload: {err}"),
-        )
-    })?;
+    let (request_attempt_id, request_mutations) = parse_mutation_batch_request(payload)?;
     let attempt_id = principal.authorization.claims.attempt_id.clone();
     let sampled_success_logs = header_bool(&headers, STUDENT_LIFECYCLE_SAMPLE_HEADER);
     let flush_cycle_id = header_string(&headers, STUDENT_FLUSH_CYCLE_ID_HEADER);
@@ -588,7 +679,7 @@ pub async fn apply_mutation_batch(
             "Attempt credential does not match the schedule.",
         ));
     }
-    if api_req.attempt_id != attempt_id {
+    if request_attempt_id != attempt_id {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "VALIDATION_ERROR",
@@ -596,7 +687,7 @@ pub async fn apply_mutation_batch(
         ));
     }
 
-    if api_req.mutations.len() > state.config.max_mutations_per_batch {
+    if request_mutations.len() > state.config.max_mutations_per_batch {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "VALIDATION_ERROR",
@@ -612,18 +703,7 @@ pub async fn apply_mutation_batch(
         attempt_id: attempt_id.clone(),
         student_key: load_attempt_student_key(&state, &attempt_id).await?,
         client_session_id: claims_client_session_id,
-        mutations: api_req
-            .mutations
-            .iter()
-            .enumerate()
-            .map(|(index, mutation)| MutationEnvelope {
-                id: mutation.mutation_id.clone(),
-                seq: (index + 1) as i64,
-                timestamp: Utc::now(),
-                command: mutation.command.command(),
-                base_revision: Some(mutation.base_revision),
-            })
-            .collect(),
+        mutations: request_mutations,
     };
     let requested_mutation_count = req.mutations.len();
     let service = delivery_service(&state);
@@ -1496,6 +1576,74 @@ mod tests {
             }
             other => panic!("Expected SetSlot command, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn mutation_batch_legacy_rejects_non_allowlisted_command() {
+        let payload = json!({
+            "attemptId": "attempt-1",
+            "mutations": [{
+                "id": "m-1",
+                "seq": 1,
+                "mutationType": "violation",
+                "payload": {}
+            }]
+        });
+
+        let parsed = parse_mutation_batch_request(payload);
+        assert!(parsed.is_err());
+        let err = parsed.unwrap_err();
+        assert_eq!(err.code, "VALIDATION_ERROR");
+    }
+
+    #[test]
+    fn mutation_batch_legacy_accepts_allowlisted_command() {
+        let payload = json!({
+            "attemptId": "attempt-1",
+            "mutations": [{
+                "id": "m-1",
+                "seq": 3,
+                "baseRevision": 4,
+                "mutationType": "SetSlot",
+                "payload": {
+                    "questionId": "q1",
+                    "slotIndex": 2,
+                    "value": "wolf"
+                }
+            }]
+        });
+
+        let parsed = parse_mutation_batch_request(payload).unwrap();
+        assert_eq!(parsed.0, "attempt-1");
+        assert_eq!(parsed.1.len(), 1);
+        assert_eq!(parsed.1[0].id, "m-1");
+        assert_eq!(parsed.1[0].seq, 3);
+        assert_eq!(parsed.1[0].base_revision, Some(4));
+        assert_eq!(parsed.1[0].mutation_type().as_str(), "SetSlot");
+    }
+
+    #[test]
+    fn mutation_batch_legacy_ignores_client_timestamp() {
+        let payload = json!({
+            "attemptId": "attempt-1",
+            "mutations": [{
+                "id": "m-1",
+                "seq": 1,
+                "timestamp": "2000-01-01T00:00:00Z",
+                "mutationType": "SetScalar",
+                "payload": {
+                    "questionId": "q1",
+                    "value": "A"
+                }
+            }]
+        });
+
+        let parsed = parse_mutation_batch_request(payload).unwrap();
+        assert_eq!(parsed.1.len(), 1);
+        let legacy_client_time = chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!(parsed.1[0].timestamp > legacy_client_time);
     }
 
     #[test]

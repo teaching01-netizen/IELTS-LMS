@@ -123,7 +123,8 @@ impl AnswerHistoryService {
         context: SubmissionAttemptContextRow,
     ) -> Result<AnswerHistoryOverview, AnswerHistoryError> {
         let history_attempt_id = self.resolve_history_attempt_id(&context).await?;
-        let target_catalog = build_target_catalog(&context.content_snapshot, &context.config_snapshot);
+        let target_catalog =
+            build_target_catalog(&context.content_snapshot, &context.config_snapshot);
         let catalog_index = build_target_catalog_index(&target_catalog);
         let submitted_states = build_submitted_target_states(
             context.final_submission.as_ref(),

@@ -1,8 +1,6 @@
 use std::{env, time::Duration};
 
-use ielts_backend_application::grading::{
-    GradingService, ObjectiveAutoGradingBackfillRequest,
-};
+use ielts_backend_application::grading::{GradingService, ObjectiveAutoGradingBackfillRequest};
 use sqlx::mysql::MySqlPoolOptions;
 
 #[derive(Debug, Clone, Default)]
@@ -37,7 +35,10 @@ fn usage() -> String {
     .join("\n")
 }
 
-fn parse_non_empty(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<Option<String>, String> {
+fn parse_non_empty(
+    args: &mut impl Iterator<Item = String>,
+    flag: &str,
+) -> Result<Option<String>, String> {
     let Some(value) = args.next() else {
         return Err(format!("Missing value for {flag}\n\n{}", usage()));
     };
@@ -56,7 +57,10 @@ fn parse_u64(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<Opti
         .parse::<u64>()
         .map_err(|_| format!("Invalid value for {flag}: {value}\n\n{}", usage()))?;
     if parsed == 0 {
-        return Err(format!("Value for {flag} must be greater than 0\n\n{}", usage()));
+        return Err(format!(
+            "Value for {flag} must be greater than 0\n\n{}",
+            usage()
+        ));
     }
     Ok(Some(parsed))
 }

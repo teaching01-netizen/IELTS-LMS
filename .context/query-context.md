@@ -1,69 +1,103 @@
 # SigMap Query Context
-Generated: 2026-05-10T05:52:16.562Z
+Generated: 2026-05-10T06:27:19.105Z
 
-## backend/crates/api/src/frontend.rs
+## src/features/builder/routes/BuilderRoot.tsx
 ```
-pub async fn serve_frontend(State(state) → Response
-```
-
-## src/services/authService.ts
-```
-export interface AuthSessionUser
-id: string
-email: string
-displayName?: string | null | undefined
-role: AuthUserRole
-state: AuthUserState
-export interface AuthSession
-user: AuthSessionUser
-csrfToken: string
-expiresAt: string
-idleTimeoutAt?: string | undefined
-export interface StudentQueuedAdmission
-state: 'queued'
-ticketId: string
-scheduleId: string
-wcode: string
-position: number
-pollAfterMs: number
-queuedAt: string
-export type AuthUserRole
+component ScoringAside
+component BuilderRoot
+hook useParams
+hook useNavigate
+hook useLocation
+hook useBuilderRouteController
+hook useUndoRedo
+hook useState
+hook useRef
+hook useEffect
+hook useMemo
+hook useKeyboardShortcuts
+export BuilderRoot
+handler onThreshold
+handler onChange
+handler onSubmitGrade
+handler onIndex
+handler onAction
+handler onUpdateState
+handler onReturnToAdmin
 ```
 
-## src/services/examLifecycleService.ts
+## src/features/builder/hooks/useBuilderRouteController.ts
 ```
-export class ExamLifecycleService
-constructor(private repository)
-async createExam(title, type, initialState, owner) → Promise<TransitionRe
-```
-
-## src/services/gradingService.ts
-```
-export interface GradingServiceResult
-success: boolean
-data?: T
-error?: string
-export interface SessionQueueSummary
-totalSessions: number
-totalStudents: number
-pendingManualReviews: number
-inProgressReviews: number
-finalizedReviews: number
-overdueReviews: number
-export class GradingService
-async buildGradingSessions() → Promise<GradingServi
-async getSessionQueue(filters?) → Promise<GradingServi
-async getSessionQueueSummary() → Promise<GradingServi
-async getSessionStudentSubmissions(sessionId, filters?) → Promise<GradingServi
+export interface BuilderRouteController
+error: string | null
+exam: ExamEntity | undefined
+isLoading: boolean
+state: ExamState | null
+handleArchive: () => Promise<void>
+handleOpenScheduling: () => void
+handlePublish: (notes?: string) => Promise<void>
+handleReturnToAdmin: () => void
+export function useBuilderRouteController(examId?,) → BuilderRouteController
 ```
 
-## backend/crates/application/src/answer_history.rs
+## src/features/admin/contracts/index.ts
 ```
-pub struct AnswerHistoryService
-pub enum AnswerHistoryError
-impl AnswerHistoryService
-pub fn new(pool: MySqlPool) → Self
-pub async fn resolve_submission_id_from_attempt(&self, attempt_id: Uuid,) → Result<String, AnswerHistor...
-pub async fn get_overview(&self, submission_id: Uuid,) → Result<AnswerHistoryOvervie...
-pub async fn get_overview_by_attempt(&self, attempt_id: Uuid,) → Result<AnswerHistoryOvervie...
+export interface AdminRootProps
+onNavigate: (mode: 'builder' | 'student' | 'adm
+exams: Exam[]
+examEntities: ExamEntity[]
+schedules: ExamSchedule[]
+defaults: ExamConfig
+setDefaults: (config: ExamConfig) => void
+export interface ExamOperationCallbacks
+onEditExam: (id: string) => void
+onCreateExam: ( title: string, type: 'Academic' |
+onCloneExam?: (examId: string, newTitle: string)
+onCreateFromTemplate?: (templateId: string, newTitle: stri
+export interface VersionManagementCallbacks
+onGetVersions: (examId: string) => Promise<ExamVer
+onGetEvents: (examId: string) => Promise<ExamEve
+onRestoreVersion: (versionId: string) => Promise<void
+onRepublishVersion: (versionId: string) => Promise<void
+onCompareVersions: (versionIdA: string, versionIdB: st
+export interface ScheduleManagementCallbacks
+onCreateSchedule: (schedule: ExamSchedule) => Promise
+```
+
+## src/features/builder/routes/ExamPreviewRoute.tsx
+```
+component ExamPreviewRoute
+component RuntimePreviewSurface
+hook useParams
+hook useNavigate
+hook useSearchParams
+hook useAuthSession
+hook useBuilderRouteController
+hook useState
+hook useMemo
+hook useEffect
+hook useStudentSessionRouteData
+export ExamPreviewRoute
+handler onModuleChange
+handler onChange
+handler onExit
+handler onRuntimeRefresh
+```
+
+## src/features/builder/routes/ExamReviewRoute.tsx
+```
+component ExamReviewRoute
+hook useParams
+hook useReviewRouteController
+hook useState
+export ExamReviewRoute
+handler onNavigateToBuilder
+handler onPublish
+handler onSchedulePublish
+handler onUnpublish
+handler onNumber
+handler onRestoreVersion
+handler onRepublishVersion
+handler onCompareVersions
+handler onCreateSchedule
+handler onClick
 ```

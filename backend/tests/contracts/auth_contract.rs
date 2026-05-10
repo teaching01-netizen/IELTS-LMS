@@ -990,7 +990,7 @@ async fn create_test_user(
         VALUES (?, ?, ?, ?, ?, 0, ?, ?)
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(email)
     .bind("Test User")
     .bind("builder")
@@ -1004,7 +1004,7 @@ async fn create_test_user(
     sqlx::query(
         "INSERT INTO user_password_credentials (user_id, password_hash, updated_at) VALUES (?, ?, ?)",
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(password_hash)
     .bind(now)
     .execute(pool)
@@ -1017,7 +1017,7 @@ async fn create_test_user(
         VALUES (?, ?, ?, ?, ?)
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind("Test User")
     .bind(email)
     .bind(now)
@@ -1035,8 +1035,8 @@ async fn create_test_user(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
-    .bind(uuid::Uuid::new_v4())
-    .bind(user_id)
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(user_id.to_string())
     .bind(ielts_backend_infrastructure::auth::sha256_hex(
         &session_token,
     ))

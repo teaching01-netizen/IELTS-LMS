@@ -572,7 +572,8 @@ async fn assigned_proctor_can_read_in_progress_attempt_target_detail_without_sub
     let database = mysql::TestDatabase::new(ANSWER_HISTORY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
-    let attempt_id = bootstrap_attempt_only(database.pool(), schedule_id, "charlie-live-detail").await;
+    let attempt_id =
+        bootstrap_attempt_only(database.pool(), schedule_id, "charlie-live-detail").await;
 
     insert_mutation(
         database.pool(),
@@ -626,7 +627,9 @@ async fn assigned_proctor_can_read_in_progress_attempt_target_detail_without_sub
     assert_eq!(detail["data"]["attemptId"], attempt_id.to_string());
     assert!(detail["data"]["submissionId"].is_null());
     assert_eq!(
-        detail["data"]["checkpoints"].as_array().map(|items| items.len()),
+        detail["data"]["checkpoints"]
+            .as_array()
+            .map(|items| items.len()),
         Some(2)
     );
 

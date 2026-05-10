@@ -1202,9 +1202,7 @@ impl GradingService {
         );
 
         if let Some(schedule_id) = request.schedule_id.as_deref() {
-            builder
-                .push(" AND a.schedule_id = ")
-                .push_bind(schedule_id);
+            builder.push(" AND a.schedule_id = ").push_bind(schedule_id);
         }
         if let Some(exam_id) = request.exam_id.as_deref() {
             builder.push(" AND a.exam_id = ").push_bind(exam_id);
@@ -1282,7 +1280,12 @@ impl GradingService {
 
             let existing_map = existing_sections
                 .into_iter()
-                .map(|section| (section.section, section.auto_grading_results.map(Into::into)))
+                .map(|section| {
+                    (
+                        section.section,
+                        section.auto_grading_results.map(Into::into),
+                    )
+                })
                 .collect::<HashMap<String, Option<Value>>>();
 
             let listening_needs_update = existing_map
@@ -1311,9 +1314,9 @@ impl GradingService {
                 )
                 .await?;
                 report.submissions_updated = report.submissions_updated.saturating_add(1);
-                report.sections_updated = report
-                    .sections_updated
-                    .saturating_add(u64::from(listening_needs_update) + u64::from(reading_needs_update));
+                report.sections_updated = report.sections_updated.saturating_add(
+                    u64::from(listening_needs_update) + u64::from(reading_needs_update),
+                );
             }
         }
 
@@ -2533,11 +2536,8 @@ fn compute_objective_auto_grading_results(
     content_snapshot: &Value,
     submitted_at: DateTime<Utc>,
 ) -> Value {
-    let answer_map = build_effective_objective_answer_map(
-        section_key,
-        section_answers,
-        content_snapshot,
-    );
+    let answer_map =
+        build_effective_objective_answer_map(section_key, section_answers, content_snapshot);
     let specs = build_objective_scoring_specs(content_snapshot, section_key);
     let mut total_score = 0i64;
     let mut max_score = 0i64;
@@ -2771,7 +2771,10 @@ fn copy_array_slot_alias(
         return;
     }
 
-    let Some(values) = base_answers.get(array_question_id).and_then(Value::as_array) else {
+    let Some(values) = base_answers
+        .get(array_question_id)
+        .and_then(Value::as_array)
+    else {
         return;
     };
     let Some(slot_value) = values.get(slot_index) else {
@@ -3803,7 +3806,10 @@ mod tests {
 
         assert_eq!(results["totalScore"], 1);
         assert_eq!(results["maxScore"], 1);
-        assert_eq!(results["questionResults"][0]["questionId"], "sentence-1:blank-1");
+        assert_eq!(
+            results["questionResults"][0]["questionId"],
+            "sentence-1:blank-1"
+        );
         assert_eq!(results["questionResults"][0]["studentAnswer"], "HALF WAY");
         assert_eq!(results["questionResults"][0]["correctAnswer"], "half way");
         assert_eq!(results["questionResults"][0]["isCorrect"], true);
@@ -3875,10 +3881,7 @@ mod tests {
             &json!({}),
             Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
         );
-        let sections = specs
-            .iter()
-            .map(|spec| spec.section)
-            .collect::<Vec<_>>();
+        let sections = specs.iter().map(|spec| spec.section).collect::<Vec<_>>();
 
         assert_eq!(sections, vec!["listening", "reading"]);
     }
