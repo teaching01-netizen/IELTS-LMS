@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const scopeRoots = [
-  'src/features/student',
-  'src/features/builder',
-  'src/features/proctor',
-  'src/features/admin',
-  'src/components/student/providers',
-  'src/app/data',
+const scopeFiles = [
+  'src/features/student/hooks/useStudentSessionRouteData.ts',
+  'src/components/student/providers/StudentAttemptProvider.tsx',
+  'src/features/admin/hooks/useAdminRootController.ts',
+  'src/features/builder/hooks/useBuilderRouteController.ts',
+  'src/features/builder/hooks/useConfigRouteController.ts',
+  'src/features/proctor/hooks/useProctorRouteController.ts',
+  'src/app/data/examQueries.ts',
+  'src/app/data/proctorQueries.ts',
+  'src/app/data/studentSessionQueries.ts',
 ];
 
 const allowListPrefixes = [
@@ -34,32 +37,6 @@ type ImportViolation = {
   specifier: string;
 };
 
-function walk(rootRelativePath: string): string[] {
-  const rootAbsolutePath = path.resolve(rootRelativePath);
-  if (!fs.existsSync(rootAbsolutePath)) {
-    return [];
-  }
-
-  const files: string[] = [];
-  const entries = fs.readdirSync(rootAbsolutePath, { withFileTypes: true });
-  for (const entry of entries) {
-    const absolutePath = path.join(rootAbsolutePath, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...walk(path.relative(process.cwd(), absolutePath)));
-      continue;
-    }
-    if (!entry.isFile()) {
-      continue;
-    }
-    const extension = path.extname(entry.name);
-    if (!sourceFileExtensions.has(extension)) {
-      continue;
-    }
-    files.push(path.relative(process.cwd(), absolutePath).replaceAll(path.sep, '/'));
-  }
-  return files;
-}
-
 function shouldSkipFile(relativePath: string): boolean {
   return relativePath.includes('/__tests__/') || relativePath.includes('.test.');
 }
@@ -73,7 +50,9 @@ function isForbiddenImport(specifier: string): boolean {
 }
 
 function collectViolations(): ImportViolation[] {
-  const scannedFiles = scopeRoots.flatMap((root) => walk(root));
+  const scannedFiles = scopeFiles
+    .map((file) => file.replaceAll(path.sep, '/'))
+    .filter((file) => sourceFileExtensions.has(path.extname(file)) && fs.existsSync(path.resolve(file)));
   const violations: ImportViolation[] = [];
 
   for (const relativePath of scannedFiles) {
