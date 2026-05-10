@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthSessionProvider } from '../../../auth/authSession';
+import { studentSessionFacade } from '@student/application/studentSessionFacade';
 import { authService, type AuthSession } from '../../../../services/authService';
 import {
   mapBackendStudentAttempt,
@@ -373,6 +374,46 @@ describe('useStudentSessionRouteData backend mode', () => {
         ([url]) => url === '/api/v1/student/sessions/sched-1?candidateId=W250334',
       ),
     ).toBe(false);
+  });
+
+  it('loads student session data through facade and preserves existing route-hook behavior', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    const loadStaticSessionSpy = vi.spyOn(studentSessionFacade, 'loadStaticSession');
+    const loadLiveSessionSpy = vi.spyOn(studentSessionFacade, 'loadLiveSession');
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(buildStaticSessionContext()))
+      .mockResolvedValueOnce(jsonResponse(buildLiveSessionContext(null)))
+      .mockResolvedValueOnce(jsonResponse(buildBootstrapContext(buildAttempt())))
+      .mockResolvedValue(jsonResponse(buildLiveSessionContext(buildAttempt())));
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.attemptSnapshot).not.toBeNull();
+    });
+
+    expect(loadStaticSessionSpy).toHaveBeenCalledWith('sched-1', 'W250334');
+    expect(loadLiveSessionSpy).toHaveBeenCalledWith('sched-1', 'W250334');
+    expect(result.current.schedule).toMatchObject({
+      id: 'sched-1',
+      examTitle: 'Mock Exam',
+    });
+    expect(result.current.runtimeSnapshot).toMatchObject({
+      scheduleId: 'sched-1',
+      status: 'live',
+    });
+    expect(result.current.attemptSnapshot).toMatchObject({
+      id: 'attempt-1',
+      candidateId: 'W250334',
+      scheduleId: 'sched-1',
+    });
   });
 
   it('uses the reconciled cached attempt snapshot after saving a live backend attempt', async () => {
