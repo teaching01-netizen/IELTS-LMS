@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getExamStateFromEntity } from '@services/examAdapterService';
-import { examLifecycleService } from '@services/examLifecycleService';
-import { examRepository } from '@services/examRepository';
+import { examAuthoringFacade } from '../../exam-authoring/application/examAuthoringFacade';
 import type { ExamState } from '../../../types';
 import type { ExamEntity } from '../../../types/domain';
 
@@ -45,12 +43,15 @@ export function useBuilderRouteController(
     setError(null);
 
     try {
-      const entity = await examRepository.getExamById(examId);
+      const entity = await examAuthoringFacade.repository.getExamById(examId);
       if (!entity) {
         throw new Error('Exam not found');
       }
 
-      const examState = await getExamStateFromEntity(entity, examRepository);
+      const examState = await examAuthoringFacade.getExamStateFromEntity(
+        entity,
+        examAuthoringFacade.repository,
+      );
 
       setExam(entity);
       setState(examState);
@@ -73,7 +74,7 @@ export function useBuilderRouteController(
 
       const resolvedContent =
         typeof nextContent === 'function' ? nextContent(state) : nextContent;
-      const result = await examLifecycleService.saveDraft(examId, resolvedContent, 'System');
+      const result = await examAuthoringFacade.lifecycle.saveDraft(examId, resolvedContent, 'System');
 
       if (!result.success) {
         throw new Error(result.error ?? 'Failed to save draft');
@@ -104,7 +105,7 @@ export function useBuilderRouteController(
         return;
       }
 
-      await examLifecycleService.publishExam(examId, 'System', notes);
+      await examAuthoringFacade.lifecycle.publishExam(examId, 'System', notes);
       await loadExam();
     },
     [examId, loadExam],
@@ -116,7 +117,7 @@ export function useBuilderRouteController(
         return;
       }
 
-      await examLifecycleService.schedulePublish(examId, 'System', scheduledTime);
+      await examAuthoringFacade.lifecycle.schedulePublish(examId, 'System', scheduledTime);
       await loadExam();
     },
     [examId, loadExam],
@@ -128,7 +129,7 @@ export function useBuilderRouteController(
         return;
       }
 
-      await examLifecycleService.unpublishExam(examId, 'System', reason);
+      await examAuthoringFacade.lifecycle.unpublishExam(examId, 'System', reason);
       await loadExam();
     },
     [examId, loadExam],
@@ -139,7 +140,7 @@ export function useBuilderRouteController(
       return;
     }
 
-    await examLifecycleService.archiveExam(examId, 'System');
+    await examAuthoringFacade.lifecycle.archiveExam(examId, 'System');
     await loadExam();
   }, [examId, loadExam]);
 

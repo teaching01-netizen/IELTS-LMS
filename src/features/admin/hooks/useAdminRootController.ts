@@ -8,15 +8,7 @@ import {
   CheckSquare,
   Settings,
 } from 'lucide-react';
-import { adminPreferencesRepository } from '@services/adminPreferencesRepository';
-import { seedDevelopmentFixtures } from '@services/developmentFixtures';
-import {
-  adaptExamEntitiesToLegacyExams,
-  createInitialExamState,
-} from '@services/examAdapterService';
-import { examDeliveryService } from '@services/examDeliveryService';
-import { examLifecycleService } from '@services/examLifecycleService';
-import { examRepository } from '@services/examRepository';
+import { examAuthoringFacade } from '../../exam-authoring/application/examAuthoringFacade';
 import { useAuthSession } from '../../auth/authSession';
 import type { Exam, ExamConfig } from '../../../types';
 import type {
@@ -57,7 +49,7 @@ export function useAdminRootController(): AdminRootController {
   const [schedules, setSchedules] = useState<ExamSchedule[]>([]);
   const [loadedExamEntities, setLoadedExamEntities] = useState<ExamEntity[]>([]);
   const [defaults, setDefaultsState] = useState<ExamConfig>(() =>
-    adminPreferencesRepository.getDefaults(),
+    examAuthoringFacade.preferences.getDefaults(),
   );
   const [isInitialized, setIsInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
@@ -108,14 +100,14 @@ export function useAdminRootController(): AdminRootController {
   }, [location.pathname]);
 
   const refreshExamData = useCallback(async () => {
-    const entities = await examRepository.getAllExamsWithLegacyMigration();
+    const entities = await examAuthoringFacade.repository.getAllExamsWithLegacyMigration();
     setLoadedExamEntities(entities);
-    setExams(await adaptExamEntitiesToLegacyExams(entities, examRepository));
+    setExams(await examAuthoringFacade.adaptExamEntitiesToLegacyExams(entities, examAuthoringFacade.repository));
     return entities;
   }, []);
 
   const refreshScheduleData = useCallback(async () => {
-    const loadedSchedules = await examRepository.getAllSchedules();
+    const loadedSchedules = await examAuthoringFacade.repository.getAllSchedules();
     setSchedules(loadedSchedules);
     return loadedSchedules;
   }, []);
@@ -132,10 +124,10 @@ export function useAdminRootController(): AdminRootController {
       const tasks = await Promise.all([
         shouldLoadExamData ? refreshExamData() : Promise.resolve<ExamEntity[]>([]),
         refreshScheduleData(),
-        shouldSeedFixtures ? seedDevelopmentFixtures() : Promise.resolve(),
+        shouldSeedFixtures ? examAuthoringFacade.seedDevelopmentFixtures() : Promise.resolve(),
         shouldLoadDefaults
-          ? adminPreferencesRepository.loadDefaults()
-          : Promise.resolve(adminPreferencesRepository.getDefaults()),
+          ? examAuthoringFacade.preferences.loadDefaults()
+          : Promise.resolve(examAuthoringFacade.preferences.getDefaults()),
       ]);
 
       if (!shouldLoadExamData) {
@@ -157,7 +149,7 @@ export function useAdminRootController(): AdminRootController {
 
   const setDefaults = useCallback((config: ExamConfig) => {
     setDefaultsState(config);
-    void adminPreferencesRepository.saveDefaults(config);
+    void examAuthoringFacade.preferences.saveDefaults(config);
   }, []);
 
   const handleNavigate = useCallback((mode: 'builder' | 'student' | 'admin' | 'proctor') => {
@@ -172,21 +164,21 @@ export function useAdminRootController(): AdminRootController {
   );
 
   const handleGetVersions = useCallback(async (examId: string): Promise<ExamVersionSummary[]> => {
-    return examRepository.getVersionSummaries(examId);
+    return examAuthoringFacade.repository.getVersionSummaries(examId);
   }, []);
 
   const handleGetEvents = useCallback(async (examId: string): Promise<ExamEvent[]> => {
-    return examRepository.getEvents(examId);
+    return examAuthoringFacade.repository.getEvents(examId);
   }, []);
 
   const handleRestoreVersion = useCallback(
     async (versionId: string) => {
-      const version = await examRepository.getVersionById(versionId);
+      const version = await examAuthoringFacade.repository.getVersionById(versionId);
       if (!version) {
         return;
       }
 
-      await examLifecycleService.restoreVersionAsDraft(version.examId, versionId, 'Admin');
+      await examAuthoringFacade.lifecycle.restoreVersionAsDraft(version.examId, versionId, 'Admin');
       await refreshExamData();
     },
     [refreshExamData],
@@ -194,12 +186,12 @@ export function useAdminRootController(): AdminRootController {
 
   const handleRepublishVersion = useCallback(
     async (versionId: string) => {
-      const version = await examRepository.getVersionById(versionId);
+      const version = await examAuthoringFacade.repository.getVersionById(versionId);
       if (!version) {
         return;
       }
 
-      await examLifecycleService.republishVersion(version.examId, versionId, 'Admin');
+      await examAuthoringFacade.lifecycle.republishVersion(version.examId, versionId, 'Admin');
       await refreshExamData();
     },
     [refreshExamData],
@@ -207,20 +199,20 @@ export function useAdminRootController(): AdminRootController {
 
   const handleCompareVersions = useCallback(
     async (versionIdA: string, versionIdB: string): Promise<VersionDiff | null> => {
-      const versionA = await examRepository.getVersionById(versionIdA);
-      const versionB = await examRepository.getVersionById(versionIdB);
+      const versionA = await examAuthoringFacade.repository.getVersionById(versionIdA);
+      const versionB = await examAuthoringFacade.repository.getVersionById(versionIdB);
       if (!versionA || !versionB) {
         return null;
       }
 
-      return examLifecycleService.compareVersions(versionA.examId, versionIdA, versionIdB);
+      return examAuthoringFacade.lifecycle.compareVersions(versionA.examId, versionIdA, versionIdB);
     },
     [],
   );
 
   const handleCloneExam = useCallback(
     async (examId: string, newTitle: string) => {
-      await examLifecycleService.cloneExam(examId, newTitle, 'Admin');
+      await examAuthoringFacade.lifecycle.cloneExam(examId, newTitle, 'Admin');
       await refreshExamData();
     },
     [refreshExamData],
@@ -228,7 +220,7 @@ export function useAdminRootController(): AdminRootController {
 
   const handleCreateFromTemplate = useCallback(
     async (templateId: string, newTitle: string) => {
-      await examLifecycleService.createFromTemplate(templateId, newTitle, 'Admin');
+      await examAuthoringFacade.lifecycle.createFromTemplate(templateId, newTitle, 'Admin');
       await refreshExamData();
     },
     [refreshExamData],
@@ -240,8 +232,8 @@ export function useAdminRootController(): AdminRootController {
       type: 'Academic' | 'General Training',
       preset: ExamConfig['general']['preset'] = 'Academic',
     ) => {
-      const initialState = createInitialExamState(title, type, preset, defaults);
-      const result = await examLifecycleService.createExam(title, type, initialState, 'Sarah Chen');
+      const initialState = examAuthoringFacade.createInitialExamState(title, type, preset, defaults);
+      const result = await examAuthoringFacade.lifecycle.createExam(title, type, initialState, 'Sarah Chen');
 
       if (result.success && result.exam) {
         await refreshExamData();
@@ -253,7 +245,7 @@ export function useAdminRootController(): AdminRootController {
 
   const handleCreateSchedule = useCallback(
     async (schedule: ExamSchedule) => {
-      await examRepository.saveSchedule(schedule);
+      await examAuthoringFacade.repository.saveSchedule(schedule);
       await refreshScheduleData();
     },
     [refreshScheduleData],
@@ -261,7 +253,7 @@ export function useAdminRootController(): AdminRootController {
 
   const handleUpdateSchedule = useCallback(
     async (schedule: ExamSchedule) => {
-      await examRepository.saveSchedule(schedule);
+      await examAuthoringFacade.repository.saveSchedule(schedule);
       await refreshScheduleData();
     },
     [refreshScheduleData],
@@ -269,8 +261,8 @@ export function useAdminRootController(): AdminRootController {
 
   const handleDeleteSchedule = useCallback(
     async (scheduleId: string) => {
-      await examRepository.deleteRuntime(scheduleId);
-      await examRepository.deleteSchedule(scheduleId);
+      await examAuthoringFacade.repository.deleteRuntime(scheduleId);
+      await examAuthoringFacade.repository.deleteSchedule(scheduleId);
       await refreshScheduleData();
     },
     [refreshScheduleData],
@@ -278,7 +270,7 @@ export function useAdminRootController(): AdminRootController {
 
   const handleStartScheduledSession = useCallback(
     async (scheduleId: string) => {
-      await examDeliveryService.startRuntime(scheduleId, 'Proctor');
+      await examAuthoringFacade.delivery.startRuntime(scheduleId, 'Proctor');
       await refreshScheduleData();
     },
     [refreshScheduleData],

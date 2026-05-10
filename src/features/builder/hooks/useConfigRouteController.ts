@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { examLifecycleService } from '@services/examLifecycleService';
-import { examRepository } from '@services/examRepository';
+import { examAuthoringFacade } from '../../exam-authoring/application/examAuthoringFacade';
 import type { ExamConfig } from '../../../types';
 import type { ExamEntity } from '../../../types/domain';
 import { syncConfigWithStandards } from '../../../constants/examDefaults';
-import { hydrateExamState } from '@services/examAdapterService';
 
 export interface ConfigValidationResult {
   isValid: boolean;
@@ -54,7 +52,7 @@ export function useConfigRouteController(
     setError(null);
 
     try {
-      const entity = await examRepository.getExamById(examId);
+      const entity = await examAuthoringFacade.repository.getExamById(examId);
       if (!entity) {
         throw new Error('Exam not found');
       }
@@ -68,7 +66,7 @@ export function useConfigRouteController(
         return;
       }
 
-      const currentVersion = await examRepository.getVersionById(versionId);
+      const currentVersion = await examAuthoringFacade.repository.getVersionById(versionId);
       if (currentVersion) {
         setConfig(currentVersion.configSnapshot);
         setIsDirty(false);
@@ -104,25 +102,25 @@ export function useConfigRouteController(
       return false;
     }
 
-    const entity = await examRepository.getExamById(examId);
+    const entity = await examAuthoringFacade.repository.getExamById(examId);
     const versionId = entity?.currentDraftVersionId ?? entity?.currentPublishedVersionId;
     if (!versionId) {
       setError('Current draft version not found');
       return false;
     }
 
-    const version = await examRepository.getVersionById(versionId);
+    const version = await examAuthoringFacade.repository.getVersionById(versionId);
     if (!version) {
       setError('Current draft version not found');
       return false;
     }
 
-    const nextContent = hydrateExamState({
+    const nextContent = examAuthoringFacade.hydrateExamState({
       ...version.contentSnapshot,
       config,
     });
 
-    const result = await examLifecycleService.saveDraft(examId, nextContent, 'System');
+    const result = await examAuthoringFacade.lifecycle.saveDraft(examId, nextContent, 'System');
     if (!result.success) {
       setError(result.error ?? 'Failed to save draft');
       return false;
