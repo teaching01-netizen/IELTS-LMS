@@ -91,8 +91,6 @@ export function applySelectionHighlightWithPolicy(
     return highlightedResult;
   }
 
-  selection.removeAllRanges();
-
   return highlightedResult;
 }
 

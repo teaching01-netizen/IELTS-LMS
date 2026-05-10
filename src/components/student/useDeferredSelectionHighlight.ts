@@ -31,11 +31,13 @@ export function useDeferredSelectionHighlight({
   const pendingSignatureRef = useRef<string | null>(null);
   const lastTouchAutoApplyAtRef = useRef<number | null>(null);
   const touchApplyTimerRef = useRef<number | null>(null);
+  const sawSelectionChangeInSessionRef = useRef(false);
 
   const clearPending = useCallback(() => {
     pendingSnapshotRef.current = null;
     pendingSignatureRef.current = null;
     touchSessionActiveRef.current = false;
+    sawSelectionChangeInSessionRef.current = false;
   }, []);
 
   const clearTouchApplyTimer = useCallback(() => {
@@ -48,11 +50,14 @@ export function useDeferredSelectionHighlight({
   const applyPending = useCallback(() => {
     const pendingSnapshot = pendingSnapshotRef.current;
 
-    let applied = false;
-    if (pendingSnapshot && applySelectionFromSnapshot?.(pendingSnapshot)) {
+    let applied = applySelection();
+    if (
+      !applied &&
+      pendingSnapshot &&
+      sawSelectionChangeInSessionRef.current &&
+      applySelectionFromSnapshot?.(pendingSnapshot)
+    ) {
       applied = true;
-    } else {
-      applied = applySelection();
     }
 
     if (applied) {
@@ -100,6 +105,7 @@ export function useDeferredSelectionHighlight({
     }
 
     touchSessionActiveRef.current = true;
+    sawSelectionChangeInSessionRef.current = false;
     queueCurrentSelection();
   }, [clearPending, clearTouchApplyTimer, enabled, queueCurrentSelection]);
 
@@ -182,6 +188,7 @@ export function useDeferredSelectionHighlight({
         return;
       }
 
+      sawSelectionChangeInSessionRef.current = true;
       queueCurrentSelection();
     };
 

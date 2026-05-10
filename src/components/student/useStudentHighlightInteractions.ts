@@ -125,7 +125,6 @@ export function useStudentHighlightInteractions({
       }
 
       onHtmlChange(result.html);
-      window.getSelection()?.removeAllRanges();
       return true;
     },
     [containerRef, enabled, maybeShowPolicyHint, onHtmlChange, resolvedHighlightClassName],

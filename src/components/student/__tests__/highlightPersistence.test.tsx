@@ -149,6 +149,7 @@ describe('student highlight persistence', () => {
 
     currentTextNode = textElement.firstChild;
     fireEvent.touchStart(textElement);
+    fireEvent(document, new Event('selectionchange'));
     getSelectionSpy.mockReturnValue(collapsedSelection);
     fireEvent.touchEnd(textElement);
     await act(async () => {
@@ -158,6 +159,45 @@ describe('student highlight persistence', () => {
     const marks = container.querySelectorAll('mark[data-highlighted="true"]');
     expect(marks).toHaveLength(1);
     expect(marks[0]).toHaveTextContent('beta gamma delta');
+
+    getSelectionSpy.mockRestore();
+  });
+
+  it('does not apply a stale touch-start snapshot when no in-session selectionchange occurred', async () => {
+    vi.useFakeTimers();
+    let currentTextNode: ChildNode | null = null;
+    const staleSelection = createSelectionMock(() => currentTextNode, {
+      start: 0,
+      end: 22,
+      text: 'Alpha beta gamma delta',
+    });
+    const collapsedSelection = {
+      rangeCount: 0,
+      getRangeAt: () => {
+        throw new Error('Selection collapsed');
+      },
+      toString: () => '',
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(staleSelection);
+
+    const { container } = render(<FormattedText text="Alpha beta gamma delta" highlightEnabled />);
+    const textElement = container.querySelector('span');
+    if (!textElement) {
+      throw new Error('Expected a rendered text span');
+    }
+
+    currentTextNode = textElement.firstChild;
+    fireEvent.touchStart(textElement);
+    getSelectionSpy.mockReturnValue(collapsedSelection);
+    fireEvent.touchEnd(textElement);
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+
+    const marks = container.querySelectorAll('mark[data-highlighted="true"]');
+    expect(marks).toHaveLength(0);
 
     getSelectionSpy.mockRestore();
   });

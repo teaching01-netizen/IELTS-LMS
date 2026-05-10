@@ -70,7 +70,7 @@ describe('applySelectionHighlight', () => {
     expect(result.html).toContain('data-highlighted="true"');
     expect(result.html).toContain('<p>Alpha <mark');
     expect(result.html).toContain('<p><mark');
-    expect(removeAllRanges).toHaveBeenCalledTimes(1);
+    expect(removeAllRanges).not.toHaveBeenCalled();
   });
 
   it('still highlights when selection stays inside a single paragraph', () => {
