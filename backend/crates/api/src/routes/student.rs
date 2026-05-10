@@ -8,6 +8,9 @@ use ielts_backend_application::auth::{AuthService, StudentAccess};
 use ielts_backend_application::delivery::{
     DeliveryConflictReason, DeliveryError, DeliveryService, MutationBatchResponseMode,
 };
+use ielts_backend_application::student_access::{
+    StudentAccessRepository, StudentAccessRepositoryError,
+};
 use ielts_backend_domain::attempt::{
     HeartbeatEventType, MutationCommand, MutationEnvelope, QuestionIdMutationPayload,
     QuestionSlotIdMutationPayload, QuestionSlotValueMutationPayload, QuestionValueMutationPayload,
@@ -20,7 +23,6 @@ use ielts_backend_domain::attempt::{
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::schedule::AuditActionType;
 use serde_json::{json, Value};
-use sqlx::{query_as, query_scalar, FromRow};
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -46,18 +48,14 @@ fn delivery_service(state: &AppState) -> DeliveryService {
     )
 }
 
+fn student_access_repository(state: &AppState) -> StudentAccessRepository {
+    StudentAccessRepository::new(state.db_pool())
+}
+
 const STUDENT_LIFECYCLE_SAMPLE_HEADER: &str = "x-student-lifecycle-sampled";
 const STUDENT_FLUSH_CYCLE_ID_HEADER: &str = "x-student-flush-cycle-id";
 const STUDENT_SUBMIT_CYCLE_ID_HEADER: &str = "x-student-submit-cycle-id";
-const PREVIEW_RUNTIME_COHORT_PREFIX: &str = "__preview_runtime__:";
-const PREVIEW_RUNTIME_INSTITUTION: &str = "preview-runtime";
 const PREVIEW_CANDIDATE_NAME: &str = "Preview Candidate";
-
-#[derive(Debug, FromRow)]
-struct PreviewScheduleRow {
-    cohort_name: String,
-    institution: Option<String>,
-}
 
 fn header_bool(headers: &HeaderMap, key: &str) -> bool {
     headers
@@ -1324,28 +1322,10 @@ async fn is_preview_runtime_schedule(
     state: &AppState,
     schedule_id: Uuid,
 ) -> Result<bool, ApiError> {
-    let schedule = query_as::<_, PreviewScheduleRow>(
-        "SELECT cohort_name, institution FROM exam_schedules WHERE id = ?",
-    )
-    .bind(schedule_id.to_string())
-    .fetch_optional(&state.db_pool())
-    .await
-    .map_err(|err| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "DATABASE_ERROR",
-            &err.to_string(),
-        )
-    })?;
-
-    let Some(schedule) = schedule else {
-        return Ok(false);
-    };
-
-    Ok(schedule
-        .cohort_name
-        .starts_with(PREVIEW_RUNTIME_COHORT_PREFIX)
-        && schedule.institution.as_deref() == Some(PREVIEW_RUNTIME_INSTITUTION))
+    student_access_repository(state)
+        .is_preview_runtime_schedule(schedule_id)
+        .await
+        .map_err(map_student_access_error)
 }
 
 fn access_key(access: &StudentAccess) -> String {
@@ -1356,36 +1336,33 @@ fn access_key(access: &StudentAccess) -> String {
 }
 
 async fn load_attempt_student_key(state: &AppState, attempt_id: &str) -> Result<String, ApiError> {
-    query_scalar("SELECT student_key FROM student_attempts WHERE id = ?")
-        .bind(attempt_id)
-        .fetch_optional(&state.db_pool())
+    student_access_repository(state)
+        .load_attempt_student_key(attempt_id)
         .await
-        .map_err(|err| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "DATABASE_ERROR",
-                &err.to_string(),
-            )
-        })?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))
+        .map_err(map_student_access_error)
 }
 
 async fn load_attempt_candidate_name(
     state: &AppState,
     attempt_id: &str,
 ) -> Result<String, ApiError> {
-    query_scalar("SELECT candidate_name FROM student_attempts WHERE id = ?")
-        .bind(attempt_id)
-        .fetch_optional(&state.db_pool())
+    student_access_repository(state)
+        .load_attempt_candidate_name(attempt_id)
         .await
-        .map_err(|err| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "DATABASE_ERROR",
-                &err.to_string(),
-            )
-        })?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))
+        .map_err(map_student_access_error)
+}
+
+fn map_student_access_error(error: StudentAccessRepositoryError) -> ApiError {
+    match error {
+        StudentAccessRepositoryError::Database(err) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &err.to_string(),
+        ),
+        StudentAccessRepositoryError::NotFound => {
+            ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+        }
+    }
 }
 
 fn map_auth_error(error: ielts_backend_application::auth::AuthError) -> ApiError {

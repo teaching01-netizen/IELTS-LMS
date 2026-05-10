@@ -45,14 +45,17 @@ fn workspace_root() -> PathBuf {
 #[test]
 fn protected_attempt_columns_are_only_written_by_delivery_writer() {
     let root = workspace_root();
-    let allowed = root.join("crates/application/src/delivery.rs");
+    let allowed_files = [
+        root.join("crates/application/src/delivery.rs"),
+        root.join("crates/application/src/delivery/mod.rs"),
+    ];
 
     let mut files = Vec::new();
     collect_rs_files(&root.join("crates"), &mut files);
 
     let mut violations = Vec::new();
     for file in files {
-        if file == allowed {
+        if allowed_files.iter().any(|allowed| file == *allowed) {
             continue;
         }
         let Ok(content) = fs::read_to_string(&file) else {
@@ -65,7 +68,7 @@ fn protected_attempt_columns_are_only_written_by_delivery_writer() {
 
     assert!(
         violations.is_empty(),
-        "Protected student_attempts columns must only be written in delivery writer (delivery.rs). Violations: {:?}",
+        "Protected student_attempts columns must only be written in delivery writer (delivery.rs or delivery/mod.rs). Violations: {:?}",
         violations
     );
 }
@@ -73,12 +76,20 @@ fn protected_attempt_columns_are_only_written_by_delivery_writer() {
 #[test]
 fn delivery_writer_declares_attempt_row_lock_for_protected_writes() {
     let root = workspace_root();
-    let delivery = root.join("crates/application/src/delivery.rs");
-    let content = fs::read_to_string(&delivery).expect("delivery.rs must be readable");
+    let candidates = [
+        root.join("crates/application/src/delivery.rs"),
+        root.join("crates/application/src/delivery/mod.rs"),
+    ];
+    let delivery = candidates
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .expect("delivery writer file must exist");
+    let content = fs::read_to_string(&delivery).expect("delivery writer must be readable");
 
     assert!(
         has_protected_attempt_write(&content),
-        "delivery.rs no longer contains protected student_attempts writes; update guard expectations"
+        "delivery writer no longer contains protected student_attempts writes; update guard expectations"
     );
     assert!(
         has_attempt_row_lock(&content),

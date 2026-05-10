@@ -1,3 +1,8 @@
+pub mod mutation_batch;
+pub mod ports;
+pub mod session_context;
+pub mod submit_attempt;
+
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use ielts_backend_domain::{
     attempt::{

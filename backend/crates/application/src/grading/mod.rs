@@ -1,3 +1,8 @@
+pub mod ports;
+pub mod projection_sync;
+pub mod review_actions;
+pub mod session_queries;
+
 use chrono::{DateTime, Utc};
 use ielts_backend_domain::{
     grading::{
