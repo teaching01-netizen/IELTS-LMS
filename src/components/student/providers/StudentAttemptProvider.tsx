@@ -8,25 +8,23 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import { backendPost } from '@services/backendBridge';
-import { buildStudentHeartbeatEvent } from '@services/studentIntegrityService';
 import {
-  hasAttemptCredential,
-  ensureClientSessionIdForAttempt,
-  mapBackendStudentAttempt,
-  refreshAttemptCredentialForAttempt,
-  studentAttemptRepository,
+  backendPost,
   backendConflictReason,
-  clearAttemptMutationWatermark,
-} from '@services/studentAttemptRepository';
-import {
   buildQueuedMutationUpdate,
+  buildStudentHeartbeatEvent,
+  clearAttemptMutationWatermark,
   createStudentMutationOutbox,
-  DurablePersistTriggerSource,
+  ensureClientSessionIdForAttempt,
+  hasAttemptCredential,
+  mapBackendStudentAttempt,
   PendingMutationDurabilityMirror,
   readAnswerSyncCheckpoint,
-} from '@services/studentMutationOutbox';
-import { saveStudentAuditEvent } from '@services/studentAuditService';
+  refreshAttemptCredentialForAttempt,
+  saveStudentAuditEvent,
+  studentAttemptRepository,
+} from '@student/application/studentAttemptFacade';
+import type { DurablePersistTriggerSource } from '@student/application/studentAttemptFacade';
 import { queryClient } from '../../../app/data/queryClient';
 import {
   emitStudentObservabilityMetric,
