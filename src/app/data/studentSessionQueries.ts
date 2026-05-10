@@ -1,46 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
 import {
-  backendGet,
-  mapBackendExamVersion,
-  mapBackendRuntime,
-  mapBackendSchedule,
-} from '../../services/backendBridge';
-import {
-  studentSessionTransport,
-} from '../../services/studentSessionTransport';
+  studentSessionFacade,
+  type StudentSessionLivePayload,
+  type StudentSessionStaticPayload,
+} from '../../features/student/application/studentSessionFacade';
 import type { StudentAttempt } from '../../types/studentAttempt';
 import { liveQueryPolicy, queryKeys, staticQueryPolicy } from './queryClient';
 
-export type BackendStudentSessionContext = {
-  schedule: Parameters<typeof mapBackendSchedule>[0];
-  version: Parameters<typeof mapBackendExamVersion>[0];
-  runtime?: Parameters<typeof mapBackendRuntime>[0] | null | undefined;
-  attempt?: unknown | null | undefined;
-  degradedLiveMode?: boolean | undefined;
-};
-
-export type BackendStudentStaticSessionContext = {
-  schedule: Parameters<typeof mapBackendSchedule>[0];
-  version: Parameters<typeof mapBackendExamVersion>[0];
-  degradedLiveMode: boolean;
-};
-
-export type BackendStudentLiveSessionContext = {
-  runtime?: Parameters<typeof mapBackendRuntime>[0] | null | undefined;
-  attempt?: unknown | null | undefined;
-  degradedLiveMode?: boolean | undefined;
-};
+export type BackendStudentSessionContext = StudentSessionStaticPayload & StudentSessionLivePayload;
+export type BackendStudentStaticSessionContext = StudentSessionStaticPayload;
+export type BackendStudentLiveSessionContext = StudentSessionLivePayload;
 
 export function fetchStudentStaticSession(scheduleId: string, candidateId: string) {
-  return backendGet<BackendStudentStaticSessionContext>(
-    studentSessionTransport.paths.staticSession(scheduleId, candidateId),
-  );
+  return studentSessionFacade.loadStaticSession(scheduleId, candidateId);
 }
 
 export function fetchStudentLiveSession(scheduleId: string, candidateId: string) {
-  return backendGet<BackendStudentLiveSessionContext>(
-    studentSessionTransport.paths.liveSession(scheduleId, candidateId),
-  );
+  return studentSessionFacade.loadLiveSession(scheduleId, candidateId);
 }
 
 export function useStudentStaticSession(

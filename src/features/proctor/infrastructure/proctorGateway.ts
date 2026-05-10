@@ -1,4 +1,5 @@
 import {
+  backendGet,
   getAttemptSchedule,
   mapBackendRuntime,
   mapBackendSchedule,
@@ -13,6 +14,7 @@ function isPreviewRuntimeCohortName(cohortName: string): boolean {
 }
 
 export const proctorGateway = {
+  backendGet,
   getAttemptSchedule,
   mapBackendRuntime,
   mapBackendSchedule,

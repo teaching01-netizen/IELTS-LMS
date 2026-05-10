@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { backendGet, mapBackendRuntime, mapBackendSchedule } from '../../services/backendBridge';
+import { proctorFacade } from '../../features/proctor/application/proctorFacade';
 import { liveQueryPolicy, queryKeys } from './queryClient';
 
 export type ProctorSessionSummaryPayload = {
-  schedule: Parameters<typeof mapBackendSchedule>[0];
-  runtime: Parameters<typeof mapBackendRuntime>[0];
+  schedule: Parameters<typeof proctorFacade.mapSchedule>[0];
+  runtime: Parameters<typeof proctorFacade.mapRuntime>[0];
   studentCount?: number | undefined;
   activeCount?: number | undefined;
   joinReadyCount?: number | undefined;
@@ -15,8 +15,8 @@ export type ProctorSessionSummaryPayload = {
 };
 
 export type ProctorSessionDetailPayload = {
-  schedule: Parameters<typeof mapBackendSchedule>[0];
-  runtime: Parameters<typeof mapBackendRuntime>[0];
+  schedule: Parameters<typeof proctorFacade.mapSchedule>[0];
+  runtime: Parameters<typeof proctorFacade.mapRuntime>[0];
   sessions: Array<{
     attemptId: string;
     studentId: string;
@@ -91,11 +91,11 @@ export function buildDashboardDetailEndpoint(scheduleId: string) {
 }
 
 export function fetchProctorSessionSummaries() {
-  return backendGet<ProctorSessionSummaryPayload[]>('/v1/proctor/sessions');
+  return proctorFacade.backendGet<ProctorSessionSummaryPayload[]>('/v1/proctor/sessions');
 }
 
 export function fetchProctorSessionDetail(scheduleId: string) {
-  return backendGet<ProctorSessionDetailPayload>(buildDashboardDetailEndpoint(scheduleId));
+  return proctorFacade.backendGet<ProctorSessionDetailPayload>(buildDashboardDetailEndpoint(scheduleId));
 }
 
 export function useProctorSessionSummaries(refetchInterval: number) {
