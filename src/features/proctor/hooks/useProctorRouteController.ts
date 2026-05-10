@@ -8,13 +8,7 @@ import {
   useProctorSessionSummaries,
 } from '@app/data/proctorQueries';
 import { liveQueryPolicy, queryKeys } from '@app/data/queryClient';
-import {
-  getAttemptSchedule,
-  mapBackendRuntime,
-  mapBackendSchedule,
-  rememberAttemptSchedule,
-} from '@services/backendBridge';
-import { examDeliveryService } from '@services/examDeliveryService';
+import { proctorFacade } from '../application/proctorFacade';
 import type {
   ProctorAlert,
   SessionAuditLog,
@@ -26,7 +20,6 @@ import type {
 import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
 import type { ProctorPresence } from '../../../types/domain';
 import type { ProctorScheduleMetrics } from '../contracts';
-import { isPreviewRuntimeCohortName } from '@builder/services/previewRuntimeSessionService';
 
 function mapBackendSessionSummary(payload: {
   attemptId: string;
@@ -48,7 +41,7 @@ function mapBackendSessionSummary(payload: {
   examId: string;
   examName: string;
 }): StudentSession {
-  rememberAttemptSchedule(payload.attemptId, payload.scheduleId);
+  proctorFacade.rememberAttemptSchedule(payload.attemptId, payload.scheduleId);
 
   return {
     id: payload.attemptId,
@@ -195,7 +188,7 @@ function getLiveUpdateScheduleId(event: LiveUpdateEvent): string | null {
   }
 
   if (event.kind === 'attempt') {
-    return getAttemptSchedule(event.id) ?? null;
+    return proctorFacade.getAttemptSchedule(event.id) ?? null;
   }
 
   return null;
@@ -290,10 +283,10 @@ export function useProctorRouteController(): ProctorRouteController {
   const applyMonitoringState = useCallback(
     (nextSummaries: typeof summaries, details: ProctorSessionDetailPayload[]) => {
       const filteredSummaries = nextSummaries.filter(
-        (summary) => !isPreviewRuntimeCohortName(summary.schedule.cohortName),
+        (summary) => !proctorFacade.isPreviewRuntimeCohortName(summary.schedule.cohortName),
       );
       const filteredDetails = details.filter(
-        (detail) => !isPreviewRuntimeCohortName(detail.schedule.cohortName),
+        (detail) => !proctorFacade.isPreviewRuntimeCohortName(detail.schedule.cohortName),
       );
 
       if (filteredSummaries.length === 0) {
@@ -331,10 +324,10 @@ export function useProctorRouteController(): ProctorRouteController {
       setSummaryPollIntervalMs(degradedMode ? 2_000 : 4_000);
       setDetailPollIntervalMs(degradedMode ? 3_000 : 6_000);
       setScheduleMetrics(metrics);
-      setSchedules(filteredSummaries.map((summary) => mapBackendSchedule(summary.schedule)));
+      setSchedules(filteredSummaries.map((summary) => proctorFacade.mapSchedule(summary.schedule)));
       setRuntimeSnapshots(
         filteredSummaries.map((summary) =>
-          mapBackendRuntime(summary.runtime, mapBackendSchedule(summary.schedule)),
+          proctorFacade.mapRuntime(summary.runtime, proctorFacade.mapSchedule(summary.schedule)),
         ),
       );
 
@@ -349,9 +342,9 @@ export function useProctorRouteController(): ProctorRouteController {
       setRuntimeSnapshots((current) => {
         const bySchedule = new Map(current.map((runtime) => [runtime.scheduleId, runtime]));
         for (const detail of filteredDetails) {
-          const schedule = mapBackendSchedule(detail.schedule);
+          const schedule = proctorFacade.mapSchedule(detail.schedule);
           bySchedule.set(detail.schedule.id, {
-            ...mapBackendRuntime(detail.runtime, schedule),
+            ...proctorFacade.mapRuntime(detail.runtime, schedule),
             proctorPresence: (detail.presence ?? []).map(mapBackendProctorPresence),
           });
         }
@@ -452,7 +445,7 @@ export function useProctorRouteController(): ProctorRouteController {
 
   const handleStartScheduledSession = useCallback(
     async (scheduleId: string) => {
-      await examDeliveryService.startRuntime(scheduleId, 'Proctor');
+      await proctorFacade.delivery.startRuntime(scheduleId, 'Proctor');
       await loadMonitoringState();
     },
     [loadMonitoringState],
@@ -460,7 +453,7 @@ export function useProctorRouteController(): ProctorRouteController {
 
   const handlePauseCohort = useCallback(
     async (scheduleId: string) => {
-      await examDeliveryService.pauseRuntime(scheduleId, 'Proctor');
+      await proctorFacade.delivery.pauseRuntime(scheduleId, 'Proctor');
       await loadMonitoringState();
     },
     [loadMonitoringState],
@@ -468,7 +461,7 @@ export function useProctorRouteController(): ProctorRouteController {
 
   const handleResumeCohort = useCallback(
     async (scheduleId: string) => {
-      await examDeliveryService.resumeRuntime(scheduleId, 'Proctor');
+      await proctorFacade.delivery.resumeRuntime(scheduleId, 'Proctor');
       await loadMonitoringState();
     },
     [loadMonitoringState],
@@ -478,7 +471,7 @@ export function useProctorRouteController(): ProctorRouteController {
     async (scheduleId: string) => {
       const runtime = runtimeSnapshots.find((candidate) => candidate.scheduleId === scheduleId);
       const expectedActiveSectionKey = runtime?.activeSectionKey ?? runtime?.currentSectionKey ?? undefined;
-      const result = await examDeliveryService.endCurrentSectionNow(
+      const result = await proctorFacade.delivery.endCurrentSectionNow(
         scheduleId,
         'Proctor',
         expectedActiveSectionKey,
@@ -497,7 +490,7 @@ export function useProctorRouteController(): ProctorRouteController {
     async (scheduleId: string, minutes: number) => {
       const runtime = runtimeSnapshots.find((candidate) => candidate.scheduleId === scheduleId);
       const expectedActiveSectionKey = runtime?.activeSectionKey ?? runtime?.currentSectionKey ?? undefined;
-      const result = await examDeliveryService.extendCurrentSection(
+      const result = await proctorFacade.delivery.extendCurrentSection(
         scheduleId,
         'Proctor',
         minutes,
@@ -515,7 +508,7 @@ export function useProctorRouteController(): ProctorRouteController {
 
   const handleCompleteExam = useCallback(
     async (scheduleId: string) => {
-      await examDeliveryService.completeRuntime(scheduleId, 'Proctor');
+      await proctorFacade.delivery.completeRuntime(scheduleId, 'Proctor');
       await loadMonitoringState();
     },
     [loadMonitoringState],
@@ -563,13 +556,13 @@ export function useProctorRouteController(): ProctorRouteController {
           }
 
           if (rule.action === 'warn') {
-            await examDeliveryService.warnStudent(
+            await proctorFacade.delivery.warnStudent(
               session.id,
               `Auto-warning triggered by ${rule.triggerType}`,
               'system',
             );
           } else if (rule.action === 'pause') {
-            await examDeliveryService.pauseStudentAttempt(session.id, 'system');
+            await proctorFacade.delivery.pauseStudentAttempt(session.id, 'system');
           } else if (rule.action === 'notify_proctor') {
             const latestViolationId = session.violations.at(-1)?.id ?? 'none';
             notifyAlerts.push({
@@ -583,7 +576,7 @@ export function useProctorRouteController(): ProctorRouteController {
               isAcknowledged: false,
             });
           } else if (rule.action === 'terminate') {
-            await examDeliveryService.terminateStudentAttempt(session.id, 'system');
+            await proctorFacade.delivery.terminateStudentAttempt(session.id, 'system');
           }
         }
       }
