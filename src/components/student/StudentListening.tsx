@@ -1,20 +1,19 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { DiagramLabelingBlock, ExamState, QuestionAnswer } from '../../types';
-import { QuestionRenderer } from './QuestionRenderer';
-import { SubAnswerTreeQuestionList } from './SubAnswerTreeQuestionList';
-import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight, ArrowLeft, ArrowRight, Flag } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
-import { getQuestionStartNumber, getStudentQuestionsForModule } from '../../services/examAdapterService';
+import { getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
 import { FormattedText } from './FormattedText';
 import { RichTextHighlighter } from './RichTextHighlighter';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
 import type { StudentHighlightColor } from './highlightPalette';
-import { formatQuestionRange } from './questionRangeLabel';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
 import { useSplitPaneResize } from './useSplitPaneResize';
 import { isInstructionReferencePlacement } from '../../utils/referenceImagePlacement';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
+import { hasHtmlMarkup } from './normalizeReadingPassageText';
+import { StudentQuestionPanel } from './StudentQuestionPanel';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -33,6 +32,13 @@ interface StudentListeningProps {
   highlightClassName?: string | undefined;
   tabletMode?: boolean | undefined;
   contentZoom?: number | undefined;
+  onIncreasePassageReadability?: (() => void) | undefined;
+  onDecreasePassageReadability?: (() => void) | undefined;
+  onResetPassageReadability?: (() => void) | undefined;
+  passageReadabilityLabel?: string | undefined;
+  canIncreasePassageReadability?: boolean | undefined;
+  canDecreasePassageReadability?: boolean | undefined;
+  registerLiveAnswer?: ((answerKey: string, value: QuestionAnswer) => void) | undefined;
 }
 
 function getDiagramSlotIds(block: DiagramLabelingBlock): string[] {
@@ -60,38 +66,20 @@ export function StudentListening({
   highlightClassName,
   tabletMode = false,
   contentZoom = 1,
+  onIncreasePassageReadability,
+  onDecreasePassageReadability,
+  onResetPassageReadability,
+  passageReadabilityLabel,
+  canIncreasePassageReadability,
+  canDecreasePassageReadability,
+  registerLiveAnswer,
 }: StudentListeningProps) {
-  const resolveSharedAnswerMeta = (
-    value: QuestionAnswer,
-    slotId: string | undefined,
-    defaultEntryAnswerIndex: number | undefined,
-    slotCount: number,
-    incomingMeta?: StudentAnswerMutationMeta,
-  ): StudentAnswerMutationMeta | undefined => {
-    if (incomingMeta?.slotIndex !== undefined || typeof defaultEntryAnswerIndex !== 'number') {
-      return incomingMeta;
-    }
-
-    let slotValue = '';
-    if (typeof value === 'string') {
-      slotValue = value;
-    } else if (Array.isArray(value)) {
-      const candidate = value[defaultEntryAnswerIndex];
-      slotValue = typeof candidate === 'string' ? candidate : '';
-    } else if (value !== null && value !== undefined) {
-      slotValue = String(value);
-    }
-
-    return {
-      ...incomingMeta,
-      slotIndex: defaultEntryAnswerIndex,
-      slotId,
-      slotCount,
-      slotValue,
-      interactionType: 'typing',
-    };
-  };
-
+  void onIncreasePassageReadability;
+  void onDecreasePassageReadability;
+  void onResetPassageReadability;
+  void passageReadabilityLabel;
+  void canIncreasePassageReadability;
+  void canDecreasePassageReadability;
   const isTabletMode = Boolean(tabletMode);
   const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
   const supportsCssZoom = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('zoom', '1.01');
@@ -145,13 +133,12 @@ export function StudentListening({
 
     return partByCurrentQuestion || state.listening.parts.find((part) => part.id === state.activeListeningPartId) || state.listening.parts[0];
   }, [currentQ, currentQuestionId, state.activeListeningPartId, state.listening.parts]);
-  const currentIndex = allQuestions.findIndex((question) => question.id === currentQuestionId);
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex >= 0 && currentIndex < allQuestions.length - 1;
-  const previousQuestion = hasPrev ? allQuestions[currentIndex - 1] : undefined;
-  const nextQuestion = hasNext ? allQuestions[currentIndex + 1] : undefined;
   const audioPlaybackEnabled = state.config.sections.listening.audioPlaybackEnabled ?? true;
   const activeTranscript = ((activePart as { transcript?: string | undefined }).transcript ?? '').trim();
+  const activeTranscriptHasHtml = useMemo(
+    () => hasHtmlMarkup(activeTranscript),
+    [activeTranscript],
+  );
   const hasAudioSource = Boolean(activePart?.audioUrl);
   const canPlayAudio = audioPlaybackEnabled && hasAudioSource;
   const shouldShowAudioPanel = audioPlaybackEnabled;
@@ -162,13 +149,28 @@ export function StudentListening({
     return currentDiagramBlocks.length > 0 ? currentDiagramBlocks : diagramBlocks;
   }, [activePart?.blocks, currentQ?.blockId, currentQuestionId]);
   const diagramBlocksInMaterialPane = useMemo(
-    () => activeDiagramBlocks.filter((block) => !isInstructionReferencePlacement(block)),
+    () => activeDiagramBlocks.filter((block) => block.referenceImagePlacement !== 'instruction'),
     [activeDiagramBlocks],
   );
   const hiddenDiagramReferenceBlockIds = useMemo(
     () => new Set(diagramBlocksInMaterialPane.map((block) => block.id)),
     [diagramBlocksInMaterialPane],
   );
+  const blockStartNumbers = useMemo(() => {
+    const map = new Map<string, number>();
+    let nextNumber = 1;
+
+    for (const part of state.listening.parts) {
+      for (const block of part.blocks) {
+        map.set(block.id, nextNumber);
+        nextNumber += getBlockQuestionCount(block);
+      }
+    }
+
+    return map;
+  }, [state.listening.parts]);
+  const getBlockStartQuestionNumber = (blockId: string) => blockStartNumbers.get(blockId) ?? 1;
+  const hideDiagramReferenceForBlock = (blockId: string) => hiddenDiagramReferenceBlockIds.has(blockId);
 
   useEffect(() => {
     if (currentQuestionId && questionContainerRef.current) {
@@ -239,7 +241,7 @@ export function StudentListening({
     audio.pause();
     setIsPlaying(false);
   };
-  
+
   const formatTime = (seconds: number) => {
     const bounded = Math.max(0, Math.floor(seconds));
     const m = Math.floor(bounded / 60);
@@ -305,7 +307,7 @@ export function StudentListening({
               onLoadedMetadata={syncProgressFromAudio}
             />
           ) : null}
-          
+
           {shouldShowAudioPanel ? (
             <div className="w-full bg-gray-50 rounded-xl p-4 md:p-6 border border-gray-200">
               <h2 className="font-semibold text-gray-800 mb-3 md:mb-4 text-base md:text-lg">Listening Audio Track</h2>
@@ -325,9 +327,9 @@ export function StudentListening({
                   <div
                     className="h-2 bg-gray-200 rounded-full overflow-hidden relative cursor-pointer"
                     data-testid="listening-progress-track"
-                    onClick={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const x = e.clientX - rect.left;
+                    onClick={(event) => {
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const x = event.clientX - rect.left;
                       seekToPercent((x / rect.width) * 100);
                     }}
                   >
@@ -371,7 +373,7 @@ export function StudentListening({
                     min="0"
                     max="100"
                     value={volume}
-                    onChange={(e) => setVolume(Number.parseInt(e.target.value, 10))}
+                    onChange={(event) => setVolume(Number.parseInt(event.target.value, 10))}
                     className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                     aria-label="Audio volume"
                     disabled={!canPlayAudio}
@@ -433,7 +435,7 @@ export function StudentListening({
               <h3 className={`${materialCompact ? 'mb-1 text-xs' : 'mb-2 text-sm'} font-semibold text-gray-700`}>Transcript / Reference</h3>
               <RichTextHighlighter
                 content={activeTranscript}
-                contentType="text"
+                contentType={activeTranscriptHasHtml ? 'html' : 'text'}
                 enabled={highlightEnabled}
                 className={`student-accessible-table-typography ${materialCompact ? 'text-xs md:text-sm' : 'text-sm md:text-base'} whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed text-gray-800`}
                 highlightColor={highlightColor}
@@ -443,7 +445,7 @@ export function StudentListening({
           ) : null}
         </div>
 
-        <div 
+        <div
           onMouseDown={handleDrag}
           onTouchStart={handleDrag}
           className={`${isTabletMode ? 'absolute inset-y-0 z-20 flex w-11 items-center justify-center' : 'hidden w-4 lg:flex relative items-center justify-center flex-shrink-0'} bg-gray-400 cursor-col-resize touch-none hover:bg-gray-600 transition-colors`}
@@ -458,221 +460,27 @@ export function StudentListening({
           </div>
         </div>
 
-        <div className={`relative flex h-full min-w-0 flex-col min-h-0 ${isTabletMode ? 'w-[var(--question-pane-width)] min-w-[48px]' : 'w-full md:min-w-[320px] lg:w-[var(--question-pane-width)]'}`}>
-          <div
-            className={`flex-1 overflow-y-auto break-words [overflow-wrap:anywhere] ${
-              answerCompact ? 'p-2.5 md:p-3 space-y-4 md:space-y-5' : 'p-4 md:p-5 lg:p-8 space-y-6 md:space-y-8'
-            } pb-20 md:pb-24 ${
-              isTabletMode ? 'pb-28 md:pb-28' : ''
-            }`}
-            ref={questionContainerRef}
-            data-student-zoom-scroll
-            data-testid="listening-question-scroll"
-            style={tabletContentZoomStyle}
-          >
-            {activePart.blocks.map((block) => {
-              const blockQuestions = allQuestions.filter((question) => question.blockId === block.id);
-              const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
-              const treeQuestions = blockQuestions.filter((question) => question.isSubAnswerTreeLeaf);
-              const rootNumbers = Array.from(new Set(blockQuestions.map((question) => question.rootNumber))).sort(
-                (left, right) => left - right,
-              );
-              let blockStartQ = 1;
-              for (const p of state.listening.parts) {
-                for (const b of p.blocks) {
-                  if (b.id === block.id) break;
-                  blockStartQ += getBlockQuestionCount(b);
-                }
-                if (p.blocks.some(b => b.id === block.id)) break;
-              }
-              const numberedBlockStart = rootNumbers[0] ?? blockStartQ;
-              const numberedBlockEnd =
-                rootNumbers[rootNumbers.length - 1] ??
-                blockStartQ + getBlockQuestionCount(block) - 1;
-
-              return (
-                <div key={block.id} className={`${answerCompact ? 'space-y-3 mb-3 md:mb-4' : 'space-y-4 md:space-y-6 mb-4 md:mb-6'}`}>
-                  <div className={answerCompact ? 'mb-2' : 'mb-3 md:mb-4'}>
-                    {numberedBlockStart !== numberedBlockEnd ? (
-                      <h3 className={`font-bold text-gray-900 break-words [overflow-wrap:anywhere] ${answerCompact ? 'mb-1 text-sm md:text-base' : 'mb-1 md:mb-2 text-base md:text-lg'}`}>
-                        Questions {formatQuestionRange(numberedBlockStart, numberedBlockEnd)}
-                      </h3>
-                    ) : null}
-                    {renderBlockInstruction(block.instruction)}
-                  </div>
-                  
-                  <div className={answerCompact ? 'space-y-5' : 'space-y-8'}>
-                    {treeQuestions.length > 0 ? (
-                      <SubAnswerTreeQuestionList
-                        questions={treeQuestions}
-                        answers={answers}
-                        currentQuestionId={currentQuestionId}
-                        flags={flags}
-                        onToggleFlag={onToggleFlag}
-                        tabletMode={isTabletMode}
-                        onAnswerChange={onAnswerChange}
-                      />
-                    ) : ('questions' in block) ? (
-                      block.questions.map((q, qIdx) => {
-                        const questionEntries = blockQuestions.filter((entry) => entry.question?.id === q.id);
-                        const firstEntry = questionEntries[0];
-                        const globalIdx =
-                          (firstEntry ? getQuestionStartNumber(allQuestions, firstEntry.id) : null) ??
-                          blockStartQ + qIdx;
-                        const inlineFlags = block.type === 'SENTENCE_COMPLETION' || block.type === 'NOTE_COMPLETION';
-                        const flagId = firstEntry?.id;
-
-                        return (
-                          <div
-                            key={q.id}
-                            id={!inlineFlags && flagId ? `question-${flagId}` : undefined}
-                            className={`relative ${isTabletMode ? 'space-y-2' : ''}`}
-                          >
-                            {isTabletMode && onToggleFlag && flagId && !inlineFlags ? (
-                              <div className="flex justify-end">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onToggleFlag(flagId);
-                                  }}
-                                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition-all ${
-                                    flags[flagId]
-                                      ? 'bg-amber-700 text-white border-amber-700'
-                                      : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
-                                  }`}
-                                  title={flags[flagId] ? 'Unflag question' : 'Flag question'}
-                                >
-                                  <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
-                                </button>
-                              </div>
-                            ) : null}
-                            {!isTabletMode && onToggleFlag && flagId && !inlineFlags ? (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); onToggleFlag(flagId); }}
-                                className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
-                                  flags[flagId] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-                                }`}
-                                title={flags[flagId] ? 'Unflag question' : 'Flag question'}
-                              >
-                                <Flag size={14} className={flags[flagId] ? 'fill-current' : ''} />
-                              </button>
-                            ) : null}
-                            <QuestionRenderer
-                              question={q}
-                              block={block}
-                              number={globalIdx}
-                              answer={answers[firstEntry?.answerKey ?? q.id]}
-                              onChange={(val, meta) =>
-                                onAnswerChange(
-                                  firstEntry?.answerKey ?? q.id,
-                                  val,
-                                  resolveSharedAnswerMeta(
-                                    val,
-                                    firstEntry?.id,
-                                    firstEntry?.answerIndex,
-                                    questionEntries.length,
-                                    meta,
-                                  ),
-                                )
-                              }
-                              registerLiveAnswer={({ value }) =>
-                                registerLiveAnswer?.(firstEntry?.answerKey ?? q.id, value)}
-                              isFlagged={flagId ? Boolean(flags[flagId]) : false}
-                              isActive={questionEntries.some((entry) => entry.id === currentQuestionId)}
-                              slotIds={questionEntries.map((entry) => entry.id)}
-                              slotNumbers={questionEntries.map((entry) => entry.rootNumber)}
-                              currentQuestionId={currentQuestionId}
-                              flags={flags}
-                              onToggleFlag={onToggleFlag}
-                              tabletMode={isTabletMode}
-                              compactPane={answerCompact}
-                              highlightEnabled={highlightEnabled}
-                              highlightColor={highlightColor}
-                              hideDiagramReference={hiddenDiagramReferenceBlockIds.has(block.id)}
-                            />
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div
-                        key={block.id}
-                        className="relative"
-                      >
-                        {isTabletMode && onToggleFlag && singleBlockQuestion ? (
-                          <div className="mb-2 flex justify-end">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onToggleFlag(singleBlockQuestion.id);
-                              }}
-                              className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition-all ${
-                                flags[singleBlockQuestion.id]
-                                  ? 'bg-amber-700 text-white border-amber-700'
-                                  : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
-                              }`}
-                              title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
-                            >
-                              <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
-                            </button>
-                          </div>
-                        ) : null}
-                        {!isTabletMode && onToggleFlag && singleBlockQuestion ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onToggleFlag(singleBlockQuestion.id); }}
-                            className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
-                              flags[singleBlockQuestion.id] ? 'bg-amber-700 text-white' : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-                            }`}
-                            title={flags[singleBlockQuestion.id] ? 'Unflag question' : 'Flag question'}
-                          >
-                            <Flag size={14} className={flags[singleBlockQuestion.id] ? 'fill-current' : ''} />
-                          </button>
-                        ) : null}
-                        <QuestionRenderer
-                          question={null}
-                          block={block}
-                          number={(singleBlockQuestion ? getQuestionStartNumber(allQuestions, singleBlockQuestion.id) : null) ?? blockStartQ}
-                          answer={answers[singleBlockQuestion?.answerKey ?? block.id]}
-                          onChange={(val, meta) =>
-                            onAnswerChange(singleBlockQuestion?.answerKey ?? block.id, val, meta)
-                          }
-                          registerLiveAnswer={({ value }) =>
-                            registerLiveAnswer?.(singleBlockQuestion?.answerKey ?? block.id, value)}
-                          isFlagged={singleBlockQuestion ? Boolean(flags[singleBlockQuestion.id]) : false}
-                          isActive={blockQuestions.some((entry) => entry.id === currentQuestionId)}
-                          slotIds={blockQuestions.map((entry) => entry.id)}
-                          slotNumbers={blockQuestions.map((entry) => entry.rootNumber)}
-                          currentQuestionId={currentQuestionId}
-                          flags={flags}
-                          onToggleFlag={onToggleFlag}
-                          tabletMode={isTabletMode}
-                          compactPane={answerCompact}
-                          highlightEnabled={highlightEnabled}
-                          highlightColor={highlightColor}
-                          hideDiagramReference={hiddenDiagramReferenceBlockIds.has(block.id)}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className={`absolute ${isTabletMode ? 'bottom-4 right-4' : 'bottom-16 md:bottom-20 right-4 md:right-6'} flex shadow-md z-20`}>
-            <button 
-              onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
-              className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
-            >
-              <ArrowLeft size={16} strokeWidth={3} />
-            </button>
-            <button 
-              onClick={() => nextQuestion && onNavigate(nextQuestion.id)}
-              className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
-            >
-              <ArrowRight size={16} strokeWidth={3} />
-            </button>
-          </div>
-        </div>
+        <StudentQuestionPanel
+          blocks={activePart.blocks}
+          allQuestions={allQuestions}
+          answers={answers}
+          onAnswerChange={onAnswerChange}
+          currentQuestionId={currentQuestionId}
+          onNavigate={onNavigate}
+          flags={flags}
+          onToggleFlag={onToggleFlag}
+          tabletMode={isTabletMode}
+          answerCompact={answerCompact}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+          registerLiveAnswer={registerLiveAnswer}
+          questionContainerRef={questionContainerRef}
+          contentZoomStyle={tabletContentZoomStyle}
+          panelTestId="listening-question-scroll"
+          getBlockStartQuestionNumber={getBlockStartQuestionNumber}
+          renderBlockInstruction={renderBlockInstruction}
+          hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
+        />
       </div>
     </div>
   );

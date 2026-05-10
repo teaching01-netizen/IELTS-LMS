@@ -155,5 +155,7 @@ describe('StudentSessionRoute', () => {
     expect(screen.queryByText('Loading Error')).not.toBeInTheDocument();
     expect(screen.getByText('Student App Active')).toBeInTheDocument();
     expect(StudentAppWrapperMock).toHaveBeenCalledTimes(1);
+    const props = StudentAppWrapperMock.mock.calls[0]?.[0] as { allowExitDuringExam?: boolean };
+    expect(props.allowExitDuringExam).toBe(false);
   });
 });

@@ -52,6 +52,7 @@ interface QuestionRendererProps {
   isFlagged?: boolean | undefined;
   isActive?: boolean | undefined;
   slotIds?: string[] | undefined;
+  slotNumbers?: number[] | undefined;
   currentQuestionId?: string | null | undefined;
   flags?: Record<string, boolean> | undefined;
   onToggleFlag?: ((id: string) => void) | undefined;
@@ -66,6 +67,7 @@ interface QuestionRendererProps {
   sessionId?: string | undefined;
   studentId?: string | undefined;
   hideDiagramReference?: boolean | undefined;
+  registerLiveAnswer?: ((payload: { value: QuestionAnswer }) => void) | undefined;
 }
 
 export function QuestionRenderer({
@@ -76,6 +78,7 @@ export function QuestionRenderer({
   onChange,
   isActive = false,
   slotIds = [],
+  slotNumbers,
   currentQuestionId = null,
   flags = {},
   onToggleFlag,
@@ -87,7 +90,9 @@ export function QuestionRenderer({
   sessionId,
   studentId,
   hideDiagramReference = false,
+  registerLiveAnswer,
 }: QuestionRendererProps) {
+  void slotNumbers;
   const stringArrayAnswer = Array.isArray(answer) ? answer : [];
   const isCompactPane = tabletMode && compactPane;
   const fieldIndentClass = tabletMode ? 'ml-0' : 'ml-9';
@@ -145,6 +150,12 @@ export function QuestionRenderer({
       slotValue: value,
       interactionType: 'typing',
     });
+    registerLiveAnswer?.({ value: next });
+  };
+
+  const commitAnswerChange = (value: QuestionAnswer, meta?: StudentAnswerMutationMeta) => {
+    onChange(value, meta);
+    registerLiveAnswer?.({ value });
   };
 
   const renderTextField = (
@@ -221,7 +232,7 @@ export function QuestionRenderer({
                 type="radio"
                 name={`q-${q.id}`}
                 checked={answer === option}
-                onChange={() => onChange(option)}
+                onChange={() => commitAnswerChange(option)}
                 className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <span className="text-sm uppercase text-gray-900">{labels[option as keyof typeof labels]}</span>
@@ -251,7 +262,7 @@ export function QuestionRenderer({
             type="text"
             name={q.id}
             value={typeof answer === 'string' ? answer : ''}
-            onChange={(event) => onChange(event.target.value)}
+            onChange={(event) => commitAnswerChange(event.target.value)}
             className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
             placeholder="Enter answer..."
             security={security}
@@ -274,7 +285,7 @@ export function QuestionRenderer({
 
         <select
           value={typeof answer === 'string' ? answer : ''}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => commitAnswerChange(event.target.value)}
           className={`flex-1 rounded-md border-2 border-gray-300 px-3 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0 max-w-full' : tabletMode ? 'max-w-full' : 'max-w-xs'}`}
           aria-label={`Heading selection for question ${number}`}
         >
@@ -297,12 +308,12 @@ export function QuestionRenderer({
 
     const toggleOption = (optionId: string) => {
       if (selectedOptions.includes(optionId)) {
-        onChange(selectedOptions.filter((candidate) => candidate !== optionId));
+        commitAnswerChange(selectedOptions.filter((candidate) => candidate !== optionId));
         return;
       }
 
       if (selectedOptions.length < mcqBlock.requiredSelections) {
-        onChange([...selectedOptions, optionId]);
+        commitAnswerChange([...selectedOptions, optionId]);
       }
     };
 
@@ -385,7 +396,7 @@ export function QuestionRenderer({
             type="text"
             name={q.id}
             value={typeof answer === 'string' ? answer : ''}
-            onChange={(event) => onChange(event.target.value)}
+            onChange={(event) => commitAnswerChange(event.target.value)}
             className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
             placeholder="Enter label..."
             security={security}
@@ -430,7 +441,7 @@ export function QuestionRenderer({
                   type="radio"
                   name={inputGroupName}
                   checked={answer === option.id}
-                  onChange={() => onChange(option.id)}
+                  onChange={() => commitAnswerChange(option.id)}
                   className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
                 <div className="flex gap-2">
@@ -464,7 +475,7 @@ export function QuestionRenderer({
             type="text"
             name={q.id}
             value={typeof answer === 'string' ? answer : ''}
-            onChange={(event) => onChange(event.target.value)}
+            onChange={(event) => commitAnswerChange(event.target.value)}
             className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
             placeholder="Enter answer..."
             security={security}
@@ -766,6 +777,9 @@ export function QuestionRenderer({
 
                   if (placeholderCount === 1 && orderedSlots.length === 1) {
                     const slot = orderedSlots[0];
+                    if (!slot) {
+                      return null;
+                    }
                     const promptPrefixText = (promptSegments[0] ?? '').trimEnd();
                     const promptSuffixText =
                       promptSegments.length > 1

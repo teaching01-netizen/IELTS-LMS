@@ -1,28 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   getEnabledModules,
   getFirstQuestionIdForModule,
-  getStudentQuestionsForModule,
-  type StudentQuestionDescriptor,
 } from '@services/examAdapterService';
-import type { ExamState, ModuleType, QuestionAnswer } from '../../types';
-import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
-import { AccessibilitySettings } from './AccessibilitySettings';
-import { QuestionNavigator } from './QuestionNavigator';
-import { StudentFooter } from './StudentFooter';
-import { StudentHeader } from './StudentHeader';
-import { StudentListening } from './StudentListening';
-import { StudentReading } from './StudentReading';
-import { StudentSpeaking } from './StudentSpeaking';
-import { StudentWriting } from './StudentWriting';
-import { StudentUIProvider, useStudentUI } from './providers/StudentUIProvider';
-import { getStudentTypographyScale } from './accessibilityScale';
-import { getStudentHighlightClassName } from './highlightPalette';
-import { StudentHighlightPersistenceProvider, clearStudentHighlights } from './highlightPersistence';
-import { resolveObjectiveAnswerUpdate } from './resolveObjectiveAnswerUpdate';
-import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
-import { useStudentTabletMode } from './tabletMode';
+import { StudentAppWrapper } from './StudentAppWrapper';
+import type { ExamState, ModuleType } from '../../types';
+import type { StudentAttempt } from '../../types/studentAttempt';
 
 interface StudentExamPreviewProps {
   state: ExamState;
@@ -30,11 +14,22 @@ interface StudentExamPreviewProps {
   initialModule?: ModuleType | null | undefined;
 }
 
-function isModuleEnabled(
-  module: ModuleType,
-  enabledModules: ModuleType[],
-): boolean {
-  return enabledModules.includes(module);
+function resolvePreviewModule(
+  state: ExamState,
+  initialModule: ModuleType | null | undefined,
+  rawQueryModule: string | null,
+): ModuleType {
+  const enabledModules = getEnabledModules(state.config);
+  if (initialModule && enabledModules.includes(initialModule)) {
+    return initialModule;
+  }
+
+  const queryModule = rawQueryModule?.trim().toLowerCase() as ModuleType | undefined;
+  if (queryModule && enabledModules.includes(queryModule)) {
+    return queryModule;
+  }
+
+  return enabledModules[0] ?? 'reading';
 }
 
 function getInitialQuestionId(state: ExamState, module: ModuleType): string | null {
@@ -49,109 +44,88 @@ function getInitialQuestionId(state: ExamState, module: ModuleType): string | nu
   return null;
 }
 
-function PreviewModal({
-  isOpen,
-  title,
-  description,
-  actionLabel = 'OK',
-  onClose,
-}: {
-  isOpen: boolean;
-  title: string;
-  description: string;
-  actionLabel?: string | undefined;
-  onClose: () => void;
-}) {
-  if (!isOpen) {
-    return null;
-  }
+function createPreviewAttemptSnapshot(
+  state: ExamState,
+  examId: string,
+  module: ModuleType,
+): StudentAttempt {
+  const nowIso = new Date().toISOString();
+  const attemptId = `preview-attempt-${examId}`;
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-    >
-      <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8">
-        <h2 className="text-xl font-black text-gray-900 mb-3">{title}</h2>
-        <p className="text-sm text-gray-700 leading-6 mb-6">{description}</p>
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-800 text-white font-bold text-sm rounded-sm"
-          >
-            {actionLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  return {
+    id: attemptId,
+    scheduleId: `preview-schedule-${examId}`,
+    studentKey: `preview-student-${examId}`,
+    examId,
+    revision: 1,
+    publishedVersionId: null,
+    examTitle: state.title,
+    candidateId: 'preview',
+    candidateName: 'Preview Candidate',
+    candidateEmail: 'preview@example.invalid',
+    phase: 'exam',
+    currentModule: module,
+    currentQuestionId: getInitialQuestionId(state, module),
+    answers: {},
+    writingAnswers: {},
+    flags: {},
+    violations: [],
+    proctorStatus: 'active',
+    proctorNote: null,
+    proctorUpdatedAt: null,
+    proctorUpdatedBy: null,
+    lastWarningId: null,
+    lastAcknowledgedWarningId: null,
+    submittedAt: null,
+    integrity: {
+      preCheck: {
+        completedAt: nowIso,
+        browserFamily: 'other',
+        browserVersion: null,
+        screenDetailsSupported: true,
+        heartbeatReady: true,
+        acknowledgedSafariLimitation: false,
+        checks: [],
+      },
+      deviceFingerprintHash: null,
+      clientSessionId: `preview-client-${examId}`,
+      lastDisconnectAt: null,
+      lastReconnectAt: null,
+      lastHeartbeatAt: nowIso,
+      lastHeartbeatStatus: 'ok',
+    },
+    recovery: {
+      lastRecoveredAt: null,
+      lastLocalMutationAt: null,
+      lastPersistedAt: null,
+      lastDroppedMutations: null,
+      pendingMutationCount: 0,
+      serverAcceptedThroughSeq: 0,
+      clientSessionId: `preview-client-${examId}`,
+      syncState: 'saved',
+    },
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
 }
 
-function StudentExamPreviewInner({
-  state,
-  examId,
-  initialModule,
-}: StudentExamPreviewProps) {
+export function StudentExamPreview({ state, examId, initialModule }: StudentExamPreviewProps) {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const { state: uiState, actions: uiActions } = useStudentUI();
-  const tabletMode = useStudentTabletMode();
-  const studentTypography = getStudentTypographyScale(uiState.accessibilitySettings.fontSize);
-  useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
-  const highlightColor = uiState.accessibilitySettings.highlightColor;
-  const highlightClassName = getStudentHighlightClassName(highlightColor);
-  const highlightNamespace = `preview:${examId}`;
-  const clearHighlights = () => {
-    clearStudentHighlights(highlightNamespace);
-  };
-  const studentShellStyle = {
-    zoom: uiState.accessibilitySettings.zoom,
-    fontSize: studentTypography.rootFontSize,
-    lineHeight: studentTypography.lineHeight,
-    ['--student-meta-font-size' as string]: studentTypography.metaFontSize,
-    ['--student-chip-font-size' as string]: studentTypography.chipFontSize,
-    ['--student-control-font-size' as string]: studentTypography.controlFontSize,
-    ['--student-preview-font-size' as string]: studentTypography.previewFontSize,
-    ['--student-passage-font-size' as string]: studentTypography.passageFontSize,
-    ['--student-passage-title-font-size' as string]: studentTypography.passageTitleFontSize,
-    ['--student-passage-h1-font-size' as string]: studentTypography.passageH1FontSize,
-    ['--student-passage-h2-font-size' as string]: studentTypography.passageH2FontSize,
-    ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
-    ['--student-passage-line-height' as string]: studentTypography.passageLineHeight,
-  } as React.CSSProperties;
-
-  const enabledModules = useMemo(() => getEnabledModules(state.config), [state.config]);
-  const resolvedInitialModule: ModuleType = useMemo(() => {
-    if (initialModule && isModuleEnabled(initialModule, enabledModules)) {
-      return initialModule;
-    }
-
-    const fromQuery = searchParams.get('module')?.trim().toLowerCase() as ModuleType | undefined;
-    if (fromQuery && isModuleEnabled(fromQuery, enabledModules)) {
-      return fromQuery;
-    }
-
-    return enabledModules[0] ?? 'reading';
-  }, [enabledModules, initialModule, searchParams]);
-
-  const [currentModule, setCurrentModule] = useState<ModuleType>(resolvedInitialModule);
-  const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(() =>
-    getInitialQuestionId(state, resolvedInitialModule),
+  const [searchParams] = useSearchParams();
+  const previewModule = useMemo(
+    () => resolvePreviewModule(state, initialModule, searchParams.get('module')),
+    [state, initialModule, searchParams],
   );
-  const [answers, setAnswers] = useState<Record<string, QuestionAnswer>>({});
-  const [flags, setFlags] = useState<Record<string, boolean>>({});
-  const [writingAnswers, setWritingAnswers] = useState<Record<string, string>>({});
-  const [submitWarningOpen, setSubmitWarningOpen] = useState(false);
-
-  const totalSecondsForModule = state.config.sections[currentModule]?.duration * 60;
-  const timeRemaining = Number.isFinite(totalSecondsForModule) ? totalSecondsForModule : 0;
-
-  const questions = useMemo<StudentQuestionDescriptor[]>(
-    () => getStudentQuestionsForModule(state, currentModule),
-    [currentModule, state],
+  const previewAttemptSnapshot = useMemo(
+    () => createPreviewAttemptSnapshot(state, examId, previewModule),
+    [state, examId, previewModule],
+  );
+  const previewState = useMemo(
+    () => ({
+      ...state,
+      activeModule: previewModule,
+    }),
+    [state, previewModule],
   );
 
   const handleExit = () => {
@@ -159,239 +133,17 @@ function StudentExamPreviewInner({
     navigate(`/builder/${examId}/builder`, { replace: true });
   };
 
-  const handleModuleChange = (nextModule: ModuleType) => {
-    if (nextModule === currentModule) {
-      return;
-    }
-
-    setCurrentModule(nextModule);
-    setCurrentQuestionId(getInitialQuestionId(state, nextModule));
-
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.set('module', nextModule);
-    setSearchParams(nextParams, { replace: true });
-
-    uiActions.setShowNavigator(false);
-  };
-
-  const handleReset = () => {
-    setAnswers({});
-    setFlags({});
-    setWritingAnswers({});
-    setCurrentQuestionId(getInitialQuestionId(state, currentModule));
-    uiActions.setShowNavigator(false);
-  };
-
-  const handleAnswerChange = (
-    answerKey: string,
-    answer: QuestionAnswer,
-    meta?: StudentAnswerMutationMeta,
-  ) => {
-    setAnswers((current) => {
-      const currentValue = current[answerKey];
-      const nextValue = resolveObjectiveAnswerUpdate(currentValue, answer, meta);
-
-      return {
-        ...current,
-        [answerKey]: nextValue,
-      };
-    });
-  };
-
-  const handleFlagToggle = (slotId: string) => {
-    setFlags((current) => ({
-      ...current,
-      [slotId]: !current[slotId],
-    }));
-  };
-
-  const handleWritingChange = (taskId: string, text: string) => {
-    setWritingAnswers((current) => ({
-      ...current,
-      [taskId]: text,
-    }));
-  };
-
-  const handleSubmit = () => {
-    setSubmitWarningOpen(true);
-  };
-
   return (
-    <StudentHighlightPersistenceProvider namespace={highlightNamespace}>
-      <div
-      className={`student-exam-shell flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
-        uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
-      }`}
-      style={studentShellStyle}
-    >
-      <div className="h-10 border-b border-gray-200 bg-white flex items-center justify-between px-3 md:px-4 lg:px-6 flex-shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-[length:var(--student-meta-font-size)] font-black uppercase tracking-[0.22em] text-gray-500">
-            Preview (not saved)
-          </span>
-          <a
-            href={`/builder/${examId}/builder`}
-            className="text-xs font-semibold text-blue-700 hover:text-blue-800"
-          >
-            Back to Builder
-          </a>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold text-gray-600">
-            <span className="sr-only">Module</span>
-            <select
-              value={currentModule}
-              onChange={(event) => handleModuleChange(event.target.value as ModuleType)}
-              className="ml-2 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-800"
-              aria-label="Preview module"
-            >
-              {enabledModules.map((module) => (
-                <option key={module} value={module}>
-                  {module.charAt(0).toUpperCase() + module.slice(1)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={handleReset}
-            className="rounded-md bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-200"
-          >
-            Reset responses
-          </button>
-        </div>
-      </div>
-
-      <StudentHeader
-        onExit={handleExit}
-        timeRemaining={timeRemaining}
-        tabletMode={tabletMode}
-        onClearHighlights={clearHighlights}
-        highlightEnabled={uiState.accessibilitySettings.highlightMode}
-        highlightColor={highlightColor}
-        onHighlightModeToggle={
-          currentModule === 'reading' || currentModule === 'listening'
-            ? uiActions.toggleHighlightMode
-            : undefined
-        }
-        onHighlightColorChange={uiActions.setHighlightColor}
-        onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
-        onOpenNavigator={
-          currentModule === 'reading' || currentModule === 'listening'
-            ? () => uiActions.setShowNavigator(true)
-            : undefined
-        }
-        isExamActive={false}
-      />
-
-      <main id="main-content" className="flex-1 overflow-hidden relative flex flex-col" role="main">
-        {currentModule === 'reading' ? (
-          <StudentReading
-            state={state}
-            answers={answers}
-            onAnswerChange={handleAnswerChange}
-            currentQuestionId={currentQuestionId}
-          onNavigate={setCurrentQuestionId}
-          flags={flags}
-          onToggleFlag={handleFlagToggle}
-          tabletMode={tabletMode}
-          highlightEnabled={uiState.accessibilitySettings.highlightMode}
-          highlightColor={highlightColor}
-          highlightClassName={highlightClassName}
-          />
-        ) : null}
-
-        {currentModule === 'listening' ? (
-          <StudentListening
-            state={state}
-            answers={answers}
-            onAnswerChange={handleAnswerChange}
-            currentQuestionId={currentQuestionId}
-          onNavigate={setCurrentQuestionId}
-          flags={flags}
-          onToggleFlag={handleFlagToggle}
-          tabletMode={tabletMode}
-          highlightEnabled={uiState.accessibilitySettings.highlightMode}
-          highlightColor={highlightColor}
-          highlightClassName={highlightClassName}
-          />
-        ) : null}
-
-        {currentModule === 'writing' ? (
-          <StudentWriting
-            state={state}
-            writingAnswers={writingAnswers}
-            onWritingChange={handleWritingChange}
-            onSubmit={handleSubmit}
-            currentQuestionId={currentQuestionId}
-            onNavigate={setCurrentQuestionId}
-            timeRemaining={timeRemaining}
-            tabletMode={tabletMode}
-          />
-        ) : null}
-
-        {currentModule === 'speaking' ? (
-          <StudentSpeaking
-            state={state}
-            onSubmit={handleSubmit}
-            currentQuestionId={currentQuestionId}
-            onNavigate={setCurrentQuestionId}
-          />
-        ) : null}
-      </main>
-
-      {currentModule === 'reading' || currentModule === 'listening' ? (
-        <StudentFooter
-          questions={questions}
-          currentQuestionId={currentQuestionId}
-          onNavigate={setCurrentQuestionId}
-          answers={answers}
-          flags={flags}
-          onToggleFlag={handleFlagToggle}
-          onSubmit={handleSubmit}
-          tabletMode={tabletMode}
-        />
-      ) : null}
-
-      {uiState.showNavigator ? (
-        <QuestionNavigator
-          questions={questions}
-          answers={answers}
-          flags={flags}
-          currentQuestionId={currentQuestionId}
-          onNavigate={(id) => {
-            setCurrentQuestionId(id);
-            uiActions.setShowNavigator(false);
-          }}
-          onClose={() => uiActions.setShowNavigator(false)}
-        />
-      ) : null}
-
-      <AccessibilitySettings
-        isOpen={uiState.showAccessibility}
-        onClose={() => uiActions.setShowAccessibility(false)}
-        fontSize={uiState.accessibilitySettings.fontSize}
-        highContrast={uiState.accessibilitySettings.highContrast}
-        onFontSizeChange={uiActions.setFontSize}
-        onHighContrastToggle={uiActions.toggleHighContrast}
-      />
-
-      <PreviewModal
-        isOpen={submitWarningOpen}
-        title="Preview mode"
-        description="Submission is disabled in preview. Use the builder to edit and publish."
-        onClose={() => setSubmitWarningOpen(false)}
-      />
-      </div>
-    </StudentHighlightPersistenceProvider>
-  );
-}
-
-export function StudentExamPreview(props: StudentExamPreviewProps) {
-  return (
-    <StudentUIProvider>
-      <StudentExamPreviewInner {...props} />
-    </StudentUIProvider>
+    <StudentAppWrapper
+      key={`legacy-preview-${examId}-${previewModule}`}
+      state={previewState}
+      onExit={handleExit}
+      scheduleId={previewAttemptSnapshot.scheduleId}
+      attemptSnapshot={previewAttemptSnapshot}
+      showSubmitControls={false}
+      allowExitDuringExam
+      persistenceEnabled={false}
+      enableMonitoring={false}
+    />
   );
 }

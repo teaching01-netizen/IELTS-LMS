@@ -5,16 +5,13 @@ import { AccessibilitySettings } from './AccessibilitySettings';
 import { HelpModal } from './HelpModal';
 import { Lobby } from './Lobby';
 import { PreCheck } from './PreCheck';
-import { QuestionNavigator } from './QuestionNavigator';
-import { StudentFooter } from './StudentFooter';
+import { StudentExamWorkspace } from './StudentExamWorkspace';
 import { StudentHeader } from './StudentHeader';
-import { StudentListening } from './StudentListening';
-import { StudentReading } from './StudentReading';
-import { StudentSpeaking } from './StudentSpeaking';
-import { StudentWriting } from './StudentWriting';
+import { StudentPostExamView } from './StudentPostExamView';
 import { SubmitConfirmation } from './SubmitConfirmation';
 import { WarningOverlay } from './WarningOverlay';
-import { getFullscreenElement, requestStudentFullscreen } from './fullscreen';
+import { useStudentAutoSubmitBoundary } from './useStudentAutoSubmitBoundary';
+import { requestStudentFullscreen } from './fullscreen';
 import {
   canDecreaseStudentPassageReadability,
   canIncreaseStudentPassageReadability,
@@ -23,8 +20,11 @@ import {
 } from './accessibilityScale';
 import { getStudentHighlightClassName } from './highlightPalette';
 import { StudentHighlightPersistenceProvider, clearStudentHighlights } from './highlightPersistence';
+import { useStudentFullscreenWarning } from './useStudentFullscreenWarning';
+import { useStudentSubmissionOrchestration } from './useStudentSubmissionOrchestration';
 import { useStudentTabletMode } from './tabletMode';
 import { shouldOfferTimeExtension } from './timeExtensionPolicy';
+import { useStudentWarningVisibility } from './useStudentWarningVisibility';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
 import { useStudentRuntime } from './providers/StudentRuntimeProvider';
 import { useStudentUI } from './providers/StudentUIProvider';
@@ -119,9 +119,13 @@ function formatRuntimeTime(seconds: number) {
 
 interface StudentAppProps {
   showSubmitControls?: boolean | undefined;
+  allowExitDuringExam?: boolean | undefined;
 }
 
-export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
+export function StudentApp({
+  showSubmitControls = true,
+  allowExitDuringExam = false,
+}: StudentAppProps) {
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
   const { state: uiState, actions: uiActions } = useStudentUI();
@@ -135,7 +139,6 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
   );
   const studentTypography = getStudentTypographyScale(uiState.accessibilitySettings.fontSize);
   useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
-  const [finalSubmitStatus, setFinalSubmitStatus] = useState<'idle' | 'submitting' | 'retrying' | 'failed'>('idle');
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
   const { setShowTimeExtensionRequest } = uiActions;
   const timeExtensionReason =
@@ -168,41 +171,18 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
     ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
     ['--student-passage-line-height' as string]: studentTypography.passageLineHeight,
   } as React.CSSProperties;
-  const autoSubmitFingerprintRef = useRef<string | null>(null);
   const runtimeStateRef = useRef(runtimeState);
   const latestAnswersRef = useRef(attemptAnswers);
   const liveObjectiveAnswersRef = useRef(attemptAnswers);
   const liveWritingAnswersRef = useRef(attemptWritingAnswers);
   const viewportLockForExamSessionRef = useRef<boolean | null>(null);
   const lockedViewportHeightRef = useRef<number | null>(null);
-  const moduleSubmitInFlightRef = useRef<Promise<void> | null>(null);
-  const moduleSubmitFingerprintRef = useRef<string | null>(null);
-  const priorTimeRemainingRef = useRef<number | null>(null);
-  const runtimeFinalSubmitRef = useRef<string | null>(null);
-  const finalSubmitInFlightRef = useRef<Promise<void> | null>(null);
   const writingDraftCommitRef = useRef<(() => void) | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
   const [warningSeverity, setWarningSeverity] = useState<'medium' | 'high' | 'critical'>(
     'medium',
   );
-  const [lastAcknowledgedSecurityViolationId, setLastAcknowledgedSecurityViolationId] =
-    useState<string | null>(null);
-  const [lastAcknowledgedSecondaryScreenViolationId, setLastAcknowledgedSecondaryScreenViolationId] =
-    useState<string | null>(null);
-  const [lastAcknowledgedTranslationViolationId, setLastAcknowledgedTranslationViolationId] =
-    useState<string | null>(null);
-  const [lastAcknowledgedScreenshotViolationId, setLastAcknowledgedScreenshotViolationId] =
-    useState<string | null>(null);
-  const [fullscreenWarningOpen, setFullscreenWarningOpen] = useState(false);
-  const [fullscreenWarningMessage, setFullscreenWarningMessage] = useState(
-    'Fullscreen mode is required. Please return to fullscreen to continue.',
-  );
-  const [fullscreenWarningSeverity, setFullscreenWarningSeverity] = useState<
-    'medium' | 'high' | 'critical'
-  >('high');
-  const fullscreenGraceTimerRef = useRef<number | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(() => Boolean(getFullscreenElement()));
   const flushDomAnswerControlsNow = useCallback(() => {
     if (typeof document === 'undefined') {
       return;
@@ -277,68 +257,35 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
     }
   }, [effectivePhase, shouldLockViewportForKeyboard]);
 
-  const flushAndSubmitCurrentModuleWithRetry = useMemo(() => {
-    return async (fingerprint: string) => {
-      if (
-        moduleSubmitInFlightRef.current &&
-        moduleSubmitFingerprintRef.current === fingerprint
-      ) {
-        await moduleSubmitInFlightRef.current;
-        return;
-      }
+  const commitWritingDraft = useCallback(() => {
+    writingDraftCommitRef.current?.();
+  }, []);
 
-      const moduleKey = runtimeStateRef.current.currentModule;
-      moduleSubmitFingerprintRef.current = fingerprint;
-
-      const promise = (async () => {
-        let attemptIndex = 0;
-
-        while (true) {
-          const latestState = runtimeStateRef.current;
-          if (latestState.phase !== 'exam') {
-            return;
-          }
-
-          if (latestState.currentModule !== moduleKey) {
-            return;
-          }
-
-          flushDomAnswerControlsNow();
-          reconcileLiveAnswerCacheNow();
-          writingDraftCommitRef.current?.();
-          const flushed = await attemptActions.flushPending();
-          if (flushed) {
-            runtimeActions.transitionBlocking('syncing_reconnect', false);
-            runtimeActions.transitionBlocking('offline', false);
-            runtimeActions.submitModule();
-            return;
-          }
-
-          if (!navigator.onLine) {
-            runtimeActions.transitionBlocking('offline', true);
-          } else {
-            runtimeActions.transitionBlocking('syncing_reconnect', true);
-          }
-
-          const backoffMs = Math.min(30_000, 1_000 * 2 ** attemptIndex);
-          attemptIndex += 1;
-
-          await new Promise<void>((resolve) => {
-            window.setTimeout(() => resolve(), backoffMs);
-          });
-        }
-      })();
-
-      moduleSubmitInFlightRef.current = promise;
-      try {
-        await promise;
-      } finally {
-        if (moduleSubmitInFlightRef.current === promise) {
-          moduleSubmitInFlightRef.current = null;
-        }
-      }
-    };
-  }, [attemptActions, flushDomAnswerControlsNow, reconcileLiveAnswerCacheNow, runtimeActions]);
+  const {
+    finalSubmitStatus,
+    flushAndSubmitCurrentModuleWithRetry,
+  } = useStudentSubmissionOrchestration({
+    runtimeState: {
+      runtimeBacked: runtimeState.runtimeBacked,
+      runtimeStatus: runtimeState.runtimeStatus,
+      currentModule: runtimeState.currentModule,
+    },
+    runtimeStateRef,
+    attemptId: attemptState.attemptId,
+    runtimeCompletionVerified,
+    shouldRenderPostExam,
+    flushDomAnswerControlsNow,
+    reconcileLiveAnswerCacheNow,
+    commitWritingDraft,
+    attemptActions: {
+      flushPending: attemptActions.flushPending,
+      submitAttempt: attemptActions.submitAttempt,
+    },
+    runtimeActions: {
+      transitionBlocking: runtimeActions.transitionBlocking,
+      submitModule: runtimeActions.submitModule,
+    },
+  });
 
   useEffect(() => {
     if (!latestPendingWarning) {
@@ -353,180 +300,56 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
     setWarningOpen(true);
   }, [latestPendingWarning]);
 
-  useEffect(() => {
-    const handleFullscreenUpdate = () => {
-      setIsFullscreen(Boolean(getFullscreenElement()));
-    };
-
-    handleFullscreenUpdate();
-    document.addEventListener('fullscreenchange', handleFullscreenUpdate);
-    document.addEventListener('webkitfullscreenchange' as unknown as 'fullscreenchange', handleFullscreenUpdate);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenUpdate);
-      document.removeEventListener(
-        'webkitfullscreenchange' as unknown as 'fullscreenchange',
-        handleFullscreenUpdate,
-      );
-    };
-  }, []);
-
-  const latestTabSwitchViolation = useMemo(() => {
-    if (effectivePhase !== 'exam') {
-      return null;
-    }
-
-    if (examState.config.security.tabSwitchRule !== 'warn') {
-      return null;
-    }
-
-    const tabSwitchViolations = runtimeState.violations.filter(
-      (violation) => violation.type === 'TAB_SWITCH',
-    );
-    return tabSwitchViolations[tabSwitchViolations.length - 1] ?? null;
-  }, [effectivePhase, examState.config.security.tabSwitchRule, runtimeState.violations]);
-
-  const shouldShowTabSwitchWarning =
-    Boolean(latestTabSwitchViolation) &&
-    latestTabSwitchViolation?.id !== lastAcknowledgedSecurityViolationId &&
-    !fullscreenWarningOpen;
-
-  const tabSwitchSeverity =
-    latestTabSwitchViolation?.severity === 'high' || latestTabSwitchViolation?.severity === 'critical'
-      ? latestTabSwitchViolation.severity
-      : 'medium';
-
-  const latestSecondaryScreenViolation = useMemo(() => {
-    if (effectivePhase !== 'exam') {
-      return null;
-    }
-
-    if (!examState.config.security.detectSecondaryScreen) {
-      return null;
-    }
-
-    const violations = runtimeState.violations.filter(
-      (violation) => violation.type === 'SECONDARY_SCREEN',
-    );
-    return violations[violations.length - 1] ?? null;
-  }, [effectivePhase, examState.config.security.detectSecondaryScreen, runtimeState.violations]);
-
-  const shouldShowSecondaryScreenWarning =
-    Boolean(latestSecondaryScreenViolation) &&
-    latestSecondaryScreenViolation?.id !== lastAcknowledgedSecondaryScreenViolationId &&
-    !fullscreenWarningOpen;
-
-  const latestScreenshotViolation = useMemo(() => {
-    if (effectivePhase !== 'exam') {
-      return null;
-    }
-
-    if (examState.config.security.antiScreenshotGuardEnabled === false) {
-      return null;
-    }
-
-    const violations = runtimeState.violations.filter(
-      (violation) => violation.type === 'SCREENSHOT_ATTEMPT',
-    );
-    return violations[violations.length - 1] ?? null;
-  }, [effectivePhase, examState.config.security.antiScreenshotGuardEnabled, runtimeState.violations]);
-
-  const shouldShowScreenshotWarning =
-    Boolean(latestScreenshotViolation) &&
-    latestScreenshotViolation?.id !== lastAcknowledgedScreenshotViolationId;
-
-  const latestTranslationViolation = useMemo(() => {
-    if (effectivePhase !== 'exam') {
-      return null;
-    }
-
-    if (examState.config.security.preventTranslation === false) {
-      return null;
-    }
-
-    const violations = runtimeState.violations.filter(
-      (violation) => violation.type === 'TRANSLATION_DETECTED',
-    );
-    return violations[violations.length - 1] ?? null;
-  }, [effectivePhase, examState.config.security.preventTranslation, runtimeState.violations]);
-
-  const shouldShowTranslationWarning =
-    Boolean(latestTranslationViolation) &&
-    latestTranslationViolation?.id !== lastAcknowledgedTranslationViolationId &&
-    !fullscreenWarningOpen;
-
-  const latestFullscreenExitViolation = useMemo(() => {
-    if (effectivePhase !== 'exam') {
-      return null;
-    }
-
-    if (!examState.config.security.requireFullscreen) {
-      return null;
-    }
-
-    const violations = runtimeState.violations.filter(
-      (violation) => violation.type === 'FULLSCREEN_EXIT',
-    );
-    return violations[violations.length - 1] ?? null;
-  }, [effectivePhase, examState.config.security.requireFullscreen, runtimeState.violations]);
-
-  useEffect(() => {
-    if (fullscreenGraceTimerRef.current) {
-      window.clearTimeout(fullscreenGraceTimerRef.current);
-      fullscreenGraceTimerRef.current = null;
-    }
-
-    if (
-      effectivePhase !== 'exam' ||
-      !examState.config.progression.showWarnings ||
-      !examState.config.security.requireFullscreen
-    ) {
-      setFullscreenWarningOpen(false);
-      return;
-    }
-
-    if (!latestFullscreenExitViolation) {
-      setFullscreenWarningOpen(false);
-      return;
-    }
-
-    if (isFullscreen) {
-      setFullscreenWarningOpen(false);
-      return;
-    }
-
-    fullscreenGraceTimerRef.current = window.setTimeout(() => {
-      if (getFullscreenElement()) {
-        setFullscreenWarningOpen(false);
-        return;
-      }
-
-      setFullscreenWarningMessage(
-        latestFullscreenExitViolation.description ??
-          'Fullscreen mode is required. Please return to fullscreen to continue.',
-      );
-      setFullscreenWarningSeverity(
-        latestFullscreenExitViolation.severity === 'critical'
-          ? 'critical'
-          : latestFullscreenExitViolation.severity === 'high'
-            ? 'high'
-            : 'medium',
-      );
-      setFullscreenWarningOpen(true);
-    }, 200);
-  }, [
+  const {
+    fullscreenWarningOpen,
+    fullscreenWarningMessage,
+    fullscreenWarningSeverity,
+  } = useStudentFullscreenWarning({
     effectivePhase,
-    examState.config.progression.showWarnings,
-    examState.config.security.requireFullscreen,
-    isFullscreen,
-    latestFullscreenExitViolation?.id,
-  ]);
+    showWarnings: examState.config.progression.showWarnings,
+    requireFullscreen: examState.config.security.requireFullscreen,
+    violations: runtimeState.violations,
+  });
 
-  useEffect(() => {
-    if (isFullscreen) {
-      setFullscreenWarningOpen(false);
-    }
-  }, [isFullscreen]);
+  const {
+    latestTabSwitchViolation,
+    shouldShowTabSwitchWarning,
+    tabSwitchSeverity,
+    latestSecondaryScreenViolation,
+    shouldShowSecondaryScreenWarning,
+    latestScreenshotViolation,
+    shouldShowScreenshotWarning,
+    latestTranslationViolation,
+    shouldShowTranslationWarning,
+    acknowledgeTabSwitch,
+    acknowledgeSecondaryScreen,
+    acknowledgeScreenshot,
+    acknowledgeTranslation,
+  } = useStudentWarningVisibility({
+    effectivePhase,
+    fullscreenWarningOpen,
+    violations: runtimeState.violations,
+    security: {
+      tabSwitchRule: examState.config.security.tabSwitchRule,
+      detectSecondaryScreen: examState.config.security.detectSecondaryScreen,
+      antiScreenshotGuardEnabled: examState.config.security.antiScreenshotGuardEnabled,
+      preventTranslation: examState.config.security.preventTranslation,
+    },
+  });
+
+  useStudentAutoSubmitBoundary({
+    effectivePhase,
+    autoSubmitEnabled: examState.config.progression.autoSubmit,
+    runtimeState: {
+      blockingActive: runtimeState.blocking.active,
+      displayTimeRemaining: runtimeState.displayTimeRemaining ?? null,
+      runtimeBacked: runtimeState.runtimeBacked,
+      runtimeStatus: runtimeState.runtimeStatus,
+      currentModule: runtimeState.currentModule,
+      runtimeSnapshot: runtimeState.runtimeSnapshot,
+    },
+    flushAndSubmitCurrentModuleWithRetry,
+  });
 
   useEffect(() => {
     if (effectivePhase !== 'exam') {
@@ -642,74 +465,6 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
     };
   }, []);
 
-  useEffect(() => {
-    const priorTimeRemaining = priorTimeRemainingRef.current;
-    priorTimeRemainingRef.current =
-      typeof runtimeState.displayTimeRemaining === 'number'
-        ? runtimeState.displayTimeRemaining
-        : null;
-
-    if (!examState.config.progression.autoSubmit) {
-      autoSubmitFingerprintRef.current = null;
-      return;
-    }
-
-    if (effectivePhase !== 'exam') {
-      autoSubmitFingerprintRef.current = null;
-      return;
-    }
-
-    if (runtimeState.blocking.active) {
-      return;
-    }
-
-    if (typeof runtimeState.displayTimeRemaining !== 'number') {
-      return;
-    }
-
-    if (runtimeState.runtimeBacked) {
-      if (runtimeState.runtimeStatus !== 'live') {
-        return;
-      }
-
-      const reachedZero = runtimeState.displayTimeRemaining === 0;
-      const transitionedToZero =
-        reachedZero && typeof priorTimeRemaining === 'number' && priorTimeRemaining > 0;
-
-      const serverSectionKey = runtimeState.runtimeSnapshot?.currentSectionKey ?? null;
-      const serverRemaining = runtimeState.runtimeSnapshot?.currentSectionRemainingSeconds;
-      const serverConfirmedBoundary =
-        serverSectionKey !== runtimeState.currentModule || serverRemaining === 0;
-      if (!transitionedToZero && !serverConfirmedBoundary) {
-        return;
-      }
-      if (!serverConfirmedBoundary) {
-        return;
-      }
-    } else if (runtimeState.displayTimeRemaining !== 0) {
-      return;
-    }
-
-    const fingerprint = `${runtimeState.runtimeBacked ? 'runtime' : 'self'}:${runtimeState.currentModule}`;
-    if (autoSubmitFingerprintRef.current === fingerprint) {
-      return;
-    }
-
-    autoSubmitFingerprintRef.current = fingerprint;
-    void flushAndSubmitCurrentModuleWithRetry(fingerprint);
-  }, [
-    attemptActions,
-    effectivePhase,
-    examState.config.progression.autoSubmit,
-    flushAndSubmitCurrentModuleWithRetry,
-    runtimeActions,
-    runtimeState.blocking.active,
-    runtimeState.currentModule,
-    runtimeState.displayTimeRemaining,
-    runtimeState.runtimeBacked,
-    runtimeState.runtimeSnapshot,
-    runtimeState.runtimeStatus,
-  ]);
   const shouldShowTimeExtension = shouldOfferTimeExtension({
     config: examState.config,
     phase: effectivePhase,
@@ -766,80 +521,6 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
     uiActions.setShowSubmitConfirm(false);
     await performModuleSubmit();
   };
-
-  useEffect(() => {
-    if (!runtimeState.runtimeBacked) {
-      runtimeFinalSubmitRef.current = null;
-      finalSubmitInFlightRef.current = null;
-      setFinalSubmitStatus('idle');
-      return;
-    }
-
-    if (runtimeState.runtimeStatus !== 'completed' || !runtimeCompletionVerified) {
-      runtimeFinalSubmitRef.current = null;
-      finalSubmitInFlightRef.current = null;
-      setFinalSubmitStatus('idle');
-      return;
-    }
-
-    if (shouldRenderPostExam) {
-      return;
-    }
-
-    const attemptId = attemptState.attemptId;
-    if (!attemptId) {
-      return;
-    }
-
-    if (runtimeFinalSubmitRef.current === attemptId) {
-      return;
-    }
-
-    if (finalSubmitInFlightRef.current) {
-      return;
-    }
-
-    finalSubmitInFlightRef.current = (async () => {
-      const maxAttempts = 6;
-      for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex += 1) {
-        setFinalSubmitStatus(attemptIndex === 0 ? 'submitting' : 'retrying');
-
-        try {
-          flushDomAnswerControlsNow();
-          reconcileLiveAnswerCacheNow();
-          writingDraftCommitRef.current?.();
-          const submitted = await attemptActions.submitAttempt();
-          if (submitted) {
-            runtimeFinalSubmitRef.current = attemptId;
-            setFinalSubmitStatus('idle');
-            return;
-          }
-        } catch {
-          // ignore and retry
-        }
-
-        const backoffMs = Math.min(30_000, 1_000 * 2 ** attemptIndex);
-        await new Promise<void>((resolve) => {
-          window.setTimeout(() => resolve(), backoffMs);
-        });
-      }
-
-      setFinalSubmitStatus('failed');
-    })();
-
-    void finalSubmitInFlightRef.current.finally(() => {
-      finalSubmitInFlightRef.current = null;
-    });
-  }, [
-    attemptActions,
-    attemptState.attemptId,
-    runtimeState.runtimeBacked,
-    runtimeState.runtimeStatus,
-    runtimeCompletionVerified,
-    shouldRenderPostExam,
-    flushDomAnswerControlsNow,
-    reconcileLiveAnswerCacheNow,
-  ]);
 
   const handleAnswerChange = (
     questionId: string,
@@ -1011,49 +692,13 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
     ].filter((item): item is { label: string; value: string } => Boolean(item.value));
 
     return (
-      <div className="flex flex-col items-center justify-center h-full w-full bg-gray-50 p-4 font-sans text-gray-900">
-        <a href="#main-content" className="skip-link">
-          Skip to main content
-        </a>
-        <main id="main-content" role="main" className="flex flex-col items-center justify-center">
-          <div className="bg-white p-6 md:p-8 rounded-lg shadow-md max-w-2xl w-full text-center">
-            <h1 className="text-3xl font-bold mb-4">
-              {isProctorTerminated ? 'Session terminated' : 'IELTS Examination Complete!'}
-            </h1>
-            {isProctorTerminated ? (
-              <div className="text-gray-600 mb-8 space-y-3">
-                <p>Your session was terminated by the proctor.</p>
-                {runtimeState.proctorNote ? (
-                  <p className="text-gray-700">{runtimeState.proctorNote}</p>
-                ) : null}
-              </div>
-            ) : (
-              <p className="text-gray-600 mb-8">
-                Congratulations! You have completed all modules of the IELTS examination.
-              </p>
-            )}
-
-            {studentInfo.length > 0 ? (
-              <div className="mb-8 rounded-sm border border-gray-200 bg-gray-50 p-4 text-left">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {studentInfo.map((item) => (
-                    <div key={item.label}>
-                      <p className="text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-[0.2em] text-gray-500">
-                        {item.label}
-                      </p>
-                      <p className="mt-1 break-words text-sm font-semibold text-gray-900">
-                        {item.value}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            <Button onClick={onExit}>Exit Exam Platform</Button>
-          </div>
-        </main>
-        {finalSubmitOverlay}
-      </div>
+      <StudentPostExamView
+        isProctorTerminated={isProctorTerminated}
+        proctorNote={runtimeState.proctorNote}
+        studentInfo={studentInfo}
+        onExit={onExit}
+        finalSubmitOverlay={finalSubmitOverlay}
+      />
     );
   }
 
@@ -1104,117 +749,48 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
             : undefined
         }
         isExamActive={effectivePhase === 'exam'}
-        showExitButton={effectivePhase !== 'exam'}
+        showExitButton={allowExitDuringExam || effectivePhase !== 'exam'}
+        confirmExitWhenExamActive={!allowExitDuringExam}
       />
 
-      <main id="main-content" className="flex-1 overflow-hidden relative flex flex-col" role="main">
-        {runtimeState.currentModule === 'reading' ? (
-          <StudentReading
-            state={examState}
-            answers={attemptAnswers}
-            onAnswerChange={handleAnswerChange}
-            currentQuestionId={runtimeState.currentQuestionId}
-            onNavigate={runtimeActions.setCurrentQuestionId}
-            flags={attemptFlags}
-            onToggleFlag={handleFlagToggle}
-            tabletMode={tabletMode}
-            contentZoom={uiState.accessibilitySettings.zoom}
-            highlightEnabled={uiState.accessibilitySettings.highlightMode}
-            highlightColor={highlightColor}
-            highlightClassName={highlightClassName}
-            onIncreasePassageReadability={uiActions.increasePassageReadability}
-            onDecreasePassageReadability={uiActions.decreasePassageReadability}
-            onResetPassageReadability={uiActions.resetPassageReadability}
-            passageReadabilityLabel={getStudentPassageReadabilityLabel(
-              uiState.accessibilitySettings.passageReadabilityLevel,
-            )}
-            canIncreasePassageReadability={canIncreasePassageReadability}
-            canDecreasePassageReadability={canDecreasePassageReadability}
-            registerLiveAnswer={registerLiveObjectiveAnswer}
-          />
-        ) : null}
-        {runtimeState.currentModule === 'listening' ? (
-          <StudentListening
-            state={examState}
-            answers={attemptAnswers}
-            onAnswerChange={handleAnswerChange}
-            currentQuestionId={runtimeState.currentQuestionId}
-            onNavigate={runtimeActions.setCurrentQuestionId}
-            flags={attemptFlags}
-            onToggleFlag={handleFlagToggle}
-            tabletMode={tabletMode}
-            contentZoom={uiState.accessibilitySettings.zoom}
-            highlightEnabled={uiState.accessibilitySettings.highlightMode}
-            highlightColor={highlightColor}
-            highlightClassName={highlightClassName}
-            onIncreasePassageReadability={uiActions.increasePassageReadability}
-            onDecreasePassageReadability={uiActions.decreasePassageReadability}
-            onResetPassageReadability={uiActions.resetPassageReadability}
-            passageReadabilityLabel={getStudentPassageReadabilityLabel(
-              uiState.accessibilitySettings.passageReadabilityLevel,
-            )}
-            canIncreasePassageReadability={canIncreasePassageReadability}
-            canDecreasePassageReadability={canDecreasePassageReadability}
-            registerLiveAnswer={registerLiveObjectiveAnswer}
-          />
-        ) : null}
-        {runtimeState.currentModule === 'writing' ? (
-          <StudentWriting
-            state={examState}
-            writingAnswers={attemptWritingAnswers}
-            onWritingChange={handleWritingChange}
-            onSubmit={handleModuleSubmit}
-            currentQuestionId={runtimeState.currentQuestionId}
-            onNavigate={runtimeActions.setCurrentQuestionId}
-            timeRemaining={runtimeState.displayTimeRemaining}
-            registerDraftCommit={registerWritingDraftCommit}
-            security={examState.config.security}
-            showSubmitButton={showSubmitControls}
-            tabletMode={tabletMode}
-            registerLiveWritingAnswer={registerLiveWritingAnswer}
-          />
-        ) : null}
-        {runtimeState.currentModule === 'speaking' ? (
-          <StudentSpeaking
-            state={examState}
-            onSubmit={handleModuleSubmit}
-            currentQuestionId={runtimeState.currentQuestionId}
-            onNavigate={runtimeActions.setCurrentQuestionId}
-          />
-        ) : null}
-      </main>
+      <StudentExamWorkspace
+        currentModule={runtimeState.currentModule}
+        examState={examState}
+        currentQuestionId={runtimeState.currentQuestionId}
+        allQuestions={runtimeState.allQuestions}
+        answers={attemptAnswers}
+        writingAnswers={attemptWritingAnswers}
+        flags={attemptFlags}
+        tabletMode={tabletMode}
+        showSubmitControls={showSubmitControls}
+        contentZoom={uiState.accessibilitySettings.zoom}
+        displayTimeRemaining={runtimeState.displayTimeRemaining}
+        highlightEnabled={uiState.accessibilitySettings.highlightMode}
+        highlightColor={highlightColor}
+        highlightClassName={highlightClassName}
+        passageReadabilityLabel={getStudentPassageReadabilityLabel(
+          uiState.accessibilitySettings.passageReadabilityLevel,
+        )}
+        canIncreasePassageReadability={canIncreasePassageReadability}
+        canDecreasePassageReadability={canDecreasePassageReadability}
+        showNavigator={uiState.showNavigator}
+        security={examState.config.security}
+        onNavigate={runtimeActions.setCurrentQuestionId}
+        onObjectiveAnswerChange={handleAnswerChange}
+        onFlagToggle={handleFlagToggle}
+        onWritingChange={handleWritingChange}
+        onModuleSubmit={handleModuleSubmit}
+        onRegisterWritingDraftCommit={registerWritingDraftCommit}
+        onRegisterLiveObjectiveAnswer={registerLiveObjectiveAnswer}
+        onRegisterLiveWritingAnswer={registerLiveWritingAnswer}
+        onIncreasePassageReadability={uiActions.increasePassageReadability}
+        onDecreasePassageReadability={uiActions.decreasePassageReadability}
+        onResetPassageReadability={uiActions.resetPassageReadability}
+        onCloseNavigator={() => uiActions.setShowNavigator(false)}
+      />
 
       {blockingOverlay}
       {finalSubmitOverlay}
-
-      {(runtimeState.currentModule === 'reading' ||
-        runtimeState.currentModule === 'listening') ? (
-        <StudentFooter
-          questions={runtimeState.allQuestions}
-          currentQuestionId={runtimeState.currentQuestionId}
-          onNavigate={runtimeActions.setCurrentQuestionId}
-          answers={attemptAnswers}
-          flags={attemptFlags}
-          onToggleFlag={handleFlagToggle}
-          onSubmit={handleModuleSubmit}
-          showSubmitButton={showSubmitControls}
-          tabletMode={tabletMode}
-        />
-      ) : null}
-
-      {uiState.showNavigator ? (
-        <QuestionNavigator
-          questions={runtimeState.allQuestions}
-          answers={attemptAnswers}
-          flags={attemptFlags}
-          currentQuestionId={runtimeState.currentQuestionId}
-          onNavigate={(id) => {
-            runtimeActions.setCurrentQuestionId(id);
-            uiActions.setShowNavigator(false);
-          }}
-          onClose={() => uiActions.setShowNavigator(false)}
-        />
-      ) : null}
 
       {examState.config.progression.showWarnings ? (
         <WarningOverlay
@@ -1241,9 +817,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
           }
           showCountdown={false}
           onAcknowledge={() => {
-            if (latestScreenshotViolation) {
-              setLastAcknowledgedScreenshotViolationId(latestScreenshotViolation.id);
-            }
+            acknowledgeScreenshot();
           }}
         />
       ) : null}
@@ -1258,9 +832,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
           }
           showCountdown={false}
           onAcknowledge={() => {
-            if (latestTabSwitchViolation) {
-              setLastAcknowledgedSecurityViolationId(latestTabSwitchViolation.id);
-            }
+            acknowledgeTabSwitch();
           }}
         />
       ) : null}
@@ -1275,9 +847,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
           }
           showCountdown={false}
           onAcknowledge={() => {
-            if (latestTranslationViolation) {
-              setLastAcknowledgedTranslationViolationId(latestTranslationViolation.id);
-            }
+            acknowledgeTranslation();
           }}
         />
       ) : null}
@@ -1292,9 +862,7 @@ export function StudentApp({ showSubmitControls = true }: StudentAppProps) {
           }
           showCountdown={false}
           onAcknowledge={() => {
-            if (latestSecondaryScreenViolation) {
-              setLastAcknowledgedSecondaryScreenViolationId(latestSecondaryScreenViolation.id);
-            }
+            acknowledgeSecondaryScreen();
           }}
         />
       ) : null}

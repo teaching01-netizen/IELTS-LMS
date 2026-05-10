@@ -117,6 +117,7 @@ describe('ExamPreviewRoute', () => {
       showSubmitControls: boolean;
       persistenceEnabled: boolean;
       enableMonitoring: boolean;
+      allowExitDuringExam: boolean;
       scheduleId: string;
       onExit: () => void;
     };
@@ -124,6 +125,7 @@ describe('ExamPreviewRoute', () => {
     expect(props.showSubmitControls).toBe(false);
     expect(props.persistenceEnabled).toBe(false);
     expect(props.enableMonitoring).toBe(false);
+    expect(props.allowExitDuringExam).toBe(true);
     expect(props.scheduleId).toBe('sched-preview-writing');
 
     props.onExit();

@@ -7,6 +7,10 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+export function hasHtmlMarkup(content: string): boolean {
+  return /<\/?[a-z][\s\S]*>/i.test(content);
+}
+
 function normalizeLineContent(line: string): string {
   return line.replace(/[ \t\f\v]+/g, ' ').trim();
 }
@@ -200,7 +204,7 @@ export function normalizeReadingContentForHighlightText(content: string): string
     return '';
   }
 
-  if (/<\/?[a-z][\s\S]*>/i.test(content)) {
+  if (hasHtmlMarkup(content)) {
     return htmlToPlainText(content);
   }
 
@@ -337,7 +341,7 @@ export function normalizeReadingContentForHighlightedFormattedText(content: stri
     return '';
   }
 
-  if (/<\/?[a-z][\s\S]*>/i.test(content)) {
+  if (hasHtmlMarkup(content)) {
     return htmlToMarkedText(content);
   }
 

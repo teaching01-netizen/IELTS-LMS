@@ -273,6 +273,7 @@ function RuntimePreviewSurface({
         runtimeSnapshot={runtimeSnapshot}
         answerInvariantRollout={answerInvariantRollout}
         showSubmitControls={false}
+        allowExitDuringExam
         persistenceEnabled={false}
         enableMonitoring={false}
       />

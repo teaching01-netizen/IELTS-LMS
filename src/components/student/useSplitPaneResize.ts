@@ -104,10 +104,15 @@ export function useSplitPaneResize({
       }) as CSSProperties,
     [answerPaneWidthProperty, dividerConsumesSpace, dividerWidth, leftWidth, materialPaneWidthProperty],
   );
+  const answerWidth = 100 - leftWidth;
+  const materialCompact = isTabletMode ? leftWidth < 46 : leftWidth < 38;
+  const answerCompact = isTabletMode ? answerWidth < 50 : answerWidth < 40;
 
   return {
+    answerCompact,
     handleDrag,
     leftWidth,
+    materialCompact,
     splitPaneStyle,
     workspaceRef,
   };

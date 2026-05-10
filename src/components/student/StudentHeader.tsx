@@ -40,6 +40,7 @@ interface StudentHeaderProps {
   onHighlightColorChange?: ((color: StudentHighlightColor) => void) | undefined;
   isExamActive?: boolean | undefined;
   showExitButton?: boolean | undefined;
+  confirmExitWhenExamActive?: boolean | undefined;
 }
 
 export function StudentHeader({
@@ -61,6 +62,7 @@ export function StudentHeader({
   onHighlightColorChange,
   isExamActive = false,
   showExitButton = true,
+  confirmExitWhenExamActive = true,
 }: StudentHeaderProps) {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showHighlightPalette, setShowHighlightPalette] = useState(false);
@@ -92,7 +94,7 @@ export function StudentHeader({
   };
 
   const handleExit = () => {
-    if (isExamActive) {
+    if (isExamActive && confirmExitWhenExamActive) {
       setShowExitConfirm(true);
     } else {
       onExit();

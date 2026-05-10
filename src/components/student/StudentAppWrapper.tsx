@@ -20,6 +20,7 @@ interface StudentAppWrapperProps {
   runtimeSnapshot?: ExamSessionRuntime | null;
   answerInvariantRollout?: StudentAnswerInvariantRollout | undefined;
   showSubmitControls?: boolean | undefined;
+  allowExitDuringExam?: boolean | undefined;
   persistenceEnabled?: boolean | undefined;
   enableMonitoring?: boolean | undefined;
 }
@@ -33,13 +34,17 @@ export function StudentAppWrapper({
   runtimeSnapshot = null,
   answerInvariantRollout,
   showSubmitControls = true,
+  allowExitDuringExam = false,
   persistenceEnabled = true,
   enableMonitoring = true,
 }: StudentAppWrapperProps) {
   const app = (
     <StudentUIProvider>
       <KeyboardProvider>
-        <StudentApp showSubmitControls={showSubmitControls} />
+        <StudentApp
+          showSubmitControls={showSubmitControls}
+          allowExitDuringExam={allowExitDuringExam}
+        />
       </KeyboardProvider>
     </StudentUIProvider>
   );

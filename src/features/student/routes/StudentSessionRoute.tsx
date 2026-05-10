@@ -92,6 +92,7 @@ export function StudentSessionRoute() {
       runtimeSnapshot={runtimeSnapshot}
       answerInvariantRollout={answerInvariantRollout}
       showSubmitControls={false}
+      allowExitDuringExam={false}
     />
   );
 }
