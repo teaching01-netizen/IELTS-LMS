@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useCallback, useEffect, useRef, useMemo } from 'react';
 import { ExamState, QuestionAnswer } from '../../types';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { ArrowLeftRight } from 'lucide-react';
@@ -44,6 +44,88 @@ interface StudentReadingProps {
   canDecreasePassageReadability?: boolean | undefined;
   registerLiveAnswer?: ((answerKey: string, value: QuestionAnswer) => void) | undefined;
 }
+
+interface ReadingPassagePaneProps {
+  activePassage: ExamState['reading']['passages'][number];
+  materialCompact: boolean;
+  isTabletMode: boolean;
+  tabletContentZoomStyle: React.CSSProperties | undefined;
+  highlightEnabled: boolean;
+  highlightColor: StudentHighlightColor | undefined;
+  highlightClassName: string | undefined;
+  highlightPassageText: string;
+  renderedPassageContent: string;
+  renderPassageImageAnnotations: (annotations: StimulusAnnotation[], zoom?: number) => React.ReactNode;
+}
+
+const ReadingPassagePane = React.memo(function ReadingPassagePane({
+  activePassage,
+  materialCompact,
+  isTabletMode,
+  tabletContentZoomStyle,
+  highlightEnabled,
+  highlightColor,
+  highlightClassName,
+  highlightPassageText,
+  renderedPassageContent,
+  renderPassageImageAnnotations,
+}: ReadingPassagePaneProps) {
+  return (
+    <div
+      className={`student-reading-passage-pane h-full overflow-y-auto font-sans text-gray-900 ${
+        materialCompact ? 'p-2 pr-2 md:p-3 md:pr-3' : 'p-4 pr-4 md:p-6 md:pr-6'
+      } ${
+        isTabletMode ? 'w-[var(--reading-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
+      }`}
+      data-student-highlightable="true"
+      style={{
+        ...(tabletContentZoomStyle ?? {}),
+        fontSize: 'var(--student-passage-font-size)',
+        lineHeight: 'var(--student-passage-line-height)',
+      }}
+      data-student-zoom-scroll
+    >
+      <h2 className={`${materialCompact ? 'mb-2' : 'mb-4 md:mb-6'} font-bold leading-tight text-gray-950 break-words`} style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
+        {activePassage.title}
+      </h2>
+      <div className={`${materialCompact ? 'space-y-3' : 'space-y-5'} break-normal text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7`}>
+        {highlightEnabled ? (
+          <FormattedText
+            as="div"
+            text={highlightPassageText}
+            className="whitespace-pre-wrap break-normal"
+            highlightEnabled
+            highlightColor={highlightColor}
+            highlightClassName={highlightClassName}
+            highlightSurfaceId={`reading:passage:${activePassage.id}`}
+            preserveInlineEmphasis
+            showHighlightButton
+          />
+        ) : (
+          <RichTextHighlighter
+            content={renderedPassageContent}
+            contentType="html"
+            enabled={false}
+            className="whitespace-pre-wrap break-normal"
+            highlightColor={highlightColor}
+            highlightClassName={highlightClassName}
+          />
+        )}
+        {(activePassage.images ?? []).map((image) => (
+          <StudentZoomableMedia
+            key={image.id}
+            sources={[image.src]}
+            alt={image.alt}
+            label={image.alt || 'Passage image'}
+            hint="Tap to zoom the passage image"
+            className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
+            renderOverlay={(zoom) => renderPassageImageAnnotations(image.annotations, zoom)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+});
 
 export function StudentReading({
   state,
@@ -147,7 +229,7 @@ export function StudentReading({
     );
   };
 
-  const renderPassageImageAnnotations = (annotations: StimulusAnnotation[], zoom = 1) => (
+  const renderPassageImageAnnotations = useCallback((annotations: StimulusAnnotation[], zoom = 1) => (
     <>
       {annotations.map((annotation) => {
         const positionStyle: React.CSSProperties = {
@@ -212,10 +294,21 @@ export function StudentReading({
         return null;
       })}
     </>
-  );
+  ), []);
 
   useEffect(() => {
     if (currentQuestionId && questionContainerRef.current) {
+      const browserSelection = window.getSelection();
+      const selectionAnchor = browserSelection?.anchorNode;
+      const hasActiveSelection = Boolean(browserSelection && !browserSelection.isCollapsed);
+      const selectionInsidePassagePane = Boolean(
+        selectionAnchor instanceof Node &&
+          selectionAnchor.parentElement?.closest('.student-reading-passage-pane'),
+      );
+      if (hasActiveSelection && selectionInsidePassagePane) {
+        return;
+      }
+
       const element = document.getElementById(`question-${currentQuestionId}`);
       if (element) {
         element.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
@@ -237,59 +330,18 @@ export function StudentReading({
         style={splitPaneStyle}
         data-testid="reading-split-workspace"
       >
-        <div
-          className={`student-reading-passage-pane h-full overflow-y-auto font-sans text-gray-900 ${
-            materialCompact ? 'p-2 pr-2 md:p-3 md:pr-3' : 'p-4 pr-4 md:p-6 md:pr-6'
-          } ${
-            isTabletMode ? 'w-[var(--reading-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
-          }`}
-          data-student-highlightable="true"
-          style={{
-            ...(tabletContentZoomStyle ?? {}),
-            fontSize: 'var(--student-passage-font-size)',
-            lineHeight: 'var(--student-passage-line-height)',
-          }}
-          data-student-zoom-scroll
-        >
-          <h2 className={`${materialCompact ? 'mb-2' : 'mb-4 md:mb-6'} font-bold leading-tight text-gray-950 break-words`} style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
-            {activePassage.title}
-          </h2>
-          <div className={`${materialCompact ? 'space-y-3' : 'space-y-5'} break-normal text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7`}>
-            {highlightEnabled ? (
-              <FormattedText
-                as="div"
-                text={highlightPassageText}
-                className="whitespace-pre-wrap break-normal"
-                highlightEnabled
-                highlightColor={highlightColor}
-                highlightClassName={highlightClassName}
-                highlightSurfaceId={`reading:passage:${activePassage.id}`}
-                preserveInlineEmphasis
-                showHighlightButton
-              />
-            ) : (
-              <RichTextHighlighter
-                content={renderedPassageContent}
-                contentType="html"
-                enabled={false}
-                className="whitespace-pre-wrap break-normal"
-                highlightColor={highlightColor}
-                highlightClassName={highlightClassName}
-              />
-            )}
-            {(activePassage.images ?? []).map((image) => (
-              <StudentZoomableMedia
-                key={image.id}
-                sources={[image.src]}
-                alt={image.alt}
-                label={image.alt || 'Passage image'}
-                hint="Tap to zoom the passage image"
-                className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
-                renderOverlay={(zoom) => renderPassageImageAnnotations(image.annotations, zoom)}
-              />
-            ))}
-          </div>
-        </div>
+        <ReadingPassagePane
+          activePassage={activePassage}
+          materialCompact={materialCompact}
+          isTabletMode={isTabletMode}
+          tabletContentZoomStyle={tabletContentZoomStyle}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+          highlightClassName={highlightClassName}
+          highlightPassageText={highlightPassageText}
+          renderedPassageContent={renderedPassageContent}
+          renderPassageImageAnnotations={renderPassageImageAnnotations}
+        />
 
         <div
           onMouseDown={handleDrag}

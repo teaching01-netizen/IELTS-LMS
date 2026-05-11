@@ -203,4 +203,43 @@ describe('StudentReading passage readability controls', () => {
     expect(passagePane).not.toBeNull();
     expect(passagePane).toHaveAttribute('data-student-highlightable', 'true');
   });
+
+  it('does not auto-scroll question panel while passage text selection is active', () => {
+    const getSelectionSpy = vi.spyOn(window, 'getSelection');
+    const state = createState();
+    const scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
+
+    const { rerender } = render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId={null}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const passagePane = document.querySelector('.student-reading-passage-pane');
+    const textNode = passagePane?.querySelector('h2')?.firstChild ?? null;
+    expect(textNode).not.toBeNull();
+
+    getSelectionSpy.mockReturnValue({
+      isCollapsed: false,
+      anchorNode: textNode,
+    } as unknown as Selection);
+
+    rerender(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+      />,
+    );
+
+    expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+    scrollIntoViewSpy.mockRestore();
+    getSelectionSpy.mockRestore();
+  });
 });
