@@ -180,7 +180,6 @@ export function AdminExams({
   onGetVersions,
   onGetEvents,
   onRestoreVersion,
-  onRepublishVersion,
   onCompareVersions,
   onBulkPublish,
   onBulkUnpublish,
@@ -562,17 +561,6 @@ export function AdminExams({
     if (onRestoreVersion) {
       await onRestoreVersion(versionId);
       // Reload versions after restore
-      if (selectedExamForHistory && onGetVersions) {
-        const loadedVersions = await onGetVersions(selectedExamForHistory.id);
-        setExamVersions(loadedVersions);
-      }
-    }
-  };
-
-  const handleRepublishVersion = async (versionId: string) => {
-    if (onRepublishVersion) {
-      await onRepublishVersion(versionId);
-      // Reload versions after republish
       if (selectedExamForHistory && onGetVersions) {
         const loadedVersions = await onGetVersions(selectedExamForHistory.id);
         setExamVersions(loadedVersions);
@@ -1152,7 +1140,6 @@ export function AdminExams({
                 versions={examVersions}
                 events={examEvents}
                 onRestoreVersion={handleRestoreVersion}
-                onRepublishVersion={handleRepublishVersion}
                 onCompareVersions={onCompareVersions}
                 onCloneExam={onCloneExam}
               />

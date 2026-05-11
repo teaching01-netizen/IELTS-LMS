@@ -1,5 +1,5 @@
 import React from 'react';
-import { useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 import { ScheduleSessionModal } from '@components/admin/ScheduleSessionModal';
 import { ExamVersionHistory } from '@components/admin/ExamVersionHistory';
 import { PublishActions } from '../components/PublishActions';
@@ -10,8 +10,10 @@ import { LoadingSurface } from '@components/ui';
 
 export function ExamReviewRoute() {
   const { examId } = useParams<{ examId: string }>();
+  const location = useLocation();
   const controller = useReviewRouteController(examId);
   const [showScheduleModal, setShowScheduleModal] = React.useState(false);
+  const publishCandidateCreated = (location.state as { publishCandidateCreated?: { sourceExamTitle?: string; schedulesCopied?: boolean } } | null)?.publishCandidateCreated;
 
   if (controller.isLoading) {
     return <LoadingSurface label="Loading exam review…" />;
@@ -78,6 +80,18 @@ export function ExamReviewRoute() {
         </div>
 
         <div className="p-8 space-y-6">
+          {publishCandidateCreated && (
+            <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200">
+              <p className="text-sm font-semibold text-emerald-900">
+                New exam copy created{publishCandidateCreated.sourceExamTitle ? ` from "${publishCandidateCreated.sourceExamTitle}"` : ''}.
+              </p>
+              <p className="text-xs text-emerald-800 mt-1">Original published exam remains unchanged.</p>
+              {!publishCandidateCreated.schedulesCopied && (
+                <p className="text-xs text-emerald-800">No schedules were copied.</p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm ring-1 ring-slate-900/5 p-6">
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Validation Summary</h2>
@@ -101,9 +115,10 @@ export function ExamReviewRoute() {
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Publish Actions</h2>
               {controller.publishReadiness ? (
                 <PublishActions
-                  canPublish={controller.publishReadiness.canPublish}
+                  canPublish={controller.exam?.canPublish ?? false}
                   publishReadiness={controller.publishReadiness}
                   onPublish={controller.handlePublish}
+                  onCreatePublishCandidate={controller.handleCreatePublishCandidate}
                   onSchedulePublish={controller.handleSchedulePublish}
                   scheduledTime={scheduledTime}
                   onOpenSchedulingWorkflow={() => setShowScheduleModal(true)}
@@ -136,7 +151,6 @@ export function ExamReviewRoute() {
                 versions={controller.versions}
                 events={[]}
                 onRestoreVersion={controller.handleRestoreVersion}
-                onRepublishVersion={controller.handleRepublishVersion}
                 onCompareVersions={async () => null}
               />
             )}
@@ -172,7 +186,7 @@ export function ExamReviewRoute() {
         <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-sm border-t border-slate-200 px-8 py-4">
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <button
-              onClick={controller.handleNavigateToBuilder}
+              onClick={() => controller.handleNavigateToBuilder()}
               className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
             >
               ← Back to Builder

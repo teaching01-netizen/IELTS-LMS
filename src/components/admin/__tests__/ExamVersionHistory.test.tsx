@@ -128,4 +128,9 @@ describe('ExamVersionHistory', () => {
     
     expect(screen.getByRole('button', { name: /hide audit log/i })).toBeTruthy();
   });
+
+  it('does not expose republish actions', () => {
+    render(<ExamVersionHistory {...defaultProps} />);
+    expect(screen.queryByRole('button', { name: /republish version/i })).toBeNull();
+  });
 });

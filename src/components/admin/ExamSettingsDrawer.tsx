@@ -1735,15 +1735,6 @@ function ExamSettingsDrawerComponent({
                                 <RotateCcw size={14} />
                               </button>
                             )}
-                            {onRepublishVersion && version.isPublished && (
-                              <button
-                                onClick={() => onRepublishVersion(version.id)}
-                                className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded transition-all"
-                                title="Republish version"
-                              >
-                                <Upload size={14} />
-                              </button>
-                            )}
                           </div>
                         </div>
                         <div className="text-xs text-gray-500 space-y-1">

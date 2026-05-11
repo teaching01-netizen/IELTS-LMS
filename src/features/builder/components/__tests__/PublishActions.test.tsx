@@ -21,6 +21,7 @@ describe('PublishActions', () => {
     canPublish: true,
     publishReadiness: mockPublishReadiness,
     onPublish: vi.fn(),
+    onCreatePublishCandidate: vi.fn(),
     onSchedulePublish: vi.fn(),
     onUnpublish: vi.fn(),
     exam: { title: 'Test Exam' }
@@ -104,7 +105,7 @@ describe('PublishActions', () => {
     expect(continueButton).toBeTruthy();
   });
 
-  it('shows republish latest draft action when there are unpublished draft changes', () => {
+  it('shows create-new-copy action when there are unpublished draft changes', () => {
     render(
       <PublishActions
         {...defaultProps}
@@ -119,18 +120,17 @@ describe('PublishActions', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: /republish \(latest draft\)/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /create new exam copy/i })).toBeTruthy();
     expect(screen.getByText(/draft v5 has changes not in published v4/i)).toBeTruthy();
   });
 
-  it('republish opens modal and confirms without schedule', async () => {
-    const onPublish = vi.fn();
+  it('creates a new publish candidate copy when requested', async () => {
+    const onCreatePublishCandidate = vi.fn().mockResolvedValue({ success: true });
 
     render(
       <PublishActions
         {...defaultProps}
-        publishReadiness={mockPublishReadiness}
-        onPublish={onPublish}
+        onCreatePublishCandidate={onCreatePublishCandidate}
         publishSuccess={{
           draftVersion: 3,
           publishedVersion: 4,
@@ -141,20 +141,38 @@ describe('PublishActions', () => {
       />
     );
 
-    fireEvent.change(screen.getByRole('textbox', { name: /publish notes/i }), {
-      target: { value: 'Republish notes' },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /republish \(latest draft\)/i }));
-    expect(screen.getByText(/republish exam/i)).toBeTruthy();
-
-    const confirmButton = screen.getByRole('button', { name: /confirm republish/i });
-    expect(confirmButton).not.toBeDisabled();
-
-    fireEvent.click(confirmButton);
+    fireEvent.click(screen.getByRole('button', { name: /create new exam copy/i }));
 
     await waitFor(() => {
-      expect(onPublish).toHaveBeenCalledWith('Republish notes');
+      expect(onCreatePublishCandidate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('shows safe-state error when creating publish candidate copy fails', async () => {
+    const onCreatePublishCandidate = vi
+      .fn()
+      .mockResolvedValue({ success: false, error: 'Could not create exam copy. Original published exam is unchanged.' });
+
+    render(
+      <PublishActions
+        {...defaultProps}
+        onCreatePublishCandidate={onCreatePublishCandidate}
+        publishSuccess={{
+          draftVersion: 3,
+          publishedVersion: 4,
+        }}
+        hasUnpublishedDraftChanges={true}
+        draftVersionNumber={5}
+        publishedVersionNumber={4}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /create new exam copy/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/could not create exam copy\. original published exam is unchanged\./i),
+      ).toBeTruthy();
     });
   });
 

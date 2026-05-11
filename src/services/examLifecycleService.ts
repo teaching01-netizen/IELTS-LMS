@@ -1509,6 +1509,28 @@ export class ExamLifecycleService {
   }
 
   /**
+   * Create a new publish candidate exam from the latest draft/published source.
+   * Enforces publish permission boundary for post-publish content changes.
+   */
+  async createPublishCandidateFromExam(
+    examId: string,
+    actor: string = 'System',
+  ): Promise<CloneResult> {
+    const sourceExam = await this.repository.getExamById(examId);
+    if (!sourceExam) {
+      return { success: false, error: 'Source exam not found' };
+    }
+
+    if (!sourceExam.canPublish) {
+      return { success: false, error: 'You do not have permission to create a publish candidate copy.' };
+    }
+
+    const dateSuffix = new Date().toISOString().slice(0, 10);
+    const newTitle = `${sourceExam.title} (Publish Candidate ${dateSuffix})`;
+    return this.cloneExam(examId, newTitle, actor);
+  }
+
+  /**
    * Create a new exam from a template
    * Similar to clone but marks the source as a template reference
    */
@@ -1632,8 +1654,8 @@ export class ExamLifecycleService {
   }
 
   /**
-   * Republish an older version as a new published version
-   * This creates a new published version from an older version's content
+   * Republish is intentionally disabled by policy.
+   * Post-publish content changes must go through clone -> review -> publish.
    */
   async republishVersion(
     examId: string,
@@ -1641,93 +1663,14 @@ export class ExamLifecycleService {
     actor: string = 'System',
     publishNotes?: string
   ): Promise<TransitionResult> {
-    const exam = await this.repository.getExamById(examId);
-    if (!exam) {
-      return { success: false, error: 'Exam not found' };
-    }
-
-    const versionToRepublish = await this.repository.getVersionById(versionId);
-    if (!versionToRepublish) {
-      return { success: false, error: 'Version not found' };
-    }
-
-    if (versionToRepublish.examId !== examId) {
-      return { success: false, error: 'Version does not belong to this exam' };
-    }
-
-    // Check publish readiness
-    const readiness = await this.getPublishReadiness(examId);
-    if (!readiness.canPublish) {
-      return {
-        success: false,
-        error: 'Exam content is not ready for publication',
-        exam
-      };
-    }
-
-    const now = new Date().toISOString();
-
-    // Get all versions to determine next version number
-    const allVersions = await this.repository.getAllVersions(examId);
-    const maxVersion = Math.max(...allVersions.map(v => v.versionNumber), 0);
-
-    // Create new published version from the version's content
-    const republishedVersion: ExamVersion = {
-      id: generateId('ver'),
-      examId,
-      versionNumber: maxVersion + 1,
-      parentVersionId: versionToRepublish.id,
-      contentSnapshot: JSON.parse(JSON.stringify(versionToRepublish.contentSnapshot)),
-      configSnapshot: JSON.parse(JSON.stringify(versionToRepublish.configSnapshot)),
-      validationSnapshot: versionToRepublish.validationSnapshot ? {
-        ...versionToRepublish.validationSnapshot,
-        lastValidatedAt: now
-      } : {
-        isValid: true,
-        errorCount: 0,
-        warningCount: 0,
-        lastValidatedAt: now
-      },
-      createdBy: actor,
-      createdAt: now,
-      publishNotes,
-      isDraft: false,
-      isPublished: true
-    };
-
-    // Update exam
-    const previousStatus = exam.status;
-    exam.currentPublishedVersionId = republishedVersion.id;
-    exam.status = 'published';
-    exam.publishedAt = now;
-    exam.updatedAt = now;
-
-    // Create audit event
-    const event: ExamEvent = {
-      id: generateId('evt'),
-      examId,
-      versionId: republishedVersion.id,
-      actor,
-      action: 'published',
-      fromState: previousStatus,
-      toState: 'published',
-      timestamp: now,
-      payload: {
-        republishedFromVersion: versionToRepublish.versionNumber,
-        notes: publishNotes
-      }
-    };
-
-    // Persist
-    await this.repository.saveExam(exam);
-    await this.repository.saveVersion(republishedVersion);
-    await this.repository.saveEvent(event);
-
+    void examId;
+    void versionId;
+    void actor;
+    void publishNotes;
     return {
-      success: true,
-      exam,
-      version: republishedVersion,
-      event
+      success: false,
+      error:
+        'Republish is disabled by policy. Create a new exam copy and publish that copy instead.',
     };
   }
 

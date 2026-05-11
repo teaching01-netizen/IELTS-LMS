@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { GitCommit, Clock, User, CheckCircle2, GitCompare, RotateCcw, Upload, Copy, ChevronDown, ChevronRight, FileText, File } from 'lucide-react';
+import { GitCommit, Clock, User, CheckCircle2, GitCompare, RotateCcw, Copy, ChevronDown, ChevronRight, FileText, File } from 'lucide-react';
 import { ExamAuditTimeline } from './ExamAuditTimeline';
 import { VersionCompareView } from './VersionCompareView';
 import { formatTimestamp, getRelativeTime, getVersionStatusColor, getVersionStatusLabel, sortVersionsByNumber } from '../../utils/versionUtils';
@@ -15,7 +15,6 @@ export function ExamVersionHistory({
   versions,
   events,
   onRestoreVersion,
-  onRepublishVersion,
   onCompareVersions,
   onCloneExam
 }: ExamVersionHistoryProps) {
@@ -107,11 +106,9 @@ export function ExamVersionHistory({
     compareDiff,
     setCompareDiff,
     handleCompare,
-    handleRestore,
-    handleRepublish
+    handleRestore
   } = useVersionHistory({
     onRestoreVersion,
-    onRepublishVersion,
     onCompareVersions,
     onCloneExam,
     examId: exam.id
@@ -373,19 +370,6 @@ export function ExamVersionHistory({
                           <RotateCcw size={14} aria-hidden="true" />
                         </button>
                       )}
-                      {onRepublishVersion && version.isPublished && !isCurrentPublished && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRepublish(version.id);
-                          }}
-                          className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded transition-all"
-                          title="Republish version"
-                          aria-label="Republish version"
-                        >
-                          <Upload size={14} aria-hidden="true" />
-                        </button>
-                      )}
                     </div>
                   </div>
 
@@ -538,7 +522,6 @@ export function ExamVersionHistory({
           }}
           diff={compareDiff}
           onRestoreAsDraft={onRestoreVersion}
-          onRepublish={onRepublishVersion}
         />
       )}
     </div>

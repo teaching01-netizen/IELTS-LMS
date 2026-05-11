@@ -410,6 +410,33 @@ describe('ExamLifecycleService - Phase 3: Versioning', () => {
     });
   });
 
+  describe('createPublishCandidateFromExam', () => {
+    it('creates a publish-candidate clone when source can publish', async () => {
+      const initialState = createMockExamState();
+      const source = await service.createExam('Source Exam', 'Academic', initialState, 'TestUser');
+
+      const result = await service.createPublishCandidateFromExam(source.exam!.id, 'Publisher');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.id).toBeDefined();
+      expect(result.exam?.title).toMatch(/\(Publish Candidate \d{4}-\d{2}-\d{2}\)$/);
+    });
+
+    it('rejects when source exam cannot publish', async () => {
+      const initialState = createMockExamState();
+      const source = await service.createExam('Restricted Exam', 'Academic', initialState, 'TestUser');
+      const entity = await mockRepo.getExamById(source.exam!.id);
+      expect(entity).toBeDefined();
+      entity!.canPublish = false;
+      await mockRepo.saveExam(entity!);
+
+      const result = await service.createPublishCandidateFromExam(source.exam!.id, 'Publisher');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/permission/i);
+    });
+  });
+
   describe('restoreVersionAsDraft', () => {
     it('should create a new draft version from restored content', async () => {
       const initialState = createMockExamState();
@@ -490,89 +517,14 @@ describe('ExamLifecycleService - Phase 3: Versioning', () => {
   });
 
   describe('republishVersion', () => {
-    it('should create a new published version from existing version', async () => {
+    it('should reject republish with policy error', async () => {
       const initialState = createMockExamState();
       const result = await service.createExam('Test Exam', 'Academic', initialState, 'TestUser');
       
-      // Publish original
-      await service.publishExam(result.exam!.id, 'TestUser', 'Initial publish');
-      
-      // Create draft changes
-      await service.saveDraft(result.exam!.id, initialState, 'TestUser');
-      
-      const versions = await mockRepo.getAllVersions(result.exam!.id);
-      const publishedVersion = versions.find(v => v.isPublished);
-      
-      const republishResult = await service.republishVersion(result.exam!.id, publishedVersion!.id, 'Republisher', 'Republishing v1');
-      
-      expect(republishResult.success).toBe(true);
-      expect(republishResult.version).toBeDefined();
-      expect(republishResult.version?.isPublished).toBe(true);
-      expect(republishResult.version?.publishNotes).toBe('Republishing v1');
-    });
-
-    it('should update exam published version pointer', async () => {
-      const initialState = createMockExamState();
-      const result = await service.createExam('Test Exam', 'Academic', initialState, 'TestUser');
-      
-      await service.publishExam(result.exam!.id, 'TestUser', 'Initial publish');
-      
-      const versions = await mockRepo.getAllVersions(result.exam!.id);
-      const publishedVersion = versions.find(v => v.isPublished);
-      
-      const oldPublishedId = result.exam!.currentPublishedVersionId;
-      const republishResult = await service.republishVersion(result.exam!.id, publishedVersion!.id, 'Republisher');
-      
-      expect(republishResult.exam?.currentPublishedVersionId).not.toBe(oldPublishedId);
-      expect(republishResult.exam?.currentPublishedVersionId).toBe(republishResult.version?.id);
-    });
-
-    it('should update exam status to published', async () => {
-      const initialState = createMockExamState();
-      const result = await service.createExam('Test Exam', 'Academic', initialState, 'TestUser');
-      
-      await service.publishExam(result.exam!.id, 'TestUser');
-      
-      // Unpublish
-      await service.unpublishExam(result.exam!.id, 'TestUser');
-      
-      const versions = await mockRepo.getAllVersions(result.exam!.id);
-      const publishedVersion = versions.find(v => v.isPublished);
-      
-      const republishResult = await service.republishVersion(result.exam!.id, publishedVersion!.id, 'Republisher');
-      
-      expect(republishResult.exam?.status).toBe('published');
-    });
-
-    it('should create audit event for republish', async () => {
-      const initialState = createMockExamState();
-      const result = await service.createExam('Test Exam', 'Academic', initialState, 'TestUser');
-      
-      await service.publishExam(result.exam!.id, 'TestUser');
-      
-      const versions = await mockRepo.getAllVersions(result.exam!.id);
-      const publishedVersion = versions.find(v => v.isPublished);
-      
-      await service.republishVersion(result.exam!.id, publishedVersion!.id, 'Republisher', 'Republish reason');
-      
-      const events = await mockRepo.getEvents(result.exam!.id);
-      const republishEvents = events.filter(e => e.action === 'published' && e.payload?.republishedFromVersion);
-      
-      expect(republishEvents.length).toBeGreaterThan(0);
-      expect(republishEvents[0].payload).toEqual({
-        republishedFromVersion: publishedVersion!.versionNumber,
-        notes: 'Republish reason'
-      });
-    });
-
-    it('should return error if version not found', async () => {
-      const initialState = createMockExamState();
-      const result = await service.createExam('Test Exam', 'Academic', initialState, 'TestUser');
-      
-      const republishResult = await service.republishVersion(result.exam!.id, 'non-existent-version', 'Republisher');
+      const republishResult = await service.republishVersion(result.exam!.id, 'any-version-id', 'Republisher');
       
       expect(republishResult.success).toBe(false);
-      expect(republishResult.error).toBe('Version not found');
+      expect(republishResult.error).toMatch(/republish is disabled by policy/i);
     });
   });
 

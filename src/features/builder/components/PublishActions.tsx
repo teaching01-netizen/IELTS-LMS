@@ -14,6 +14,7 @@ interface PublishActionsProps {
   canPublish: boolean;
   publishReadiness?: PublishReadiness;
   onPublish: (notes?: string) => void;
+  onCreatePublishCandidate?: () => Promise<{ success: boolean; error?: string } | void>;
   onSchedulePublish: (scheduledTime: string) => void;
   scheduledTime?: string;
   onOpenSchedulingWorkflow?: (() => void) | undefined;
@@ -33,8 +34,10 @@ interface PublishActionsProps {
 }
 
 export function PublishActions({
+  canPublish,
   publishReadiness,
   onPublish,
+  onCreatePublishCandidate,
   onSchedulePublish,
   scheduledTime: scheduledTimeProp,
   onOpenSchedulingWorkflow,
@@ -54,8 +57,9 @@ export function PublishActions({
   const [scheduledTime, setScheduledTime] = useState('');
   const [showSchedule, setShowSchedule] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [confirmMode, setConfirmMode] = useState<'publish' | 'republish'>('publish');
   const [linkCopied, setLinkCopied] = useState(false);
+  const [isCreatingPublishCandidate, setIsCreatingPublishCandidate] = useState(false);
+  const [publishCandidateError, setPublishCandidateError] = useState<string | null>(null);
 
   const isValidationPassed = publishReadiness?.canPublish ?? false;
   const isContentReviewed = true;
@@ -67,8 +71,7 @@ export function PublishActions({
   const draftHasChanges = Boolean(hasUnpublishedDraftChanges);
   const scheduleRequired = !isPublished;
 
-  const canPublishNow = isValidationPassed && isScheduled;
-  const canRepublishNow = isValidationPassed;
+  const canPublishNow = canPublish && isValidationPassed && isScheduled;
 
   const statusLabel = !isPublished
     ? 'Not published yet'
@@ -78,14 +81,15 @@ export function PublishActions({
 
   const nextStepText = (() => {
     if (!isPublished) {
+      if (!canPublish) return 'Next step: You do not have permission to publish this exam.';
       if (!isValidationPassed) return 'Next step: Fix technical validation issues.';
       if (!isScheduled) return 'Next step: Schedule when students can access the exam.';
       return 'Next step: Publish.';
     }
 
     if (draftHasChanges) {
-      if (!isValidationPassed) return 'Next step: Fix technical validation issues in the draft before republishing.';
-      return 'Next step: Republish the latest draft to update the published version students take.';
+      if (!canPublish) return 'Next step: You do not have permission to create a new publish candidate.';
+      return 'Next step: Create a new exam copy, then publish that new exam when ready.';
     }
 
     return 'Up to date. Next step: Reschedule if you need to change access time.';
@@ -99,7 +103,7 @@ export function PublishActions({
     setShowSchedule(true);
   };
 
-  const renderStepper = (publishActionLabel: string) => (
+  const renderStepper = (finalActionLabel: string, finalActionReady: boolean) => (
     <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
       <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider mb-3">Next Steps</p>
       <ol className="space-y-2" aria-label="Publish steps">
@@ -136,29 +140,48 @@ export function PublishActions({
           </div>
         </li>
         <li className="flex items-start gap-2">
-          {(!isPublished && canPublishNow) || (isPublished && draftHasChanges && canRepublishNow) ? (
+          {finalActionReady ? (
             <CheckCircle2 size={14} className="text-emerald-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
           ) : (
             <Circle size={14} className="text-blue-400 mt-0.5 flex-shrink-0" aria-hidden="true" />
           )}
           <div>
-            <p className="text-xs font-medium text-slate-700">3) {publishActionLabel}</p>
+            <p className="text-xs font-medium text-slate-700">3) {finalActionLabel}</p>
             {!isPublished && !canPublishNow && (
               <p className="text-[11px] text-slate-500">
-                {!isValidationPassed ? 'Blocked: validation must pass.' : !isScheduled ? 'Blocked: schedule must be set.' : 'Blocked.'}
+                {!canPublish ? 'Blocked: publish permission required.' : !isValidationPassed ? 'Blocked: validation must pass.' : !isScheduled ? 'Blocked: schedule must be set.' : 'Blocked.'}
               </p>
             )}
-            {isPublished && draftHasChanges && !canRepublishNow && (
-              <p className="text-[11px] text-slate-500">Blocked: validation must pass to republish.</p>
+            {isPublished && draftHasChanges && !canPublish && (
+              <p className="text-[11px] text-slate-500">Blocked: publish permission required.</p>
             )}
             {isPublished && !draftHasChanges && (
-              <p className="text-[11px] text-slate-500">No draft changes to republish.</p>
+              <p className="text-[11px] text-slate-500">No draft changes requiring a new publish candidate.</p>
             )}
           </div>
         </li>
       </ol>
     </div>
   );
+
+  const handleCreatePublishCandidate = async () => {
+    if (!onCreatePublishCandidate || isCreatingPublishCandidate) {
+      return;
+    }
+
+    setPublishCandidateError(null);
+    setIsCreatingPublishCandidate(true);
+    try {
+      const result = await onCreatePublishCandidate();
+      if (result && result.success === false) {
+        setPublishCandidateError(result.error ?? 'Could not create exam copy. Original published exam is unchanged.');
+      }
+    } catch {
+      setPublishCandidateError('Could not create exam copy. Original published exam is unchanged.');
+    } finally {
+      setIsCreatingPublishCandidate(false);
+    }
+  };
 
   if (publishSuccess) {
     const effectiveDraftVersion = draftVersionNumber ?? publishSuccess.draftVersion;
@@ -172,7 +195,10 @@ export function PublishActions({
           <p className="text-xs text-slate-600">{nextStepText}</p>
         </div>
 
-        {renderStepper('Republish')}
+        {renderStepper(
+          hasUnpublishedDraftChanges ? 'Create New Exam Copy' : 'No content action needed',
+          hasUnpublishedDraftChanges ? canPublish : true,
+        )}
 
         <div className="flex items-center gap-3 p-4 bg-emerald-50 rounded-xl border border-emerald-200">
           <CheckCircle2 size={24} className="text-emerald-600 flex-shrink-0" aria-hidden="true" />
@@ -191,7 +217,9 @@ export function PublishActions({
         </div>
 
         <div className="p-3 bg-sky-50 rounded-lg border border-sky-100">
-          <p className="text-xs text-sky-900">Draft remains editable. Create new published version when ready.</p>
+          <p className="text-xs text-sky-900">
+            Draft remains editable. To change published content, create a new exam copy and publish that copy.
+          </p>
         </div>
 
         {hasUnpublishedDraftChanges && (
@@ -199,34 +227,21 @@ export function PublishActions({
             <p className="text-xs text-amber-900">
               Draft v{effectiveDraftVersion} has changes not in Published v{effectivePublishedVersion}.
             </p>
-            <div>
-              <label className="block text-xs font-semibold text-amber-900 uppercase tracking-wider mb-2">
-                Publish Notes
-              </label>
-              <textarea
-                value={publishNotes}
-                onChange={(e) => setPublishNotes(e.target.value)}
-                className="w-full px-3 py-2 border border-amber-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white"
-                rows={2}
-                placeholder="Optional notes about this republished version..."
-                aria-label="Publish notes"
-              />
-            </div>
             <div className="flex gap-3">
               <button
                 onClick={() => {
-                  setConfirmMode('republish');
-                  setShowConfirmModal(true);
+                  void handleCreatePublishCandidate();
                 }}
-                disabled={!isValidationPassed}
+                disabled={!canPublish || isCreatingPublishCandidate}
                 className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none"
                 title={
-                  !isValidationPassed
-                    ? 'Fix validation errors before republishing.'
-                    : 'Creates a new published version from the latest draft.'
+                  !canPublish
+                    ? 'Publish permission required to create a new exam copy.'
+                    : 'Creates a new exam copy from the latest draft. Original published exam remains unchanged.'
                 }
+                aria-label="Create new exam copy"
               >
-                Republish (Latest Draft)
+                {isCreatingPublishCandidate ? 'Creating copy...' : 'Create New Exam Copy'}
               </button>
               <button
                 onClick={openScheduling}
@@ -236,9 +251,14 @@ export function PublishActions({
                 <Calendar size={16} aria-hidden="true" /> Reschedule
               </button>
             </div>
-            {!isValidationPassed && (
+            {publishCandidateError && (
               <p className="text-xs text-amber-900">
-                Republish is disabled until the current draft passes validation.
+                {publishCandidateError}
+              </p>
+            )}
+            {!canPublish && (
+              <p className="text-xs text-amber-900">
+                Create copy is disabled until publish permission is granted.
               </p>
             )}
           </div>
@@ -339,7 +359,7 @@ export function PublishActions({
 
           {onArchive && (
             <button
-              onClick={() => onArchive}
+              onClick={() => onArchive()}
               className="w-full px-4 py-2.5 bg-slate-50 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-100 transition-all duration-200 flex items-center justify-center gap-2 border border-slate-200"
               aria-label="Archive exam"
             >
@@ -351,8 +371,8 @@ export function PublishActions({
         <PublishConfirmationModal
           isOpen={showConfirmModal}
           onClose={() => setShowConfirmModal(false)}
-          mode={confirmMode}
-          requireSchedule={confirmMode === 'publish'}
+          mode="publish"
+          requireSchedule={true}
           onConfirm={async () => {
             onPublish(publishNotes);
             setShowConfirmModal(false);
@@ -386,7 +406,7 @@ export function PublishActions({
           <p className="text-xs text-slate-600">{nextStepText}</p>
         </div>
 
-        {renderStepper('Publish')}
+        {renderStepper('Publish', canPublishNow)}
 
         <div>
           <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Publish Notes</label>
@@ -410,7 +430,6 @@ export function PublishActions({
             </button>
             <button
               onClick={() => {
-                setConfirmMode('publish');
                 setShowConfirmModal(true);
               }}
               disabled
@@ -425,14 +444,15 @@ export function PublishActions({
           <div className="flex gap-3">
             <button
               onClick={() => {
-                setConfirmMode('publish');
                 setShowConfirmModal(true);
               }}
               disabled={!canPublishNow}
               className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none"
               title={
                 !canPublishNow
-                  ? !isValidationPassed
+                  ? !canPublish
+                    ? 'Publish permission required.'
+                    : !isValidationPassed
                     ? 'Fix validation issues first.'
                     : 'Set a schedule first.'
                   : 'Creates an immutable published version from the current draft.'
@@ -476,8 +496,8 @@ export function PublishActions({
       <PublishConfirmationModal
         isOpen={showConfirmModal}
         onClose={() => setShowConfirmModal(false)}
-        mode={confirmMode}
-        requireSchedule={confirmMode === 'publish'}
+        mode="publish"
+        requireSchedule={true}
         onConfirm={async () => {
           onPublish(publishNotes);
           setShowConfirmModal(false);

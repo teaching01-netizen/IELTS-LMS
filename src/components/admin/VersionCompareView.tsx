@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, GitCompare, ArrowRight, CheckCircle2, XCircle, Clock, User, FileText, Layers } from 'lucide-react';
+import { X, GitCompare, ArrowRight, XCircle, Clock, User, FileText, Layers } from 'lucide-react';
 import { VersionDiff } from '../../types/domain';
 import { summarizeChanges, getChangeCount, formatTimestamp, getVersionStatusLabel, getVersionStatusColor } from '../../utils/versionUtils';
 
@@ -8,10 +8,9 @@ interface VersionCompareViewProps {
   onClose: () => void;
   diff: VersionDiff | null;
   onRestoreAsDraft?: ((versionId: string) => void) | undefined;
-  onRepublish?: ((versionId: string) => void) | undefined;
 }
 
-export function VersionCompareView({ isOpen, onClose, diff, onRestoreAsDraft, onRepublish }: VersionCompareViewProps) {
+export function VersionCompareView({ isOpen, onClose, diff, onRestoreAsDraft }: VersionCompareViewProps) {
   if (!isOpen || !diff) return null;
 
   const changes = summarizeChanges(diff);
@@ -243,15 +242,6 @@ export function VersionCompareView({ isOpen, onClose, diff, onRestoreAsDraft, on
                 >
                   <ArrowRight size={16} className="rotate-180" />
                   Restore v{diff.versionA.versionNumber} as Draft
-                </button>
-              )}
-              {onRepublish && diff.versionB.isPublished && (
-                <button
-                  onClick={() => onRepublish(diff.versionA.id)}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-all"
-                >
-                  <CheckCircle2 size={16} />
-                  Republish v{diff.versionA.versionNumber}
                 </button>
               )}
             </div>

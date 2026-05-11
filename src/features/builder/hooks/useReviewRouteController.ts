@@ -20,10 +20,10 @@ export interface ReviewRouteController {
   schedules: ExamSchedule[];
   publishReadiness: PublishReadiness | undefined;
   handlePublish: (notes?: string) => Promise<void>;
+  handleCreatePublishCandidate: () => Promise<{ success: boolean; error?: string }>;
   handleSchedulePublish: (scheduledTime: string) => Promise<void>;
   handleUnpublish: (reason?: string) => Promise<void>;
   handleRestoreVersion: (versionId: string) => Promise<void>;
-  handleRepublishVersion: (versionId: string) => Promise<void>;
   handleNavigateToBuilder: (field?: string) => void;
   handleOpenScheduling: () => void;
   handleCreateSchedule: (schedule: ExamSchedule) => Promise<void>;
@@ -99,6 +99,42 @@ export function useReviewRouteController(
     [examId, loadExam],
   );
 
+  const handleCreatePublishCandidate = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+    if (!examId) {
+      return { success: false, error: 'Exam ID not found' };
+    }
+
+    const sourceExam = await examRepository.getExamById(examId);
+    if (!sourceExam) {
+      return { success: false, error: 'Source exam not found' };
+    }
+
+    if (!sourceExam.canPublish) {
+      return { success: false, error: 'You do not have permission to create a publish candidate copy.' };
+    }
+
+    const result = await examLifecycleService.createPublishCandidateFromExam(examId, 'System');
+
+    if (!result.success || !result.exam?.id) {
+      return {
+        success: false,
+        error: result.error ?? 'Could not create exam copy. Original published exam is unchanged.',
+      };
+    }
+
+    navigate(`/builder/${result.exam.id}/review`, {
+      state: {
+        publishCandidateCreated: {
+          sourceExamId: sourceExam.id,
+          sourceExamTitle: sourceExam.title,
+          schedulesCopied: false,
+        },
+      },
+    });
+
+    return { success: true };
+  }, [examId, navigate]);
+
   const handleSchedulePublish = useCallback(
     async (scheduledTime: string) => {
       if (!examId) {
@@ -130,18 +166,6 @@ export function useReviewRouteController(
       }
 
       await examLifecycleService.restoreVersionAsDraft(examId, versionId, 'System');
-      await loadExam();
-    },
-    [examId, loadExam],
-  );
-
-  const handleRepublishVersion = useCallback(
-    async (versionId: string) => {
-      if (!examId) {
-        return;
-      }
-
-      await examLifecycleService.republishVersion(examId, versionId, 'System');
       await loadExam();
     },
     [examId, loadExam],
@@ -191,10 +215,10 @@ export function useReviewRouteController(
     schedules,
     publishReadiness,
     handlePublish,
+    handleCreatePublishCandidate,
     handleSchedulePublish,
     handleUnpublish,
     handleRestoreVersion,
-    handleRepublishVersion,
     handleNavigateToBuilder,
     handleOpenScheduling,
     handleCreateSchedule,

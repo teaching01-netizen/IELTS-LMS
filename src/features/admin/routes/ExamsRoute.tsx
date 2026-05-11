@@ -18,7 +18,7 @@ import { useAdminContext } from './AdminContext';
  * service adapters so route files stop copy-pasting business logic.
  */
 export function ExamsRoute() {
-  const { defaults, examEntities, exams, onNavigate, onGetVersions, onGetEvents, onRestoreVersion, onRepublishVersion, onCompareVersions } = useAdminContext();
+  const { defaults, examEntities, exams, onNavigate, onGetVersions, onGetEvents, onRestoreVersion, onCompareVersions } = useAdminContext();
   const navigate = useNavigate();
   const [localExamEntities, setLocalExamEntities] = useState<ExamEntity[]>(examEntities);
   const [localExams, setLocalExams] = useState<Exam[]>(exams);
@@ -108,7 +108,6 @@ export function ExamsRoute() {
       onGetVersions={onGetVersions}
       onGetEvents={onGetEvents}
       onRestoreVersion={onRestoreVersion}
-      onRepublishVersion={onRepublishVersion}
       onCompareVersions={onCompareVersions}
       onBulkPublish={handleBulkPublish}
       onBulkUnpublish={handleBulkUnpublish}

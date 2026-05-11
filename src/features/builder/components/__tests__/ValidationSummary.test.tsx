@@ -79,7 +79,7 @@ describe('ValidationSummary', () => {
     );
 
     expect(screen.getByText(/next steps:/i)).toBeTruthy();
-    expect(screen.getByText(/schedule access time and publish \(or republish\)/i)).toBeTruthy();
+    expect(screen.getByText(/schedule access time and publish when ready/i)).toBeTruthy();
   });
 
   it('calls onScheduleClick when schedule item clicked', () => {
