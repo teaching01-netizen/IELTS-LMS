@@ -155,4 +155,20 @@ describe('StudentReading passage readability controls', () => {
     expect(highlightContainer?.textContent).toContain('William Henry Perkin was born in London.');
     expect(highlightContainer?.textContent).toContain('Second paragraph keeps emphasis.');
   });
+
+  it('requires explicit highlight button tap on tablet reading passages', () => {
+    render(
+      <StudentReading
+        state={createState()}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+        highlightEnabled
+        tabletMode
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /highlight selected text/i })).toBeInTheDocument();
+  });
 });

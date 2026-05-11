@@ -14,6 +14,8 @@ type FormattedTextProps = {
   highlightClassName?: string | undefined;
   highlightPersistenceKey?: string | undefined;
   preserveInlineEmphasis?: boolean | undefined;
+  showHighlightButton?: boolean | undefined;
+  highlightButtonLabel?: string | undefined;
 };
 export function FormattedText({
   text,
@@ -24,6 +26,8 @@ export function FormattedText({
   highlightClassName,
   highlightPersistenceKey,
   preserveInlineEmphasis = false,
+  showHighlightButton = false,
+  highlightButtonLabel = 'Highlight selected text',
 }: FormattedTextProps) {
   const Tag = as as any;
   const shouldSplitParagraphs = as === 'div' && /\n\n/.test(text);
@@ -97,12 +101,21 @@ export function FormattedText({
           data-student-highlightable="true"
           style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
           onClick={removeTappedHighlight}
-          onMouseUp={highlightEnabled ? handleMouseUp : undefined}
-          onTouchStart={highlightEnabled ? startTouchSelectionSession : undefined}
-          onTouchEnd={highlightEnabled ? scheduleSelectionHighlight : undefined}
+          onMouseUp={highlightEnabled && !showHighlightButton ? handleMouseUp : undefined}
+          onTouchStart={highlightEnabled && !showHighlightButton ? startTouchSelectionSession : undefined}
+          onTouchEnd={highlightEnabled && !showHighlightButton ? scheduleSelectionHighlight : undefined}
           onKeyUp={highlightEnabled ? handleSelection : undefined}
           dangerouslySetInnerHTML={{ __html: html }}
         />
+        {highlightEnabled && showHighlightButton ? (
+          <button
+            type="button"
+            onClick={handleSelection}
+            className="mt-2 inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 shadow-sm"
+          >
+            {highlightButtonLabel}
+          </button>
+        ) : null}
         {highlightPolicyHint ? (
           <div
             role="status"

@@ -263,6 +263,7 @@ export function StudentReading({
                 highlightColor={highlightColor}
                 highlightClassName={highlightClassName}
                 preserveInlineEmphasis
+                showHighlightButton={isTabletMode}
               />
             ) : (
               <RichTextHighlighter

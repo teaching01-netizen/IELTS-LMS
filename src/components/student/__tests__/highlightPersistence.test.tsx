@@ -120,6 +120,38 @@ describe('student highlight persistence', () => {
     getSelectionSpy.mockRestore();
   });
 
+  it('keeps touch selection pending until explicit button press when highlight button mode is enabled', async () => {
+    vi.useFakeTimers();
+    let currentTextNode: ChildNode | null = null;
+    const selectionMock = createSelectionMock(() => currentTextNode, {
+      start: 6,
+      end: 22,
+      text: 'beta gamma delta',
+    });
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(selectionMock);
+
+    const { container } = render(
+      <FormattedText text="Alpha beta gamma delta" highlightEnabled showHighlightButton />,
+    );
+    const textElement = container.querySelector('span');
+    if (!textElement) {
+      throw new Error('Expected a rendered text span');
+    }
+
+    currentTextNode = textElement.firstChild;
+    fireEvent.touchStart(textElement);
+    fireEvent.touchEnd(textElement);
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(container.querySelector('mark')).toBeNull();
+
+    expect(screen.getByRole('button', { name: /highlight selected text/i })).toBeInTheDocument();
+
+    getSelectionSpy.mockRestore();
+  });
+
   it('auto-highlights from snapshot even if live touch selection collapses before touch end', async () => {
     vi.useFakeTimers();
     let currentTextNode: ChildNode | null = null;
