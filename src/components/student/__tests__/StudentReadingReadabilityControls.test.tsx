@@ -186,4 +186,21 @@ describe('StudentReading passage readability controls', () => {
 
     expect(screen.getByRole('button', { name: /highlight selected text/i })).toBeInTheDocument();
   });
+
+  it('marks the full reading passage pane as highlightable so native drag-selection is never blocked there', () => {
+    const { container } = render(
+      <StudentReading
+        state={createState()}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+        highlightEnabled={false}
+      />,
+    );
+
+    const passagePane = container.querySelector('.student-reading-passage-pane');
+    expect(passagePane).not.toBeNull();
+    expect(passagePane).toHaveAttribute('data-student-highlightable', 'true');
+  });
 });

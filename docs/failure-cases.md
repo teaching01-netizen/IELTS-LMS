@@ -53,3 +53,26 @@ Selection handling mixed live browser selection with post-mouseup/button events,
 
 ### Invariant
 Highlighting is fail-closed: no endpoint clipping, no cross-block expansion, and no highlight apply based on stale/collapsed live selection if a stable snapshot exists.
+
+---
+
+## 2026-05-11: Reading Passage Selection Blocked By Drag Guard
+
+### Symptom
+Students could see text selection collapse/disappear when drag-selecting reading passage text, especially when selection started on the passage title.
+
+### Scope
+Student reading passage selection behavior under exam anti-cheat drag/drop guard.
+
+### Root Cause
+Global `dragstart` blocking exempted only elements inside `[data-student-highlightable="true"]`. The reading title sat outside that boundary, so native selection gestures could be canceled.
+
+### Fix
+- Marked the full reading passage pane container as `data-student-highlightable="true"` so title and body are covered by the drag-selection exemption.
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/StudentReadingReadabilityControls.test.tsx`
+- Rules/Docs: `docs/failure-cases.md`
+
+### Invariant
+Reading passage text selection (title and body) must remain native-selectable during exam mode while non-passage drag/drop restrictions remain enforced.

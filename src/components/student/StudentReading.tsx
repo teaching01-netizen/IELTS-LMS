@@ -243,6 +243,7 @@ export function StudentReading({
           } ${
             isTabletMode ? 'w-[var(--reading-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
           }`}
+          data-student-highlightable="true"
           style={{
             ...(tabletContentZoomStyle ?? {}),
             fontSize: 'var(--student-passage-font-size)',
