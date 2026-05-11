@@ -35,6 +35,18 @@ export function RichTextHighlighter({
     () => (contentType === 'html' ? sanitizeHtml(content) : escapeHtml(content)),
     [content, contentType],
   );
+
+  if (!enabled) {
+    return (
+      <Tag
+        className={className}
+        data-student-highlightable="true"
+        style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
+        dangerouslySetInnerHTML={{ __html: initialHtml }}
+      />
+    );
+  }
+
   const instanceId = useId();
   const defaultSurfaceId = useMemo(
     () => `rich:${instanceId}`,

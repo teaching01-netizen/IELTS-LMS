@@ -45,4 +45,28 @@ describe('RichTextHighlighter user-select', () => {
     expect(wrapper).not.toBeNull();
     expect(wrapper.style.touchAction).toBe('auto');
   });
+
+  it('keeps the same wrapper node across rerenders when enabled=false', () => {
+    const { container, rerender } = render(
+      <RichTextHighlighter
+        content="<p>Hello world</p>"
+        contentType="html"
+        enabled={false}
+      />,
+    );
+
+    const before = container.firstElementChild;
+    expect(before).not.toBeNull();
+
+    rerender(
+      <RichTextHighlighter
+        content="<p>Hello world</p>"
+        contentType="html"
+        enabled={false}
+      />,
+    );
+
+    const after = container.firstElementChild;
+    expect(after).toBe(before);
+  });
 });
