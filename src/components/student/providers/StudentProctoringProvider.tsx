@@ -699,7 +699,7 @@ export function ProctoringProvider({
       void handleFullscreenChange();
     };
 
-    const attemptFullscreenOnGesture = () => {
+    const attemptFullscreenOnGesture = (event: PointerEvent | TouchEvent) => {
       if (
         runtimeState.phase !== 'exam' ||
         !config.security.requireFullscreen ||
@@ -714,6 +714,18 @@ export function ProctoringProvider({
 
       if (getFullscreenElement()) {
         return;
+      }
+
+      const eventTarget = event.target;
+      const targetElement = eventTarget instanceof Element ? eventTarget : null;
+      const insideHighlightableSurface = Boolean(
+        targetElement?.closest('[data-student-highlightable="true"]'),
+      );
+      if (insideHighlightableSurface) {
+        const activeSelection = window.getSelection()?.toString().trim() ?? '';
+        if (activeSelection.length > 0) {
+          return;
+        }
       }
 
       const now = Date.now();
