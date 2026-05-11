@@ -80,16 +80,6 @@ function getViewportHeight(): number {
   return window.visualViewport?.height ?? window.innerHeight;
 }
 
-function resolveEventTargetElement(target: EventTarget | null): Element | null {
-  if (target instanceof Element) {
-    return target;
-  }
-  if (target instanceof Node) {
-    return target.parentElement;
-  }
-  return null;
-}
-
 export function ProctoringProvider({
   children,
   config,
@@ -724,17 +714,6 @@ export function ProctoringProvider({
 
       if (getFullscreenElement()) {
         return;
-      }
-
-      const targetElement = resolveEventTargetElement(event.target);
-      const insideHighlightableSurface = Boolean(
-        targetElement?.closest('[data-student-highlightable="true"]'),
-      );
-      if (insideHighlightableSurface) {
-        const activeSelection = window.getSelection()?.toString().trim() ?? '';
-        if (activeSelection.length > 0) {
-          return;
-        }
       }
 
       const now = Date.now();

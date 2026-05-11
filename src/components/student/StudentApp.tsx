@@ -388,34 +388,8 @@ export function StudentApp({
       applyViewportHeight(stableViewportHeight);
     };
 
-    const resolveEventTargetElement = (target: EventTarget | null): Element | null => {
-      if (target instanceof Element) {
-        return target;
-      }
-      if (target instanceof Node) {
-        return target.parentElement;
-      }
-      return null;
-    };
-
-    const isSelectionGestureInsideHighlightableSurface = (
-      event: TouchEvent,
-    ): boolean => {
-      const targetElement = resolveEventTargetElement(event.target);
-      if (!targetElement?.closest('[data-student-highlightable="true"]')) {
-        return false;
-      }
-
-      const activeSelection = window.getSelection()?.toString().trim() ?? '';
-      return activeSelection.length > 0;
-    };
-
     const handleTouchStart = (event: TouchEvent) => {
       if (!tabletViewportSessionLocked) {
-        return;
-      }
-
-      if (isSelectionGestureInsideHighlightableSurface(event)) {
         return;
       }
 
@@ -429,10 +403,6 @@ export function StudentApp({
         return;
       }
 
-      if (isSelectionGestureInsideHighlightableSurface(event)) {
-        return;
-      }
-
       if (event.touches.length >= 2) {
         updateViewportHeight();
       }
@@ -440,10 +410,6 @@ export function StudentApp({
 
     const handleTouchEnd = (event: TouchEvent) => {
       if (!tabletViewportSessionLocked) {
-        return;
-      }
-
-      if (isSelectionGestureInsideHighlightableSurface(event)) {
         return;
       }
 
