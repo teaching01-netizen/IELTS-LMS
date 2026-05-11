@@ -371,13 +371,14 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       if (event.type === 'dragstart') {
         const target = event.target;
         const targetElement = target instanceof HTMLElement ? target : null;
-        const highlightModeEnabled = uiState.accessibilitySettings.highlightMode;
-        const isReadingModule = runtimeState.currentModule === 'reading';
         const withinHighlightableContainer = Boolean(
           targetElement?.closest('[data-student-highlightable="true"]'),
         );
 
-        if (highlightModeEnabled && isReadingModule && withinHighlightableContainer) {
+        // Allow drag-selection gestures for all student highlightable text
+        // surfaces; blocking dragstart here can clear active selection on some
+        // browsers/touch devices.
+        if (withinHighlightableContainer) {
           return;
         }
       }
@@ -417,7 +418,6 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
     runtimeActions,
     runtimeState,
     submitRequiresConfirmation,
-    uiState.accessibilitySettings.highlightMode,
     uiActions,
   ]);
 
