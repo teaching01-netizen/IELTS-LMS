@@ -262,6 +262,7 @@ export function StudentReading({
                 highlightEnabled
                 highlightColor={highlightColor}
                 highlightClassName={highlightClassName}
+                highlightSurfaceId={`reading:passage:${activePassage.id}`}
                 preserveInlineEmphasis
                 showHighlightButton
               />

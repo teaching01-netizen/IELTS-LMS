@@ -1,7 +1,12 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  HIGHLIGHT_CLEAR_EVENT_NAME,
+  HIGHLIGHT_HTML_STORAGE_PREFIX,
+  HIGHLIGHT_RANGE_STORAGE_PREFIX,
+} from './highlightStorageKeys';
 
-const STORAGE_PREFIX = 'ielts_student_highlight_html_v1';
-const CLEAR_EVENT_NAME = 'ielts-student-highlight-clear-v1';
+const STORAGE_PREFIX = HIGHLIGHT_HTML_STORAGE_PREFIX;
+const CLEAR_EVENT_NAME = HIGHLIGHT_CLEAR_EVENT_NAME;
 
 interface HighlightPersistenceContextValue {
   namespace: string;
@@ -54,11 +59,14 @@ function clearNamespace(namespace: string): void {
     return;
   }
 
-  const prefix = `${STORAGE_PREFIX}:${namespace}:`;
+  const prefixes = [
+    `${STORAGE_PREFIX}:${namespace}:`,
+    `${HIGHLIGHT_RANGE_STORAGE_PREFIX}:${namespace}:`,
+  ];
 
   for (let index = storage.length - 1; index >= 0; index -= 1) {
     const key = storage.key(index);
-    if (key?.startsWith(prefix)) {
+    if (key && prefixes.some((prefix) => key.startsWith(prefix))) {
       storage.removeItem(key);
     }
   }

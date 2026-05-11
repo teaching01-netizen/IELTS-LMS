@@ -1,9 +1,8 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useId, useMemo } from 'react';
 import { parseBoldMarkdown, parseRichMarkdown } from '../../utils/boldMarkdown';
 import { escapeHtml } from './highlightSelection';
 import { type StudentHighlightColor } from './highlightPalette';
-import { usePersistedStudentHighlightHtml } from './highlightPersistence';
-import { useStudentHighlightInteractions } from './useStudentHighlightInteractions';
+import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';
 
 type FormattedTextProps = {
   text: string;
@@ -12,7 +11,7 @@ type FormattedTextProps = {
   highlightEnabled?: boolean | undefined;
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
-  highlightPersistenceKey?: string | undefined;
+  highlightSurfaceId?: string | undefined;
   preserveInlineEmphasis?: boolean | undefined;
   showHighlightButton?: boolean | undefined;
   highlightButtonLabel?: string | undefined;
@@ -24,7 +23,7 @@ export function FormattedText({
   highlightEnabled = false,
   highlightColor,
   highlightClassName,
-  highlightPersistenceKey,
+  highlightSurfaceId,
   preserveInlineEmphasis = false,
   showHighlightButton = false,
   highlightButtonLabel = 'Highlight selected text',
@@ -45,7 +44,6 @@ export function FormattedText({
   const classes = shouldSplitParagraphs
     ? ['break-words', className].filter(Boolean).join(' ')
     : ['whitespace-pre-wrap', 'break-words', className].filter(Boolean).join(' ');
-  const containerRef = useRef<HTMLElement | null>(null);
   const initialHtml = useMemo(
     () =>
       paragraphSegments
@@ -73,28 +71,30 @@ export function FormattedText({
         .join(''),
     [paragraphSegments, preserveInlineEmphasis, shouldSplitParagraphs],
   );
-  const { html, setHtml, hasPersistedHtml } = usePersistedStudentHighlightHtml(
-    initialHtml,
-    highlightPersistenceKey,
+  const instanceId = useId();
+  const defaultSurfaceId = useMemo(
+    () => `formatted:${instanceId}`,
+    [instanceId],
   );
   const {
-    handleSelection,
-    handleMouseDown,
-    handleManualSelection,
-    handleMouseUp,
-    removeTappedHighlight,
-    startTouchSelectionSession,
-    scheduleSelectionHighlight,
-    highlightPolicyHint,
-  } = useStudentHighlightInteractions({
-    enabled: highlightEnabled,
     containerRef,
-    highlightClassName,
+    renderedHtml,
+    canHighlightSelection,
+    canEraseSelection,
+    applySelectionHighlight,
+    eraseSelectionHighlight,
+    hint,
+  } = useHighlightSurfaceV2({
+    enabled: highlightEnabled,
+    surfaceId: highlightSurfaceId ?? defaultSurfaceId,
+    baseHtml: initialHtml,
     highlightColor,
-    onHtmlChange: setHtml,
+    highlightClassName,
   });
+  const shouldShowControls =
+    highlightEnabled && (showHighlightButton || canHighlightSelection || canEraseSelection);
 
-  if (highlightEnabled || hasPersistedHtml) {
+  if (highlightEnabled || renderedHtml !== initialHtml) {
     return (
       <>
         <Tag
@@ -102,31 +102,36 @@ export function FormattedText({
           className={classes}
           data-student-highlightable="true"
           style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
-          onClick={removeTappedHighlight}
-          onMouseDown={highlightEnabled && !showHighlightButton ? handleMouseDown : undefined}
-          onMouseUp={highlightEnabled && !showHighlightButton ? handleMouseUp : undefined}
-          onTouchStart={highlightEnabled && !showHighlightButton ? startTouchSelectionSession : undefined}
-          onTouchEnd={highlightEnabled && !showHighlightButton ? scheduleSelectionHighlight : undefined}
-          onKeyUp={highlightEnabled ? handleSelection : undefined}
-          dangerouslySetInnerHTML={{ __html: html }}
+          dangerouslySetInnerHTML={{ __html: renderedHtml }}
         />
-        {highlightEnabled && showHighlightButton ? (
-          <button
-            type="button"
-            onClick={handleManualSelection}
-            className="mt-2 inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 shadow-sm"
-          >
-            {highlightButtonLabel}
-          </button>
+        {shouldShowControls ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={applySelectionHighlight}
+              disabled={!canHighlightSelection}
+              className="inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {highlightButtonLabel}
+            </button>
+            <button
+              type="button"
+              onClick={eraseSelectionHighlight}
+              disabled={!canEraseSelection}
+              className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-bold text-gray-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Erase selected text
+            </button>
+          </div>
         ) : null}
-        {highlightPolicyHint ? (
+        {hint ? (
           <div
             role="status"
             aria-live="polite"
             className="pointer-events-none fixed inset-x-0 bottom-4 z-[85] flex justify-center px-4"
           >
             <div className="rounded-sm border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-800 shadow-md">
-              {highlightPolicyHint}
+              {hint}
             </div>
           </div>
         ) : null}

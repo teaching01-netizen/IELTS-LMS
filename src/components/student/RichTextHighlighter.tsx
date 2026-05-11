@@ -1,11 +1,10 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useId, useMemo } from 'react';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import {
   escapeHtml,
 } from './highlightSelection';
 import { type StudentHighlightColor } from './highlightPalette';
-import { usePersistedStudentHighlightHtml } from './highlightPersistence';
-import { useStudentHighlightInteractions } from './useStudentHighlightInteractions';
+import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';
 
 interface RichTextHighlighterProps {
   content: string;
@@ -15,7 +14,7 @@ interface RichTextHighlighterProps {
   className?: string | undefined;
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
-  highlightPersistenceKey?: string | undefined;
+  highlightSurfaceId?: string | undefined;
   showHighlightButton?: boolean | undefined;
   highlightButtonLabel?: string | undefined;
 }
@@ -27,36 +26,37 @@ export function RichTextHighlighter({
   className,
   highlightColor,
   highlightClassName,
-  highlightPersistenceKey,
+  highlightSurfaceId,
   showHighlightButton = false,
   highlightButtonLabel = 'Highlight selected text',
 }: RichTextHighlighterProps) {
   const Tag = as as any;
-  const containerRef = useRef<HTMLElement | null>(null);
   const initialHtml = useMemo(
     () => (contentType === 'html' ? sanitizeHtml(content) : escapeHtml(content)),
     [content, contentType],
   );
-  const { html, setHtml } = usePersistedStudentHighlightHtml(
-    initialHtml,
-    highlightPersistenceKey,
+  const instanceId = useId();
+  const defaultSurfaceId = useMemo(
+    () => `rich:${instanceId}`,
+    [instanceId],
   );
   const {
-    handleSelection,
-    handleMouseDown,
-    handleManualSelection,
-    handleMouseUp,
-    removeTappedHighlight,
-    startTouchSelectionSession,
-    scheduleSelectionHighlight,
-    highlightPolicyHint,
-  } = useStudentHighlightInteractions({
-    enabled,
     containerRef,
+    renderedHtml,
+    canHighlightSelection,
+    canEraseSelection,
+    applySelectionHighlight,
+    eraseSelectionHighlight,
+    hint,
+  } = useHighlightSurfaceV2({
+    enabled,
+    surfaceId: highlightSurfaceId ?? defaultSurfaceId,
+    baseHtml: initialHtml,
     highlightClassName,
     highlightColor,
-    onHtmlChange: setHtml,
   });
+  const shouldShowControls =
+    enabled && (showHighlightButton || canHighlightSelection || canEraseSelection);
 
   return (
     <>
@@ -65,31 +65,36 @@ export function RichTextHighlighter({
         className={className}
         data-student-highlightable="true"
         style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
-        onClick={removeTappedHighlight}
-        onMouseDown={enabled && !showHighlightButton ? handleMouseDown : undefined}
-        onMouseUp={enabled && !showHighlightButton ? handleMouseUp : undefined}
-        onTouchStart={enabled && !showHighlightButton ? startTouchSelectionSession : undefined}
-        onTouchEnd={enabled && !showHighlightButton ? scheduleSelectionHighlight : undefined}
-        onKeyUp={enabled ? handleSelection : undefined}
-        dangerouslySetInnerHTML={{ __html: html }}
+        dangerouslySetInnerHTML={{ __html: renderedHtml }}
       />
-      {enabled && showHighlightButton ? (
-        <button
-          type="button"
-          onClick={handleManualSelection}
-          className="mt-2 inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 shadow-sm"
-        >
-          {highlightButtonLabel}
-        </button>
+      {shouldShowControls ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={applySelectionHighlight}
+            disabled={!canHighlightSelection}
+            className="inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {highlightButtonLabel}
+          </button>
+          <button
+            type="button"
+            onClick={eraseSelectionHighlight}
+            disabled={!canEraseSelection}
+            className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-bold text-gray-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Erase selected text
+          </button>
+        </div>
       ) : null}
-      {highlightPolicyHint ? (
+      {hint ? (
         <div
           role="status"
           aria-live="polite"
           className="pointer-events-none fixed inset-x-0 bottom-4 z-[85] flex justify-center px-4"
         >
           <div className="rounded-sm border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-800 shadow-md">
-            {highlightPolicyHint}
+            {hint}
           </div>
         </div>
       ) : null}

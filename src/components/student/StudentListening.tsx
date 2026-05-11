@@ -440,6 +440,7 @@ export function StudentListening({
                 className={`student-accessible-table-typography ${materialCompact ? 'text-xs md:text-sm' : 'text-sm md:text-base'} whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed text-gray-800`}
                 highlightColor={highlightColor}
                 highlightClassName={highlightClassName}
+                highlightSurfaceId={`listening:transcript:${activePart.id}`}
               />
             </div>
           ) : null}
