@@ -596,7 +596,7 @@ describe('student highlight persistence', () => {
     });
   });
 
-  it('does not auto-retry desktop highlight after a collapsed mouseup selection', async () => {
+  it('uses the latest captured desktop selection when mouseup sees a collapsed selection', async () => {
     vi.useFakeTimers();
     let currentTextNode: ChildNode | null = null;
     let collapsed = false;
@@ -630,16 +630,45 @@ describe('student highlight persistence', () => {
     }
 
     currentTextNode = textElement.firstChild;
+    fireEvent(document, new Event('selectionchange'));
     collapsed = true;
     fireEvent.mouseUp(textElement);
-    expect(container.querySelector('mark')).toBeNull();
+    expect(container.querySelector('mark')).not.toBeNull();
+    expect(container.querySelector('mark')).toHaveTextContent('beta');
 
-    collapsed = false;
-    await act(async () => {
-      vi.advanceTimersByTime(200);
-    });
+    getSelectionSpy.mockRestore();
+  });
 
-    expect(container.querySelector('mark')).toBeNull();
+  it('does not auto-apply a broad container-boundary desktop selection', async () => {
+    let highlightable: Element | null = null;
+    const broadSelection = {
+      rangeCount: 1,
+      getRangeAt: () => {
+        if (!highlightable) {
+          throw new Error('Expected a highlightable container');
+        }
+        const range = document.createRange();
+        range.setStart(highlightable, 0);
+        range.setEnd(highlightable, highlightable.childNodes.length);
+        return range;
+      },
+      toString: () => highlightable?.textContent ?? '',
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(broadSelection);
+
+    const { container } = render(
+      <FormattedText text={'Alpha beta.\n\nGamma delta.'} as="div" highlightEnabled />,
+    );
+    highlightable = container.querySelector('[data-student-highlightable="true"]');
+    if (!highlightable) {
+      throw new Error('Expected a rendered highlight container');
+    }
+
+    fireEvent.mouseUp(highlightable);
+
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(0);
 
     getSelectionSpy.mockRestore();
   });

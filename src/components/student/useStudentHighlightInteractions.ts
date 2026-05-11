@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import {
   applyHighlightFromSnapshotWithPolicy,
-  applySelectionHighlightWithPolicy,
   createHighlightSelectionSnapshot,
   removeHighlightAtIndex,
   type HighlightPolicyReason,
@@ -89,27 +88,21 @@ export function useStudentHighlightInteractions({
     [clearHighlightPolicyHintTimer],
   );
 
-  const handleSelection = useCallback(() => {
-    if (!enabled) {
-      return false;
-    }
-
+  const captureCurrentSelectionSnapshot = useCallback(() => {
     const container = containerRef.current;
     const selection = window.getSelection();
     if (!container || !selection) {
-      return false;
+      return null;
     }
 
-    const result = applySelectionHighlightWithPolicy(container, selection, resolvedHighlightClassName);
-    if (result.html) {
-      latestSelectionSnapshotRef.current = null;
-      onHtmlChange(result.html);
-      return true;
+    const snapshot = createHighlightSelectionSnapshot(container, selection);
+    if (!snapshot || !isPreciseSelectionSnapshot(snapshot)) {
+      return null;
     }
 
-    maybeShowPolicyHint(result.reason);
-    return false;
-  }, [containerRef, enabled, maybeShowPolicyHint, onHtmlChange, resolvedHighlightClassName]);
+    latestSelectionSnapshotRef.current = snapshot;
+    return snapshot;
+  }, [containerRef]);
 
   const applySelectionFromSnapshot = useCallback(
     (snapshot: HighlightSelectionSnapshot) => {
@@ -139,15 +132,37 @@ export function useStudentHighlightInteractions({
     [containerRef, enabled, maybeShowPolicyHint, onHtmlChange, resolvedHighlightClassName],
   );
 
+  const applyLatestSelectionSnapshot = useCallback(() => {
+    const latestSelectionSnapshot = latestSelectionSnapshotRef.current;
+    if (!latestSelectionSnapshot) {
+      return false;
+    }
+
+    return applySelectionFromSnapshot(latestSelectionSnapshot);
+  }, [applySelectionFromSnapshot]);
+
+  const handleSelection = useCallback(() => {
+    if (!enabled) {
+      return false;
+    }
+
+    const snapshot = captureCurrentSelectionSnapshot();
+    if (!snapshot) {
+      return false;
+    }
+
+    return applySelectionFromSnapshot(snapshot);
+  }, [applySelectionFromSnapshot, captureCurrentSelectionSnapshot, enabled]);
+
   const handleMouseUp = useCallback(() => {
     if (!enabled) {
       return;
     }
-    const applied = handleSelection();
+    const applied = handleSelection() || applyLatestSelectionSnapshot();
     if (applied) {
       lastMouseSelectionIntentAtRef.current = Date.now();
     }
-  }, [enabled, handleSelection]);
+  }, [applyLatestSelectionSnapshot, enabled, handleSelection]);
 
   const handleManualSelection = useCallback(() => {
     if (!enabled) {
@@ -158,13 +173,8 @@ export function useStudentHighlightInteractions({
       return true;
     }
 
-    const latestSelectionSnapshot = latestSelectionSnapshotRef.current;
-    if (!latestSelectionSnapshot) {
-      return false;
-    }
-
-    return applySelectionFromSnapshot(latestSelectionSnapshot);
-  }, [applySelectionFromSnapshot, enabled, handleSelection]);
+    return applyLatestSelectionSnapshot();
+  }, [applyLatestSelectionSnapshot, enabled, handleSelection]);
 
   const { isWithinRecentTouchAutoApplyGuard, startTouchSelectionSession, scheduleSelectionHighlight } =
     useDeferredSelectionHighlight({
@@ -219,16 +229,7 @@ export function useStudentHighlightInteractions({
     }
 
     const captureLatestSelectionSnapshot = () => {
-      const container = containerRef.current;
-      const selection = window.getSelection();
-      if (!container || !selection) {
-        return;
-      }
-
-      const snapshot = createHighlightSelectionSnapshot(container, selection);
-      if (snapshot && isPreciseSelectionSnapshot(snapshot)) {
-        latestSelectionSnapshotRef.current = snapshot;
-      }
+      captureCurrentSelectionSnapshot();
     };
 
     document.addEventListener('selectionchange', captureLatestSelectionSnapshot);
@@ -236,7 +237,7 @@ export function useStudentHighlightInteractions({
     return () => {
       document.removeEventListener('selectionchange', captureLatestSelectionSnapshot);
     };
-  }, [containerRef, enabled]);
+  }, [captureCurrentSelectionSnapshot, enabled]);
 
   useEffect(() => {
     return () => {
