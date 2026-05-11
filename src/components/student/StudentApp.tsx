@@ -388,11 +388,20 @@ export function StudentApp({
       applyViewportHeight(stableViewportHeight);
     };
 
+    const resolveEventTargetElement = (target: EventTarget | null): Element | null => {
+      if (target instanceof Element) {
+        return target;
+      }
+      if (target instanceof Node) {
+        return target.parentElement;
+      }
+      return null;
+    };
+
     const isSelectionGestureInsideHighlightableSurface = (
       event: TouchEvent,
     ): boolean => {
-      const target = event.target;
-      const targetElement = target instanceof Element ? target : null;
+      const targetElement = resolveEventTargetElement(event.target);
       if (!targetElement?.closest('[data-student-highlightable="true"]')) {
         return false;
       }

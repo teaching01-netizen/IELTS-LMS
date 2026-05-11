@@ -80,6 +80,16 @@ function getViewportHeight(): number {
   return window.visualViewport?.height ?? window.innerHeight;
 }
 
+function resolveEventTargetElement(target: EventTarget | null): Element | null {
+  if (target instanceof Element) {
+    return target;
+  }
+  if (target instanceof Node) {
+    return target.parentElement;
+  }
+  return null;
+}
+
 export function ProctoringProvider({
   children,
   config,
@@ -716,8 +726,7 @@ export function ProctoringProvider({
         return;
       }
 
-      const eventTarget = event.target;
-      const targetElement = eventTarget instanceof Element ? eventTarget : null;
+      const targetElement = resolveEventTargetElement(event.target);
       const insideHighlightableSurface = Boolean(
         targetElement?.closest('[data-student-highlightable="true"]'),
       );

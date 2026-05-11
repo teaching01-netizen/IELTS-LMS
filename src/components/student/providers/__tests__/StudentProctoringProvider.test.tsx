@@ -932,6 +932,56 @@ describe('StudentProctoringProvider', () => {
     }
   });
 
+  it('does not attempt fullscreen re-entry when pointerup targets a text node in highlightable text with active selection', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value:
+        'Mozilla/5.0 (iPad; CPU OS 16_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Mobile/15E148 Safari/604.1',
+      configurable: true,
+    });
+
+    const webkitRequestFullscreen = vi.fn();
+    Object.defineProperty(document.documentElement, 'webkitRequestFullscreen', {
+      value: webkitRequestFullscreen,
+      configurable: true,
+    });
+
+    renderHarness();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    webkitRequestFullscreen.mockClear();
+
+    const highlightSurface = document.createElement('div');
+    highlightSurface.setAttribute('data-student-highlightable', 'true');
+    highlightSurface.textContent = 'Alpha beta gamma';
+    document.body.appendChild(highlightSurface);
+
+    const textNode = highlightSurface.firstChild;
+    if (!textNode) {
+      throw new Error('Expected text node inside highlightable surface');
+    }
+
+    const selectionMock = {
+      rangeCount: 1,
+      toString: () => 'beta',
+    } as unknown as Selection;
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(selectionMock);
+
+    try {
+      act(() => {
+        Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
+        textNode.dispatchEvent(new Event('pointerup', { bubbles: true }));
+      });
+
+      expect(webkitRequestFullscreen).not.toHaveBeenCalled();
+    } finally {
+      getSelectionSpy.mockRestore();
+      highlightSurface.remove();
+    }
+  });
+
   it('defers fullscreen-exit handling on iPad while the viewport settles after scroll', async () => {
     Object.defineProperty(navigator, 'userAgent', {
       value:
