@@ -639,7 +639,7 @@ describe('student highlight persistence', () => {
     getSelectionSpy.mockRestore();
   });
 
-  it('finishes a desktop passage selection when mouseup happens outside the highlightable passage', async () => {
+  it('rejects a desktop selection when mouseup extends outside the highlightable passage', async () => {
     let passageTextNode: ChildNode | null = null;
     let questionTextNode: ChildNode | null = null;
     const removeAllRanges = vi.fn();
@@ -679,10 +679,9 @@ describe('student highlight persistence', () => {
     fireEvent.mouseUp(document);
 
     const marks = container.querySelectorAll('mark[data-highlighted="true"]');
-    expect(marks).toHaveLength(1);
-    expect(marks[0]).toHaveTextContent('beta gamma');
+    expect(marks).toHaveLength(0);
     expect(questionText.querySelector('mark')).toBeNull();
-    expect(removeAllRanges).toHaveBeenCalled();
+    expect(removeAllRanges).not.toHaveBeenCalled();
 
     getSelectionSpy.mockRestore();
   });
@@ -721,7 +720,7 @@ describe('student highlight persistence', () => {
     getSelectionSpy.mockRestore();
   });
 
-  it('highlights cross-paragraph selection without showing a policy hint', async () => {
+  it('rejects cross-paragraph selection and shows a policy hint', async () => {
     vi.useFakeTimers();
     let firstParagraphTextNode: ChildNode | null = null;
     let secondParagraphTextNode: ChildNode | null = null;
@@ -768,8 +767,8 @@ describe('student highlight persistence', () => {
     fireEvent.mouseDown(highlightable);
     fireEvent.mouseUp(highlightable);
 
-    expect(screen.queryByText('Highlight works within one paragraph at a time.')).not.toBeInTheDocument();
-    expect(container.querySelectorAll('mark[data-highlighted="true"]').length).toBeGreaterThan(0);
+    expect(screen.getByText('Highlight works within one paragraph at a time.')).toBeInTheDocument();
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(0);
     getSelectionSpy.mockRestore();
   });
 });

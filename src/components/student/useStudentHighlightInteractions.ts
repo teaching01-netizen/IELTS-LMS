@@ -161,7 +161,7 @@ export function useStudentHighlightInteractions({
     if (!enabled) {
       return;
     }
-    const applied = handleSelection() || applyLatestSelectionSnapshot();
+    const applied = applyLatestSelectionSnapshot() || handleSelection();
     mouseSelectionSessionActiveRef.current = false;
     if (applied) {
       lastMouseSelectionIntentAtRef.current = Date.now();
@@ -185,11 +185,11 @@ export function useStudentHighlightInteractions({
       return false;
     }
 
-    if (handleSelection()) {
+    if (applyLatestSelectionSnapshot()) {
       return true;
     }
 
-    return applyLatestSelectionSnapshot();
+    return handleSelection();
   }, [applyLatestSelectionSnapshot, enabled, handleSelection]);
 
   const { isWithinRecentTouchAutoApplyGuard, startTouchSelectionSession, scheduleSelectionHighlight } =
@@ -266,7 +266,7 @@ export function useStudentHighlightInteractions({
         return;
       }
 
-      const applied = handleSelection() || applyLatestSelectionSnapshot();
+      const applied = applyLatestSelectionSnapshot() || handleSelection();
       mouseSelectionSessionActiveRef.current = false;
       if (applied) {
         lastMouseSelectionIntentAtRef.current = Date.now();

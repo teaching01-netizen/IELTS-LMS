@@ -199,52 +199,17 @@ export function createHighlightSelectionSnapshot(
 }
 
 function clipRangeToContainer(container: HTMLElement, range: Range): Range | null {
-  if (container.contains(range.commonAncestorContainer)) {
-    return range;
-  }
-
   const startInside = container.contains(range.startContainer);
   const endInside = container.contains(range.endContainer);
-  if (!startInside && !endInside) {
+  if (!startInside || !endInside) {
     return null;
   }
 
-  const clippedRange = range.cloneRange();
-  if (!startInside) {
-    const firstTextNode = getBoundaryTextNode(container, 'first');
-    if (!firstTextNode) {
-      return null;
-    }
-    clippedRange.setStart(firstTextNode, 0);
+  if (!container.contains(range.commonAncestorContainer)) {
+    return null;
   }
 
-  if (!endInside) {
-    const lastTextNode = getBoundaryTextNode(container, 'last');
-    if (!lastTextNode) {
-      return null;
-    }
-    clippedRange.setEnd(lastTextNode, lastTextNode.textContent?.length ?? 0);
-  }
-
-  return clippedRange;
-}
-
-function getBoundaryTextNode(container: HTMLElement, boundary: 'first' | 'last'): Text | null {
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  let currentNode = walker.nextNode();
-  let lastTextNode: Text | null = null;
-  while (currentNode) {
-    const textNode = currentNode as Text;
-    if ((textNode.textContent ?? '').trim()) {
-      if (boundary === 'first') {
-        return textNode;
-      }
-      lastTextNode = textNode;
-    }
-    currentNode = walker.nextNode();
-  }
-
-  return lastTextNode;
+  return range;
 }
 
 const BLOCK_BOUNDARY_TAGS = new Set([
@@ -308,6 +273,10 @@ function applyHighlightToClonedRange(
   }
 
   const crossesBlockBoundary = selectionCrossesBlockBoundary(clonedContainer, clonedRange);
+  if (crossesBlockBoundary) {
+    return { html: null, reason: 'cross_block_selection' };
+  }
+
   const didApplyHighlight = applySplitRangeHighlight(
     clonedContainer,
     clonedRange,
