@@ -3,6 +3,7 @@ import type { MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import {
   applyHighlightFromSnapshotWithPolicy,
   applySelectionHighlightWithPolicy,
+  createHighlightSelectionSnapshot,
   removeHighlightAtIndex,
   type HighlightPolicyReason,
   type HighlightSelectionSnapshot,
@@ -25,6 +26,7 @@ interface UseStudentHighlightInteractionsOptions {
 
 interface UseStudentHighlightInteractionsResult {
   handleSelection: () => boolean;
+  handleManualSelection: () => boolean;
   handleMouseUp: () => void;
   removeTappedHighlight: (event: ReactMouseEvent<HTMLElement>) => void;
   startTouchSelectionSession: () => void;
@@ -39,6 +41,10 @@ function resolveHighlightClassName(
   return highlightClassName ?? (highlightColor ? getStudentHighlightClassName(highlightColor) : DEFAULT_HIGHLIGHT_CLASS_NAME);
 }
 
+function isPreciseSelectionSnapshot(snapshot: HighlightSelectionSnapshot): boolean {
+  return snapshot.startNodePath.length > 0 && snapshot.endNodePath.length > 0;
+}
+
 export function useStudentHighlightInteractions({
   enabled,
   containerRef,
@@ -51,6 +57,7 @@ export function useStudentHighlightInteractions({
     [highlightClassName, highlightColor],
   );
   const lastMouseSelectionIntentAtRef = useRef<number | null>(null);
+  const latestSelectionSnapshotRef = useRef<HighlightSelectionSnapshot | null>(null);
   const highlightPolicyHintTimerRef = useRef<number | null>(null);
   const lastPolicyHintAtRef = useRef<number>(0);
   const [highlightPolicyHint, setHighlightPolicyHint] = useState<string | null>(null);
@@ -95,6 +102,7 @@ export function useStudentHighlightInteractions({
 
     const result = applySelectionHighlightWithPolicy(container, selection, resolvedHighlightClassName);
     if (result.html) {
+      latestSelectionSnapshotRef.current = null;
       onHtmlChange(result.html);
       return true;
     }
@@ -124,6 +132,7 @@ export function useStudentHighlightInteractions({
         return false;
       }
 
+      latestSelectionSnapshotRef.current = null;
       onHtmlChange(result.html);
       return true;
     },
@@ -139,6 +148,23 @@ export function useStudentHighlightInteractions({
       lastMouseSelectionIntentAtRef.current = Date.now();
     }
   }, [enabled, handleSelection]);
+
+  const handleManualSelection = useCallback(() => {
+    if (!enabled) {
+      return false;
+    }
+
+    if (handleSelection()) {
+      return true;
+    }
+
+    const latestSelectionSnapshot = latestSelectionSnapshotRef.current;
+    if (!latestSelectionSnapshot) {
+      return false;
+    }
+
+    return applySelectionFromSnapshot(latestSelectionSnapshot);
+  }, [applySelectionFromSnapshot, enabled, handleSelection]);
 
   const { isWithinRecentTouchAutoApplyGuard, startTouchSelectionSession, scheduleSelectionHighlight } =
     useDeferredSelectionHighlight({
@@ -183,8 +209,34 @@ export function useStudentHighlightInteractions({
     if (!enabled) {
       clearHighlightPolicyHintTimer();
       setHighlightPolicyHint(null);
+      latestSelectionSnapshotRef.current = null;
     }
   }, [clearHighlightPolicyHintTimer, enabled]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    const captureLatestSelectionSnapshot = () => {
+      const container = containerRef.current;
+      const selection = window.getSelection();
+      if (!container || !selection) {
+        return;
+      }
+
+      const snapshot = createHighlightSelectionSnapshot(container, selection);
+      if (snapshot && isPreciseSelectionSnapshot(snapshot)) {
+        latestSelectionSnapshotRef.current = snapshot;
+      }
+    };
+
+    document.addEventListener('selectionchange', captureLatestSelectionSnapshot);
+
+    return () => {
+      document.removeEventListener('selectionchange', captureLatestSelectionSnapshot);
+    };
+  }, [containerRef, enabled]);
 
   useEffect(() => {
     return () => {
@@ -194,6 +246,7 @@ export function useStudentHighlightInteractions({
 
   return {
     handleSelection,
+    handleManualSelection,
     handleMouseUp,
     removeTappedHighlight,
     startTouchSelectionSession,

@@ -152,6 +152,88 @@ describe('student highlight persistence', () => {
     getSelectionSpy.mockRestore();
   });
 
+  it('uses the latest captured selection when the highlight button receives focus after selection collapses', async () => {
+    let currentTextNode: ChildNode | null = null;
+    const activeSelection = createSelectionMock(() => currentTextNode, {
+      start: 6,
+      end: 22,
+      text: 'beta gamma delta',
+    });
+    const collapsedSelection = {
+      rangeCount: 0,
+      getRangeAt: () => {
+        throw new Error('Selection collapsed');
+      },
+      toString: () => '',
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(activeSelection);
+
+    const { container } = render(
+      <FormattedText text="Alpha beta gamma delta" highlightEnabled showHighlightButton />,
+    );
+    const textElement = container.querySelector('span');
+    if (!textElement) {
+      throw new Error('Expected a rendered text span');
+    }
+
+    currentTextNode = textElement.firstChild;
+    fireEvent(document, new Event('selectionchange'));
+    getSelectionSpy.mockReturnValue(collapsedSelection);
+    fireEvent.click(screen.getByRole('button', { name: /highlight selected text/i }));
+
+    const marks = container.querySelectorAll('mark[data-highlighted="true"]');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]).toHaveTextContent('beta gamma delta');
+
+    getSelectionSpy.mockRestore();
+  });
+
+  it('does not use a broad container-boundary snapshot when manual selection collapses', async () => {
+    let highlightable: Element | null = null;
+    const broadSelection = {
+      rangeCount: 1,
+      getRangeAt: () => {
+        if (!highlightable) {
+          throw new Error('Expected a highlightable container');
+        }
+        const range = document.createRange();
+        range.setStart(highlightable, 0);
+        range.setEnd(highlightable, highlightable.childNodes.length);
+        return range;
+      },
+      toString: () => highlightable?.textContent ?? '',
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+    const collapsedSelection = {
+      rangeCount: 0,
+      getRangeAt: () => {
+        throw new Error('Selection collapsed');
+      },
+      toString: () => '',
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(broadSelection);
+
+    const { container } = render(
+      <FormattedText text={'Alpha beta.\n\nGamma delta.'} as="div" highlightEnabled showHighlightButton />,
+    );
+    highlightable = container.querySelector('[data-student-highlightable="true"]');
+    if (!highlightable) {
+      throw new Error('Expected a rendered highlight container');
+    }
+
+    fireEvent(document, new Event('selectionchange'));
+    getSelectionSpy.mockReturnValue(collapsedSelection);
+    fireEvent.click(screen.getByRole('button', { name: /highlight selected text/i }));
+
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(0);
+
+    getSelectionSpy.mockRestore();
+  });
+
   it('auto-highlights from snapshot even if live touch selection collapses before touch end', async () => {
     vi.useFakeTimers();
     let currentTextNode: ChildNode | null = null;
