@@ -156,6 +156,36 @@ describe('StudentReading passage readability controls', () => {
     expect(highlightContainer?.textContent).toContain('Second paragraph keeps emphasis.');
   });
 
+  it('normalizes passage html typography to the standard reading font settings', () => {
+    const state = createState();
+    state.reading.passages[0].content = `
+      <p>
+        <span style="font-family: 'Times New Roman'; font-size: 28px; line-height: 2.4; color: #102a43;">
+          Styled text should keep color only.
+        </span>
+        <strong>Bold emphasis stays.</strong>
+      </p>
+    `;
+
+    const { container } = render(
+      <StudentReading
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+      />,
+    );
+
+    const styledSpan = container.querySelector('span');
+    expect(styledSpan).not.toBeNull();
+    expect(styledSpan).not.toHaveStyle({ fontFamily: 'Times New Roman' });
+    expect(styledSpan).not.toHaveStyle({ fontSize: '28px' });
+    expect(styledSpan).not.toHaveStyle({ lineHeight: '2.4' });
+    expect(styledSpan).toHaveStyle({ color: 'rgb(16, 42, 67)' });
+    expect(screen.getByText('Bold emphasis stays.').tagName).toBe('STRONG');
+  });
+
   it('requires explicit highlight button tap on tablet reading passages', () => {
     render(
       <StudentReading

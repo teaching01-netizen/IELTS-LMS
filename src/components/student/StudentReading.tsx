@@ -11,6 +11,7 @@ import { StudentZoomableMedia } from './StudentZoomableMedia';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StimulusAnnotation } from '../../types';
 import { useSplitPaneResize } from './useSplitPaneResize';
+import { sanitizeReadingPassageHtml } from './sanitizeReadingPassageHtml';
 import {
   hasHtmlMarkup,
   normalizeReadingContentForHighlightedFormattedText,
@@ -191,7 +192,7 @@ export function StudentReading({
   );
   const renderedPassageContent = useMemo(() => {
     const content = activePassage?.content ?? '';
-    return passageHasHtml ? content : normalizeReadingPlainTextForDisplay(content);
+    return passageHasHtml ? sanitizeReadingPassageHtml(content) : normalizeReadingPlainTextForDisplay(content);
   }, [activePassage?.content, passageHasHtml]);
   const highlightPassageText = useMemo(
     () => normalizeReadingContentForHighlightedFormattedText(activePassage?.content ?? ''),

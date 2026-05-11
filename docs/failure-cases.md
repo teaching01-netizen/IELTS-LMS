@@ -76,3 +76,28 @@ Global `dragstart` blocking exempted only elements inside `[data-student-highlig
 
 ### Invariant
 Reading passage text selection (title and body) must remain native-selectable during exam mode while non-passage drag/drop restrictions remain enforced.
+
+---
+
+## 2026-05-11: Reading Passage HTML Overrides Standard Typography
+
+### Symptom
+Reading passage content rendered with mixed font families and sizes when pasted HTML included inline typography styles.
+
+### Scope
+Student reading passage rendering path (`StudentReading` non-highlight HTML mode).
+
+### Root Cause
+Passage HTML was sanitized for safety, but inline typography declarations (`font-family`, `font-size`, `line-height`) were still preserved and overrode the shared student reading typography variables.
+
+### Fix
+- Added `sanitizeReadingPassageHtml` in the student reading module.
+- Strip inline typography overrides (`font-family`, `font-size`, `line-height`) after sanitization.
+- Unwrap legacy `<font>` tags so passage text always uses the standard reading typography baseline.
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/StudentReadingReadabilityControls.test.tsx`
+- Rules/Docs: `docs/failure-cases.md`
+
+### Invariant
+Reading passage content may keep semantic emphasis formatting (for example bold/italic), but font family, base font size, and line-height must come from platform reading typography variables only.
