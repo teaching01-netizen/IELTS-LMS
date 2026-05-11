@@ -25,6 +25,7 @@ interface UseStudentHighlightInteractionsOptions {
 
 interface UseStudentHighlightInteractionsResult {
   handleSelection: () => boolean;
+  handleMouseDown: (event: ReactMouseEvent<HTMLElement>) => void;
   handleManualSelection: () => boolean;
   handleMouseUp: () => void;
   removeTappedHighlight: (event: ReactMouseEvent<HTMLElement>) => void;
@@ -56,6 +57,7 @@ export function useStudentHighlightInteractions({
     [highlightClassName, highlightColor],
   );
   const lastMouseSelectionIntentAtRef = useRef<number | null>(null);
+  const mouseSelectionSessionActiveRef = useRef(false);
   const latestSelectionSnapshotRef = useRef<HighlightSelectionSnapshot | null>(null);
   const highlightPolicyHintTimerRef = useRef<number | null>(null);
   const lastPolicyHintAtRef = useRef<number>(0);
@@ -127,6 +129,7 @@ export function useStudentHighlightInteractions({
 
       latestSelectionSnapshotRef.current = null;
       onHtmlChange(result.html);
+      window.getSelection()?.removeAllRanges();
       return true;
     },
     [containerRef, enabled, maybeShowPolicyHint, onHtmlChange, resolvedHighlightClassName],
@@ -159,10 +162,23 @@ export function useStudentHighlightInteractions({
       return;
     }
     const applied = handleSelection() || applyLatestSelectionSnapshot();
+    mouseSelectionSessionActiveRef.current = false;
     if (applied) {
       lastMouseSelectionIntentAtRef.current = Date.now();
     }
   }, [applyLatestSelectionSnapshot, enabled, handleSelection]);
+
+  const handleMouseDown = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      if (!enabled || event.button !== 0) {
+        return;
+      }
+
+      mouseSelectionSessionActiveRef.current = true;
+      latestSelectionSnapshotRef.current = null;
+    },
+    [enabled],
+  );
 
   const handleManualSelection = useCallback(() => {
     if (!enabled) {
@@ -220,6 +236,7 @@ export function useStudentHighlightInteractions({
       clearHighlightPolicyHintTimer();
       setHighlightPolicyHint(null);
       latestSelectionSnapshotRef.current = null;
+      mouseSelectionSessionActiveRef.current = false;
     }
   }, [clearHighlightPolicyHintTimer, enabled]);
 
@@ -240,6 +257,30 @@ export function useStudentHighlightInteractions({
   }, [captureCurrentSelectionSnapshot, enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    const finishMouseSelectionSession = () => {
+      if (!mouseSelectionSessionActiveRef.current) {
+        return;
+      }
+
+      const applied = handleSelection() || applyLatestSelectionSnapshot();
+      mouseSelectionSessionActiveRef.current = false;
+      if (applied) {
+        lastMouseSelectionIntentAtRef.current = Date.now();
+      }
+    };
+
+    document.addEventListener('mouseup', finishMouseSelectionSession);
+
+    return () => {
+      document.removeEventListener('mouseup', finishMouseSelectionSession);
+    };
+  }, [applyLatestSelectionSnapshot, enabled, handleSelection]);
+
+  useEffect(() => {
     return () => {
       clearHighlightPolicyHintTimer();
     };
@@ -247,6 +288,7 @@ export function useStudentHighlightInteractions({
 
   return {
     handleSelection,
+    handleMouseDown,
     handleManualSelection,
     handleMouseUp,
     removeTappedHighlight,

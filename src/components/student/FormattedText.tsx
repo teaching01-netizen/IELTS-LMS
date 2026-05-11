@@ -79,6 +79,7 @@ export function FormattedText({
   );
   const {
     handleSelection,
+    handleMouseDown,
     handleManualSelection,
     handleMouseUp,
     removeTappedHighlight,
@@ -102,6 +103,7 @@ export function FormattedText({
           data-student-highlightable="true"
           style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
           onClick={removeTappedHighlight}
+          onMouseDown={highlightEnabled && !showHighlightButton ? handleMouseDown : undefined}
           onMouseUp={highlightEnabled && !showHighlightButton ? handleMouseUp : undefined}
           onTouchStart={highlightEnabled && !showHighlightButton ? startTouchSelectionSession : undefined}
           onTouchEnd={highlightEnabled && !showHighlightButton ? scheduleSelectionHighlight : undefined}

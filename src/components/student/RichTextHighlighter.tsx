@@ -43,6 +43,7 @@ export function RichTextHighlighter({
   );
   const {
     handleSelection,
+    handleMouseDown,
     handleManualSelection,
     handleMouseUp,
     removeTappedHighlight,
@@ -65,6 +66,7 @@ export function RichTextHighlighter({
         data-student-highlightable="true"
         style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
         onClick={removeTappedHighlight}
+        onMouseDown={enabled && !showHighlightButton ? handleMouseDown : undefined}
         onMouseUp={enabled && !showHighlightButton ? handleMouseUp : undefined}
         onTouchStart={enabled && !showHighlightButton ? startTouchSelectionSession : undefined}
         onTouchEnd={enabled && !showHighlightButton ? scheduleSelectionHighlight : undefined}

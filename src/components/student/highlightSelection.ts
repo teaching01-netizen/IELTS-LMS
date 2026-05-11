@@ -168,21 +168,21 @@ export function createHighlightSelectionSnapshot(
     debugHighlight('createSnapshot:get_range_failed');
     return null;
   }
+  const clippedRange = clipRangeToContainer(container, range);
+  if (!clippedRange) {
+    debugHighlight('createSnapshot:outside_container');
+    return null;
+  }
   // Use the exact captured range text, not selection.toString(), because some
   // browsers can report stale selection text at mouseup/touchend.
-  const selectedText = range.toString().trim();
+  const selectedText = clippedRange.toString().trim();
   if (!selectedText) {
     debugHighlight('createSnapshot:collapsed_or_empty');
     return null;
   }
 
-  if (!container.contains(range.commonAncestorContainer)) {
-    debugHighlight('createSnapshot:outside_container');
-    return null;
-  }
-
-  const startNodePath = getNodePath(container, range.startContainer);
-  const endNodePath = getNodePath(container, range.endContainer);
+  const startNodePath = getNodePath(container, clippedRange.startContainer);
+  const endNodePath = getNodePath(container, clippedRange.endContainer);
   if (!startNodePath || !endNodePath) {
     debugHighlight('createSnapshot:path_resolution_failed');
     return null;
@@ -190,12 +190,61 @@ export function createHighlightSelectionSnapshot(
 
   return {
     startNodePath,
-    startOffset: range.startOffset,
+    startOffset: clippedRange.startOffset,
     endNodePath,
-    endOffset: range.endOffset,
+    endOffset: clippedRange.endOffset,
     selectedText,
-    signature: `${startNodePath.join('.')}:${range.startOffset}|${endNodePath.join('.')}:${range.endOffset}|${selectedText}`,
+    signature: `${startNodePath.join('.')}:${clippedRange.startOffset}|${endNodePath.join('.')}:${clippedRange.endOffset}|${selectedText}`,
   };
+}
+
+function clipRangeToContainer(container: HTMLElement, range: Range): Range | null {
+  if (container.contains(range.commonAncestorContainer)) {
+    return range;
+  }
+
+  const startInside = container.contains(range.startContainer);
+  const endInside = container.contains(range.endContainer);
+  if (!startInside && !endInside) {
+    return null;
+  }
+
+  const clippedRange = range.cloneRange();
+  if (!startInside) {
+    const firstTextNode = getBoundaryTextNode(container, 'first');
+    if (!firstTextNode) {
+      return null;
+    }
+    clippedRange.setStart(firstTextNode, 0);
+  }
+
+  if (!endInside) {
+    const lastTextNode = getBoundaryTextNode(container, 'last');
+    if (!lastTextNode) {
+      return null;
+    }
+    clippedRange.setEnd(lastTextNode, lastTextNode.textContent?.length ?? 0);
+  }
+
+  return clippedRange;
+}
+
+function getBoundaryTextNode(container: HTMLElement, boundary: 'first' | 'last'): Text | null {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let currentNode = walker.nextNode();
+  let lastTextNode: Text | null = null;
+  while (currentNode) {
+    const textNode = currentNode as Text;
+    if ((textNode.textContent ?? '').trim()) {
+      if (boundary === 'first') {
+        return textNode;
+      }
+      lastTextNode = textNode;
+    }
+    currentNode = walker.nextNode();
+  }
+
+  return lastTextNode;
 }
 
 const BLOCK_BOUNDARY_TAGS = new Set([

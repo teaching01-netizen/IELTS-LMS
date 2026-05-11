@@ -639,6 +639,54 @@ describe('student highlight persistence', () => {
     getSelectionSpy.mockRestore();
   });
 
+  it('finishes a desktop passage selection when mouseup happens outside the highlightable passage', async () => {
+    let passageTextNode: ChildNode | null = null;
+    let questionTextNode: ChildNode | null = null;
+    const removeAllRanges = vi.fn();
+    const selectionMock = {
+      rangeCount: 1,
+      getRangeAt: () => {
+        if (!passageTextNode || !questionTextNode) {
+          throw new Error('Expected passage and question text nodes');
+        }
+        const range = document.createRange();
+        range.setStart(passageTextNode, 6);
+        range.setEnd(questionTextNode, 8);
+        return range;
+      },
+      toString: () => 'beta gammaQuestion',
+      removeAllRanges,
+    } as unknown as Selection;
+
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(selectionMock);
+
+    const { container } = render(
+      <div>
+        <RichTextHighlighter content="Alpha beta gamma" enabled />
+        <p data-testid="question-text">Question text outside passage</p>
+      </div>,
+    );
+    const highlightable = container.querySelector('[data-student-highlightable="true"]');
+    const questionText = screen.getByTestId('question-text');
+    if (!highlightable || !questionText.firstChild) {
+      throw new Error('Expected rendered passage and question text');
+    }
+
+    passageTextNode = highlightable.firstChild;
+    questionTextNode = questionText.firstChild;
+    fireEvent.mouseDown(highlightable);
+    fireEvent(document, new Event('selectionchange'));
+    fireEvent.mouseUp(document);
+
+    const marks = container.querySelectorAll('mark[data-highlighted="true"]');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]).toHaveTextContent('beta gamma');
+    expect(questionText.querySelector('mark')).toBeNull();
+    expect(removeAllRanges).toHaveBeenCalled();
+
+    getSelectionSpy.mockRestore();
+  });
+
   it('does not auto-apply a broad container-boundary desktop selection', async () => {
     let highlightable: Element | null = null;
     const broadSelection = {
