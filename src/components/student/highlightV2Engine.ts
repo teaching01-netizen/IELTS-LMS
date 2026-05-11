@@ -207,12 +207,6 @@ export function captureSurfaceSelection(
   if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
     return null;
   }
-  if (
-    range.startContainer.nodeType !== Node.TEXT_NODE ||
-    range.endContainer.nodeType !== Node.TEXT_NODE
-  ) {
-    return null;
-  }
 
   if (
     disallowedSelectionSelector &&
@@ -225,13 +219,28 @@ export function captureSurfaceSelection(
     return null;
   }
 
+  const segments = getSelectionTextSegments(container, range);
+  const firstSegment = segments[0];
+  const lastSegment = segments[segments.length - 1];
+  if (!firstSegment || !lastSegment) {
+    return null;
+  }
+
   const selectedText = normalizeSelectionText(range.toString());
   if (!selectedText) {
     return null;
   }
 
-  const start = computeTextOffsetFromContainerStart(container, range.startContainer, range.startOffset);
-  const end = computeTextOffsetFromContainerStart(container, range.endContainer, range.endOffset);
+  const start = computeTextOffsetFromContainerStart(
+    container,
+    firstSegment.textNode,
+    firstSegment.startOffset,
+  );
+  const end = computeTextOffsetFromContainerStart(
+    container,
+    lastSegment.textNode,
+    lastSegment.endOffset,
+  );
 
   if (start === null || end === null || end <= start) {
     return null;

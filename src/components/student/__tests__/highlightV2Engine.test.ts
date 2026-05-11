@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { addHighlightRange, eraseHighlightRange, type HighlightSelectionV2 } from '../highlightV2Engine';
+import {
+  addHighlightRange,
+  captureSurfaceSelection,
+  eraseHighlightRange,
+  type HighlightSelectionV2,
+} from '../highlightV2Engine';
 import type { StudentHighlightColor } from '../highlightPalette';
 
 const YELLOW = 'yellow' as StudentHighlightColor;
@@ -62,5 +67,34 @@ describe('highlight v2 engine', () => {
 
     expect(next.limitReached).toBe(true);
     expect(next.ranges).toEqual(dense);
+  });
+
+  it('captures single-block selections when browsers report element-node range boundaries', () => {
+    const container = document.createElement('div');
+    container.innerHTML = '<p>Alpha beta gamma</p>';
+    const paragraph = container.querySelector('p');
+    if (!paragraph) {
+      throw new Error('Expected paragraph element');
+    }
+
+    const range = document.createRange();
+    range.setStart(paragraph, 0);
+    range.setEnd(paragraph, paragraph.childNodes.length);
+
+    const selection = {
+      rangeCount: 1,
+      getRangeAt: () => range,
+      toString: () => range.toString(),
+    } as unknown as Selection;
+
+    const captured = captureSurfaceSelection(container, selection, {
+      enforceSingleBlock: true,
+    });
+
+    expect(captured).toEqual({
+      start: 0,
+      end: 'Alpha beta gamma'.length,
+      selectedText: 'Alpha beta gamma',
+    });
   });
 });
