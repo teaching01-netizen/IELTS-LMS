@@ -98,6 +98,40 @@ describe('applySelectionHighlight', () => {
     expect(html).toContain('data-highlighted="true"');
   });
 
+  it('captures snapshots when the range commonAncestorContainer is the highlight container itself', () => {
+    const container = document.createElement('span');
+    container.innerHTML = 'Alpha <strong>beta</strong> gamma';
+
+    const startTextNode = container.firstChild;
+    const strongTextNode = container.querySelector('strong')?.firstChild;
+    if (
+      !startTextNode ||
+      startTextNode.nodeType !== Node.TEXT_NODE ||
+      !strongTextNode ||
+      strongTextNode.nodeType !== Node.TEXT_NODE
+    ) {
+      throw new Error('Expected inline text nodes');
+    }
+
+    const range = document.createRange();
+    range.setStart(startTextNode, 6);
+    range.setEnd(strongTextNode, 4);
+
+    const selection = {
+      rangeCount: 1,
+      getRangeAt: () => range,
+      toString: () => range.toString(),
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+
+    const snapshot = createHighlightSelectionSnapshot(container, selection);
+    expect(snapshot).not.toBeNull();
+
+    const result = applyHighlightFromSnapshotWithPolicy(container, snapshot!, 'bg-blue-200');
+    expect(result.reason).toBeNull();
+    expect(result.html).toContain('data-highlighted="true"');
+  });
+
   it('rejects cross-paragraph snapshot selections', () => {
     const container = document.createElement('div');
     container.innerHTML = '<p>Alpha beta</p><p>Gamma delta</p>';

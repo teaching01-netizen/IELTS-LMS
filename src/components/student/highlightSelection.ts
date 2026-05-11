@@ -205,7 +205,8 @@ function clipRangeToContainer(container: HTMLElement, range: Range): Range | nul
     return null;
   }
 
-  if (!container.contains(range.commonAncestorContainer)) {
+  const ancestor = range.commonAncestorContainer;
+  if (ancestor !== container && !container.contains(ancestor)) {
     return null;
   }
 
