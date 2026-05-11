@@ -327,6 +327,24 @@ describe('StudentApp runtime-backed mode', () => {
     },
   };
 
+  it('does not render highlight controls in exam mode', async () => {
+    render(
+      <StudentAppWrapper
+        state={readingState}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={createReadingAttemptSnapshot()}
+        runtimeSnapshot={createReadingRuntimeSnapshot()}
+      />,
+    );
+
+    await screen.findByRole('timer', { name: /time remaining/i });
+    expect(screen.queryByRole('button', { name: /open highlight options/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /highlight options/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /erase selected text/i })).not.toBeInTheDocument();
+  });
+
   it('keeps tablet footer viewport height stable while an editable field is focused', async () => {
     const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');

@@ -18,8 +18,7 @@ import {
   getStudentPassageReadabilityLabel,
   getStudentTypographyScale,
 } from './accessibilityScale';
-import { getStudentHighlightClassName } from './highlightPalette';
-import { StudentHighlightPersistenceProvider, clearStudentHighlights } from './highlightPersistence';
+import { defaultStudentHighlightColor, getStudentHighlightClassName } from './highlightPalette';
 import { useStudentFullscreenWarning } from './useStudentFullscreenWarning';
 import { useStudentSubmissionOrchestration } from './useStudentSubmissionOrchestration';
 import { useStudentTabletMode } from './tabletMode';
@@ -143,18 +142,12 @@ export function StudentApp({
   const { setShowTimeExtensionRequest } = uiActions;
   const timeExtensionReason =
     typeof uiState.timeExtensionReason === 'string' ? uiState.timeExtensionReason : '';
-  const highlightColor = uiState.accessibilitySettings.highlightColor;
-  const highlightClassName = getStudentHighlightClassName(highlightColor);
-  const highlightNamespace = useMemo(
-    () => `attempt:${attemptState.attempt?.id ?? 'unknown'}`,
-    [attemptState.attempt?.id],
-  );
+  const highlightColor = defaultStudentHighlightColor;
+  const highlightClassName = getStudentHighlightClassName(defaultStudentHighlightColor);
+  const highlightEnabled = false;
   const attemptAnswers = attemptState.attempt?.answers ?? {};
   const attemptWritingAnswers = attemptState.attempt?.writingAnswers ?? {};
   const attemptFlags = attemptState.attempt?.flags ?? {};
-  const clearHighlights = useCallback(() => {
-    clearStudentHighlights(highlightNamespace);
-  }, [highlightNamespace]);
   const studentShellStyle = {
     height: 'var(--student-viewport-height, 100dvh)',
     zoom: tabletMode ? 1 : uiState.accessibilitySettings.zoom,
@@ -703,7 +696,6 @@ export function StudentApp({
   }
 
   return (
-    <StudentHighlightPersistenceProvider namespace={highlightNamespace}>
       <div
       className={`student-exam-shell flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
         uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
@@ -732,16 +724,8 @@ export function StudentApp({
         testTakerId={attemptState.attempt?.candidateId ?? undefined}
         timeRemaining={runtimeState.displayTimeRemaining}
         tabletMode={tabletMode}
-        onClearHighlights={clearHighlights}
-        highlightEnabled={uiState.accessibilitySettings.highlightMode}
+        highlightEnabled={highlightEnabled}
         highlightColor={highlightColor}
-        onHighlightModeToggle={
-          runtimeState.currentModule === 'reading' ||
-          runtimeState.currentModule === 'listening'
-            ? uiActions.toggleHighlightMode
-            : undefined
-        }
-        onHighlightColorChange={uiActions.setHighlightColor}
         onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
         onOpenNavigator={
           runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening'
@@ -765,7 +749,7 @@ export function StudentApp({
         showSubmitControls={showSubmitControls}
         contentZoom={uiState.accessibilitySettings.zoom}
         displayTimeRemaining={runtimeState.displayTimeRemaining}
-        highlightEnabled={uiState.accessibilitySettings.highlightMode}
+        highlightEnabled={highlightEnabled}
         highlightColor={highlightColor}
         highlightClassName={highlightClassName}
         passageReadabilityLabel={getStudentPassageReadabilityLabel(
@@ -942,6 +926,5 @@ export function StudentApp({
         onHighContrastToggle={uiActions.toggleHighContrast}
       />
       </div>
-    </StudentHighlightPersistenceProvider>
   );
 }
