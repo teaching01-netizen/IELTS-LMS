@@ -43,7 +43,15 @@ function isEditingTarget(target: EventTarget | null) {
 }
 
 function isWithinHighlightableContainer(target: EventTarget | null) {
-  return target instanceof HTMLElement && Boolean(target.closest('[data-student-highlightable="true"]'));
+  if (target instanceof HTMLElement) {
+    return Boolean(target.closest('[data-student-highlightable="true"]'));
+  }
+
+  if (target instanceof Node) {
+    return Boolean(target.parentElement?.closest('[data-student-highlightable="true"]'));
+  }
+
+  return false;
 }
 
 function historyKindFromUndoRedoShortcut(event: KeyboardEvent): UndoRedoKind | null {

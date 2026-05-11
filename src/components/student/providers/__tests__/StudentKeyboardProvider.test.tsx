@@ -380,6 +380,28 @@ describe('StudentKeyboardProvider', () => {
     expect(harness.runtime.state.violations).toHaveLength(0);
   });
 
+  it('allows dragstart when browser targets a text node inside highlightable reading text', () => {
+    const harness = renderHarness();
+
+    act(() => {
+      harness.runtime.actions.setCurrentModule('reading');
+    });
+
+    const textNode = harness.highlightTarget.firstChild;
+    expect(textNode).not.toBeNull();
+    const event = new Event('dragstart', {
+      bubbles: true,
+      cancelable: true,
+    });
+
+    act(() => {
+      (textNode as Node).dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(harness.runtime.state.violations).toHaveLength(0);
+  });
+
   it('allows dragstart inside highlightable listening text when highlight mode is active', () => {
     const harness = renderHarness();
 
