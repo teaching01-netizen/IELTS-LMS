@@ -759,6 +759,72 @@ describe('StudentApp runtime-backed mode', () => {
     }
   });
 
+  it('ignores touchend viewport-lock updates during active text selection on highlightable surfaces', async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const originalMatchMedia = window.matchMedia;
+    const originalMaxTouchPoints = Object.getOwnPropertyDescriptor(window.navigator, 'maxTouchPoints');
+    const visualViewport = installVisualViewportMock(900);
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    window.matchMedia = vi.fn(createMatchMediaMock(true)) as unknown as typeof window.matchMedia;
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: 5 });
+
+    const highlightSurface = document.createElement('div');
+    highlightSurface.setAttribute('data-student-highlightable', 'true');
+    highlightSurface.textContent = 'Alpha beta gamma';
+    document.body.appendChild(highlightSurface);
+
+    const selectionMock = {
+      rangeCount: 1,
+      toString: () => 'beta',
+    } as unknown as Selection;
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(selectionMock);
+
+    try {
+      render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createWritingAttemptSnapshot()}
+          runtimeSnapshot={createWritingRuntimeSnapshot()}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      });
+
+      const setViewportStyleSpy = vi.spyOn(document.documentElement.style, 'setProperty');
+      setViewportStyleSpy.mockClear();
+
+      act(() => {
+        fireEvent.touchEnd(highlightSurface, { touches: [] });
+      });
+
+      expect(setViewportStyleSpy).not.toHaveBeenCalledWith('--student-viewport-height', expect.any(String));
+      setViewportStyleSpy.mockRestore();
+    } finally {
+      getSelectionSpy.mockRestore();
+      highlightSurface.remove();
+      visualViewport.restore();
+      window.matchMedia = originalMatchMedia;
+      if (originalInnerWidth) {
+        Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      if (originalMaxTouchPoints) {
+        Object.defineProperty(window.navigator, 'maxTouchPoints', originalMaxTouchPoints);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints');
+      }
+    }
+  });
+
   it('keeps the locked iPad footer height after resize even when live tablet detection flips off', async () => {
     const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
