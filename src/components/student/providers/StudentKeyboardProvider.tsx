@@ -42,6 +42,10 @@ function isEditingTarget(target: EventTarget | null) {
   );
 }
 
+function isWithinHighlightableContainer(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest('[data-student-highlightable="true"]'));
+}
+
 function historyKindFromUndoRedoShortcut(event: KeyboardEvent): UndoRedoKind | null {
   const key = event.key.toLowerCase();
   const usesUndoModifier = (event.metaKey || event.ctrlKey) && !event.altKey;
@@ -328,6 +332,11 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
     };
 
     const handleClipboardEvent = (event: ClipboardEvent) => {
+      if ((event.type === 'copy' || event.type === 'cut') && isWithinHighlightableContainer(event.target)) {
+        // Reading/listening passage text surfaces are intentionally copy/cut-allowed.
+        return;
+      }
+
       if (!shouldBlockClipboard || event.type !== 'paste') {
         return;
       }
@@ -370,10 +379,7 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
 
       if (event.type === 'dragstart') {
         const target = event.target;
-        const targetElement = target instanceof HTMLElement ? target : null;
-        const withinHighlightableContainer = Boolean(
-          targetElement?.closest('[data-student-highlightable="true"]'),
-        );
+        const withinHighlightableContainer = isWithinHighlightableContainer(target);
 
         // Allow drag-selection gestures for all student highlightable text
         // surfaces; blocking dragstart here can clear active selection on some

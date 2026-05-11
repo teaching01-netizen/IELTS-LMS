@@ -236,6 +236,30 @@ describe('StudentKeyboardProvider', () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it('allows copy events from highlightable reading/listening text surfaces', () => {
+    const harness = renderHarness();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+
+    act(() => {
+      harness.highlightTarget.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(harness.runtime.state.violations).toHaveLength(0);
+  });
+
+  it('allows cut events from highlightable reading/listening text surfaces', () => {
+    const harness = renderHarness();
+    const event = new Event('cut', { bubbles: true, cancelable: true });
+
+    act(() => {
+      harness.highlightTarget.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(harness.runtime.state.violations).toHaveLength(0);
+  });
+
   it('allows context menu inside highlightable reading text when highlight mode is active', () => {
     const harness = renderHarness();
 
