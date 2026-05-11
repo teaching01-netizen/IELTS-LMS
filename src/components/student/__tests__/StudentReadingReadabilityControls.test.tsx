@@ -171,4 +171,19 @@ describe('StudentReading passage readability controls', () => {
 
     expect(screen.getByRole('button', { name: /highlight selected text/i })).toBeInTheDocument();
   });
+
+  it('requires explicit highlight button click on desktop reading passages', () => {
+    render(
+      <StudentReading
+        state={createState()}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+        highlightEnabled
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /highlight selected text/i })).toBeInTheDocument();
+  });
 });
