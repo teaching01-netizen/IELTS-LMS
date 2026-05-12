@@ -3,7 +3,7 @@ import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import {
   escapeHtml,
 } from './highlightSelection';
-import { HighlightSelectionToolbar } from './HighlightSelectionToolbar';
+import { HighlightableSurface } from './HighlightableSurface';
 import { type StudentHighlightColor } from './highlightPalette';
 import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';
 
@@ -27,7 +27,6 @@ export function RichTextHighlighter({
   highlightClassName,
   highlightSurfaceId,
 }: RichTextHighlighterProps) {
-  const Tag = as as any;
   const initialHtml = useMemo(
     () => (contentType === 'html' ? sanitizeHtml(content) : escapeHtml(content)),
     [content, contentType],
@@ -35,11 +34,10 @@ export function RichTextHighlighter({
 
   if (!enabled) {
     return (
-      <Tag
+      <HighlightableSurface
+        as={as}
         className={className}
-        data-student-highlightable="true"
-        style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
-        dangerouslySetInnerHTML={{ __html: initialHtml }}
+        html={initialHtml}
       />
     );
   }
@@ -66,33 +64,17 @@ export function RichTextHighlighter({
     highlightColor,
   });
   return (
-    <>
-      <Tag
-        ref={containerRef as any}
-        className={className}
-        data-student-highlightable="true"
-        style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
-        dangerouslySetInnerHTML={{ __html: renderedHtml }}
-      />
-      <HighlightSelectionToolbar
-        visible={Boolean(canHighlightSelection && selectionToolbarPosition)}
-        left={selectionToolbarPosition?.left ?? 0}
-        top={selectionToolbarPosition?.top ?? 0}
-        canEraseSelection={canEraseSelection}
-        onApplyColor={(color) => applySelectionHighlight(color)}
-        onEraseSelection={eraseSelectionHighlight}
-      />
-      {hint ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="pointer-events-none fixed inset-x-0 bottom-4 z-[85] flex justify-center px-4"
-        >
-          <div className="rounded-sm border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-800 shadow-md">
-            {hint}
-          </div>
-        </div>
-      ) : null}
-    </>
+    <HighlightableSurface
+      as={as}
+      containerRef={containerRef}
+      className={className}
+      html={renderedHtml}
+      showToolbar={canHighlightSelection}
+      toolbarPosition={selectionToolbarPosition}
+      canEraseSelection={canEraseSelection}
+      onApplyColor={applySelectionHighlight}
+      onEraseSelection={eraseSelectionHighlight}
+      hint={hint}
+    />
   );
 }

@@ -19,6 +19,7 @@ import {
   getStudentTypographyScale,
 } from './accessibilityScale';
 import { defaultStudentHighlightColor } from './highlightPalette';
+import { StudentHighlightSelectionManagerProvider } from './highlightSelectionManager';
 import { useStudentFullscreenWarning } from './useStudentFullscreenWarning';
 import { useStudentSubmissionOrchestration } from './useStudentSubmissionOrchestration';
 import { useStudentTabletMode } from './tabletMode';
@@ -735,41 +736,43 @@ export function StudentApp({
         confirmExitWhenExamActive={!allowExitDuringExam}
       />
 
-      <StudentExamWorkspace
-        currentModule={runtimeState.currentModule}
-        examState={examState}
-        currentQuestionId={runtimeState.currentQuestionId}
-        allQuestions={runtimeState.allQuestions}
-        answers={attemptAnswers}
-        writingAnswers={attemptWritingAnswers}
-        flags={attemptFlags}
-        tabletMode={tabletMode}
-        showSubmitControls={showSubmitControls}
-        contentZoom={uiState.accessibilitySettings.zoom}
-        displayTimeRemaining={runtimeState.displayTimeRemaining}
-        highlightEnabled={highlightEnabled}
-        highlightColor={highlightColor}
-        highlightClassName={highlightClassName}
-        passageReadabilityLabel={getStudentPassageReadabilityLabel(
-          uiState.accessibilitySettings.passageReadabilityLevel,
-        )}
-        canIncreasePassageReadability={canIncreasePassageReadability}
-        canDecreasePassageReadability={canDecreasePassageReadability}
-        showNavigator={uiState.showNavigator}
-        security={examState.config.security}
-        onNavigate={runtimeActions.setCurrentQuestionId}
-        onObjectiveAnswerChange={handleAnswerChange}
-        onFlagToggle={handleFlagToggle}
-        onWritingChange={handleWritingChange}
-        onModuleSubmit={handleModuleSubmit}
-        onRegisterWritingDraftCommit={registerWritingDraftCommit}
-        onRegisterLiveObjectiveAnswer={registerLiveObjectiveAnswer}
-        onRegisterLiveWritingAnswer={registerLiveWritingAnswer}
-        onIncreasePassageReadability={uiActions.increasePassageReadability}
-        onDecreasePassageReadability={uiActions.decreasePassageReadability}
-        onResetPassageReadability={uiActions.resetPassageReadability}
-        onCloseNavigator={() => uiActions.setShowNavigator(false)}
-      />
+      <StudentHighlightSelectionManagerProvider>
+        <StudentExamWorkspace
+          currentModule={runtimeState.currentModule}
+          examState={examState}
+          currentQuestionId={runtimeState.currentQuestionId}
+          allQuestions={runtimeState.allQuestions}
+          answers={attemptAnswers}
+          writingAnswers={attemptWritingAnswers}
+          flags={attemptFlags}
+          tabletMode={tabletMode}
+          showSubmitControls={showSubmitControls}
+          contentZoom={uiState.accessibilitySettings.zoom}
+          displayTimeRemaining={runtimeState.displayTimeRemaining}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+          highlightClassName={highlightClassName}
+          passageReadabilityLabel={getStudentPassageReadabilityLabel(
+            uiState.accessibilitySettings.passageReadabilityLevel,
+          )}
+          canIncreasePassageReadability={canIncreasePassageReadability}
+          canDecreasePassageReadability={canDecreasePassageReadability}
+          showNavigator={uiState.showNavigator}
+          security={examState.config.security}
+          onNavigate={runtimeActions.setCurrentQuestionId}
+          onObjectiveAnswerChange={handleAnswerChange}
+          onFlagToggle={handleFlagToggle}
+          onWritingChange={handleWritingChange}
+          onModuleSubmit={handleModuleSubmit}
+          onRegisterWritingDraftCommit={registerWritingDraftCommit}
+          onRegisterLiveObjectiveAnswer={registerLiveObjectiveAnswer}
+          onRegisterLiveWritingAnswer={registerLiveWritingAnswer}
+          onIncreasePassageReadability={uiActions.increasePassageReadability}
+          onDecreasePassageReadability={uiActions.decreasePassageReadability}
+          onResetPassageReadability={uiActions.resetPassageReadability}
+          onCloseNavigator={() => uiActions.setShowNavigator(false)}
+        />
+      </StudentHighlightSelectionManagerProvider>
 
       {blockingOverlay}
       {finalSubmitOverlay}

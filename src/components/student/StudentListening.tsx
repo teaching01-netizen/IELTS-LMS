@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { DiagramLabelingBlock, ExamState, QuestionAnswer } from '../../types';
-import { Play, Pause, SkipBack, SkipForward, Volume2, ArrowLeftRight } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
@@ -13,7 +13,7 @@ import { useSplitPaneResize } from './useSplitPaneResize';
 import { isInstructionReferencePlacement } from '../../utils/referenceImagePlacement';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { hasHtmlMarkup } from './normalizeReadingPassageText';
-import { StudentQuestionPanel } from './StudentQuestionPanel';
+import { StudentMaterialWithQuestionPane } from './StudentMaterialWithQuestionPane';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -276,15 +276,16 @@ export function StudentListening({
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-white">
-      <div
-        className={`relative flex flex-1 overflow-hidden border-t border-gray-300 ${
-          isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
-        }`}
-        ref={workspaceRef}
-        style={splitPaneStyle}
-        data-testid="listening-split-workspace"
-      >
+    <StudentMaterialWithQuestionPane
+      isTabletMode={isTabletMode}
+      workspaceRef={workspaceRef}
+      splitPaneStyle={splitPaneStyle}
+      leftWidth={leftWidth}
+      onDividerPointerDown={handleDrag}
+      workspaceTestId="listening-split-workspace"
+      dividerAriaLabel="Resize listening material and answer panels"
+      dividerTestId="listening-pane-resizer"
+      materialPane={(
         <div
           className={`h-full overflow-y-auto font-sans leading-relaxed text-gray-900 ${
             materialCompact ? 'p-2 pr-2 text-xs md:p-3 md:pr-3 md:text-sm' : 'p-4 pr-4 text-sm md:p-6 md:pr-6 md:text-base'
@@ -445,44 +446,27 @@ export function StudentListening({
             </div>
           ) : null}
         </div>
-
-        <div
-          onMouseDown={handleDrag}
-          onTouchStart={handleDrag}
-          className={`${isTabletMode ? 'absolute inset-y-0 z-20 flex w-11 items-center justify-center' : 'hidden w-4 lg:flex relative items-center justify-center flex-shrink-0'} bg-gray-400 cursor-col-resize touch-none hover:bg-gray-600 transition-colors`}
-          style={isTabletMode ? { left: `calc(${leftWidth}% - 22px)` } : undefined}
-          role="separator"
-          aria-label="Resize listening material and answer panels"
-          aria-orientation="vertical"
-          data-testid="listening-pane-resizer"
-        >
-          <div className={`${isTabletMode ? 'h-[5.5rem] w-14' : 'h-10 w-8'} bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none`}>
-            <ArrowLeftRight size={isTabletMode ? 22 : 14} className="text-gray-600" />
-          </div>
-        </div>
-
-        <StudentQuestionPanel
-          blocks={activePart.blocks}
-          allQuestions={allQuestions}
-          answers={answers}
-          onAnswerChange={onAnswerChange}
-          currentQuestionId={currentQuestionId}
-          onNavigate={onNavigate}
-          flags={flags}
-          onToggleFlag={onToggleFlag}
-          tabletMode={isTabletMode}
-          answerCompact={answerCompact}
-          highlightEnabled={highlightEnabled}
-          highlightColor={highlightColor}
-          registerLiveAnswer={registerLiveAnswer}
-          questionContainerRef={questionContainerRef}
-          contentZoomStyle={tabletContentZoomStyle}
-          panelTestId="listening-question-scroll"
-          getBlockStartQuestionNumber={getBlockStartQuestionNumber}
-          renderBlockInstruction={renderBlockInstruction}
-          hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
-        />
-      </div>
-    </div>
+      )}
+      questionPanel={{
+        blocks: activePart.blocks,
+        allQuestions,
+        answers,
+        onAnswerChange,
+        currentQuestionId,
+        onNavigate,
+        flags,
+        onToggleFlag,
+        answerCompact,
+        highlightEnabled,
+        highlightColor,
+        registerLiveAnswer,
+        questionContainerRef,
+        contentZoomStyle: tabletContentZoomStyle,
+        panelTestId: 'listening-question-scroll',
+        getBlockStartQuestionNumber,
+        renderBlockInstruction,
+        hideDiagramReferenceForBlock,
+      }}
+    />
   );
 }

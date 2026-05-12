@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useMemo } from 'react';
 import { ExamState, QuestionAnswer } from '../../types';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
-import { ArrowLeftRight } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import { getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { prefersReducedMotion } from './prefersReducedMotion';
@@ -18,7 +17,7 @@ import {
   normalizeReadingPlainTextForDisplay,
 } from './normalizeReadingPassageText';
 import { isInstructionReferencePlacement } from '../../utils/referenceImagePlacement';
-import { StudentQuestionPanel } from './StudentQuestionPanel';
+import { StudentMaterialWithQuestionPane } from './StudentMaterialWithQuestionPane';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -47,7 +46,8 @@ interface StudentReadingProps {
 }
 
 interface ReadingPassagePaneProps {
-  activePassage: ExamState['reading']['passages'][number];
+  passageId: string;
+  passageTitle: string;
   materialCompact: boolean;
   isTabletMode: boolean;
   tabletContentZoomStyle: React.CSSProperties | undefined;
@@ -56,11 +56,13 @@ interface ReadingPassagePaneProps {
   highlightClassName: string | undefined;
   highlightPassageText: string;
   renderedPassageContent: string;
+  passageImages: ExamState['reading']['passages'][number]['images'];
   renderPassageImageAnnotations: (annotations: StimulusAnnotation[], zoom?: number) => React.ReactNode;
 }
 
 const ReadingPassagePane = React.memo(function ReadingPassagePane({
-  activePassage,
+  passageId,
+  passageTitle,
   materialCompact,
   isTabletMode,
   tabletContentZoomStyle,
@@ -69,6 +71,7 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
   highlightClassName,
   highlightPassageText,
   renderedPassageContent,
+  passageImages,
   renderPassageImageAnnotations,
 }: ReadingPassagePaneProps) {
   return (
@@ -87,7 +90,7 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
       data-student-zoom-scroll
     >
       <h2 className={`${materialCompact ? 'mb-2' : 'mb-4 md:mb-6'} font-bold leading-tight text-gray-950 break-words`} style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
-        {activePassage.title}
+        {passageTitle}
       </h2>
       <div className={`${materialCompact ? 'space-y-3' : 'space-y-5'} break-normal text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7`}>
         {highlightEnabled ? (
@@ -98,7 +101,7 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
             highlightEnabled
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
-            highlightSurfaceId={`reading:passage:${activePassage.id}`}
+            highlightSurfaceId={`reading:passage:${passageId}`}
             preserveInlineEmphasis
           />
         ) : (
@@ -111,7 +114,7 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
             highlightClassName={highlightClassName}
           />
         )}
-        {(activePassage.images ?? []).map((image) => (
+        {(passageImages ?? []).map((image) => (
           <StudentZoomableMedia
             key={image.id}
             sources={[image.src]}
@@ -321,17 +324,19 @@ export function StudentReading({
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-white">
-      <div
-        className={`relative flex flex-1 overflow-hidden border-t border-gray-300 ${
-          isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
-        }`}
-        ref={workspaceRef}
-        style={splitPaneStyle}
-        data-testid="reading-split-workspace"
-      >
+    <StudentMaterialWithQuestionPane
+      isTabletMode={isTabletMode}
+      workspaceRef={workspaceRef}
+      splitPaneStyle={splitPaneStyle}
+      leftWidth={leftWidth}
+      onDividerPointerDown={handleDrag}
+      workspaceTestId="reading-split-workspace"
+      dividerAriaLabel="Resize reading passage and answer panels"
+      dividerTestId="reading-pane-resizer"
+      materialPane={(
         <ReadingPassagePane
-          activePassage={activePassage}
+          passageId={activePassage.id}
+          passageTitle={activePassage.title}
           materialCompact={materialCompact}
           isTabletMode={isTabletMode}
           tabletContentZoomStyle={tabletContentZoomStyle}
@@ -340,47 +345,31 @@ export function StudentReading({
           highlightClassName={highlightClassName}
           highlightPassageText={highlightPassageText}
           renderedPassageContent={renderedPassageContent}
+          passageImages={activePassage.images}
           renderPassageImageAnnotations={renderPassageImageAnnotations}
         />
-
-        <div
-          onMouseDown={handleDrag}
-          onTouchStart={handleDrag}
-          className={`${isTabletMode ? 'absolute inset-y-0 z-20 flex w-11 items-center justify-center' : 'hidden w-4 lg:flex relative items-center justify-center flex-shrink-0'} bg-gray-400 cursor-col-resize touch-none hover:bg-gray-600 transition-colors`}
-          style={isTabletMode ? { left: `calc(${leftWidth}% - 22px)` } : undefined}
-          role="separator"
-          aria-label="Resize reading passage and answer panels"
-          aria-orientation="vertical"
-          data-testid="reading-pane-resizer"
-        >
-          <div className={`${isTabletMode ? 'h-[5.5rem] w-14' : 'h-10 w-8'} bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none`}>
-            <ArrowLeftRight size={isTabletMode ? 22 : 14} className="text-gray-600" />
-          </div>
-        </div>
-
-        <StudentQuestionPanel
-          blocks={activePassage.blocks}
-          allQuestions={allQuestions}
-          answers={answers}
-          onAnswerChange={onAnswerChange}
-          currentQuestionId={currentQuestionId}
-          onNavigate={onNavigate}
-          flags={flags}
-          onToggleFlag={onToggleFlag}
-          tabletMode={isTabletMode}
-          answerCompact={answerCompact}
-          highlightEnabled={highlightEnabled}
-          highlightColor={highlightColor}
-          registerLiveAnswer={registerLiveAnswer}
-          questionContainerRef={questionContainerRef}
-          contentZoomStyle={tabletContentZoomStyle}
-          panelTestId="reading-question-scroll"
-          getBlockStartQuestionNumber={getBlockStartQuestionNumber}
-          renderBlockInstruction={renderBlockInstruction}
-          expandedQuestionGapClassName="space-y-8 md:space-y-10"
-          hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
-        />
-      </div>
-    </div>
+      )}
+      questionPanel={{
+        blocks: activePassage.blocks,
+        allQuestions,
+        answers,
+        onAnswerChange,
+        currentQuestionId,
+        onNavigate,
+        flags,
+        onToggleFlag,
+        answerCompact,
+        highlightEnabled,
+        highlightColor,
+        registerLiveAnswer,
+        questionContainerRef,
+        contentZoomStyle: tabletContentZoomStyle,
+        panelTestId: 'reading-question-scroll',
+        getBlockStartQuestionNumber,
+        renderBlockInstruction,
+        expandedQuestionGapClassName: 'space-y-8 md:space-y-10',
+        hideDiagramReferenceForBlock,
+      }}
+    />
   );
 }

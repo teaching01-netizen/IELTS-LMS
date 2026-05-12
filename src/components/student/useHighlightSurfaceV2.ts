@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import {
   defaultStudentHighlightColor,
@@ -7,15 +7,17 @@ import {
 } from './highlightPalette';
 import {
   addHighlightRange,
-  captureSurfaceSelection,
   eraseHighlightRange,
   renderHighlightedHtml,
   selectionIntersectsRanges,
   type HighlightSelectionV2,
 } from './highlightV2Engine';
 import { usePersistedHighlightRangesV2 } from './highlightV2Persistence';
+import { useHighlightSelectionManager } from './highlightSelectionManager';
+import { useHighlightSelectionPort } from './highlightSelectionPort';
 
 const MAX_SURFACE_RANGES = 200;
+const TRANSIENT_SELECTION_STICKY_WINDOW_MS = 250;
 
 function extractCanonicalTextFromHtml(baseHtml: string): string {
   const container = document.createElement('div');
@@ -50,6 +52,12 @@ export function useHighlightSurfaceV2({
   highlightClassName,
 }: UseHighlightSurfaceV2Options): UseHighlightSurfaceV2Result {
   const containerRef = useRef<HTMLElement | null>(null);
+  const instanceIdRef = useRef(`surface:${useId()}`);
+  const lastValidSelectionAtRef = useRef<number>(0);
+  const manager = useHighlightSelectionManager();
+  const selectionPort = useHighlightSelectionPort();
+  const activeSurfaceId = manager?.activeSurfaceId ?? null;
+  const ownsGlobalSelection = !manager || activeSurfaceId === null || activeSurfaceId === instanceIdRef.current;
   const canonicalText = useMemo(() => extractCanonicalTextFromHtml(baseHtml), [baseHtml]);
   const { ranges, setRanges } = usePersistedHighlightRangesV2(surfaceId, canonicalText);
   const [selection, setSelection] = useState<HighlightSelectionV2 | null>(null);
@@ -78,36 +86,37 @@ export function useHighlightSurfaceV2({
     }
 
     const container = containerRef.current;
-    const browserSelection = window.getSelection();
-    if (!container || !browserSelection) {
+    if (!container) {
       setSelection(null);
       setSelectionToolbarPosition(null);
       return;
     }
 
-    const captured = captureSurfaceSelection(container, browserSelection, {
+    const snapshot = selectionPort.readSelection(container, {
       enforceSingleBlock: true,
     });
-    setSelection(captured);
-    if (!captured || browserSelection.rangeCount === 0) {
+    if (!snapshot.selection) {
+      const now = Date.now();
+      const canKeepPreviousSelection =
+        Boolean(selection) &&
+        snapshot.selectionText === selection!.selectedText &&
+        now - lastValidSelectionAtRef.current <= TRANSIENT_SELECTION_STICKY_WINDOW_MS;
+
+      if (canKeepPreviousSelection) {
+        return;
+      }
+
+      setSelection(null);
       setSelectionToolbarPosition(null);
+      manager?.releaseSurface(instanceIdRef.current);
       return;
     }
 
-    try {
-      const range = browserSelection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      const left = rect.left + rect.width / 2;
-      const top = rect.top + window.scrollY;
-      if (!Number.isFinite(left) || !Number.isFinite(top)) {
-        setSelectionToolbarPosition(null);
-        return;
-      }
-      setSelectionToolbarPosition({ left, top });
-    } catch {
-      setSelectionToolbarPosition({ left: 0, top: window.scrollY });
-    }
-  }, [enabled]);
+    setSelection(snapshot.selection);
+    lastValidSelectionAtRef.current = Date.now();
+    manager?.claimSurface(instanceIdRef.current);
+    setSelectionToolbarPosition(snapshot.toolbarPosition);
+  }, [enabled, manager, selection, selectionPort]);
 
   const resolveCurrentSelection = useCallback(() => {
     if (!enabled) {
@@ -119,19 +128,18 @@ export function useHighlightSurfaceV2({
     }
 
     const container = containerRef.current;
-    const browserSelection = window.getSelection();
-    if (!container || !browserSelection) {
+    if (!container) {
       return null;
     }
 
-    return captureSurfaceSelection(container, browserSelection, {
+    return selectionPort.readSelection(container, {
       enforceSingleBlock: true,
-    });
-  }, [enabled, selection]);
+    }).selection;
+  }, [enabled, selection, selectionPort]);
 
   const applySelectionHighlight = useCallback((color?: StudentHighlightColor) => {
     const activeSelection = resolveCurrentSelection();
-    if (!enabled || !activeSelection) {
+    if (!enabled || !activeSelection || !ownsGlobalSelection) {
       return;
     }
 
@@ -148,23 +156,25 @@ export function useHighlightSurfaceV2({
 
     setHint(null);
     setRanges(next.ranges);
-    window.getSelection()?.removeAllRanges();
+    selectionPort.clearSelection();
     setSelection(null);
     setSelectionToolbarPosition(null);
-  }, [enabled, ranges, resolveCurrentSelection, resolvedHighlightColor, setRanges]);
+    manager?.releaseSurface(instanceIdRef.current);
+  }, [enabled, manager, ownsGlobalSelection, ranges, resolveCurrentSelection, resolvedHighlightColor, selectionPort, setRanges]);
 
   const eraseSelectionHighlight = useCallback(() => {
     const activeSelection = resolveCurrentSelection();
-    if (!enabled || !activeSelection) {
+    if (!enabled || !activeSelection || !ownsGlobalSelection) {
       return;
     }
 
     setHint(null);
     setRanges(eraseHighlightRange(ranges, activeSelection));
-    window.getSelection()?.removeAllRanges();
+    selectionPort.clearSelection();
     setSelection(null);
     setSelectionToolbarPosition(null);
-  }, [enabled, ranges, resolveCurrentSelection, setRanges]);
+    manager?.releaseSurface(instanceIdRef.current);
+  }, [enabled, manager, ownsGlobalSelection, ranges, resolveCurrentSelection, selectionPort, setRanges]);
 
   const canEraseSelection = useMemo(() => {
     if (!selection) {
@@ -179,42 +189,24 @@ export function useHighlightSurfaceV2({
       setSelection(null);
       setSelectionToolbarPosition(null);
       setHint(null);
+      manager?.releaseSurface(instanceIdRef.current);
       return;
     }
 
-    const handleSelectionChange = () => {
+    const unsubscribe = selectionPort.subscribe(() => {
       refreshSelection();
-    };
+    });
+    return unsubscribe;
+  }, [enabled, manager, refreshSelection, selectionPort]);
 
-    document.addEventListener('selectionchange', handleSelectionChange);
-
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
-    };
-  }, [enabled, refreshSelection]);
-
-  useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-
-    const handlePointerUp = () => {
-      refreshSelection();
-    };
-
-    document.addEventListener('mouseup', handlePointerUp);
-    document.addEventListener('touchend', handlePointerUp);
-
-    return () => {
-      document.removeEventListener('mouseup', handlePointerUp);
-      document.removeEventListener('touchend', handlePointerUp);
-    };
-  }, [enabled, refreshSelection]);
+  useEffect(() => () => {
+    manager?.releaseSurface(instanceIdRef.current);
+  }, [manager]);
 
   return {
     containerRef,
     renderedHtml,
-    canHighlightSelection: Boolean(enabled && selection),
+    canHighlightSelection: Boolean(enabled && selection && ownsGlobalSelection),
     canEraseSelection,
     applySelectionHighlight,
     eraseSelectionHighlight,

@@ -186,7 +186,7 @@ describe('StudentReading passage readability controls', () => {
     expect(screen.getByText('Bold emphasis stays.').tagName).toBe('STRONG');
   });
 
-  it('requires explicit highlight button tap on tablet reading passages', () => {
+  it('does not render a static highlight button on tablet reading passages', () => {
     render(
       <StudentReading
         state={createState()}
@@ -199,10 +199,10 @@ describe('StudentReading passage readability controls', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: /highlight selected text/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
   });
 
-  it('requires explicit highlight button click on desktop reading passages', () => {
+  it('does not render a static highlight button on desktop reading passages', () => {
     render(
       <StudentReading
         state={createState()}
@@ -214,7 +214,7 @@ describe('StudentReading passage readability controls', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: /highlight selected text/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
   });
 
   it('marks the full reading passage pane as highlightable so native drag-selection is never blocked there', () => {

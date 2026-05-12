@@ -2,7 +2,7 @@ import React, { useId, useMemo } from 'react';
 import { parseBoldMarkdown, parseRichMarkdown } from '../../utils/boldMarkdown';
 import { escapeHtml } from './highlightSelection';
 import { type StudentHighlightColor } from './highlightPalette';
-import { HighlightSelectionToolbar } from './HighlightSelectionToolbar';
+import { HighlightableSurface } from './HighlightableSurface';
 import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';
 
 type FormattedTextProps = {
@@ -91,34 +91,18 @@ export function FormattedText({
   });
   if (highlightEnabled || renderedHtml !== initialHtml) {
     return (
-      <>
-        <Tag
-          ref={containerRef as any}
-          className={classes}
-          data-student-highlightable="true"
-          style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
-          dangerouslySetInnerHTML={{ __html: renderedHtml }}
-        />
-        <HighlightSelectionToolbar
-          visible={Boolean(canHighlightSelection && selectionToolbarPosition)}
-          left={selectionToolbarPosition?.left ?? 0}
-          top={selectionToolbarPosition?.top ?? 0}
-          canEraseSelection={canEraseSelection}
-          onApplyColor={(color) => applySelectionHighlight(color)}
-          onEraseSelection={eraseSelectionHighlight}
-        />
-        {hint ? (
-          <div
-            role="status"
-            aria-live="polite"
-            className="pointer-events-none fixed inset-x-0 bottom-4 z-[85] flex justify-center px-4"
-          >
-            <div className="rounded-sm border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-800 shadow-md">
-              {hint}
-            </div>
-          </div>
-        ) : null}
-      </>
+      <HighlightableSurface
+        as={as}
+        containerRef={containerRef}
+        className={classes}
+        html={renderedHtml}
+        showToolbar={canHighlightSelection}
+        toolbarPosition={selectionToolbarPosition}
+        canEraseSelection={canEraseSelection}
+        onApplyColor={applySelectionHighlight}
+        onEraseSelection={eraseSelectionHighlight}
+        hint={hint}
+      />
     );
   }
 

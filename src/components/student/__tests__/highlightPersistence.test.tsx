@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { FormattedText } from '../FormattedText';
 import { StudentHighlightPersistenceProvider } from '../highlightPersistence';
+import { StudentHighlightSelectionManagerProvider } from '../highlightSelectionManager';
 
 function findFirstTextNode(root: Element): ChildNode | null {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -167,6 +168,118 @@ describe('student highlight persistence v2', () => {
     );
 
     expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(0);
+
+    getSelectionSpy.mockRestore();
+  });
+
+  it('keeps selection actions visible during transient invalid selection snapshots', () => {
+    let textNode: ChildNode | null = null;
+    let highlightable: Element | null = null;
+
+    const validSelection = createSelectionMock(() => textNode, {
+      start: 6,
+      end: 10,
+      text: 'beta',
+    });
+
+    const transientInvalidSelection = {
+      rangeCount: 1,
+      getRangeAt: () => {
+        if (!highlightable) {
+          throw new Error('Expected highlight surface');
+        }
+        const range = document.createRange();
+        range.setStart(highlightable, 0);
+        range.setEnd(highlightable, highlightable.childNodes.length);
+        return range;
+      },
+      toString: () => 'beta',
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+
+    let activeSelection: Selection = validSelection;
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockImplementation(() => activeSelection);
+
+    const { container } = render(
+      <FormattedText
+        text="Alpha beta gamma"
+        highlightEnabled
+        highlightSurfaceId="test:transient-selection"
+      />,
+    );
+
+    highlightable = container.querySelector('[data-student-highlightable="true"]');
+    if (!highlightable) {
+      throw new Error('Expected highlight surface');
+    }
+    textNode = findFirstTextNode(highlightable);
+
+    fireEvent(document, new Event('selectionchange'));
+    expect(container.querySelector('button[aria-label="Apply Yellow highlight"]')).not.toBeNull();
+
+    activeSelection = transientInvalidSelection;
+    fireEvent(document, new Event('selectionchange'));
+    expect(container.querySelector('button[aria-label="Apply Yellow highlight"]')).not.toBeNull();
+
+    getSelectionSpy.mockRestore();
+  });
+
+  it('allows only one active highlight surface selection across multiple surfaces', () => {
+    let firstTextNode: ChildNode | null = null;
+    let secondTextNode: ChildNode | null = null;
+    let activeTarget: 'first' | 'second' = 'first';
+
+    const globalSelection = {
+      rangeCount: 1,
+      getRangeAt: () => {
+        const textNode = activeTarget === 'first' ? firstTextNode : secondTextNode;
+        if (!textNode) {
+          throw new Error('Expected text node');
+        }
+        const range = document.createRange();
+        range.setStart(textNode, 0);
+        range.setEnd(textNode, 5);
+        return range;
+      },
+      toString: () => 'Alpha',
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue(globalSelection);
+
+    const { container } = render(
+      <StudentHighlightSelectionManagerProvider>
+        <div>
+          <FormattedText
+            text="Alpha one"
+            highlightEnabled
+            highlightSurfaceId="test:surface:one"
+          />
+          <FormattedText
+            text="Alpha two"
+            highlightEnabled
+            highlightSurfaceId="test:surface:two"
+          />
+        </div>
+      </StudentHighlightSelectionManagerProvider>,
+    );
+
+    const surfaces = container.querySelectorAll('[data-student-highlightable="true"]');
+    const firstSurface = surfaces[0];
+    const secondSurface = surfaces[1];
+    if (!firstSurface || !secondSurface) {
+      throw new Error('Expected two highlight surfaces');
+    }
+    firstTextNode = findFirstTextNode(firstSurface);
+    secondTextNode = findFirstTextNode(secondSurface);
+
+    activeTarget = 'first';
+    fireEvent(document, new Event('selectionchange'));
+    expect(container.querySelectorAll('button[aria-label="Apply Yellow highlight"]')).toHaveLength(1);
+
+    activeTarget = 'second';
+    fireEvent(document, new Event('selectionchange'));
+    expect(container.querySelectorAll('button[aria-label="Apply Yellow highlight"]')).toHaveLength(1);
 
     getSelectionSpy.mockRestore();
   });

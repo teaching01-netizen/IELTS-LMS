@@ -255,6 +255,17 @@
     touch-action: auto;
   }
 
+  /* Keep native text selection readable on top of custom highlight marks. */
+  [data-highlighted="true"]::selection {
+    background-color: rgba(59, 130, 246, 0.35);
+    color: inherit;
+  }
+
+  [data-highlighted="true"]::-moz-selection {
+    background-color: rgba(59, 130, 246, 0.35);
+    color: inherit;
+  }
+
   .student-stimulus-content p {
     margin-top: var(--student-reading-paragraph-spacing, 1rem);
     margin-bottom: var(--student-reading-paragraph-spacing, 1rem);
