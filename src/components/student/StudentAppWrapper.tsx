@@ -4,6 +4,7 @@ import type { ExamSessionRuntime } from '../../types/domain';
 import type { StudentAttempt } from '../../types/studentAttempt';
 import type { StudentAnswerInvariantRollout } from '../../features/student/hooks/useStudentSessionRouteData';
 import { StudentApp } from './StudentApp';
+import { KeyboardProvider } from './providers/StudentKeyboardProvider';
 import { StudentAttemptProvider } from './providers/StudentAttemptProvider';
 import { StudentNetworkProvider } from './providers/StudentNetworkProvider';
 import { ProctoringProvider } from './providers/StudentProctoringProvider';
@@ -39,10 +40,12 @@ export function StudentAppWrapper({
 }: StudentAppWrapperProps) {
   const app = (
     <StudentUIProvider>
-      <StudentApp
-        showSubmitControls={showSubmitControls}
-        allowExitDuringExam={allowExitDuringExam}
-      />
+      <KeyboardProvider>
+        <StudentApp
+          showSubmitControls={showSubmitControls}
+          allowExitDuringExam={allowExitDuringExam}
+        />
+      </KeyboardProvider>
     </StudentUIProvider>
   );
 
