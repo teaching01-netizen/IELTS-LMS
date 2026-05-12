@@ -101,3 +101,30 @@ Passage HTML was sanitized for safety, but inline typography declarations (`font
 
 ### Invariant
 Reading passage content may keep semantic emphasis formatting (for example bold/italic), but font family, base font size, and line-height must come from platform reading typography variables only.
+
+---
+
+## 2026-05-12: Reading Question Text Selection Blocked By Question Chrome
+
+### Symptom
+Students could not reliably drag-select reading question text. Starting selection on a question number, option letter, or prompt row chrome could collapse or fail selection even though the prompt text itself was highlight-enabled.
+
+### Scope
+Student reading question rendering and exam anti-cheat drag/drop guard behavior.
+
+### Root Cause
+`QuestionRenderer` marked only inner `FormattedText` prompt spans as highlightable. The visible question chrome around those spans, especially question numbers and prompt rows, remained outside `[data-student-highlightable="true"]`, so the global drag/drop guard could treat native selection gestures as blocked drag/drop attempts.
+
+### Fix
+- Marked visible question text chrome as highlightable/selectable across objective question renderers.
+- Kept answer inputs/selects outside the highlightable boundary so answer-control protections are not weakened.
+- Made the reading passage pane explicitly `user-select: text` in addition to its highlightable marker.
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/StudentReadingReadabilityControls.test.tsx`
+- Tests: `src/components/student/__tests__/StudentQuestionExperience.test.tsx`
+- Tests: `src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx`
+- Rules/Docs: `docs/failure-cases.md`
+
+### Invariant
+Reading passage and question display text must remain native-selectable during exam mode, while answer controls remain outside highlightable selection boundaries.

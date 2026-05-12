@@ -232,6 +232,7 @@ describe('StudentReading passage readability controls', () => {
     const passagePane = container.querySelector('.student-reading-passage-pane');
     expect(passagePane).not.toBeNull();
     expect(passagePane).toHaveAttribute('data-student-highlightable', 'true');
+    expect(passagePane).toHaveStyle({ userSelect: 'text' });
   });
 
   it('does not auto-scroll question panel while passage text selection is active', () => {
@@ -271,5 +272,27 @@ describe('StudentReading passage readability controls', () => {
     expect(scrollIntoViewSpy).not.toHaveBeenCalled();
     scrollIntoViewSpy.mockRestore();
     getSelectionSpy.mockRestore();
+  });
+
+  it('marks the visible question number and prompt row as highlightable selection text', () => {
+    const { container } = render(
+      <StudentReading
+        state={createState()}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+        highlightEnabled
+      />,
+    );
+
+    const questionSlot = container.querySelector('#question-q1');
+    expect(questionSlot).not.toBeNull();
+    const questionNumber = screen.getByText('1.');
+    const questionPrompt = screen.getByText('What is the answer?');
+
+    expect(questionNumber.closest('[data-student-highlightable="true"]')).not.toBeNull();
+    expect(questionPrompt.closest('[data-student-highlightable="true"]')).not.toBeNull();
+    expect(questionSlot?.querySelector('input')?.closest('[data-student-highlightable="true"]')).toBeNull();
   });
 });

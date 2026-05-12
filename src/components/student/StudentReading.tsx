@@ -86,6 +86,8 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
         ...(tabletContentZoomStyle ?? {}),
         fontSize: 'var(--student-passage-font-size)',
         lineHeight: 'var(--student-passage-line-height)',
+        WebkitUserSelect: 'text',
+        userSelect: 'text',
       }}
       data-student-zoom-scroll
     >

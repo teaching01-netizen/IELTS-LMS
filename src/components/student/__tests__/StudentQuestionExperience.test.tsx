@@ -795,7 +795,7 @@ describe('student question experience', () => {
     expect(passageTitle).toHaveStyle({ fontSize: 'var(--student-passage-title-font-size)' });
     expect(passageTitle.nextElementSibling?.className).toContain('--student-passage-h1-font-size');
 
-    const readingHighlighters = container.querySelectorAll('[data-student-highlightable="true"]');
+    const readingHighlighters = passagePanel?.querySelectorAll('[data-student-highlightable="true"]') ?? [];
     const readingHighlighter = readingHighlighters[readingHighlighters.length - 1] ?? null;
     expect(readingHighlighter).not.toBeNull();
     expect(readingHighlighter).toHaveClass('whitespace-pre-wrap');

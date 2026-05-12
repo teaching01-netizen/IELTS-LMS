@@ -97,6 +97,14 @@ export function QuestionRenderer({
   const isCompactPane = tabletMode && compactPane;
   const fieldIndentClass = tabletMode ? 'ml-0' : 'ml-9';
   const inputWidthClass = isCompactPane ? 'w-full min-w-0 max-w-full' : tabletMode ? 'max-w-full' : 'max-w-md';
+  const selectableTextProps = {
+    'data-student-highlightable': 'true',
+    style: {
+      WebkitUserSelect: 'text',
+      userSelect: 'text',
+      touchAction: 'auto',
+    },
+  } as const;
 
   const getSlotId = (index: number, fallback: string) => slotIds[index] ?? fallback;
   const getSlotClassName = (slotId: string) => {
@@ -177,7 +185,7 @@ export function QuestionRenderer({
         />
       ) : null}
       <div className={isCompactPane ? 'flex flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
-        <span className="min-w-[2rem] font-bold text-gray-900">{slotNumber}.</span>
+        <span className="min-w-[2rem] font-bold text-gray-900" {...selectableTextProps}>{slotNumber}.</span>
         <ProtectedInput
           type="text"
           name={slotId}
@@ -213,7 +221,7 @@ export function QuestionRenderer({
 
     return (
       <fieldset className="flex flex-col gap-4">
-        <legend className="flex gap-3 items-start">
+        <legend className="flex gap-3 items-start" {...selectableTextProps}>
           <div className="mt-0.5 flex h-6 min-w-[1.75rem] items-center justify-center border-2 border-blue-500 text-[length:var(--student-chip-font-size)] font-bold text-blue-600">
             {number}
           </div>
@@ -247,7 +255,7 @@ export function QuestionRenderer({
     void clozeBlock;
     return (
       <div className="flex flex-col gap-3">
-        <div className="flex gap-3">
+        <div className="flex gap-3" {...selectableTextProps}>
           <span className="min-w-[1.75rem] font-bold text-gray-900">{number}.</span>
           <FormattedText
             as="span"
@@ -278,8 +286,8 @@ export function QuestionRenderer({
   const renderMatching = (matchingBlock: MatchingBlock, q: MatchingQuestion) => (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-4">
-          <span className="min-w-[1.75rem] font-bold text-gray-900">{number}.</span>
-        <span className="font-medium text-gray-800 text-[length:var(--student-control-font-size)]">
+          <span className="min-w-[1.75rem] font-bold text-gray-900" {...selectableTextProps}>{number}.</span>
+        <span className="font-medium text-gray-800 text-[length:var(--student-control-font-size)]" {...selectableTextProps}>
           Paragraph {q.paragraphLabel}
         </span>
 
@@ -319,7 +327,7 @@ export function QuestionRenderer({
 
     return (
       <fieldset className="flex flex-col gap-4">
-        <legend className="flex gap-3">
+        <legend className="flex gap-3" {...selectableTextProps}>
           <span className="min-w-[1.75rem] font-bold text-gray-900">{blockNum}.</span>
         <FormattedText
           as="span"
@@ -362,7 +370,7 @@ export function QuestionRenderer({
                   {isSelected ? <div className="h-3 w-3 bg-white" style={{ clipPath: 'polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%)' }}></div> : null}
                 </div>
                 <div className="flex gap-2">
-                  <span className="font-bold text-gray-700">{letter}.</span>
+                  <span className="font-bold text-gray-700" {...selectableTextProps}>{letter}.</span>
                   <FormattedText as="span" className="text-gray-800" text={option.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </div>
               </label>
@@ -385,7 +393,7 @@ export function QuestionRenderer({
         hint="Tap to zoom the map"
       />
       <div className="flex flex-col gap-3">
-        <div className="flex gap-3">
+        <div className="flex gap-3" {...selectableTextProps}>
           <span className="min-w-[1.75rem] font-bold text-gray-900">{num}.</span>
           <span className="text-gray-800">
             Label <FormattedText as="span" className="text-gray-800" text={q.label} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
@@ -422,7 +430,7 @@ export function QuestionRenderer({
 
     return (
       <fieldset className="flex flex-col gap-4">
-        <legend className="flex gap-3">
+        <legend className="flex gap-3" {...selectableTextProps}>
           <span className="min-w-[1.75rem] font-bold text-gray-900">{blockNum}.</span>
           <FormattedText
             as="span"
@@ -445,7 +453,7 @@ export function QuestionRenderer({
                   className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
                 <div className="flex gap-2">
-                  <span className="font-bold text-gray-700">{letter}.</span>
+                  <span className="font-bold text-gray-700" {...selectableTextProps}>{letter}.</span>
                   <FormattedText
                     as="span"
                     className="text-gray-800"
@@ -466,7 +474,7 @@ export function QuestionRenderer({
     void shortBlock;
     return (
       <div className="flex flex-col gap-3">
-        <div className="flex gap-3">
+        <div className="flex gap-3" {...selectableTextProps}>
           <span className="min-w-[1.75rem] font-bold text-gray-900">{num}.</span>
           <FormattedText as="span" className="text-gray-800" text={q.prompt} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
         </div>
