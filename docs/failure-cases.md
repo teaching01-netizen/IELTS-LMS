@@ -176,3 +176,27 @@ The highlight surface only kept transient invalid selection snapshots when the b
 
 ### Invariant
 Floating highlight controls must consume the latest valid captured text selection even if the browser temporarily reports an empty live selection while the toolbar is being tapped.
+
+---
+
+## 2026-05-13: Dragstart Anti-Cheat Blocks Native Text Selection
+
+### Symptom
+Students could not select reading/question text like a normal browser. Selection could collapse or never reach the highlight toolbar, especially when the browser emitted `dragstart` from wrapper text chrome instead of the exact highlightable element.
+
+### Scope
+Student exam global anti-cheat drag/drop guard and student text selection.
+
+### Root Cause
+The anti-cheat layer blocked `dragstart` unless the event target was inside `[data-student-highlightable="true"]`. Native selection gestures can dispatch `dragstart` from surrounding wrappers, whitespace, or text nodes that are still part of the visible reading/question text experience, so the guard interrupted normal browser selection behavior.
+
+### Fix
+- Allow `dragstart` during exam mode so native text selection behaves normally.
+- Keep `drop` blocked during exam mode so answer/file drop restrictions remain enforced.
+
+### Regression Protection
+- Tests: `src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx`
+- Rules/Docs: `docs/ux-invariants.md`
+
+### Invariant
+Anti-cheat drag/drop policy must not cancel native text selection gestures; enforcement belongs on drop/paste paths that mutate exam inputs or introduce external content.

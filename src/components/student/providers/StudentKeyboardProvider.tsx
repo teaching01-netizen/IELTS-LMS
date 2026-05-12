@@ -386,15 +386,9 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       }
 
       if (event.type === 'dragstart') {
-        const target = event.target;
-        const withinHighlightableContainer = isWithinHighlightableContainer(target);
-
-        // Allow drag-selection gestures for all student highlightable text
-        // surfaces; blocking dragstart here can clear active selection on some
-        // browsers/touch devices.
-        if (withinHighlightableContainer) {
-          return;
-        }
+        // Native text selection can emit dragstart from wrapper elements,
+        // whitespace, or text nodes outside the exact highlightable marker.
+        return;
       }
 
       handleRestrictedInteraction(

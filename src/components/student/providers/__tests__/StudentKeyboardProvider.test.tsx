@@ -324,9 +324,24 @@ describe('StudentKeyboardProvider', () => {
     expect(harness.runtime.state.violations).toHaveLength(0);
   });
 
-  it('blocks drag and drop interactions during exam phase', () => {
+  it('allows dragstart during exam phase so native text selection behaves normally', () => {
     const harness = renderHarness();
     const event = new Event('dragstart', {
+      bubbles: true,
+      cancelable: true,
+    });
+
+    act(() => {
+      document.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(harness.runtime.state.violations).toHaveLength(0);
+  });
+
+  it('blocks drop interactions during exam phase', () => {
+    const harness = renderHarness();
+    const event = new Event('drop', {
       bubbles: true,
       cancelable: true,
     });
