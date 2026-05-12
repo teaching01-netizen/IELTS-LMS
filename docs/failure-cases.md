@@ -128,3 +128,26 @@ Student reading question rendering and exam anti-cheat drag/drop guard behavior.
 
 ### Invariant
 Reading passage and question display text must remain native-selectable during exam mode, while answer controls remain outside highlightable selection boundaries.
+
+---
+
+## 2026-05-12: Reading Highlight Toolbar Clears Selection Before Apply
+
+### Symptom
+Students could select reading passage text, but clicking a floating highlight color action did not apply a highlight. In browser selection UI this could look like the active selection jumped or expanded unexpectedly before the highlight action completed.
+
+### Scope
+Student reading/listening highlight toolbar and v2 highlight persistence.
+
+### Root Cause
+The floating toolbar accepted a normal mouse down. Browsers may collapse or rewrite the active text selection before the subsequent click handler runs, causing the highlight surface to clear its captured selection and leaving the color action with nothing to apply.
+
+### Fix
+- Prevent default mouse-down behavior on the floating highlight toolbar so clicking color actions does not steal or collapse the active text selection before the click handler runs.
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/highlightPersistence.test.tsx`
+- Rules/Docs: `docs/failure-cases.md`
+
+### Invariant
+Floating highlight controls must not clear or replace the text selection they are acting on before the apply/remove action has consumed it.

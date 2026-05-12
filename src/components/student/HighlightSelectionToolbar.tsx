@@ -31,6 +31,7 @@ export function HighlightSelectionToolbar({
       style={{ left, top: top - 12 }}
       role="toolbar"
       aria-label="Highlight selection actions"
+      onMouseDown={(event) => event.preventDefault()}
     >
       <div className="flex items-center gap-1">
         {studentHighlightPalette.map((entry) => (
