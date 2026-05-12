@@ -54,6 +54,18 @@ function isWithinHighlightableContainer(target: EventTarget | null) {
   return false;
 }
 
+function hasActiveSelectionWithinHighlightableContainer() {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) {
+    return false;
+  }
+
+  return (
+    isWithinHighlightableContainer(selection.anchorNode) &&
+    isWithinHighlightableContainer(selection.focusNode)
+  );
+}
+
 function historyKindFromUndoRedoShortcut(event: KeyboardEvent): UndoRedoKind | null {
   const key = event.key.toLowerCase();
   const usesUndoModifier = (event.metaKey || event.ctrlKey) && !event.altKey;
@@ -274,6 +286,10 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
           return;
         }
 
+        return;
+      }
+
+      if (hasActiveSelectionWithinHighlightableContainer()) {
         return;
       }
 

@@ -6,7 +6,7 @@ import type { ExamState } from '../../../../types';
 import type { StudentAttempt } from '../../../../types/studentAttempt';
 import { KeyboardProvider } from '../StudentKeyboardProvider';
 import { ProctoringProvider } from '../StudentProctoringProvider';
-import { StudentAttemptProvider } from '../StudentAttemptProvider';
+import { StudentAttemptProvider, useStudentAttempt } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
 import { StudentUIProvider, useStudentUI } from '../StudentUIProvider';
 
@@ -110,6 +110,7 @@ describe('StudentKeyboardProvider', () => {
   function renderHarness(overrideState?: (nextState: ExamState) => void) {
     let runtimeContext: ReturnType<typeof useStudentRuntime> | null = null;
     let uiContext: ReturnType<typeof useStudentUI> | null = null;
+    let attemptContext: ReturnType<typeof useStudentAttempt> | null = null;
     const state = createExamState();
     overrideState?.(state);
     const attemptSnapshot = createAttemptSnapshot();
@@ -117,6 +118,7 @@ describe('StudentKeyboardProvider', () => {
     function Probe() {
       runtimeContext = useStudentRuntime();
       uiContext = useStudentUI();
+      attemptContext = useStudentAttempt();
 
       return (
         <>
@@ -160,6 +162,9 @@ describe('StudentKeyboardProvider', () => {
       },
       get ui() {
         return uiContext!;
+      },
+      get attempt() {
+        return attemptContext!;
       },
       editor: screen.getByTestId('editor'),
       objectiveInput: screen.getByTestId('objective-input'),
@@ -469,6 +474,31 @@ describe('StudentKeyboardProvider', () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(harness.runtime.state.violations).toHaveLength(0);
+  });
+
+  it('does not trigger single-key shortcuts while selecting text in a highlightable passage', () => {
+    const harness = renderHarness();
+    const textNode = harness.highlightTarget.firstChild;
+    expect(textNode).not.toBeNull();
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      anchorNode: textNode,
+      focusNode: textNode,
+    } as Selection);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'f',
+      bubbles: true,
+      cancelable: true,
+    });
+
+    act(() => {
+      document.dispatchEvent(event);
+    });
+
+    expect(harness.attempt.state.attempt?.flags?.q1).toBeUndefined();
+    expect(event.defaultPrevented).toBe(false);
+    getSelectionSpy.mockRestore();
   });
 
   it('blocks undo shortcuts inside editable inputs without recording a restricted-shortcut violation', () => {
