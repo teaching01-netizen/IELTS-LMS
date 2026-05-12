@@ -174,6 +174,54 @@ describe('student highlight persistence v2', () => {
     getSelectionSpy.mockRestore();
   });
 
+  it('keeps the selected passage text when tapping the floating highlight toolbar', () => {
+    let textNode: ChildNode | null = null;
+    const validSelection = createSelectionMock(() => textNode, {
+      start: 6,
+      end: 10,
+      text: 'beta',
+    });
+    const collapsedSelection = {
+      rangeCount: 0,
+      toString: () => '',
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection;
+    let activeSelection: Selection = validSelection;
+    const getSelectionSpy = vi.spyOn(window, 'getSelection').mockImplementation(() => activeSelection);
+
+    const { container } = render(
+      <FormattedText
+        text="Alpha beta gamma"
+        highlightEnabled
+        highlightSurfaceId="test:toolbar-preserves-touch-selection"
+      />,
+    );
+
+    const surface = container.querySelector('[data-student-highlightable="true"]');
+    if (!surface) {
+      throw new Error('Expected surface');
+    }
+
+    textNode = findFirstTextNode(surface);
+    fireEvent(document, new Event('selectionchange'));
+
+    const colorButton = container.querySelector('button[aria-label="Apply Yellow highlight"]');
+    if (!colorButton) {
+      throw new Error('Expected highlight color action button');
+    }
+
+    if (fireEvent.touchStart(colorButton)) {
+      activeSelection = collapsedSelection;
+      fireEvent(document, new Event('selectionchange'));
+    }
+
+    fireEvent.click(colorButton);
+
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(1);
+
+    getSelectionSpy.mockRestore();
+  });
+
   it('drops stored ranges when the source text changes', () => {
     let textNode: ChildNode | null = null;
     const selection = createSelectionMock(() => textNode, {

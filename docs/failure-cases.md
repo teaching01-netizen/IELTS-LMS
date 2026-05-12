@@ -151,3 +151,28 @@ The floating toolbar accepted a normal mouse down. Browsers may collapse or rewr
 
 ### Invariant
 Floating highlight controls must not clear or replace the text selection they are acting on before the apply/remove action has consumed it.
+
+---
+
+## 2026-05-13: Touch Highlight Toolbar Tap Drops Selected Text
+
+### Symptom
+Students could select the intended passage/question text, but tapping the floating highlight toolbar could make the toolbar disappear or leave the color action with no selection to apply.
+
+### Scope
+Student reading/listening highlight toolbar and v2 highlight selection capture.
+
+### Root Cause
+The highlight surface only kept transient invalid selection snapshots when the browser still reported the same selected text. Touch/pointer activation can briefly report a collapsed empty selection before the click action runs, so the surface could clear the captured selection and hide the toolbar during the action sequence.
+
+### Fix
+- Preserve toolbar selection controls for the existing short transient window whenever a valid captured selection just existed.
+- Keep the last valid captured selection available for toolbar apply/remove during that transient window.
+- Prevent mouse, pointer, and touch start defaults on toolbar controls so activation does not steal native text selection.
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/highlightPersistence.test.tsx`
+- Rules/Docs: `docs/ux-invariants.md`
+
+### Invariant
+Floating highlight controls must consume the latest valid captured text selection even if the browser temporarily reports an empty live selection while the toolbar is being tapped.

@@ -54,6 +54,7 @@ export function useHighlightSurfaceV2({
   const containerRef = useRef<HTMLElement | null>(null);
   const instanceIdRef = useRef(`surface:${useId()}`);
   const lastValidSelectionAtRef = useRef<number>(0);
+  const lastValidSelectionRef = useRef<HighlightSelectionV2 | null>(null);
   const manager = useHighlightSelectionManager();
   const selectionPort = useHighlightSelectionPort();
   const activeSurfaceId = manager?.activeSurfaceId ?? null;
@@ -81,6 +82,7 @@ export function useHighlightSurfaceV2({
   const refreshSelection = useCallback(() => {
     if (!enabled) {
       setSelection(null);
+      lastValidSelectionRef.current = null;
       setSelectionToolbarPosition(null);
       return;
     }
@@ -88,6 +90,7 @@ export function useHighlightSurfaceV2({
     const container = containerRef.current;
     if (!container) {
       setSelection(null);
+      lastValidSelectionRef.current = null;
       setSelectionToolbarPosition(null);
       return;
     }
@@ -99,7 +102,6 @@ export function useHighlightSurfaceV2({
       const now = Date.now();
       const canKeepPreviousSelection =
         Boolean(selection) &&
-        snapshot.selectionText === selection!.selectedText &&
         now - lastValidSelectionAtRef.current <= TRANSIENT_SELECTION_STICKY_WINDOW_MS;
 
       if (canKeepPreviousSelection) {
@@ -113,6 +115,7 @@ export function useHighlightSurfaceV2({
     }
 
     setSelection(snapshot.selection);
+    lastValidSelectionRef.current = snapshot.selection;
     lastValidSelectionAtRef.current = Date.now();
     manager?.claimSurface(instanceIdRef.current);
     setSelectionToolbarPosition(snapshot.toolbarPosition);
@@ -125,6 +128,14 @@ export function useHighlightSurfaceV2({
 
     if (selection) {
       return selection;
+    }
+
+    const now = Date.now();
+    if (
+      lastValidSelectionRef.current &&
+      now - lastValidSelectionAtRef.current <= TRANSIENT_SELECTION_STICKY_WINDOW_MS
+    ) {
+      return lastValidSelectionRef.current;
     }
 
     const container = containerRef.current;
@@ -158,6 +169,7 @@ export function useHighlightSurfaceV2({
     setRanges(next.ranges);
     selectionPort.clearSelection();
     setSelection(null);
+    lastValidSelectionRef.current = null;
     setSelectionToolbarPosition(null);
     manager?.releaseSurface(instanceIdRef.current);
   }, [enabled, manager, ownsGlobalSelection, ranges, resolveCurrentSelection, resolvedHighlightColor, selectionPort, setRanges]);
@@ -172,6 +184,7 @@ export function useHighlightSurfaceV2({
     setRanges(eraseHighlightRange(ranges, activeSelection));
     selectionPort.clearSelection();
     setSelection(null);
+    lastValidSelectionRef.current = null;
     setSelectionToolbarPosition(null);
     manager?.releaseSurface(instanceIdRef.current);
   }, [enabled, manager, ownsGlobalSelection, ranges, resolveCurrentSelection, selectionPort, setRanges]);
@@ -187,6 +200,7 @@ export function useHighlightSurfaceV2({
   useEffect(() => {
     if (!enabled) {
       setSelection(null);
+      lastValidSelectionRef.current = null;
       setSelectionToolbarPosition(null);
       setHint(null);
       manager?.releaseSurface(instanceIdRef.current);
