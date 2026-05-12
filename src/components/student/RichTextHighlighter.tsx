@@ -3,6 +3,7 @@ import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import {
   escapeHtml,
 } from './highlightSelection';
+import { HighlightSelectionToolbar } from './HighlightSelectionToolbar';
 import { type StudentHighlightColor } from './highlightPalette';
 import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';
 
@@ -15,8 +16,6 @@ interface RichTextHighlighterProps {
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
   highlightSurfaceId?: string | undefined;
-  showHighlightButton?: boolean | undefined;
-  highlightButtonLabel?: string | undefined;
 }
 export function RichTextHighlighter({
   content,
@@ -27,8 +26,6 @@ export function RichTextHighlighter({
   highlightColor,
   highlightClassName,
   highlightSurfaceId,
-  showHighlightButton = false,
-  highlightButtonLabel = 'Highlight selected text',
 }: RichTextHighlighterProps) {
   const Tag = as as any;
   const initialHtml = useMemo(
@@ -60,6 +57,7 @@ export function RichTextHighlighter({
     applySelectionHighlight,
     eraseSelectionHighlight,
     hint,
+    selectionToolbarPosition,
   } = useHighlightSurfaceV2({
     enabled,
     surfaceId: highlightSurfaceId ?? defaultSurfaceId,
@@ -67,9 +65,6 @@ export function RichTextHighlighter({
     highlightClassName,
     highlightColor,
   });
-  const shouldShowControls =
-    enabled && (showHighlightButton || canHighlightSelection || canEraseSelection);
-
   return (
     <>
       <Tag
@@ -79,26 +74,14 @@ export function RichTextHighlighter({
         style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
         dangerouslySetInnerHTML={{ __html: renderedHtml }}
       />
-      {shouldShowControls ? (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={applySelectionHighlight}
-            disabled={!canHighlightSelection}
-            className="inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {highlightButtonLabel}
-          </button>
-          <button
-            type="button"
-            onClick={eraseSelectionHighlight}
-            disabled={!canEraseSelection}
-            className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-bold text-gray-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Erase selected text
-          </button>
-        </div>
-      ) : null}
+      <HighlightSelectionToolbar
+        visible={Boolean(canHighlightSelection && selectionToolbarPosition)}
+        left={selectionToolbarPosition?.left ?? 0}
+        top={selectionToolbarPosition?.top ?? 0}
+        canEraseSelection={canEraseSelection}
+        onApplyColor={(color) => applySelectionHighlight(color)}
+        onEraseSelection={eraseSelectionHighlight}
+      />
       {hint ? (
         <div
           role="status"

@@ -24,7 +24,7 @@ interface StudentExamWorkspaceProps {
   displayTimeRemaining: number | undefined;
   highlightEnabled: boolean;
   highlightColor: StudentHighlightColor;
-  highlightClassName: string;
+  highlightClassName?: string;
   passageReadabilityLabel: string;
   canIncreasePassageReadability: boolean;
   canDecreasePassageReadability: boolean;

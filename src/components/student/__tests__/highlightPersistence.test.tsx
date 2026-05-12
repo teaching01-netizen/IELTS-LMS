@@ -4,6 +4,18 @@ import React from 'react';
 import { FormattedText } from '../FormattedText';
 import { StudentHighlightPersistenceProvider } from '../highlightPersistence';
 
+function findFirstTextNode(root: Element): ChildNode | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    if ((node.textContent?.length ?? 0) > 0) {
+      return node;
+    }
+    node = walker.nextNode();
+  }
+  return null;
+}
+
 function createSelectionMock(
   getTextNode: () => ChildNode | null,
   options: { start: number; end: number; text: string },
@@ -75,7 +87,6 @@ describe('student highlight persistence v2', () => {
         <FormattedText
           text="Alpha beta gamma"
           highlightEnabled
-          showHighlightButton
           highlightSurfaceId="test:persist"
         />
       </StudentHighlightPersistenceProvider>,
@@ -86,13 +97,13 @@ describe('student highlight persistence v2', () => {
       throw new Error('Expected first surface');
     }
 
-    textNode = firstSurface.firstChild;
+    textNode = findFirstTextNode(firstSurface);
     fireEvent(document, new Event('selectionchange'));
-    const highlightButton = first.container.querySelector('button');
-    if (!highlightButton) {
-      throw new Error('Expected highlight action button');
+    const colorButton = first.container.querySelector('button[aria-label="Apply Yellow highlight"]');
+    if (!colorButton) {
+      throw new Error('Expected highlight color action button');
     }
-    fireEvent.click(highlightButton);
+    fireEvent.click(colorButton);
     expect(first.container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(1);
 
     first.unmount();
@@ -126,7 +137,6 @@ describe('student highlight persistence v2', () => {
         <FormattedText
           text="Alpha beta gamma"
           highlightEnabled
-          showHighlightButton
           highlightSurfaceId="test:hash-reset"
         />
       </StudentHighlightPersistenceProvider>,
@@ -137,13 +147,13 @@ describe('student highlight persistence v2', () => {
       throw new Error('Expected surface');
     }
 
-    textNode = surface.firstChild;
+    textNode = findFirstTextNode(surface);
     fireEvent(document, new Event('selectionchange'));
-    const highlightButton = container.querySelector('button');
-    if (!highlightButton) {
-      throw new Error('Expected highlight action button');
+    const colorButton = container.querySelector('button[aria-label="Apply Yellow highlight"]');
+    if (!colorButton) {
+      throw new Error('Expected highlight color action button');
     }
-    fireEvent.click(highlightButton);
+    fireEvent.click(colorButton);
     expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(1);
 
     rerender(

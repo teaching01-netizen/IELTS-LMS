@@ -1,4 +1,4 @@
-export type StudentHighlightColor = 'yellow' | 'amber' | 'green' | 'blue';
+export type StudentHighlightColor = 'yellow' | 'amber' | 'green' | 'blue' | 'purple';
 
 export interface StudentHighlightPaletteEntry {
   id: StudentHighlightColor;
@@ -36,6 +36,13 @@ export const studentHighlightPalette: StudentHighlightPaletteEntry[] = [
     swatchClassName: 'bg-sky-200',
     highlightClassName: 'rounded-sm bg-sky-200/80 text-gray-900',
     highlightColorValue: '#bae6fd',
+  },
+  {
+    id: 'purple',
+    label: 'Purple',
+    swatchClassName: 'bg-violet-200',
+    highlightClassName: 'rounded-sm bg-violet-200/80 text-gray-900',
+    highlightColorValue: '#ddd6fe',
   },
 ];
 

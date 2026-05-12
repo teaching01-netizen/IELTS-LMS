@@ -36,9 +36,10 @@ interface UseHighlightSurfaceV2Result {
   renderedHtml: string;
   canHighlightSelection: boolean;
   canEraseSelection: boolean;
-  applySelectionHighlight: () => void;
+  applySelectionHighlight: (color?: StudentHighlightColor) => void;
   eraseSelectionHighlight: () => void;
   hint: string | null;
+  selectionToolbarPosition: { left: number; top: number } | null;
 }
 
 export function useHighlightSurfaceV2({
@@ -52,6 +53,10 @@ export function useHighlightSurfaceV2({
   const canonicalText = useMemo(() => extractCanonicalTextFromHtml(baseHtml), [baseHtml]);
   const { ranges, setRanges } = usePersistedHighlightRangesV2(surfaceId, canonicalText);
   const [selection, setSelection] = useState<HighlightSelectionV2 | null>(null);
+  const [selectionToolbarPosition, setSelectionToolbarPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const resolvedHighlightColor = highlightColor ?? defaultStudentHighlightColor;
   const resolvedClassForColor = useCallback(
@@ -68,6 +73,7 @@ export function useHighlightSurfaceV2({
   const refreshSelection = useCallback(() => {
     if (!enabled) {
       setSelection(null);
+      setSelectionToolbarPosition(null);
       return;
     }
 
@@ -75,6 +81,7 @@ export function useHighlightSurfaceV2({
     const browserSelection = window.getSelection();
     if (!container || !browserSelection) {
       setSelection(null);
+      setSelectionToolbarPosition(null);
       return;
     }
 
@@ -82,6 +89,24 @@ export function useHighlightSurfaceV2({
       enforceSingleBlock: true,
     });
     setSelection(captured);
+    if (!captured || browserSelection.rangeCount === 0) {
+      setSelectionToolbarPosition(null);
+      return;
+    }
+
+    try {
+      const range = browserSelection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      const left = rect.left + rect.width / 2;
+      const top = rect.top + window.scrollY;
+      if (!Number.isFinite(left) || !Number.isFinite(top)) {
+        setSelectionToolbarPosition(null);
+        return;
+      }
+      setSelectionToolbarPosition({ left, top });
+    } catch {
+      setSelectionToolbarPosition({ left: 0, top: window.scrollY });
+    }
   }, [enabled]);
 
   const resolveCurrentSelection = useCallback(() => {
@@ -104,13 +129,18 @@ export function useHighlightSurfaceV2({
     });
   }, [enabled, selection]);
 
-  const applySelectionHighlight = useCallback(() => {
+  const applySelectionHighlight = useCallback((color?: StudentHighlightColor) => {
     const activeSelection = resolveCurrentSelection();
     if (!enabled || !activeSelection) {
       return;
     }
 
-    const next = addHighlightRange(ranges, activeSelection, resolvedHighlightColor, MAX_SURFACE_RANGES);
+    const next = addHighlightRange(
+      ranges,
+      activeSelection,
+      color ?? resolvedHighlightColor,
+      MAX_SURFACE_RANGES,
+    );
     if (next.limitReached) {
       setHint('You reached the highlight limit for this text section.');
       return;
@@ -118,6 +148,9 @@ export function useHighlightSurfaceV2({
 
     setHint(null);
     setRanges(next.ranges);
+    window.getSelection()?.removeAllRanges();
+    setSelection(null);
+    setSelectionToolbarPosition(null);
   }, [enabled, ranges, resolveCurrentSelection, resolvedHighlightColor, setRanges]);
 
   const eraseSelectionHighlight = useCallback(() => {
@@ -128,6 +161,9 @@ export function useHighlightSurfaceV2({
 
     setHint(null);
     setRanges(eraseHighlightRange(ranges, activeSelection));
+    window.getSelection()?.removeAllRanges();
+    setSelection(null);
+    setSelectionToolbarPosition(null);
   }, [enabled, ranges, resolveCurrentSelection, setRanges]);
 
   const canEraseSelection = useMemo(() => {
@@ -141,6 +177,7 @@ export function useHighlightSurfaceV2({
   useEffect(() => {
     if (!enabled) {
       setSelection(null);
+      setSelectionToolbarPosition(null);
       setHint(null);
       return;
     }
@@ -182,5 +219,6 @@ export function useHighlightSurfaceV2({
     applySelectionHighlight,
     eraseSelectionHighlight,
     hint,
+    selectionToolbarPosition,
   };
 }

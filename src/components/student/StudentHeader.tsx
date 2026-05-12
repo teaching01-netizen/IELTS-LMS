@@ -2,11 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Bell,
-  ChevronDown,
   CheckCircle,
   Clock,
   Contrast,
-  Highlighter,
   LayoutGrid,
   Menu,
   Minus,
@@ -15,11 +13,6 @@ import {
   Wifi,
 } from 'lucide-react';
 import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
-import {
-  defaultStudentHighlightColor,
-  studentHighlightPalette,
-  type StudentHighlightColor,
-} from './highlightPalette';
 
 interface StudentHeaderProps {
   onExit: () => void;
@@ -34,10 +27,6 @@ interface StudentHeaderProps {
   onZoomIn?: (() => void) | undefined;
   onZoomOut?: (() => void) | undefined;
   onZoomReset?: (() => void) | undefined;
-  highlightEnabled?: boolean | undefined;
-  highlightColor?: StudentHighlightColor | undefined;
-  onHighlightModeToggle?: (() => void) | undefined;
-  onHighlightColorChange?: ((color: StudentHighlightColor) => void) | undefined;
   isExamActive?: boolean | undefined;
   showExitButton?: boolean | undefined;
   confirmExitWhenExamActive?: boolean | undefined;
@@ -56,37 +45,23 @@ export function StudentHeader({
   onZoomIn,
   onZoomOut,
   onZoomReset,
-  highlightEnabled = false,
-  highlightColor = defaultStudentHighlightColor,
-  onHighlightModeToggle,
-  onHighlightColorChange,
   isExamActive = false,
   showExitButton = true,
   confirmExitWhenExamActive = true,
 }: StudentHeaderProps) {
+  void onClearHighlights;
   const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const [showHighlightPalette, setShowHighlightPalette] = useState(false);
   const [showTabletZoomControls, setShowTabletZoomControls] = useState(false);
-  const [highlightPaletteStyle, setHighlightPaletteStyle] = useState<React.CSSProperties>({
-    top: 0,
-    left: 0,
-    width: 288,
-  });
   const [tabletZoomControlsStyle, setTabletZoomControlsStyle] = useState<React.CSSProperties>({
     top: 0,
     left: 0,
     width: 280,
   });
-  const highlightButtonRef = useRef<HTMLButtonElement | null>(null);
-  const highlightPaletteRef = useRef<HTMLDivElement | null>(null);
   const tabletZoomButtonRef = useRef<HTMLButtonElement | null>(null);
   const tabletZoomPanelRef = useRef<HTMLDivElement | null>(null);
   const showZoomControls = zoom !== undefined && onZoomIn && onZoomOut && onZoomReset;
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
-  const showHighlightControls = Boolean(onHighlightModeToggle && onHighlightColorChange);
-  const selectedHighlight =
-    studentHighlightPalette.find((entry) => entry.id === highlightColor) ?? studentHighlightPalette[0]!;
-  
+
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -105,80 +80,6 @@ export function StudentHeader({
     setShowExitConfirm(false);
     onExit();
   };
-
-  const updateHighlightPalettePosition = useCallback(() => {
-    const button = highlightButtonRef.current;
-    if (!button) {
-      return;
-    }
-
-    const rect = button.getBoundingClientRect();
-    const width = 288;
-    const left = Math.min(Math.max(12, rect.right - width), Math.max(12, window.innerWidth - width - 12));
-
-    setHighlightPaletteStyle({
-      top: Math.round(rect.bottom + 10),
-      left: Math.round(left),
-      width,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!showHighlightPalette) {
-      return;
-    }
-
-    updateHighlightPalettePosition();
-
-    const handleResize = () => {
-      updateHighlightPalettePosition();
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setShowHighlightPalette(false);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [showHighlightPalette, updateHighlightPalettePosition]);
-
-  useEffect(() => {
-    if (!showHighlightPalette) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
-      const target = event.target as Node | null;
-      if (
-        target &&
-        (highlightButtonRef.current?.contains(target) || highlightPaletteRef.current?.contains(target))
-      ) {
-        return;
-      }
-
-      setShowHighlightPalette(false);
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('touchstart', handlePointerDown);
-
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('touchstart', handlePointerDown);
-    };
-  }, [showHighlightPalette]);
-
-  const handleHighlightButtonClick = useCallback(() => {
-    setShowHighlightPalette((open) => !open);
-    setShowTabletZoomControls(false);
-  }, []);
 
   const updateTabletZoomControlsPosition = useCallback(() => {
     const button = tabletZoomButtonRef.current;
@@ -238,14 +139,6 @@ export function StudentHeader({
       window.removeEventListener('resize', handleResize);
     };
   }, [showTabletZoomControls, tabletMode, updateTabletZoomControlsPosition]);
-
-  const handleHighlightColorChange = (color: StudentHighlightColor) => {
-    onHighlightColorChange?.(color);
-    if (!highlightEnabled) {
-      onHighlightModeToggle?.();
-    }
-    setShowHighlightPalette(false);
-  };
 
   const renderOverlayPanel = useCallback((panel: React.ReactNode) => {
     if (typeof document === 'undefined') {
@@ -311,77 +204,6 @@ export function StudentHeader({
       )
     : null;
 
-  const highlightPalettePanel = showHighlightPalette
-    ? renderOverlayPanel(
-        <div
-          ref={highlightPaletteRef}
-          id="student-highlight-palette"
-          role="dialog"
-          aria-label="Highlight options"
-          className="fixed z-[90] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-2xl"
-          style={highlightPaletteStyle}
-        >
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[length:var(--student-meta-font-size)] font-black uppercase tracking-[0.18em] text-gray-500">
-                Highlight
-              </div>
-              <div className="text-xs text-gray-600">
-                Pick a color and turn highlight mode on or off.
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                onHighlightModeToggle?.();
-              }}
-              className={`rounded-full border px-3 py-1.5 text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-wide transition-colors ${
-                highlightEnabled
-                  ? 'border-amber-500 bg-amber-50 text-amber-800'
-                  : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              {highlightEnabled ? 'On' : 'Off'}
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {studentHighlightPalette.map((color) => {
-              const isActive = highlightColor === color.id;
-              return (
-                <button
-                  key={color.id}
-                  type="button"
-                  onClick={() => handleHighlightColorChange(color.id)}
-                  className={`rounded-lg border-2 p-2 text-left transition-all ${
-                    isActive
-                      ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
-                  aria-pressed={isActive}
-                  aria-label={`Select ${color.label} highlight color`}
-                >
-                  <div className={`h-6 rounded-md ${color.swatchClassName}`} />
-                  <div className="mt-1 text-xs font-semibold text-gray-900">{color.label}</div>
-                </button>
-              );
-            })}
-          </div>
-          {onClearHighlights ? (
-            <button
-              type="button"
-              onClick={() => {
-                onClearHighlights();
-                setShowHighlightPalette(false);
-              }}
-              className="mt-3 w-full rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[length:var(--student-control-font-size)] font-bold text-rose-700 hover:border-rose-300 hover:bg-rose-100"
-            >
-              Remove all highlights
-            </button>
-          ) : null}
-        </div>,
-      )
-    : null;
-
   return (
     <header
       className="h-14 md:h-16 border-b border-gray-200 bg-white grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 md:gap-3 px-3 md:px-4 lg:px-6 flex-shrink-0 z-10 shadow-sm"
@@ -426,8 +248,8 @@ export function StudentHeader({
         className="flex min-w-0 max-w-full items-center justify-end gap-1.5 md:gap-2 lg:gap-4 text-gray-700 flex-shrink-0 overflow-x-auto no-scrollbar justify-self-end"
         data-testid="student-header-controls-slot"
       >
-          {autoSaveStatus && (
-            <div className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-wider hidden sm:flex">
+        {autoSaveStatus && (
+          <div className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-wider hidden sm:flex">
             {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (
               <>
                 <LoadingMark size="xs" className="bg-gray-300" />
@@ -458,7 +280,6 @@ export function StudentHeader({
                   type="button"
                   onClick={() => {
                     setShowTabletZoomControls((open) => !open);
-                    setShowHighlightPalette(false);
                   }}
                   className="flex min-w-[5.75rem] items-center justify-center gap-1 rounded-sm border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[length:var(--student-control-font-size)] font-bold text-gray-700 transition-colors hover:border-gray-300 hover:bg-gray-100"
                   aria-expanded={showTabletZoomControls}
@@ -474,29 +295,6 @@ export function StudentHeader({
                   ) : null}
                 </button>
                 {tabletZoomPanel}
-              </div>
-            ) : null}
-            {showHighlightControls ? (
-              <div className="relative">
-                <button
-                  ref={highlightButtonRef}
-                  type="button"
-                  onClick={handleHighlightButtonClick}
-                  className={`flex min-w-[6.75rem] items-center justify-center gap-1 rounded-sm border px-2.5 py-1.5 text-[length:var(--student-control-font-size)] font-bold transition-colors ${
-                    highlightEnabled
-                      ? 'border-amber-500 bg-amber-50 text-amber-800'
-                      : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300 hover:bg-gray-100'
-                  }`}
-                  aria-expanded={showHighlightPalette}
-                  aria-controls="student-highlight-palette"
-                  aria-label="Open highlight options"
-                  title="Open highlight options"
-                >
-                  <Highlighter size={14} strokeWidth={2.2} />
-                  <span>Highlight</span>
-                  <span className={`h-2.5 w-2.5 rounded-full border border-white shadow-sm ${selectedHighlight.swatchClassName}`} />
-                </button>
-                {highlightPalettePanel}
               </div>
             ) : null}
           </>
@@ -542,30 +340,6 @@ export function StudentHeader({
                 >
                   <RefreshCw size={14} />
                 </button>
-              </div>
-            ) : null}
-            {showHighlightControls ? (
-              <div className="relative">
-                <button
-                  ref={highlightButtonRef}
-                  type="button"
-                  onClick={handleHighlightButtonClick}
-                  className={`flex items-center gap-1 rounded-sm border px-2.5 py-1.5 text-[length:var(--student-control-font-size)] font-bold transition-colors ${
-                    highlightEnabled
-                      ? 'border-amber-500 bg-amber-50 text-amber-800'
-                      : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300 hover:bg-gray-100'
-                  }`}
-                  aria-expanded={showHighlightPalette}
-                  aria-controls="student-highlight-palette"
-                  aria-label="Open highlight options"
-                  title="Open highlight options"
-                >
-                  <Highlighter size={14} strokeWidth={2.2} />
-                  <span className="hidden sm:inline">Highlight</span>
-                  <span className={`h-2.5 w-2.5 rounded-full border border-white shadow-sm ${selectedHighlight.swatchClassName}`} />
-                  <ChevronDown size={12} className="hidden sm:inline" />
-                </button>
-                {highlightPalettePanel}
               </div>
             ) : null}
           </>
@@ -617,26 +391,28 @@ export function StudentHeader({
           </>
         )}
       </div>
-      
+
       {showExitConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4" role="dialog" aria-modal="true" aria-labelledby="exit-confirm-title">
-          <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8">
-            <h2 id="exit-confirm-title" className="text-xl font-black text-gray-900 mb-3">Exit Exam?</h2>
-            <p className="text-sm text-gray-700 leading-6 mb-6">
-              Are you sure you want to exit the exam? Your progress will be saved, but you will not be able to return to this session.
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-sm max-w-md w-full p-6">
+            <h3 className="text-xl font-black text-gray-900 mb-3">Exit Exam?</h3>
+            <p className="text-gray-700 mb-6 leading-relaxed">
+              Your exam progress has been autosaved, but leaving now may interrupt your session.
             </p>
             <div className="flex gap-3 justify-end">
               <button
+                type="button"
                 onClick={() => setShowExitConfirm(false)}
-                className="px-4 py-2 bg-gray-50 text-gray-900 font-bold text-sm rounded-sm"
+                className="px-4 py-2 border border-gray-300 rounded-sm text-gray-700 font-bold"
               >
-                Cancel
+                Stay
               </button>
               <button
+                type="button"
                 onClick={confirmExit}
-                className="px-4 py-2 bg-red-800 text-white font-bold text-sm rounded-sm"
+                className="px-4 py-2 bg-red-600 text-white rounded-sm font-bold"
               >
-                Exit Exam
+                Exit
               </button>
             </div>
           </div>

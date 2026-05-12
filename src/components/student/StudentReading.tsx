@@ -100,7 +100,6 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
             highlightClassName={highlightClassName}
             highlightSurfaceId={`reading:passage:${activePassage.id}`}
             preserveInlineEmphasis
-            showHighlightButton
           />
         ) : (
           <RichTextHighlighter

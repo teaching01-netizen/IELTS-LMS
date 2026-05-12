@@ -18,7 +18,7 @@ import {
   getStudentPassageReadabilityLabel,
   getStudentTypographyScale,
 } from './accessibilityScale';
-import { defaultStudentHighlightColor, getStudentHighlightClassName } from './highlightPalette';
+import { defaultStudentHighlightColor } from './highlightPalette';
 import { useStudentFullscreenWarning } from './useStudentFullscreenWarning';
 import { useStudentSubmissionOrchestration } from './useStudentSubmissionOrchestration';
 import { useStudentTabletMode } from './tabletMode';
@@ -143,8 +143,8 @@ export function StudentApp({
   const timeExtensionReason =
     typeof uiState.timeExtensionReason === 'string' ? uiState.timeExtensionReason : '';
   const highlightColor = defaultStudentHighlightColor;
-  const highlightClassName = getStudentHighlightClassName(defaultStudentHighlightColor);
-  const highlightEnabled = false;
+  const highlightClassName = undefined;
+  const highlightEnabled = true;
   const attemptAnswers = attemptState.attempt?.answers ?? {};
   const attemptWritingAnswers = attemptState.attempt?.writingAnswers ?? {};
   const attemptFlags = attemptState.attempt?.flags ?? {};
@@ -724,8 +724,6 @@ export function StudentApp({
         testTakerId={attemptState.attempt?.candidateId ?? undefined}
         timeRemaining={runtimeState.displayTimeRemaining}
         tabletMode={tabletMode}
-        highlightEnabled={highlightEnabled}
-        highlightColor={highlightColor}
         onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
         onOpenNavigator={
           runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening'

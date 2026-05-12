@@ -795,7 +795,8 @@ describe('student question experience', () => {
     expect(passageTitle).toHaveStyle({ fontSize: 'var(--student-passage-title-font-size)' });
     expect(passageTitle.nextElementSibling?.className).toContain('--student-passage-h1-font-size');
 
-    const readingHighlighter = container.querySelector('[data-student-highlightable="true"]');
+    const readingHighlighters = container.querySelectorAll('[data-student-highlightable="true"]');
+    const readingHighlighter = readingHighlighters[readingHighlighters.length - 1] ?? null;
     expect(readingHighlighter).not.toBeNull();
     expect(readingHighlighter).toHaveClass('whitespace-pre-wrap');
     expect(readingHighlighter?.className).not.toContain('break-words');
@@ -1005,7 +1006,8 @@ describe('student question experience', () => {
       '--reading-pane-width': '97%',
       '--question-pane-width': 'calc(3%)',
     });
-    expect(screen.getByTestId('reading-question-scroll')).toHaveClass('p-4');
+    expect(screen.getByTestId('reading-question-scroll')).toHaveClass('p-2.5');
+    expect(screen.getByTestId('reading-question-scroll')).toHaveClass('md:p-3');
   });
 
   it('allows desktop reading split drag to reach near-boundary widths', () => {
@@ -1277,13 +1279,11 @@ describe('student question experience', () => {
     expect(onOpenNavigator).toHaveBeenCalledTimes(1);
   });
 
-  it('wires zoom controls and opens the highlight palette from the header', () => {
+  it('wires zoom controls from the header', () => {
     const onOpenAccessibility = vi.fn();
     const onZoomIn = vi.fn();
     const onZoomOut = vi.fn();
     const onZoomReset = vi.fn();
-    const onHighlightModeToggle = vi.fn();
-    const onHighlightColorChange = vi.fn();
 
     render(
       <StudentHeader
@@ -1291,14 +1291,10 @@ describe('student question experience', () => {
         timeRemaining={1200}
         isExamActive
         zoom={1.25}
-        highlightEnabled={false}
-        highlightColor="yellow"
         onOpenAccessibility={onOpenAccessibility}
         onZoomIn={onZoomIn}
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
-        onHighlightModeToggle={onHighlightModeToggle}
-        onHighlightColorChange={onHighlightColorChange}
       />,
     );
 
@@ -1309,26 +1305,19 @@ describe('student question experience', () => {
     fireEvent.click(screen.getByRole('button', { name: /zoom out/i }));
     fireEvent.click(screen.getByRole('button', { name: /zoom in/i }));
     fireEvent.click(screen.getByRole('button', { name: /reset zoom/i }));
-    fireEvent.click(screen.getByRole('button', { name: /open highlight options/i }));
-    expect(screen.getByRole('dialog', { name: /highlight options/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /select pink highlight color/i }));
     fireEvent.click(screen.getByRole('button', { name: /open accessibility settings/i }));
 
     expect(onZoomOut).toHaveBeenCalledTimes(1);
     expect(onZoomIn).toHaveBeenCalledTimes(1);
     expect(onZoomReset).toHaveBeenCalledTimes(1);
-    expect(onHighlightModeToggle).toHaveBeenCalledTimes(1);
-    expect(onHighlightColorChange).toHaveBeenCalledWith('amber');
     expect(onOpenAccessibility).toHaveBeenCalledTimes(1);
   });
 
-  it('renders separate tablet zoom and highlight controls in the header', () => {
+  it('renders tablet zoom controls in the header', () => {
     const onOpenAccessibility = vi.fn();
     const onZoomIn = vi.fn();
     const onZoomOut = vi.fn();
     const onZoomReset = vi.fn();
-    const onHighlightModeToggle = vi.fn();
-    const onHighlightColorChange = vi.fn();
 
     render(
       <StudentHeader
@@ -1337,21 +1326,15 @@ describe('student question experience', () => {
         isExamActive
         tabletMode
         zoom={1.1}
-        highlightEnabled={false}
-        highlightColor="yellow"
         onOpenAccessibility={onOpenAccessibility}
         onZoomIn={onZoomIn}
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
-        onHighlightModeToggle={onHighlightModeToggle}
-        onHighlightColorChange={onHighlightColorChange}
       />,
     );
 
     expect(screen.queryByTestId('zoom-controls')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open zoom controls/i })).toHaveTextContent('Zoom');
-    expect(screen.getByRole('button', { name: /open highlight options/i })).toHaveTextContent('Highlight');
-
     fireEvent.click(screen.getByRole('button', { name: /open zoom controls/i }));
 
     const zoomPanel = screen.getByRole('dialog', { name: /zoom controls/i });
@@ -1360,17 +1343,9 @@ describe('student question experience', () => {
     expect(zoomPanel).toHaveClass('z-[90]');
 
     fireEvent.click(within(zoomPanel).getByRole('button', { name: /zoom in/i }));
-    fireEvent.click(screen.getByRole('button', { name: /open highlight options/i }));
-    const highlightPanel = screen.getByRole('dialog', { name: /highlight options/i });
-    expect(within(highlightPanel).queryByTestId('zoom-controls')).not.toBeInTheDocument();
-    expect(highlightPanel.parentElement).toBe(document.body);
-    expect(highlightPanel).toHaveClass('z-[90]');
-    fireEvent.click(within(highlightPanel).getByRole('button', { name: /select pink highlight color/i }));
     fireEvent.click(screen.getByRole('button', { name: /open accessibility settings/i }));
 
     expect(onZoomIn).toHaveBeenCalledTimes(1);
-    expect(onHighlightColorChange).toHaveBeenCalledWith('amber');
-    expect(onHighlightModeToggle).toHaveBeenCalledTimes(1);
     expect(onOpenAccessibility).toHaveBeenCalledTimes(1);
     expect(onZoomOut).not.toHaveBeenCalled();
     expect(onZoomReset).not.toHaveBeenCalled();
@@ -1382,8 +1357,6 @@ describe('student question experience', () => {
     const onZoomIn = vi.fn();
     const onZoomOut = vi.fn();
     const onZoomReset = vi.fn();
-    const onHighlightModeToggle = vi.fn();
-    const onHighlightColorChange = vi.fn();
 
     const { rerender } = render(
       <StudentHeader
@@ -1408,15 +1381,11 @@ describe('student question experience', () => {
         timeRemaining={1200}
         isExamActive
         zoom={1}
-        highlightEnabled={false}
-        highlightColor="yellow"
         onOpenAccessibility={onOpenAccessibility}
         onOpenNavigator={onOpenNavigator}
         onZoomIn={onZoomIn}
         onZoomOut={onZoomOut}
         onZoomReset={onZoomReset}
-        onHighlightModeToggle={onHighlightModeToggle}
-        onHighlightColorChange={onHighlightColorChange}
       />,
     );
 
@@ -1948,7 +1917,8 @@ describe('student question experience', () => {
       '--listening-pane-width': '97%',
       '--question-pane-width': 'calc(3%)',
     });
-    expect(screen.getByTestId('listening-question-scroll')).toHaveClass('p-4');
+    expect(screen.getByTestId('listening-question-scroll')).toHaveClass('p-2.5');
+    expect(screen.getByTestId('listening-question-scroll')).toHaveClass('md:p-3');
   });
 
   it('allows desktop listening split drag to reach near-boundary widths', () => {
