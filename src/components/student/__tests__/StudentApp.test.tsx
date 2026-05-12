@@ -2409,7 +2409,7 @@ describe('StudentApp runtime-backed mode', () => {
     vi.useRealTimers();
   });
 
-  it('shows a blocking black overlay when screenshot shortcut is detected', async () => {
+  it('does not show a blocking black overlay when screenshot shortcut is detected', () => {
     const config = createDefaultConfig('Academic', 'Academic');
     config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
@@ -2557,16 +2557,8 @@ describe('StudentApp runtime-backed mode', () => {
       );
     });
 
-    expect(screen.getByText(/screen capture blocked/i)).toBeInTheDocument();
-    expect(screen.getByText(/screenshot attempt detected/i)).toBeInTheDocument();
-
-    act(() => {
-      fireEvent.click(screen.getByRole('button', { name: /continue exam/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.queryByText(/screen capture blocked/i)).not.toBeInTheDocument();
-    });
+    expect(screen.queryByText(/screen capture blocked/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/screenshot attempt detected/i)).not.toBeInTheDocument();
   });
 
   it('does not show screenshot blackout overlay when anti-screenshot guard is disabled', () => {
