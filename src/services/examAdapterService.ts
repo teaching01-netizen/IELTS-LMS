@@ -20,6 +20,7 @@ import type {
   SubAnswerTreeNode,
   SingleMCQQuestion,
   SingleMCQBlock,
+  TableCompletionBlock,
   TFNGQuestion,
   MCQOption,
 } from '../types';
@@ -542,32 +543,66 @@ export function countAnsweredQuestions(
   questions: StudentQuestionDescriptor[],
   answers: Record<string, StudentAnswerValue | undefined>,
 ): number {
-  return questions.reduce((count, question) => {
-    return count + getAnsweredSlotCount(question, answers);
-  }, 0);
+  const groupedSlots = new Map<string, StudentQuestionDescriptor[]>();
+  let count = 0;
+
+  for (const question of questions) {
+    const groupKey = getGroupedScoringSlotKey(question);
+    if (groupKey) {
+      const existing = groupedSlots.get(groupKey);
+      if (existing) {
+        existing.push(question);
+      } else {
+        groupedSlots.set(groupKey, [question]);
+      }
+      continue;
+    }
+
+    count += getAnsweredSlotCount(question, answers);
+  }
+
+  for (const groupQuestions of groupedSlots.values()) {
+    const requiredCorrect = resolveGroupedScoringRequiredCorrect(groupQuestions);
+    const answeredSlots = groupQuestions.reduce((acc, groupedQuestion) => {
+      const answer = getQuestionAnswer(groupedQuestion, answers);
+      return acc + (hasAnsweredValue(answer) ? 1 : 0);
+    }, 0);
+    if (answeredSlots >= requiredCorrect) {
+      count += 1;
+    }
+  }
+
+  return count;
 }
 
 export function countQuestionSlots(questions: StudentQuestionDescriptor[]): number {
-  return questions.reduce(
-    (count, question) => count + (question.isMulti ? question.correctCount : 1),
-    0,
-  );
+  const groupedSlotKeys = new Set<string>();
+  let count = 0;
+
+  for (const question of questions) {
+    if (question.isMulti) {
+      count += question.correctCount;
+      continue;
+    }
+
+    const groupKey = getGroupedScoringSlotKey(question);
+    if (groupKey) {
+      groupedSlotKeys.add(groupKey);
+      continue;
+    }
+
+    count += 1;
+  }
+
+  return count + groupedSlotKeys.size;
 }
 
 export function getQuestionStartNumber(
   questions: StudentQuestionDescriptor[],
   questionId: string,
 ): number | null {
-  let current = 1;
-
-  for (const question of questions) {
-    if (question.id === questionId) {
-      return current;
-    }
-    current += question.isMulti ? question.correctCount : 1;
-  }
-
-  return null;
+  const lookup = buildQuestionStartNumberLookup(questions);
+  return lookup.get(questionId) ?? null;
 }
 
 export function getQuestionNumberLabel(
@@ -590,6 +625,77 @@ export function getQuestionNumberLabel(
   }
 
   return `${start}`;
+}
+
+function getGroupedScoringSlotKey(question: StudentQuestionDescriptor): string | null {
+  if (typeof question.rootId !== 'string') {
+    return null;
+  }
+  // Only collapse slots explicitly marked as grouped scoring (e.g. 2-for-1),
+  // not other uses of rootId such as the sub-answer tree.
+  return question.rootId.includes('::group::') ? question.rootId : null;
+}
+
+function resolveGroupedScoringRequiredCorrect(groupQuestions: StudentQuestionDescriptor[]): number {
+  const candidates: number[] = [];
+
+  for (const question of groupQuestions) {
+    if (question.block.type === 'SENTENCE_COMPLETION' && question.question && question.answerIndex !== undefined) {
+      const blank = question.question.blanks[question.answerIndex];
+      if (blank?.requiredCorrect !== undefined) {
+        candidates.push(blank.requiredCorrect);
+      }
+      continue;
+    }
+
+    if (question.block.type === 'TABLE_COMPLETION' && question.answerIndex !== undefined) {
+      const cell = (question.block as TableCompletionBlock).cells[question.answerIndex];
+      if (cell?.requiredCorrect !== undefined) {
+        candidates.push(cell.requiredCorrect);
+      }
+    }
+  }
+
+  const normalized = candidates
+    .map((value) => (Number.isFinite(value) ? Math.floor(value) : 0))
+    .filter((value) => value >= 1);
+
+  return normalized.length > 0 ? Math.max(...normalized) : 1;
+}
+
+function buildQuestionStartNumberLookup(
+  questions: StudentQuestionDescriptor[],
+): Map<string, number> {
+  const lookup = new Map<string, number>();
+  const groupedStartNumbers = new Map<string, number>();
+  let current = 1;
+
+  for (const question of questions) {
+    if (question.isMulti) {
+      lookup.set(question.id, current);
+      current += question.correctCount;
+      continue;
+    }
+
+    const groupKey = getGroupedScoringSlotKey(question);
+    if (groupKey) {
+      const existing = groupedStartNumbers.get(groupKey);
+      if (existing !== undefined) {
+        lookup.set(question.id, existing);
+        continue;
+      }
+
+      groupedStartNumbers.set(groupKey, current);
+      lookup.set(question.id, current);
+      current += 1;
+      continue;
+    }
+
+    lookup.set(question.id, current);
+    current += 1;
+  }
+
+  return lookup;
 }
 
 export function getQuestionAnswer(
@@ -630,7 +736,13 @@ export function isQuestionAnswered(
   question: StudentQuestionDescriptor,
   answers: Record<string, StudentAnswerValue | undefined>,
 ): boolean {
-  return getAnsweredSlotCount(question, answers) > 0;
+  const groupKey = getGroupedScoringSlotKey(question);
+  if (!groupKey) {
+    return getAnsweredSlotCount(question, answers) > 0;
+  }
+
+  const groupQuestions = questionsForGroupedScoringSlot(groupKey, question, answers);
+  return groupQuestions.some((groupedQuestion) => hasAnsweredValue(getQuestionAnswer(groupedQuestion, answers)));
 }
 
 export function isQuestionFullyAnswered(
@@ -641,7 +753,65 @@ export function isQuestionFullyAnswered(
     return getAnsweredSlotCount(question, answers) >= question.correctCount;
   }
 
-  return isQuestionAnswered(question, answers);
+  const groupKey = getGroupedScoringSlotKey(question);
+  if (!groupKey) {
+    return isQuestionAnswered(question, answers);
+  }
+
+  const groupQuestions = questionsForGroupedScoringSlot(groupKey, question, answers);
+  const requiredCorrect = resolveGroupedScoringRequiredCorrect(groupQuestions);
+  const answeredSlots = groupQuestions.reduce((acc, groupedQuestion) => {
+    const answer = getQuestionAnswer(groupedQuestion, answers);
+    return acc + (hasAnsweredValue(answer) ? 1 : 0);
+  }, 0);
+  return answeredSlots >= requiredCorrect;
+}
+
+function questionsForGroupedScoringSlot(
+  groupKey: string,
+  representative: StudentQuestionDescriptor,
+  answers: Record<string, StudentAnswerValue | undefined>,
+): StudentQuestionDescriptor[] {
+  void answers;
+  // We don't have the entire question list here, so fall back to using the block/question
+  // shape to locate all sibling slots that belong to the same group key.
+  // This is only used for grouped scoring on SentenceCompletion/TableCompletion slots.
+  if (representative.block.type === 'SENTENCE_COMPLETION' && representative.question) {
+    const question = representative.question;
+    return question.blanks
+      .map((blank, index) => ({
+        ...representative,
+        id: `${question.id}:${blank.id}`,
+        answerIndex: index,
+        rootId: (() => {
+          const scoreGroupId = typeof blank.scoreGroupId === 'string' ? blank.scoreGroupId.trim() : '';
+          return scoreGroupId
+            ? `${representative.block.id}::sentence::${question.id}::group::${scoreGroupId}`
+            : `${representative.block.id}::sentence::${question.id}::slot::${blank.id}`;
+        })(),
+      }))
+      .filter((entry) => entry.rootId === groupKey);
+  }
+
+  if (representative.block.type === 'TABLE_COMPLETION') {
+    const block = representative.block as TableCompletionBlock;
+    return block.cells
+      .map((cell, index) => ({
+        ...representative,
+        id: `${block.id}:${cell.id}`,
+        answerKey: block.id,
+        answerIndex: index,
+        rootId: (() => {
+          const scoreGroupId = typeof cell.scoreGroupId === 'string' ? cell.scoreGroupId.trim() : '';
+          return scoreGroupId
+            ? `${block.id}::table::group::${scoreGroupId}`
+            : `${block.id}::table::slot::${cell.id}`;
+        })(),
+      }))
+      .filter((entry) => entry.rootId === groupKey);
+  }
+
+  return [representative];
 }
 
 function buildStudentQuestionDescriptors(

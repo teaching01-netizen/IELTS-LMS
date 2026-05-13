@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countQuestionSlots,
   createInitialExamState,
   getQuestionNumberLabel,
+  getQuestionStartNumber,
   getStudentQuestionsForModule,
   isQuestionFullyAnswered,
 } from '../examAdapterService';
@@ -165,5 +167,12 @@ describe('student question descriptors (student exam core logic)', () => {
     // Grouped scoring should display one root question number for both blanks.
     expect(questions[0]?.rootNumber).toBe(1);
     expect(questions[1]?.rootNumber).toBe(1);
+
+    // Student numbering + totals should collapse the group into one question slot.
+    expect(countQuestionSlots(questions)).toBe(1);
+    expect(getQuestionStartNumber(questions, questions[0]!.id)).toBe(1);
+    expect(getQuestionStartNumber(questions, questions[1]!.id)).toBe(1);
+    expect(getQuestionNumberLabel(questions, questions[0]!.id)).toBe('1');
+    expect(getQuestionNumberLabel(questions, questions[1]!.id)).toBe('1');
   });
 });

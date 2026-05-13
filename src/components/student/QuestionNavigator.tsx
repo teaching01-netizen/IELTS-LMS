@@ -27,6 +27,24 @@ export function QuestionNavigator({
   onNavigate,
   onClose,
 }: QuestionNavigatorProps) {
+  const dedupeGroupedScoringSlots = React.useCallback(
+    (items: StudentQuestionDescriptor[]) => {
+      const seen = new Set<string>();
+      const out: StudentQuestionDescriptor[] = [];
+      for (const item of items) {
+        const key =
+          typeof item.rootId === 'string' && item.rootId.includes('::group::')
+            ? item.rootId
+            : item.id;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(item);
+      }
+      return out;
+    },
+    [],
+  );
+
   const totalQuestions = countQuestionSlots(questions);
   const answeredCount = countAnsweredQuestions(questions, answers);
   const flaggedCount = Object.values(flags).filter(Boolean).length;
@@ -88,7 +106,7 @@ export function QuestionNavigator({
                 Section {groupIndex + 1}
               </h3>
               <div className="flex flex-wrap gap-2">
-                {groupQuestions.map((question) => {
+                {dedupeGroupedScoringSlots(groupQuestions).map((question) => {
                   const isAnswered = isQuestionAnswered(question, answers);
                   const isFullyComplete = isQuestionFullyAnswered(question, answers);
                   const isFlagged = flags[question.id];

@@ -31,6 +31,24 @@ export function StudentFooter({
   showSubmitButton = true,
   tabletMode = false,
 }: StudentFooterProps) {
+  const dedupeGroupedScoringSlots = React.useCallback(
+    (items: StudentQuestionDescriptor[]) => {
+      const seen = new Set<string>();
+      const out: StudentQuestionDescriptor[] = [];
+      for (const item of items) {
+        const key =
+          typeof item.rootId === 'string' && item.rootId.includes('::group::')
+            ? item.rootId
+            : item.id;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(item);
+      }
+      return out;
+    },
+    [],
+  );
+
   const groupedQuestions = questions.reduce<Record<string, StudentQuestionDescriptor[]>>(
     (groups, question) => {
       const existingGroup = groups[question.groupId];
@@ -101,7 +119,7 @@ export function StudentFooter({
             >
               {isActiveGroup ? (
                 <div className="flex items-center gap-0.5 md:gap-1">
-                  {groupQuestions.map((question) => {
+                  {dedupeGroupedScoringSlots(groupQuestions).map((question) => {
                     const isCurrent = question.id === currentQuestionId;
                     const isFlagged = Boolean(flags[question.id]);
                     const isAnswered = isQuestionAnswered(question, answers);
