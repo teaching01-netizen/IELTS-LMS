@@ -12,6 +12,12 @@ import { createDefaultConfig, normalizeExamConfig } from '../constants/examDefau
 import { hydrateExamState } from '../services/examAdapterService';
 import { resolveAcceptedAnswers } from './acceptedAnswers';
 
+const normalizeScoreGroupId = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 export const getBlockQuestionCount = (block: QuestionBlock): number => {
   switch (block.type) {
     case 'TFNG':
@@ -29,13 +35,35 @@ export const getBlockQuestionCount = (block: QuestionBlock): number => {
     case 'SHORT_ANSWER':
       return block.questions.length;
     case 'SENTENCE_COMPLETION':
-      return block.questions.reduce((acc, q) => acc + q.blanks.length, 0);
+      return block.questions.reduce((acc, q) => {
+        const slotIds = new Set<string>();
+        q.blanks.forEach((blank) => {
+          const groupId = normalizeScoreGroupId(blank.scoreGroupId);
+          if (groupId) {
+            slotIds.add(`sentence:${q.id}:group:${groupId}`);
+          } else {
+            slotIds.add(`sentence:${q.id}:slot:${blank.id}`);
+          }
+        });
+        return acc + slotIds.size;
+      }, 0);
     case 'DIAGRAM_LABELING':
       return block.labels.length;
     case 'FLOW_CHART':
       return block.steps.length;
     case 'TABLE_COMPLETION':
-      return block.cells.length;
+      return (() => {
+        const slotIds = new Set<string>();
+        block.cells.forEach((cell) => {
+          const groupId = normalizeScoreGroupId(cell.scoreGroupId);
+          if (groupId) {
+            slotIds.add(`table:${block.id}:group:${groupId}`);
+          } else {
+            slotIds.add(`table:${block.id}:slot:${cell.id}`);
+          }
+        });
+        return slotIds.size;
+      })();
     case 'NOTE_COMPLETION':
       return block.questions.reduce((acc, q) => acc + q.blanks.length, 0);
     case 'CLASSIFICATION':

@@ -682,6 +682,34 @@ function buildStudentQuestionDescriptors(
     };
   }
 
+  const normalizeScoreGroupId = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  const buildGroupedSlotRootNumbers = (
+    slotKeys: string[],
+    firstRootNumber: number,
+  ): { rootNumbers: number[]; nextNumber: number } => {
+    const rootNumbers: number[] = [];
+    const assigned = new Map<string, number>();
+    let nextNumber = firstRootNumber;
+
+    for (const key of slotKeys) {
+      const existing = assigned.get(key);
+      if (existing !== undefined) {
+        rootNumbers.push(existing);
+        continue;
+      }
+      assigned.set(key, nextNumber);
+      rootNumbers.push(nextNumber);
+      nextNumber += 1;
+    }
+
+    return { rootNumbers, nextNumber };
+  };
+
   const descriptors: StudentQuestionDescriptor[] = (() => {
   switch (block.type) {
     case 'TFNG':
@@ -702,20 +730,40 @@ function buildStudentQuestionDescriptors(
       }));
 
     case 'SENTENCE_COMPLETION':
-      return block.questions.flatMap((question) =>
-        question.blanks.map((blank, blankIndex) => ({
-          id: `${question.id}:${blank.id}`,
-          blockId: block.id,
-          groupId,
-          groupLabel,
-          isMulti: false,
-          correctCount: 1,
-          answerKey: question.id,
-          answerIndex: blankIndex,
-          block,
-          question,
-        })),
-      );
+      return (() => {
+        let nextNumber = startRootNumber;
+        const result: StudentQuestionDescriptor[] = [];
+
+        for (const question of block.questions) {
+          const slotKeys = question.blanks.map((blank) => {
+            const groupKey = normalizeScoreGroupId(blank.scoreGroupId);
+            return groupKey
+              ? `${block.id}::sentence::${question.id}::group::${groupKey}`
+              : `${block.id}::sentence::${question.id}::slot::${blank.id}`;
+          });
+          const numbering = buildGroupedSlotRootNumbers(slotKeys, nextNumber);
+          nextNumber = numbering.nextNumber;
+
+          question.blanks.forEach((blank, blankIndex) => {
+            result.push({
+              id: `${question.id}:${blank.id}`,
+              blockId: block.id,
+              groupId,
+              groupLabel,
+              isMulti: false,
+              correctCount: 1,
+              answerKey: question.id,
+              answerIndex: blankIndex,
+              block,
+              question,
+              rootId: slotKeys[blankIndex],
+              rootNumber: numbering.rootNumbers[blankIndex],
+            });
+          });
+        }
+
+        return result;
+      })();
 
     case 'NOTE_COMPLETION':
       return block.questions.flatMap((question) =>
@@ -783,18 +831,30 @@ function buildStudentQuestionDescriptors(
       }));
 
     case 'TABLE_COMPLETION':
-      return block.cells.map((cell, cellIndex) => ({
-        id: `${block.id}:${cell.id}`,
-        blockId: block.id,
-        groupId,
-        groupLabel,
-        isMulti: false,
-        correctCount: 1,
-        answerKey: block.id,
-        answerIndex: cellIndex,
-        block,
-        question: null,
-      }));
+      return (() => {
+        const slotKeys = block.cells.map((cell) => {
+          const groupKey = normalizeScoreGroupId(cell.scoreGroupId);
+          return groupKey
+            ? `${block.id}::table::group::${groupKey}`
+            : `${block.id}::table::slot::${cell.id}`;
+        });
+        const numbering = buildGroupedSlotRootNumbers(slotKeys, startRootNumber);
+
+        return block.cells.map((cell, cellIndex) => ({
+          id: `${block.id}:${cell.id}`,
+          blockId: block.id,
+          groupId,
+          groupLabel,
+          isMulti: false,
+          correctCount: 1,
+          answerKey: block.id,
+          answerIndex: cellIndex,
+          block,
+          question: null,
+          rootId: slotKeys[cellIndex],
+          rootNumber: numbering.rootNumbers[cellIndex],
+        }));
+      })();
 
     case 'CLASSIFICATION':
       return block.items.map((item, itemIndex) => ({
@@ -828,7 +888,15 @@ function buildStudentQuestionDescriptors(
 
   return {
     descriptors,
-    nextNumber: startRootNumber + countQuestionSlots(descriptors),
+    nextNumber: (() => {
+      const definedRootNumbers = descriptors
+        .map((descriptor) => descriptor.rootNumber)
+        .filter((value): value is number => typeof value === 'number');
+      if (definedRootNumbers.length > 0) {
+        return Math.max(...definedRootNumbers) + 1;
+      }
+      return startRootNumber + countQuestionSlots(descriptors);
+    })(),
   };
 }
 

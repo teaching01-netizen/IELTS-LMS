@@ -92,7 +92,6 @@ export function QuestionRenderer({
   hideDiagramReference = false,
   registerLiveAnswer,
 }: QuestionRendererProps) {
-  void slotNumbers;
   const stringArrayAnswer = Array.isArray(answer) ? answer : [];
   const isCompactPane = tabletMode && compactPane;
   const fieldIndentClass = tabletMode ? 'ml-0' : 'ml-9';
@@ -107,6 +106,25 @@ export function QuestionRenderer({
   } as const;
 
   const getSlotId = (index: number, fallback: string) => slotIds[index] ?? fallback;
+  const hasDuplicateSlotNumbers = React.useMemo(() => {
+    if (!Array.isArray(slotNumbers) || slotNumbers.length === 0) {
+      return false;
+    }
+    const seen = new Set<number>();
+    for (const value of slotNumbers) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        continue;
+      }
+      if (seen.has(value)) {
+        return true;
+      }
+      seen.add(value);
+    }
+    return false;
+  }, [slotNumbers]);
+  const getSlotNumber = (index: number, fallback: number) => slotNumbers?.[index] ?? fallback;
+  const getSlotAriaLabelSuffix = (slotIndex: number) =>
+    hasDuplicateSlotNumbers ? ` (blank ${slotIndex + 1})` : '';
   const getSlotClassName = (slotId: string) => {
     const activeClass = currentQuestionId === slotId ? 'ring-2 ring-blue-500 ring-offset-2' : '';
     const flaggedClass = flags[slotId] ? 'border-amber-300 bg-amber-50' : 'border-transparent';
@@ -508,31 +526,38 @@ export function QuestionRenderer({
             <React.Fragment key={`${q.id}-${index}`}>
               <FormattedText as="span" text={part} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
               {index < blanks ? (
+                (() => {
+                  const slotId = getSlotId(index, `${q.id}:${index}`);
+                  const slotNumber = getSlotNumber(index, number + index);
+                  const ariaSuffix = getSlotAriaLabelSuffix(index);
+                  return (
                 <span
-                  id={`question-${getSlotId(index, `${q.id}:${index}`)}`}
+                  id={`question-${slotId}`}
                   className={`mx-1 inline-flex items-center gap-2 rounded-lg border px-2 py-1 align-middle ${getSlotClassName(
-                    getSlotId(index, `${q.id}:${index}`),
+                    slotId,
                   )}`}
                 >
                   <span className="min-w-[1.75rem] text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
-                    {number + index}
+                    {slotNumber}
                   </span>
                   <ProtectedInput
                     type="text"
-                    name={getSlotId(index, `${q.id}:${index}`)}
+                    name={slotId}
                     value={stringArrayAnswer[index] ?? ''}
                     onChange={(event) =>
-                      updateIndexedAnswer(index, event.target.value, blanks, getSlotId(index, `${q.id}:${index}`))
+                      updateIndexedAnswer(index, event.target.value, blanks, slotId)
                     }
                     className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0' : 'w-28'} ${tabletMode && !isCompactPane ? 'max-w-full' : ''}`}
                     placeholder="Answer..."
                     security={security}
                     sessionId={sessionId}
                     studentId={studentId}
-                    aria-label={`Answer for question ${number + index}`}
+                    aria-label={`Answer for question ${slotNumber}${ariaSuffix}`}
                   />
-                  {renderFlagButton(getSlotId(index, `${q.id}:${index}`))}
+                  {renderFlagButton(slotId)}
                 </span>
+                  );
+                })()
               ) : null}
             </React.Fragment>
           ))}
@@ -552,25 +577,30 @@ export function QuestionRenderer({
             <React.Fragment key={`${noteQuestion.id}-${index}`}>
               <FormattedText as="span" text={part} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
               {index < blanks ? (
+                (() => {
+                  const slotId = getSlotId(index, `${noteQuestion.id}:${index}`);
+                  const slotNumber = getSlotNumber(index, number + index);
+                  const ariaSuffix = getSlotAriaLabelSuffix(index);
+                  return (
                 <span
-                  id={`question-${getSlotId(index, `${noteQuestion.id}:${index}`)}`}
+                  id={`question-${slotId}`}
                   className={`mx-1 inline-flex items-center gap-2 rounded-lg border px-2 py-1 align-middle ${getSlotClassName(
-                    getSlotId(index, `${noteQuestion.id}:${index}`),
+                    slotId,
                   )}`}
                 >
                   <span className="min-w-[1.75rem] text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
-                    {number + index}
+                    {slotNumber}
                   </span>
                   <ProtectedInput
                     type="text"
-                    name={getSlotId(index, `${noteQuestion.id}:${index}`)}
+                    name={slotId}
                     value={stringArrayAnswer[index] ?? ''}
                     onChange={(event) =>
                       updateIndexedAnswer(
                         index,
                         event.target.value,
                         blanks,
-                        getSlotId(index, `${noteQuestion.id}:${index}`),
+                        slotId,
                       )
                     }
                     className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0' : 'w-28'} ${tabletMode && !isCompactPane ? 'max-w-full' : ''}`}
@@ -578,10 +608,12 @@ export function QuestionRenderer({
                     security={security}
                     sessionId={sessionId}
                     studentId={studentId}
-                    aria-label={`Answer for question ${number + index}`}
+                    aria-label={`Answer for question ${slotNumber}${ariaSuffix}`}
                   />
-                  {renderFlagButton(getSlotId(index, `${noteQuestion.id}:${index}`))}
+                  {renderFlagButton(slotId)}
                 </span>
+                  );
+                })()
               ) : null}
             </React.Fragment>
           ))}
@@ -596,7 +628,7 @@ export function QuestionRenderer({
         <React.Fragment key={label.id}>
           {renderTextField(
             getSlotId(index, `${diagramBlock.id}:${label.id}`),
-            number + index,
+            getSlotNumber(index, number + index),
             stringArrayAnswer[index] ?? '',
             (nextValue) =>
               updateIndexedAnswer(
@@ -653,7 +685,7 @@ export function QuestionRenderer({
       {flowChartBlock.steps.map((step, index) =>
         renderTextField(
           getSlotId(index, `${flowChartBlock.id}:${step.id}`),
-          number + index,
+          getSlotNumber(index, number + index),
           stringArrayAnswer[index] ?? '',
           (nextValue) =>
             updateIndexedAnswer(
@@ -802,9 +834,9 @@ export function QuestionRenderer({
                         isFlagged={Boolean(flags[slot.slotId])}
                         promptPrefixText={promptPrefixText}
                         promptSuffixText={promptSuffixText}
-                        slotNumber={number + slot.index}
+                        slotNumber={getSlotNumber(slot.index, number + slot.index)}
                         answerValue={stringArrayAnswer[slot.index] ?? ''}
-                        ariaLabel={`Answer for question ${number + slot.index}`}
+                        ariaLabel={`Answer for question ${getSlotNumber(slot.index, number + slot.index)}`}
                         highlightEnabled={highlightEnabled}
                         highlightColor={highlightColor}
                         security={security}
@@ -859,7 +891,7 @@ export function QuestionRenderer({
                                     className="mx-1 inline-flex items-center gap-2 align-middle"
                                   >
                                     <span className="font-bold text-gray-900">
-                                      {number + slot.index}.
+                                      {getSlotNumber(slot.index, number + slot.index)}.
                                     </span>
                                     <span className="inline-block min-w-[11rem] max-w-full align-middle">
                                       <ProtectedInput
@@ -879,7 +911,7 @@ export function QuestionRenderer({
                                         security={security}
                                         sessionId={sessionId}
                                         studentId={studentId}
-                                        aria-label={`Answer for question ${number + slot.index}`}
+                                        aria-label={`Answer for question ${getSlotNumber(slot.index, number + slot.index)}`}
                                       />
                                     </span>
                                   </span>
@@ -914,11 +946,12 @@ export function QuestionRenderer({
       <div className="space-y-3">
         {classificationBlock.items.map((item, index) => {
           const slotId = getSlotId(index, `${classificationBlock.id}:${item.id}`);
+          const slotNumber = getSlotNumber(index, number + index);
           return (
             <div key={item.id} id={`question-${slotId}`} className={getSlotClassName(slotId)}>
               <div className={`flex flex-col gap-3 ${isCompactPane ? '' : 'md:flex-row md:items-center'}`}>
                 <div className="flex items-start gap-3 md:flex-1">
-                  <span className="min-w-[2rem] font-bold text-gray-900">{number + index}.</span>
+                  <span className="min-w-[2rem] font-bold text-gray-900">{slotNumber}.</span>
                   <FormattedText as="span" className="text-gray-800" text={item.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </div>
                 <div className={isCompactPane ? 'flex w-full flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
@@ -933,7 +966,7 @@ export function QuestionRenderer({
                       )
                     }
                     className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0' : 'min-w-[11rem]'}`}
-                    aria-label={`Category selection for question ${number + index}`}
+                    aria-label={`Category selection for question ${slotNumber}`}
                   >
                     <option value="">Choose category…</option>
                     {classificationBlock.categories.map((category) => (
@@ -957,11 +990,12 @@ export function QuestionRenderer({
       <div className="space-y-3">
         {matchingFeaturesBlock.features.map((feature, index) => {
           const slotId = getSlotId(index, `${matchingFeaturesBlock.id}:${feature.id}`);
+          const slotNumber = getSlotNumber(index, number + index);
           return (
             <div key={feature.id} id={`question-${slotId}`} className={getSlotClassName(slotId)}>
               <div className={`flex flex-col gap-3 ${isCompactPane ? '' : 'md:flex-row md:items-center'}`}>
                 <div className="flex items-start gap-3 md:flex-1">
-                  <span className="min-w-[2rem] font-bold text-gray-900">{number + index}.</span>
+                  <span className="min-w-[2rem] font-bold text-gray-900">{slotNumber}.</span>
                   <FormattedText as="span" className="text-gray-800" text={feature.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
                 </div>
                 <div className={isCompactPane ? 'flex w-full flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
@@ -976,7 +1010,7 @@ export function QuestionRenderer({
                       )
                     }
                     className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0' : 'min-w-[11rem]'}`}
-                    aria-label={`Matching selection for question ${number + index}`}
+                    aria-label={`Matching selection for question ${slotNumber}`}
                   >
                     <option value="">Choose match…</option>
                     {matchingFeaturesBlock.options.map((option) => (

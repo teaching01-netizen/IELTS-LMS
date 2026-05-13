@@ -120,4 +120,50 @@ describe('student question descriptors (student exam core logic)', () => {
     expect(questions[1]?.id).toBe('tree-block::tree::root-a::leaf-b');
     expect(questions[1]?.rootNumber).toBe(1);
   });
+
+  it('assigns shared rootNumber for grouped sentence-completion blanks', () => {
+    const state = createInitialExamState('Exam', 'Academic');
+
+    state.reading.passages[0].blocks = [
+      {
+        id: 'sentence-grouped',
+        type: 'SENTENCE_COMPLETION',
+        instruction: 'Complete the sentence.',
+        questions: [
+          {
+            id: 'sentence-q1',
+            sentence: 'The ____ is ____.',
+            answerRule: 'TWO_WORDS',
+            blanks: [
+              {
+                id: 'blank-1',
+                correctAnswer: 'data',
+                position: 0,
+                scoreGroupId: 'sentence-q1',
+                scoreWeight: 1,
+                groupRule: 'at_least_n',
+                requiredCorrect: 2,
+              },
+              {
+                id: 'blank-2',
+                correctAnswer: 'important',
+                position: 1,
+                scoreGroupId: 'sentence-q1',
+                scoreWeight: 0,
+                groupRule: 'at_least_n',
+                requiredCorrect: 2,
+              },
+            ],
+          },
+        ],
+      } as any,
+    ];
+
+    const questions = getStudentQuestionsForModule(state, 'reading');
+    expect(questions).toHaveLength(2);
+
+    // Grouped scoring should display one root question number for both blanks.
+    expect(questions[0]?.rootNumber).toBe(1);
+    expect(questions[1]?.rootNumber).toBe(1);
+  });
 });

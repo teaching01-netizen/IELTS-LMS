@@ -539,6 +539,45 @@ describe('student question experience', () => {
     expect(screen.queryByText(/limit:/i)).not.toBeInTheDocument();
   });
 
+  it('renders sentence completion slot numbers from slotNumbers when provided', () => {
+    const question = {
+      id: 'sentence-1',
+      sentence: 'The library is open ____ and ____.',
+      blanks: [
+        { id: 'blank-1', correctAnswer: 'daily', position: 0 },
+        { id: 'blank-2', correctAnswer: 'late', position: 1 },
+      ],
+      answerRule: 'TWO_WORDS' as const,
+    };
+
+    const block: SentenceCompletionBlock = {
+      id: 'sentence-block-1',
+      type: 'SENTENCE_COMPLETION',
+      instruction: 'Complete the sentence.',
+      questions: [question],
+    };
+
+    render(
+      <QuestionRenderer
+        question={question}
+        block={block}
+        number={35}
+        answer={['', '']}
+        onChange={() => {}}
+        slotIds={['sentence-slot-a', 'sentence-slot-b']}
+        slotNumbers={[35, 35]}
+      />,
+    );
+
+    const firstSlot = document.getElementById('question-sentence-slot-a');
+    const secondSlot = document.getElementById('question-sentence-slot-b');
+
+    expect(firstSlot).not.toBeNull();
+    expect(secondSlot).not.toBeNull();
+    expect(firstSlot).toHaveTextContent('35');
+    expect(secondSlot).toHaveTextContent('35');
+  });
+
   it('renders diagram-labeling answers below a sticky diagram reference', () => {
     const onChange = vi.fn();
     const block: DiagramLabelingBlock = {
