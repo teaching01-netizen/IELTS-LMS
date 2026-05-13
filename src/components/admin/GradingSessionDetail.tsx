@@ -1,22 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight } from 'lucide-react';
+import { Search, Filter, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight, Download } from 'lucide-react';
 import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus, WritingTaskSubmission } from '../../types/grading';
 import { gradingService } from '../../services/gradingService';
 import { gradingRepository } from '../../services/gradingRepository';
 import { examRepository } from '../../services/examRepository';
 import { seedDevelopmentFixtures } from '../../services/developmentFixtures';
-import { TableLoadingSkeleton } from '@components/ui';
+import { TableLoadingSkeleton, Dialog } from '@components/ui';
 import { GradingExportButtons } from './GradingExportButtons';
 import {
   buildCsvContent,
   buildCsvFilename,
   buildWideObjectiveExport,
+  buildWideWritingExport,
+  downloadBinaryFile,
   downloadCsvFile,
   type GradingExportSection,
 } from './gradingReviewUtils';
+import {
+  createPerStudentZipPdfExport,
+  type PerStudentZipPdfExportSection,
+} from './gradingPerStudentExport';
 import type { ExamState } from '../../types';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
-import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
+import { htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
 
 interface SessionWritingPrintDocument {
   pages: SessionWritingPrintPage[];
@@ -157,6 +163,18 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
   const [loading, setLoading] = useState(true);
   const [exportingSection, setExportingSection] = useState<GradingExportSection | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportMode, setExportMode] = useState<'default' | 'per_student_zip_pdf'>('default');
+  const [perStudentDialogOpen, setPerStudentDialogOpen] = useState(false);
+  const [perStudentDialogLoading, setPerStudentDialogLoading] = useState(false);
+  const [perStudentDialogError, setPerStudentDialogError] = useState<string | null>(null);
+  const [perStudentDialogSearch, setPerStudentDialogSearch] = useState('');
+  const [perStudentDialogSubmissions, setPerStudentDialogSubmissions] = useState<StudentSubmission[]>([]);
+  const [perStudentSelectedSubmissionIds, setPerStudentSelectedSubmissionIds] = useState<string[]>([]);
+  const [perStudentSections, setPerStudentSections] = useState<PerStudentZipPdfExportSection[]>([
+    'reading',
+    'writing',
+  ]);
+  const [perStudentExporting, setPerStudentExporting] = useState(false);
   const [writingPrintDocument, setWritingPrintDocument] = useState<SessionWritingPrintDocument | null>(null);
   const [filters, setFilters] = useState<SessionDetailFilters>({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -177,7 +195,60 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     return () => {
       cancelled = true;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, filters]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem(`grading:${sessionId}:exportMode`);
+      if (stored === 'per_student_zip_pdf' || stored === 'default') {
+        setExportMode(stored);
+      } else {
+        setExportMode('default');
+      }
+    } catch {
+      setExportMode('default');
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(`grading:${sessionId}:exportMode`, exportMode);
+    } catch {
+      // Ignore storage failures (private mode / quota).
+    }
+  }, [exportMode, sessionId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(`grading:${sessionId}:perStudentExportSections`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter((value) => value === 'reading' || value === 'writing') as PerStudentZipPdfExportSection[];
+        if (valid.length > 0) {
+          setPerStudentSections(valid);
+        }
+      }
+    } catch {
+      // Ignore invalid storage.
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        `grading:${sessionId}:perStudentExportSections`,
+        JSON.stringify(perStudentSections),
+      );
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [perStudentSections, sessionId]);
 
   const loadSubmissions = async () => {
     setLoading(true);
@@ -392,8 +463,357 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     }
   };
 
+  const openPerStudentExportDialog = async () => {
+    setPerStudentDialogError(null);
+    setPerStudentDialogSearch('');
+    setPerStudentSelectedSubmissionIds([]);
+    setPerStudentDialogOpen(true);
+    setPerStudentDialogLoading(true);
+
+    try {
+      const fullSubmissions = await gradingRepository.getSubmissionsBySession(sessionId);
+      setPerStudentDialogSubmissions(fullSubmissions);
+    } catch (error) {
+      setPerStudentDialogError(
+        error instanceof Error ? error.message : 'Failed to load students for export.',
+      );
+    } finally {
+      setPerStudentDialogLoading(false);
+    }
+  };
+
+  const closePerStudentExportDialog = () => {
+    if (perStudentExporting) return;
+    setPerStudentDialogOpen(false);
+    setPerStudentDialogError(null);
+  };
+
+  const togglePerStudentSection = (section: PerStudentZipPdfExportSection) => {
+    setPerStudentSections((current) => {
+      if (current.includes(section)) {
+        return current.filter((value) => value !== section);
+      }
+      return [...current, section];
+    });
+  };
+
+  const togglePerStudentSelected = (submissionId: string) => {
+    setPerStudentSelectedSubmissionIds((current) => {
+      if (current.includes(submissionId)) {
+        return current.filter((id) => id !== submissionId);
+      }
+      return [...current, submissionId];
+    });
+  };
+
+  const setPerStudentSelectedAll = (submissionIds: string[]) => {
+    setPerStudentSelectedSubmissionIds(Array.from(new Set(submissionIds)));
+  };
+
+  const runPerStudentZipExport = async () => {
+    setPerStudentDialogError(null);
+
+    const selectedSections = perStudentSections;
+    if (selectedSections.length === 0) {
+      setPerStudentDialogError('Select at least one section (Reading and/or Writing).');
+      return;
+    }
+    if (perStudentSelectedSubmissionIds.length === 0) {
+      setPerStudentDialogError('Select at least one student.');
+      return;
+    }
+
+    setPerStudentExporting(true);
+    try {
+      const fullSession = session ?? (await gradingRepository.getSessionById(sessionId));
+      if (!fullSession) {
+        throw new Error('Could not load grading session metadata.');
+      }
+
+      const selectedSubmissions = perStudentDialogSubmissions.filter((submission) =>
+        perStudentSelectedSubmissionIds.includes(submission.id),
+      );
+
+      const sessionContext = {
+        sessionId: fullSession.id,
+        examTitle: fullSession.examTitle,
+      };
+
+      const sectionDataBySubmissionId = new Map<
+        string,
+        Partial<
+          Record<
+            PerStudentZipPdfExportSection,
+            { columns: Array<{ key: string; label: string }>; row: Record<string, unknown> | null }
+          >
+        >
+      >();
+
+      if (selectedSections.includes('reading')) {
+        const examState = await resolveExamState(fullSession.publishedVersionId);
+        const readingSectionEntries = await Promise.all(
+          selectedSubmissions.map(async (submission) => {
+            const sections = await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id);
+            const sectionSubmission = sections.find((item) => item.section === 'reading') ?? null;
+            return { submissionId: submission.id, sectionSubmission };
+          }),
+        );
+        const hasReadingSubmission = new Set(
+          readingSectionEntries
+            .filter((entry) => Boolean(entry.sectionSubmission))
+            .map((entry) => entry.submissionId),
+        );
+        const readingExport = buildWideObjectiveExport({
+          session: sessionContext,
+          submissions: selectedSubmissions,
+          sectionSubmissions: readingSectionEntries,
+          examState,
+          moduleType: 'reading',
+          mode: 'auto',
+        });
+
+        const rowBySubmissionId = new Map(
+          readingExport.rows.map((row) => [String(row['submissionId']), row] as const),
+        );
+
+        for (const submission of selectedSubmissions) {
+          const existing = sectionDataBySubmissionId.get(submission.id) ?? {};
+          sectionDataBySubmissionId.set(submission.id, {
+            ...existing,
+            reading: {
+              columns: readingExport.columns,
+              row: hasReadingSubmission.has(submission.id) ? (rowBySubmissionId.get(submission.id) ?? null) : null,
+            },
+          });
+        }
+      }
+
+      if (selectedSections.includes('writing')) {
+        const writingEntries = await Promise.all(
+          selectedSubmissions.map(async (submission) => ({
+            submissionId: submission.id,
+            writing: await gradingRepository.getWritingSubmissionsBySubmissionId(submission.id),
+          })),
+        );
+        const hasWritingSubmission = new Set(
+          writingEntries.filter((entry) => entry.writing.length > 0).map((entry) => entry.submissionId),
+        );
+        const writingExport = buildWideWritingExport({
+          session: sessionContext,
+          submissions: selectedSubmissions,
+          writingSubmissions: writingEntries,
+        });
+        const rowBySubmissionId = new Map(
+          writingExport.rows.map((row) => [String(row['submissionId']), row] as const),
+        );
+
+        for (const submission of selectedSubmissions) {
+          const existing = sectionDataBySubmissionId.get(submission.id) ?? {};
+          sectionDataBySubmissionId.set(submission.id, {
+            ...existing,
+            writing: {
+              columns: writingExport.columns,
+              row: hasWritingSubmission.has(submission.id) ? (rowBySubmissionId.get(submission.id) ?? null) : null,
+            },
+          });
+        }
+      }
+
+      const exportPayload = await createPerStudentZipPdfExport({
+        filenameBase: `${fullSession.examTitle}-${fullSession.cohortName || ''}`.trim(),
+        generatedAt: new Date(),
+        sections: selectedSections,
+        students: selectedSubmissions.map((submission) => ({
+          submissionId: submission.id,
+          studentName: submission.studentName,
+          studentId: submission.studentId || submission.submissionId,
+          sectionData: sectionDataBySubmissionId.get(submission.id) ?? {},
+        })),
+      });
+
+      downloadBinaryFile(exportPayload.filename, exportPayload.bytes, exportPayload.contentType);
+      setPerStudentDialogOpen(false);
+    } catch (error) {
+      setPerStudentDialogError(
+        error instanceof Error ? error.message : 'Failed to export per-student PDFs.',
+      );
+    } finally {
+      setPerStudentExporting(false);
+    }
+  };
+
+  const normalizedPerStudentSearch = perStudentDialogSearch.trim().toLowerCase();
+  const perStudentFilteredSubmissions = normalizedPerStudentSearch
+    ? perStudentDialogSubmissions.filter((submission) => {
+        const id = (submission.studentId || submission.submissionId || '').toLowerCase();
+        const name = (submission.studentName || '').toLowerCase();
+        const email = (submission.studentEmail || '').toLowerCase();
+        return (
+          name.includes(normalizedPerStudentSearch) ||
+          id.includes(normalizedPerStudentSearch) ||
+          email.includes(normalizedPerStudentSearch)
+        );
+      })
+    : perStudentDialogSubmissions;
+  const perStudentFilteredIds = perStudentFilteredSubmissions.map((submission) => submission.id);
+  const perStudentAllFilteredSelected =
+    perStudentFilteredIds.length > 0 &&
+    perStudentFilteredIds.every((id) => perStudentSelectedSubmissionIds.includes(id));
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
+      <Dialog
+        isOpen={perStudentDialogOpen}
+        onClose={closePerStudentExportDialog}
+        title="Export per student (ZIP PDFs)"
+        preventCloseOnOverlayClick={perStudentExporting}
+        closeOnEscape={!perStudentExporting}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={closePerStudentExportDialog}
+              disabled={perStudentExporting}
+              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void runPerStudentZipExport()}
+              disabled={
+                perStudentExporting ||
+                perStudentSelectedSubmissionIds.length === 0 ||
+                perStudentSections.length === 0
+              }
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {perStudentExporting ? 'Exporting…' : 'Export ZIP'}
+            </button>
+          </>
+        }
+        size="full"
+      >
+        {perStudentDialogError ? (
+          <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {perStudentDialogError}
+          </div>
+        ) : null}
+
+        <div className="flex flex-col gap-4">
+          <div>
+            <div className="text-xs font-semibold text-gray-700">Sections</div>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <label htmlFor="per-student-export-section-reading" className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  id="per-student-export-section-reading"
+                  type="checkbox"
+                  checked={perStudentSections.includes('reading')}
+                  onChange={() => togglePerStudentSection('reading')}
+                  aria-label="Include reading section"
+                  disabled={perStudentExporting}
+                />
+                Reading
+              </label>
+              <label htmlFor="per-student-export-section-writing" className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  id="per-student-export-section-writing"
+                  type="checkbox"
+                  checked={perStudentSections.includes('writing')}
+                  onChange={() => togglePerStudentSection('writing')}
+                  aria-label="Include writing section"
+                  disabled={perStudentExporting}
+                />
+                Writing
+              </label>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              PDFs include the same fields as the current grading CSV export for the selected sections.
+              Writing includes full essay text. Missing data is shown as “No submission”.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-gray-700">
+                Students ({perStudentSelectedSubmissionIds.length} selected)
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    perStudentAllFilteredSelected
+                      ? setPerStudentSelectedAll(
+                          perStudentSelectedSubmissionIds.filter(
+                            (id) => !perStudentFilteredIds.includes(id),
+                          ),
+                        )
+                      : setPerStudentSelectedAll([
+                          ...perStudentSelectedSubmissionIds,
+                          ...perStudentFilteredIds,
+                        ])
+                  }
+                  disabled={perStudentExporting || perStudentDialogLoading}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {perStudentAllFilteredSelected ? 'Unselect all' : 'Select all'}
+                </button>
+              </div>
+            </div>
+
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
+              <input
+                type="text"
+                placeholder="Search by name, id, or email..."
+                value={perStudentDialogSearch}
+                onChange={(e) => setPerStudentDialogSearch(e.target.value)}
+                aria-label="Search students for export"
+                className="w-full rounded-md border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={perStudentExporting}
+              />
+            </div>
+
+            <div className="max-h-[46vh] overflow-y-auto rounded-md border border-gray-200">
+              {perStudentDialogLoading ? (
+                <div className="px-4 py-3 text-sm text-gray-500">Loading students…</div>
+              ) : perStudentFilteredSubmissions.length === 0 ? (
+                <div className="px-4 py-3 text-sm text-gray-500">No students match your search.</div>
+              ) : (
+                <ul className="divide-y divide-gray-100">
+                  {perStudentFilteredSubmissions.map((submission) => {
+                    const checked = perStudentSelectedSubmissionIds.includes(submission.id);
+                    const studentId = submission.studentId || submission.submissionId;
+                    const checkboxId = `per-student-export-select-${submission.id}`;
+                    return (
+                      <li key={submission.id} className="px-4 py-3">
+                        <label htmlFor={checkboxId} className="flex cursor-pointer items-start gap-3">
+                          <input
+                            id={checkboxId}
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => togglePerStudentSelected(submission.id)}
+                            aria-label={`Select ${submission.studentName} for export`}
+                            disabled={perStudentExporting}
+                            className="mt-1"
+                          />
+                          <span className="flex flex-col">
+                            <span className="text-sm font-semibold text-gray-900">{submission.studentName}</span>
+                            <span className="text-xs text-gray-500">
+                              {studentId}
+                              {submission.studentEmail ? ` • ${submission.studentEmail}` : ''}
+                            </span>
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      </Dialog>
       <style>
         {`
           .session-writing-print-root {
@@ -672,6 +1092,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
               placeholder="Search students..." 
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
+              aria-label="Search students"
               className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             />
           </div>
@@ -679,14 +1100,48 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             <Filter size={16} />
             <span className="hidden sm:inline">Filter</span>
           </button>
-          <GradingExportButtons
-            exportingSection={exportingSection}
-            onExportReading={() => void handleExportSection('reading')}
-            onExportReadingManual={() => void handleExportSection('reading_manual')}
-            onExportListening={() => void handleExportSection('listening')}
-            onExportListeningManual={() => void handleExportSection('listening_manual')}
-            onPrintWriting={() => void handleExportSection('writing')}
-          />
+          <div className="flex items-start gap-3">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-gray-400">
+                Export Mode
+              </span>
+              <select
+                value={exportMode}
+                onChange={(e) => setExportMode(e.target.value as 'default' | 'per_student_zip_pdf')}
+                disabled={exportingSection !== null || perStudentExporting}
+                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="default">CSV / Print (Default)</option>
+                <option value="per_student_zip_pdf">Per-student ZIP (PDF)</option>
+              </select>
+            </div>
+
+            {exportMode === 'default' ? (
+              <GradingExportButtons
+                exportingSection={exportingSection}
+                onExportReading={() => void handleExportSection('reading')}
+                onExportReadingManual={() => void handleExportSection('reading_manual')}
+                onExportListening={() => void handleExportSection('listening')}
+                onExportListeningManual={() => void handleExportSection('listening_manual')}
+                onPrintWriting={() => void handleExportSection('writing')}
+              />
+            ) : (
+              <div className="flex flex-col items-start gap-2 sm:items-end">
+                <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-gray-400">
+                  Export PDFs
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void openPerStudentExportDialog()}
+                  disabled={perStudentExporting || perStudentDialogLoading}
+                  className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Download size={14} />
+                  Per-student ZIP PDFs
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

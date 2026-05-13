@@ -234,6 +234,25 @@ export function downloadCsvFile(filename: string, csvContent: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+export function downloadBinaryFile(
+  filename: string,
+  bytes: Uint8Array | ArrayBuffer,
+  contentType: string,
+): void {
+  if (typeof document === 'undefined') return;
+
+  const blob = new Blob([bytes], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 function buildQuestionResultMap(results: ObjectiveQuestionResult[] | undefined): Map<string, ObjectiveQuestionResult> {
   return new Map((results ?? []).map((result) => [result.questionId, result] as const));
 }
