@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { RefObject } from 'react';
 import { HighlightSelectionToolbar } from './HighlightSelectionToolbar';
 import type { StudentHighlightColor } from './highlightPalette';
@@ -29,6 +29,10 @@ export function HighlightableSurface({
   hint = null,
 }: HighlightableSurfaceProps) {
   const Tag = as as any;
+  // If this object identity changes on every render, React may re-apply innerHTML
+  // even when the string is unchanged, which can blow away the browser's current
+  // text selection (blue highlight) when the toolbar toggles visibility.
+  const innerHtml = useMemo(() => ({ __html: html }), [html]);
 
   return (
     <>
@@ -37,7 +41,7 @@ export function HighlightableSurface({
         className={className}
         data-student-highlightable="true"
         style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
-        dangerouslySetInnerHTML={{ __html: html }}
+        dangerouslySetInnerHTML={innerHtml}
       />
       <HighlightSelectionToolbar
         visible={Boolean(showToolbar && toolbarPosition && onApplyColor && onEraseSelection)}
