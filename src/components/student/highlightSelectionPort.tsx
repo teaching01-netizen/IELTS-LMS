@@ -34,7 +34,8 @@ function safeToolbarPosition(selection: Selection): { left: number; top: number 
     const range = selection.getRangeAt(0);
     const rect = range.getBoundingClientRect();
     const left = rect.left + rect.width / 2;
-    const top = rect.top + window.scrollY;
+    // Anchor to the bottom of the selected text so the toolbar renders below it.
+    const top = rect.bottom + window.scrollY;
     if (!Number.isFinite(left) || !Number.isFinite(top)) {
       return null;
     }

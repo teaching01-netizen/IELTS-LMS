@@ -52,6 +52,18 @@ describe('highlight selection port', () => {
         const range = document.createRange();
         range.setStart(textNode, 6);
         range.setEnd(textNode, 10);
+        // JSDOM doesn't implement layout; provide a stable rect for toolbar positioning.
+        (range as any).getBoundingClientRect = () => ({
+          left: 10,
+          top: 20,
+          bottom: 40,
+          width: 100,
+          height: 20,
+          right: 110,
+          x: 10,
+          y: 20,
+          toJSON: () => ({}),
+        });
         return range;
       },
       toString: () => 'beta',
@@ -64,6 +76,7 @@ describe('highlight selection port', () => {
     const snapshot = port.readSelection(host, { enforceSingleBlock: true });
     expect(snapshot.selection?.selectedText).toBe('beta');
     expect(snapshot.selectionText).toBe('beta');
+    expect(snapshot.toolbarPosition).toEqual({ left: 60, top: 40 });
 
     port.clearSelection();
     expect(removeAllRanges).toHaveBeenCalledTimes(1);

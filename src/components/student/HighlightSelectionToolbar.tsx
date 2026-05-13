@@ -31,8 +31,8 @@ export function HighlightSelectionToolbar({
 
   return (
     <div
-      className="fixed z-[95] -translate-x-1/2 -translate-y-full rounded-lg border border-gray-200 bg-white p-1.5 shadow-2xl"
-      style={{ left, top: top - 12 }}
+      className="fixed z-[95] -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-1.5 shadow-2xl"
+      style={{ left, top: top + 12 }}
       role="toolbar"
       aria-label="Highlight selection actions"
       onMouseDown={preserveSelection}
