@@ -69,22 +69,26 @@ describe('highlight v2 engine', () => {
     expect(next.ranges).toEqual(dense);
   });
 
-  it('captures single-block selections when browsers report element-node range boundaries', () => {
+  it('rebuilds ambiguous container-wide ranges from anchor/focus points', () => {
     const container = document.createElement('div');
-    container.innerHTML = '<p>Alpha beta gamma</p>';
-    const paragraph = container.querySelector('p');
-    if (!paragraph) {
-      throw new Error('Expected paragraph element');
+    container.innerHTML = '<p>Alpha beta gamma</p><p>Delta epsilon</p>';
+    const textNode = container.querySelector('p')?.firstChild;
+    if (!(textNode instanceof Text)) {
+      throw new Error('Expected first paragraph text node');
     }
 
     const range = document.createRange();
-    range.setStart(paragraph, 0);
-    range.setEnd(paragraph, paragraph.childNodes.length);
+    range.setStart(container, 0);
+    range.setEnd(container, container.childNodes.length);
 
     const selection = {
       rangeCount: 1,
       getRangeAt: () => range,
       toString: () => range.toString(),
+      anchorNode: textNode,
+      anchorOffset: 6,
+      focusNode: textNode,
+      focusOffset: 10,
     } as unknown as Selection;
 
     const captured = captureSurfaceSelection(container, selection, {
@@ -92,9 +96,42 @@ describe('highlight v2 engine', () => {
     });
 
     expect(captured).toEqual({
-      start: 0,
-      end: 'Alpha beta gamma'.length,
-      selectedText: 'Alpha beta gamma',
+      start: 6,
+      end: 10,
+      selectedText: 'beta',
+    });
+  });
+
+  it('normalizes backward anchor/focus direction when rebuilding container-wide ranges', () => {
+    const container = document.createElement('div');
+    container.innerHTML = '<p>Alpha beta gamma</p><p>Delta epsilon</p>';
+    const textNode = container.querySelector('p')?.firstChild;
+    if (!(textNode instanceof Text)) {
+      throw new Error('Expected first paragraph text node');
+    }
+
+    const range = document.createRange();
+    range.setStart(container, 0);
+    range.setEnd(container, container.childNodes.length);
+
+    const selection = {
+      rangeCount: 1,
+      getRangeAt: () => range,
+      toString: () => range.toString(),
+      anchorNode: textNode,
+      anchorOffset: 10,
+      focusNode: textNode,
+      focusOffset: 6,
+    } as unknown as Selection;
+
+    const captured = captureSurfaceSelection(container, selection, {
+      enforceSingleBlock: true,
+    });
+
+    expect(captured).toEqual({
+      start: 6,
+      end: 10,
+      selectedText: 'beta',
     });
   });
 

@@ -64,6 +64,14 @@ export function resolveSurfaceSelection(
     return null;
   }
 
+  return resolveSurfaceRange(container, range, options);
+}
+
+export function resolveSurfaceRange(
+  container: HTMLElement,
+  range: Range,
+  options?: SurfaceResolverOptions,
+): ResolvedSurfaceSelection | null {
   if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
     return null;
   }

@@ -39,8 +39,9 @@ function createSelectionMock(
 }
 
 describe('student highlight persistence v2', () => {
-  it('allows broad same-surface selections so cross-block highlighting can apply', () => {
+  it('rebuilds broad container selections from anchor/focus text points', () => {
     let highlightable: Element | null = null;
+    let firstTextNode: ChildNode | null = null;
     const broadSelection = {
       rangeCount: 1,
       getRangeAt: () => {
@@ -53,6 +54,14 @@ describe('student highlight persistence v2', () => {
         return range;
       },
       toString: () => highlightable?.textContent ?? '',
+      get anchorNode() {
+        return firstTextNode;
+      },
+      anchorOffset: 6,
+      get focusNode() {
+        return firstTextNode;
+      },
+      focusOffset: 10,
       removeAllRanges: vi.fn(),
     } as unknown as Selection;
 
@@ -65,6 +74,10 @@ describe('student highlight persistence v2', () => {
     if (!highlightable) {
       throw new Error('Expected highlight surface');
     }
+    firstTextNode = findFirstTextNode(highlightable);
+    if (!firstTextNode) {
+      throw new Error('Expected first text node');
+    }
 
     fireEvent(document, new Event('selectionchange'));
 
@@ -74,7 +87,9 @@ describe('student highlight persistence v2', () => {
       throw new Error('Expected highlight color action button');
     }
     fireEvent.click(colorButton);
-    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(2);
+    const marks = container.querySelectorAll('mark[data-highlighted="true"]');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.textContent).toBe('beta');
 
     getSelectionSpy.mockRestore();
   });
@@ -285,15 +300,14 @@ describe('student highlight persistence v2', () => {
       text: 'beta',
     });
 
+    const detachedNode = document.createElement('div');
+    detachedNode.textContent = 'detached';
     const transientInvalidSelection = {
       rangeCount: 1,
       getRangeAt: () => {
-        if (!highlightable) {
-          throw new Error('Expected highlight surface');
-        }
         const range = document.createRange();
-        range.setStart(highlightable, 0);
-        range.setEnd(highlightable, highlightable.childNodes.length);
+        range.setStart(detachedNode.firstChild as Text, 0);
+        range.setEnd(detachedNode.firstChild as Text, 3);
         return range;
       },
       toString: () => 'beta',

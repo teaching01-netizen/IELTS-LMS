@@ -1,7 +1,7 @@
 import type { StudentHighlightColor } from './highlightPalette';
 import {
   DEFAULT_DISALLOWED_SELECTION_SELECTOR,
-  resolveSurfaceSelection,
+  resolveSurfaceRange,
 } from './highlight/surfaceResolver';
 import { normalizeRangeToSurfaceSelection } from './highlight/rangeNormalizer';
 
@@ -84,6 +84,67 @@ function getSelectionTextSegments(
   return segments;
 }
 
+function isAmbiguousContainerWideRange(container: HTMLElement, range: Range): boolean {
+  return (
+    range.startContainer === container &&
+    range.endContainer === container &&
+    range.startOffset === 0 &&
+    range.endOffset === container.childNodes.length
+  );
+}
+
+function rebuildRangeFromAnchorFocus(selection: Selection): Range | null {
+  const anchorNode = selection.anchorNode;
+  const focusNode = selection.focusNode;
+  if (!anchorNode || !focusNode) {
+    return null;
+  }
+
+  const anchorOffset = selection.anchorOffset;
+  const focusOffset = selection.focusOffset;
+  if (!Number.isFinite(anchorOffset) || !Number.isFinite(focusOffset)) {
+    return null;
+  }
+
+  const orderingProbe = document.createRange();
+  try {
+    orderingProbe.setStart(anchorNode, anchorOffset);
+    orderingProbe.collapse(true);
+  } catch {
+    return null;
+  }
+
+  let startNode = anchorNode;
+  let startOffset = anchorOffset;
+  let endNode = focusNode;
+  let endOffset = focusOffset;
+
+  let compareResult = 0;
+  try {
+    compareResult = orderingProbe.comparePoint(focusNode, focusOffset);
+  } catch {
+    return null;
+  }
+
+  // comparePoint returns -1 when point is before the collapsed anchor point.
+  if (compareResult < 0) {
+    startNode = focusNode;
+    startOffset = focusOffset;
+    endNode = anchorNode;
+    endOffset = anchorOffset;
+  }
+
+  const range = document.createRange();
+  try {
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+  } catch {
+    return null;
+  }
+
+  return range;
+}
+
 export function captureSurfaceSelection(
   container: HTMLElement,
   selection: Selection,
@@ -92,7 +153,25 @@ export function captureSurfaceSelection(
   const disallowedSelectionSelector =
     options?.disallowedSelectionSelector ?? DEFAULT_DISALLOWED_SELECTION_SELECTOR;
 
-  const resolved = resolveSurfaceSelection(container, selection, {
+  if (selection.rangeCount === 0) {
+    return null;
+  }
+
+  let range: Range;
+  try {
+    range = selection.getRangeAt(0);
+  } catch {
+    return null;
+  }
+
+  if (isAmbiguousContainerWideRange(container, range)) {
+    const rebuiltRange = rebuildRangeFromAnchorFocus(selection);
+    if (rebuiltRange) {
+      range = rebuiltRange;
+    }
+  }
+
+  const resolved = resolveSurfaceRange(container, range, {
     disallowedSelectionSelector,
   });
   if (!resolved) {
