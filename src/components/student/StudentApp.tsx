@@ -724,6 +724,7 @@ export function StudentApp({
         onExit={onExit}
         testTakerId={attemptState.attempt?.candidateId ?? undefined}
         timeRemaining={runtimeState.displayTimeRemaining}
+        highlightEnabled={highlightEnabled}
         tabletMode={tabletMode}
         onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
         onOpenNavigator={

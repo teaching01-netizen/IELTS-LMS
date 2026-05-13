@@ -19,6 +19,7 @@ interface StudentHeaderProps {
   testTakerId?: string | undefined;
   timeRemaining?: number | undefined;
   autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | null | undefined;
+  highlightEnabled?: boolean | undefined;
   onOpenAccessibility?: (() => void) | undefined;
   onOpenNavigator?: (() => void) | undefined;
   onClearHighlights?: (() => void) | undefined;
@@ -37,6 +38,7 @@ export function StudentHeader({
   testTakerId,
   timeRemaining,
   autoSaveStatus,
+  highlightEnabled = false,
   onOpenAccessibility,
   onOpenNavigator,
   onClearHighlights,
@@ -61,6 +63,7 @@ export function StudentHeader({
   const tabletZoomPanelRef = useRef<HTMLDivElement | null>(null);
   const showZoomControls = zoom !== undefined && onZoomIn && onZoomOut && onZoomReset;
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
+  const shouldShowHighlightHint = Boolean(highlightEnabled && onOpenNavigator);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -248,6 +251,11 @@ export function StudentHeader({
         className="flex min-w-0 max-w-full items-center justify-end gap-1.5 md:gap-2 lg:gap-4 text-gray-700 flex-shrink-0 overflow-x-auto no-scrollbar justify-self-end"
         data-testid="student-header-controls-slot"
       >
+        {shouldShowHighlightHint ? (
+          <div className="hidden sm:flex items-center rounded-sm border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-700">
+            Tip: Select text to highlight
+          </div>
+        ) : null}
         {autoSaveStatus && (
           <div className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-wider hidden sm:flex">
             {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (
