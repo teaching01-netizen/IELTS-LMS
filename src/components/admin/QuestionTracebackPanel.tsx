@@ -39,8 +39,6 @@ function QuestionStatusBadge({ correctness }: { correctness: boolean | null }) {
 }
 
 function renderGroup(group: ObjectiveTracebackGroup, index: number) {
-  const renderedRootLabels = new Set<string>();
-
   return (
     <section key={group.groupId} className="rounded-2xl border border-gray-200 bg-white shadow-sm">
       <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
@@ -62,11 +60,6 @@ function renderGroup(group: ObjectiveTracebackGroup, index: number) {
 
       <div className="grid gap-4 px-5 py-5">
         {group.items.map((item) => {
-          const showRootRule = Boolean(item.rootRuleLabel) && !renderedRootLabels.has(item.rootId);
-          if (showRootRule) {
-            renderedRootLabels.add(item.rootId);
-          }
-
           return (
           <article
             key={item.questionId}
@@ -84,9 +77,6 @@ function renderGroup(group: ObjectiveTracebackGroup, index: number) {
                   <Hash size={12} />
                   {item.numberLabel || item.questionId}
                 </div>
-                {showRootRule ? (
-                  <p className="text-xs font-medium text-blue-700">{item.rootRuleLabel}</p>
-                ) : null}
                 <h4 className="text-sm font-semibold text-gray-900">
                   {item.prompt || 'Question prompt unavailable'}
                 </h4>
@@ -112,7 +102,9 @@ function renderGroup(group: ObjectiveTracebackGroup, index: number) {
                         key={`${item.questionId}:slot:${slotIndex}`}
                         className="whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-800"
                       >
-                        {`[${slotIndex + 1}] `}
+                        {item.slotLabels?.[slotIndex]
+                          ? `${item.slotLabels[slotIndex]}: `
+                          : `[${slotIndex + 1}] `}
                         {slotValue === '' ? '∅' : slotValue}
                       </p>
                     ))}
@@ -128,9 +120,25 @@ function renderGroup(group: ObjectiveTracebackGroup, index: number) {
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">
                   Correct answer
                 </p>
-                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-800">
-                  {item.correctAnswer || '—'}
-                </p>
+                {item.correctAnswerSlots && item.correctAnswerSlots.length > 0 ? (
+                  <div className="mt-2 space-y-1">
+                    {item.correctAnswerSlots.map((slotValue, slotIndex) => (
+                      <p
+                        key={`${item.questionId}:correct-slot:${slotIndex}`}
+                        className="whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-800"
+                      >
+                        {item.slotLabels?.[slotIndex]
+                          ? `${item.slotLabels[slotIndex]}: `
+                          : `[${slotIndex + 1}] `}
+                        {slotValue === '' ? '∅' : slotValue}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-800">
+                    {item.correctAnswer || '—'}
+                  </p>
+                )}
               </div>
             </div>
           </article>
@@ -165,7 +173,7 @@ export function QuestionTracebackPanel({
 
     groups.forEach((group) => {
       group.items.forEach((item) => {
-        const parsed = Number.parseInt(item.rootNumberLabel, 10);
+        const parsed = Number.parseInt(item.rootNumberLabel ?? item.numberLabel, 10);
         if (Number.isFinite(parsed) && parsed > 0 && !seen.has(parsed)) {
           seen.add(parsed);
           rootNumbers.push(parsed);
@@ -200,7 +208,10 @@ export function QuestionTracebackPanel({
   const unmappedAnswerKeys = useMemo(() => {
     if (groups.length === 0) return [];
     const descriptorAnswerKeys = new Set(
-      groups.flatMap((group) => group.items.map((item) => item.answerKey).filter(Boolean)),
+      groups.flatMap((group) =>
+        group.items.flatMap((item) => (item.answerKeys && item.answerKeys.length > 0 ? item.answerKeys : [item.answerKey]))
+          .filter(Boolean),
+      ),
     );
 
     return Object.keys(objectiveAnswerMap).filter((key) => !descriptorAnswerKeys.has(key));

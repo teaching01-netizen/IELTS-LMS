@@ -46,6 +46,17 @@ export interface ObjectiveTracebackItem {
   awardedScore: number | null;
   maxScore: number | null;
   answerKey: string;
+  /**
+   * Grouped scoring support (e.g. two blanks required for one mark).
+   * When present, this item represents a single "question slot" with multiple sub-answers.
+   */
+  rootId?: string;
+  rootNumberLabel?: string;
+  requiredCorrect?: number;
+  answerKeys?: string[];
+  slotLabels?: string[];
+  studentAnswerSlots?: string[];
+  correctAnswerSlots?: string[];
 }
 
 export interface ObjectiveTracebackGroup {
@@ -227,6 +238,57 @@ function buildQuestionResultMap(results: ObjectiveQuestionResult[] | undefined):
   return new Map((results ?? []).map((result) => [result.questionId, result] as const));
 }
 
+function getGroupedScoringSlotKey(descriptor: StudentQuestionDescriptor): string | null {
+  if (typeof descriptor.rootId !== 'string') {
+    return null;
+  }
+  // Only collapse slots explicitly marked as grouped scoring (e.g. 2-for-1),
+  // not other uses of rootId such as the sub-answer tree.
+  return descriptor.rootId.includes('::group::') ? descriptor.rootId : null;
+}
+
+function resolveGroupedScoringRequiredCorrect(groupQuestions: StudentQuestionDescriptor[]): number {
+  const candidates: number[] = [];
+
+  for (const question of groupQuestions) {
+    if (question.block.type === 'SENTENCE_COMPLETION' && question.question && question.answerIndex !== undefined) {
+      const blank = question.question.blanks[question.answerIndex];
+      if (blank?.requiredCorrect !== undefined) {
+        candidates.push(blank.requiredCorrect);
+      }
+      continue;
+    }
+
+    if (question.block.type === 'TABLE_COMPLETION' && question.answerIndex !== undefined) {
+      const block = question.block as unknown as { cells?: Array<{ requiredCorrect?: number }> };
+      const cell = Array.isArray(block.cells) ? block.cells[question.answerIndex] : undefined;
+      if (cell?.requiredCorrect !== undefined) {
+        candidates.push(cell.requiredCorrect);
+      }
+    }
+  }
+
+  const normalized = candidates
+    .map((value) => (Number.isFinite(value) ? Math.floor(value) : 0))
+    .filter((value) => value >= 1);
+
+  return normalized.length > 0 ? Math.max(...normalized) : 1;
+}
+
+function getGroupedSlotLabel(descriptor: StudentQuestionDescriptor, index: number): string {
+  const fallback = `Answer ${index + 1}`;
+
+  if (descriptor.block.type === 'SENTENCE_COMPLETION') {
+    return typeof descriptor.answerIndex === 'number' ? `Blank ${descriptor.answerIndex + 1}` : fallback;
+  }
+
+  if (descriptor.block.type === 'TABLE_COMPLETION') {
+    return typeof descriptor.answerIndex === 'number' ? `Cell ${descriptor.answerIndex + 1}` : fallback;
+  }
+
+  return fallback;
+}
+
 function buildTracebackItem(
   descriptor: StudentQuestionDescriptor,
   descriptors: StudentQuestionDescriptor[],
@@ -250,6 +312,76 @@ function buildTracebackItem(
     awardedScore,
     maxScore,
     answerKey: descriptor.answerKey,
+    rootId: descriptor.rootId,
+    rootNumberLabel: typeof descriptor.rootNumber === 'number' ? String(descriptor.rootNumber) : undefined,
+  };
+}
+
+function buildGroupedTracebackItem(
+  groupKey: string,
+  groupDescriptors: StudentQuestionDescriptor[],
+  allDescriptors: StudentQuestionDescriptor[],
+  answerMap: Record<string, unknown>,
+  results: Map<string, ObjectiveQuestionResult>,
+): ObjectiveTracebackItem {
+  const sorted = [...groupDescriptors].sort((left, right) => (left.answerIndex ?? 0) - (right.answerIndex ?? 0));
+  const representative = sorted[0];
+  if (!representative) {
+    return {
+      numberLabel: '',
+      questionId: groupKey,
+      prompt: '',
+      studentAnswer: '',
+      correctAnswer: '',
+      correctness: null,
+      awardedScore: null,
+      maxScore: null,
+      answerKey: '',
+      rootId: groupKey,
+    };
+  }
+
+  const slotCorrectness = sorted.map((descriptor) => {
+    const questionResult = results.get(descriptor.id);
+    const computed = isStudentAnswerCorrect(descriptor, answerMap);
+    return questionResult?.isCorrect ?? computed;
+  });
+
+  const requiredCorrect = resolveGroupedScoringRequiredCorrect(sorted);
+  const correctSlots = slotCorrectness.filter((value) => value === true).length;
+  const hasUnscored = slotCorrectness.some((value) => value === null);
+
+  const correctness = hasUnscored ? null : correctSlots >= requiredCorrect;
+  const awardedScore = correctness === null ? null : correctness ? 1 : 0;
+  const maxScore = correctness === null ? null : 1;
+
+  const slotLabels = sorted.map((descriptor, index) => getGroupedSlotLabel(descriptor, index));
+  const studentAnswerSlots = sorted.map((descriptor) => getStudentAnswerDisplay(descriptor, answerMap));
+  const correctAnswerSlots = sorted.map((descriptor) => getCorrectAnswerDisplay(descriptor));
+  const answerKeys = sorted.map((descriptor) => descriptor.answerKey).filter(Boolean);
+
+  const prompt =
+    representative.block.type === 'SENTENCE_COMPLETION' && representative.question && 'sentence' in representative.question
+      ? representative.question.sentence ?? ''
+      : representative.block.instruction || getQuestionPrompt(representative);
+
+  return {
+    numberLabel: getQuestionNumberLabel(allDescriptors, representative.id),
+    questionId: representative.id,
+    prompt,
+    studentAnswer: studentAnswerSlots.join(' | '),
+    correctAnswer: correctAnswerSlots.join(' | '),
+    correctness,
+    awardedScore,
+    maxScore,
+    answerKey: representative.answerKey,
+    rootId: groupKey,
+    rootNumberLabel: typeof representative.rootNumber === 'number' ? String(representative.rootNumber) : undefined,
+    requiredCorrect,
+    answerKeys,
+    slotLabels,
+    studentAnswerSlots,
+    correctAnswerSlots,
   };
 }
 
@@ -266,6 +398,7 @@ export function buildQuestionTracebackGroups(
   const answerMap = extractObjectiveAnswerMap(sectionSubmission.answers);
   const results = buildQuestionResultMap(sectionSubmission.autoGradingResults?.questionResults);
   const groups = new Map<string, ObjectiveTracebackGroup>();
+  const groupedSlotsByGroup = new Map<string, Map<string, StudentQuestionDescriptor[]>>();
 
   for (const descriptor of descriptors) {
     const groupId = descriptor.groupId || 'group';
@@ -277,9 +410,31 @@ export function buildQuestionTracebackGroups(
         items: [],
       });
     }
-    const group = groups.get(groupId);
-    if (!group) continue;
-    group.items.push(buildTracebackItem(descriptor, descriptors, answerMap, results));
+    const slotKey = getGroupedScoringSlotKey(descriptor) ?? descriptor.id;
+    if (!groupedSlotsByGroup.has(groupId)) {
+      groupedSlotsByGroup.set(groupId, new Map());
+    }
+    const slots = groupedSlotsByGroup.get(groupId);
+    if (!slots) continue;
+    if (!slots.has(slotKey)) {
+      slots.set(slotKey, []);
+    }
+    slots.get(slotKey)?.push(descriptor);
+  }
+
+  for (const [groupId, group] of groups.entries()) {
+    const slots = groupedSlotsByGroup.get(groupId);
+    if (!slots) continue;
+    for (const [slotKey, slotDescriptors] of slots.entries()) {
+      const groupKey = getGroupedScoringSlotKey(slotDescriptors[0] ?? ({} as StudentQuestionDescriptor));
+      if (groupKey) {
+        group.items.push(buildGroupedTracebackItem(slotKey, slotDescriptors, descriptors, answerMap, results));
+      } else {
+        const descriptor = slotDescriptors[0];
+        if (!descriptor) continue;
+        group.items.push(buildTracebackItem(descriptor, descriptors, answerMap, results));
+      }
+    }
   }
 
   return Array.from(groups.values());
@@ -350,7 +505,7 @@ export function buildObjectiveExportRows({
         section: moduleType,
         groupLabel: group.groupLabel,
         questionNumber: item.numberLabel,
-        questionId: item.questionId,
+        questionId: item.rootId ?? item.questionId,
         prompt: item.prompt,
         studentAnswer: item.studentAnswer,
         correctAnswer: item.correctAnswer,
@@ -443,35 +598,85 @@ export function buildWideObjectiveExport({
   mode = 'auto',
 }: WideObjectiveExportInput): WideObjectiveExport {
   const descriptors = examState ? getStudentQuestionsForModule(examState, moduleType) : [];
-  const answerColumns = descriptors.map((descriptor) => {
-    const label = getQuestionColumnLabel(descriptor, descriptors);
-    return { key: `answer:${descriptor.id}`, label: `${label} Answer` };
+
+  type ExportSlot = {
+    slotKey: string;
+    isGrouped: boolean;
+    representativeId: string;
+    baseLabel: string;
+    descriptors: StudentQuestionDescriptor[];
+  };
+
+  const slotMap = new Map<string, StudentQuestionDescriptor[]>();
+  for (const descriptor of descriptors) {
+    const slotKey = getGroupedScoringSlotKey(descriptor) ?? descriptor.id;
+    if (!slotMap.has(slotKey)) {
+      slotMap.set(slotKey, []);
+    }
+    slotMap.get(slotKey)?.push(descriptor);
+  }
+
+  const exportSlots: ExportSlot[] = Array.from(slotMap.entries()).map(([slotKey, slotDescriptors]) => {
+    const sorted = [...slotDescriptors].sort((left, right) => (left.answerIndex ?? 0) - (right.answerIndex ?? 0));
+    const representative = sorted[0];
+    const representativeId = representative?.id ?? slotKey;
+    const numberLabel = representative ? getQuestionNumberLabel(descriptors, representativeId) : '';
+    return {
+      slotKey,
+      isGrouped: slotKey.includes('::group::'),
+      representativeId,
+      baseLabel: `Q${numberLabel}`,
+      descriptors: sorted,
+    };
   });
-  const rightAnswerColumns =
-    mode === 'auto'
-      ? descriptors.map((descriptor) => {
-        const label = getQuestionColumnLabel(descriptor, descriptors);
-        return { key: `rightAnswer:${descriptor.id}`, label: `${label} Right Answer` };
-      })
-      : descriptors.map((descriptor) => {
-        const label = getQuestionColumnLabel(descriptor, descriptors);
-        return { key: `manualCorrect:${descriptor.id}`, label: `Correct ${label}` };
-      });
-  const scoreColumns =
-    mode === 'auto'
-      ? descriptors.map((descriptor) => {
-        const label = getQuestionColumnLabel(descriptor, descriptors);
-        return { key: `score:${descriptor.id}`, label: `${label} Score` };
-      })
-      : [];
-  const manualQuestionColumns = descriptors.flatMap((descriptor) => {
-    const label = getQuestionColumnLabel(descriptor, descriptors);
-    return [
-      { key: `answer:${descriptor.id}`, label: `${label} Answer` },
-      { key: `rightAnswer:${descriptor.id}`, label: `${label} Right Answer/Answer Key` },
-      { key: `manualCorrect:${descriptor.id}`, label: `Correct ${label}` },
-    ];
-  });
+
+  const answerColumns: CsvColumn[] = [];
+  const rightAnswerColumns: CsvColumn[] = [];
+  const scoreColumns: CsvColumn[] = [];
+  const manualQuestionColumns: CsvColumn[] = [];
+
+  for (const slot of exportSlots) {
+    if (!slot.isGrouped) {
+      answerColumns.push({ key: `answer:${slot.representativeId}`, label: `${slot.baseLabel} Answer` });
+      if (mode === 'auto') {
+        rightAnswerColumns.push({
+          key: `rightAnswer:${slot.representativeId}`,
+          label: `${slot.baseLabel} Right Answer`,
+        });
+        scoreColumns.push({ key: `score:${slot.representativeId}`, label: `${slot.baseLabel} Score` });
+      } else {
+        manualQuestionColumns.push(
+          { key: `answer:${slot.representativeId}`, label: `${slot.baseLabel} Answer` },
+          { key: `rightAnswer:${slot.representativeId}`, label: `${slot.baseLabel} Right Answer/Answer Key` },
+          { key: `manualCorrect:${slot.representativeId}`, label: `Correct ${slot.baseLabel}` },
+        );
+      }
+      continue;
+    }
+
+    slot.descriptors.forEach((descriptor, index) => {
+      const suffix = `(${index + 1})`;
+      answerColumns.push({ key: `answer:${descriptor.id}`, label: `${slot.baseLabel} Answer ${suffix}` });
+      if (mode === 'auto') {
+        rightAnswerColumns.push({
+          key: `rightAnswer:${descriptor.id}`,
+          label: `${slot.baseLabel} Right Answer ${suffix}`,
+        });
+      } else {
+        manualQuestionColumns.push(
+          { key: `answer:${descriptor.id}`, label: `${slot.baseLabel} Answer ${suffix}` },
+          { key: `rightAnswer:${descriptor.id}`, label: `${slot.baseLabel} Right Answer/Answer Key ${suffix}` },
+        );
+      }
+    });
+
+    if (mode === 'auto') {
+      scoreColumns.push({ key: `scoreGroup:${slot.slotKey}`, label: `${slot.baseLabel} Score` });
+    } else {
+      manualQuestionColumns.push({ key: `manualCorrectGroup:${slot.slotKey}`, label: `Correct ${slot.baseLabel}` });
+    }
+  }
+
   const sectionBySubmissionId = new Map(
     sectionSubmissions.map((entry) => [entry.submissionId, entry.sectionSubmission] as const),
   );
@@ -479,7 +684,7 @@ export function buildWideObjectiveExport({
   const rows = submissions.map((submission) => {
     const sectionSubmission = sectionBySubmissionId.get(submission.id) ?? null;
     const groups = buildQuestionTracebackGroups(examState, sectionSubmission, moduleType);
-    const items = new Map(groups.flatMap((group) => group.items.map((item) => [item.questionId, item] as const)));
+    const answerMap = sectionSubmission ? extractObjectiveAnswerMap(sectionSubmission.answers) : {};
     const autoGradingResults = sectionSubmission?.autoGradingResults;
     const scoredResults = buildQuestionResultMap(autoGradingResults?.questionResults);
     const row: Record<string, unknown> = {
@@ -496,22 +701,43 @@ export function buildWideObjectiveExport({
       totalScore: mode === 'manual' ? '' : toOptionalNumber(autoGradingResults?.totalScore),
       maxScore: toOptionalNumber(autoGradingResults?.maxScore),
       percentage: toOptionalNumber(autoGradingResults?.percentage),
-      correctCount: autoGradingResults?.questionResults
-        ? autoGradingResults.questionResults.filter((result) => result.isCorrect).length
-        : countCorrectAnswers(groups),
+      correctCount: countCorrectAnswers(groups),
       ieltsBandScore: deriveIeltsBandScore(examState, moduleType, autoGradingResults?.totalScore),
     };
 
-    for (const descriptor of descriptors) {
-      const item = items.get(descriptor.id);
-      const scoredResult = scoredResults.get(descriptor.id);
-      row[`answer:${descriptor.id}`] = item?.studentAnswer ?? '';
+    for (const slot of exportSlots) {
+      if (!slot.isGrouped) {
+        const descriptor = slot.descriptors[0];
+        if (!descriptor) continue;
+        row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(descriptor, answerMap);
+        row[`rightAnswer:${descriptor.id}`] = getCorrectAnswerDisplay(descriptor);
+        if (mode === 'auto') {
+          row[`score:${descriptor.id}`] = toOptionalNumber(scoredResults.get(descriptor.id)?.awardedScore);
+        } else {
+          row[`manualCorrect:${descriptor.id}`] = '';
+        }
+        continue;
+      }
+
+      for (const descriptor of slot.descriptors) {
+        row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(descriptor, answerMap);
+        row[`rightAnswer:${descriptor.id}`] = getCorrectAnswerDisplay(descriptor);
+        if (mode === 'manual') {
+          row[`manualCorrect:${descriptor.id}`] = '';
+        }
+      }
+
       if (mode === 'auto') {
-        row[`rightAnswer:${descriptor.id}`] = item?.correctAnswer ?? '';
-        row[`score:${descriptor.id}`] = toOptionalNumber(scoredResult?.awardedScore);
+        const groupResults = slot.descriptors.map((descriptor) => scoredResults.get(descriptor.id));
+        if (groupResults.some((result) => !result)) {
+          row[`scoreGroup:${slot.slotKey}`] = '';
+        } else {
+          const requiredCorrect = resolveGroupedScoringRequiredCorrect(slot.descriptors);
+          const correctSlots = groupResults.filter((result) => result?.isCorrect).length;
+          row[`scoreGroup:${slot.slotKey}`] = correctSlots >= requiredCorrect ? 1 : 0;
+        }
       } else {
-        row[`rightAnswer:${descriptor.id}`] = item?.correctAnswer ?? '';
-        row[`manualCorrect:${descriptor.id}`] = '';
+        row[`manualCorrectGroup:${slot.slotKey}`] = '';
       }
     }
 
@@ -523,9 +749,7 @@ export function buildWideObjectiveExport({
       ...(mode === 'auto'
         ? OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS
         : OBJECTIVE_WIDE_MANUAL_EXPORT_BASE_COLUMNS),
-      ...(mode === 'auto'
-        ? [...answerColumns, ...rightAnswerColumns, ...scoreColumns]
-        : manualQuestionColumns),
+      ...(mode === 'auto' ? [...answerColumns, ...rightAnswerColumns, ...scoreColumns] : manualQuestionColumns),
       ...(mode === 'auto' ? [{ key: 'ieltsBandScore', label: 'IELTS Band Score' }] : []),
     ],
     rows,

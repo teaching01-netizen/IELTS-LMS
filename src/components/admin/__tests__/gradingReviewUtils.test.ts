@@ -270,6 +270,118 @@ describe('gradingReviewUtils', () => {
     expect(rows[0]?.isCorrect).toBe('Correct');
   });
 
+  test('collapses grouped scoring into one traceback item and one export question', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages = [
+      {
+        id: 'passage-1',
+        title: 'Passage 1',
+        content: 'Content',
+        blocks: [
+          {
+            id: 'block-1',
+            type: 'SENTENCE_COMPLETION',
+            instruction: 'Complete the sentences.',
+            questions: [
+              {
+                id: 'q-1',
+                sentence: 'The data was recorded on a _____. Outcome: Land tortoises were represented by a dense _____ of points.',
+                blanks: [
+                  { id: 'b-1', correctAnswer: 'graph', position: 0, scoreGroupId: 'g1', requiredCorrect: 2 },
+                  { id: 'b-2', correctAnswer: 'cluster', position: 1, scoreGroupId: 'g1', requiredCorrect: 2 },
+                ],
+                answerRule: 'ONE_WORD',
+              },
+            ],
+          },
+        ],
+        images: [],
+        wordCount: 1,
+      },
+    ];
+
+    const groupedSlotKey = 'block-1::sentence::q-1::group::g1';
+    const sectionSubmission = {
+      id: 'sec-1',
+      submissionId: 'sub-1',
+      section: 'reading',
+      answers: {
+        type: 'reading',
+        answers: {
+          'q-1': ['graph', 'cluster'],
+        },
+      },
+      autoGradingResults: {
+        generatedAt: new Date().toISOString(),
+        totalScore: 1,
+        maxScore: 1,
+        percentage: 100,
+        questionResults: [
+          createQuestionResult('q-1:b-1', true, 1),
+          createQuestionResult('q-1:b-2', true, 1),
+        ],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } as any;
+
+    const groups = buildQuestionTracebackGroups(examState, sectionSubmission, 'reading');
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.items).toHaveLength(1);
+    const item = groups[0]?.items[0];
+    expect(item?.numberLabel).toBe('1');
+    expect(item?.rootId).toBe(groupedSlotKey);
+    expect(item?.studentAnswerSlots).toEqual(['graph', 'cluster']);
+    expect(item?.correctAnswerSlots).toEqual(['graph', 'cluster']);
+    expect(item?.awardedScore).toBe(1);
+    expect(item?.maxScore).toBe(1);
+
+    const exportRows = buildObjectiveExportRows({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submission: createStudentSubmission('sub-1', 'stu-1', 'Student One'),
+      sectionSubmission,
+      examState,
+      moduleType: 'reading',
+    });
+    expect(exportRows).toHaveLength(1);
+    expect(exportRows[0]?.questionId).toBe(groupedSlotKey);
+
+    const wideAuto = buildWideObjectiveExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      sectionSubmissions: [{ submissionId: 'sub-1', sectionSubmission }],
+      examState,
+      moduleType: 'reading',
+    });
+
+    const wideLabels = wideAuto.columns.map((column) => column.label);
+    expect(wideLabels).toContain('Q1 Answer (1)');
+    expect(wideLabels).toContain('Q1 Answer (2)');
+    expect(wideLabels).toContain('Q1 Right Answer (1)');
+    expect(wideLabels).toContain('Q1 Right Answer (2)');
+    expect(wideLabels).toContain('Q1 Score');
+    expect(wideLabels.filter((label) => label === 'Q1 Answer')).toHaveLength(0);
+    expect(wideAuto.rows[0]?.['answer:q-1:b-1']).toBe('graph');
+    expect(wideAuto.rows[0]?.['answer:q-1:b-2']).toBe('cluster');
+    expect(wideAuto.rows[0]?.[`scoreGroup:${groupedSlotKey}`]).toBe(1);
+
+    const wideManual = buildWideObjectiveExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      sectionSubmissions: [{ submissionId: 'sub-1', sectionSubmission }],
+      examState,
+      moduleType: 'reading',
+      mode: 'manual',
+    });
+    const manualLabels = wideManual.columns.map((column) => column.label);
+    expect(manualLabels).toContain('Q1 Answer (1)');
+    expect(manualLabels).toContain('Q1 Answer (2)');
+    expect(manualLabels).toContain('Q1 Right Answer/Answer Key (1)');
+    expect(manualLabels).toContain('Q1 Right Answer/Answer Key (2)');
+    expect(manualLabels).toContain('Correct Q1');
+    expect(wideManual.rows[0]?.[`manualCorrectGroup:${groupedSlotKey}`]).toBe('');
+  });
+
   test('prefers stored objective correctness when it differs from the raw answer', () => {
     const examState = createInitialExamState('Exam', 'Academic');
     examState.reading.passages = [
