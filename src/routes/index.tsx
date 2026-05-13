@@ -92,6 +92,12 @@ const StudentRegistrationRoute = lazy(() =>
   })),
 );
 
+const DevHighlightSelectionRoute = lazy(() =>
+  import('./dev/HighlightSelectionDebugRoute').then((module) => ({
+    default: module.HighlightSelectionDebugRoute,
+  })),
+);
+
 function RouteLoadingFallback() {
   return <AppLoadingSkeleton />;
 }
@@ -126,7 +132,7 @@ function withAuth(element: React.ReactNode, allowedRoles?: Array<'admin' | 'buil
   return <RequireAuth allowedRoles={allowedRoles}>{element}</RequireAuth>;
 }
 
-export const appRoutes = [
+const baseRoutes = [
   {
     path: '/login',
     element: <LoginPage />,
@@ -296,5 +302,20 @@ export const appRoutes = [
     ],
   },
 ];
+
+const devRoutes = import.meta.env.DEV
+  ? [
+      {
+        path: '/__dev/highlight-selection',
+        element: (
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <DevHighlightSelectionRoute />
+          </Suspense>
+        ),
+      },
+    ]
+  : [];
+
+export const appRoutes = [...devRoutes, ...baseRoutes];
 
 export const router = createBrowserRouter(appRoutes);
