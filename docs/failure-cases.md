@@ -75,7 +75,7 @@ Global `dragstart` blocking exempted only elements inside `[data-student-highlig
 - Rules/Docs: `docs/failure-cases.md`
 
 ### Invariant
-Reading passage text selection (title and body) must remain native-selectable during exam mode while non-passage drag/drop restrictions remain enforced.
+Reading passage text selection (title and body) must remain native-selectable during exam mode.
 
 ---
 
@@ -231,11 +231,11 @@ The anti-cheat layer blocked `dragstart` unless the event target was inside `[da
 
 ### Fix
 - Allow `dragstart` during exam mode so native text selection behaves normally.
-- Keep `drop` blocked during exam mode so answer/file drop restrictions remain enforced.
+- Allow `drop` during exam mode so native browser text/interaction flows are not canceled by global listeners.
 
 ### Regression Protection
 - Tests: `src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx`
 - Rules/Docs: `docs/ux-invariants.md`
 
 ### Invariant
-Anti-cheat drag/drop policy must not cancel native text selection gestures; enforcement belongs on drop/paste paths that mutate exam inputs or introduce external content.
+Anti-cheat interaction policy must not cancel native text selection or drop gestures; integrity enforcement belongs on paste and answer-mutation paths.

@@ -396,31 +396,11 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       // Native callout/context menu is intentionally allowed across exam text surfaces.
     };
 
-    const handleDragDrop = (event: DragEvent) => {
-      if (!shouldBlockClipboard) {
-        return;
-      }
-
-      if (event.type === 'dragstart') {
-        // Native text selection can emit dragstart from wrapper elements,
-        // whitespace, or text nodes outside the exact highlightable marker.
-        return;
-      }
-
-      handleRestrictedInteraction(
-        event,
-        'DRAG_DROP_BLOCKED',
-        'Drag and drop is blocked during the exam.',
-      );
-    };
-
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('copy', handleClipboardEvent);
     document.addEventListener('cut', handleClipboardEvent);
     document.addEventListener('paste', handleClipboardEvent);
     document.addEventListener('contextmenu', handleContextMenu);
-    document.addEventListener('dragstart', handleDragDrop);
-    document.addEventListener('drop', handleDragDrop);
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
@@ -428,8 +408,6 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       document.removeEventListener('cut', handleClipboardEvent);
       document.removeEventListener('paste', handleClipboardEvent);
       document.removeEventListener('contextmenu', handleContextMenu);
-      document.removeEventListener('dragstart', handleDragDrop);
-      document.removeEventListener('drop', handleDragDrop);
     };
   }, [
     attemptActions,

@@ -344,7 +344,7 @@ describe('StudentKeyboardProvider', () => {
     expect(harness.runtime.state.violations).toHaveLength(0);
   });
 
-  it('blocks drop interactions during exam phase', () => {
+  it('allows drop interactions during exam phase', () => {
     const harness = renderHarness();
     const event = new Event('drop', {
       bubbles: true,
@@ -355,8 +355,8 @@ describe('StudentKeyboardProvider', () => {
       document.dispatchEvent(event);
     });
 
-    expect(event.defaultPrevented).toBe(true);
-    expect(harness.runtime.state.violations.at(-1)?.type).toBe('DRAG_DROP_BLOCKED');
+    expect(event.defaultPrevented).toBe(false);
+    expect(harness.runtime.state.violations).toHaveLength(0);
   });
 
   it('allows dragstart inside highlightable reading text when highlight mode is active', () => {
