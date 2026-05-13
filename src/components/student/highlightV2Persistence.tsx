@@ -1,12 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useStudentHighlightPersistenceContext } from './highlightPersistence';
+import React, { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { hashString, type HighlightRangeV2 } from './highlightV2Engine';
-import { HIGHLIGHT_RANGE_STORAGE_PREFIX } from './highlightStorageKeys';
+import {
+  HIGHLIGHT_CLEAR_EVENT_NAME,
+  HIGHLIGHT_HTML_STORAGE_PREFIX,
+  HIGHLIGHT_RANGE_STORAGE_PREFIX,
+} from './highlightStorageKeys';
+import {
+  readPersistedSurfaceRanges,
+  removePersistedSurfaceRanges,
+  writePersistedSurfaceRanges,
+} from './highlight/highlightStore';
 
-interface PersistedSurfaceRangesV2 {
-  sourceHash: string;
-  ranges: HighlightRangeV2[];
+interface HighlightPersistenceContextValue {
+  namespace: string;
+  clearHighlights: () => void;
 }
+
+const HighlightPersistenceContext = createContext<HighlightPersistenceContextValue | null>(null);
 
 function getStorage(): Storage | null {
   try {
@@ -16,64 +26,61 @@ function getStorage(): Storage | null {
   }
 }
 
-function buildStorageKey(namespace: string, surfaceId: string): string {
-  return `${HIGHLIGHT_RANGE_STORAGE_PREFIX}:${namespace}:${surfaceId}`;
-}
-
-function safeParseRanges(payload: string | null): PersistedSurfaceRangesV2 | null {
-  if (!payload) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(payload) as PersistedSurfaceRangesV2;
-    if (!parsed || typeof parsed !== 'object') {
-      return null;
-    }
-
-    if (typeof parsed.sourceHash !== 'string' || !Array.isArray(parsed.ranges)) {
-      return null;
-    }
-
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function readSurfaceRanges(namespace: string, surfaceId: string): PersistedSurfaceRangesV2 | null {
-  const storage = getStorage();
-  if (!storage) {
-    return null;
-  }
-
-  return safeParseRanges(storage.getItem(buildStorageKey(namespace, surfaceId)));
-}
-
-function writeSurfaceRanges(namespace: string, surfaceId: string, payload: PersistedSurfaceRangesV2): void {
+function clearNamespace(namespace: string): void {
   const storage = getStorage();
   if (!storage) {
     return;
   }
 
-  try {
-    storage.setItem(buildStorageKey(namespace, surfaceId), JSON.stringify(payload));
-  } catch {
-    // Ignore storage errors; in-memory highlighting still works.
+  const prefixes = [
+    `${HIGHLIGHT_HTML_STORAGE_PREFIX}:${namespace}:`,
+    `${HIGHLIGHT_RANGE_STORAGE_PREFIX}:${namespace}:`,
+  ];
+
+  for (let index = storage.length - 1; index >= 0; index -= 1) {
+    const key = storage.key(index);
+    if (key && prefixes.some((prefix) => key.startsWith(prefix))) {
+      storage.removeItem(key);
+    }
   }
 }
 
-function removeSurfaceRanges(namespace: string, surfaceId: string): void {
-  const storage = getStorage();
-  if (!storage) {
-    return;
-  }
+export function clearStudentHighlights(namespace: string): void {
+  clearNamespace(namespace);
 
-  try {
-    storage.removeItem(buildStorageKey(namespace, surfaceId));
-  } catch {
-    // Ignore storage errors.
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(HIGHLIGHT_CLEAR_EVENT_NAME, {
+        detail: { namespace },
+      }),
+    );
   }
+}
+
+export function StudentHighlightPersistenceProvider({
+  namespace,
+  children,
+}: {
+  namespace: string;
+  children: ReactNode;
+}) {
+  const clearHighlights = () => {
+    clearStudentHighlights(namespace);
+  };
+
+  const value = useMemo(
+    () => ({
+      namespace,
+      clearHighlights,
+    }),
+    [namespace],
+  );
+
+  return <HighlightPersistenceContext.Provider value={value}>{children}</HighlightPersistenceContext.Provider>;
+}
+
+export function useStudentHighlightPersistenceContext() {
+  return useContext(HighlightPersistenceContext);
 }
 
 export function usePersistedHighlightRangesV2(surfaceId: string, canonicalText: string) {
@@ -86,7 +93,7 @@ export function usePersistedHighlightRangesV2(surfaceId: string, canonicalText: 
       return [];
     }
 
-    const persisted = readSurfaceRanges(namespace, surfaceId);
+    const persisted = readPersistedSurfaceRanges(namespace, surfaceId);
     if (!persisted || persisted.sourceHash !== sourceHash) {
       return [];
     }
@@ -100,7 +107,7 @@ export function usePersistedHighlightRangesV2(surfaceId: string, canonicalText: 
       return;
     }
 
-    const persisted = readSurfaceRanges(namespace, surfaceId);
+    const persisted = readPersistedSurfaceRanges(namespace, surfaceId);
     if (!persisted || persisted.sourceHash !== sourceHash) {
       setRanges([]);
       return;
@@ -115,15 +122,35 @@ export function usePersistedHighlightRangesV2(surfaceId: string, canonicalText: 
     }
 
     if (ranges.length === 0) {
-      removeSurfaceRanges(namespace, surfaceId);
+      removePersistedSurfaceRanges(namespace, surfaceId);
       return;
     }
 
-    writeSurfaceRanges(namespace, surfaceId, {
+    writePersistedSurfaceRanges(namespace, surfaceId, {
       sourceHash,
       ranges,
     });
   }, [namespace, ranges, sourceHash, surfaceId]);
+
+  useEffect(() => {
+    if (!namespace || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleClear = (event: Event) => {
+      const customEvent = event as CustomEvent<{ namespace?: string }>;
+      if (customEvent.detail?.namespace && customEvent.detail.namespace !== namespace) {
+        return;
+      }
+
+      setRanges([]);
+    };
+
+    window.addEventListener(HIGHLIGHT_CLEAR_EVENT_NAME, handleClear as EventListener);
+    return () => {
+      window.removeEventListener(HIGHLIGHT_CLEAR_EVENT_NAME, handleClear as EventListener);
+    };
+  }, [namespace]);
 
   return {
     ranges,

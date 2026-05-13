@@ -6,15 +6,17 @@ import {
   type StudentHighlightColor,
 } from './highlightPalette';
 import {
-  addHighlightRange,
-  eraseHighlightRange,
-  renderHighlightedHtml,
-  selectionIntersectsRanges,
   type HighlightSelectionV2,
 } from './highlightV2Engine';
 import { usePersistedHighlightRangesV2 } from './highlightV2Persistence';
 import { useHighlightSelectionManager } from './highlightSelectionManager';
 import { useHighlightSelectionPort } from './highlightSelectionPort';
+import {
+  canEraseHighlight,
+  createHighlight,
+  eraseHighlight,
+} from './highlight/highlightCommandService';
+import { renderSurfaceHighlights } from './highlight/renderAdapter';
 
 const MAX_SURFACE_RANGES = 200;
 const TRANSIENT_SELECTION_STICKY_WINDOW_MS = 250;
@@ -75,7 +77,7 @@ export function useHighlightSurfaceV2({
   );
 
   const renderedHtml = useMemo(
-    () => renderHighlightedHtml(baseHtml, ranges, resolvedClassForColor),
+    () => renderSurfaceHighlights(baseHtml, ranges, resolvedClassForColor),
     [baseHtml, ranges, resolvedClassForColor],
   );
 
@@ -95,9 +97,7 @@ export function useHighlightSurfaceV2({
       return;
     }
 
-    const snapshot = selectionPort.readSelection(container, {
-      enforceSingleBlock: true,
-    });
+    const snapshot = selectionPort.readSelection(container);
     if (!snapshot.selection) {
       const now = Date.now();
       const canKeepPreviousSelection =
@@ -143,9 +143,7 @@ export function useHighlightSurfaceV2({
       return null;
     }
 
-    return selectionPort.readSelection(container, {
-      enforceSingleBlock: true,
-    }).selection;
+    return selectionPort.readSelection(container).selection;
   }, [enabled, selection, selectionPort]);
 
   const applySelectionHighlight = useCallback((color?: StudentHighlightColor) => {
@@ -154,7 +152,7 @@ export function useHighlightSurfaceV2({
       return;
     }
 
-    const next = addHighlightRange(
+    const next = createHighlight(
       ranges,
       activeSelection,
       color ?? resolvedHighlightColor,
@@ -181,7 +179,7 @@ export function useHighlightSurfaceV2({
     }
 
     setHint(null);
-    setRanges(eraseHighlightRange(ranges, activeSelection));
+    setRanges(eraseHighlight(ranges, activeSelection));
     selectionPort.clearSelection();
     setSelection(null);
     lastValidSelectionRef.current = null;
@@ -194,7 +192,7 @@ export function useHighlightSurfaceV2({
       return false;
     }
 
-    return selectionIntersectsRanges(ranges, selection);
+    return canEraseHighlight(ranges, selection);
   }, [ranges, selection]);
 
   useEffect(() => {

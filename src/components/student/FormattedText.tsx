@@ -1,6 +1,6 @@
 import React, { useId, useMemo } from 'react';
 import { parseBoldMarkdown, parseRichMarkdown } from '../../utils/boldMarkdown';
-import { escapeHtml } from './highlightSelection';
+import { escapeHtml } from './highlight/htmlEscape';
 import { type StudentHighlightColor } from './highlightPalette';
 import { HighlightableSurface } from './HighlightableSurface';
 import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';

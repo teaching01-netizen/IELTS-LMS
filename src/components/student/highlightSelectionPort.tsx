@@ -4,6 +4,7 @@ import {
   type CaptureSelectionOptions,
   type HighlightSelectionV2,
 } from './highlightV2Engine';
+import { subscribeSelectionObserver } from './highlight/selectionObserver';
 
 export interface SurfaceSelectionSnapshot {
   selection: HighlightSelectionV2 | null;
@@ -46,15 +47,7 @@ function safeToolbarPosition(selection: Selection): { left: number; top: number 
 export function createBrowserHighlightSelectionPort(): HighlightSelectionPort {
   return {
     subscribe(onSelectionChange) {
-      document.addEventListener('selectionchange', onSelectionChange);
-      document.addEventListener('mouseup', onSelectionChange);
-      document.addEventListener('touchend', onSelectionChange);
-
-      return () => {
-        document.removeEventListener('selectionchange', onSelectionChange);
-        document.removeEventListener('mouseup', onSelectionChange);
-        document.removeEventListener('touchend', onSelectionChange);
-      };
+      return subscribeSelectionObserver(onSelectionChange);
     },
 
     readSelection(container, options) {

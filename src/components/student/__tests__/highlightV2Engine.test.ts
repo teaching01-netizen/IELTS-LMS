@@ -97,4 +97,57 @@ describe('highlight v2 engine', () => {
       selectedText: 'Alpha beta gamma',
     });
   });
+
+  it('captures cross-block selections when endpoints stay in the same surface', () => {
+    const container = document.createElement('div');
+    container.innerHTML = '<p>Alpha beta.</p><p>Gamma delta.</p>';
+    const firstText = container.querySelector('p')?.firstChild;
+    const secondText = container.querySelectorAll('p')?.[1]?.firstChild;
+    if (!(firstText instanceof Text) || !(secondText instanceof Text)) {
+      throw new Error('Expected paragraph text nodes');
+    }
+
+    const range = document.createRange();
+    range.setStart(firstText, 6);
+    range.setEnd(secondText, 5);
+
+    const selection = {
+      rangeCount: 1,
+      getRangeAt: () => range,
+      toString: () => range.toString(),
+    } as unknown as Selection;
+
+    const captured = captureSurfaceSelection(container, selection, {
+      enforceSingleBlock: true,
+    });
+
+    expect(captured).toEqual({
+      start: 6,
+      end: 16,
+      selectedText: 'beta.Gamma',
+    });
+  });
+
+  it('rejects selections that touch excluded answer controls', () => {
+    const container = document.createElement('div');
+    container.innerHTML = '<p>Alpha beta</p><input value="forbidden" />';
+
+    const paragraphText = container.querySelector('p')?.firstChild;
+    const input = container.querySelector('input');
+    if (!(paragraphText instanceof Text) || !(input instanceof HTMLInputElement)) {
+      throw new Error('Expected paragraph text and input');
+    }
+
+    const range = document.createRange();
+    range.setStart(paragraphText, 6);
+    range.setEnd(input, 0);
+
+    const selection = {
+      rangeCount: 1,
+      getRangeAt: () => range,
+      toString: () => 'beta',
+    } as unknown as Selection;
+
+    expect(captureSurfaceSelection(container, selection)).toBeNull();
+  });
 });

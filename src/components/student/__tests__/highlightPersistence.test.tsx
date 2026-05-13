@@ -2,7 +2,7 @@ import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { FormattedText } from '../FormattedText';
-import { StudentHighlightPersistenceProvider } from '../highlightPersistence';
+import { StudentHighlightPersistenceProvider } from '../highlightV2Persistence';
 import { StudentHighlightSelectionManagerProvider } from '../highlightSelectionManager';
 
 function findFirstTextNode(root: Element): ChildNode | null {
@@ -39,7 +39,7 @@ function createSelectionMock(
 }
 
 describe('student highlight persistence v2', () => {
-  it('rejects broad container-boundary selections to avoid accidental select-all highlights', () => {
+  it('allows broad same-surface selections so cross-block highlighting can apply', () => {
     let highlightable: Element | null = null;
     const broadSelection = {
       rangeCount: 1,
@@ -68,8 +68,13 @@ describe('student highlight persistence v2', () => {
 
     fireEvent(document, new Event('selectionchange'));
 
-    expect(container.querySelector('button')).toBeNull();
-    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(0);
+    const colorButton = container.querySelector('button[aria-label="Apply Yellow highlight"]');
+    expect(colorButton).not.toBeNull();
+    if (!colorButton) {
+      throw new Error('Expected highlight color action button');
+    }
+    fireEvent.click(colorButton);
+    expect(container.querySelectorAll('mark[data-highlighted="true"]')).toHaveLength(2);
 
     getSelectionSpy.mockRestore();
   });

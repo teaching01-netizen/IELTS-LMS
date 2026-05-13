@@ -179,6 +179,45 @@ Floating highlight controls must consume the latest valid captured text selectio
 
 ---
 
+## 2026-05-13: Highlight Surface V3 Enables Cross-Block, Surface-Bounded Selection
+
+### Symptom
+Reading/question text selection could not be highlighted when a range crossed paragraph/block boundaries inside the same visible text surface.
+
+### Scope
+Student highlight selection capture, toolbar apply flow, and highlight persistence boundary policy.
+
+### Root Cause
+Selection capture enforced a single-block policy gate that rejected otherwise valid same-surface ranges.
+
+### Fix
+- Rebuilt the selection pipeline around `highlightSelectionPort -> captureSurfaceSelection -> useHighlightSurfaceV2 -> highlightV2Persistence` with explicit V3 seams:
+  - `surfaceResolver`
+  - `rangeNormalizer`
+  - `selectionObserver`
+  - `highlightCommandService`
+  - `highlightStore`
+  - `renderAdapter`
+- Removed single-block rejection from capture so cross-block ranges are valid when both endpoints stay in one highlight surface.
+- Kept strict fail-closed surface checks and exclusion of answer controls (`input`, `textarea`, `select`, `[contenteditable]`, and answer-control wrappers).
+- Deleted legacy snapshot/highlight path files:
+  - `src/components/student/highlightSelection.ts`
+  - `src/components/student/highlightPersistence.tsx`
+  - `src/components/student/__tests__/highlightSelection.test.ts`
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/highlightV2Engine.test.ts`
+- Tests: `src/components/student/__tests__/highlightSelectionPort.test.tsx`
+- Tests: `src/components/student/__tests__/highlightPersistence.test.tsx`
+- Tests: `src/components/student/__tests__/StudentReadingReadabilityControls.test.tsx`
+- Tests: `src/components/student/__tests__/StudentQuestionExperience.test.tsx`
+- Rules/Docs: `docs/ux-invariants.md`
+
+### Invariant
+Cross-block selections are valid within a single highlight surface. Cross-surface and answer-control-touching selections are rejected.
+
+---
+
 ## 2026-05-13: Dragstart Anti-Cheat Blocks Native Text Selection
 
 ### Symptom

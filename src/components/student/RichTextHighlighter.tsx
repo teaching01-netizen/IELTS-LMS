@@ -1,8 +1,6 @@
 import React, { useId, useMemo } from 'react';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
-import {
-  escapeHtml,
-} from './highlightSelection';
+import { escapeHtml } from './highlight/htmlEscape';
 import { HighlightableSurface } from './HighlightableSurface';
 import { type StudentHighlightColor } from './highlightPalette';
 import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';

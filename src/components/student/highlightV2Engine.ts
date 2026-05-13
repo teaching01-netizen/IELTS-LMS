@@ -1,4 +1,9 @@
 import type { StudentHighlightColor } from './highlightPalette';
+import {
+  DEFAULT_DISALLOWED_SELECTION_SELECTOR,
+  resolveSurfaceSelection,
+} from './highlight/surfaceResolver';
+import { normalizeRangeToSurfaceSelection } from './highlight/rangeNormalizer';
 
 export interface HighlightRangeV2 {
   start: number;
@@ -14,50 +19,8 @@ export interface HighlightSelectionV2 {
 
 export interface CaptureSelectionOptions {
   disallowedSelectionSelector?: string | undefined;
+  // Deprecated: cross-block ranges are now allowed within one surface.
   enforceSingleBlock?: boolean | undefined;
-}
-
-const DEFAULT_DISALLOWED_SELECTION_SELECTOR =
-  'input, textarea, select, [contenteditable="true"], [data-answer-control="true"]';
-
-const BLOCK_BOUNDARY_TAGS = new Set([
-  'P',
-  'DIV',
-  'SECTION',
-  'ARTICLE',
-  'ASIDE',
-  'MAIN',
-  'NAV',
-  'HEADER',
-  'FOOTER',
-  'UL',
-  'OL',
-  'LI',
-  'DL',
-  'DT',
-  'DD',
-  'BLOCKQUOTE',
-  'PRE',
-  'TABLE',
-  'THEAD',
-  'TBODY',
-  'TFOOT',
-  'TR',
-  'TD',
-  'TH',
-  'CAPTION',
-  'FIGURE',
-  'FIGCAPTION',
-  'H1',
-  'H2',
-  'H3',
-  'H4',
-  'H5',
-  'H6',
-]);
-
-function normalizeSelectionText(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
 }
 
 export function hashString(value: string): string {
@@ -70,23 +33,6 @@ export function hashString(value: string): string {
 
 export function getCanonicalSurfaceText(root: HTMLElement): string {
   return root.textContent ?? '';
-}
-
-function findNearestBlockBoundary(container: HTMLElement, node: Node): Node {
-  const initialElement =
-    node.nodeType === Node.ELEMENT_NODE
-      ? (node as Element)
-      : node.parentElement;
-
-  let current: Element | null = initialElement;
-  while (current && current !== container) {
-    if (BLOCK_BOUNDARY_TAGS.has(current.tagName)) {
-      return current;
-    }
-    current = current.parentElement;
-  }
-
-  return container;
 }
 
 function getSelectionTextSegments(
@@ -138,52 +84,6 @@ function getSelectionTextSegments(
   return segments;
 }
 
-function selectionCrossesBlockBoundary(container: HTMLElement, range: Range): boolean {
-  const segments = getSelectionTextSegments(container, range);
-  if (segments.length === 0) {
-    return false;
-  }
-
-  const firstBlock = findNearestBlockBoundary(container, segments[0]!.textNode);
-  for (const segment of segments) {
-    if (findNearestBlockBoundary(container, segment.textNode) !== firstBlock) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function computeTextOffsetFromContainerStart(
-  container: HTMLElement,
-  node: Node,
-  offset: number,
-): number | null {
-  const probeRange = document.createRange();
-  probeRange.selectNodeContents(container);
-
-  try {
-    probeRange.setEnd(node, offset);
-  } catch {
-    return null;
-  }
-
-  return probeRange.toString().length;
-}
-
-function hasDisallowedSelectionTarget(
-  startNode: Node,
-  endNode: Node,
-  selector: string,
-): boolean {
-  const startElement =
-    startNode.nodeType === Node.ELEMENT_NODE ? (startNode as Element) : startNode.parentElement;
-  const endElement =
-    endNode.nodeType === Node.ELEMENT_NODE ? (endNode as Element) : endNode.parentElement;
-
-  return Boolean(startElement?.closest(selector) || endElement?.closest(selector));
-}
-
 export function captureSurfaceSelection(
   container: HTMLElement,
   selection: Selection,
@@ -191,66 +91,15 @@ export function captureSurfaceSelection(
 ): HighlightSelectionV2 | null {
   const disallowedSelectionSelector =
     options?.disallowedSelectionSelector ?? DEFAULT_DISALLOWED_SELECTION_SELECTOR;
-  const enforceSingleBlock = options?.enforceSingleBlock ?? true;
 
-  if (selection.rangeCount === 0) {
+  const resolved = resolveSurfaceSelection(container, selection, {
+    disallowedSelectionSelector,
+  });
+  if (!resolved) {
     return null;
   }
 
-  let range: Range;
-  try {
-    range = selection.getRangeAt(0);
-  } catch {
-    return null;
-  }
-
-  if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
-    return null;
-  }
-
-  if (
-    disallowedSelectionSelector &&
-    hasDisallowedSelectionTarget(range.startContainer, range.endContainer, disallowedSelectionSelector)
-  ) {
-    return null;
-  }
-
-  if (enforceSingleBlock && selectionCrossesBlockBoundary(container, range)) {
-    return null;
-  }
-
-  const segments = getSelectionTextSegments(container, range);
-  const firstSegment = segments[0];
-  const lastSegment = segments[segments.length - 1];
-  if (!firstSegment || !lastSegment) {
-    return null;
-  }
-
-  const selectedText = normalizeSelectionText(range.toString());
-  if (!selectedText) {
-    return null;
-  }
-
-  const start = computeTextOffsetFromContainerStart(
-    container,
-    firstSegment.textNode,
-    firstSegment.startOffset,
-  );
-  const end = computeTextOffsetFromContainerStart(
-    container,
-    lastSegment.textNode,
-    lastSegment.endOffset,
-  );
-
-  if (start === null || end === null || end <= start) {
-    return null;
-  }
-
-  return {
-    start,
-    end,
-    selectedText,
-  };
+  return normalizeRangeToSurfaceSelection(container, resolved.range);
 }
 
 function normalizeHighlightRanges(ranges: HighlightRangeV2[]): HighlightRangeV2[] {
