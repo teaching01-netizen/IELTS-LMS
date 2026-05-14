@@ -38,10 +38,15 @@ Output:
 PDF content:
 
 - Mirrors the existing grading CSV fields for the selected sections (rendered as a readable key/value report).
-- Writing includes the full essay text (plain text) when available.
+- Writing uses the same structure as the default **"Print all writing"** export (task pages with prompt, response, and assessment form), and includes the full essay text (plain text) when available.
 - Missing section data is rendered as **"No submission"**.
 
 The selected sections are persisted per grading session in `localStorage`:
 
 - `grading:<sessionId>:perStudentExportSections` (JSON array)
 
+PDF filenames inside the ZIP can be customized via a template persisted per grading session in `localStorage`:
+
+- `grading:<sessionId>:perStudentPdfFilenameTemplate`
+
+The template affects **only** PDF filenames inside the ZIP (the ZIP filename remains unchanged). Unknown placeholders are kept as literal text and the UI warns.

@@ -20,6 +20,12 @@ import {
   createPerStudentZipPdfExport,
   type PerStudentZipPdfExportSection,
 } from './gradingPerStudentExport';
+import {
+  DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE,
+  PER_STUDENT_PDF_FILENAME_TEMPLATE_FIELDS,
+  renderPerStudentPdfFilenameTemplate,
+  resolvePerStudentPdfFilenameCollisions,
+} from './gradingPerStudentPdfFilenameTemplate';
 import type { ExamState } from '../../types';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
@@ -174,6 +180,9 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     'reading',
     'writing',
   ]);
+  const [perStudentPdfFilenameTemplate, setPerStudentPdfFilenameTemplate] = useState(
+    DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE,
+  );
   const [perStudentExporting, setPerStudentExporting] = useState(false);
   const [writingPrintDocument, setWritingPrintDocument] = useState<SessionWritingPrintDocument | null>(null);
   const [filters, setFilters] = useState<SessionDetailFilters>({});
@@ -249,6 +258,32 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       // Ignore storage failures.
     }
   }, [perStudentSections, sessionId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem(`grading:${sessionId}:perStudentPdfFilenameTemplate`);
+      if (stored && stored.trim().length > 0) {
+        setPerStudentPdfFilenameTemplate(stored);
+      } else {
+        setPerStudentPdfFilenameTemplate(DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE);
+      }
+    } catch {
+      setPerStudentPdfFilenameTemplate(DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        `grading:${sessionId}:perStudentPdfFilenameTemplate`,
+        perStudentPdfFilenameTemplate,
+      );
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [perStudentPdfFilenameTemplate, sessionId]);
 
   const loadSubmissions = async () => {
     setLoading(true);
@@ -609,11 +644,14 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
 
         for (const submission of selectedSubmissions) {
           const existing = sectionDataBySubmissionId.get(submission.id) ?? {};
+          const writingTasks =
+            writingEntries.find((entry) => entry.submissionId === submission.id)?.writing ?? [];
           sectionDataBySubmissionId.set(submission.id, {
             ...existing,
             writing: {
               columns: writingExport.columns,
               row: hasWritingSubmission.has(submission.id) ? (rowBySubmissionId.get(submission.id) ?? null) : null,
+              writingTasks,
             },
           });
         }
@@ -623,10 +661,17 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         filenameBase: `${fullSession.examTitle}-${fullSession.cohortName || ''}`.trim(),
         generatedAt: new Date(),
         sections: selectedSections,
+        pdfFilenameTemplate: perStudentPdfFilenameTemplate,
+        session: {
+          examTitle: fullSession.examTitle,
+          cohortName: fullSession.cohortName,
+          sessionId: fullSession.id,
+        },
         students: selectedSubmissions.map((submission) => ({
           submissionId: submission.id,
           studentName: submission.studentName,
           studentId: submission.studentId || submission.submissionId,
+          studentEmail: submission.studentEmail,
           sectionData: sectionDataBySubmissionId.get(submission.id) ?? {},
         })),
       });
@@ -659,6 +704,50 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
   const perStudentAllFilteredSelected =
     perStudentFilteredIds.length > 0 &&
     perStudentFilteredIds.every((id) => perStudentSelectedSubmissionIds.includes(id));
+
+  const perStudentPreviewSubmission =
+    perStudentSelectedSubmissionIds.length > 0
+      ? perStudentDialogSubmissions.find((submission) => submission.id === perStudentSelectedSubmissionIds[0]) ??
+        null
+      : null;
+  const perStudentPreviewContextSession = session ?? null;
+  const perStudentPreviewResult = perStudentPreviewSubmission
+    ? renderPerStudentPdfFilenameTemplate(perStudentPdfFilenameTemplate, {
+        studentName: perStudentPreviewSubmission.studentName,
+        studentId: perStudentPreviewSubmission.studentId || perStudentPreviewSubmission.submissionId,
+        studentEmail: perStudentPreviewSubmission.studentEmail,
+        submissionId: perStudentPreviewSubmission.id,
+        examTitle: perStudentPreviewContextSession?.examTitle,
+        cohortName: perStudentPreviewContextSession?.cohortName,
+        sessionId: sessionId,
+        sections: perStudentSections,
+        generatedAt: new Date(),
+      })
+    : null;
+
+  const perStudentTemplateUnknown =
+    perStudentPreviewResult?.unknownPlaceholders ?? [];
+
+  const perStudentCollisionInfo = (() => {
+    if (perStudentSelectedSubmissionIds.length <= 1) return { collisionsResolved: 0 };
+    const selected = perStudentDialogSubmissions.filter((submission) =>
+      perStudentSelectedSubmissionIds.includes(submission.id),
+    );
+    const desired = selected.map((submission) =>
+      renderPerStudentPdfFilenameTemplate(perStudentPdfFilenameTemplate, {
+        studentName: submission.studentName,
+        studentId: submission.studentId || submission.submissionId,
+        studentEmail: submission.studentEmail,
+        submissionId: submission.id,
+        examTitle: perStudentPreviewContextSession?.examTitle,
+        cohortName: perStudentPreviewContextSession?.cohortName,
+        sessionId,
+        sections: perStudentSections,
+        generatedAt: new Date(),
+      }).filename,
+    );
+    return resolvePerStudentPdfFilenameCollisions(desired);
+  })();
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -731,6 +820,53 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
               PDFs include the same fields as the current grading CSV export for the selected sections.
               Writing includes full essay text. Missing data is shown as “No submission”.
             </p>
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold text-gray-700">PDF filename template</div>
+            <p className="mt-1 text-xs text-gray-500">
+              Template affects PDF filenames inside the ZIP only. Use <code className="font-mono">{'{{field}}'}</code> placeholders.
+            </p>
+            <input
+              type="text"
+              value={perStudentPdfFilenameTemplate}
+              onChange={(e) => setPerStudentPdfFilenameTemplate(e.target.value)}
+              aria-label="PDF filename template"
+              disabled={perStudentExporting}
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            <div className="mt-2 flex flex-wrap gap-2">
+              {PER_STUDENT_PDF_FILENAME_TEMPLATE_FIELDS.map((field) => (
+                <button
+                  key={field.key}
+                  type="button"
+                  disabled={perStudentExporting}
+                  onClick={() =>
+                    setPerStudentPdfFilenameTemplate((current) => `${current}{{${field.key}}}`)
+                  }
+                  className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {field.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+              <div className="font-semibold text-gray-800">Example</div>
+              <div className="mt-1 font-mono text-gray-800">
+                {perStudentPreviewResult?.filename ?? 'Select a student to preview'}
+              </div>
+              {perStudentTemplateUnknown.length > 0 ? (
+                <div className="mt-2 text-amber-900">
+                  Unknown placeholders: {perStudentTemplateUnknown.map((value) => `{{${value}}}`).join(', ')}
+                </div>
+              ) : null}
+              {perStudentCollisionInfo.collisionsResolved > 0 ? (
+                <div className="mt-1 text-amber-900">
+                  Duplicate filenames detected. The export will suffix duplicates with <span className="font-mono">(2)</span>, <span className="font-mono">(3)</span>, etc.
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="flex flex-col gap-2">
