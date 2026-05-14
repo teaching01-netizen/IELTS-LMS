@@ -14,7 +14,7 @@ interface PublishActionsProps {
   canPublish: boolean;
   publishReadiness?: PublishReadiness;
   onPublish: (notes?: string) => void;
-  onCreatePublishCandidate?: () => Promise<{ success: boolean; error?: string } | void>;
+  onRepublishLatestDraft?: () => Promise<{ success: boolean; error?: string } | void>;
   onSchedulePublish: (scheduledTime: string) => void;
   scheduledTime?: string;
   onOpenSchedulingWorkflow?: (() => void) | undefined;
@@ -37,7 +37,7 @@ export function PublishActions({
   canPublish,
   publishReadiness,
   onPublish,
-  onCreatePublishCandidate,
+  onRepublishLatestDraft,
   onSchedulePublish,
   scheduledTime: scheduledTimeProp,
   onOpenSchedulingWorkflow,
@@ -58,8 +58,8 @@ export function PublishActions({
   const [showSchedule, setShowSchedule] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const [isCreatingPublishCandidate, setIsCreatingPublishCandidate] = useState(false);
-  const [publishCandidateError, setPublishCandidateError] = useState<string | null>(null);
+  const [isRepublishing, setIsRepublishing] = useState(false);
+  const [republishError, setRepublishError] = useState<string | null>(null);
 
   const isValidationPassed = publishReadiness?.canPublish ?? false;
   const isContentReviewed = true;
@@ -88,8 +88,8 @@ export function PublishActions({
     }
 
     if (draftHasChanges) {
-      if (!canPublish) return 'Next step: You do not have permission to create a new publish candidate.';
-      return 'Next step: Create a new exam copy, then publish that new exam when ready.';
+      if (!canPublish) return 'Next step: You do not have permission to republish this exam.';
+      return 'Next step: Republish using the latest draft (existing schedules will not change).';
     }
 
     return 'Up to date. Next step: Reschedule if you need to change access time.';
@@ -156,7 +156,7 @@ export function PublishActions({
               <p className="text-[11px] text-slate-500">Blocked: publish permission required.</p>
             )}
             {isPublished && !draftHasChanges && (
-              <p className="text-[11px] text-slate-500">No draft changes requiring a new publish candidate.</p>
+              <p className="text-[11px] text-slate-500">No draft changes requiring republish.</p>
             )}
           </div>
         </li>
@@ -164,22 +164,22 @@ export function PublishActions({
     </div>
   );
 
-  const handleCreatePublishCandidate = async () => {
-    if (!onCreatePublishCandidate || isCreatingPublishCandidate) {
+  const handleRepublishLatestDraft = async () => {
+    if (!onRepublishLatestDraft || isRepublishing) {
       return;
     }
 
-    setPublishCandidateError(null);
-    setIsCreatingPublishCandidate(true);
+    setRepublishError(null);
+    setIsRepublishing(true);
     try {
-      const result = await onCreatePublishCandidate();
+      const result = await onRepublishLatestDraft();
       if (result && result.success === false) {
-        setPublishCandidateError(result.error ?? 'Could not create exam copy. Original published exam is unchanged.');
+        setRepublishError(result.error ?? 'Could not republish. Existing schedules are unchanged.');
       }
     } catch {
-      setPublishCandidateError('Could not create exam copy. Original published exam is unchanged.');
+      setRepublishError('Could not republish. Existing schedules are unchanged.');
     } finally {
-      setIsCreatingPublishCandidate(false);
+      setIsRepublishing(false);
     }
   };
 
@@ -196,7 +196,7 @@ export function PublishActions({
         </div>
 
         {renderStepper(
-          hasUnpublishedDraftChanges ? 'Create New Exam Copy' : 'No content action needed',
+          hasUnpublishedDraftChanges ? 'Republish Latest Draft' : 'No content action needed',
           hasUnpublishedDraftChanges ? canPublish : true,
         )}
 
@@ -218,7 +218,7 @@ export function PublishActions({
 
         <div className="p-3 bg-sky-50 rounded-lg border border-sky-100">
           <p className="text-xs text-sky-900">
-            Draft remains editable. To change published content, create a new exam copy and publish that copy.
+            Draft remains editable. Republish creates a new immutable published version; existing schedules are unchanged.
           </p>
         </div>
 
@@ -230,18 +230,18 @@ export function PublishActions({
             <div className="flex gap-3">
               <button
                 onClick={() => {
-                  void handleCreatePublishCandidate();
+                  void handleRepublishLatestDraft();
                 }}
-                disabled={!canPublish || isCreatingPublishCandidate}
+                disabled={!canPublish || isRepublishing}
                 className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none"
                 title={
                   !canPublish
-                    ? 'Publish permission required to create a new exam copy.'
-                    : 'Creates a new exam copy from the latest draft. Original published exam remains unchanged.'
+                    ? 'Publish permission required to republish.'
+                    : 'Republishes using the latest draft. Existing schedules are unchanged.'
                 }
-                aria-label="Create new exam copy"
+                aria-label="Republish latest draft"
               >
-                {isCreatingPublishCandidate ? 'Creating copy...' : 'Create New Exam Copy'}
+                {isRepublishing ? 'Republishing…' : 'Republish'}
               </button>
               <button
                 onClick={openScheduling}
@@ -251,14 +251,14 @@ export function PublishActions({
                 <Calendar size={16} aria-hidden="true" /> Reschedule
               </button>
             </div>
-            {publishCandidateError && (
+            {republishError && (
               <p className="text-xs text-amber-900">
-                {publishCandidateError}
+                {republishError}
               </p>
             )}
             {!canPublish && (
               <p className="text-xs text-amber-900">
-                Create copy is disabled until publish permission is granted.
+                Republish is disabled until publish permission is granted.
               </p>
             )}
           </div>

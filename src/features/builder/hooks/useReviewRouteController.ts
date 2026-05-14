@@ -20,7 +20,7 @@ export interface ReviewRouteController {
   schedules: ExamSchedule[];
   publishReadiness: PublishReadiness | undefined;
   handlePublish: (notes?: string) => Promise<void>;
-  handleCreatePublishCandidate: () => Promise<{ success: boolean; error?: string }>;
+  handleRepublishLatestDraft: () => Promise<{ success: boolean; error?: string }>;
   handleSchedulePublish: (scheduledTime: string) => Promise<void>;
   handleUnpublish: (reason?: string) => Promise<void>;
   handleRestoreVersion: (versionId: string) => Promise<void>;
@@ -99,7 +99,7 @@ export function useReviewRouteController(
     [examId, loadExam],
   );
 
-  const handleCreatePublishCandidate = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+  const handleRepublishLatestDraft = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
     if (!examId) {
       return { success: false, error: 'Exam ID not found' };
     }
@@ -110,28 +110,18 @@ export function useReviewRouteController(
     }
 
     if (!sourceExam.canPublish) {
-      return { success: false, error: 'You do not have permission to create a publish candidate copy.' };
+      return { success: false, error: 'You do not have permission to republish this exam.' };
     }
 
-    const result = await examLifecycleService.createPublishCandidateFromExam(examId, 'System');
-
-    if (!result.success || !result.exam?.id) {
+    const result = await examLifecycleService.republishVersion(examId, sourceExam.currentDraftVersionId ?? 'latest', 'System');
+    if (!result.success) {
       return {
         success: false,
-        error: result.error ?? 'Could not create exam copy. Original published exam is unchanged.',
+        error: result.error ?? 'Could not republish. Existing schedules are unchanged.',
       };
     }
 
-    navigate(`/builder/${result.exam.id}/review`, {
-      state: {
-        publishCandidateCreated: {
-          sourceExamId: sourceExam.id,
-          sourceExamTitle: sourceExam.title,
-          schedulesCopied: false,
-        },
-      },
-    });
-
+    await loadExam();
     return { success: true };
   }, [examId, navigate]);
 
@@ -215,7 +205,7 @@ export function useReviewRouteController(
     schedules,
     publishReadiness,
     handlePublish,
-    handleCreatePublishCandidate,
+    handleRepublishLatestDraft,
     handleSchedulePublish,
     handleUnpublish,
     handleRestoreVersion,

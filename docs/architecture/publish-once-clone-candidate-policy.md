@@ -1,8 +1,9 @@
 # Publish-Once Clone-Candidate Policy
 
 ## Decision
-- In-place republish is disabled.
-- After first publish, content updates must use `clone -> review -> publish` on a new exam artifact.
+- In-place republish is allowed by publishing the latest draft into a new immutable published version on the same exam.
+- Republish must not rewrite any existing schedules’ `publishedVersionId` (even if their start time is in the future).
+- If operators need a separate exam artifact (e.g., for branching content), they can still use `clone -> review -> publish`.
 
 ## Rationale
 - Improve operator confidence in high-stakes workflows.
@@ -14,14 +15,14 @@
 - Scheduling changes remain allowed on a published exam and are audited separately.
 - Clone-from-published must not copy schedules.
 - Clone-from-published follows publish permission boundaries.
+- Republish must not rewrite existing schedules (schedules are pinned to immutable published versions).
 
 ## UI Requirements
-- `Review & Publish` must not show republish actions.
-- If published draft diverges from published content, show `Create New Exam Copy`.
-- On clone success, navigate to new exam `Review & Publish` and show:
-  - original published exam unchanged
+- If published draft diverges from published content, show `Republish`.
+- UI copy must clarify: existing schedules won’t change; only new schedules created after republish will use the new version.
+- If clone is offered/used, on clone success navigate to the new exam `Review & Publish` and show:
+  - original exam unchanged
   - no schedules copied
-- On clone failure, show safe-state message and retry path.
 
 ## Service Requirements
-- `republishVersion(...)` returns a policy error and must not mutate state.
+- `republishVersion(...)` publishes the latest draft into a new immutable published version and must not rewrite schedules.

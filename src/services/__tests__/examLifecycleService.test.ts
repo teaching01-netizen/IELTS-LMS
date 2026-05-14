@@ -11,6 +11,7 @@ import {
   ExamEntity,
   ExamEvent,
   ExamStatus,
+  ExamSchedule,
   ExamVersion,
   ExamVersionSummary,
   SCHEMA_VERSION,
@@ -23,6 +24,7 @@ class MockExamRepository implements IExamRepository {
   private exams: ExamEntity[] = [];
   private versions: ExamVersion[] = [];
   private events: ExamEvent[] = [];
+  private schedules: ExamSchedule[] = [];
 
   async getAllExamsWithLegacyMigration(): Promise<ExamEntity[]> {
     return this.exams;
@@ -84,16 +86,25 @@ class MockExamRepository implements IExamRepository {
   }
 
   async getAllSchedules(): Promise<any[]> {
-    return [];
+    return this.schedules;
   }
 
   async getSchedulesByExam(examId: string): Promise<any[]> {
-    return [];
+    return this.schedules.filter((schedule) => schedule.examId === examId);
   }
 
-  async saveSchedule(schedule: any): Promise<void> {}
+  async saveSchedule(schedule: any): Promise<void> {
+    const index = this.schedules.findIndex((s) => s.id === schedule.id);
+    if (index >= 0) {
+      this.schedules[index] = schedule;
+    } else {
+      this.schedules.push(schedule);
+    }
+  }
 
-  async deleteSchedule(id: string): Promise<void> {}
+  async deleteSchedule(id: string): Promise<void> {
+    this.schedules = this.schedules.filter((schedule) => schedule.id !== id);
+  }
 
   async getRuntimeByScheduleId(scheduleId: string): Promise<any | null> {
     return null;
@@ -130,6 +141,7 @@ class MockExamRepository implements IExamRepository {
     this.exams = [];
     this.versions = [];
     this.events = [];
+    this.schedules = [];
   }
 }
 
@@ -517,14 +529,70 @@ describe('ExamLifecycleService - Phase 3: Versioning', () => {
   });
 
   describe('republishVersion', () => {
-    it('should reject republish with policy error', async () => {
+    it('republishes using the latest draft without creating a new exam', async () => {
       const initialState = createMockExamState();
       const result = await service.createExam('Test Exam', 'Academic', initialState, 'TestUser');
       
-      const republishResult = await service.republishVersion(result.exam!.id, 'any-version-id', 'Republisher');
-      
-      expect(republishResult.success).toBe(false);
-      expect(republishResult.error).toMatch(/republish is disabled by policy/i);
+      // First publish
+      const publishResult = await service.publishExam(result.exam!.id, 'Publisher');
+      expect(publishResult.success).toBe(true);
+
+      // Create a new draft version with changes
+      const saveResult = await service.saveAsNewVersion(result.exam!.id, 'Editor', 'Draft changes');
+      expect(saveResult.success).toBe(true);
+
+      const republishResult = await service.republishVersion(result.exam!.id, saveResult.version!.id, 'Republisher');
+
+      expect(republishResult.success).toBe(true);
+
+      const updatedExam = await mockRepo.getExamById(result.exam!.id);
+      expect(updatedExam).toBeTruthy();
+      expect(updatedExam?.id).toBe(result.exam!.id);
+      expect(updatedExam?.currentPublishedVersionId).toBeTruthy();
+      expect(updatedExam?.status).toBe('published');
+    });
+
+    it('does not rewrite existing schedules (even future start time)', async () => {
+      const initialState = createMockExamState();
+      const result = await service.createExam('Test Exam', 'Academic', initialState, 'TestUser');
+
+      const publishResult = await service.publishExam(result.exam!.id, 'Publisher');
+      expect(publishResult.success).toBe(true);
+
+      const publishedVersionId = (await mockRepo.getExamById(result.exam!.id))?.currentPublishedVersionId;
+      expect(publishedVersionId).toBeTruthy();
+
+      const schedule: ExamSchedule = {
+        id: 'sched-1',
+        examId: result.exam!.id,
+        examTitle: 'Test Exam',
+        proctorDisplayName: 'Proctor',
+        gradingDisplayName: 'Grader',
+        publishedVersionId: publishedVersionId as string,
+        cohortName: 'Cohort A',
+        institution: 'Inst',
+        startTime: '2099-01-01T09:00:00.000Z',
+        endTime: '2099-01-01T10:00:00.000Z',
+        plannedDurationMinutes: 60,
+        deliveryMode: 'proctor_start',
+        autoStart: false,
+        autoStop: false,
+        status: 'scheduled',
+        createdAt: '2099-01-01T00:00:00.000Z',
+        createdBy: 'Admin',
+        updatedAt: '2099-01-01T00:00:00.000Z',
+      };
+      await mockRepo.saveSchedule(schedule);
+
+      const saveResult = await service.saveAsNewVersion(result.exam!.id, 'Editor', 'Draft changes');
+      expect(saveResult.success).toBe(true);
+
+      const republishResult = await service.republishVersion(result.exam!.id, saveResult.version!.id, 'Republisher');
+      expect(republishResult.success).toBe(true);
+
+      const storedSchedules = await mockRepo.getSchedulesByExam(result.exam!.id);
+      expect(storedSchedules).toHaveLength(1);
+      expect(storedSchedules[0].publishedVersionId).toBe(publishedVersionId);
     });
   });
 

@@ -21,7 +21,7 @@ describe('PublishActions', () => {
     canPublish: true,
     publishReadiness: mockPublishReadiness,
     onPublish: vi.fn(),
-    onCreatePublishCandidate: vi.fn(),
+    onRepublishLatestDraft: vi.fn(),
     onSchedulePublish: vi.fn(),
     onUnpublish: vi.fn(),
     exam: { title: 'Test Exam' }
@@ -105,7 +105,7 @@ describe('PublishActions', () => {
     expect(continueButton).toBeTruthy();
   });
 
-  it('shows create-new-copy action when there are unpublished draft changes', () => {
+  it('shows republish action when there are unpublished draft changes', () => {
     render(
       <PublishActions
         {...defaultProps}
@@ -120,17 +120,17 @@ describe('PublishActions', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: /create new exam copy/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /republish/i })).toBeTruthy();
     expect(screen.getByText(/draft v5 has changes not in published v4/i)).toBeTruthy();
   });
 
-  it('creates a new publish candidate copy when requested', async () => {
-    const onCreatePublishCandidate = vi.fn().mockResolvedValue({ success: true });
+  it('republishes when requested', async () => {
+    const onRepublishLatestDraft = vi.fn().mockResolvedValue({ success: true });
 
     render(
       <PublishActions
         {...defaultProps}
-        onCreatePublishCandidate={onCreatePublishCandidate}
+        onRepublishLatestDraft={onRepublishLatestDraft}
         publishSuccess={{
           draftVersion: 3,
           publishedVersion: 4,
@@ -141,22 +141,22 @@ describe('PublishActions', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /create new exam copy/i }));
+    fireEvent.click(screen.getByRole('button', { name: /republish/i }));
 
     await waitFor(() => {
-      expect(onCreatePublishCandidate).toHaveBeenCalledTimes(1);
+      expect(onRepublishLatestDraft).toHaveBeenCalledTimes(1);
     });
   });
 
-  it('shows safe-state error when creating publish candidate copy fails', async () => {
-    const onCreatePublishCandidate = vi
+  it('shows safe-state error when republish fails', async () => {
+    const onRepublishLatestDraft = vi
       .fn()
-      .mockResolvedValue({ success: false, error: 'Could not create exam copy. Original published exam is unchanged.' });
+      .mockResolvedValue({ success: false, error: 'Could not republish. Existing schedules are unchanged.' });
 
     render(
       <PublishActions
         {...defaultProps}
-        onCreatePublishCandidate={onCreatePublishCandidate}
+        onRepublishLatestDraft={onRepublishLatestDraft}
         publishSuccess={{
           draftVersion: 3,
           publishedVersion: 4,
@@ -167,11 +167,11 @@ describe('PublishActions', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /create new exam copy/i }));
+    fireEvent.click(screen.getByRole('button', { name: /republish/i }));
 
     await waitFor(() => {
       expect(
-        screen.getByText(/could not create exam copy\. original published exam is unchanged\./i),
+        screen.getByText(/could not republish\. existing schedules are unchanged\./i),
       ).toBeTruthy();
     });
   });

@@ -118,7 +118,7 @@ export function ExamReviewRoute() {
                   canPublish={controller.exam?.canPublish ?? false}
                   publishReadiness={controller.publishReadiness}
                   onPublish={controller.handlePublish}
-                  onCreatePublishCandidate={controller.handleCreatePublishCandidate}
+                  onRepublishLatestDraft={controller.handleRepublishLatestDraft}
                   onSchedulePublish={controller.handleSchedulePublish}
                   scheduledTime={scheduledTime}
                   onOpenSchedulingWorkflow={() => setShowScheduleModal(true)}

@@ -515,7 +515,7 @@ impl BuilderService {
         .bind(&draft_version_id)
         .bind(ctx.actor_id.to_string())
         .bind(ExamEventAction::Published)
-        .bind("draft".to_string())
+        .bind(exam.status.to_string())
         .bind("published".to_string())
         .execute(&mut *tx)
         .await?;

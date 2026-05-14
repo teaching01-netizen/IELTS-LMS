@@ -1654,8 +1654,11 @@ export class ExamLifecycleService {
   }
 
   /**
-   * Republish is intentionally disabled by policy.
-   * Post-publish content changes must go through clone -> review -> publish.
+   * Republish the current exam using the latest draft.
+   *
+   * Important: This does not rewrite existing schedules. Schedules remain pinned to
+   * their original `publishedVersionId`. Only schedules created after republish will
+   * default to the newer published version.
    */
   async republishVersion(
     examId: string,
@@ -1663,14 +1666,111 @@ export class ExamLifecycleService {
     actor: string = 'System',
     publishNotes?: string
   ): Promise<TransitionResult> {
-    void examId;
+    // `versionId` is retained for backward compatibility with older admin tooling,
+    // but republish always uses the latest draft for safety and consistency.
     void versionId;
-    void actor;
-    void publishNotes;
+
+    if (this.useBackendBuilder()) {
+      const readiness = await this.getPublishReadiness(examId);
+      if (!readiness.canPublish) {
+        const exam = await this.repository.getExamById(examId);
+        return {
+          success: false,
+          error: 'Exam is not ready for publication',
+          exam: exam ?? undefined,
+        };
+      }
+
+      try {
+        const revision = await this.refreshBackendExamRevision(examId);
+        if (revision === null) {
+          return { success: false, error: 'Exam not found' };
+        }
+
+        const publishedVersion = await backendPost<any>(`/v1/exams/${examId}/publish`, {
+          publishNotes,
+          revision,
+        });
+        const exam = await this.repository.getExamById(examId);
+        const version = publishedVersion ? mapBackendExamVersion(publishedVersion) : null;
+
+        return {
+          success: true,
+          exam: exam ?? undefined,
+          version: version ?? undefined,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to republish exam',
+        };
+      }
+    }
+
+    const exam = await this.repository.getExamById(examId);
+    if (!exam) {
+      return { success: false, error: 'Exam not found' };
+    }
+
+    const readiness = await this.getPublishReadiness(examId);
+    if (!readiness.canPublish) {
+      return {
+        success: false,
+        error: 'Exam is not ready for publication',
+        exam,
+      };
+    }
+
+    const now = new Date().toISOString();
+
+    if (!exam.currentDraftVersionId) {
+      return { success: false, error: 'No draft version to publish' };
+    }
+
+    const draftVersion = await this.repository.getVersionById(exam.currentDraftVersionId);
+    if (!draftVersion) {
+      return { success: false, error: 'Draft version not found' };
+    }
+
+    const publishedVersion: ExamVersion = {
+      ...draftVersion,
+      id: generateId('ver'),
+      parentVersionId: draftVersion.id,
+      isDraft: false,
+      isPublished: true,
+      publishNotes,
+      createdAt: now,
+    };
+
+    const previousStatus = exam.status;
+    exam.currentPublishedVersionId = publishedVersion.id;
+    exam.status = 'published';
+    if (!exam.publishedAt) {
+      exam.publishedAt = now;
+    }
+    exam.updatedAt = now;
+
+    const event: ExamEvent = {
+      id: generateId('evt'),
+      examId,
+      versionId: publishedVersion.id,
+      actor,
+      action: 'published',
+      fromState: previousStatus,
+      toState: 'published',
+      timestamp: now,
+      payload: publishNotes ? { notes: publishNotes } : undefined,
+    };
+
+    await this.repository.saveExam(exam);
+    await this.repository.saveVersion(publishedVersion);
+    await this.repository.saveEvent(event);
+
     return {
-      success: false,
-      error:
-        'Republish is disabled by policy. Create a new exam copy and publish that copy instead.',
+      success: true,
+      exam,
+      version: publishedVersion,
+      event,
     };
   }
 
