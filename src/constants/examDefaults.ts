@@ -131,6 +131,26 @@ const buildWritingTasksFromStandards = (
 
   const [task1 = defaultTask1, task2 = defaultTask2] = currentTasks;
 
+  if (currentTasks.length === 1) {
+    const onlyTask = task1;
+    const syncedOnly =
+      onlyTask.id === 'task2'
+        ? {
+            ...onlyTask,
+            minWords: standards.task2.minWords,
+            recommendedTime: standards.task2.recommendedTime,
+          }
+        : onlyTask.id === 'task1'
+          ? {
+              ...onlyTask,
+              minWords: standards.task1.minWords,
+              recommendedTime: standards.task1.recommendedTime,
+            }
+          : onlyTask;
+
+    return [syncedOnly];
+  }
+
   const syncedTasks: WritingTaskConfig[] = [
     {
       ...task1,

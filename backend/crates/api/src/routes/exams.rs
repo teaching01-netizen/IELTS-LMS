@@ -9,6 +9,7 @@ use ielts_backend_domain::exam::{
     CreateExamRequest, ExamEntity, ExamValidationSummary, ExamVersion, ExamVersionSummary,
     PublishExamRequest, SaveDraftRequest, UpdateExamRequest,
 };
+use ielts_backend_infrastructure::authorization::AuthorizationService;
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -21,16 +22,55 @@ use crate::{
     state::AppState,
 };
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExamEntityWithPermissions {
+    #[serde(flatten)]
+    pub exam: ExamEntity,
+    pub can_edit: bool,
+    pub can_publish: bool,
+    pub can_delete: bool,
+}
+
+fn to_exam_with_permissions(
+    ctx: &ielts_backend_infrastructure::actor_context::ActorContext,
+    exam: ExamEntity,
+) -> ExamEntityWithPermissions {
+    // NOTE: Exam routes already enforce staff-only access (Admin/Builder).
+    // We still include explicit permission flags because the frontend relies on them
+    // to enable/disable publish workflows (e.g., "Create New Exam Copy").
+    let can_modify = matches!(
+        ctx.role,
+        ielts_backend_infrastructure::actor_context::ActorRole::Admin
+            | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+            | ielts_backend_infrastructure::actor_context::ActorRole::Builder
+    ) || exam
+        .organization_id
+        .as_ref()
+        .is_some_and(|org_id| AuthorizationService::can_modify_exam_content(ctx, org_id.clone()));
+
+    ExamEntityWithPermissions {
+        exam,
+        can_edit: can_modify,
+        can_publish: can_modify,
+        can_delete: can_modify,
+    }
+}
+
 pub async fn list_exams(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
-) -> Result<ApiResponse<Vec<ExamEntity>>, ApiError> {
+) -> Result<ApiResponse<Vec<ExamEntityWithPermissions>>, ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let exams = service.list_exams(&ctx).await?;
-    Ok(ApiResponse::success_with_request_id(exams, request_id.0))
+    let response = exams
+        .into_iter()
+        .map(|exam| to_exam_with_permissions(&ctx, exam))
+        .collect();
+    Ok(ApiResponse::success_with_request_id(response, request_id.0))
 }
 
 pub async fn create_exam(
@@ -39,12 +79,15 @@ pub async fn create_exam(
     principal: AuthenticatedUser,
     _csrf: VerifiedCsrf,
     Json(req): Json<CreateExamRequest>,
-) -> Result<ApiResponse<ExamEntity>, ApiError> {
+) -> Result<ApiResponse<ExamEntityWithPermissions>, ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let exam = service.create_exam(&ctx, req).await?;
-    Ok(ApiResponse::success_with_request_id(exam, request_id.0))
+    Ok(ApiResponse::success_with_request_id(
+        to_exam_with_permissions(&ctx, exam),
+        request_id.0,
+    ))
 }
 
 pub async fn get_exam(
@@ -52,12 +95,15 @@ pub async fn get_exam(
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
     Path(id): Path<Uuid>,
-) -> Result<ApiResponse<ExamEntity>, ApiError> {
+) -> Result<ApiResponse<ExamEntityWithPermissions>, ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let exam = service.get_exam(&ctx, id.to_string()).await?;
-    Ok(ApiResponse::success_with_request_id(exam, request_id.0))
+    Ok(ApiResponse::success_with_request_id(
+        to_exam_with_permissions(&ctx, exam),
+        request_id.0,
+    ))
 }
 
 pub async fn update_exam(
@@ -67,12 +113,15 @@ pub async fn update_exam(
     _csrf: VerifiedCsrf,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateExamRequest>,
-) -> Result<ApiResponse<ExamEntity>, ApiError> {
+) -> Result<ApiResponse<ExamEntityWithPermissions>, ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let exam = service.update_exam(&ctx, id.to_string(), req).await?;
-    Ok(ApiResponse::success_with_request_id(exam, request_id.0))
+    Ok(ApiResponse::success_with_request_id(
+        to_exam_with_permissions(&ctx, exam),
+        request_id.0,
+    ))
 }
 
 pub async fn save_draft(

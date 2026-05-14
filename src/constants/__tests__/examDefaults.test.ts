@@ -149,4 +149,27 @@ describe('examDefaults standards', () => {
 
     expect(config.security.antiScreenshotGuardEnabled).toBe(true);
   });
+
+  it('keeps single-task writing configs single-task after normalization', () => {
+    const config = normalizeExamConfig({
+      sections: {
+        writing: {
+          tasks: [{ id: 'task1', label: 'Task 1', taskType: 'task1-academic', minWords: 150, recommendedTime: 20 }],
+        },
+      },
+      standards: {
+        writingTasks: {
+          task1: { minWords: 180, recommendedTime: 25 },
+          task2: { minWords: 270, recommendedTime: 45 },
+        },
+      },
+    });
+
+    expect(config.sections.writing.tasks).toHaveLength(1);
+    expect(config.sections.writing.tasks[0]).toMatchObject({
+      id: 'task1',
+      minWords: 180,
+      recommendedTime: 25,
+    });
+  });
 });

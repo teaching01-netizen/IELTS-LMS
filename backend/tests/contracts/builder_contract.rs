@@ -135,6 +135,9 @@ async fn list_exams_returns_seeded_exam_entities() {
     assert_eq!(exams.len(), 1);
     assert_eq!(exams[0]["id"], seeded.id.to_string());
     assert_eq!(exams[0]["slug"], seeded.slug);
+    assert_eq!(exams[0]["canEdit"], true);
+    assert_eq!(exams[0]["canPublish"], true);
+    assert_eq!(exams[0]["canDelete"], true);
 
     database.shutdown().await;
 }
@@ -170,6 +173,9 @@ async fn get_exam_returns_exam_detail_by_id() {
     assert_eq!(json["data"]["id"], seeded.id.to_string());
     assert_eq!(json["data"]["slug"], seeded.slug);
     assert_eq!(json["data"]["status"], "draft");
+    assert_eq!(json["data"]["canEdit"], true);
+    assert_eq!(json["data"]["canPublish"], true);
+    assert_eq!(json["data"]["canDelete"], true);
 
     database.shutdown().await;
 }
