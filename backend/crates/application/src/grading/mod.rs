@@ -757,7 +757,7 @@ impl GradingService {
         sqlx::query(
             r#"
             INSERT INTO release_events (id, result_id, submission_id, actor_id, action, payload, created_at)
-            VALUES (?, ?, ?, ?, 'released', ?, NOW())
+            VALUES (?, ?, ?, ?, 'released', ?, NOW(6))
             "#,
         )
         .bind(Uuid::new_v4().to_string())
@@ -916,7 +916,7 @@ impl GradingService {
             sqlx::query(
                 r#"
                 INSERT INTO release_events (id, result_id, submission_id, actor_id, action, payload, created_at)
-                VALUES (?, ?, ?, ?, 'scheduled', ?, NOW())
+                VALUES (?, ?, ?, ?, 'scheduled', ?, NOW(6))
                 "#,
             )
             .bind(event_id)
@@ -1348,6 +1348,106 @@ impl GradingService {
         Ok(report)
     }
 
+    pub async fn regrade_schedule_objectives_from_latest_draft(
+        &self,
+        ctx: &ActorContext,
+        actor_name: &str,
+        schedule_id: Uuid,
+        reason: String,
+    ) -> Result<(ObjectiveAutoGradingBackfillReport, String), GradingError> {
+        let schedule_id_db = schedule_id.to_string();
+        if reason.trim().is_empty() {
+            return Err(GradingError::Validation(
+                "Regrade reason is required.".to_owned(),
+            ));
+        }
+
+        if ctx.schedule_scope_id.as_deref() != Some(&schedule_id_db)
+            && !matches!(ctx.role, ActorRole::Admin | ActorRole::AdminObserver)
+        {
+            return Err(GradingError::Validation(
+                "Missing schedule scope for regrade access.".to_owned(),
+            ));
+        }
+
+        let exam_id: String = sqlx::query_scalar(
+            "SELECT exam_id FROM exam_schedules WHERE id = ?",
+        )
+        .bind(&schedule_id_db)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(GradingError::NotFound)?;
+
+        let draft_version_id: Option<String> = sqlx::query_scalar(
+            "SELECT CAST(current_draft_version_id AS CHAR) AS current_draft_version_id FROM exam_entities WHERE id = ?",
+        )
+        .bind(&exam_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(draft_version_id) = draft_version_id.filter(|id| !id.trim().is_empty()) else {
+            return Err(GradingError::Validation(
+                "No draft version found for this exam.".to_owned(),
+            ));
+        };
+
+        let (draft_content_snapshot, draft_config_snapshot) = sqlx::query_as::<_, (Value, Value)>(
+            "SELECT content_snapshot, config_snapshot FROM exam_versions WHERE id = ?",
+        )
+        .bind(&draft_version_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(GradingError::NotFound)?;
+
+        let actor_id = ctx.actor_id.clone();
+        self.append_schedule_override_event(
+            &schedule_id_db,
+            &actor_id,
+            actor_name,
+            "objective_regrade_triggered",
+            json!({
+                "reason": reason,
+                "source": "latest_draft",
+                "examId": exam_id,
+                "draftVersionId": draft_version_id.clone(),
+            }),
+        )
+        .await?;
+
+        // Persist the grading source so future sync-on-read projection cycles keep objective
+        // sections aligned with the same draft version until an admin changes it again.
+        self.upsert_schedule_objective_grading_source(
+            &schedule_id_db,
+            &actor_id,
+            actor_name,
+            "draft_version",
+            Some(&draft_version_id),
+        )
+        .await?;
+
+        let report = self
+            .backfill_objective_auto_grading_from_snapshots(
+                &schedule_id_db,
+                &draft_content_snapshot,
+                &draft_config_snapshot,
+            )
+            .await?;
+
+        self.append_schedule_override_event(
+            &schedule_id_db,
+            &actor_id,
+            actor_name,
+            "objective_regrade_completed",
+            json!({
+                "source": "latest_draft",
+                "draftVersionId": draft_version_id.clone(),
+                "report": report,
+            }),
+        )
+        .await?;
+
+        Ok((report, draft_version_id))
+    }
+
     pub async fn list_schedule_objective_overrides(
         &self,
         ctx: &ActorContext,
@@ -1687,6 +1787,69 @@ impl GradingService {
         Ok(())
     }
 
+    async fn upsert_schedule_objective_grading_source(
+        &self,
+        schedule_id: &str,
+        actor_id: &str,
+        actor_name: &str,
+        source: &str,
+        version_id: Option<&str>,
+    ) -> Result<(), GradingError> {
+        sqlx::query(
+            r#"
+            INSERT INTO grading_schedule_objective_grading_source (
+                schedule_id,
+                source,
+                version_id,
+                updated_by_actor_id,
+                updated_by_actor_name,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, NOW())
+            ON DUPLICATE KEY UPDATE
+                source = VALUES(source),
+                version_id = VALUES(version_id),
+                updated_by_actor_id = VALUES(updated_by_actor_id),
+                updated_by_actor_name = VALUES(updated_by_actor_name),
+                updated_at = NOW()
+            "#,
+        )
+        .bind(schedule_id)
+        .bind(source)
+        .bind(version_id)
+        .bind(actor_id)
+        .bind(actor_name)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn load_schedule_objective_grading_source_version_id(
+        &self,
+        schedule_id: &str,
+    ) -> Result<Option<String>, GradingError> {
+        let row: Option<(String, Option<String>)> = sqlx::query_as(
+            r#"
+            SELECT
+                source,
+                CAST(version_id AS CHAR) AS version_id
+            FROM grading_schedule_objective_grading_source
+            WHERE schedule_id = ?
+            "#,
+        )
+        .bind(schedule_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some((source, version_id)) = row else {
+            return Ok(None);
+        };
+        if source != "draft_version" {
+            return Ok(None);
+        }
+        Ok(version_id.filter(|id| !id.trim().is_empty()))
+    }
+
     async fn ensure_materialized_state(&self) -> Result<(), GradingError> {
         self.run_projection_cycle(GradingProjectionRequest::default())
             .await?;
@@ -1945,6 +2108,8 @@ impl GradingService {
         let mut writing_task_rows_synced: u64 = 0;
         let mut affected_schedule_ids = HashSet::new();
         let mut max_updated_at: Option<DateTime<Utc>> = None;
+        let mut objective_source_version_cache: HashMap<String, Option<String>> = HashMap::new();
+        let mut objective_source_snapshot_cache: HashMap<String, (Value, Value)> = HashMap::new();
 
         for attempt in attempts {
             let attempt_id = attempt.id.to_string();
@@ -2018,6 +2183,51 @@ impl GradingService {
                 section_rows_synced.saturating_add(section_sync.section_rows_synced);
             writing_task_rows_synced =
                 writing_task_rows_synced.saturating_add(section_sync.writing_task_rows_synced);
+
+            // If the schedule has an objective grading source override (e.g. draft version),
+            // apply objective section sync again using that source so sync-on-read projection
+            // does not overwrite admin-triggered regrades.
+            let schedule_id_db = attempt.schedule_id.to_string();
+            let source_version_id = if let Some(cached) =
+                objective_source_version_cache.get(&schedule_id_db).cloned()
+            {
+                cached
+            } else {
+                let loaded = self
+                    .load_schedule_objective_grading_source_version_id(&schedule_id_db)
+                    .await?;
+                objective_source_version_cache.insert(schedule_id_db.clone(), loaded.clone());
+                loaded
+            };
+
+            if let Some(source_version_id) = source_version_id {
+                let (source_content_snapshot, source_config_snapshot) =
+                    if let Some(cached) = objective_source_snapshot_cache.get(&source_version_id) {
+                        (cached.0.clone(), cached.1.clone())
+                    } else {
+                        let loaded: (Value, Value) = sqlx::query_as(
+                            "SELECT content_snapshot, config_snapshot FROM exam_versions WHERE id = ?",
+                        )
+                        .bind(&source_version_id)
+                        .fetch_optional(&self.pool)
+                        .await?
+                        .ok_or(GradingError::NotFound)?;
+                        objective_source_snapshot_cache
+                            .insert(source_version_id.clone(), (loaded.0.clone(), loaded.1.clone()));
+                        loaded
+                    };
+
+                let objective_sync = self
+                    .ensure_objective_section_submissions(
+                        &submission,
+                        &attempt.final_submission,
+                        &source_content_snapshot,
+                        &source_config_snapshot,
+                    )
+                    .await?;
+                section_rows_synced =
+                    section_rows_synced.saturating_add(objective_sync.section_rows_synced);
+            }
         }
 
         Ok(SubmissionSyncReport {
@@ -2233,6 +2443,144 @@ impl GradingService {
 
         Ok(())
     }
+
+    async fn backfill_objective_auto_grading_from_snapshots(
+        &self,
+        schedule_id: &str,
+        content_snapshot: &Value,
+        config_snapshot: &Value,
+    ) -> Result<ObjectiveAutoGradingBackfillReport, GradingError> {
+        let mut builder = QueryBuilder::<MySql>::new(
+            r#"
+            SELECT
+                a.id,
+                a.schedule_id,
+                a.exam_id,
+                a.published_version_id,
+                a.candidate_id,
+                a.candidate_name,
+                a.candidate_email,
+                s.cohort_name,
+                a.submitted_at,
+                a.final_submission,
+                a.updated_at
+            FROM student_attempts a
+            JOIN exam_schedules s ON s.id = a.schedule_id
+            WHERE a.submitted_at IS NOT NULL
+              AND a.schedule_id = 
+            "#,
+        );
+        builder.push_bind(schedule_id);
+
+        builder.push(" ORDER BY a.updated_at ASC, a.id ASC");
+
+        let attempts: Vec<AttemptDraftBackfillRow> =
+            builder.build_query_as().fetch_all(&self.pool).await?;
+        let mut report = ObjectiveAutoGradingBackfillReport::default();
+        report.attempts_scanned = attempts.len() as u64;
+        let mut override_cache: HashMap<String, HashMap<String, ObjectiveOverridePayload>> =
+            HashMap::new();
+        let answer_sections = build_objective_answer_sections(content_snapshot);
+
+        for attempt in attempts {
+            let attempt_id = attempt.id.to_string();
+            let submission_sql = student_submission_query("WHERE s.attempt_id = ?");
+            let submission = sqlx::query_as::<_, StudentSubmission>(&submission_sql)
+                .bind(&attempt_id)
+                .fetch_optional(&self.pool)
+                .await?;
+            let Some(submission) = submission else {
+                report.submissions_missing = report.submissions_missing.saturating_add(1);
+                continue;
+            };
+
+            report.submissions_matched = report.submissions_matched.saturating_add(1);
+
+            let schedule_id_db = attempt.schedule_id.to_string();
+            if !override_cache.contains_key(&schedule_id_db) {
+                let overrides = self
+                    .load_schedule_objective_override_lookup(&schedule_id_db)
+                    .await?;
+                override_cache.insert(schedule_id_db.clone(), overrides);
+            }
+            let overrides = override_cache
+                .get(&schedule_id_db)
+                .map(|map| map as &HashMap<String, ObjectiveOverridePayload>);
+
+            let answers = attempt
+                .final_submission
+                .get("answers")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let listening_answers =
+                filter_answers_for_section(&answers, &answer_sections, "listening");
+            let reading_answers = filter_answers_for_section(&answers, &answer_sections, "reading");
+            let listening_auto_results = compute_objective_auto_grading_results(
+                "listening",
+                &listening_answers,
+                content_snapshot,
+                submission.submitted_at,
+                overrides,
+            );
+            let reading_auto_results = compute_objective_auto_grading_results(
+                "reading",
+                &reading_answers,
+                content_snapshot,
+                submission.submitted_at,
+                overrides,
+            );
+
+            let existing_sections = sqlx::query_as::<_, SectionSubmission>(
+                "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading')",
+            )
+            .bind(&submission.id)
+            .fetch_all(&self.pool)
+            .await?;
+
+            let existing_map = existing_sections
+                .into_iter()
+                .map(|section| {
+                    (
+                        section.section,
+                        section.auto_grading_results.map(Into::into),
+                    )
+                })
+                .collect::<HashMap<String, Option<Value>>>();
+
+            let listening_needs_update = existing_map
+                .get("listening")
+                .and_then(|value| value.as_ref())
+                .is_none_or(|value| *value != listening_auto_results);
+            let reading_needs_update = existing_map
+                .get("reading")
+                .and_then(|value| value.as_ref())
+                .is_none_or(|value| *value != reading_auto_results);
+
+            report.sections_checked = report.sections_checked.saturating_add(2);
+            if listening_needs_update {
+                report.sections_needing_update = report.sections_needing_update.saturating_add(1);
+            }
+            if reading_needs_update {
+                report.sections_needing_update = report.sections_needing_update.saturating_add(1);
+            }
+
+            if listening_needs_update || reading_needs_update {
+                self.ensure_objective_section_submissions(
+                    &submission,
+                    &attempt.final_submission,
+                    content_snapshot,
+                    config_snapshot,
+                )
+                .await?;
+                report.submissions_updated = report.submissions_updated.saturating_add(1);
+                report.sections_updated = report.sections_updated.saturating_add(
+                    u64::from(listening_needs_update) + u64::from(reading_needs_update),
+                );
+            }
+        }
+
+        Ok(report)
+    }
 }
 
 fn student_submission_query(suffix: &str) -> String {
@@ -2281,6 +2629,21 @@ struct AttemptSubmissionRow {
     final_submission: Value,
     content_snapshot: Value,
     config_snapshot: Value,
+    updated_at: chrono::DateTime<Utc>,
+}
+
+#[derive(FromRow)]
+struct AttemptDraftBackfillRow {
+    id: Hyphenated,
+    schedule_id: Hyphenated,
+    exam_id: Hyphenated,
+    published_version_id: Hyphenated,
+    candidate_id: String,
+    candidate_name: String,
+    candidate_email: String,
+    cohort_name: String,
+    submitted_at: Option<chrono::DateTime<Utc>>,
+    final_submission: Value,
     updated_at: chrono::DateTime<Utc>,
 }
 

@@ -55,6 +55,19 @@ pub struct ObjectiveOverrideMutationResponse {
     pub regrade_report: ielts_backend_application::grading::ObjectiveAutoGradingBackfillReport,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveLatestDraftRegradeRequest {
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveLatestDraftRegradeResponse {
+    pub draft_version_id: String,
+    pub regrade_report: ielts_backend_application::grading::ObjectiveAutoGradingBackfillReport,
+}
+
 pub async fn list_sessions(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
@@ -172,6 +185,35 @@ pub async fn delete_objective_override(
         ObjectiveOverrideMutationResponse {
             override_row: None,
             deleted: Some(deleted),
+            regrade_report: report,
+        },
+        request_id.0,
+    ))
+}
+
+pub async fn regrade_objective_latest_draft(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    _csrf: VerifiedCsrf,
+    Path(schedule_id): Path<Uuid>,
+    Json(req): Json<ObjectiveLatestDraftRegradeRequest>,
+) -> Result<ApiResponse<ObjectiveLatestDraftRegradeResponse>, ApiError> {
+    principal.require_one_of(&[UserRole::Admin])?;
+
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
+    let service = grading_service(&state);
+    let started = Instant::now();
+    let (report, draft_version_id) = service
+        .regrade_schedule_objectives_from_latest_draft(&ctx, &principal.display_name(), schedule_id, req.reason)
+        .await?;
+    state
+        .telemetry
+        .observe_db_operation("grading.objective_regrade_latest_draft", started.elapsed());
+    Ok(ApiResponse::success_with_request_id(
+        ObjectiveLatestDraftRegradeResponse {
+            draft_version_id,
             regrade_report: report,
         },
         request_id.0,

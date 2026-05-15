@@ -221,6 +221,10 @@ pub fn build_router(state: AppState) -> Router {
                     put(grading::upsert_objective_override)
                         .delete(grading::delete_objective_override),
                 )
+                .route(
+                    "/schedules/:schedule_id/objective-regrade-latest-draft",
+                    post(grading::regrade_objective_latest_draft),
+                )
                 .route("/submissions/:submission_id", get(grading::get_submission))
                 .route(
                     "/submissions/:submission_id/sections",

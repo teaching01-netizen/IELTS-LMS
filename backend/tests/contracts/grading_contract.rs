@@ -54,6 +54,8 @@ const GRADING_MIGRATIONS: &[&str] = &[
     "0023_sort_memory_hotpath_indexes.sql",
     "0024_projection_sort_hardening.sql",
     "0027_grading_objective_overrides.sql",
+    "0028_grading_objective_grading_source.sql",
+    "0029_release_events_timestamp_precision.sql",
 ];
 
 #[tokio::test]
@@ -1245,21 +1247,22 @@ async fn grading_objective_overrides_apply_strict_matching_and_regrade_immediate
 
     // Upsert an override to accept the student's lower-case response and award 2 points.
     let override_response = app
-        .clone()
-        .oneshot(
-            auth.with_csrf(
-                Request::builder()
-                    .method("PUT")
-                    .uri(format!(
-                        "/api/v1/grading/schedules/{}/objective-overrides/{}",
-                        schedule.id, "q-reading-1"
-                    )),
-            )
-            .body(Body::from(
-                json!({
-                    "correctAnswer": "alpha answer",
-                    "acceptedAnswers": [],
-                    "scoringRule": "TWO_WORDS",
+	        .clone()
+	        .oneshot(
+	            auth.with_csrf(
+	                Request::builder()
+	                    .method("PUT")
+	                    .uri(format!(
+	                        "/api/v1/grading/schedules/{}/objective-overrides/{}",
+	                        schedule.id, "q-reading-1"
+	                    )),
+	            )
+	            .header("content-type", "application/json")
+	            .body(Body::from(
+	                json!({
+	                    "correctAnswer": "alpha answer",
+	                    "acceptedAnswers": [],
+	                    "scoringRule": "TWO_WORDS",
                     "maxScore": 2,
                     "reason": "Answer key correction for schedule"
                 })
@@ -1303,6 +1306,213 @@ async fn grading_objective_overrides_apply_strict_matching_and_regrade_immediate
     assert_eq!(q_result["hasOverride"], true);
     assert_eq!(q_result["maxScore"], 2);
     assert_eq!(q_result["awardedScore"], 2);
+}
+
+#[tokio::test]
+async fn grading_objective_regrade_latest_draft_updates_objective_scores_for_schedule() {
+    let database = mysql::TestDatabase::new(GRADING_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+
+    let submitted_answers = json!({
+        "q-reading-1": "Alpha answer",
+        "q-listening-1": "Listening response",
+    });
+    let attempt_id = bootstrap_and_submit(
+        database.pool(),
+        schedule_id,
+        "draft-regrade",
+        submitted_answers.clone(),
+        json!({}),
+        json!({}),
+    )
+    .await;
+
+    let auth = create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "admin@example.com",
+        "Test Admin",
+    )
+    .await;
+    let mut config = AppConfig::default();
+    config.grading_sync_on_read_fallback = true;
+    let app = build_router(AppState::with_pool(config, database.pool().clone()));
+
+    // Ensure grading projection runs.
+    let sessions = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri("/api/v1/grading/sessions"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(sessions.status(), StatusCode::OK);
+
+    // Locate submission id for the attempt.
+    let session_detail = app
+        .clone()
+        .oneshot(
+            auth.with_auth(
+                Request::builder().uri(format!("/api/v1/grading/sessions/{}", schedule.id)),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(session_detail.status(), StatusCode::OK);
+    let session_detail_json = json_body(session_detail).await;
+    let submission_id = Uuid::parse_str(
+        session_detail_json["data"]["submissions"][0]["id"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        session_detail_json["data"]["submissions"][0]["attemptId"],
+        attempt_id.to_string()
+    );
+
+    // Baseline: published version snapshot should mark both objective answers correct.
+    let section_detail = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/grading/submissions/{}/sections",
+                submission_id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(section_detail.status(), StatusCode::OK);
+    let section_detail_json = json_body(section_detail).await;
+    let section_items = section_detail_json["data"]
+        .as_array()
+        .expect("section submissions array");
+    let reading_section = section_items
+        .iter()
+        .find(|entry| entry["section"] == "reading")
+        .expect("reading section");
+    assert_eq!(
+        reading_section["autoGradingResults"]["totalScore"],
+        json!(1)
+    );
+    let listening_section = section_items
+        .iter()
+        .find(|entry| entry["section"] == "listening")
+        .expect("listening section");
+    assert_eq!(
+        listening_section["autoGradingResults"]["totalScore"],
+        json!(1)
+    );
+
+    // Create a new draft that changes the objective answer key.
+    let actor = contract_actor();
+    let builder_service = BuilderService::new(database.pool().clone());
+    let exam = builder_service
+        .get_exam(&actor, schedule.exam_id.clone())
+        .await
+        .expect("load exam");
+    let mut draft_snapshot = default_content_snapshot();
+    draft_snapshot["reading"]["passages"][0]["blocks"][0]["questions"][0]["correctAnswer"] =
+        json!("Beta answer");
+    draft_snapshot["listening"]["parts"][0]["blocks"][0]["questions"][0]["correctAnswer"] =
+        json!("Different response");
+
+    builder_service
+        .save_draft(
+            &actor,
+            schedule.exam_id.clone(),
+            SaveDraftRequest {
+                content_snapshot: draft_snapshot,
+                config_snapshot: sample_delivery_config(),
+                revision: exam.revision,
+            },
+        )
+        .await
+        .expect("save new draft");
+
+    let exam_after_draft = builder_service
+        .get_exam(&actor, schedule.exam_id.clone())
+        .await
+        .expect("load exam after draft");
+    let draft_version_id = exam_after_draft
+        .current_draft_version_id
+        .clone()
+        .expect("draft version id");
+    let draft_version = builder_service
+        .get_version(&actor, draft_version_id.clone())
+        .await
+        .expect("load draft version");
+    assert_eq!(
+        draft_version.content_snapshot["reading"]["passages"][0]["blocks"][0]["questions"][0]
+            ["correctAnswer"],
+        json!("Beta answer")
+    );
+
+    // Regrade using latest draft snapshot (not the published version).
+    let regrade = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/grading/schedules/{}/objective-regrade-latest-draft",
+                        schedule.id
+                    )),
+            )
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "reason": "Use latest draft" }).to_string()))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(regrade.status(), StatusCode::OK);
+    let regrade_json = json_body(regrade).await;
+    assert_eq!(regrade_json["data"]["draftVersionId"], json!(draft_version_id));
+    assert_eq!(regrade_json["data"]["regradeReport"]["attemptsScanned"], json!(1));
+    assert_eq!(regrade_json["data"]["regradeReport"]["sectionsUpdated"], json!(2));
+
+    // After regrade, the stored objective totals should reflect the latest draft answer key (both incorrect).
+    let section_detail = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/grading/submissions/{}/sections",
+                submission_id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(section_detail.status(), StatusCode::OK);
+    let section_detail_json = json_body(section_detail).await;
+    let section_items = section_detail_json["data"]
+        .as_array()
+        .expect("section submissions array");
+    let reading_section = section_items
+        .iter()
+        .find(|entry| entry["section"] == "reading")
+        .expect("reading section");
+    assert_eq!(
+        reading_section["autoGradingResults"]["totalScore"],
+        json!(0)
+    );
+    let listening_section = section_items
+        .iter()
+        .find(|entry| entry["section"] == "listening")
+        .expect("listening section");
+    assert_eq!(
+        listening_section["autoGradingResults"]["totalScore"],
+        json!(0)
+    );
 }
 
 fn matrix_submitted_answers() -> serde_json::Value {

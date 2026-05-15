@@ -508,6 +508,20 @@ describe('gradingService backend mode', () => {
             submissionsUpdated: 1,
           },
         }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          draftVersionId: 'draft-123',
+          regradeReport: {
+            attemptsScanned: 1,
+            submissionsMatched: 1,
+            submissionsMissing: 0,
+            sectionsChecked: 2,
+            sectionsNeedingUpdate: 2,
+            sectionsUpdated: 2,
+            submissionsUpdated: 1,
+          },
+        }),
       );
 
     global.fetch = fetchMock as typeof fetch;
@@ -529,6 +543,11 @@ describe('gradingService backend mode', () => {
       reason: 'Revert override',
     });
     expect(deleteResult.success).toBe(true);
+
+    const regradeResult = await gradingService.regradeObjectiveLatestDraft('sched-1', {
+      reason: 'Use latest draft snapshot',
+    });
+    expect(regradeResult.success).toBe(true);
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -556,6 +575,17 @@ describe('gradingService backend mode', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual(
       expect.objectContaining({
         reason: 'Revert override',
+      }),
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      '/api/v1/grading/schedules/sched-1/objective-regrade-latest-draft',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toEqual(
+      expect.objectContaining({
+        reason: 'Use latest draft snapshot',
       }),
     );
   });

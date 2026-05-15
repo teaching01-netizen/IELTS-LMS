@@ -40,6 +40,8 @@ import {
   GradingScheduleObjectiveOverrideRow,
   ObjectiveOverrideDeleteRequest,
   ObjectiveOverrideMutationResponse,
+  ObjectiveLatestDraftRegradeRequest,
+  ObjectiveLatestDraftRegradeResponse,
   ObjectiveOverrideUpsertRequest,
 } from '../types/grading';
 
@@ -243,6 +245,25 @@ export class GradingService {
       return { success: true, data: response };
     } catch (error) {
       return { success: false, error: `Failed to delete objective override: ${error}` };
+    }
+  }
+
+  async regradeObjectiveLatestDraft(
+    scheduleId: string,
+    request: ObjectiveLatestDraftRegradeRequest,
+  ): Promise<GradingServiceResult<ObjectiveLatestDraftRegradeResponse>> {
+    try {
+      if (!isBackendGradingEnabled()) {
+        return { success: false, error: 'Objective regrade requires backend grading.' };
+      }
+
+      const response = await backendPost<ObjectiveLatestDraftRegradeResponse>(
+        `/v1/grading/schedules/${scheduleId}/objective-regrade-latest-draft`,
+        request,
+      );
+      return { success: true, data: response };
+    } catch (error) {
+      return { success: false, error: `Failed to regrade objective sections: ${error}` };
     }
   }
   

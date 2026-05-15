@@ -331,6 +331,15 @@ export interface ObjectiveOverrideDeleteRequest {
   reason: string;
 }
 
+export interface ObjectiveLatestDraftRegradeRequest {
+  reason: string;
+}
+
+export interface ObjectiveLatestDraftRegradeResponse {
+  draftVersionId: string;
+  regradeReport: ObjectiveAutoGradingBackfillReport;
+}
+
 export interface ObjectiveOverrideMutationResponse {
   overrideRow?: GradingScheduleObjectiveOverrideRow | undefined;
   deleted?: boolean | undefined;

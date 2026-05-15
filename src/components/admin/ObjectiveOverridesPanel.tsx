@@ -5,6 +5,7 @@ import { gradingService } from '../../services/gradingService';
 import type {
   GradingScheduleObjectiveOverrideRow,
   ObjectiveOverrideDeleteRequest,
+  ObjectiveLatestDraftRegradeResponse,
   ObjectiveOverrideMutationResponse,
   ObjectiveOverrideUpsertRequest,
 } from '../../types/grading';
@@ -132,6 +133,10 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [mutationResult, setMutationResult] = useState<ObjectiveOverrideMutationResponse | null>(null);
   const [mutating, setMutating] = useState(false);
+  const [scheduleRegradeReason, setScheduleRegradeReason] = useState('');
+  const [scheduleRegrading, setScheduleRegrading] = useState(false);
+  const [scheduleRegradeError, setScheduleRegradeError] = useState<string | null>(null);
+  const [scheduleRegradeResult, setScheduleRegradeResult] = useState<ObjectiveLatestDraftRegradeResponse | null>(null);
 
   const questionNumberById = useMemo(() => {
     const map = new Map<string, number>();
@@ -264,6 +269,30 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
     }
   };
 
+  const handleScheduleRegradeLatestDraft = async () => {
+    setScheduleRegradeError(null);
+    setScheduleRegradeResult(null);
+
+    if (!scheduleRegradeReason.trim()) {
+      setScheduleRegradeError('Reason is required.');
+      return;
+    }
+
+    setScheduleRegrading(true);
+    try {
+      const result = await gradingService.regradeObjectiveLatestDraft(scheduleId, { reason: scheduleRegradeReason });
+      if (!result.success || !result.data) {
+        throw new Error(result.error ?? 'Failed to regrade objective sections');
+      }
+      setScheduleRegradeResult(result.data);
+      setScheduleRegradeReason('');
+    } catch (error) {
+      setScheduleRegradeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setScheduleRegrading(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
       <button
@@ -280,6 +309,35 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
 
       {open ? (
         <div className="border-t border-gray-200 px-4 py-4">
+          <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+              <label className="block flex-1">
+                <div className="text-xs font-semibold text-gray-700">Regrade objective sections (latest draft)</div>
+                <input
+                  value={scheduleRegradeReason}
+                  onChange={(e) => setScheduleRegradeReason(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                  placeholder="Reason (required)"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleScheduleRegradeLatestDraft()}
+                disabled={scheduleRegrading}
+                className="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {scheduleRegrading ? 'Regrading…' : 'Refresh grading'}
+              </button>
+            </div>
+            {scheduleRegradeError ? <div className="mt-2 text-sm text-red-700">{scheduleRegradeError}</div> : null}
+            {scheduleRegradeResult ? (
+              <div className="mt-2 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                Regraded from draft {scheduleRegradeResult.draftVersionId}. Updated{' '}
+                {scheduleRegradeResult.regradeReport.sectionsUpdated} sections across{' '}
+                {scheduleRegradeResult.regradeReport.attemptsScanned} attempts scanned.
+              </div>
+            ) : null}
+          </div>
           {loading ? (
             <div className="text-sm text-gray-600">Loading objective questions…</div>
           ) : loadError ? (
