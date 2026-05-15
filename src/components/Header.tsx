@@ -1,5 +1,5 @@
 import React from 'react';
-import { Save, ArrowLeft, ArrowRight, Eye } from 'lucide-react';
+import { Save, ArrowLeft, ArrowRight, Eye, KeyRound } from 'lucide-react';
 import type { ExamState } from '../types';
 
 type ExamStateUpdate = ExamState | ((previous: ExamState) => ExamState);
@@ -10,6 +10,7 @@ interface HeaderProps {
   onReturnToAdmin: () => void;
   onNavigateToConfig: () => void;
   onNavigateToReview: () => void;
+  onNavigateToAnswerKey?: (() => void) | undefined;
   onOpenPreview?: (() => void) | undefined;
   onLoadSampleExam?: (() => void) | undefined;
   onSaveDraft?: (() => void) | undefined;
@@ -22,6 +23,7 @@ export function Header({
   onReturnToAdmin,
   onNavigateToConfig,
   onNavigateToReview,
+  onNavigateToAnswerKey,
   onOpenPreview,
   onLoadSampleExam,
   onSaveDraft,
@@ -80,6 +82,18 @@ export function Header({
             <Save size={18} />
           </button>
         )}
+        {onNavigateToAnswerKey ? (
+          <button
+            onClick={onNavigateToAnswerKey}
+            className="px-3 py-1.5 rounded-md text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-800 transition-colors inline-flex items-center gap-2"
+            aria-label="Answer key overview"
+            title="Open answer key overview"
+            type="button"
+          >
+            <KeyRound size={16} />
+            Answer Key
+          </button>
+        ) : null}
         {onOpenPreview ? (
           <button
             onClick={onOpenPreview}

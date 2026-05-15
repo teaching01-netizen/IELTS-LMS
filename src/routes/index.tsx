@@ -71,6 +71,11 @@ const ExamPreviewRoute = lazy(() =>
     default: module.ExamPreviewRoute,
   })),
 );
+const ExamAnswerKeyRoute = lazy(() =>
+  import('../features/builder/routes/ExamAnswerKeyRoute').then((module) => ({
+    default: module.ExamAnswerKeyRoute,
+  })),
+);
 const ProctorRoot = lazy(() =>
   import('../features/proctor/routes/ProctorRoot').then((module) => ({
     default: module.ProctorRoot,
@@ -256,6 +261,14 @@ const baseRoutes = [
         element: withAuth((
           <Suspense fallback={<RouteLoadingFallback />}>
             <ExamPreviewRoute />
+          </Suspense>
+        ), ['admin', 'builder']),
+      },
+      {
+        path: 'builder/:examId/answer-key',
+        element: withAuth((
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <ExamAnswerKeyRoute />
           </Suspense>
         ), ['admin', 'builder']),
       },

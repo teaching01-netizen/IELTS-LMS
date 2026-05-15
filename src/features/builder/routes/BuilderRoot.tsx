@@ -545,6 +545,17 @@ export function BuilderRoot() {
     navigate(`/builder/${examId}/review`);
   };
 
+  const handleNavigateToAnswerKey = () => {
+    if (!examId) return;
+    void (async () => {
+      const saved = await saveDraftNow();
+      if (!saved) {
+        return;
+      }
+      navigate(`/builder/${examId}/answer-key`);
+    })();
+  };
+
   const handleReturnToAdmin = () => {
     void (async () => {
       const saved = await saveDraftNow();
@@ -851,6 +862,7 @@ export function BuilderRoot() {
           onNavigateToReview={() => {
             void handleNavigateToReview();
           }}
+          onNavigateToAnswerKey={handleNavigateToAnswerKey}
           onOpenPreview={handleOpenPreview}
           onLoadSampleExam={() => {
             void loadAcademicSampleExam();

@@ -38,4 +38,8 @@ describe('route contracts', () => {
   it('exposes builder preview as a real route', () => {
     expect(getLeafPath('/builder/exam-123/preview')).toBe('builder/:examId/preview');
   });
+
+  it('exposes builder answer key overview as a real route', () => {
+    expect(getLeafPath('/builder/exam-123/answer-key')).toBe('builder/:examId/answer-key');
+  });
 });
