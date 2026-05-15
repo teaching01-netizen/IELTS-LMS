@@ -19,6 +19,7 @@ import {
 import {
   createPerStudentZipPdfExport,
   type PerStudentZipPdfExportSection,
+  type PerStudentZipPdfMode,
 } from './gradingPerStudentExport';
 import {
   DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE,
@@ -178,8 +179,10 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
   const [perStudentSelectedSubmissionIds, setPerStudentSelectedSubmissionIds] = useState<string[]>([]);
   const [perStudentSections, setPerStudentSections] = useState<PerStudentZipPdfExportSection[]>([
     'reading',
+    'listening',
     'writing',
   ]);
+  const [perStudentPdfMode, setPerStudentPdfMode] = useState<PerStudentZipPdfMode>('combined');
   const [perStudentPdfFilenameTemplate, setPerStudentPdfFilenameTemplate] = useState(
     DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE,
   );
@@ -237,7 +240,9 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        const valid = parsed.filter((value) => value === 'reading' || value === 'writing') as PerStudentZipPdfExportSection[];
+        const valid = parsed.filter(
+          (value) => value === 'reading' || value === 'listening' || value === 'writing',
+        ) as PerStudentZipPdfExportSection[];
         if (valid.length > 0) {
           setPerStudentSections(valid);
         }
@@ -258,6 +263,32 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       // Ignore storage failures.
     }
   }, [perStudentSections, sessionId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem(`grading:${sessionId}:perStudentPdfMode`);
+      if (stored === 'combined' || stored === 'separate') {
+        setPerStudentPdfMode(stored);
+      } else {
+        setPerStudentPdfMode('combined');
+      }
+    } catch {
+      setPerStudentPdfMode('combined');
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        `grading:${sessionId}:perStudentPdfMode`,
+        perStudentPdfMode,
+      );
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [perStudentPdfMode, sessionId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -550,7 +581,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
 
     const selectedSections = perStudentSections;
     if (selectedSections.length === 0) {
-      setPerStudentDialogError('Select at least one section (Reading and/or Writing).');
+      setPerStudentDialogError('Select at least one section (Reading, Listening, and/or Writing).');
       return;
     }
     if (perStudentSelectedSubmissionIds.length === 0) {
@@ -584,42 +615,52 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         >
       >();
 
-      if (selectedSections.includes('reading')) {
+      const objectiveSections = (['reading', 'listening'] as const).filter((section) =>
+        selectedSections.includes(section),
+      );
+      if (objectiveSections.length > 0) {
         const examState = await resolveExamState(fullSession.publishedVersionId);
-        const readingSectionEntries = await Promise.all(
-          selectedSubmissions.map(async (submission) => {
-            const sections = await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id);
-            const sectionSubmission = sections.find((item) => item.section === 'reading') ?? null;
-            return { submissionId: submission.id, sectionSubmission };
+        const objectiveSectionEntriesBySection = await Promise.all(
+          objectiveSections.map(async (objectiveSection) => {
+            const entries = await Promise.all(
+              selectedSubmissions.map(async (submission) => {
+                const sections = await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id);
+                const sectionSubmission =
+                  sections.find((item) => item.section === objectiveSection) ?? null;
+                return { submissionId: submission.id, sectionSubmission };
+              }),
+            );
+            return { objectiveSection, entries };
           }),
         );
-        const hasReadingSubmission = new Set(
-          readingSectionEntries
-            .filter((entry) => Boolean(entry.sectionSubmission))
-            .map((entry) => entry.submissionId),
-        );
-        const readingExport = buildWideObjectiveExport({
-          session: sessionContext,
-          submissions: selectedSubmissions,
-          sectionSubmissions: readingSectionEntries,
-          examState,
-          moduleType: 'reading',
-          mode: 'auto',
-        });
 
-        const rowBySubmissionId = new Map(
-          readingExport.rows.map((row) => [String(row['submissionId']), row] as const),
-        );
-
-        for (const submission of selectedSubmissions) {
-          const existing = sectionDataBySubmissionId.get(submission.id) ?? {};
-          sectionDataBySubmissionId.set(submission.id, {
-            ...existing,
-            reading: {
-              columns: readingExport.columns,
-              row: hasReadingSubmission.has(submission.id) ? (rowBySubmissionId.get(submission.id) ?? null) : null,
-            },
+        for (const { objectiveSection, entries } of objectiveSectionEntriesBySection) {
+          const hasSubmission = new Set(
+            entries.filter((entry) => Boolean(entry.sectionSubmission)).map((entry) => entry.submissionId),
+          );
+          const exportData = buildWideObjectiveExport({
+            session: sessionContext,
+            submissions: selectedSubmissions,
+            sectionSubmissions: entries,
+            examState,
+            moduleType: objectiveSection,
+            mode: 'auto',
           });
+
+          const rowBySubmissionId = new Map(
+            exportData.rows.map((row) => [String(row['submissionId']), row] as const),
+          );
+
+          for (const submission of selectedSubmissions) {
+            const existing = sectionDataBySubmissionId.get(submission.id) ?? {};
+            sectionDataBySubmissionId.set(submission.id, {
+              ...existing,
+              [objectiveSection]: {
+                columns: exportData.columns,
+                row: hasSubmission.has(submission.id) ? (rowBySubmissionId.get(submission.id) ?? null) : null,
+              },
+            });
+          }
         }
       }
 
@@ -661,6 +702,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         filenameBase: `${fullSession.examTitle}-${fullSession.cohortName || ''}`.trim(),
         generatedAt: new Date(),
         sections: selectedSections,
+        pdfMode: perStudentPdfMode,
         pdfFilenameTemplate: perStudentPdfFilenameTemplate,
         session: {
           examTitle: fullSession.examTitle,
@@ -711,14 +753,82 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     perStudentFilteredIds.length > 0 &&
     perStudentFilteredIds.every((id) => perStudentSelectedSubmissionIds.includes(id));
 
+  const perStudentPreviewGeneratedAt = new Date();
+  const perStudentPreviewOrderedSections = (['reading', 'listening', 'writing'] as const).filter(
+    (section) => perStudentSections.includes(section),
+  );
   const perStudentPreviewSubmission =
     perStudentSelectedSubmissionIds.length > 0
       ? perStudentDialogSubmissions.find((submission) => submission.id === perStudentSelectedSubmissionIds[0]) ??
         null
       : null;
   const perStudentPreviewContextSession = session ?? null;
-  const perStudentPreviewResult = perStudentPreviewSubmission
-    ? renderPerStudentPdfFilenameTemplate(perStudentPdfFilenameTemplate, {
+  const perStudentPreviewExamples = (() => {
+    if (!perStudentPreviewSubmission) return [];
+    const baseContext = {
+      studentName: perStudentPreviewSubmission.studentName,
+      studentId: perStudentPreviewSubmission.studentId || perStudentPreviewSubmission.submissionId,
+      studentEmail: perStudentPreviewSubmission.studentEmail,
+      nickname: perStudentPreviewSubmission.nickname,
+      ieltsCourse: perStudentPreviewSubmission.ieltsCourse,
+      submissionId: perStudentPreviewSubmission.id,
+      examTitle: perStudentPreviewContextSession?.examTitle,
+      cohortName: perStudentPreviewContextSession?.cohortName,
+      sessionId: sessionId,
+      sections: perStudentSections,
+      generatedAt: perStudentPreviewGeneratedAt,
+    };
+
+    if (perStudentPdfMode === 'combined') {
+      const result = renderPerStudentPdfFilenameTemplate(perStudentPdfFilenameTemplate, baseContext);
+      return [{ key: 'combined', label: 'Combined', filename: result.filename, unknown: result.unknownPlaceholders }];
+    }
+
+    return perStudentPreviewOrderedSections.map((section) => {
+      const result = renderPerStudentPdfFilenameTemplate(perStudentPdfFilenameTemplate, {
+        ...baseContext,
+        section,
+      });
+      return {
+        key: section,
+        label: section.toUpperCase(),
+        filename: result.filename,
+        unknown: result.unknownPlaceholders,
+      };
+    });
+  })();
+
+  const perStudentTemplateUnknown = Array.from(
+    new Set(perStudentPreviewExamples.flatMap((entry) => entry.unknown)),
+  );
+
+  const perStudentCollisionInfo = (() => {
+    if (perStudentPdfMode === 'combined') {
+      if (perStudentSelectedSubmissionIds.length <= 1) return { collisionsResolved: 0, filenames: [] as string[] };
+      const selected = perStudentDialogSubmissions.filter((submission) =>
+        perStudentSelectedSubmissionIds.includes(submission.id),
+      );
+      const desired = selected.map((submission) =>
+        renderPerStudentPdfFilenameTemplate(perStudentPdfFilenameTemplate, {
+          studentName: submission.studentName,
+          studentId: submission.studentId || submission.submissionId,
+          studentEmail: submission.studentEmail,
+          nickname: submission.nickname,
+          ieltsCourse: submission.ieltsCourse,
+          submissionId: submission.id,
+          examTitle: perStudentPreviewContextSession?.examTitle,
+          cohortName: perStudentPreviewContextSession?.cohortName,
+          sessionId,
+          sections: perStudentSections,
+          generatedAt: perStudentPreviewGeneratedAt,
+        }).filename,
+      );
+      return resolvePerStudentPdfFilenameCollisions(desired);
+    }
+
+    if (!perStudentPreviewSubmission) return { collisionsResolved: 0, filenames: [] as string[] };
+    const desired = perStudentPreviewOrderedSections.map((section) =>
+      renderPerStudentPdfFilenameTemplate(perStudentPdfFilenameTemplate, {
         studentName: perStudentPreviewSubmission.studentName,
         studentId: perStudentPreviewSubmission.studentId || perStudentPreviewSubmission.submissionId,
         studentEmail: perStudentPreviewSubmission.studentEmail,
@@ -727,33 +837,10 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         submissionId: perStudentPreviewSubmission.id,
         examTitle: perStudentPreviewContextSession?.examTitle,
         cohortName: perStudentPreviewContextSession?.cohortName,
-        sessionId: sessionId,
-        sections: perStudentSections,
-        generatedAt: new Date(),
-      })
-    : null;
-
-  const perStudentTemplateUnknown =
-    perStudentPreviewResult?.unknownPlaceholders ?? [];
-
-  const perStudentCollisionInfo = (() => {
-    if (perStudentSelectedSubmissionIds.length <= 1) return { collisionsResolved: 0 };
-    const selected = perStudentDialogSubmissions.filter((submission) =>
-      perStudentSelectedSubmissionIds.includes(submission.id),
-    );
-    const desired = selected.map((submission) =>
-      renderPerStudentPdfFilenameTemplate(perStudentPdfFilenameTemplate, {
-        studentName: submission.studentName,
-        studentId: submission.studentId || submission.submissionId,
-        studentEmail: submission.studentEmail,
-        nickname: submission.nickname,
-        ieltsCourse: submission.ieltsCourse,
-        submissionId: submission.id,
-        examTitle: perStudentPreviewContextSession?.examTitle,
-        cohortName: perStudentPreviewContextSession?.cohortName,
         sessionId,
         sections: perStudentSections,
-        generatedAt: new Date(),
+        section,
+        generatedAt: perStudentPreviewGeneratedAt,
       }).filename,
     );
     return resolvePerStudentPdfFilenameCollisions(desired);
@@ -814,6 +901,17 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                 />
                 Reading
               </label>
+              <label htmlFor="per-student-export-section-listening" className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  id="per-student-export-section-listening"
+                  type="checkbox"
+                  checked={perStudentSections.includes('listening')}
+                  onChange={() => togglePerStudentSection('listening')}
+                  aria-label="Include listening section"
+                  disabled={perStudentExporting}
+                />
+                Listening
+              </label>
               <label htmlFor="per-student-export-section-writing" className="inline-flex items-center gap-2 text-sm text-gray-700">
                 <input
                   id="per-student-export-section-writing"
@@ -829,6 +927,39 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             <p className="mt-1 text-xs text-gray-500">
               PDFs include the same fields as the current grading CSV export for the selected sections.
               Writing includes full essay text. Missing data is shown as “No submission”.
+            </p>
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold text-gray-700">PDF mode</div>
+            <div className="mt-2 flex flex-wrap items-center gap-4">
+              <label htmlFor="per-student-export-pdf-mode-combined" className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  id="per-student-export-pdf-mode-combined"
+                  type="radio"
+                  name="per-student-export-pdf-mode"
+                  checked={perStudentPdfMode === 'combined'}
+                  onChange={() => setPerStudentPdfMode('combined')}
+                  aria-label="Combined PDFs (one per student)"
+                  disabled={perStudentExporting}
+                />
+                Combined (1 PDF per student)
+              </label>
+              <label htmlFor="per-student-export-pdf-mode-separate" className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  id="per-student-export-pdf-mode-separate"
+                  type="radio"
+                  name="per-student-export-pdf-mode"
+                  checked={perStudentPdfMode === 'separate'}
+                  onChange={() => setPerStudentPdfMode('separate')}
+                  aria-label="Separate PDFs (one per student per section)"
+                  disabled={perStudentExporting}
+                />
+                Separate (1 PDF per section)
+              </label>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              Separate mode creates a folder per student inside the ZIP, with one PDF per selected section.
             </p>
           </div>
 
@@ -863,9 +994,17 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
 
             <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
               <div className="font-semibold text-gray-800">Example</div>
-              <div className="mt-1 font-mono text-gray-800">
-                {perStudentPreviewResult?.filename ?? 'Select a student to preview'}
-              </div>
+              {perStudentPreviewExamples.length > 0 ? (
+                <ul className="mt-1 space-y-1 font-mono text-gray-800">
+                  {perStudentPreviewExamples.map((entry) => (
+                    <li key={entry.key}>
+                      <span className="text-gray-500">{entry.label}:</span> {entry.filename}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="mt-1 font-mono text-gray-800">Select a student to preview</div>
+              )}
               {perStudentTemplateUnknown.length > 0 ? (
                 <div className="mt-2 text-amber-900">
                   Unknown placeholders: {perStudentTemplateUnknown.map((value) => `{{${value}}}`).join(', ')}
