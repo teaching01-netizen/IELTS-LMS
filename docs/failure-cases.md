@@ -30,6 +30,30 @@ Purpose: turn incidents and bug fixes into durable memory for humans and AI agen
 
 ---
 
+## 2026-05-15: Objective Word Limit Treated As Exact Count
+
+### Symptom
+A Listening/Reading objective answer could be displayed with identical student and correct answers but still marked incorrect when the scoring rule was `TWO_WORDS`.
+
+### Scope
+Backend objective auto-grading for text answers and schedule-scoped objective overrides.
+
+### Root Cause
+The grading helper interpreted `ONE_WORD`, `TWO_WORDS`, and `THREE_WORDS` as exact whitespace token counts. IELTS-style answer rules are maximum limits, so a one-word answer such as `CD` must be valid under `TWO_WORDS`.
+
+### Fix
+- Treat text-answer word-count scoring rules as upper bounds.
+- Keep strict text matching and reject responses that exceed the configured word limit.
+
+### Regression Protection
+- Tests: `backend/crates/application/src/grading/mod.rs`
+- Rules/Docs: `docs/failure-cases.md`
+
+### Invariant
+Objective text scoring must require exact answer-key equality while enforcing `ONE_WORD` / `TWO_WORDS` / `THREE_WORDS` as maximum word limits, not exact counts.
+
+---
+
 ## 2026-05-11: Desktop Reading Highlight Selection Escapes Passage
 
 ### Symptom

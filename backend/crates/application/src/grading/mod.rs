@@ -2915,7 +2915,7 @@ impl ObjectiveExpectedAnswer {
                 let Some(answer) = values.first() else {
                     return false;
                 };
-                if !strict_word_count_matches(answer, scoring_rule) {
+                if !strict_word_count_within_limit(answer, scoring_rule) {
                     return false;
                 }
                 expected.contains(answer)
@@ -2925,17 +2925,17 @@ impl ObjectiveExpectedAnswer {
     }
 }
 
-fn strict_word_count_matches(answer: &str, scoring_rule: &str) -> bool {
-    let expected_words = match scoring_rule {
+fn strict_word_count_within_limit(answer: &str, scoring_rule: &str) -> bool {
+    let max_words = match scoring_rule {
         "ONE_WORD" => Some(1usize),
         "TWO_WORDS" => Some(2usize),
         "THREE_WORDS" => Some(3usize),
         _ => None,
     };
-    let Some(expected_words) = expected_words else {
+    let Some(max_words) = max_words else {
         return true;
     };
-    answer.split_whitespace().count() == expected_words
+    answer.split_whitespace().count() <= max_words
 }
 
 fn compute_objective_auto_grading_results(
@@ -4313,7 +4313,7 @@ mod tests {
     }
 
     #[test]
-    fn objective_auto_grading_enforces_exact_word_count_rules() {
+    fn objective_auto_grading_enforces_word_count_upper_bounds() {
         let content_snapshot = json!({
             "reading": {
                 "passages": [{
@@ -4347,6 +4347,36 @@ mod tests {
             None,
         );
         assert_eq!(incorrect["totalScore"], 0);
+    }
+
+    #[test]
+    fn objective_auto_grading_accepts_answers_under_word_limit() {
+        let content_snapshot = json!({
+            "listening": {
+                "parts": [{
+                    "blocks": [{
+                        "id": "short-block-1",
+                        "type": "SHORT_ANSWER",
+                        "questions": [{
+                            "id": "short-1",
+                            "correctAnswer": "CD",
+                            "answerRule": "TWO_WORDS"
+                        }]
+                    }]
+                }]
+            }
+        });
+
+        let results = compute_objective_auto_grading_results(
+            "listening",
+            &json!({ "short-1": "CD" }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["totalScore"], 1);
+        assert_eq!(results["questionResults"][0]["isCorrect"], true);
     }
 
     #[test]
