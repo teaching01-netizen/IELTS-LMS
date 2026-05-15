@@ -10,7 +10,9 @@ import {
   resolvePerStudentPdfFilenameCollisions,
 } from './gradingPerStudentPdfFilenameTemplate';
 
-export type PerStudentZipPdfExportSection = 'reading' | 'writing';
+export type PerStudentZipPdfExportSection = 'reading' | 'listening' | 'writing';
+
+export type PerStudentZipPdfMode = 'combined' | 'separate';
 
 export interface PerStudentZipPdfSectionData {
   columns: CsvColumn[];
@@ -38,6 +40,7 @@ export interface PerStudentZipPdfExportInput {
   sections: PerStudentZipPdfExportSection[];
   students: PerStudentZipPdfStudentInput[];
   pdfFilenameTemplate?: string | undefined;
+  pdfMode?: PerStudentZipPdfMode | undefined;
   session?: { examTitle?: string | null | undefined; cohortName?: string | null | undefined; sessionId?: string | null | undefined } | undefined;
 }
 
@@ -47,6 +50,7 @@ export interface PerStudentZipPdfExportManifestStudent {
   studentName: string;
   nickname?: string | undefined;
   ieltsCourse?: string | undefined;
+  outputs: string[];
   filename: string;
   status: 'ok' | 'failed';
   error?: string | undefined;
@@ -57,6 +61,7 @@ export interface PerStudentZipPdfExportManifest {
   generatedAt: string;
   filename: string;
   sections: PerStudentZipPdfExportSection[];
+  pdfMode: PerStudentZipPdfMode;
   students: PerStudentZipPdfExportManifestStudent[];
 }
 
@@ -74,6 +79,30 @@ function sanitizeFilenameSegment(value: string): string {
     .replace(/\s+/g, ' ')
     .replace(/\.+$/g, '')
     .slice(0, 120);
+}
+
+function applyUniquenessSuffix(name: string, suffixNumber: number): string {
+  if (suffixNumber <= 1) return name;
+  return `${name} (${suffixNumber})`;
+}
+
+function resolveUniqueZipPathSegments(desired: string[]): string[] {
+  const used = new Map<string, number>();
+  return desired.map((raw) => {
+    const sanitized = sanitizeFilenameSegment(raw) || 'student';
+    const currentCount = used.get(sanitized) ?? 0;
+    const nextCount = currentCount + 1;
+    used.set(sanitized, nextCount);
+    if (nextCount === 1) return sanitized;
+
+    let attempt = applyUniquenessSuffix(sanitized, nextCount);
+    while (used.has(attempt)) {
+      const bumped = (used.get(attempt) ?? nextCount) + 1;
+      attempt = applyUniquenessSuffix(sanitized, bumped);
+    }
+    used.set(attempt, 1);
+    return attempt;
+  });
 }
 
 function formatSectionList(sections: PerStudentZipPdfExportSection[]): string {
@@ -99,6 +128,7 @@ function writeWrappedText(
   y: number,
   maxWidth: number,
   lineHeight: number,
+  onNewPage?: (() => void) | undefined,
 ): number {
   const pageHeight = doc.internal.pageSize.getHeight();
   const bottomMargin = 12;
@@ -111,12 +141,95 @@ function writeWrappedText(
     if (cursorY > pageHeight - bottomMargin) {
       doc.addPage();
       cursorY = topMargin;
+      onNewPage?.();
     }
     doc.text(line, x, cursorY);
     cursorY += lineHeight;
   }
 
   return cursorY;
+}
+
+type PdfHeaderContext = {
+  studentName: string;
+  studentId: string;
+  submissionId: string;
+  generatedAt: Date;
+  sectionLabel?: string | undefined;
+};
+
+function renderPdfHeader(doc: jsPDF, context: PdfHeaderContext): number {
+  const left = 14;
+  const maxWidth = 180;
+  let y = 12;
+
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Grading Export', left, y);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  y += 5;
+
+  const meta = [
+    `Generated: ${context.generatedAt.toISOString()}`,
+    `Student: ${context.studentName} (${context.studentId})`,
+    `Submission: ${context.submissionId}`,
+    context.sectionLabel ? `Section: ${context.sectionLabel}` : null,
+  ].filter((line): line is string => Boolean(line));
+
+  for (const line of meta) {
+    y = writeWrappedText(doc, line, left, y, maxWidth, 4.2);
+  }
+
+  // Divider
+  y += 2;
+  doc.setDrawColor(200);
+  doc.line(left, y, left + maxWidth, y);
+  y += 5;
+  return y;
+}
+
+function writeKeyValueRow(
+  doc: jsPDF,
+  label: string,
+  value: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  onNewPage?: (() => void) | undefined,
+): number {
+  const labelText = label.trim();
+  const valueText = value.trim();
+
+  doc.setFont('helvetica', 'bold');
+  const labelLines = doc.splitTextToSize(labelText, 58) as string[];
+  doc.setFont('helvetica', 'normal');
+  const valueLines = doc.splitTextToSize(valueText, maxWidth - 62) as string[];
+
+  const rowLines = Math.max(labelLines.length, valueLines.length, 1);
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const bottomMargin = 12;
+  const topMargin = 14;
+
+  if (y + rowLines * lineHeight > pageHeight - bottomMargin) {
+    doc.addPage();
+    y = topMargin;
+    onNewPage?.();
+  }
+
+  for (let i = 0; i < rowLines; i += 1) {
+    const rowY = y + i * lineHeight;
+    const labelLine = labelLines[i] ?? '';
+    const valueLine = valueLines[i] ?? '';
+    doc.setFont('helvetica', 'bold');
+    doc.text(labelLine, x, rowY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(valueLine, x + 62, rowY);
+  }
+
+  return y + rowLines * lineHeight;
 }
 
 function buildStudentPdfBytes(
@@ -127,66 +240,71 @@ function buildStudentPdfBytes(
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const left = 14;
   const maxWidth = 180;
-  let y = 14;
-
-  doc.setFontSize(14);
-  doc.text('Grading Export', left, y);
-  y += 7;
-
-  doc.setFontSize(10);
-  y = writeWrappedText(
-    doc,
-    `Generated: ${generatedAt.toISOString()}`,
-    left,
-    y,
-    maxWidth,
-    5,
-  );
-  y += 2;
-  y = writeWrappedText(doc, `Student: ${student.studentName}`, left, y, maxWidth, 5);
-  y = writeWrappedText(doc, `Student ID: ${student.studentId}`, left, y, maxWidth, 5);
-  if (student.nickname) {
-    y = writeWrappedText(doc, `Nickname: ${student.nickname}`, left, y, maxWidth, 5);
-  }
-  if (student.ieltsCourse) {
-    y = writeWrappedText(doc, `IELTS Course: ${student.ieltsCourse}`, left, y, maxWidth, 5);
-  }
-  if (student.studentEmail) {
-    y = writeWrappedText(doc, `Email: ${student.studentEmail}`, left, y, maxWidth, 5);
-  }
-  y = writeWrappedText(doc, `Submission ID: ${student.submissionId}`, left, y, maxWidth, 5);
-  y += 4;
+  let y = renderPdfHeader(doc, {
+    studentName: student.studentName,
+    studentId: student.studentId,
+    submissionId: student.submissionId,
+    generatedAt,
+    sectionLabel: sections[0]?.toUpperCase(),
+  });
 
   for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
     const section = sections[sectionIndex];
+    if (!section) continue;
     const data = student.sectionData[section];
-    if (section === 'writing' && data?.writingTasks) {
+    if (section === 'writing' && (data?.writingTasks?.length ?? 0) > 0) {
       // Match the default "Print all writing" export feel by starting writing on a new page
       // when the PDF already contains other sections.
-      if (sectionIndex > 0) {
-        doc.addPage();
-        y = 14;
-      }
-      y = renderWritingLikeDefaultPrint(
-        doc,
-        {
-          studentName: student.studentName,
-          studentId: student.studentId,
-          submissionId: student.submissionId,
-        },
-        data.writingTasks,
-        y,
-      );
+      if (sectionIndex > 0) doc.addPage();
+      y = renderPdfHeader(doc, {
+        studentName: student.studentName,
+        studentId: student.studentId,
+        submissionId: student.submissionId,
+        generatedAt,
+        sectionLabel: 'WRITING',
+      });
+          y = renderWritingLikeDefaultPrint(
+            doc,
+            {
+              studentName: student.studentName,
+              studentId: student.studentId,
+              submissionId: student.submissionId,
+            },
+            data.writingTasks,
+            generatedAt,
+            y,
+          );
       continue;
     }
 
+    if (sectionIndex > 0) {
+      doc.addPage();
+      y = renderPdfHeader(doc, {
+        studentName: student.studentName,
+        studentId: student.studentId,
+        submissionId: student.submissionId,
+        generatedAt,
+        sectionLabel: section.toUpperCase(),
+      });
+    }
+
     doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
     doc.text(section.toUpperCase(), left, y);
     y += 6;
     doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
 
     if (!data || data.row === null) {
-      y = writeWrappedText(doc, 'No submission', left, y, maxWidth, 4.5);
+      y = writeWrappedText(doc, 'No submission', left, y, maxWidth, 4.5, () => {
+        y = renderPdfHeader(doc, {
+          studentName: student.studentName,
+          studentId: student.studentId,
+          submissionId: student.submissionId,
+          generatedAt,
+          sectionLabel: section.toUpperCase(),
+        });
+      });
       y += 3;
       continue;
     }
@@ -195,9 +313,25 @@ function buildStudentPdfBytes(
     for (const column of data.columns) {
       const raw = row[column.key];
       const value = toDisplayValue(raw);
-      const label = column.label.trim();
-      const line = `${label}: ${value}`;
-      y = writeWrappedText(doc, line, left, y, maxWidth, 4.5);
+      y = writeKeyValueRow(
+        doc,
+        column.label,
+        value,
+        left,
+        y,
+        maxWidth,
+        4.6,
+        () => {
+          y = renderPdfHeader(doc, {
+            studentName: student.studentName,
+            studentId: student.studentId,
+            submissionId: student.submissionId,
+            generatedAt,
+            sectionLabel: section.toUpperCase(),
+          });
+        },
+      );
+      y += 1.2;
     }
 
     y += 4;
@@ -263,6 +397,7 @@ function renderWritingLikeDefaultPrint(
   doc: jsPDF,
   student: { studentName: string; studentId: string; submissionId: string },
   writingTasks: WritingTaskSubmission[],
+  generatedAt: Date,
   startY: number,
 ): number {
   const left = 14;
@@ -285,6 +420,7 @@ function renderWritingLikeDefaultPrint(
   const slots = ['task1', 'task2'] as const;
   for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
     const slot = slots[slotIndex];
+    if (!slot) continue;
     const task = tasksBySlot.get(slot) ?? null;
 
     // Start each task on a fresh page if we are too low.
@@ -293,47 +429,70 @@ function renderWritingLikeDefaultPrint(
       y = topMargin;
     }
 
-    // Header
-    doc.setFontSize(16);
-    doc.text(student.studentName, left, y);
-    y += 7;
-
-    doc.setFontSize(10);
-    y = writeWrappedText(doc, `Student ID: ${student.studentId}`, left, y, maxWidth, 5);
-    y = writeWrappedText(doc, `Task: ${getTaskLabelForSlot(slot)}`, left, y, maxWidth, 5);
-    y = writeWrappedText(doc, `Submitted: ${formatSubmittedAt(task?.submittedAt)}`, left, y, maxWidth, 5);
-    y += 4;
+    y = renderPdfHeader(doc, {
+      studentName: student.studentName,
+      studentId: student.studentId,
+      submissionId: student.submissionId,
+      generatedAt,
+      sectionLabel: `WRITING - ${getTaskLabelForSlot(slot)}`,
+    });
+    y = writeWrappedText(
+      doc,
+      `Submitted: ${formatSubmittedAt(task?.submittedAt)}`,
+      left,
+      y,
+      maxWidth,
+      4.8,
+      () => {
+        y = renderPdfHeader(doc, {
+          studentName: student.studentName,
+          studentId: student.studentId,
+          submissionId: student.submissionId,
+          generatedAt,
+          sectionLabel: `WRITING - ${getTaskLabelForSlot(slot)}`,
+        });
+      },
+    );
+    y += 3;
 
     doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
     doc.text(getTaskLabelForSlot(slot), left, y);
     y += 6;
     doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
     y = writeWrappedText(doc, `Word count: ${task?.wordCount ?? 0}`, left, y, maxWidth, 5);
     y += 3;
 
     // Prompt
     doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
     doc.text('Prompt', left, y);
     y += 5;
     doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
     const promptText = task ? htmlToPlainTextPreserveLineBreaks(task.prompt) : 'Prompt unavailable.';
     y = writeWrappedText(doc, promptText || 'Prompt unavailable.', left, y, maxWidth, lineHeight);
     y += 3;
 
     // Response
     doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
     doc.text('Student Response', left, y);
     y += 5;
     doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
     const responseText = task ? htmlToPlainTextPreserveLineBreaks(task.studentText) : '';
     y = writeWrappedText(doc, responseText || 'No submission', left, y, maxWidth, lineHeight);
     y += 4;
 
     // Assessment table
     doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
     doc.text('Assessment Form', left, y);
     y += 5;
     doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
 
     const colCriterion = 60;
     const colBand = 18;
@@ -362,10 +521,19 @@ function renderWritingLikeDefaultPrint(
       if (y + rowHeight > pageHeight - bottomMargin) {
         doc.addPage();
         y = topMargin;
+        y = renderPdfHeader(doc, {
+          studentName: student.studentName,
+          studentId: student.studentId,
+          submissionId: student.submissionId,
+          generatedAt,
+          sectionLabel: `WRITING - ${getTaskLabelForSlot(slot)}`,
+        });
         doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
         doc.text('Assessment Form (cont.)', left, y);
         y += 5;
         doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
         drawTableHeader(y);
         y += 4.5;
       }
@@ -393,7 +561,7 @@ function renderWritingLikeDefaultPrint(
 export async function createPerStudentZipPdfExport(
   input: PerStudentZipPdfExportInput,
 ): Promise<PerStudentZipPdfExportResult> {
-  const sections = (['reading', 'writing'] as const).filter((section) =>
+  const sections = (['reading', 'listening', 'writing'] as const).filter((section) =>
     input.sections.includes(section),
   );
   const sectionSuffix = formatSectionList(sections);
@@ -403,50 +571,115 @@ export async function createPerStudentZipPdfExport(
   const files: Record<string, Uint8Array> = {};
   const manifestStudents: PerStudentZipPdfExportManifestStudent[] = [];
 
+  const pdfMode: PerStudentZipPdfMode = input.pdfMode ?? 'combined';
   const template = (input.pdfFilenameTemplate || '').trim() || DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE;
-  const desiredPdfFilenames = input.students.map((student) =>
-    renderPerStudentPdfFilenameTemplate(template, {
-      studentName: student.studentName,
-      studentId: student.studentId,
-      studentEmail: student.studentEmail,
-      nickname: student.nickname,
-      ieltsCourse: student.ieltsCourse,
-      submissionId: student.submissionId,
-      examTitle: input.session?.examTitle,
-      cohortName: input.session?.cohortName,
-      sessionId: input.session?.sessionId,
-      sections,
-      generatedAt: input.generatedAt,
-    }).filename,
-  );
-  const { filenames: pdfFilenames } = resolvePerStudentPdfFilenameCollisions(desiredPdfFilenames);
+  if (pdfMode === 'combined') {
+    const desiredPdfFilenames = input.students.map((student) =>
+      renderPerStudentPdfFilenameTemplate(template, {
+        studentName: student.studentName,
+        studentId: student.studentId,
+        studentEmail: student.studentEmail,
+        nickname: student.nickname,
+        ieltsCourse: student.ieltsCourse,
+        submissionId: student.submissionId,
+        examTitle: input.session?.examTitle,
+        cohortName: input.session?.cohortName,
+        sessionId: input.session?.sessionId,
+        sections,
+        generatedAt: input.generatedAt,
+      }).filename,
+    );
+    const { filenames: pdfFilenames } = resolvePerStudentPdfFilenameCollisions(desiredPdfFilenames);
 
-  for (let i = 0; i < input.students.length; i += 1) {
-    const student = input.students[i];
-    const pdfFilename = pdfFilenames[i] ?? `student_${i + 1}_${sectionSuffix}.pdf`;
+    for (let i = 0; i < input.students.length; i += 1) {
+      const student = input.students[i];
+      if (!student) continue;
+      const pdfFilename = pdfFilenames[i] ?? `student_${i + 1}_${sectionSuffix}.pdf`;
 
-    try {
-      const pdfBytes = buildStudentPdfBytes(student, sections, input.generatedAt);
-      files[pdfFilename] = pdfBytes;
+      try {
+        const pdfBytes = buildStudentPdfBytes(student, sections, input.generatedAt);
+        files[pdfFilename] = pdfBytes;
+        manifestStudents.push({
+          submissionId: student.submissionId,
+          studentId: student.studentId,
+          studentName: student.studentName,
+          nickname: student.nickname ?? undefined,
+          ieltsCourse: student.ieltsCourse ?? undefined,
+          outputs: [pdfFilename],
+          filename: pdfFilename,
+          status: 'ok',
+        });
+      } catch (error) {
+        manifestStudents.push({
+          submissionId: student.submissionId,
+          studentId: student.studentId,
+          studentName: student.studentName,
+          nickname: student.nickname ?? undefined,
+          ieltsCourse: student.ieltsCourse ?? undefined,
+          outputs: [pdfFilename],
+          filename: pdfFilename,
+          status: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+  } else {
+    const desiredFolders = input.students.map((student) =>
+      `${student.studentName}_${student.submissionId}`,
+    );
+    const folderNames = resolveUniqueZipPathSegments(desiredFolders);
+
+    for (let studentIndex = 0; studentIndex < input.students.length; studentIndex += 1) {
+      const student = input.students[studentIndex];
+      if (!student) continue;
+      const folderName = folderNames[studentIndex] ?? `student_${studentIndex + 1}`;
+
+      const desiredStudentPdfFilenames = sections.map((section) =>
+        renderPerStudentPdfFilenameTemplate(template, {
+          studentName: student.studentName,
+          studentId: student.studentId,
+          studentEmail: student.studentEmail,
+          nickname: student.nickname,
+          ieltsCourse: student.ieltsCourse,
+          submissionId: student.submissionId,
+          examTitle: input.session?.examTitle,
+          cohortName: input.session?.cohortName,
+          sessionId: input.session?.sessionId,
+          sections,
+          section,
+          generatedAt: input.generatedAt,
+        }).filename,
+      );
+      const { filenames: studentPdfFilenames } = resolvePerStudentPdfFilenameCollisions(desiredStudentPdfFilenames);
+
+      const outputs: string[] = [];
+      const errors: string[] = [];
+      for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
+        const section = sections[sectionIndex];
+        const pdfFilename = studentPdfFilenames[sectionIndex] ?? `${section}.pdf`;
+        const zipPath = `${folderName}/${pdfFilename}`;
+
+        try {
+          const pdfBytes = buildStudentPdfBytes(student, [section], input.generatedAt);
+          files[zipPath] = pdfBytes;
+          outputs.push(zipPath);
+        } catch (error) {
+          errors.push(
+            `${section}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          );
+        }
+      }
+
       manifestStudents.push({
         submissionId: student.submissionId,
         studentId: student.studentId,
         studentName: student.studentName,
         nickname: student.nickname ?? undefined,
         ieltsCourse: student.ieltsCourse ?? undefined,
-        filename: pdfFilename,
-        status: 'ok',
-      });
-    } catch (error) {
-      manifestStudents.push({
-        submissionId: student.submissionId,
-        studentId: student.studentId,
-        studentName: student.studentName,
-        nickname: student.nickname ?? undefined,
-        ieltsCourse: student.ieltsCourse ?? undefined,
-        filename: pdfFilename,
-        status: 'failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        outputs,
+        filename: folderName,
+        status: errors.length === 0 && outputs.length > 0 ? 'ok' : 'failed',
+        error: errors.length > 0 ? errors.join('; ') : undefined,
       });
     }
   }
@@ -456,10 +689,17 @@ export async function createPerStudentZipPdfExport(
     generatedAt: input.generatedAt.toISOString(),
     filename: zipFilename,
     sections,
+    pdfMode,
     students: manifestStudents,
   };
 
-  files['manifest.json'] = strToU8(JSON.stringify(manifest, null, 2));
+  const manifestBytes = strToU8(JSON.stringify(manifest, null, 2));
+  files['manifest.json'] = new Uint8Array(
+    manifestBytes.buffer.slice(
+      manifestBytes.byteOffset,
+      manifestBytes.byteOffset + manifestBytes.byteLength,
+    ),
+  );
 
   // PDFs are already compressed; avoid wasting CPU on recompressing.
   const bytes = zipSync(files, { level: 0 });

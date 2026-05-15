@@ -23,16 +23,20 @@ The selected mode is persisted **per grading session** using `localStorage`:
 When `exportMode = per_student_zip_pdf`, the UI provides:
 
 - Student picker: multi-select + search + select-all
-- Section picker: Reading and/or Writing
+- Section picker: Reading, Listening, and/or Writing
+- PDF mode:
+  - `combined`: one PDF per student containing the selected sections
+  - `separate`: one folder per student, with one PDF per selected section
 
 Output:
 
 - A single `.zip` download
-- One `.pdf` per selected student
+- One `.pdf` per selected student (combined mode), or multiple PDFs per student (separate mode)
 - `manifest.json` at the root of the ZIP, describing:
   - `mode = per_student_zip_pdf`
   - `generatedAt`
   - selected `sections`
+  - `pdfMode`
   - per-student status (`ok` / `failed`)
 
 PDF content:
@@ -44,6 +48,10 @@ PDF content:
 The selected sections are persisted per grading session in `localStorage`:
 
 - `grading:<sessionId>:perStudentExportSections` (JSON array)
+
+The PDF mode is persisted per grading session in `localStorage`:
+
+- `grading:<sessionId>:perStudentPdfMode` (`combined` / `separate`)
 
 PDF filenames inside the ZIP can be customized via a template persisted per grading session in `localStorage`:
 

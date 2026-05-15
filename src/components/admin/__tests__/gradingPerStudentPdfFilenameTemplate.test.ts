@@ -67,6 +67,20 @@ describe('renderPerStudentPdfFilenameTemplate', () => {
 
     expect(result.filename).toBe('Ada-Student_sub-1-.pdf');
   });
+
+  test('supports section placeholder for per-section exports', () => {
+    const result = renderPerStudentPdfFilenameTemplate('{{studentName}}_{{section}}_{{submissionId}}', {
+      studentName: 'Ada Student',
+      studentId: 'student-1',
+      submissionId: 'sub-1',
+      section: 'listening',
+      sections: ['reading', 'listening', 'writing'],
+      generatedAt: new Date('2026-05-14T00:00:00.000Z'),
+    });
+
+    expect(result.unknownPlaceholders).toEqual([]);
+    expect(result.filename).toBe('Ada Student_listening_sub-1.pdf');
+  });
 });
 
 describe('resolvePerStudentPdfFilenameCollisions', () => {

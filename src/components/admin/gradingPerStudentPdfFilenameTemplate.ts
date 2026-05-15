@@ -13,6 +13,7 @@ export const PER_STUDENT_PDF_FILENAME_TEMPLATE_FIELDS = [
   { key: 'examTitle', label: 'Exam title' },
   { key: 'cohortName', label: 'Cohort name' },
   { key: 'sessionId', label: 'Session ID' },
+  { key: 'section', label: 'Section' },
   { key: 'sections', label: 'Sections' },
   { key: 'date', label: 'Date' },
   { key: 'timestamp', label: 'Timestamp' },
@@ -31,6 +32,7 @@ export interface PerStudentPdfFilenameTemplateContext {
   examTitle?: string | null | undefined;
   cohortName?: string | null | undefined;
   sessionId?: string | null | undefined;
+  section?: PerStudentZipPdfExportSection | undefined;
   sections: PerStudentZipPdfExportSection[];
   generatedAt: Date;
 }
@@ -111,6 +113,7 @@ export function renderPerStudentPdfFilenameTemplate(
       examTitle: context.examTitle ?? '',
       cohortName: context.cohortName ?? '',
       sessionId: context.sessionId ?? '',
+      section: context.section ?? '',
       sections: formatSections(context.sections),
       date: formatDateLocal(context.generatedAt),
       timestamp: formatTimestampLocalSafe(context.generatedAt),
