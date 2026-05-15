@@ -69,9 +69,7 @@ describe('createPerStudentZipPdfExport', () => {
     expect(manifest.sections).toEqual(['reading', 'writing']);
     expect(manifest.pdfMode).toBe('combined');
     expect(manifest.students).toHaveLength(2);
-    expect(manifest.students[0]?.outputs).toEqual([
-      'Ada Student_sub-1_reading-writing.pdf',
-    ]);
+    expect(manifest.students[0]?.outputs).toEqual(['Ada Student_sub-1_reading-writing.pdf']);
   });
 
   test('includes listening in combined mode when selected', async () => {
@@ -92,11 +90,11 @@ describe('createPerStudentZipPdfExport', () => {
           sectionData: {
             reading: {
               columns: objectiveColumns,
-              row: { studentName: 'Ada Student', 'answer:q1': 'A' },
+              row: { studentName: 'Ada Student', 'answer:q1': 'A', 'rightAnswer:q1': 'A', 'score:q1': 1 },
             },
             listening: {
               columns: objectiveColumns,
-              row: { studentName: 'Ada Student', 'answer:q1': 'B' },
+              row: { studentName: 'Ada Student', 'answer:q1': 'B', 'rightAnswer:q1': 'C', 'score:q1': 0 },
             },
           },
         },
@@ -131,8 +129,8 @@ describe('createPerStudentZipPdfExport', () => {
           studentName: 'Ada Student',
           studentId: 'student-sub-1',
           sectionData: {
-            reading: { columns: objectiveColumns, row: { studentName: 'Ada Student', 'answer:q1': 'A' } },
-            listening: { columns: objectiveColumns, row: { studentName: 'Ada Student', 'answer:q1': 'B' } },
+            reading: { columns: objectiveColumns, row: { studentName: 'Ada Student', 'answer:q1': 'A', 'rightAnswer:q1': 'A', 'score:q1': 1 } },
+            listening: { columns: objectiveColumns, row: { studentName: 'Ada Student', 'answer:q1': 'B', 'rightAnswer:q1': 'C', 'score:q1': 0 } },
             writing: { columns: [{ key: 'studentName', label: 'Student Name' }], row: { studentName: 'Ada Student' } },
           },
         },

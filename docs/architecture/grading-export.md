@@ -31,7 +31,7 @@ When `exportMode = per_student_zip_pdf`, the UI provides:
 Output:
 
 - A single `.zip` download
-- One `.pdf` per selected student (combined mode), or multiple PDFs per student (separate mode)
+- One `.pdf` per selected student (combined mode), or one PDF per selected section (separate mode)
 - `manifest.json` at the root of the ZIP, describing:
   - `mode = per_student_zip_pdf`
   - `generatedAt`
@@ -41,7 +41,7 @@ Output:
 
 PDF content:
 
-- Mirrors the existing grading CSV fields for the selected sections (rendered as a readable key/value report).
+- Reading/Listening: rendered as a teacher-friendly table: question, student answer, right answer, correct, score.
 - Writing uses the same structure as the default **"Print all writing"** export (task pages with prompt, response, and assessment form), and includes the full essay text (plain text) when available.
 - Missing section data is rendered as **"No submission"**.
 
@@ -58,3 +58,7 @@ PDF filenames inside the ZIP can be customized via a template persisted per grad
 - `grading:<sessionId>:perStudentPdfFilenameTemplate`
 
 The template affects **only** PDF filenames inside the ZIP (the ZIP filename remains unchanged). Unknown placeholders are kept as literal text and the UI warns.
+
+Notes:
+
+- In `separate` PDF mode, use `{{section}}` in the template to generate distinct filenames per section and avoid ` (2)`, ` (3)` suffixes.

@@ -121,6 +121,22 @@ function toDisplayValue(value: unknown): string {
   }
 }
 
+function normalizeAnswer(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function toOptionalFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
 function writeWrappedText(
   doc: jsPDF,
   text: string,
@@ -148,6 +164,61 @@ function writeWrappedText(
   }
 
   return cursorY;
+}
+
+type ObjectiveQuestionTableRow = {
+  question: string;
+  studentAnswer: string;
+  rightAnswer: string;
+  correct: '' | 'Yes' | 'No';
+  score: string;
+};
+
+function buildObjectiveQuestionTableRows(
+  columns: CsvColumn[],
+  row: Record<string, unknown>,
+): ObjectiveQuestionTableRow[] {
+  const scoreKeyByLabel = new Map<string, string>();
+  for (const column of columns) {
+    const key = column.key;
+    if (!key.startsWith('score:') && !key.startsWith('scoreGroup:')) continue;
+    scoreKeyByLabel.set(column.label.trim(), key);
+  }
+
+  const rows: ObjectiveQuestionTableRow[] = [];
+  for (const column of columns) {
+    if (!column.key.startsWith('answer:')) continue;
+    const id = column.key.slice('answer:'.length);
+    const label = column.label.trim();
+    const baseQuestion = label.replace(/\s+Answer.*$/i, '').trim();
+    const suffixMatch = label.match(/Answer\s*(\(\d+\))/i);
+    const question = suffixMatch ? `${baseQuestion} ${suffixMatch[1]}` : baseQuestion;
+
+    const studentAnswer = toDisplayValue(row[column.key]);
+    const rightAnswer = toDisplayValue(row[`rightAnswer:${id}`]);
+
+    const scoreLabel = `${baseQuestion} Score`;
+    const scoreKey = scoreKeyByLabel.get(scoreLabel) ?? `score:${id}`;
+    const scoreValue = toDisplayValue(row[scoreKey]);
+    const scoreNum = toOptionalFiniteNumber(row[scoreKey]);
+
+    let correct: '' | 'Yes' | 'No' = '';
+    if (scoreNum !== null) {
+      correct = scoreNum > 0 ? 'Yes' : 'No';
+    } else if (studentAnswer.trim() !== '' && rightAnswer.trim() !== '') {
+      correct = normalizeAnswer(studentAnswer) === normalizeAnswer(rightAnswer) ? 'Yes' : 'No';
+    }
+
+    rows.push({
+      question,
+      studentAnswer,
+      rightAnswer,
+      correct,
+      score: scoreValue,
+    });
+  }
+
+  return rows;
 }
 
 type PdfHeaderContext = {
@@ -232,6 +303,167 @@ function writeKeyValueRow(
   return y + rowLines * lineHeight;
 }
 
+function renderObjectiveQuestionTable(
+  doc: jsPDF,
+  headerContext: PdfHeaderContext,
+  sectionLabel: string,
+  columns: CsvColumn[],
+  row: Record<string, unknown>,
+  startY: number,
+): number {
+  const left = 14;
+  const maxWidth = 180;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const bottomMargin = 12;
+  const paddingX = 1.4;
+  const paddingY = 1.8;
+
+  const colQ = 14;
+  const colStudent = 70;
+  const colRight = 70;
+  const colCorrect = 16;
+  const colScore = maxWidth - colQ - colStudent - colRight - colCorrect;
+  const colX = {
+    q: left,
+    student: left + colQ,
+    right: left + colQ + colStudent,
+    correct: left + colQ + colStudent + colRight,
+    score: left + colQ + colStudent + colRight + colCorrect,
+  } as const;
+
+  const renderSectionHeader = () => {
+    startY = renderPdfHeader(doc, { ...headerContext, sectionLabel });
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(sectionLabel, left, startY);
+    startY += 6;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+  };
+
+  const ensureSpace = (neededHeight: number) => {
+    if (startY + neededHeight <= pageHeight - bottomMargin) return;
+    doc.addPage();
+    renderSectionHeader();
+  };
+
+  const summaryPairs: Array<{ label: string; value: string }> = [
+    { label: 'Submitted', value: toDisplayValue(row['submittedAt']) },
+    { label: 'Total', value: `${toDisplayValue(row['totalScore'])}/${toDisplayValue(row['maxScore'])}`.replace(/^\/|\/$/g, '') },
+    { label: 'Correct', value: toDisplayValue(row['correctCount']) },
+    { label: 'Band', value: toDisplayValue(row['ieltsBandScore']) },
+  ].filter((pair) => pair.value.trim() !== '');
+
+  if (summaryPairs.length > 0) {
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Summary', left, startY);
+    startY += 5;
+
+    doc.setFontSize(9);
+    for (const pair of summaryPairs) {
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${pair.label}:`, left, startY);
+      doc.setFont('helvetica', 'normal');
+      startY = writeWrappedText(doc, pair.value, left + 24, startY, maxWidth - 24, 4.4, () => {
+        renderSectionHeader();
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Summary (cont.)', left, startY);
+        startY += 5;
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+      });
+      startY += 1.2;
+    }
+    startY += 2;
+  }
+
+  const tableRows = buildObjectiveQuestionTableRows(columns, row);
+  if (tableRows.length === 0) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    return writeWrappedText(doc, 'No question answers found.', left, startY, maxWidth, 4.6);
+  }
+
+  const headerHeight = 7.5;
+  ensureSpace(headerHeight + 2);
+
+  const drawTableHeader = () => {
+    doc.setDrawColor(210);
+    doc.setFillColor(245, 247, 250);
+    doc.rect(left, startY, maxWidth, headerHeight, 'FD');
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Q', colX.q + paddingX, startY + 5.1);
+    doc.text('Student Answer', colX.student + paddingX, startY + 5.1);
+    doc.text('Right Answer', colX.right + paddingX, startY + 5.1);
+    doc.text('Correct', colX.correct + paddingX, startY + 5.1);
+    doc.text('Score', colX.score + paddingX, startY + 5.1);
+    startY += headerHeight;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+  };
+
+  drawTableHeader();
+
+  const lineHeight = 4.2;
+  for (let i = 0; i < tableRows.length; i += 1) {
+    const item = tableRows[i]!;
+    const qLines = doc.splitTextToSize(item.question, colQ - paddingX * 2) as string[];
+    const studentLines = doc.splitTextToSize(item.studentAnswer || '', colStudent - paddingX * 2) as string[];
+    const rightLines = doc.splitTextToSize(item.rightAnswer || '', colRight - paddingX * 2) as string[];
+    const correctLines = doc.splitTextToSize(item.correct || '', colCorrect - paddingX * 2) as string[];
+    const scoreLines = doc.splitTextToSize(item.score || '', colScore - paddingX * 2) as string[];
+    const maxLines = Math.max(qLines.length, studentLines.length, rightLines.length, correctLines.length, scoreLines.length, 1);
+    const rowHeight = maxLines * lineHeight + paddingY * 2;
+
+    if (startY + rowHeight > pageHeight - bottomMargin) {
+      doc.addPage();
+      renderSectionHeader();
+      drawTableHeader();
+    }
+
+    doc.setDrawColor(225);
+    if (i % 2 === 1) {
+      doc.setFillColor(252, 252, 253);
+      doc.rect(left, startY, maxWidth, rowHeight, 'F');
+    }
+
+    doc.rect(colX.q, startY, colQ, rowHeight, 'S');
+    doc.rect(colX.student, startY, colStudent, rowHeight, 'S');
+    doc.rect(colX.right, startY, colRight, rowHeight, 'S');
+    doc.rect(colX.correct, startY, colCorrect, rowHeight, 'S');
+    doc.rect(colX.score, startY, colScore, rowHeight, 'S');
+
+    const cellTop = startY + paddingY + 2.4;
+    const drawLines = (lines: string[], x: number) => {
+      for (let li = 0; li < lines.length; li += 1) {
+        const text = lines[li];
+        if (!text) continue;
+        doc.text(String(text), x + paddingX, cellTop + li * lineHeight);
+      }
+    };
+
+    drawLines(qLines, colX.q);
+    drawLines(studentLines, colX.student);
+    drawLines(rightLines, colX.right);
+
+    doc.setFont('helvetica', 'bold');
+    if (item.correct === 'Yes') doc.setTextColor(20, 110, 60);
+    if (item.correct === 'No') doc.setTextColor(160, 40, 40);
+    drawLines(correctLines, colX.correct);
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'normal');
+
+    drawLines(scoreLines, colX.score);
+
+    startY += rowHeight;
+  }
+
+  return startY;
+}
+
 function buildStudentPdfBytes(
   student: PerStudentZipPdfStudentInput,
   sections: PerStudentZipPdfExportSection[],
@@ -245,14 +477,13 @@ function buildStudentPdfBytes(
     studentId: student.studentId,
     submissionId: student.submissionId,
     generatedAt,
-    sectionLabel: sections[0]?.toUpperCase(),
+    sectionLabel: sections.length === 1 ? sections[0].toUpperCase() : undefined,
   });
 
   for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
     const section = sections[sectionIndex];
-    if (!section) continue;
     const data = student.sectionData[section];
-    if (section === 'writing' && (data?.writingTasks?.length ?? 0) > 0) {
+    if (section === 'writing' && data?.writingTasks) {
       // Match the default "Print all writing" export feel by starting writing on a new page
       // when the PDF already contains other sections.
       if (sectionIndex > 0) doc.addPage();
@@ -263,17 +494,16 @@ function buildStudentPdfBytes(
         generatedAt,
         sectionLabel: 'WRITING',
       });
-          y = renderWritingLikeDefaultPrint(
-            doc,
-            {
-              studentName: student.studentName,
-              studentId: student.studentId,
-              submissionId: student.submissionId,
-            },
-            data.writingTasks,
-            generatedAt,
-            y,
-          );
+      y = renderWritingLikeDefaultPrint(
+        doc,
+        {
+          studentName: student.studentName,
+          studentId: student.studentId,
+          submissionId: student.submissionId,
+        },
+        data.writingTasks,
+        y,
+      );
       continue;
     }
 
@@ -309,29 +539,45 @@ function buildStudentPdfBytes(
       continue;
     }
 
-    const row = data.row;
-    for (const column of data.columns) {
-      const raw = row[column.key];
-      const value = toDisplayValue(raw);
-      y = writeKeyValueRow(
+    if (section === 'reading' || section === 'listening') {
+      y = renderObjectiveQuestionTable(
         doc,
-        column.label,
-        value,
-        left,
-        y,
-        maxWidth,
-        4.6,
-        () => {
-          y = renderPdfHeader(doc, {
-            studentName: student.studentName,
-            studentId: student.studentId,
-            submissionId: student.submissionId,
-            generatedAt,
-            sectionLabel: section.toUpperCase(),
-          });
+        {
+          studentName: student.studentName,
+          studentId: student.studentId,
+          submissionId: student.submissionId,
+          generatedAt,
         },
+        section.toUpperCase(),
+        data.columns,
+        data.row,
+        y,
       );
-      y += 1.2;
+    } else {
+      const row = data.row;
+      for (const column of data.columns) {
+        const raw = row[column.key];
+        const value = toDisplayValue(raw);
+        y = writeKeyValueRow(
+          doc,
+          column.label,
+          value,
+          left,
+          y,
+          maxWidth,
+          4.6,
+          () => {
+            y = renderPdfHeader(doc, {
+              studentName: student.studentName,
+              studentId: student.studentId,
+              submissionId: student.submissionId,
+              generatedAt,
+              sectionLabel: section.toUpperCase(),
+            });
+          },
+        );
+        y += 1.2;
+      }
     }
 
     y += 4;
@@ -397,7 +643,6 @@ function renderWritingLikeDefaultPrint(
   doc: jsPDF,
   student: { studentName: string; studentId: string; submissionId: string },
   writingTasks: WritingTaskSubmission[],
-  generatedAt: Date,
   startY: number,
 ): number {
   const left = 14;
@@ -420,7 +665,6 @@ function renderWritingLikeDefaultPrint(
   const slots = ['task1', 'task2'] as const;
   for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
     const slot = slots[slotIndex];
-    if (!slot) continue;
     const task = tasksBySlot.get(slot) ?? null;
 
     // Start each task on a fresh page if we are too low.
@@ -433,7 +677,7 @@ function renderWritingLikeDefaultPrint(
       studentName: student.studentName,
       studentId: student.studentId,
       submissionId: student.submissionId,
-      generatedAt,
+      generatedAt: new Date(),
       sectionLabel: `WRITING - ${getTaskLabelForSlot(slot)}`,
     });
     y = writeWrappedText(
@@ -448,7 +692,7 @@ function renderWritingLikeDefaultPrint(
           studentName: student.studentName,
           studentId: student.studentId,
           submissionId: student.submissionId,
-          generatedAt,
+          generatedAt: new Date(),
           sectionLabel: `WRITING - ${getTaskLabelForSlot(slot)}`,
         });
       },
@@ -525,7 +769,7 @@ function renderWritingLikeDefaultPrint(
           studentName: student.studentName,
           studentId: student.studentId,
           submissionId: student.submissionId,
-          generatedAt,
+          generatedAt: new Date(),
           sectionLabel: `WRITING - ${getTaskLabelForSlot(slot)}`,
         });
         doc.setFontSize(11);
@@ -593,7 +837,6 @@ export async function createPerStudentZipPdfExport(
 
     for (let i = 0; i < input.students.length; i += 1) {
       const student = input.students[i];
-      if (!student) continue;
       const pdfFilename = pdfFilenames[i] ?? `student_${i + 1}_${sectionSuffix}.pdf`;
 
       try {
@@ -631,7 +874,6 @@ export async function createPerStudentZipPdfExport(
 
     for (let studentIndex = 0; studentIndex < input.students.length; studentIndex += 1) {
       const student = input.students[studentIndex];
-      if (!student) continue;
       const folderName = folderNames[studentIndex] ?? `student_${studentIndex + 1}`;
 
       const desiredStudentPdfFilenames = sections.map((section) =>
@@ -664,9 +906,7 @@ export async function createPerStudentZipPdfExport(
           files[zipPath] = pdfBytes;
           outputs.push(zipPath);
         } catch (error) {
-          errors.push(
-            `${section}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          );
+          errors.push(`${section}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       }
 
