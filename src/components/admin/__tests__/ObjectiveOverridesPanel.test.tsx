@@ -75,10 +75,12 @@ describe('ObjectiveOverridesPanel', () => {
     fireEvent.click(screen.getByText('Session Settings'));
 
     await waitFor(() => {
-      expect(screen.getByText(/READING • q-reading-1/i)).toBeTruthy();
+      expect(screen.getByText(/READING • Q1/i)).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByText(/READING • q-reading-1/i));
+    expect(screen.queryByText(/q-reading-1/i)).toBeNull();
+
+    fireEvent.click(screen.getByText(/READING • Q1/i));
 
     fireEvent.click(screen.getByText('Save override + regrade'));
     await waitFor(() => {
@@ -108,4 +110,3 @@ describe('ObjectiveOverridesPanel', () => {
     });
   });
 });
-

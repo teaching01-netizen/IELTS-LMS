@@ -23,6 +23,25 @@ type ObjectiveQuestionItem = {
   defaultMaxScore: number;
 };
 
+const SCORING_RULE_OPTIONS = [
+  'exact_match',
+  'ONE_WORD',
+  'TWO_WORDS',
+  'THREE_WORDS',
+  'MULTI_MCQ',
+  'single_choice',
+  'diagram_label',
+  'flow_chart',
+  'table_completion',
+  'classification',
+  'matching_features',
+  'sub_answer_tree',
+] as const;
+
+function isKnownScoringRule(value: string): value is (typeof SCORING_RULE_OPTIONS)[number] {
+  return (SCORING_RULE_OPTIONS as readonly string[]).includes(value);
+}
+
 function toTextLines(value: string): string[] {
   return value
     .split('\n')
@@ -113,6 +132,12 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [mutationResult, setMutationResult] = useState<ObjectiveOverrideMutationResponse | null>(null);
   const [mutating, setMutating] = useState(false);
+
+  const questionNumberById = useMemo(() => {
+    const map = new Map<string, number>();
+    questions.forEach((q, index) => map.set(q.descriptor.id, index + 1));
+    return map;
+  }, [questions]);
 
   const overridesByQuestionId = useMemo(() => {
     const map = new Map<string, GradingScheduleObjectiveOverrideRow>();
@@ -269,6 +294,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
                   {questions.map((q) => {
                     const active = overridesByQuestionId.has(q.descriptor.id);
                     const isSelected = q.descriptor.id === selectedQuestionId;
+                    const questionNumber = questionNumberById.get(q.descriptor.id) ?? 0;
                     return (
                       <button
                         key={q.descriptor.id}
@@ -281,7 +307,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="text-xs font-semibold text-gray-900">
-                            {q.moduleType.toUpperCase()} • {q.descriptor.id}
+                            {q.moduleType.toUpperCase()} • Q{questionNumber}
                           </div>
                           {active ? (
                             <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
@@ -302,7 +328,9 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
                   <div className="space-y-3 rounded-md border border-gray-200 p-3">
                     <div>
                       <div className="text-xs font-semibold text-gray-700">Question</div>
-                      <div className="text-xs text-gray-600">{selected.descriptor.id}</div>
+                      <div className="text-xs text-gray-600" title={selected.descriptor.id}>
+                        {selected.moduleType.toUpperCase()} • Q{questionNumberById.get(selected.descriptor.id) ?? 0}
+                      </div>
                       <div className="mt-1 text-xs text-gray-600">{selected.prompt}</div>
                       <div className="mt-2 text-xs font-semibold text-gray-700">Current key</div>
                       <div className="text-xs text-gray-600">{selected.defaultCorrectAnswer}</div>
@@ -311,12 +339,32 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
                     <div className="grid gap-3 md:grid-cols-2">
                       <label className="block">
                         <div className="text-xs font-semibold text-gray-700">Scoring rule</div>
-                        <input
-                          value={form.scoringRule}
-                          onChange={(e) => setForm({ ...form, scoringRule: e.target.value })}
-                          className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
-                          placeholder="exact_match / ONE_WORD / TWO_WORDS / THREE_WORDS / MULTI_MCQ"
-                        />
+                        <div className="mt-1 space-y-2">
+                          <select
+                            value={isKnownScoringRule(form.scoringRule) ? form.scoringRule : '__custom__'}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === '__custom__') return;
+                              setForm({ ...form, scoringRule: value });
+                            }}
+                            className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          >
+                            {SCORING_RULE_OPTIONS.map((rule) => (
+                              <option key={rule} value={rule}>
+                                {rule}
+                              </option>
+                            ))}
+                            <option value="__custom__">Custom…</option>
+                          </select>
+                          {!isKnownScoringRule(form.scoringRule) ? (
+                            <input
+                              value={form.scoringRule}
+                              onChange={(e) => setForm({ ...form, scoringRule: e.target.value })}
+                              className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                              placeholder="Enter a scoring rule"
+                            />
+                          ) : null}
+                        </div>
                       </label>
                       <label className="block">
                         <div className="text-xs font-semibold text-gray-700">Max score</div>
@@ -412,4 +460,3 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
     </div>
   );
 }
-
