@@ -62,3 +62,19 @@ The template affects **only** PDF filenames inside the ZIP (the ZIP filename rem
 Notes:
 
 - In `separate` PDF mode, use `{{section}}` in the template to generate distinct filenames per section and avoid ` (2)`, ` (3)` suffixes.
+
+## Owning modules and seams
+
+Per-student ZIP export is intentionally split into a few deep modules to keep UI changes local and make PDF layout work safer:
+
+- Dialog UI (state + persisted preferences): `src/components/admin/PerStudentZipPdfExportDialog.tsx`
+- Export orchestrator (read-only data assembly seam): `src/components/admin/buildPerStudentZipPdfExportInput.ts`
+  - Responsibility: fetch section submissions + writing submissions, build wide exports, and assemble `PerStudentZipPdfExportInput`.
+  - Invariant: must not mutate grading/submission data.
+- Export implementation (PDF renderers + ZIP/manifest builder):
+  - Public entrypoint: `src/components/admin/gradingPerStudentExport.ts` (re-exports)
+  - ZIP builder + manifest: `src/components/admin/gradingPerStudentExport/zipExport.ts`
+  - Student PDF builder: `src/components/admin/gradingPerStudentExport/studentPdf.ts`
+  - Objective table-row model: `src/components/admin/gradingPerStudentExport/objective/tableRows.ts`
+  - Objective table renderer: `src/components/admin/gradingPerStudentExport/objective/renderTable.ts`
+  - Writing renderer: `src/components/admin/gradingPerStudentExport/writing/renderWritingLikeDefaultPrint.ts`
