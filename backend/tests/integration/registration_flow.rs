@@ -39,6 +39,8 @@ async fn registration_rejects_invalid_wcode_and_is_idempotent_for_same_user() {
             "123456".to_owned(),
             "alice@example.com".to_owned(),
             "Alice Roe".to_owned(),
+            None,
+            None,
             user_id,
         )
         .await;
@@ -51,6 +53,8 @@ async fn registration_rejects_invalid_wcode_and_is_idempotent_for_same_user() {
             "W123456".to_owned(),
             "alice@example.com".to_owned(),
             "Alice Roe".to_owned(),
+            None,
+            None,
             user_id,
         )
         .await
@@ -68,6 +72,8 @@ async fn registration_rejects_invalid_wcode_and_is_idempotent_for_same_user() {
             "W123456".to_owned(),
             "changed@example.com".to_owned(),
             "Changed Name".to_owned(),
+            None,
+            None,
             user_id,
         )
         .await
@@ -83,6 +89,8 @@ async fn registration_rejects_invalid_wcode_and_is_idempotent_for_same_user() {
             "W123456".to_owned(),
             "other@example.com".to_owned(),
             "Other Name".to_owned(),
+            None,
+            None,
             Uuid::new_v4(),
         )
         .await;

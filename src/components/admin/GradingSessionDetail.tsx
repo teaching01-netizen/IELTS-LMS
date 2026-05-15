@@ -672,6 +672,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           studentName: submission.studentName,
           studentId: submission.studentId || submission.submissionId,
           studentEmail: submission.studentEmail,
+          nickname: submission.nickname,
+          ieltsCourse: submission.ieltsCourse,
           sectionData: sectionDataBySubmissionId.get(submission.id) ?? {},
         })),
       });
@@ -693,10 +695,14 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         const id = (submission.studentId || submission.submissionId || '').toLowerCase();
         const name = (submission.studentName || '').toLowerCase();
         const email = (submission.studentEmail || '').toLowerCase();
+        const nickname = (submission.nickname || '').toLowerCase();
+        const course = (submission.ieltsCourse || '').toLowerCase();
         return (
           name.includes(normalizedPerStudentSearch) ||
           id.includes(normalizedPerStudentSearch) ||
-          email.includes(normalizedPerStudentSearch)
+          email.includes(normalizedPerStudentSearch) ||
+          nickname.includes(normalizedPerStudentSearch) ||
+          course.includes(normalizedPerStudentSearch)
         );
       })
     : perStudentDialogSubmissions;
@@ -716,6 +722,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         studentName: perStudentPreviewSubmission.studentName,
         studentId: perStudentPreviewSubmission.studentId || perStudentPreviewSubmission.submissionId,
         studentEmail: perStudentPreviewSubmission.studentEmail,
+        nickname: perStudentPreviewSubmission.nickname,
+        ieltsCourse: perStudentPreviewSubmission.ieltsCourse,
         submissionId: perStudentPreviewSubmission.id,
         examTitle: perStudentPreviewContextSession?.examTitle,
         cohortName: perStudentPreviewContextSession?.cohortName,
@@ -738,6 +746,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         studentName: submission.studentName,
         studentId: submission.studentId || submission.submissionId,
         studentEmail: submission.studentEmail,
+        nickname: submission.nickname,
+        ieltsCourse: submission.ieltsCourse,
         submissionId: submission.id,
         examTitle: perStudentPreviewContextSession?.examTitle,
         cohortName: perStudentPreviewContextSession?.cohortName,
@@ -1388,7 +1398,14 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                         </div>
                         <div className="min-w-0">
                           <p className="font-medium text-gray-900 truncate">{submission.studentName}</p>
-                          <p className="text-xs text-gray-500 hidden sm:block truncate">{submission.studentEmail}</p>
+                          <p className="text-xs text-gray-500 hidden sm:block truncate">
+                            {submission.studentEmail ? submission.studentEmail : ''}
+                          </p>
+                          <p className="text-xs text-gray-500 hidden md:block truncate">
+                            {[submission.nickname ? `Nickname: ${submission.nickname}` : null, submission.ieltsCourse ? `Course: ${submission.ieltsCourse}` : null]
+                              .filter(Boolean)
+                              .join(' • ')}
+                          </p>
                         </div>
                         {submission.isFlagged && (
                           <AlertCircle size={16} className="text-red-500" />

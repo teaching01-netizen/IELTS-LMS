@@ -29,6 +29,8 @@ interface AuthSessionContextValue {
     wcode: string;
     email: string;
     studentName: string;
+    nickname: string;
+    ieltsCourse: string;
   }) => Promise<StudentEntryResult>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
@@ -146,6 +148,8 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     wcode: string;
     email: string;
     studentName: string;
+    nickname: string;
+    ieltsCourse: string;
   }) => {
     const result = await authService.studentEntry(payload);
     if ('state' in result && result.state === 'queued') {

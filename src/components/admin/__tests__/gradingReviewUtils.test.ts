@@ -21,6 +21,8 @@ function createStudentSubmission(id: string, studentId: string, studentName: str
     studentId,
     studentName,
     studentEmail: `${studentId}@example.com`,
+    nickname: 'Ada',
+    ieltsCourse: 'IELTS Academic',
     cohortName: 'Cohort',
     submittedAt: '2026-01-01T00:00:00.000Z',
     timeSpentSeconds: 0,
@@ -37,6 +39,16 @@ function createStudentSubmission(id: string, studentId: string, studentName: str
     updatedAt: '2026-01-01T00:00:00.000Z',
   } as any;
 }
+
+test('export column sets include nickname and ieltsCourse', () => {
+  const objectiveKeys = OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS.map((col) => col.key);
+  expect(objectiveKeys).toContain('nickname');
+  expect(objectiveKeys).toContain('ieltsCourse');
+
+  const writingKeys = WRITING_EXPORT_COLUMNS.map((col) => col.key);
+  expect(writingKeys).toContain('nickname');
+  expect(writingKeys).toContain('ieltsCourse');
+});
 
 function createQuestionResult(questionId: string, isCorrect: boolean, awardedScore: number) {
   return {
@@ -543,6 +555,8 @@ describe('gradingReviewUtils', () => {
       'Student Name',
       'Student ID',
       'Student Email',
+      'Nickname',
+      'IELTS Course',
       'Cohort Name',
       'Section',
       'Submitted At',
@@ -664,6 +678,8 @@ describe('gradingReviewUtils', () => {
       'Student Name',
       'Student ID',
       'Student Email',
+      'Nickname',
+      'IELTS Course',
       'Section',
       'Total Score',
       'Q1 Answer',

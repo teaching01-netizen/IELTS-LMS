@@ -139,6 +139,8 @@ export interface StudentSubmission {
   studentId: string;
   studentName: string;
   studentEmail?: string | undefined;
+  nickname?: string | undefined;
+  ieltsCourse?: string | undefined;
   cohortName: string;
   
   // Submission timing

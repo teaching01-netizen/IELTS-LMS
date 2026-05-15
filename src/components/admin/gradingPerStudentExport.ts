@@ -27,6 +27,8 @@ export interface PerStudentZipPdfStudentInput {
   studentName: string;
   studentId: string;
   studentEmail?: string | null | undefined;
+  nickname?: string | null | undefined;
+  ieltsCourse?: string | null | undefined;
   sectionData: Partial<Record<PerStudentZipPdfExportSection, PerStudentZipPdfSectionData>>;
 }
 
@@ -43,6 +45,8 @@ export interface PerStudentZipPdfExportManifestStudent {
   submissionId: string;
   studentId: string;
   studentName: string;
+  nickname?: string | undefined;
+  ieltsCourse?: string | undefined;
   filename: string;
   status: 'ok' | 'failed';
   error?: string | undefined;
@@ -141,6 +145,15 @@ function buildStudentPdfBytes(
   y += 2;
   y = writeWrappedText(doc, `Student: ${student.studentName}`, left, y, maxWidth, 5);
   y = writeWrappedText(doc, `Student ID: ${student.studentId}`, left, y, maxWidth, 5);
+  if (student.nickname) {
+    y = writeWrappedText(doc, `Nickname: ${student.nickname}`, left, y, maxWidth, 5);
+  }
+  if (student.ieltsCourse) {
+    y = writeWrappedText(doc, `IELTS Course: ${student.ieltsCourse}`, left, y, maxWidth, 5);
+  }
+  if (student.studentEmail) {
+    y = writeWrappedText(doc, `Email: ${student.studentEmail}`, left, y, maxWidth, 5);
+  }
   y = writeWrappedText(doc, `Submission ID: ${student.submissionId}`, left, y, maxWidth, 5);
   y += 4;
 
@@ -396,6 +409,8 @@ export async function createPerStudentZipPdfExport(
       studentName: student.studentName,
       studentId: student.studentId,
       studentEmail: student.studentEmail,
+      nickname: student.nickname,
+      ieltsCourse: student.ieltsCourse,
       submissionId: student.submissionId,
       examTitle: input.session?.examTitle,
       cohortName: input.session?.cohortName,
@@ -417,6 +432,8 @@ export async function createPerStudentZipPdfExport(
         submissionId: student.submissionId,
         studentId: student.studentId,
         studentName: student.studentName,
+        nickname: student.nickname ?? undefined,
+        ieltsCourse: student.ieltsCourse ?? undefined,
         filename: pdfFilename,
         status: 'ok',
       });
@@ -425,6 +442,8 @@ export async function createPerStudentZipPdfExport(
         submissionId: student.submissionId,
         studentId: student.studentId,
         studentName: student.studentName,
+        nickname: student.nickname ?? undefined,
+        ieltsCourse: student.ieltsCourse ?? undefined,
         filename: pdfFilename,
         status: 'failed',
         error: error instanceof Error ? error.message : 'Unknown error',

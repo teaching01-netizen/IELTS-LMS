@@ -213,14 +213,15 @@ impl GradingService {
                 .bind(&session.schedule_id)
                 .fetch_one(&self.pool)
                 .await?;
-        let submissions = sqlx::query_as::<_, StudentSubmission>(
-            "SELECT * FROM student_submissions WHERE schedule_id = ? ORDER BY submitted_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(&session.schedule_id)
-        .bind(page_size_i64)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await?;
+        let submissions_sql = student_submission_query(
+            "WHERE s.schedule_id = ? ORDER BY s.submitted_at DESC LIMIT ? OFFSET ?",
+        );
+        let submissions = sqlx::query_as::<_, StudentSubmission>(&submissions_sql)
+            .bind(&session.schedule_id)
+            .bind(page_size_i64)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await?;
         let total = total_submissions.max(0) as u64;
         let has_more = offset.saturating_add(page_size_i64) < total_submissions.max(0);
 
@@ -244,13 +245,12 @@ impl GradingService {
         self.maybe_sync_on_read().await?;
         let submission_id = submission_id.to_string();
 
-        let submission = sqlx::query_as::<_, StudentSubmission>(
-            "SELECT * FROM student_submissions WHERE id = ?",
-        )
-        .bind(&submission_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let submission_sql = student_submission_query("WHERE s.id = ?");
+        let submission = sqlx::query_as::<_, StudentSubmission>(&submission_sql)
+            .bind(&submission_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(GradingError::NotFound)?;
 
         // Get the schedule to get organization_id
         let schedule =
@@ -352,13 +352,12 @@ impl GradingService {
         let submission_id = submission_id_uuid.to_string();
 
         // Get submission to check authorization
-        let submission = sqlx::query_as::<_, StudentSubmission>(
-            "SELECT * FROM student_submissions WHERE id = ?",
-        )
-        .bind(&submission_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let submission_sql = student_submission_query("WHERE s.id = ?");
+        let submission = sqlx::query_as::<_, StudentSubmission>(&submission_sql)
+            .bind(&submission_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(GradingError::NotFound)?;
 
         // Get the schedule to get organization_id
         let schedule =
@@ -384,13 +383,12 @@ impl GradingService {
             return Ok(existing);
         }
 
-        let submission = sqlx::query_as::<_, StudentSubmission>(
-            "SELECT * FROM student_submissions WHERE id = ?",
-        )
-        .bind(&submission_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let submission_sql = student_submission_query("WHERE s.id = ?");
+        let submission = sqlx::query_as::<_, StudentSubmission>(&submission_sql)
+            .bind(&submission_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(GradingError::NotFound)?;
         let actor_id_str = ctx.actor_id.to_string();
         let draft_id = Uuid::new_v4().hyphenated();
         sqlx::query(
@@ -466,13 +464,12 @@ impl GradingService {
         let submission_id_db = submission_id.to_string();
 
         // Get submission to check authorization
-        let submission = sqlx::query_as::<_, StudentSubmission>(
-            "SELECT * FROM student_submissions WHERE id = ?",
-        )
-        .bind(&submission_id_db)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let submission_sql = student_submission_query("WHERE s.id = ?");
+        let submission = sqlx::query_as::<_, StudentSubmission>(&submission_sql)
+            .bind(&submission_id_db)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(GradingError::NotFound)?;
 
         // Get the schedule to get organization_id
         let schedule =
@@ -619,13 +616,12 @@ impl GradingService {
     ) -> Result<StudentResult, GradingError> {
         let submission_id_db = submission_id.to_string();
 
-        let submission = sqlx::query_as::<_, StudentSubmission>(
-            "SELECT * FROM student_submissions WHERE id = ?",
-        )
-        .bind(&submission_id_db)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let submission_sql = student_submission_query("WHERE s.id = ?");
+        let submission = sqlx::query_as::<_, StudentSubmission>(&submission_sql)
+            .bind(&submission_id_db)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(GradingError::NotFound)?;
 
         // Get the schedule to get organization_id
         let schedule =
@@ -779,13 +775,12 @@ impl GradingService {
     ) -> Result<ReviewDraft, GradingError> {
         let submission_id_db = submission_id.to_string();
 
-        let submission = sqlx::query_as::<_, StudentSubmission>(
-            "SELECT * FROM student_submissions WHERE id = ?",
-        )
-        .bind(&submission_id_db)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let submission_sql = student_submission_query("WHERE s.id = ?");
+        let submission = sqlx::query_as::<_, StudentSubmission>(&submission_sql)
+            .bind(&submission_id_db)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(GradingError::NotFound)?;
 
         // Get the schedule to get organization_id
         let schedule =
@@ -1229,12 +1224,11 @@ impl GradingService {
 
         for attempt in attempts {
             let attempt_id = attempt.id.to_string();
-            let submission = sqlx::query_as::<_, StudentSubmission>(
-                "SELECT * FROM student_submissions WHERE attempt_id = ?",
-            )
-            .bind(&attempt_id)
-            .fetch_optional(&self.pool)
-            .await?;
+            let submission_sql = student_submission_query("WHERE s.attempt_id = ?");
+            let submission = sqlx::query_as::<_, StudentSubmission>(&submission_sql)
+                .bind(&attempt_id)
+                .fetch_optional(&self.pool)
+                .await?;
 
             let Some(submission) = submission else {
                 report.submissions_missing = report.submissions_missing.saturating_add(1);
@@ -1636,12 +1630,11 @@ impl GradingService {
                 current.max(attempt.updated_at)
             }));
 
-            let submission = sqlx::query_as::<_, StudentSubmission>(
-                "SELECT * FROM student_submissions WHERE attempt_id = ?",
-            )
-            .bind(&attempt_id)
-            .fetch_one(&self.pool)
-            .await?;
+            let submission_sql = student_submission_query("WHERE s.attempt_id = ?");
+            let submission = sqlx::query_as::<_, StudentSubmission>(&submission_sql)
+                .bind(&attempt_id)
+                .fetch_one(&self.pool)
+                .await?;
 
             let section_sync = self
                 .ensure_section_submissions(
@@ -1866,6 +1859,22 @@ impl GradingService {
 
         Ok(())
     }
+}
+
+fn student_submission_query(suffix: &str) -> String {
+    format!(
+        r#"
+        SELECT
+            s.*,
+            JSON_UNQUOTE(JSON_EXTRACT(r.metadata, '$.nickname')) AS nickname,
+            JSON_UNQUOTE(JSON_EXTRACT(r.metadata, '$.ieltsCourse')) AS ielts_course
+        FROM student_submissions s
+        LEFT JOIN schedule_registrations r
+            ON r.schedule_id = s.schedule_id
+            AND r.student_id = s.student_id
+        {suffix}
+        "#
+    )
 }
 
 #[derive(FromRow)]
@@ -3348,6 +3357,8 @@ mod tests {
             student_id: "student-1".to_owned(),
             student_name: "Student".to_owned(),
             student_email: Some("student@example.com".to_owned()),
+            nickname: None,
+            ielts_course: None,
             cohort_name: "Cohort".to_owned(),
             submitted_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             time_spent_seconds: 120,

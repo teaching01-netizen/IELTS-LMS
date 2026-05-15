@@ -11,6 +11,8 @@ describe('renderPerStudentPdfFilenameTemplate', () => {
       studentName: 'Ada Student',
       studentId: 'student-1',
       studentEmail: 'ada@example.com',
+      nickname: 'Ada',
+      ieltsCourse: 'IELTS Academic',
       submissionId: 'sub-1',
       examTitle: 'IELTS Mock',
       cohortName: 'Cohort A',
@@ -21,6 +23,24 @@ describe('renderPerStudentPdfFilenameTemplate', () => {
 
     expect(result.unknownPlaceholders).toEqual([]);
     expect(result.filename).toBe('Ada Student_sub-1_reading-writing.pdf');
+  });
+
+  test('supports nickname and ieltsCourse placeholders', () => {
+    const result = renderPerStudentPdfFilenameTemplate(
+      '{{studentName}}_{{nickname}}_{{ieltsCourse}}_{{submissionId}}',
+      {
+        studentName: 'Ada Student',
+        studentId: 'student-1',
+        nickname: 'Ada',
+        ieltsCourse: 'IELTS Academic',
+        submissionId: 'sub-1',
+        sections: ['writing'],
+        generatedAt: new Date('2026-05-14T10:11:12.000Z'),
+      },
+    );
+
+    expect(result.unknownPlaceholders).toEqual([]);
+    expect(result.filename).toBe('Ada Student_Ada_IELTS Academic_sub-1.pdf');
   });
 
   test('keeps unknown placeholders and reports them', () => {
@@ -61,4 +81,3 @@ describe('resolvePerStudentPdfFilenameCollisions', () => {
     expect(filenames).toEqual(['Ada.pdf', 'Ada (2).pdf', 'Ada (3).pdf']);
   });
 });
-

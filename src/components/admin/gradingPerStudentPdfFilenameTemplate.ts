@@ -7,6 +7,8 @@ export const PER_STUDENT_PDF_FILENAME_TEMPLATE_FIELDS = [
   { key: 'studentName', label: 'Student name' },
   { key: 'studentId', label: 'Student ID' },
   { key: 'studentEmail', label: 'Student email' },
+  { key: 'nickname', label: 'Nickname' },
+  { key: 'ieltsCourse', label: 'IELTS course' },
   { key: 'submissionId', label: 'Submission ID' },
   { key: 'examTitle', label: 'Exam title' },
   { key: 'cohortName', label: 'Cohort name' },
@@ -23,6 +25,8 @@ export interface PerStudentPdfFilenameTemplateContext {
   studentName: string;
   studentId: string;
   studentEmail?: string | null | undefined;
+  nickname?: string | null | undefined;
+  ieltsCourse?: string | null | undefined;
   submissionId: string;
   examTitle?: string | null | undefined;
   cohortName?: string | null | undefined;
@@ -101,6 +105,8 @@ export function renderPerStudentPdfFilenameTemplate(
       studentName: context.studentName,
       studentId: context.studentId,
       studentEmail: context.studentEmail ?? '',
+      nickname: context.nickname ?? '',
+      ieltsCourse: context.ieltsCourse ?? '',
       submissionId: context.submissionId,
       examTitle: context.examTitle ?? '',
       cohortName: context.cohortName ?? '',
@@ -150,4 +156,3 @@ export function resolvePerStudentPdfFilenameCollisions(
 
   return { filenames, collisionsResolved };
 }
-

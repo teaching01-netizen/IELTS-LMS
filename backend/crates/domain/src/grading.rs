@@ -136,6 +136,10 @@ pub struct StudentSubmission {
     pub student_id: String,
     pub student_name: String,
     pub student_email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ielts_course: Option<String>,
     pub cohort_name: String,
     pub submitted_at: DateTime<Utc>,
     pub time_spent_seconds: i32,

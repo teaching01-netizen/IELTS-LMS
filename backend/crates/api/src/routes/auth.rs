@@ -380,6 +380,31 @@ pub async fn student_entry(
         ));
     }
 
+    let normalized_nickname = req.nickname.trim();
+    if normalized_nickname.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            "Nickname is required.",
+        ));
+    }
+    if normalized_nickname.chars().count() > 50 {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            "Nickname must be 50 characters or less.",
+        ));
+    }
+
+    let normalized_ielts_course = req.ielts_course.trim();
+    if normalized_ielts_course.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "VALIDATION_ERROR",
+            "IELTS Course is required.",
+        ));
+    }
+
     #[derive(Debug, Clone, FromRow)]
     struct RegistrationIdentityRow {
         student_name: String,
@@ -628,6 +653,8 @@ pub async fn student_entry(
             normalized_wcode.clone(),
             req.email.trim().to_owned(),
             normalized_name.to_owned(),
+            Some(normalized_nickname.to_owned()),
+            Some(normalized_ielts_course.to_owned()),
             user_id,
         )
         .await?;

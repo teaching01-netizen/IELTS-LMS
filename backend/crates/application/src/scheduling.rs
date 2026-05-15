@@ -115,6 +115,7 @@ impl SchedulingService {
         wcode: &str,
         email: &str,
         student_name: &str,
+        metadata: Option<Value>,
         user_id: Uuid,
     ) -> Result<ScheduleRegistrationRow, SchedulingError> {
         sqlx::query(
@@ -128,6 +129,7 @@ impl SchedulingService {
                     WHEN access_state = 'invited' THEN 'checked_in'
                     ELSE access_state
                 END,
+                metadata = ?,
                 user_id = ?,
                 actor_id = ?,
                 updated_at = NOW(),
@@ -139,6 +141,7 @@ impl SchedulingService {
         .bind(email)
         .bind(student_name)
         .bind(wcode)
+        .bind(metadata)
         .bind(user_id.to_string())
         .bind(user_id.to_string())
         .bind(schedule_id.to_string())
@@ -983,6 +986,8 @@ impl SchedulingService {
         wcode: String,
         email: String,
         student_name: String,
+        nickname: Option<String>,
+        ielts_course: Option<String>,
         user_id: Uuid,
     ) -> Result<ScheduleRegistration, SchedulingError> {
         let normalized_wcode = ielts_backend_domain::schedule::normalize_access_code(&wcode);
@@ -992,6 +997,7 @@ impl SchedulingService {
         self.get_schedule(ctx, schedule_id).await?;
 
         let user_id_str = user_id.to_string();
+        let metadata = merge_registration_metadata(None, nickname.as_deref(), ielts_course.as_deref());
 
         if let Some(row) = self
             .load_registration_by_wcode(schedule_id, &normalized_wcode)
@@ -1004,6 +1010,11 @@ impl SchedulingService {
                 || row.actor_id.as_deref() == Some(user_id_str.as_str());
 
             if same_user {
+                let metadata = merge_registration_metadata(
+                    row.metadata.clone(),
+                    nickname.as_deref(),
+                    ielts_course.as_deref(),
+                );
                 let existing_name = row.student_name.trim();
                 let requested_name = student_name.trim();
                 if !existing_name.is_empty() && existing_name != requested_name {
@@ -1031,6 +1042,7 @@ impl SchedulingService {
                         &normalized_wcode,
                         &email,
                         &student_name,
+                        metadata,
                         user_id,
                     )
                     .await?;
@@ -1049,10 +1061,10 @@ impl SchedulingService {
         let inserted = sqlx::query(
             r#"
             INSERT INTO schedule_registrations (
-                id, schedule_id, user_id, actor_id, wcode, student_key, student_id, student_name, student_email,
+                id, schedule_id, user_id, actor_id, wcode, student_key, student_id, student_name, student_email, metadata,
                 access_state, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', NOW(), NOW())
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', NOW(), NOW())
             "#
         )
         .bind(registration_id.to_string())
@@ -1064,6 +1076,7 @@ impl SchedulingService {
         .bind(&normalized_wcode)
         .bind(&student_name)
         .bind(&email)
+        .bind(metadata)
         .execute(&self.pool)
         .await;
 
@@ -1091,6 +1104,11 @@ impl SchedulingService {
                     || row.actor_id.as_deref() == Some(user_id_str.as_str());
 
                 if same_user {
+                    let metadata = merge_registration_metadata(
+                        row.metadata.clone(),
+                        nickname.as_deref(),
+                        ielts_course.as_deref(),
+                    );
                     let existing_name = row.student_name.trim();
                     let requested_name = student_name.trim();
                     if !existing_name.is_empty() && existing_name != requested_name {
@@ -1118,6 +1136,7 @@ impl SchedulingService {
                             &normalized_wcode,
                             &email,
                             &student_name,
+                            metadata,
                             user_id,
                         )
                         .await?;
@@ -1132,6 +1151,37 @@ impl SchedulingService {
             Err(err) => Err(SchedulingError::Database(err)),
         }
     }
+}
+
+fn merge_registration_metadata(
+    existing: Option<Value>,
+    nickname: Option<&str>,
+    ielts_course: Option<&str>,
+) -> Option<Value> {
+    if nickname.is_none() && ielts_course.is_none() {
+        return existing;
+    }
+
+    let mut object = match existing {
+        Some(Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    };
+
+    if let Some(value) = nickname {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            object.insert("nickname".to_owned(), Value::String(trimmed.to_owned()));
+        }
+    }
+
+    if let Some(value) = ielts_course {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            object.insert("ieltsCourse".to_owned(), Value::String(trimmed.to_owned()));
+        }
+    }
+
+    Some(Value::Object(object))
 }
 
 fn is_mysql_duplicate_key(err: &sqlx::Error) -> bool {

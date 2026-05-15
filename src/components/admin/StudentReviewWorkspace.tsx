@@ -1006,6 +1006,13 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               <div>
                 <h1 className="text-lg font-bold text-gray-900">{submission.studentName}</h1>
                 <p className="text-sm text-gray-500">{submission.cohortName} • {submission.examId}</p>
+                {(submission.nickname || submission.ieltsCourse) && (
+                  <p className="text-xs text-gray-500">
+                    {[submission.nickname ? `Nickname: ${submission.nickname}` : null, submission.ieltsCourse ? `Course: ${submission.ieltsCourse}` : null]
+                      .filter(Boolean)
+                      .join(' • ')}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1045,6 +1052,30 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           <div className="p-4 border-b border-gray-200">
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Student Overview</h2>
             <div className="space-y-2 text-sm">
+              {submission.studentEmail && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-gray-600">Email</span>
+                  <span className="text-gray-900 truncate" title={submission.studentEmail}>
+                    {submission.studentEmail}
+                  </span>
+                </div>
+              )}
+              {submission.nickname && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-gray-600">Nickname</span>
+                  <span className="text-gray-900 truncate" title={submission.nickname}>
+                    {submission.nickname}
+                  </span>
+                </div>
+              )}
+              {submission.ieltsCourse && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-gray-600">IELTS Course</span>
+                  <span className="text-gray-900 truncate" title={submission.ieltsCourse}>
+                    {submission.ieltsCourse}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-gray-600">Status</span>
                 {getReleaseStatusBadge(reviewDraft?.releaseStatus || 'draft')}

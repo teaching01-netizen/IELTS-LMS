@@ -205,6 +205,8 @@ pub async fn create_student_registration(
             req.wcode,
             req.email,
             req.student_name,
+            None,
+            None,
             user_id,
         )
         .await?;

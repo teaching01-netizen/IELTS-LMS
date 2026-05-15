@@ -9,6 +9,8 @@ interface EntryFormData {
   wcode: string;
   email: string;
   studentName: string;
+  nickname: string;
+  ieltsCourse: string;
 }
 
 const LAST_WCODE_STORAGE_PREFIX = 'ielts-student-last-wcode:';
@@ -49,7 +51,7 @@ function storeLastWcode(scheduleId: string, wcode: string): void {
 function storeCandidateProfile(
   scheduleId: string,
   wcode: string,
-  profile: { studentName: string; email: string },
+  profile: { studentName: string; email: string; nickname: string; ieltsCourse: string },
 ): void {
   if (typeof window === 'undefined') {
     return;
@@ -64,7 +66,7 @@ function storeCandidateProfile(
 function loadCandidateProfile(
   scheduleId: string,
   wcode: string,
-): { studentName: string; email: string } | null {
+): { studentName: string; email: string; nickname: string; ieltsCourse: string } | null {
   if (typeof window === 'undefined') {
     return null;
   }
@@ -75,15 +77,22 @@ function loadCandidateProfile(
   }
 
   try {
-    const parsed = JSON.parse(raw) as { studentName?: unknown; email?: unknown };
+    const parsed = JSON.parse(raw) as {
+      studentName?: unknown;
+      email?: unknown;
+      nickname?: unknown;
+      ieltsCourse?: unknown;
+    };
     const studentName = typeof parsed.studentName === 'string' ? parsed.studentName.trim() : '';
     const email = typeof parsed.email === 'string' ? parsed.email.trim() : '';
+    const nickname = typeof parsed.nickname === 'string' ? parsed.nickname.trim() : '';
+    const ieltsCourse = typeof parsed.ieltsCourse === 'string' ? parsed.ieltsCourse.trim() : '';
 
-    if (!studentName || !email) {
+    if (!studentName || !email || !nickname || !ieltsCourse) {
       return null;
     }
 
-    return { studentName, email };
+    return { studentName, email, nickname, ieltsCourse };
   } catch {
     return null;
   }
@@ -118,6 +127,14 @@ export function StudentEntryRoute() {
     studentName:
       scheduleId && initialWcode
         ? loadCandidateProfile(scheduleId, initialWcode)?.studentName ?? ''
+        : '',
+    nickname:
+      scheduleId && initialWcode
+        ? loadCandidateProfile(scheduleId, initialWcode)?.nickname ?? ''
+        : '',
+    ieltsCourse:
+      scheduleId && initialWcode
+        ? loadCandidateProfile(scheduleId, initialWcode)?.ieltsCourse ?? ''
         : '',
   });
   const [errors, setErrors] = useState<Partial<Record<keyof EntryFormData, string>>>({});
@@ -177,6 +194,8 @@ export function StudentEntryRoute() {
     const normalizedWcode = normalizeAccessCode(formData.wcode);
     const normalizedEmail = formData.email.trim();
     const normalizedName = formData.studentName.trim();
+    const normalizedNickname = formData.nickname.trim();
+    const normalizedIeltsCourse = formData.ieltsCourse.trim();
 
     const newErrors: Partial<Record<keyof EntryFormData, string>> = {};
 
@@ -190,6 +209,16 @@ export function StudentEntryRoute() {
 
     if (!normalizedName) {
       newErrors.studentName = 'Name is required';
+    }
+
+    if (!normalizedNickname) {
+      newErrors.nickname = 'Nickname is required';
+    } else if (normalizedNickname.length > 50) {
+      newErrors.nickname = 'Nickname must be 50 characters or less';
+    }
+
+    if (!normalizedIeltsCourse) {
+      newErrors.ieltsCourse = 'IELTS Course is required';
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -212,6 +241,8 @@ export function StudentEntryRoute() {
         wcode: normalizedWcode,
         email: normalizedEmail,
         studentName: normalizedName,
+        nickname: normalizedNickname,
+        ieltsCourse: normalizedIeltsCourse,
       });
 
       if ('state' in result && result.state === 'queued') {
@@ -220,6 +251,8 @@ export function StudentEntryRoute() {
           wcode: normalizedWcode,
           email: normalizedEmail,
           studentName: normalizedName,
+          nickname: normalizedNickname,
+          ieltsCourse: normalizedIeltsCourse,
         });
         return;
       }
@@ -228,6 +261,8 @@ export function StudentEntryRoute() {
       storeCandidateProfile(scheduleId, normalizedWcode, {
         studentName: normalizedName,
         email: normalizedEmail,
+        nickname: normalizedNickname,
+        ieltsCourse: normalizedIeltsCourse,
       });
       navigate(buildStudentRoute(scheduleId, normalizedWcode));
     } catch (error) {
@@ -253,6 +288,8 @@ export function StudentEntryRoute() {
           wcode: queuedPayload.wcode,
           email: queuedPayload.email,
           studentName: queuedPayload.studentName,
+          nickname: queuedPayload.nickname,
+          ieltsCourse: queuedPayload.ieltsCourse,
         });
         if (cancelled) {
           return;
@@ -266,6 +303,8 @@ export function StudentEntryRoute() {
         storeCandidateProfile(scheduleId, queuedPayload.wcode, {
           studentName: queuedPayload.studentName,
           email: queuedPayload.email,
+          nickname: queuedPayload.nickname,
+          ieltsCourse: queuedPayload.ieltsCourse,
         });
         navigate(buildStudentRoute(scheduleId, queuedPayload.wcode));
       } catch (error) {
@@ -357,6 +396,45 @@ export function StudentEntryRoute() {
             />
             {errors.studentName && (
               <p className="mt-1 text-sm text-red-600">{errors.studentName}</p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="nickname" className="block text-sm font-medium text-gray-700 mb-2">
+              Nickname
+            </label>
+            <input
+              id="nickname"
+              type="text"
+              value={formData.nickname}
+              onChange={(e) => handleInputChange('nickname', e.target.value)}
+              placeholder="Nickname"
+              disabled={isLoading || Boolean(queuedAdmission)}
+              maxLength={50}
+              className={`w-full px-3 py-2 border rounded-md ${
+                errors.nickname ? 'border-red-300' : 'border-gray-300'
+              } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+            />
+            {errors.nickname && <p className="mt-1 text-sm text-red-600">{errors.nickname}</p>}
+          </div>
+
+          <div>
+            <label htmlFor="ieltsCourse" className="block text-sm font-medium text-gray-700 mb-2">
+              IELTS Course
+            </label>
+            <input
+              id="ieltsCourse"
+              type="text"
+              value={formData.ieltsCourse}
+              onChange={(e) => handleInputChange('ieltsCourse', e.target.value)}
+              placeholder="IELTS Course"
+              disabled={isLoading || Boolean(queuedAdmission)}
+              className={`w-full px-3 py-2 border rounded-md ${
+                errors.ieltsCourse ? 'border-red-300' : 'border-gray-300'
+              } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+            />
+            {errors.ieltsCourse && (
+              <p className="mt-1 text-sm text-red-600">{errors.ieltsCourse}</p>
             )}
           </div>
 

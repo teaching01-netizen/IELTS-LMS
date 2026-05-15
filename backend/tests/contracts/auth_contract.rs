@@ -71,6 +71,8 @@ async fn student_entry_locks_identity_on_student_name() {
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
+                        nickname: "Alice".to_owned(),
+                        ielts_course: "IELTS Course A".to_owned(),
                     })
                     .unwrap(),
                 ))
@@ -93,6 +95,8 @@ async fn student_entry_locks_identity_on_student_name() {
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Mallory Candidate".to_owned(),
+                        nickname: "Alice".to_owned(),
+                        ielts_course: "IELTS Course A".to_owned(),
                     })
                     .unwrap(),
                 ))
@@ -132,6 +136,8 @@ async fn student_entry_locks_identity_on_email_once_claimed() {
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
+                        nickname: "Alice".to_owned(),
+                        ielts_course: "IELTS Course A".to_owned(),
                     })
                     .unwrap(),
                 ))
@@ -154,6 +160,8 @@ async fn student_entry_locks_identity_on_email_once_claimed() {
                         wcode: "W123456".to_owned(),
                         email: "mallory@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
+                        nickname: "Alice".to_owned(),
+                        ielts_course: "IELTS Course A".to_owned(),
                     })
                     .unwrap(),
                 ))
@@ -165,6 +173,155 @@ async fn student_entry_locks_identity_on_email_once_claimed() {
     assert_eq!(second.status(), StatusCode::CONFLICT);
     let json = json_body(second).await;
     assert_eq!(json["error"]["code"], "CONFLICT");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn student_entry_requires_nickname() {
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let schedule = seed_schedule_with_slug(database.pool(), "auth-student-entry-requires-nickname")
+        .await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/student/entry")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.15")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentEntryRequest {
+                        schedule_id: schedule.id.clone(),
+                        wcode: "W123456".to_owned(),
+                        email: "alice@example.com".to_owned(),
+                        student_name: "Alice Candidate".to_owned(),
+                        nickname: "   ".to_owned(),
+                        ielts_course: "IELTS Course A".to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let json = json_body(response).await;
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn student_entry_requires_ielts_course() {
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let schedule =
+        seed_schedule_with_slug(database.pool(), "auth-student-entry-requires-ielts-course").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/student/entry")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.16")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentEntryRequest {
+                        schedule_id: schedule.id.clone(),
+                        wcode: "W123456".to_owned(),
+                        email: "alice@example.com".to_owned(),
+                        student_name: "Alice Candidate".to_owned(),
+                        nickname: "Alice".to_owned(),
+                        ielts_course: "   ".to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let json = json_body(response).await;
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn student_entry_persists_nickname_and_ielts_course_metadata() {
+    let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
+    let schedule =
+        seed_schedule_with_slug(database.pool(), "auth-student-entry-persists-metadata").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/student/entry")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", "203.0.113.17")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentEntryRequest {
+                        schedule_id: schedule.id.clone(),
+                        wcode: "W123456".to_owned(),
+                        email: "alice@example.com".to_owned(),
+                        student_name: "Alice Candidate".to_owned(),
+                        nickname: "Ace".to_owned(),
+                        ielts_course: "IELTS Course - Intermediate".to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let nickname: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.nickname'))
+        FROM schedule_registrations
+        WHERE schedule_id = ? AND wcode = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(&schedule.id)
+    .bind("W123456")
+    .fetch_optional(database.pool())
+    .await
+    .unwrap()
+    .flatten();
+    assert_eq!(nickname.as_deref(), Some("Ace"));
+
+    let course: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.ieltsCourse'))
+        FROM schedule_registrations
+        WHERE schedule_id = ? AND wcode = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(&schedule.id)
+    .bind("W123456")
+    .fetch_optional(database.pool())
+    .await
+    .unwrap()
+    .flatten();
+    assert_eq!(course.as_deref(), Some("IELTS Course - Intermediate"));
 
     database.shutdown().await;
 }
@@ -189,6 +346,8 @@ async fn student_entry_is_rate_limited_per_ip() {
         wcode: "W123456".to_owned(),
         email: "alice@example.com".to_owned(),
         student_name: "Alice Candidate".to_owned(),
+        nickname: "Alice".to_owned(),
+        ielts_course: "IELTS Course A".to_owned(),
     };
 
     let first = app
@@ -252,6 +411,8 @@ async fn student_entry_returns_queued_admission_when_storm_mode_enabled() {
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
+                        nickname: "Alice".to_owned(),
+                        ielts_course: "IELTS Course A".to_owned(),
                     })
                     .unwrap(),
                 ))
@@ -291,6 +452,8 @@ async fn student_entry_queue_retries_are_not_rate_limited_in_storm_mode() {
         wcode: "W123456".to_owned(),
         email: "alice@example.com".to_owned(),
         student_name: "Alice Candidate".to_owned(),
+        nickname: "Alice".to_owned(),
+        ielts_course: "IELTS Course A".to_owned(),
     };
 
     let first = app
@@ -352,6 +515,8 @@ async fn student_entry_transitions_from_queued_to_authenticated_after_runtime_st
         wcode: "W123456".to_owned(),
         email: "alice@example.com".to_owned(),
         student_name: "Alice Candidate".to_owned(),
+        nickname: "Alice".to_owned(),
+        ielts_course: "IELTS Course A".to_owned(),
     };
 
     let queued = app

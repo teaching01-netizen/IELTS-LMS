@@ -269,6 +269,8 @@ pub struct StudentEntryRequest {
     pub wcode: String,
     pub email: String,
     pub student_name: String,
+    pub nickname: String,
+    pub ielts_course: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
