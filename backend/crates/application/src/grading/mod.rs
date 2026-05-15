@@ -6,12 +6,13 @@ pub mod session_queries;
 use chrono::{DateTime, Utc};
 use ielts_backend_domain::{
     grading::{
-        ActorActionRequest, GradingSession, GradingSessionDetail, GradingSessionPagination,
-        GradingSessionStatus, OverallGradingStatus, ReleaseEvent, ReleaseNowRequest, ReleaseStatus,
-        ResultsAnalytics, ReviewAction, ReviewDraft, ReviewDraftSummary, SaveReviewDraftRequest,
-        ScheduleReleaseRequest, SectionGradingStatus, SectionSubmission, StartReviewRequest,
-        StudentResult, StudentSubmission, SubmissionReviewBundle, SubmissionReviewSummary,
-        WritingTaskSubmission,
+        ActorActionRequest, GradingScheduleObjectiveOverride, GradingSession, GradingSessionDetail,
+        GradingSessionPagination, GradingSessionStatus, ObjectiveOverrideDeleteRequest,
+        ObjectiveOverrideUpsertRequest, OverallGradingStatus, ReleaseEvent, ReleaseNowRequest,
+        ReleaseStatus, ResultsAnalytics, ReviewAction, ReviewDraft, ReviewDraftSummary,
+        SaveReviewDraftRequest, ScheduleReleaseRequest, SectionGradingStatus, SectionSubmission,
+        StartReviewRequest, StudentResult, StudentSubmission, SubmissionReviewBundle,
+        SubmissionReviewSummary, WritingTaskSubmission,
     },
     schedule::{ExamSchedule, ScheduleStatus},
 };
@@ -53,7 +54,8 @@ pub struct GradingProjectionReport {
     pub next_watermark: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ObjectiveAutoGradingBackfillRequest {
     pub apply: bool,
     pub schedule_id: Option<String>,
@@ -64,7 +66,8 @@ pub struct ObjectiveAutoGradingBackfillRequest {
     pub limit: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ObjectiveAutoGradingBackfillReport {
     pub attempts_scanned: u64,
     pub submissions_matched: u64,
@@ -78,6 +81,19 @@ pub struct ObjectiveAutoGradingBackfillReport {
 pub struct GradingService {
     pool: MySqlPool,
     sync_on_read_fallback: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ObjectiveOverridePayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    correct_answer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_answers: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    correct_option_ids: Option<Vec<String>>,
+    scoring_rule: String,
+    max_score: i64,
 }
 
 impl GradingService {
@@ -1221,6 +1237,8 @@ impl GradingService {
             builder.build_query_as().fetch_all(&self.pool).await?;
         let mut report = ObjectiveAutoGradingBackfillReport::default();
         report.attempts_scanned = attempts.len() as u64;
+        let mut override_cache: HashMap<String, HashMap<String, ObjectiveOverridePayload>> =
+            HashMap::new();
 
         for attempt in attempts {
             let attempt_id = attempt.id.to_string();
@@ -1243,6 +1261,17 @@ impl GradingService {
 
             report.submissions_matched = report.submissions_matched.saturating_add(1);
 
+            let schedule_id_db = attempt.schedule_id.to_string();
+            if !override_cache.contains_key(&schedule_id_db) {
+                let overrides = self
+                    .load_schedule_objective_override_lookup(&schedule_id_db)
+                    .await?;
+                override_cache.insert(schedule_id_db.clone(), overrides);
+            }
+            let overrides = override_cache
+                .get(&schedule_id_db)
+                .map(|map| map as &HashMap<String, ObjectiveOverridePayload>);
+
             let answers = attempt
                 .final_submission
                 .get("answers")
@@ -1257,12 +1286,14 @@ impl GradingService {
                 &listening_answers,
                 &attempt.content_snapshot,
                 submission.submitted_at,
+                overrides,
             );
             let reading_auto_results = compute_objective_auto_grading_results(
                 "reading",
                 &reading_answers,
                 &attempt.content_snapshot,
                 submission.submitted_at,
+                overrides,
             );
 
             let existing_sections = sqlx::query_as::<_, SectionSubmission>(
@@ -1315,6 +1346,345 @@ impl GradingService {
         }
 
         Ok(report)
+    }
+
+    pub async fn list_schedule_objective_overrides(
+        &self,
+        ctx: &ActorContext,
+        schedule_id: Uuid,
+    ) -> Result<Vec<GradingScheduleObjectiveOverride>, GradingError> {
+        let schedule_id_db = schedule_id.to_string();
+        if ctx.schedule_scope_id.as_deref() != Some(&schedule_id_db)
+            && !matches!(ctx.role, ActorRole::Admin | ActorRole::AdminObserver)
+        {
+            return Err(GradingError::Validation(
+                "Missing schedule scope for override access.".to_owned(),
+            ));
+        }
+
+        let rows = sqlx::query_as::<_, GradingScheduleObjectiveOverride>(
+            r#"
+            SELECT
+                schedule_id,
+                question_id,
+                override_json,
+                updated_by_actor_id,
+                updated_by_actor_name,
+                updated_at
+            FROM grading_schedule_question_overrides
+            WHERE schedule_id = ?
+            ORDER BY updated_at DESC, question_id ASC
+            "#,
+        )
+        .bind(&schedule_id_db)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn upsert_schedule_objective_override(
+        &self,
+        ctx: &ActorContext,
+        actor_name: &str,
+        schedule_id: Uuid,
+        question_id: String,
+        req: ObjectiveOverrideUpsertRequest,
+    ) -> Result<(GradingScheduleObjectiveOverride, ObjectiveAutoGradingBackfillReport), GradingError>
+    {
+        let schedule_id_db = schedule_id.to_string();
+        if req.reason.trim().is_empty() {
+            return Err(GradingError::Validation(
+                "Override reason is required.".to_owned(),
+            ));
+        }
+        if req.scoring_rule.trim().is_empty() {
+            return Err(GradingError::Validation(
+                "Override scoringRule is required.".to_owned(),
+            ));
+        }
+        if req.max_score < 0 {
+            return Err(GradingError::Validation(
+                "Override maxScore must be >= 0.".to_owned(),
+            ));
+        }
+        if ctx.schedule_scope_id.as_deref() != Some(&schedule_id_db)
+            && !matches!(ctx.role, ActorRole::Admin | ActorRole::AdminObserver)
+        {
+            return Err(GradingError::Validation(
+                "Missing schedule scope for override access.".to_owned(),
+            ));
+        }
+
+        let before = sqlx::query_scalar::<_, Value>(
+            r#"
+            SELECT override_json
+            FROM grading_schedule_question_overrides
+            WHERE schedule_id = ? AND question_id = ?
+            "#,
+        )
+        .bind(&schedule_id_db)
+        .bind(&question_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let payload = ObjectiveOverridePayload {
+            correct_answer: req.correct_answer.clone(),
+            accepted_answers: req.accepted_answers.clone(),
+            correct_option_ids: req.correct_option_ids.clone(),
+            scoring_rule: req.scoring_rule.clone(),
+            max_score: req.max_score,
+        };
+        let override_json = serde_json::to_value(&payload).map_err(|err| {
+            GradingError::Validation(format!("Invalid override payload: {err}"))
+        })?;
+
+        if payload.correct_answer.is_none()
+            && payload.accepted_answers.as_ref().is_none_or(|v| v.is_empty())
+            && payload.correct_option_ids.as_ref().is_none_or(|v| v.is_empty())
+        {
+            return Err(GradingError::Validation(
+                "Override must include correctAnswer, acceptedAnswers, or correctOptionIds."
+                    .to_owned(),
+            ));
+        }
+
+        let actor_id = ctx.actor_id.clone();
+        sqlx::query(
+            r#"
+            INSERT INTO grading_schedule_question_overrides (
+                schedule_id,
+                question_id,
+                override_json,
+                updated_by_actor_id,
+                updated_by_actor_name,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, NOW())
+            ON DUPLICATE KEY UPDATE
+                override_json = VALUES(override_json),
+                updated_by_actor_id = VALUES(updated_by_actor_id),
+                updated_by_actor_name = VALUES(updated_by_actor_name),
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&schedule_id_db)
+        .bind(&question_id)
+        .bind(&override_json)
+        .bind(&actor_id)
+        .bind(actor_name)
+        .execute(&self.pool)
+        .await?;
+
+        self.append_schedule_override_event(
+            &schedule_id_db,
+            &actor_id,
+            actor_name,
+            "objective_override_upserted",
+            json!({
+                "questionId": question_id,
+                "reason": req.reason,
+                "before": before,
+                "after": override_json,
+            }),
+        )
+        .await?;
+
+        self.append_schedule_override_event(
+            &schedule_id_db,
+            &actor_id,
+            actor_name,
+            "objective_regrade_triggered",
+            json!({ "reason": "schedule objective override changed" }),
+        )
+        .await?;
+
+        let report = self
+            .backfill_objective_auto_grading(ObjectiveAutoGradingBackfillRequest {
+                apply: true,
+                schedule_id: Some(schedule_id_db.clone()),
+                ..Default::default()
+            })
+            .await?;
+
+        self.append_schedule_override_event(
+            &schedule_id_db,
+            &actor_id,
+            actor_name,
+            "objective_regrade_completed",
+            json!({ "report": report }),
+        )
+        .await?;
+
+        let row = sqlx::query_as::<_, GradingScheduleObjectiveOverride>(
+            r#"
+            SELECT
+                schedule_id,
+                question_id,
+                override_json,
+                updated_by_actor_id,
+                updated_by_actor_name,
+                updated_at
+            FROM grading_schedule_question_overrides
+            WHERE schedule_id = ? AND question_id = ?
+            "#,
+        )
+        .bind(&schedule_id_db)
+        .bind(&question_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok((row, report))
+    }
+
+    pub async fn delete_schedule_objective_override(
+        &self,
+        ctx: &ActorContext,
+        actor_name: &str,
+        schedule_id: Uuid,
+        question_id: String,
+        req: ObjectiveOverrideDeleteRequest,
+    ) -> Result<(ObjectiveAutoGradingBackfillReport, bool), GradingError> {
+        let schedule_id_db = schedule_id.to_string();
+        if req.reason.trim().is_empty() {
+            return Err(GradingError::Validation(
+                "Override reason is required.".to_owned(),
+            ));
+        }
+        if ctx.schedule_scope_id.as_deref() != Some(&schedule_id_db)
+            && !matches!(ctx.role, ActorRole::Admin | ActorRole::AdminObserver)
+        {
+            return Err(GradingError::Validation(
+                "Missing schedule scope for override access.".to_owned(),
+            ));
+        }
+
+        let before = sqlx::query_scalar::<_, Value>(
+            r#"
+            SELECT override_json
+            FROM grading_schedule_question_overrides
+            WHERE schedule_id = ? AND question_id = ?
+            "#,
+        )
+        .bind(&schedule_id_db)
+        .bind(&question_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let result = sqlx::query(
+            r#"
+            DELETE FROM grading_schedule_question_overrides
+            WHERE schedule_id = ? AND question_id = ?
+            "#,
+        )
+        .bind(&schedule_id_db)
+        .bind(&question_id)
+        .execute(&self.pool)
+        .await?;
+        let deleted = result.rows_affected() > 0;
+
+        let actor_id = ctx.actor_id.clone();
+        self.append_schedule_override_event(
+            &schedule_id_db,
+            &actor_id,
+            actor_name,
+            "objective_override_deleted",
+            json!({
+                "questionId": question_id,
+                "reason": req.reason,
+                "before": before,
+                "deleted": deleted
+            }),
+        )
+        .await?;
+
+        self.append_schedule_override_event(
+            &schedule_id_db,
+            &actor_id,
+            actor_name,
+            "objective_regrade_triggered",
+            json!({ "reason": "schedule objective override changed" }),
+        )
+        .await?;
+
+        let report = self
+            .backfill_objective_auto_grading(ObjectiveAutoGradingBackfillRequest {
+                apply: true,
+                schedule_id: Some(schedule_id_db.clone()),
+                ..Default::default()
+            })
+            .await?;
+
+        self.append_schedule_override_event(
+            &schedule_id_db,
+            &actor_id,
+            actor_name,
+            "objective_regrade_completed",
+            json!({ "report": report }),
+        )
+        .await?;
+
+        Ok((report, deleted))
+    }
+
+    async fn load_schedule_objective_override_lookup(
+        &self,
+        schedule_id: &str,
+    ) -> Result<HashMap<String, ObjectiveOverridePayload>, GradingError> {
+        let rows = sqlx::query_as::<_, (String, Value)>(
+            r#"
+            SELECT question_id, override_json
+            FROM grading_schedule_question_overrides
+            WHERE schedule_id = ?
+            "#,
+        )
+        .bind(schedule_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut lookup = HashMap::<String, ObjectiveOverridePayload>::new();
+        for (question_id, override_json) in rows {
+            let parsed: ObjectiveOverridePayload = match serde_json::from_value(override_json) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            lookup.insert(question_id, parsed);
+        }
+        Ok(lookup)
+    }
+
+    async fn append_schedule_override_event(
+        &self,
+        schedule_id: &str,
+        actor_id: &str,
+        actor_name: &str,
+        action: &str,
+        payload_json: Value,
+    ) -> Result<(), GradingError> {
+        let event_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            r#"
+            INSERT INTO grading_schedule_override_events (
+                id,
+                schedule_id,
+                actor_id,
+                actor_name,
+                action,
+                payload_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, NOW())
+            "#,
+        )
+        .bind(&event_id)
+        .bind(schedule_id)
+        .bind(actor_id)
+        .bind(actor_name)
+        .bind(action)
+        .bind(payload_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn ensure_materialized_state(&self) -> Result<(), GradingError> {
@@ -1710,6 +2080,9 @@ impl GradingService {
             .cloned()
             .unwrap_or_else(|| json!({}));
         let submitted_at = submission.submitted_at;
+        let overrides = self
+            .load_schedule_objective_override_lookup(&submission.schedule_id)
+            .await?;
         let section_specs = build_section_sync_specs(
             mode,
             &answers,
@@ -1717,6 +2090,7 @@ impl GradingService {
             content_snapshot,
             config_snapshot,
             submitted_at,
+            Some(&overrides),
         );
         let mut section_rows_synced: u64 = 0;
         let mut writing_task_rows_synced: u64 = 0;
@@ -1964,6 +2338,7 @@ fn build_section_sync_specs(
     content_snapshot: &Value,
     config_snapshot: &Value,
     submitted_at: DateTime<Utc>,
+    overrides: Option<&HashMap<String, ObjectiveOverridePayload>>,
 ) -> Vec<SectionSyncSpec> {
     let answer_sections = build_objective_answer_sections(content_snapshot);
     let listening_answers = filter_answers_for_section(answers, &answer_sections, "listening");
@@ -1973,12 +2348,14 @@ fn build_section_sync_specs(
         &listening_answers,
         content_snapshot,
         submitted_at,
+        overrides,
     );
     let reading_auto_results = compute_objective_auto_grading_results(
         "reading",
         &reading_answers,
         content_snapshot,
         submitted_at,
+        overrides,
     );
 
     let mut specs = vec![
@@ -2520,6 +2897,8 @@ struct ObjectiveAnswerSpec {
     expected: ObjectiveExpectedAnswer,
     scoring_rule: String,
     correct_answer: Value,
+    max_score: i64,
+    has_override: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -2529,14 +2908,34 @@ enum ObjectiveExpectedAnswer {
 }
 
 impl ObjectiveExpectedAnswer {
-    fn matches(&self, value: &Value) -> bool {
+    fn matches(&self, value: &Value, scoring_rule: &str) -> bool {
         match self {
-            Self::TextAnyOf(expected) => canonical_text_values(value)
-                .first()
-                .is_some_and(|answer| expected.contains(answer)),
-            Self::ExactSet(expected) => canonical_text_set(value) == *expected,
+            Self::TextAnyOf(expected) => {
+                let values = strict_text_values(value);
+                let Some(answer) = values.first() else {
+                    return false;
+                };
+                if !strict_word_count_matches(answer, scoring_rule) {
+                    return false;
+                }
+                expected.contains(answer)
+            }
+            Self::ExactSet(expected) => strict_text_set(value) == *expected,
         }
     }
+}
+
+fn strict_word_count_matches(answer: &str, scoring_rule: &str) -> bool {
+    let expected_words = match scoring_rule {
+        "ONE_WORD" => Some(1usize),
+        "TWO_WORDS" => Some(2usize),
+        "THREE_WORDS" => Some(3usize),
+        _ => None,
+    };
+    let Some(expected_words) = expected_words else {
+        return true;
+    };
+    answer.split_whitespace().count() == expected_words
 }
 
 fn compute_objective_auto_grading_results(
@@ -2544,23 +2943,27 @@ fn compute_objective_auto_grading_results(
     section_answers: &Value,
     content_snapshot: &Value,
     submitted_at: DateTime<Utc>,
+    overrides: Option<&HashMap<String, ObjectiveOverridePayload>>,
 ) -> Value {
     let answer_map =
         build_effective_objective_answer_map(section_key, section_answers, content_snapshot);
-    let specs = build_objective_scoring_specs(content_snapshot, section_key);
+    let specs = build_objective_scoring_specs(content_snapshot, section_key, overrides);
     let mut total_score = 0i64;
     let mut max_score = 0i64;
     let mut question_results = Vec::with_capacity(specs.len());
 
     for spec in specs {
-        max_score += 1;
+        let question_max = spec.max_score.max(0);
+        max_score += question_max;
         let student_answer = answer_map
             .get(&spec.question_id)
             .cloned()
             .unwrap_or(Value::Null);
-        let is_correct = spec.expected.matches(&student_answer);
+        let is_correct = spec
+            .expected
+            .matches(&student_answer, &spec.scoring_rule);
         if is_correct {
-            total_score += 1;
+            total_score += question_max;
         }
 
         question_results.push(json!({
@@ -2568,10 +2971,10 @@ fn compute_objective_auto_grading_results(
             "studentAnswer": value_to_display_text(&student_answer),
             "correctAnswer": value_to_display_text(&spec.correct_answer),
             "isCorrect": is_correct,
-            "awardedScore": i64::from(is_correct),
-            "maxScore": 1,
+            "awardedScore": if is_correct { question_max } else { 0 },
+            "maxScore": question_max,
             "scoringRule": spec.scoring_rule,
-            "hasOverride": false
+            "hasOverride": spec.has_override
         }));
     }
 
@@ -2796,6 +3199,7 @@ fn copy_array_slot_alias(
 fn build_objective_scoring_specs(
     content_snapshot: &Value,
     section_key: &str,
+    overrides: Option<&HashMap<String, ObjectiveOverridePayload>>,
 ) -> Vec<ObjectiveAnswerSpec> {
     let mut specs = Vec::<ObjectiveAnswerSpec>::new();
     let mut seen = HashSet::<String>::new();
@@ -2834,7 +3238,104 @@ fn build_objective_scoring_specs(
         _ => {}
     }
 
+    if let Some(overrides) = overrides {
+        apply_objective_scoring_overrides(&mut specs, overrides);
+    }
+
     specs
+}
+
+fn apply_objective_scoring_overrides(
+    specs: &mut [ObjectiveAnswerSpec],
+    overrides: &HashMap<String, ObjectiveOverridePayload>,
+) {
+    let index = specs
+        .iter()
+        .enumerate()
+        .map(|(idx, spec)| (spec.question_id.clone(), idx))
+        .collect::<HashMap<_, _>>();
+
+    for (question_id, override_payload) in overrides {
+        let Some(idx) = index.get(question_id).copied() else {
+            continue;
+        };
+        let spec = &mut specs[idx];
+        spec.scoring_rule = override_payload.scoring_rule.clone();
+        spec.max_score = override_payload.max_score;
+        spec.has_override = true;
+
+        if let Some(option_ids) = override_payload
+            .correct_option_ids
+            .as_ref()
+            .map(|values| values.iter().filter(|v| !v.is_empty()).cloned().collect::<Vec<_>>())
+            .filter(|values| !values.is_empty())
+        {
+            if option_ids.len() > 1 {
+                spec.expected =
+                    ObjectiveExpectedAnswer::ExactSet(option_ids.iter().cloned().collect());
+                spec.correct_answer = Value::Array(
+                    option_ids
+                        .into_iter()
+                        .map(Value::String)
+                        .collect::<Vec<_>>(),
+                );
+            } else {
+                spec.expected =
+                    ObjectiveExpectedAnswer::TextAnyOf(option_ids.iter().cloned().collect());
+                spec.correct_answer = Value::String(option_ids.join(" | "));
+            }
+            continue;
+        }
+
+        let accepted = resolve_override_accepted_answers(
+            override_payload.correct_answer.as_deref(),
+            override_payload.accepted_answers.as_deref(),
+        );
+        if !accepted.is_empty() {
+            spec.expected = ObjectiveExpectedAnswer::TextAnyOf(accepted.iter().cloned().collect());
+            spec.correct_answer = Value::String(accepted.join(" | "));
+        }
+    }
+}
+
+fn resolve_override_accepted_answers(
+    correct_answer: Option<&str>,
+    accepted_answers: Option<&[String]>,
+) -> Vec<String> {
+    let mut seen = HashSet::<String>::new();
+    let mut resolved = Vec::<String>::new();
+
+    if let Some(values) = accepted_answers {
+        for value in values.iter().map(|value| value.as_str()) {
+            for variant in split_accepted_answer_variants(value) {
+                let trimmed = variant.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if !seen.insert(trimmed.to_owned()) {
+                    continue;
+                }
+                resolved.push(trimmed.to_owned());
+            }
+        }
+    }
+
+    if resolved.is_empty() {
+        if let Some(correct) = correct_answer {
+            for variant in split_accepted_answer_variants(correct) {
+                let trimmed = variant.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if !seen.insert(trimmed.to_owned()) {
+                    continue;
+                }
+                resolved.push(trimmed.to_owned());
+            }
+        }
+    }
+
+    resolved
 }
 
 fn index_objective_block_scoring_specs(
@@ -3169,7 +3670,7 @@ fn insert_text_answer_spec(
     }
     let normalized = accepted_answers
         .iter()
-        .map(|value| canonicalize_answer_for_matching(value))
+        .map(|value| value.to_owned())
         .filter(|value| !value.is_empty())
         .collect::<HashSet<_>>();
     if normalized.is_empty() {
@@ -3182,6 +3683,8 @@ fn insert_text_answer_spec(
         expected: ObjectiveExpectedAnswer::TextAnyOf(normalized),
         scoring_rule,
         correct_answer: Value::String(accepted_answers.join(" | ")),
+        max_score: 1,
+        has_override: false,
     });
 }
 
@@ -3198,7 +3701,7 @@ fn insert_exact_set_spec(
 
     let normalized = expected_values
         .iter()
-        .map(|value| canonicalize_answer_for_matching(value))
+        .map(|value| value.to_owned())
         .filter(|value| !value.is_empty())
         .collect::<HashSet<_>>();
     if normalized.is_empty() {
@@ -3216,6 +3719,8 @@ fn insert_exact_set_spec(
                 .map(Value::String)
                 .collect::<Vec<_>>(),
         ),
+        max_score: 1,
+        has_override: false,
     });
 }
 
@@ -3233,8 +3738,7 @@ fn resolve_accepted_answers(
                 if trimmed.is_empty() {
                     continue;
                 }
-                let canonical = canonicalize_answer_for_matching(trimmed);
-                if canonical.is_empty() || !seen.insert(canonical) {
+                if !seen.insert(trimmed.to_owned()) {
                     continue;
                 }
                 resolved.push(trimmed.to_owned());
@@ -3249,8 +3753,7 @@ fn resolve_accepted_answers(
                 if trimmed.is_empty() {
                     continue;
                 }
-                let canonical = canonicalize_answer_for_matching(trimmed);
-                if canonical.is_empty() || !seen.insert(canonical) {
+                if !seen.insert(trimmed.to_owned()) {
                     continue;
                 }
                 resolved.push(trimmed.to_owned());
@@ -3269,20 +3772,16 @@ fn split_accepted_answer_variants(value: &str) -> Vec<&str> {
     }
 }
 
-fn canonical_text_values(value: &Value) -> Vec<String> {
+fn strict_text_values(value: &Value) -> Vec<String> {
     match value {
         Value::String(text) => {
-            let normalized = canonicalize_answer_for_matching(text);
-            if normalized.is_empty() {
+            if text.is_empty() {
                 Vec::new()
             } else {
-                vec![normalized]
+                vec![text.clone()]
             }
         }
-        Value::Array(values) => values
-            .iter()
-            .flat_map(canonical_text_values)
-            .collect::<Vec<_>>(),
+        Value::Array(values) => values.iter().flat_map(strict_text_values).collect(),
         _ => Vec::new(),
     }
 }
@@ -3306,25 +3805,11 @@ fn validate_release_override_requirement(
     ))
 }
 
-fn canonical_text_set(value: &Value) -> HashSet<String> {
-    canonical_text_values(value)
+fn strict_text_set(value: &Value) -> HashSet<String> {
+    strict_text_values(value)
         .into_iter()
         .filter(|entry| !entry.is_empty())
-        .collect::<HashSet<_>>()
-}
-
-fn canonicalize_answer_for_matching(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    for ch in value.chars().flat_map(char::to_lowercase) {
-        match ch {
-            '’' | '‘' | '`' | '\'' => {}
-            '‐' | '‑' | '‒' | '–' | '—' | '−' | '-' => output.push(' '),
-            '.' | ',' | ';' | ':' | '!' | '?' | '/' | '\\' | '(' | ')' | '[' | ']' | '{' | '}'
-            | '"' => output.push(' '),
-            _ => output.push(ch),
-        }
-    }
-    output.split_whitespace().collect::<Vec<_>>().join(" ")
+        .collect()
 }
 
 fn value_to_display_text(value: &Value) -> String {
@@ -3789,7 +4274,7 @@ mod tests {
     }
 
     #[test]
-    fn objective_auto_grading_supports_array_backed_slot_answers_and_case_insensitive_match() {
+    fn objective_auto_grading_supports_array_backed_slot_answers_and_strict_match() {
         let section_answers = json!({
             "sentence-1": ["HALF WAY"]
         });
@@ -3813,9 +4298,10 @@ mod tests {
             &section_answers,
             &content_snapshot,
             Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
         );
 
-        assert_eq!(results["totalScore"], 1);
+        assert_eq!(results["totalScore"], 0);
         assert_eq!(results["maxScore"], 1);
         assert_eq!(
             results["questionResults"][0]["questionId"],
@@ -3823,7 +4309,44 @@ mod tests {
         );
         assert_eq!(results["questionResults"][0]["studentAnswer"], "HALF WAY");
         assert_eq!(results["questionResults"][0]["correctAnswer"], "half way");
-        assert_eq!(results["questionResults"][0]["isCorrect"], true);
+        assert_eq!(results["questionResults"][0]["isCorrect"], false);
+    }
+
+    #[test]
+    fn objective_auto_grading_enforces_exact_word_count_rules() {
+        let content_snapshot = json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "id": "short-block-1",
+                        "type": "SHORT_ANSWER",
+                        "questions": [{
+                            "id": "short-1",
+                            "correctAnswer": "New York",
+                            "answerRule": "TWO_WORDS"
+                        }]
+                    }]
+                }]
+            }
+        });
+
+        let correct = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "short-1": "New York" }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+        assert_eq!(correct["totalScore"], 1);
+
+        let incorrect = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "short-1": "New York City" }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+        assert_eq!(incorrect["totalScore"], 0);
     }
 
     #[test]
@@ -3851,6 +4374,7 @@ mod tests {
             &section_answers,
             &content_snapshot,
             Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
         );
 
         assert_eq!(results["totalScore"], 1);
@@ -3891,6 +4415,7 @@ mod tests {
             &content_snapshot,
             &json!({}),
             Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
         );
         let sections = specs.iter().map(|spec| spec.section).collect::<Vec<_>>();
 

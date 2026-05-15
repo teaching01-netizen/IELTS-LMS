@@ -1,6 +1,6 @@
 use axum::{
     middleware,
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Router,
 };
 
@@ -212,6 +212,15 @@ pub fn build_router(state: AppState) -> Router {
             Router::new()
                 .route("/sessions", get(grading::list_sessions))
                 .route("/sessions/:session_id", get(grading::get_session))
+                .route(
+                    "/schedules/:schedule_id/objective-overrides",
+                    get(grading::list_objective_overrides),
+                )
+                .route(
+                    "/schedules/:schedule_id/objective-overrides/:question_id",
+                    put(grading::upsert_objective_override)
+                        .delete(grading::delete_objective_override),
+                )
                 .route("/submissions/:submission_id", get(grading::get_submission))
                 .route(
                     "/submissions/:submission_id/sections",

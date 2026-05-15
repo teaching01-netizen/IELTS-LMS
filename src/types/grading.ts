@@ -291,6 +291,52 @@ export interface ObjectiveQuestionResult {
   overriddenAt?: string | undefined;
 }
 
+export interface ObjectiveOverridePayload {
+  correctAnswer?: string | undefined;
+  acceptedAnswers?: string[] | undefined;
+  correctOptionIds?: string[] | undefined;
+  scoringRule: string;
+  maxScore: number;
+}
+
+export interface GradingScheduleObjectiveOverrideRow {
+  scheduleId: string;
+  questionId: string;
+  overrideJson: ObjectiveOverridePayload;
+  updatedByActorId: string;
+  updatedByActorName: string;
+  updatedAt: string;
+}
+
+export interface ObjectiveAutoGradingBackfillReport {
+  attemptsScanned: number;
+  submissionsMatched: number;
+  submissionsMissing: number;
+  sectionsChecked: number;
+  sectionsNeedingUpdate: number;
+  sectionsUpdated: number;
+  submissionsUpdated: number;
+}
+
+export interface ObjectiveOverrideUpsertRequest {
+  correctAnswer?: string | undefined;
+  acceptedAnswers?: string[] | undefined;
+  correctOptionIds?: string[] | undefined;
+  scoringRule: string;
+  maxScore: number;
+  reason: string;
+}
+
+export interface ObjectiveOverrideDeleteRequest {
+  reason: string;
+}
+
+export interface ObjectiveOverrideMutationResponse {
+  overrideRow?: GradingScheduleObjectiveOverrideRow | undefined;
+  deleted?: boolean | undefined;
+  regradeReport: ObjectiveAutoGradingBackfillReport;
+}
+
 /**
  * Writing task submission with review support
  */

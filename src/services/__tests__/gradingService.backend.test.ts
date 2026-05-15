@@ -456,4 +456,107 @@ describe('gradingService backend mode', () => {
       expect.objectContaining({ method: 'GET' }),
     );
   });
+
+  it('upserts and deletes objective overrides through the backend override endpoints', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_GRADING', 'true');
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            scheduleId: 'sched-1',
+            questionId: 'q-reading-1',
+            overrideJson: { correctAnswer: 'Top', scoringRule: 'ONE_WORD', maxScore: 1 },
+            updatedByActorId: 'grader-1',
+            updatedByActorName: 'Taylor Grader',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          overrideRow: {
+            scheduleId: 'sched-1',
+            questionId: 'q-reading-1',
+            overrideJson: { correctAnswer: 'top', scoringRule: 'ONE_WORD', maxScore: 2 },
+            updatedByActorId: 'grader-1',
+            updatedByActorName: 'Taylor Grader',
+            updatedAt: '2026-01-01T00:01:00.000Z',
+          },
+          regradeReport: {
+            attemptsScanned: 1,
+            submissionsMatched: 1,
+            submissionsMissing: 0,
+            sectionsChecked: 2,
+            sectionsNeedingUpdate: 1,
+            sectionsUpdated: 1,
+            submissionsUpdated: 1,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          deleted: true,
+          regradeReport: {
+            attemptsScanned: 1,
+            submissionsMatched: 1,
+            submissionsMissing: 0,
+            sectionsChecked: 2,
+            sectionsNeedingUpdate: 1,
+            sectionsUpdated: 1,
+            submissionsUpdated: 1,
+          },
+        }),
+      );
+
+    global.fetch = fetchMock as typeof fetch;
+
+    const listResult = await gradingService.getObjectiveOverrides('sched-1');
+    expect(listResult.success).toBe(true);
+
+    const upsertResult = await gradingService.upsertObjectiveOverride('sched-1', 'q-reading-1', {
+      correctAnswer: 'top',
+      acceptedAnswers: [],
+      correctOptionIds: [],
+      scoringRule: 'ONE_WORD',
+      maxScore: 2,
+      reason: 'Case-sensitive correction',
+    });
+    expect(upsertResult.success).toBe(true);
+
+    const deleteResult = await gradingService.deleteObjectiveOverride('sched-1', 'q-reading-1', {
+      reason: 'Revert override',
+    });
+    expect(deleteResult.success).toBe(true);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/grading/schedules/sched-1/objective-overrides',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/grading/schedules/sched-1/objective-overrides/q-reading-1',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual(
+      expect.objectContaining({
+        correctAnswer: 'top',
+        scoringRule: 'ONE_WORD',
+        maxScore: 2,
+        reason: 'Case-sensitive correction',
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/v1/grading/schedules/sched-1/objective-overrides/q-reading-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual(
+      expect.objectContaining({
+        reason: 'Revert override',
+      }),
+    );
+  });
 });

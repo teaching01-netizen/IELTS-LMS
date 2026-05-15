@@ -8,7 +8,13 @@
  * - Review finalization and reopening
  * - Results handoff
  */
-import { backendPost, backendPut, isBackendGradingEnabled } from './backendBridge';
+import {
+  backendDeleteWithBody,
+  backendGet,
+  backendPost,
+  backendPut,
+  isBackendGradingEnabled,
+} from './backendBridge';
 import { getReviewDraftRevision, gradingRepository } from './gradingRepository';
 import { examRepository } from './examRepository';
 import {
@@ -30,7 +36,11 @@ import {
   WritingAnnotation,
   StudentResult,
   ReleaseAction,
-  ReleaseEvent
+  ReleaseEvent,
+  GradingScheduleObjectiveOverrideRow,
+  ObjectiveOverrideDeleteRequest,
+  ObjectiveOverrideMutationResponse,
+  ObjectiveOverrideUpsertRequest,
 } from '../types/grading';
 
 /**
@@ -176,6 +186,63 @@ export class GradingService {
       return { success: true, data: submissions };
     } catch (error) {
       return { success: false, error: `Failed to get session submissions: ${error}` };
+    }
+  }
+
+  async getObjectiveOverrides(
+    scheduleId: string,
+  ): Promise<GradingServiceResult<GradingScheduleObjectiveOverrideRow[]>> {
+    try {
+      if (!isBackendGradingEnabled()) {
+        return { success: false, error: 'Objective overrides require backend grading.' };
+      }
+
+      const overrides = await backendGet<GradingScheduleObjectiveOverrideRow[]>(
+        `/v1/grading/schedules/${scheduleId}/objective-overrides`,
+      );
+      return { success: true, data: overrides };
+    } catch (error) {
+      return { success: false, error: `Failed to load objective overrides: ${error}` };
+    }
+  }
+
+  async upsertObjectiveOverride(
+    scheduleId: string,
+    questionId: string,
+    request: ObjectiveOverrideUpsertRequest,
+  ): Promise<GradingServiceResult<ObjectiveOverrideMutationResponse>> {
+    try {
+      if (!isBackendGradingEnabled()) {
+        return { success: false, error: 'Objective overrides require backend grading.' };
+      }
+
+      const response = await backendPut<ObjectiveOverrideMutationResponse>(
+        `/v1/grading/schedules/${scheduleId}/objective-overrides/${encodeURIComponent(questionId)}`,
+        request,
+      );
+      return { success: true, data: response };
+    } catch (error) {
+      return { success: false, error: `Failed to update objective override: ${error}` };
+    }
+  }
+
+  async deleteObjectiveOverride(
+    scheduleId: string,
+    questionId: string,
+    request: ObjectiveOverrideDeleteRequest,
+  ): Promise<GradingServiceResult<ObjectiveOverrideMutationResponse>> {
+    try {
+      if (!isBackendGradingEnabled()) {
+        return { success: false, error: 'Objective overrides require backend grading.' };
+      }
+
+      const response = await backendDeleteWithBody<ObjectiveOverrideMutationResponse>(
+        `/v1/grading/schedules/${scheduleId}/objective-overrides/${encodeURIComponent(questionId)}`,
+        request,
+      );
+      return { success: true, data: response };
+    } catch (error) {
+      return { success: false, error: `Failed to delete objective override: ${error}` };
     }
   }
   

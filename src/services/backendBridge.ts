@@ -337,6 +337,18 @@ export async function backendDelete(endpoint: string, config?: ApiRequestConfig)
   await del<BackendEnvelope<unknown> | unknown>(endpoint, config);
 }
 
+export async function backendDeleteWithBody<T, TBody = unknown>(
+  endpoint: string,
+  body?: TBody,
+  config?: ApiRequestConfig,
+): Promise<T> {
+  const response = await del<BackendEnvelope<T> | T>(endpoint, {
+    ...config,
+    body,
+  });
+  return extractBackendData<T>(response.data);
+}
+
 export function buildCreateExamPayload(exam: Pick<ExamEntity, 'slug' | 'title' | 'type' | 'visibility'>) {
   return {
     slug: exam.slug,

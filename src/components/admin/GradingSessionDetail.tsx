@@ -7,6 +7,7 @@ import { examRepository } from '../../services/examRepository';
 import { seedDevelopmentFixtures } from '../../services/developmentFixtures';
 import { TableLoadingSkeleton } from '@components/ui';
 import { GradingExportButtons } from './GradingExportButtons';
+import { ObjectiveOverridesPanel } from './ObjectiveOverridesPanel';
 import {
   buildCsvContent,
   buildCsvFilename,
@@ -767,6 +768,13 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           {exportError}
         </div>
+      ) : null}
+
+      {session ? (
+        <ObjectiveOverridesPanel
+          scheduleId={session.scheduleId}
+          publishedVersionId={session.publishedVersionId}
+        />
       ) : null}
 
       {/* Quick Stats */}

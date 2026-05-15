@@ -594,3 +594,32 @@ pub struct CompleteUploadRequest {
     pub size_bytes: Option<i64>,
     pub checksum_sha256: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveOverrideUpsertRequest {
+    pub correct_answer: Option<String>,
+    pub accepted_answers: Option<Vec<String>>,
+    pub correct_option_ids: Option<Vec<String>>,
+    pub scoring_rule: String,
+    pub max_score: i64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveOverrideDeleteRequest {
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
+#[serde(rename_all = "camelCase")]
+pub struct GradingScheduleObjectiveOverride {
+    pub schedule_id: String,
+    pub question_id: String,
+    pub override_json: Value,
+    pub updated_by_actor_id: String,
+    pub updated_by_actor_name: String,
+    pub updated_at: DateTime<Utc>,
+}

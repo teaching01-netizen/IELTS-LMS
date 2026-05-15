@@ -7,9 +7,11 @@ use ielts_backend_application::auth::AuthService;
 use ielts_backend_application::grading::{GradingError, GradingService};
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::grading::{
-    ActorActionRequest, GradingSession, GradingSessionDetail, ReleaseEvent, ReleaseNowRequest,
-    ReviewDraft, SaveReviewDraftRequest, ScheduleReleaseRequest, SectionSubmission,
-    StartReviewRequest, StudentResult, SubmissionReviewSummary, WritingTaskSubmission,
+    ActorActionRequest, GradingScheduleObjectiveOverride, GradingSession, GradingSessionDetail,
+    ObjectiveOverrideDeleteRequest, ObjectiveOverrideUpsertRequest, ReleaseEvent,
+    ReleaseNowRequest, ReviewDraft, SaveReviewDraftRequest, ScheduleReleaseRequest,
+    SectionSubmission, StartReviewRequest, StudentResult, SubmissionReviewSummary,
+    WritingTaskSubmission,
 };
 use serde::Deserialize;
 use sqlx::query_scalar;
@@ -45,6 +47,14 @@ fn grading_service(state: &AppState) -> GradingService {
     )
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveOverrideMutationResponse {
+    pub override_row: Option<GradingScheduleObjectiveOverride>,
+    pub deleted: Option<bool>,
+    pub regrade_report: ielts_backend_application::grading::ObjectiveAutoGradingBackfillReport,
+}
+
 pub async fn list_sessions(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
@@ -76,6 +86,96 @@ pub async fn list_sessions(
         .telemetry
         .observe_db_operation("grading.list_sessions", started.elapsed());
     Ok(ApiResponse::success_with_request_id(sessions, request_id.0))
+}
+
+pub async fn list_objective_overrides(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    Path(schedule_id): Path<Uuid>,
+) -> Result<ApiResponse<Vec<GradingScheduleObjectiveOverride>>, ApiError> {
+    authorize_schedule_for_overrides(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
+    let service = grading_service(&state);
+    let started = Instant::now();
+    let rows = service
+        .list_schedule_objective_overrides(&ctx, schedule_id)
+        .await?;
+    state
+        .telemetry
+        .observe_db_operation("grading.list_objective_overrides", started.elapsed());
+    Ok(ApiResponse::success_with_request_id(rows, request_id.0))
+}
+
+pub async fn upsert_objective_override(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    _csrf: VerifiedCsrf,
+    Path((schedule_id, question_id)): Path<(Uuid, String)>,
+    Json(req): Json<ObjectiveOverrideUpsertRequest>,
+) -> Result<ApiResponse<ObjectiveOverrideMutationResponse>, ApiError> {
+    authorize_schedule_for_overrides(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
+    let service = grading_service(&state);
+    let started = Instant::now();
+    let (row, report) = service
+        .upsert_schedule_objective_override(
+            &ctx,
+            &principal.display_name(),
+            schedule_id,
+            question_id,
+            req,
+        )
+        .await?;
+    state
+        .telemetry
+        .observe_db_operation("grading.upsert_objective_override", started.elapsed());
+    Ok(ApiResponse::success_with_request_id(
+        ObjectiveOverrideMutationResponse {
+            override_row: Some(row),
+            deleted: None,
+            regrade_report: report,
+        },
+        request_id.0,
+    ))
+}
+
+pub async fn delete_objective_override(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    _csrf: VerifiedCsrf,
+    Path((schedule_id, question_id)): Path<(Uuid, String)>,
+    Json(req): Json<ObjectiveOverrideDeleteRequest>,
+) -> Result<ApiResponse<ObjectiveOverrideMutationResponse>, ApiError> {
+    authorize_schedule_for_overrides(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
+    let service = grading_service(&state);
+    let started = Instant::now();
+    let (report, deleted) = service
+        .delete_schedule_objective_override(
+            &ctx,
+            &principal.display_name(),
+            schedule_id,
+            question_id,
+            req,
+        )
+        .await?;
+    state
+        .telemetry
+        .observe_db_operation("grading.delete_objective_override", started.elapsed());
+    Ok(ApiResponse::success_with_request_id(
+        ObjectiveOverrideMutationResponse {
+            override_row: None,
+            deleted: Some(deleted),
+            regrade_report: report,
+        },
+        request_id.0,
+    ))
 }
 
 pub async fn get_session(
@@ -630,6 +730,36 @@ async fn authorize_schedule(
                 StatusCode::FORBIDDEN,
                 "FORBIDDEN",
                 "The authenticated user is not assigned to this grading schedule.",
+            )
+        })
+}
+
+async fn authorize_schedule_for_overrides(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    schedule_id: Uuid,
+) -> Result<(), ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::Grader, UserRole::Proctor])?;
+    if principal.user.role == UserRole::Admin {
+        return Ok(());
+    }
+
+    AuthService::new(state.db_pool(), state.config.clone())
+        .authorize_staff_schedule(
+            &ielts_backend_application::auth::AuthenticatedSession {
+                user: principal.user.clone(),
+                session: principal.session.clone(),
+            },
+            schedule_id.to_string(),
+            principal.user.role.clone(),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::FORBIDDEN,
+                "FORBIDDEN",
+                "The authenticated user is not assigned to this schedule.",
             )
         })
 }

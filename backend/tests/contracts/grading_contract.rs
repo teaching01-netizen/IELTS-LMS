@@ -53,6 +53,7 @@ const GRADING_MIGRATIONS: &[&str] = &[
     "0022_attempt_submission_ledger.sql",
     "0023_sort_memory_hotpath_indexes.sql",
     "0024_projection_sort_hardening.sql",
+    "0027_grading_objective_overrides.sql",
 ];
 
 #[tokio::test]
@@ -1103,7 +1104,7 @@ fn default_content_snapshot() -> serde_json::Value {
                         "id": "q-reading-1",
                         "prompt": "What is the keyword?",
                         "correctAnswer": "Alpha answer",
-                        "answerRule": "THREE_WORDS"
+                        "answerRule": "TWO_WORDS"
                     }]
                 }, {
                     "id": "reading-sentence-1",
@@ -1132,7 +1133,7 @@ fn default_content_snapshot() -> serde_json::Value {
                         "id": "q-listening-1",
                         "prompt": "What did you hear?",
                         "correctAnswer": "Listening response",
-                        "answerRule": "THREE_WORDS"
+                        "answerRule": "TWO_WORDS"
                     }]
                 }]
             }]
@@ -1144,6 +1145,164 @@ fn default_content_snapshot() -> serde_json::Value {
         },
         "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
     })
+}
+
+#[tokio::test]
+async fn grading_objective_overrides_apply_strict_matching_and_regrade_immediately() {
+    let database = mysql::TestDatabase::new(GRADING_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let submitted_answers = json!({
+        "q-reading-1": "alpha answer",
+        "q-listening-1": "Listening response",
+    });
+    let attempt_id = bootstrap_and_submit(
+        database.pool(),
+        schedule_id,
+        "bob",
+        submitted_answers.clone(),
+        json!({}),
+        json!({}),
+    )
+    .await;
+    let auth = create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "admin@example.com",
+        "Test Admin",
+    )
+    .await;
+    let mut config = AppConfig::default();
+    config.grading_sync_on_read_fallback = true;
+    let app = build_router(AppState::with_pool(config, database.pool().clone()));
+
+    // Ensure grading projection runs.
+    let sessions = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri("/api/v1/grading/sessions"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(sessions.status(), StatusCode::OK);
+
+    // Locate the submission id for the attempt.
+    let session_detail = app
+        .clone()
+        .oneshot(
+            auth.with_auth(
+                Request::builder().uri(format!("/api/v1/grading/sessions/{}", schedule.id)),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(session_detail.status(), StatusCode::OK);
+    let session_detail_json = json_body(session_detail).await;
+    let submission_id = Uuid::parse_str(
+        session_detail_json["data"]["submissions"][0]["id"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        session_detail_json["data"]["submissions"][0]["attemptId"],
+        attempt_id.to_string()
+    );
+
+    // Strict matching: "Alpha answer" != "alpha answer" before override.
+    let section_detail = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/grading/submissions/{}/sections",
+                submission_id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(section_detail.status(), StatusCode::OK);
+    let section_detail_json = json_body(section_detail).await;
+    let section_items = section_detail_json["data"]
+        .as_array()
+        .expect("section submissions array");
+    let reading_section = section_items
+        .iter()
+        .find(|entry| entry["section"] == "reading")
+        .expect("reading section");
+    let q_result = reading_section["autoGradingResults"]["questionResults"]
+        .as_array()
+        .expect("questionResults")
+        .iter()
+        .find(|entry| entry["questionId"] == "q-reading-1")
+        .expect("q-reading-1 result");
+    assert_eq!(q_result["isCorrect"], false);
+
+    // Upsert an override to accept the student's lower-case response and award 2 points.
+    let override_response = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!(
+                        "/api/v1/grading/schedules/{}/objective-overrides/{}",
+                        schedule.id, "q-reading-1"
+                    )),
+            )
+            .body(Body::from(
+                json!({
+                    "correctAnswer": "alpha answer",
+                    "acceptedAnswers": [],
+                    "scoringRule": "TWO_WORDS",
+                    "maxScore": 2,
+                    "reason": "Answer key correction for schedule"
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(override_response.status(), StatusCode::OK);
+
+    // Stored results should reflect override and regrade immediately.
+    let section_detail = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/grading/submissions/{}/sections",
+                submission_id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(section_detail.status(), StatusCode::OK);
+    let section_detail_json = json_body(section_detail).await;
+    let section_items = section_detail_json["data"]
+        .as_array()
+        .expect("section submissions array");
+    let reading_section = section_items
+        .iter()
+        .find(|entry| entry["section"] == "reading")
+        .expect("reading section");
+    let q_result = reading_section["autoGradingResults"]["questionResults"]
+        .as_array()
+        .expect("questionResults")
+        .iter()
+        .find(|entry| entry["questionId"] == "q-reading-1")
+        .expect("q-reading-1 result");
+    assert_eq!(q_result["isCorrect"], true);
+    assert_eq!(q_result["hasOverride"], true);
+    assert_eq!(q_result["maxScore"], 2);
+    assert_eq!(q_result["awardedScore"], 2);
 }
 
 fn matrix_submitted_answers() -> serde_json::Value {
