@@ -3298,11 +3298,29 @@ impl ObjectiveExpectedAnswer {
                 let Some(answer) = values.first() else {
                     return false;
                 };
-                expected.contains(answer.trim())
+                expected.contains(&normalize_exact_text(answer))
             }
             Self::ExactSet(expected) => strict_text_set(value) == *expected,
         }
     }
+}
+
+fn normalize_exact_text(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut last_was_space = false;
+    for ch in value.chars() {
+        let is_space = ch.is_whitespace() || ch == '\u{00A0}';
+        if is_space {
+            if !last_was_space {
+                out.push(' ');
+                last_was_space = true;
+            }
+        } else {
+            out.push(ch);
+            last_was_space = false;
+        }
+    }
+    out.trim().to_owned()
 }
 
 fn compute_objective_auto_grading_results(
@@ -3675,14 +3693,14 @@ fn resolve_override_accepted_answers(
     if let Some(values) = accepted_answers {
         for value in values.iter().map(|value| value.as_str()) {
             for variant in split_accepted_answer_variants(value) {
-                let trimmed = variant.trim();
+                let trimmed = normalize_exact_text(variant);
                 if trimmed.is_empty() {
                     continue;
                 }
-                if !seen.insert(trimmed.to_owned()) {
+                if !seen.insert(trimmed.clone()) {
                     continue;
                 }
-                resolved.push(trimmed.to_owned());
+                resolved.push(trimmed);
             }
         }
     }
@@ -3690,14 +3708,14 @@ fn resolve_override_accepted_answers(
     if resolved.is_empty() {
         if let Some(correct) = correct_answer {
             for variant in split_accepted_answer_variants(correct) {
-                let trimmed = variant.trim();
+                let trimmed = normalize_exact_text(variant);
                 if trimmed.is_empty() {
                     continue;
                 }
-                if !seen.insert(trimmed.to_owned()) {
+                if !seen.insert(trimmed.clone()) {
                     continue;
                 }
-                resolved.push(trimmed.to_owned());
+                resolved.push(trimmed);
             }
         }
     }
@@ -4035,11 +4053,12 @@ fn insert_text_answer_spec(
     if seen.contains(question_id) {
         return;
     }
-    let normalized = accepted_answers
+    let display_answers = accepted_answers
         .iter()
-        .map(|value| value.to_owned())
+        .map(|value| normalize_exact_text(value))
         .filter(|value| !value.is_empty())
-        .collect::<HashSet<_>>();
+        .collect::<Vec<_>>();
+    let normalized = display_answers.iter().cloned().collect::<HashSet<_>>();
     if normalized.is_empty() {
         return;
     }
@@ -4049,7 +4068,7 @@ fn insert_text_answer_spec(
         question_id: question_id.to_owned(),
         expected: ObjectiveExpectedAnswer::TextAnyOf(normalized),
         scoring_rule,
-        correct_answer: Value::String(accepted_answers.join(" | ")),
+        correct_answer: Value::String(display_answers.join(" | ")),
         max_score: 1,
         has_override: false,
     });
@@ -4101,14 +4120,14 @@ fn resolve_accepted_answers(
     if let Some(values) = accepted_answers.and_then(Value::as_array) {
         for value in values.iter().filter_map(Value::as_str) {
             for variant in split_accepted_answer_variants(value) {
-                let trimmed = variant.trim();
+                let trimmed = normalize_exact_text(variant);
                 if trimmed.is_empty() {
                     continue;
                 }
-                if !seen.insert(trimmed.to_owned()) {
+                if !seen.insert(trimmed.clone()) {
                     continue;
                 }
-                resolved.push(trimmed.to_owned());
+                resolved.push(trimmed);
             }
         }
     }
@@ -4116,14 +4135,14 @@ fn resolve_accepted_answers(
     if resolved.is_empty() {
         if let Some(correct) = correct_answer.and_then(Value::as_str) {
             for variant in split_accepted_answer_variants(correct) {
-                let trimmed = variant.trim();
+                let trimmed = normalize_exact_text(variant);
                 if trimmed.is_empty() {
                     continue;
                 }
-                if !seen.insert(trimmed.to_owned()) {
+                if !seen.insert(trimmed.clone()) {
                     continue;
                 }
-                resolved.push(trimmed.to_owned());
+                resolved.push(trimmed);
             }
         }
     }
@@ -4795,6 +4814,38 @@ mod tests {
         assert_eq!(results["totalScore"], 1);
         assert_eq!(results["maxScore"], 1);
         assert_eq!(results["questionResults"][0]["questionId"], "short-1");
+        assert_eq!(results["questionResults"][0]["isCorrect"], true);
+    }
+
+    #[test]
+    fn objective_auto_grading_normalizes_unicode_whitespace_for_exact_text_matching() {
+        let section_answers = json!({
+            "short-1": format!("Invisible\u{00A0}disabilities")
+        });
+        let content_snapshot = json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "id": "short-block-1",
+                        "type": "SHORT_ANSWER",
+                        "questions": [{
+                            "id": "short-1",
+                            "correctAnswer": "Invisible disabilities"
+                        }]
+                    }]
+                }]
+            }
+        });
+
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &section_answers,
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["totalScore"], 1);
         assert_eq!(results["questionResults"][0]["isCorrect"], true);
     }
 
