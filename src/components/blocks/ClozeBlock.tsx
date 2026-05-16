@@ -12,6 +12,7 @@ import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
 import { buildAcceptedAnswerFields, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
+import { maxVariantWordCountFromAcceptedAnswers, suggestUpgradedAnswerRule } from '../../utils/answerRuleAutoUpgrade';
 
 interface Props {
   block: QuestionBlock;
@@ -48,10 +49,23 @@ export const ClozeBlock: React.FC<Props> = ({
   const getFieldError = (field: string) => errors.find(e => e.field.includes(field));
 
   const updateQuestion = (qId: string, updates: Partial<ClozeQuestion>) => {
-    const newQuestions = clozeBlock.questions.map(q => 
-      q.id === qId ? { ...q, ...updates } : q
+    const newQuestions = clozeBlock.questions.map((q) => (q.id === qId ? { ...q, ...updates } : q));
+    const requiredWords = Math.max(
+      0,
+      ...newQuestions.map((q) => maxVariantWordCountFromAcceptedAnswers(resolveAcceptedAnswers(q))),
     );
-    updateBlock({ ...clozeBlock, questions: newQuestions });
+    const nextRule = clozeBlock.answerRule || 'TWO_WORDS';
+    const upgrade = suggestUpgradedAnswerRule(nextRule, requiredWords);
+    updateBlock({ ...clozeBlock, questions: newQuestions, ...(upgrade ? { answerRule: upgrade } : {}) });
+  };
+
+  const updateAnswerRule = (nextRule: AnswerRule) => {
+    const requiredWords = Math.max(
+      0,
+      ...clozeBlock.questions.map((q) => maxVariantWordCountFromAcceptedAnswers(resolveAcceptedAnswers(q))),
+    );
+    const upgrade = suggestUpgradedAnswerRule(nextRule, requiredWords);
+    updateBlock({ ...clozeBlock, answerRule: upgrade ?? nextRule });
   };
 
   const addQuestion = () => {
@@ -152,7 +166,7 @@ export const ClozeBlock: React.FC<Props> = ({
             <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Answer Rule:</label>
             <select 
               value={answerRule} 
-              onChange={(e) => updateBlock({ ...clozeBlock, answerRule: e.target.value as AnswerRule })}
+              onChange={(e) => updateAnswerRule(e.target.value as AnswerRule)}
               className={`border rounded-sm p-1.5 text-sm text-gray-700 focus:ring-1 focus:ring-blue-700 outline-none transition-colors ${getFieldError('answerRule') ? 'border-red-500 bg-red-50' : 'border-gray-100'}`}
             >
               <option value="ONE_WORD">NO MORE THAN ONE WORD</option>

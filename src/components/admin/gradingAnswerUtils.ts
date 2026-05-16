@@ -27,33 +27,6 @@ function normalizeComparable(value: string): string {
   return normalizeAnswerForMatching(value);
 }
 
-function wordLimitFromRule(rule: unknown): number | null {
-  if (typeof rule !== 'string') return null;
-  switch (rule) {
-    case 'ONE_WORD':
-      return 1;
-    case 'TWO_WORDS':
-      return 2;
-    case 'THREE_WORDS':
-      return 3;
-    default:
-      return null;
-  }
-}
-
-function resolveDescriptorWordLimit(descriptor: StudentQuestionDescriptor): number | null {
-  const question = descriptor.question as { answerRule?: unknown } | null | undefined;
-  const block = descriptor.block as { answerRule?: unknown };
-  const questionRule = question?.answerRule;
-  const blockRule = block?.answerRule;
-  return wordLimitFromRule(questionRule ?? blockRule);
-}
-
-function filterAnswerVariantsWithinWordLimit(variants: string[], maxWords: number | null): string[] {
-  if (!maxWords) return variants;
-  return variants.filter((value) => value.split(/\s+/).filter(Boolean).length <= maxWords);
-}
-
 function stringifyFallback(value: unknown): string {
   try {
     return JSON.stringify(value);
@@ -234,8 +207,7 @@ export function getCorrectAnswerValue(descriptor: StudentQuestionDescriptor): un
 export function getCorrectAnswerDisplay(descriptor: StudentQuestionDescriptor): string {
   const acceptedAnswers = getAcceptedAnswersForDescriptor(descriptor);
   if (acceptedAnswers && acceptedAnswers.length > 0) {
-    const withinLimit = filterAnswerVariantsWithinWordLimit(acceptedAnswers, resolveDescriptorWordLimit(descriptor));
-    return (withinLimit.length > 0 ? withinLimit : acceptedAnswers).join(' | ');
+    return acceptedAnswers.join(' | ');
   }
 
   const correct = getCorrectAnswerValue(descriptor);

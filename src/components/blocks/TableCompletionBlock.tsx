@@ -16,6 +16,7 @@ import {
   trimSuspiciousTableCellContent,
 } from '../../utils/tableCompletion';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
+import { maxVariantWordCountFromAcceptedAnswers, suggestUpgradedAnswerRule } from '../../utils/answerRuleAutoUpgrade';
 
 interface TableCompletionBlockProps {
   block: TableCompletionBlockType;
@@ -137,7 +138,12 @@ export function TableCompletionBlock({
   };
 
   const updateAnswerRule = (answerRule: AnswerRule) => {
-    commitBlock({ ...block, answerRule });
+    const requiredWords = Math.max(
+      0,
+      ...block.cells.map((cell) => maxVariantWordCountFromAcceptedAnswers(resolveAcceptedAnswers(cell))),
+    );
+    const upgrade = suggestUpgradedAnswerRule(answerRule, requiredWords);
+    commitBlock({ ...block, answerRule: upgrade ?? answerRule });
   };
 
   const updateHeader = (index: number, value: string) => {
@@ -217,8 +223,12 @@ export function TableCompletionBlock({
         acceptedAnswers: nextAccepted,
       };
     });
-
-    commitBlock({ ...block, cells: nextCells });
+    const requiredWords = Math.max(
+      0,
+      ...nextCells.map((cell) => maxVariantWordCountFromAcceptedAnswers(resolveAcceptedAnswers(cell))),
+    );
+    const upgrade = suggestUpgradedAnswerRule(block.answerRule, requiredWords);
+    commitBlock({ ...block, cells: nextCells, ...(upgrade ? { answerRule: upgrade } : {}) });
   };
 
   const updateCellAcceptedAnswers = (target: TableCellTarget, nextAnswers: string[]) => {
@@ -228,7 +238,12 @@ export function TableCompletionBlock({
     const nextCells = block.cells.map((cell, index) =>
       index === targetIndex ? { ...cell, ...buildAcceptedAnswerFields(nextAnswers) } : cell,
     );
-    commitBlock({ ...block, cells: nextCells });
+    const requiredWords = Math.max(
+      0,
+      ...nextCells.map((cell) => maxVariantWordCountFromAcceptedAnswers(resolveAcceptedAnswers(cell))),
+    );
+    const upgrade = suggestUpgradedAnswerRule(block.answerRule, requiredWords);
+    commitBlock({ ...block, cells: nextCells, ...(upgrade ? { answerRule: upgrade } : {}) });
   };
 
   const clearCellScoring = (cell: TableCompletionBlockType['cells'][number]) => {

@@ -9,6 +9,7 @@ import {
   resolveAcceptedAnswers,
 } from '../../utils/acceptedAnswers';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
+import { maxVariantWordCountFromAcceptedAnswers, suggestUpgradedAnswerRule } from '../../utils/answerRuleAutoUpgrade';
 
 interface ShortAnswerBlockProps {
   block: ShortAnswerBlockType;
@@ -39,9 +40,14 @@ export function ShortAnswerBlock({
     questionId: string,
     updates: { prompt?: string; correctAnswer?: string; acceptedAnswers?: string[]; answerRule?: AnswerRule },
   ) => {
-    const newQuestions = block.questions.map(q =>
-      q.id === questionId ? { ...q, ...updates } : q
-    );
+    const newQuestions = block.questions.map((q) => {
+      if (q.id !== questionId) return q;
+      const next = { ...q, ...updates };
+      const accepted = resolveAcceptedAnswers(next);
+      const requiredWords = maxVariantWordCountFromAcceptedAnswers(accepted);
+      const upgrade = suggestUpgradedAnswerRule(next.answerRule ?? 'TWO_WORDS', requiredWords);
+      return upgrade ? { ...next, answerRule: upgrade } : next;
+    });
     updateBlock({ ...block, questions: newQuestions });
   };
 

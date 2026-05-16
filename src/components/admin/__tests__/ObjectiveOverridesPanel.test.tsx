@@ -114,7 +114,7 @@ describe('ObjectiveOverridesPanel', () => {
     });
   });
 
-  it('blocks saving ONE_WORD overrides when any accepted variant exceeds the word limit', async () => {
+  it('auto-upgrades scoringRule when answer key variants exceed the selected word limit', async () => {
     const { examRepository } = await import('../../../services/examRepository');
     const { gradingService } = await import('../../../services/gradingService');
 
@@ -172,8 +172,11 @@ describe('ObjectiveOverridesPanel', () => {
     fireEvent.click(screen.getByText('Save override + regrade'));
 
     await waitFor(() => {
-      expect(screen.getByText(/exceeds the ONE_WORD limit/i)).toBeTruthy();
+      expect(gradingService.upsertObjectiveOverride).toHaveBeenCalledWith(
+        'sched-1',
+        'q-reading-1',
+        expect.objectContaining({ scoringRule: 'TWO_WORDS' }),
+      );
     });
-    expect(gradingService.upsertObjectiveOverride).not.toHaveBeenCalled();
   });
 });

@@ -42,8 +42,7 @@ Admin grading/review UI correct-answer display for objective text questions (Clo
 The UI displayed all accepted-answer variants from the exam snapshot without considering the configured `answerRule` word limit. The backend enforces `ONE_WORD`/`TWO_WORDS`/`THREE_WORDS` as a hard upper bound, so multi-word variants in the key are unreachable when the rule is `ONE_WORD`.
 
 ### Fix
-- Filter correct-answer display variants to those that fit within the descriptor's `answerRule` word limit (fallback to original list if none fit).
-- Block saving objective overrides that specify a word-limit scoring rule but include any text variant exceeding that limit (forces key + rule to be consistent).
+- Auto-upgrade objective override scoring rules (`ONE_WORD`/`TWO_WORDS`/`THREE_WORDS`) to match the longest provided answer-key variant so staff-entered `a | b` behaves as an OR list.
 
 ### Regression Protection
 - Tests: `src/components/admin/__tests__/gradingAnswerUtils.test.ts`

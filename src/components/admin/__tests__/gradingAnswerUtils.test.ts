@@ -95,7 +95,7 @@ describe('gradingAnswerUtils', () => {
     expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'different' })).toBe(false);
   });
 
-  test('CLOZE: correct answer display omits variants that exceed the answerRule word limit', () => {
+  test('CLOZE: correct answer display shows all accepted variants from the key', () => {
     const descriptor = {
       id: 'q-words',
       blockId: 'b-words',
@@ -114,7 +114,7 @@ describe('gradingAnswerUtils', () => {
       question: { id: 'q-words', prompt: 'Fill blank', correctAnswer: 'crowd | crowd noise', answerRule: 'ONE_WORD' },
     } as unknown as StudentQuestionDescriptor;
 
-    expect(getCorrectAnswerDisplay(descriptor)).toBe('crowd');
+    expect(getCorrectAnswerDisplay(descriptor)).toBe('crowd | crowd noise');
   });
 
   test('SINGLE_MCQ: maps option id to option text', () => {

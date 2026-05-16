@@ -63,6 +63,19 @@ function wordLimitFromScoringRule(rule: string): number | null {
   }
 }
 
+function scoringRuleFromWordLimit(limit: number): string | null {
+  switch (limit) {
+    case 1:
+      return 'ONE_WORD';
+    case 2:
+      return 'TWO_WORDS';
+    case 3:
+      return 'THREE_WORDS';
+    default:
+      return null;
+  }
+}
+
 function splitVariants(value: string): string[] {
   if (!value.trim()) return [];
   return value
@@ -75,7 +88,7 @@ function countWords(value: string): number {
   return value.split(/\s+/).filter(Boolean).length;
 }
 
-function findFirstVariantOverWordLimit(input: { correctAnswer?: string; acceptedAnswers?: string[] }, maxWords: number): string | null {
+function maxVariantWordCount(input: { correctAnswer?: string; acceptedAnswers?: string[] }): number {
   const variants: string[] = [];
   for (const line of input.acceptedAnswers ?? []) {
     variants.push(...splitVariants(line));
@@ -84,10 +97,11 @@ function findFirstVariantOverWordLimit(input: { correctAnswer?: string; accepted
     variants.push(...splitVariants(input.correctAnswer));
   }
 
+  let maxCount = 0;
   for (const variant of variants) {
-    if (countWords(variant) > maxWords) return variant;
+    maxCount = Math.max(maxCount, countWords(variant));
   }
-  return null;
+  return maxCount;
 }
 
 function getDefaultScoringRule(descriptor: StudentQuestionDescriptor): string {
@@ -259,27 +273,34 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
       return;
     }
 
-    const maxWords = wordLimitFromScoringRule(form.scoringRule);
-    if (maxWords && (!form.correctOptionIds || form.correctOptionIds.length === 0)) {
-      const offending = findFirstVariantOverWordLimit(
-        { correctAnswer: form.correctAnswer ?? undefined, acceptedAnswers: form.acceptedAnswers ?? [] },
-        maxWords,
-      );
-      if (offending) {
-        setMutationError(
-          `Answer variant "${offending}" exceeds the ${form.scoringRule} limit. Increase the scoring rule or remove the variant.`,
-        );
-        return;
-      }
-    }
-
     setMutating(true);
     try {
+      let scoringRule = form.scoringRule;
+      const currentLimit = wordLimitFromScoringRule(scoringRule);
+      const isTextOverride = !form.correctOptionIds || form.correctOptionIds.length === 0;
+
+      if (currentLimit && isTextOverride) {
+        const required = maxVariantWordCount({
+          correctAnswer: form.correctAnswer ?? undefined,
+          acceptedAnswers: form.acceptedAnswers ?? [],
+        });
+        if (required > currentLimit) {
+          const upgraded = scoringRuleFromWordLimit(required);
+          if (!upgraded) {
+            throw new Error(
+              `Answer key contains a ${required}-word variant, but the scoring rule only supports up to THREE_WORDS. Use a different scoring rule or shorten the variants.`,
+            );
+          }
+          scoringRule = upgraded;
+          setForm({ ...form, scoringRule });
+        }
+      }
+
       const payload: ObjectiveOverrideUpsertRequest = {
         correctAnswer: form.correctAnswer?.trim() ? form.correctAnswer : undefined,
         acceptedAnswers: Array.isArray(form.acceptedAnswers) ? form.acceptedAnswers : [],
         correctOptionIds: Array.isArray(form.correctOptionIds) ? form.correctOptionIds : [],
-        scoringRule: form.scoringRule,
+        scoringRule,
         maxScore: Number.isFinite(form.maxScore) ? form.maxScore : 0,
         reason: form.reason,
       };

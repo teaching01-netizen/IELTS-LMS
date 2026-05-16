@@ -55,6 +55,12 @@ describe('accepted answer chips in block editors', () => {
 
     expect(latestBlock.questions[0]?.acceptedAnswers).toEqual(['cat']);
     expect(latestBlock.questions[0]?.correctAnswer).toBe('cat');
+
+    const inputAgain = screen.getByPlaceholderText('Enter the accepted answer...');
+    fireEvent.change(inputAgain, { target: { value: 'crowd noise' } });
+    fireEvent.keyDown(inputAgain, { key: 'Enter' });
+
+    expect(latestBlock.questions[0]?.answerRule).toBe('TWO_WORDS');
   });
 
   it('syncs sentence blank primary correctAnswer from acceptedAnswers chips', () => {
@@ -97,5 +103,11 @@ describe('accepted answer chips in block editors', () => {
 
     expect(latestBlock.questions[0]?.blanks[0]?.acceptedAnswers).toEqual(['ticket']);
     expect(latestBlock.questions[0]?.blanks[0]?.correctAnswer).toBe('ticket');
+
+    const inputAgain = screen.getByPlaceholderText('Answer...');
+    fireEvent.change(inputAgain, { target: { value: 'crowd noise' } });
+    fireEvent.keyDown(inputAgain, { key: 'Enter' });
+
+    expect(latestBlock.questions[0]?.answerRule).toBe('TWO_WORDS');
   });
 });

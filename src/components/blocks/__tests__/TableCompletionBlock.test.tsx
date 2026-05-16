@@ -48,4 +48,42 @@ describe('TableCompletionBlock', () => {
     expect(latestBlock.cells[0]?.correctAnswer).toBe('edited-left');
     expect(latestBlock.cells[1]?.correctAnswer).toBe('right');
   });
+
+  it('auto-upgrades answerRule when a cell answer contains multiple words', () => {
+    const initialBlock: TableCompletionBlockType = {
+      id: 'table-2',
+      type: 'TABLE_COMPLETION',
+      instruction: 'Complete the table',
+      answerRule: 'ONE_WORD',
+      insertedImages: [],
+      headers: ['A', 'B'],
+      rows: [['____', '']],
+      cells: [{ id: 'cell-1', row: 0, col: 0, correctAnswer: 'crowd', acceptedAnswers: ['crowd'] }],
+    };
+
+    let latestBlock = initialBlock;
+
+    function Harness() {
+      const [block, setBlock] = useState(initialBlock);
+      latestBlock = block;
+      return (
+        <TableCompletionBlock
+          block={block}
+          startNum={1}
+          endNum={1}
+          updateBlock={setBlock}
+          deleteBlock={() => {}}
+          moveBlock={() => {}}
+          errors={[]}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const inputs = screen.getAllByPlaceholderText('Primary answer...');
+    fireEvent.change(inputs[0]!, { target: { value: 'crowd noise' } });
+
+    expect(latestBlock.answerRule).toBe('TWO_WORDS');
+  });
 });

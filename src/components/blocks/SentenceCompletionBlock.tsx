@@ -10,6 +10,7 @@ import {
   resolveAcceptedAnswers,
 } from '../../utils/acceptedAnswers';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
+import { maxVariantWordCountFromAcceptedAnswers, suggestUpgradedAnswerRule } from '../../utils/answerRuleAutoUpgrade';
 
 interface SentenceCompletionBlockProps {
   block: SentenceCompletionBlockType;
@@ -61,7 +62,13 @@ export function SentenceCompletionBlock({
 
       nextBlanks = nextBlanks.map((blank, index) => ({ ...blank, position: index }));
 
-      return { ...q, ...updates, sentence: nextSentence, blanks: nextBlanks };
+      const nextQuestion = { ...q, ...updates, sentence: nextSentence, blanks: nextBlanks };
+      const requiredWords = Math.max(
+        0,
+        ...nextQuestion.blanks.map((blank) => maxVariantWordCountFromAcceptedAnswers(resolveAcceptedAnswers(blank))),
+      );
+      const upgrade = suggestUpgradedAnswerRule(nextQuestion.answerRule, requiredWords);
+      return upgrade ? { ...nextQuestion, answerRule: upgrade } : nextQuestion;
     });
 
     updateBlock({ ...block, questions: newQuestions });
@@ -72,12 +79,15 @@ export function SentenceCompletionBlock({
     blankId: string,
     updates: { correctAnswer?: string; acceptedAnswers?: string[] },
   ) => {
-    const newQuestions = block.questions.map(q => {
+    const newQuestions = block.questions.map((q) => {
       if (q.id !== questionId) return q;
-      const newBlanks = q.blanks.map(b =>
-        b.id === blankId ? { ...b, ...updates } : b
+      const newBlanks = q.blanks.map((b) => (b.id === blankId ? { ...b, ...updates } : b));
+      const requiredWords = Math.max(
+        0,
+        ...newBlanks.map((blank) => maxVariantWordCountFromAcceptedAnswers(resolveAcceptedAnswers(blank))),
       );
-      return { ...q, blanks: newBlanks };
+      const upgrade = suggestUpgradedAnswerRule(q.answerRule, requiredWords);
+      return upgrade ? { ...q, blanks: newBlanks, answerRule: upgrade } : { ...q, blanks: newBlanks };
     });
     updateBlock({ ...block, questions: newQuestions });
   };
