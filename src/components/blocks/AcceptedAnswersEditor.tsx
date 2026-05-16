@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, X } from 'lucide-react';
-import { normalizeAnswerForMatching } from '../../utils/acceptedAnswers';
+import { normalizeAnswerForAcceptedAnswerKey } from '../../utils/acceptedAnswers';
 
 interface AcceptedAnswersEditorProps {
   value: string[];
@@ -16,7 +16,7 @@ export function AcceptedAnswersEditor({
   const [draft, setDraft] = useState('');
 
   const normalizedValues = useMemo(
-    () => new Set(value.map((answer) => normalizeAnswerForMatching(answer))),
+    () => new Set(value.map((answer) => normalizeAnswerForAcceptedAnswerKey(answer))),
     [value],
   );
 
@@ -26,7 +26,7 @@ export function AcceptedAnswersEditor({
       return;
     }
 
-    const key = normalizeAnswerForMatching(trimmed);
+    const key = normalizeAnswerForAcceptedAnswerKey(trimmed);
     if (!key || normalizedValues.has(key)) {
       setDraft('');
       return;

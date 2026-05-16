@@ -7,16 +7,26 @@ function splitAnswerVariants(value: string): string[] {
   return value.includes('|') ? value.split('|') : [value];
 }
 
-export function normalizeAnswerForMatching(value: string): string {
-  return value
-    .normalize('NFKC')
-    .toLowerCase()
+function normalizeAnswer(value: string, foldCase: boolean): string {
+  let normalized = value.normalize('NFKC');
+  if (foldCase) {
+    normalized = normalized.toLowerCase();
+  }
+  return normalized
     .replace(/[’‘`]/g, "'")
     .replace(/[‐‑‒–—−-]+/g, ' ')
     .replace(/'/g, '')
     .replace(/[.,;:!?/\\()[\]{}"]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+export function normalizeAnswerForMatching(value: string): string {
+  return normalizeAnswer(value, true);
+}
+
+export function normalizeAnswerForAcceptedAnswerKey(value: string): string {
+  return normalizeAnswer(value, false);
 }
 
 export function sanitizeAcceptedAnswers(acceptedAnswers: readonly string[] | undefined): string[] {
@@ -31,7 +41,7 @@ export function sanitizeAcceptedAnswers(acceptedAnswers: readonly string[] | und
         continue;
       }
 
-      const key = normalizeAnswerForMatching(trimmed);
+      const key = normalizeAnswerForAcceptedAnswerKey(trimmed);
       if (!key || seen.has(key)) {
         continue;
       }

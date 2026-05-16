@@ -1,5 +1,5 @@
 import type { QuestionBlock, SubAnswerTreeNode } from '../types';
-import { normalizeAnswerForMatching } from './acceptedAnswers';
+import { normalizeAnswerForAcceptedAnswerKey, normalizeAnswerForMatching } from './acceptedAnswers';
 
 export const SUB_ANSWER_TREE_MAX_DEPTH = 10;
 
@@ -134,7 +134,7 @@ function normalizeAcceptedAnswers(values: readonly string[] | undefined): string
     if (typeof value !== 'string') continue;
     const trimmed = value.trim();
     if (!trimmed) continue;
-    const key = normalizeAnswerForMatching(trimmed);
+    const key = normalizeAnswerForAcceptedAnswerKey(trimmed);
     if (!key || seen.has(key)) continue;
     seen.add(key);
     out.push(trimmed);

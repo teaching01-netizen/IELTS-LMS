@@ -17,7 +17,7 @@ describe('acceptedAnswers', () => {
   it('splits and deduplicates pipe-delimited acceptedAnswers', () => {
     expect(
       sanitizeAcceptedAnswers(['dog | cat', 'CAT', ' dog ']),
-    ).toEqual(['dog', 'cat']);
+    ).toEqual(['dog', 'cat', 'CAT']);
   });
 
   it('normalizes case and punctuation for matching', () => {
