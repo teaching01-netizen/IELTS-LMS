@@ -32,9 +32,14 @@ export function ExamAnswerKeyRoute() {
   const debouncedAutosaveRef = useRef<number | null>(null);
   const pendingAutosaveRef = useRef<{ state: ExamState; requestId: number } | null>(null);
   const latestSaveRequestIdRef = useRef(0);
+  const handleUpdateExamContentRef = useRef(controller.handleUpdateExamContent);
   const saveRunnerRef = useRef<LatestOnlyAsyncRunner<{ state: ExamState; requestId: number }> | null>(
     null,
   );
+
+  useEffect(() => {
+    handleUpdateExamContentRef.current = controller.handleUpdateExamContent;
+  }, [controller.handleUpdateExamContent]);
 
   useEffect(() => {
     if (controller.state) {
@@ -48,7 +53,7 @@ export function ExamAnswerKeyRoute() {
     saveRunnerRef.current = createLatestOnlyAsyncRunner(async ({ state: nextState, requestId }) => {
       setSaveStatus('saving');
       try {
-        await controller.handleUpdateExamContent(nextState);
+        await handleUpdateExamContentRef.current(nextState);
         if (requestId === latestSaveRequestIdRef.current) {
           setSaveStatus('saved');
         }
@@ -138,6 +143,60 @@ export function ExamAnswerKeyRoute() {
     })();
   };
 
+  const allRows = useMemo(() => (localState ? buildAnswerKeyRows(localState) : []), [localState]);
+
+  const groups = useMemo(() => {
+    const unique = new Map<string, { id: string; label: string }>();
+    for (const row of allRows) {
+      const key = `${row.moduleType}:${row.groupId}`;
+      if (!unique.has(key)) {
+        unique.set(key, {
+          id: key,
+          label: `${row.moduleType === 'reading' ? 'Reading' : 'Listening'}: ${row.groupLabel}`,
+        });
+      }
+    }
+    return [
+      { id: 'all', label: 'All groups' },
+      ...Array.from(unique.values()).sort((a, b) => a.label.localeCompare(b.label)),
+    ];
+  }, [allRows]);
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return allRows.filter((row) => {
+      if (moduleFilter !== 'all' && row.moduleType !== moduleFilter) return false;
+      if (groupFilter !== 'all' && `${row.moduleType}:${row.groupId}` !== groupFilter) return false;
+      if (!q) return true;
+      return (
+        row.numberLabel.toLowerCase().includes(q)
+        || row.prompt.toLowerCase().includes(q)
+        || row.blockType.toLowerCase().includes(q)
+      );
+    });
+  }, [allRows, groupFilter, moduleFilter, search]);
+
+  const rowsByGroup = useMemo(() => {
+    const map = new Map<string, AnswerKeyRow[]>();
+    for (const row of filteredRows) {
+      const key = `${row.moduleType}:${row.groupId}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(row);
+    }
+    return Array.from(map.entries())
+      .map(([key, rows]) => {
+        const first = rows[0]!;
+        return {
+          key,
+          moduleType: first.moduleType,
+          groupId: first.groupId,
+          groupLabel: first.groupLabel,
+          rows: [...rows].sort((a, b) => a.sortKey.localeCompare(b.sortKey, undefined, { numeric: true })),
+        };
+      })
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }, [filteredRows]);
+
   if (!examId) {
     return <ErrorSurface title="Answer key unavailable" description="Exam ID not found." />;
   }
@@ -166,52 +225,6 @@ export function ExamAnswerKeyRoute() {
         return 'Save failed';
     }
   })();
-
-  const allRows = useMemo(() => buildAnswerKeyRows(localState), [localState]);
-
-  const groups = useMemo(() => {
-    const unique = new Map<string, { id: string; label: string }>();
-    for (const row of allRows) {
-      const key = `${row.moduleType}:${row.groupId}`;
-      if (!unique.has(key)) {
-        unique.set(key, { id: key, label: `${row.moduleType === 'reading' ? 'Reading' : 'Listening'}: ${row.groupLabel}` });
-      }
-    }
-    return [{ id: 'all', label: 'All groups' }, ...Array.from(unique.values()).sort((a, b) => a.label.localeCompare(b.label))];
-  }, [allRows]);
-
-  const filteredRows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return allRows.filter((row) => {
-      if (moduleFilter !== 'all' && row.moduleType !== moduleFilter) return false;
-      if (groupFilter !== 'all' && `${row.moduleType}:${row.groupId}` !== groupFilter) return false;
-      if (!q) return true;
-      return (
-        row.numberLabel.toLowerCase().includes(q)
-        || row.prompt.toLowerCase().includes(q)
-        || row.blockType.toLowerCase().includes(q)
-      );
-    });
-  }, [allRows, groupFilter, moduleFilter, search]);
-
-  const rowsByGroup = useMemo(() => {
-    const map = new Map<string, AnswerKeyRow[]>();
-    for (const row of filteredRows) {
-      const key = `${row.moduleType}:${row.groupId}`;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(row);
-    }
-    return Array.from(map.entries()).map(([key, rows]) => {
-      const first = rows[0]!;
-      return {
-        key,
-        moduleType: first.moduleType,
-        groupId: first.groupId,
-        groupLabel: first.groupLabel,
-        rows: [...rows].sort((a, b) => a.sortKey.localeCompare(b.sortKey, undefined, { numeric: true })),
-      };
-    }).sort((a, b) => a.key.localeCompare(b.key));
-  }, [filteredRows]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
