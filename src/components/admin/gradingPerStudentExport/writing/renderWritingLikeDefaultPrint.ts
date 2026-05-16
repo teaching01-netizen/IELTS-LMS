@@ -151,26 +151,45 @@ export function renderWritingLikeDefaultPrint(
     const colCriterion = 60;
     const colBand = 18;
     const colComments = maxWidth - colCriterion - colBand;
-    const drawTableHeader = (headerY: number) => {
+    const colX = {
+      criterion: left,
+      band: left + colCriterion,
+      comments: left + colCriterion + colBand,
+    } as const;
+
+    const paddingX = 1.4;
+    const paddingY = 1.8;
+    const headerHeight = 7.5;
+
+    const drawTableHeader = () => {
+      doc.setDrawColor(156, 163, 175);
+      doc.setFillColor(243, 244, 246);
+      doc.rect(left, y, maxWidth, headerHeight, 'FD');
+      doc.rect(colX.criterion, y, colCriterion, headerHeight, 'S');
+      doc.rect(colX.band, y, colBand, headerHeight, 'S');
+      doc.rect(colX.comments, y, colComments, headerHeight, 'S');
+
       doc.setFontSize(9);
-      doc.text('Criterion', left + 1, headerY);
-      doc.text('Band', left + colCriterion + 1, headerY);
-      doc.text('Comments', left + colCriterion + colBand + 1, headerY);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Criterion', colX.criterion + paddingX, y + 5.1);
+      doc.text('Band', colX.band + paddingX, y + 5.1);
+      doc.text('Comments', colX.comments + paddingX, y + 5.1);
+      doc.setFont('helvetica', 'normal');
+      y += headerHeight;
     };
 
-    drawTableHeader(y);
-    y += 4.5;
+    drawTableHeader();
 
     for (const row of getAssessmentRows(task)) {
       const criterion = row.criterion;
       const band = row.band === null || row.band === undefined ? '' : String(row.band);
       const comments = row.notes || '';
 
-      const criterionLines = doc.splitTextToSize(criterion, colCriterion - 2) as string[];
-      const commentsLines = doc.splitTextToSize(comments, colComments - 2) as string[];
-      const bandLines = doc.splitTextToSize(band, colBand - 2) as string[];
+      const criterionLines = doc.splitTextToSize(criterion, colCriterion - paddingX * 2) as string[];
+      const commentsLines = doc.splitTextToSize(comments, colComments - paddingX * 2) as string[];
+      const bandLines = doc.splitTextToSize(band, colBand - paddingX * 2) as string[];
       const rowLines = Math.max(criterionLines.length, commentsLines.length, bandLines.length, 1);
-      const rowHeight = rowLines * lineHeight + 1.5;
+      const rowHeight = rowLines * lineHeight + paddingY * 2;
 
       if (y + rowHeight > pageHeight - bottomMargin) {
         doc.addPage();
@@ -188,16 +207,28 @@ export function renderWritingLikeDefaultPrint(
         y += 5;
         doc.setFontSize(9);
         doc.setFont('helvetica', 'normal');
-        drawTableHeader(y);
-        y += 4.5;
+        drawTableHeader();
       }
 
-      for (let i = 0; i < rowLines; i += 1) {
-        const lineY = y + i * lineHeight;
-        if (criterionLines[i]) doc.text(String(criterionLines[i]), left + 1, lineY);
-        if (bandLines[i]) doc.text(String(bandLines[i]), left + colCriterion + 1, lineY);
-        if (commentsLines[i]) doc.text(String(commentsLines[i]), left + colCriterion + colBand + 1, lineY);
-      }
+      doc.setDrawColor(156, 163, 175);
+      doc.rect(colX.criterion, y, colCriterion, rowHeight, 'S');
+      doc.rect(colX.band, y, colBand, rowHeight, 'S');
+      doc.rect(colX.comments, y, colComments, rowHeight, 'S');
+
+      const cellTop = y + paddingY + 2.4;
+      const drawLines = (lines: string[], x: number) => {
+        for (let li = 0; li < lines.length; li += 1) {
+          const text = lines[li];
+          if (!text) continue;
+          doc.text(String(text), x + paddingX, cellTop + li * lineHeight);
+        }
+      };
+
+      doc.setFont('helvetica', 'bold');
+      drawLines(criterionLines, colX.criterion);
+      drawLines(bandLines, colX.band);
+      doc.setFont('helvetica', 'normal');
+      drawLines(commentsLines, colX.comments);
 
       y += rowHeight;
     }
