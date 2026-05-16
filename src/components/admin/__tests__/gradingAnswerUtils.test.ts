@@ -95,6 +95,28 @@ describe('gradingAnswerUtils', () => {
     expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'different' })).toBe(false);
   });
 
+  test('CLOZE: correct answer display omits variants that exceed the answerRule word limit', () => {
+    const descriptor = {
+      id: 'q-words',
+      blockId: 'b-words',
+      groupId: 'p1',
+      groupLabel: 'Passage 1',
+      isMulti: false,
+      correctCount: 1,
+      answerKey: 'q-words',
+      block: {
+        id: 'b-words',
+        type: 'CLOZE',
+        instruction: '',
+        answerRule: 'ONE_WORD',
+        questions: [{ id: 'q-words', prompt: 'Fill blank', correctAnswer: 'crowd | crowd noise' }],
+      },
+      question: { id: 'q-words', prompt: 'Fill blank', correctAnswer: 'crowd | crowd noise', answerRule: 'ONE_WORD' },
+    } as unknown as StudentQuestionDescriptor;
+
+    expect(getCorrectAnswerDisplay(descriptor)).toBe('crowd');
+  });
+
   test('SINGLE_MCQ: maps option id to option text', () => {
     const descriptor = {
       id: 'block-1',

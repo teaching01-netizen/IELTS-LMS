@@ -10,7 +10,6 @@ interface WarningSecurityConfig {
 
 interface UseStudentWarningVisibilityOptions {
   effectivePhase: 'pre-check' | 'lobby' | 'exam' | 'post-exam' | 'submitted';
-  fullscreenWarningOpen: boolean;
   violations: Violation[];
   security: WarningSecurityConfig;
 }
@@ -22,7 +21,6 @@ function findLatestViolation(violations: Violation[], type: string): Violation |
 
 export function useStudentWarningVisibility({
   effectivePhase,
-  fullscreenWarningOpen,
   violations,
   security,
 }: UseStudentWarningVisibilityOptions) {
@@ -45,8 +43,7 @@ export function useStudentWarningVisibility({
 
   const shouldShowTabSwitchWarning =
     Boolean(latestTabSwitchViolation) &&
-    latestTabSwitchViolation?.id !== lastAcknowledgedSecurityViolationId &&
-    !fullscreenWarningOpen;
+    latestTabSwitchViolation?.id !== lastAcknowledgedSecurityViolationId;
 
   const tabSwitchSeverity: ViolationSeverity | 'medium' =
     latestTabSwitchViolation?.severity === 'high' || latestTabSwitchViolation?.severity === 'critical'
@@ -63,8 +60,7 @@ export function useStudentWarningVisibility({
 
   const shouldShowSecondaryScreenWarning =
     Boolean(latestSecondaryScreenViolation) &&
-    latestSecondaryScreenViolation?.id !== lastAcknowledgedSecondaryScreenViolationId &&
-    !fullscreenWarningOpen;
+    latestSecondaryScreenViolation?.id !== lastAcknowledgedSecondaryScreenViolationId;
 
   const latestScreenshotViolation = useMemo(() => {
     if (effectivePhase !== 'exam' || security.antiScreenshotGuardEnabled === false) {
@@ -88,8 +84,7 @@ export function useStudentWarningVisibility({
 
   const shouldShowTranslationWarning =
     Boolean(latestTranslationViolation) &&
-    latestTranslationViolation?.id !== lastAcknowledgedTranslationViolationId &&
-    !fullscreenWarningOpen;
+    latestTranslationViolation?.id !== lastAcknowledgedTranslationViolationId;
 
   const acknowledgeTabSwitch = useCallback(() => {
     if (latestTabSwitchViolation) {

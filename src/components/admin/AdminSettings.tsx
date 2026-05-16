@@ -593,20 +593,6 @@ export function AdminSettings({ config, onChange }: AdminSettingsProps) {
               </div>
               <div className="p-6 space-y-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-6 bg-amber-50 rounded-3xl border border-amber-100">
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <p className="text-sm font-bold text-amber-900">Mandatory Fullscreen</p>
-                        <p className="text-xs text-amber-700/70 mt-1 leading-relaxed">Browser will lock to the exam tab</p>
-                      </div>
-                      <input 
-                        type="checkbox" 
-                        checked={config.security.requireFullscreen}
-                        onChange={(e) => updateConfig('security', { requireFullscreen: e.target.checked })}
-                        className="w-5 h-5 rounded-lg border-amber-300 text-amber-600 focus:ring-amber-500" 
-                      />
-                    </div>
-                  </div>
                   <div className="p-6 bg-red-50 rounded-3xl border border-red-100">
                     <div>
                       <p className="text-sm font-bold text-red-900 mb-3">Tab Switch Rule</p>

@@ -142,11 +142,6 @@ test.describe('Backend-backed builder workflow', () => {
     // Navigate to security settings
     await page.getByRole('tab', { name: 'Security' }).click();
 
-    // Configure fullscreen requirement
-    const fullscreenCheckbox = page.getByLabel('Require Fullscreen');
-    await fullscreenCheckbox.check();
-    await expect(fullscreenCheckbox).toBeChecked();
-
     // Configure tab switching detection
     const tabSwitchCheckbox = page.getByLabel('Detect Tab Switching');
     await tabSwitchCheckbox.check();

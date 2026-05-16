@@ -568,6 +568,33 @@ function countCorrectAnswers(groups: ObjectiveTracebackGroup[]): number {
   );
 }
 
+function deriveObjectiveTotalsFromTracebackGroups(groups: ObjectiveTracebackGroup[]): {
+  totalScore: number | null;
+  maxScore: number | null;
+  percentage: number | null;
+} {
+  const items = groups.flatMap((group) => group.items);
+  if (items.length === 0) {
+    return { totalScore: null, maxScore: null, percentage: null };
+  }
+
+  let totalScore = 0;
+  let maxScore = 0;
+  for (const item of items) {
+    if (item.awardedScore === null || item.awardedScore === undefined) {
+      return { totalScore: null, maxScore: null, percentage: null };
+    }
+    if (item.maxScore === null || item.maxScore === undefined) {
+      return { totalScore: null, maxScore: null, percentage: null };
+    }
+    totalScore += item.awardedScore;
+    maxScore += item.maxScore;
+  }
+
+  const percentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
+  return { totalScore, maxScore, percentage };
+}
+
 function calculateBandScore(rawScore: number, table: Record<number, number>): number {
   const sortedThresholds = Object.keys(table)
     .map(Number)
@@ -717,6 +744,10 @@ export function buildWideObjectiveExport({
     const groups = buildQuestionTracebackGroups(examState, sectionSubmission, moduleType);
     const answerMap = sectionSubmission ? extractObjectiveAnswerMap(sectionSubmission.answers) : {};
     const autoGradingResults = sectionSubmission?.autoGradingResults;
+    const derivedTotals = deriveObjectiveTotalsFromTracebackGroups(groups);
+    const derivedTotalScore = derivedTotals.totalScore ?? autoGradingResults?.totalScore ?? null;
+    const derivedMaxScore = derivedTotals.maxScore ?? autoGradingResults?.maxScore ?? null;
+    const derivedPercentage = derivedTotals.percentage ?? autoGradingResults?.percentage ?? null;
     const scoredResults = buildQuestionResultMap(autoGradingResults?.questionResults);
     const row: Record<string, unknown> = {
       examTitle: session.examTitle,
@@ -731,11 +762,11 @@ export function buildWideObjectiveExport({
       cohortName: submission.cohortName,
       section: moduleType,
       submittedAt: sectionSubmission?.submittedAt ?? submission.submittedAt,
-      totalScore: mode === 'manual' ? '' : toOptionalNumber(autoGradingResults?.totalScore),
-      maxScore: toOptionalNumber(autoGradingResults?.maxScore),
-      percentage: toOptionalNumber(autoGradingResults?.percentage),
+      totalScore: mode === 'manual' ? '' : toOptionalNumber(derivedTotalScore),
+      maxScore: toOptionalNumber(derivedMaxScore),
+      percentage: toOptionalNumber(derivedPercentage),
       correctCount: countCorrectAnswers(groups),
-      ieltsBandScore: deriveIeltsBandScore(examState, moduleType, autoGradingResults?.totalScore),
+      ieltsBandScore: deriveIeltsBandScore(examState, moduleType, derivedTotalScore),
     };
 
     for (const slot of exportSlots) {

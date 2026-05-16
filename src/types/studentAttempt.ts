@@ -33,7 +33,7 @@ export type StudentAttemptMutationType =
 export type HeartbeatEventType = 'heartbeat' | 'disconnect' | 'reconnect' | 'lost';
 
 export interface StudentPreCheckCheckResult {
-  id: 'browser' | 'javascript' | 'fullscreen' | 'storage' | 'online' | 'screen-details';
+  id: 'browser' | 'javascript' | 'storage' | 'online' | 'screen-details';
   label: string;
   message: string;
   required: boolean;

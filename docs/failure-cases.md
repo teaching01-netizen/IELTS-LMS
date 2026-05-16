@@ -30,6 +30,29 @@ Purpose: turn incidents and bug fixes into durable memory for humans and AI agen
 
 ---
 
+## 2026-05-16: Correct Answer Display Included Unreachable Variants Under ONE_WORD
+
+### Symptom
+Grading review UI could show a student's answer as `Incorrect` while also displaying a correct-answer key that appeared to include the student's exact text (e.g. student `crowd noise`, correct answer `crowd | crowd noise`).
+
+### Scope
+Admin grading/review UI correct-answer display for objective text questions (Cloze/Short Answer/Sentence Completion/Note Completion).
+
+### Root Cause
+The UI displayed all accepted-answer variants from the exam snapshot without considering the configured `answerRule` word limit. The backend enforces `ONE_WORD`/`TWO_WORDS`/`THREE_WORDS` as a hard upper bound, so multi-word variants in the key are unreachable when the rule is `ONE_WORD`.
+
+### Fix
+- Filter correct-answer display variants to those that fit within the descriptor's `answerRule` word limit (fallback to original list if none fit).
+- Block saving objective overrides that specify a word-limit scoring rule but include any text variant exceeding that limit (forces key + rule to be consistent).
+
+### Regression Protection
+- Tests: `src/components/admin/__tests__/gradingAnswerUtils.test.ts`
+- Tests: `src/components/admin/__tests__/ObjectiveOverridesPanel.test.tsx`
+- Rules/Docs updated: `docs/failure-cases.md`
+
+### Invariant
+Correct-answer display must reflect answers that can actually earn points under the configured word-limit rule.
+
 ## 2026-05-15: Objective Word Limit Treated As Exact Count
 
 ### Symptom
@@ -263,3 +286,28 @@ The anti-cheat layer blocked `dragstart` unless the event target was inside `[da
 
 ### Invariant
 Anti-cheat interaction policy must not cancel native text selection or drop gestures; integrity enforcement belongs on paste and answer-mutation paths.
+
+---
+
+## 2026-05-16: Fullscreen Anti-Cheat Removed From Student Runtime
+
+### Symptom
+Required fullscreen enforcement depended on browser fullscreen APIs from React effects and retry handlers. Those APIs are gesture-gated, so an exam could silently continue without entering fullscreen while the runtime carried extra iPad keyboard/viewport exception logic.
+
+### Scope
+Student proctoring runtime, student pre-check, builder/admin security configuration, and default exam config normalization.
+
+### Fix
+- Removed fullscreen entry/re-entry enforcement and `FULLSCREEN_EXIT` runtime counting.
+- Removed fullscreen warning overlays and fullscreen controls from builder/admin security UI.
+- Removed fullscreen API checks from student pre-check and preview pre-check snapshots.
+- Kept legacy fullscreen config keys tolerated only so old saved JSON can normalize without crashing.
+
+### Regression Protection
+- Tests: `src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx`
+- Tests: `src/components/student/__tests__/PreCheck.test.tsx`
+- Tests: `src/features/builder/components/__tests__/SecurityTab.test.tsx`
+- Tests: `src/constants/__tests__/examDefaults.test.ts`
+
+### Invariant
+Do not reintroduce browser fullscreen as an anti-cheat requirement. Integrity enforcement remains in tab-switch, secondary-screen, translation, screenshot, clipboard, audit, and threshold flows.

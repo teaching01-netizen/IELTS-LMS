@@ -86,9 +86,6 @@ async function createNewExam(page: Page, title: string, type: 'Academic' | 'Gene
           proctoringControls: { webcam: true, audio: true, screen: true },
           screenDetection: {
             detectSecondaryScreen: true,
-            fullscreen: 'required',
-            fullscreenAutoReentry: true,
-            fullscreenMaxViolations: 3,
           },
           inputProtection: { preventAutofill: true, preventAutocorrect: true },
           tabSwitchRule: 'warn',
@@ -239,9 +236,6 @@ async function configureSecurityTab(page: Page): Promise<void> {
   
   // Screen Detection
   await page.getByLabel('Detect secondary screen').check();
-  await page.getByLabel('Fullscreen required').check();
-  await page.getByLabel('Fullscreen auto reentry').check();
-  await page.getByLabel('Fullscreen max violations').fill('3');
   
   // Input Protection
   await page.getByLabel('Prevent autofill').check();

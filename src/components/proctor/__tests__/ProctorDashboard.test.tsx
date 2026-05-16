@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProctorDashboard } from '../ProctorDashboard';
 import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
@@ -91,7 +91,7 @@ describe('ProctorDashboard runtime controls', () => {
     updatedAt: '2026-01-01T00:10:00.000Z'
   };
 
-  it('disables start before a scheduled cohort is ready', () => {
+  it('keeps start disabled until a cohort is selected', () => {
     render(
       <DashboardHarness
         schedules={[baseSchedule]}
@@ -110,6 +110,37 @@ describe('ProctorDashboard runtime controls', () => {
     );
 
     expect(screen.getByRole('button', { name: /Start Exam/i })).toBeDisabled();
+  });
+
+  it('allows a proctor to force start a selected scheduled cohort before the window opens', async () => {
+    const onStartScheduledSession = vi.fn();
+    render(
+      <DashboardHarness
+        schedules={[baseSchedule]}
+        runtimeSnapshots={[]}
+        sessions={[]}
+        alerts={[]}
+        onUpdateSessions={vi.fn()}
+        onUpdateAlerts={vi.fn()}
+        onStartScheduledSession={onStartScheduledSession}
+        onPauseCohort={vi.fn()}
+        onResumeCohort={vi.fn()}
+        onEndSectionNow={vi.fn()}
+        onExtendCurrentSection={vi.fn()}
+        onCompleteExam={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
+
+    const startButton = screen.getByRole('button', { name: /Start Exam/i });
+    expect(startButton).not.toBeDisabled();
+
+    await act(async () => {
+      fireEvent.click(startButton);
+    });
+
+    expect(onStartScheduledSession).toHaveBeenCalledWith('sched-1');
   });
 
   it('shows an overrun warning when runtime extends past the scheduled window', () => {

@@ -16,10 +16,9 @@ function violation(partial: Partial<Violation>): Violation {
 describe('useStudentWarningVisibility', () => {
   it('shows tab-switch warning only in exam phase when rule is warn and not acknowledged', () => {
     const { result, rerender } = renderHook(
-      ({ phase, fullscreenOpen }: { phase: 'exam' | 'lobby'; fullscreenOpen: boolean }) =>
+      ({ phase }: { phase: 'exam' | 'lobby' }) =>
         useStudentWarningVisibility({
           effectivePhase: phase,
-          fullscreenWarningOpen: fullscreenOpen,
           violations: [violation({ id: 'tab-1', type: 'TAB_SWITCH', severity: 'critical' })],
           security: {
             tabSwitchRule: 'warn',
@@ -28,7 +27,7 @@ describe('useStudentWarningVisibility', () => {
             preventTranslation: false,
           },
         }),
-      { initialProps: { phase: 'exam', fullscreenOpen: false } },
+      { initialProps: { phase: 'exam' } },
     );
 
     expect(result.current.shouldShowTabSwitchWarning).toBe(true);
@@ -39,25 +38,7 @@ describe('useStudentWarningVisibility', () => {
     });
     expect(result.current.shouldShowTabSwitchWarning).toBe(false);
 
-    rerender({ phase: 'lobby', fullscreenOpen: false });
-    expect(result.current.shouldShowTabSwitchWarning).toBe(false);
-  });
-
-  it('hides tab-switch warning while fullscreen warning is active', () => {
-    const { result } = renderHook(() =>
-      useStudentWarningVisibility({
-        effectivePhase: 'exam',
-        fullscreenWarningOpen: true,
-        violations: [violation({ id: 'tab-1', type: 'TAB_SWITCH' })],
-        security: {
-          tabSwitchRule: 'warn',
-          detectSecondaryScreen: false,
-          antiScreenshotGuardEnabled: false,
-          preventTranslation: false,
-        },
-      }),
-    );
-
+    rerender({ phase: 'lobby' });
     expect(result.current.shouldShowTabSwitchWarning).toBe(false);
   });
 
@@ -65,7 +46,6 @@ describe('useStudentWarningVisibility', () => {
     const { result } = renderHook(() =>
       useStudentWarningVisibility({
         effectivePhase: 'exam',
-        fullscreenWarningOpen: false,
         violations: [
           violation({ id: 'screenshot-1', type: 'SCREENSHOT_ATTEMPT' }),
           violation({ id: 'translation-1', type: 'TRANSLATION_DETECTED' }),

@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ObjectiveOverridesPanel } from '../ObjectiveOverridesPanel';
 
@@ -18,6 +18,10 @@ vi.mock('../../../services/gradingService', () => ({
 }));
 
 describe('ObjectiveOverridesPanel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('loads overrides and requires a reason for PUT/DELETE', async () => {
     const { examRepository } = await import('../../../services/examRepository');
     const { gradingService } = await import('../../../services/gradingService');
@@ -108,5 +112,68 @@ describe('ObjectiveOverridesPanel', () => {
         expect.objectContaining({ reason: 'Fix key' }),
       );
     });
+  });
+
+  it('blocks saving ONE_WORD overrides when any accepted variant exceeds the word limit', async () => {
+    const { examRepository } = await import('../../../services/examRepository');
+    const { gradingService } = await import('../../../services/gradingService');
+
+    (examRepository.getVersionById as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      contentSnapshot: {
+        reading: {
+          passages: [
+            {
+              id: 'p1',
+              title: 'Passage 1',
+              blocks: [
+                {
+                  id: 'b1',
+                  type: 'SHORT_ANSWER',
+                  instruction: 'Answer',
+                  questions: [
+                    { id: 'q-reading-1', prompt: 'Keyword?', correctAnswer: 'crowd | crowd noise', answerRule: 'ONE_WORD' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        listening: { parts: [] },
+      },
+    });
+
+    (gradingService.getObjectiveOverrides as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: [],
+    });
+
+    (gradingService.upsertObjectiveOverride as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { regradeReport: { sectionsUpdated: 1 } },
+    });
+
+    render(<ObjectiveOverridesPanel scheduleId="sched-1" publishedVersionId="ver-1" />);
+
+    fireEvent.click(screen.getByText('Session Settings'));
+    await waitFor(() => {
+      expect(screen.getByText(/READING • Q1/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText(/READING • Q1/i));
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. Top (case/whitespace sensitive)'), {
+      target: { value: 'crowd | crowd noise' },
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('Why is this override needed?'), {
+      target: { value: 'Validate key' },
+    });
+
+    fireEvent.click(screen.getByText('Save override + regrade'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/exceeds the ONE_WORD limit/i)).toBeTruthy();
+    });
+    expect(gradingService.upsertObjectiveOverride).not.toHaveBeenCalled();
   });
 });

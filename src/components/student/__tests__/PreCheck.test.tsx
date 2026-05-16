@@ -48,18 +48,13 @@ describe('PreCheck', () => {
     );
   });
 
-  it('allows iPad secure mode as best-effort instead of failing browser compatibility', async () => {
+  it('does not include fullscreen checks for legacy fullscreen configs', async () => {
     Object.defineProperty(navigator, 'userAgent', {
       value:
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.0.0 Safari/604.1',
       configurable: true,
     });
     Object.defineProperty(navigator, 'maxTouchPoints', { value: 5, configurable: true });
-    Object.defineProperty(document.documentElement, 'webkitRequestFullscreen', {
-      value: vi.fn(),
-      configurable: true,
-    });
-
     const config = createDefaultConfig('Academic', 'Academic');
     config.security.requireFullscreen = true;
     config.security.detectSecondaryScreen = true;
@@ -75,11 +70,12 @@ describe('PreCheck', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     const submittedResult = onComplete.mock.calls[0]?.[0];
+    expect(submittedResult?.checks.some((check: { id: string }) => check.id === 'fullscreen')).toBe(false);
     const browserCheck = submittedResult?.checks.find(
       (check: { id: string }) => check.id === 'browser',
     );
     expect(browserCheck?.status).toBe('pass');
-    expect(browserCheck?.message).toMatch(/iPad secure mode is best-effort/i);
+    expect(browserCheck?.message).not.toMatch(/fullscreen/i);
   });
 
   it('shows submit error and allows retry', async () => {

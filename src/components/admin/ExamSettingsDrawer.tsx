@@ -1266,20 +1266,7 @@ function ExamSettingsDrawerComponent({
                   <Shield size={16} className="text-blue-500" /> Proctoring Control
                 </h3>
                 <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
-                  <label className="p-4 border-b border-gray-50 flex items-center justify-between cursor-pointer">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">Fullscreen Warning</p>
-                      <p className="text-[10px] text-gray-500">Require fullscreen and warn if candidates exit it</p>
-                    </div>
-                    <input 
-                      type="checkbox" 
-                      aria-label="Fullscreen Warning"
-                      checked={config.security.requireFullscreen}
-                      onChange={(e) => updateConfig('security', { requireFullscreen: e.target.checked })}
-                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                  </label>
-                  <div className="p-4 border-b border-gray-50 flex items-center justify-between">
+                  <div className="p-4 flex items-center justify-between">
                     <div>
                       <p className="text-sm font-semibold text-gray-900">Tab Switch Rule</p>
                       <p className="text-[10px] text-gray-500">Behavior when candidate leaves the tab</p>
@@ -1293,32 +1280,6 @@ function ExamSettingsDrawerComponent({
                       <option value="warn">Warn (3 Threshold)</option>
                       <option value="terminate">Immediate Terminate</option>
                     </select>
-                  </div>
-                  <div className="p-4 border-b border-gray-50 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">Auto Re-enter Fullscreen</p>
-                      <p className="text-[10px] text-gray-500">Automatically re-enter fullscreen on exit</p>
-                    </div>
-                    <input 
-                      type="checkbox" 
-                      checked={config.security.fullscreenAutoReentry}
-                      onChange={(e) => updateConfig('security', { fullscreenAutoReentry: e.target.checked })}
-                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="p-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">Max Fullscreen Violations</p>
-                      <p className="text-[10px] text-gray-500">Terminate after this many violations</p>
-                    </div>
-                    <input 
-                      type="number" 
-                      min={1}
-                      max={10}
-                      value={config.security.fullscreenMaxViolations}
-                      onChange={(e) => updateConfig('security', { fullscreenMaxViolations: parseInt(e.target.value) })}
-                      className="w-16 px-2 py-1 border border-gray-200 rounded text-sm text-right outline-none focus:ring-2 focus:ring-blue-100"
-                    />
                   </div>
                 </div>
               </section>

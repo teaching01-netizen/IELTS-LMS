@@ -325,8 +325,10 @@ describe('gradingReviewUtils', () => {
       },
       autoGradingResults: {
         generatedAt: new Date().toISOString(),
-        totalScore: 1,
-        maxScore: 1,
+        // Stored totals may be wrong when grouped scoring slots were computed as 1-per-blank.
+        // Export paths should derive grouped totals from the question slots instead.
+        totalScore: 2,
+        maxScore: 2,
         percentage: 100,
         questionResults: [
           createQuestionResult('q-1:b-1', true, 1),
@@ -376,6 +378,9 @@ describe('gradingReviewUtils', () => {
     expect(wideAuto.rows[0]?.['answer:q-1:b-1']).toBe('graph');
     expect(wideAuto.rows[0]?.['answer:q-1:b-2']).toBe('cluster');
     expect(wideAuto.rows[0]?.[`scoreGroup:${groupedSlotKey}`]).toBe(1);
+    expect(wideAuto.rows[0]?.['totalScore']).toBe(1);
+    expect(wideAuto.rows[0]?.['maxScore']).toBe(1);
+    expect(wideAuto.rows[0]?.['percentage']).toBe(100);
 
     const wideManual = buildWideObjectiveExport({
       session: { sessionId: 'session-1', examTitle: 'Exam' },

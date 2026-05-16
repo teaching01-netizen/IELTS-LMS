@@ -1,6 +1,7 @@
 import React from 'react';
 import { ChevronRight, Clock, MessageSquare, Users } from 'lucide-react';
 import { ExamGroup } from '../../types';
+import { examDeliveryService } from '../../services/examDeliveryService';
 
 interface ExamGroupCardProps {
   group: ExamGroup;
@@ -22,7 +23,7 @@ export const ExamGroupCard = React.memo(function ExamGroupCard({ group, onClick,
           <h3 className="text-lg font-semibold text-slate-950">{group.examTitle}</h3>
           <p className="mt-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
             <Clock size={12} />
-            {new Date(group.scheduledStartTime).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}
+            {examDeliveryService.formatExamGroupScheduledStartTime(group.scheduledStartTime)}
           </p>
           <p className="mt-1 text-sm text-slate-500">Cohort {group.cohortName}</p>
         </div>

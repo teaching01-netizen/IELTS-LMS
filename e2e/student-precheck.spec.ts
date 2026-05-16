@@ -44,7 +44,6 @@ test.describe('Student system compatibility pre-check', () => {
     if (preCheckVisible) {
       await expect(page.getByText('Browser compatibility')).toBeVisible();
       await expect(page.getByText('JavaScript runtime')).toBeVisible();
-      await expect(page.getByText('Fullscreen API')).toBeVisible();
       await expect(page.getByText('Secure local storage')).toBeVisible();
       await expect(page.getByText('Network connectivity')).toBeVisible();
       await expect(page.getByText('Secondary screen detection')).toBeVisible();

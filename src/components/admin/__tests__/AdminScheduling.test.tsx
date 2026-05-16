@@ -1,15 +1,21 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AdminScheduling } from '../AdminScheduling';
 import { examRepository } from '../../../services/examRepository';
+import { examDeliveryService } from '../../../services/examDeliveryService';
 import { createDefaultConfig } from '../../../constants/examDefaults';
 import { SCHEMA_VERSION, type ExamEntity, type ExamVersion } from '../../../types/domain';
 
 describe('AdminScheduling', () => {
-  it('blocks schedule creation when the session window is shorter than planned duration', async () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('creates a cohort without manual schedule window fields and derives the internal window from the exam plan', async () => {
     localStorage.clear();
     const config = createDefaultConfig('Academic', 'Academic');
+    const plan = examDeliveryService.buildSectionPlan(config);
     const exam: ExamEntity = {
       id: 'exam-1',
       slug: 'mock-exam',
@@ -55,7 +61,7 @@ describe('AdminScheduling', () => {
 
     const onCreateSchedule = vi.fn();
 
-    const { container } = render(
+    render(
       <AdminScheduling
         schedules={[]}
         exams={[]}
@@ -71,20 +77,24 @@ describe('AdminScheduling', () => {
 
     await screen.findByText(/v1 \(ver-1\)/i);
 
-    const [startInput, endInput] = Array.from(
-      container.querySelectorAll('input[type="datetime-local"]')
-    ) as HTMLInputElement[];
+    expect(screen.queryByLabelText(/start time/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/end time/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/window length/i)).not.toBeInTheDocument();
 
-    fireEvent.change(startInput, { target: { value: '2026-01-01T00:00' } });
-    fireEvent.change(endInput, { target: { value: '2026-01-01T01:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
 
-    await waitFor(() => {
-      expect(screen.getByText('Window validation failed')).toBeTruthy();
-    });
-
-    expect(screen.getByText(/Scheduled window must be at least/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Create Schedule' })).toBeDisabled();
-    expect(onCreateSchedule).not.toHaveBeenCalled();
+    await waitFor(() => expect(onCreateSchedule).toHaveBeenCalledTimes(1));
+    const createdSchedule = onCreateSchedule.mock.calls[0][0];
+    expect(createdSchedule).toEqual(
+      expect.objectContaining({
+        plannedDurationMinutes: plan.plannedDurationMinutes,
+        deliveryMode: 'proctor_start',
+        autoStart: false,
+      }),
+    );
+    expect(Date.parse(createdSchedule.endTime) - Date.parse(createdSchedule.startTime)).toBe(
+      plan.plannedDurationMinutes * 60_000,
+    );
   });
 
   it('opens create schedule modal with the routed exam preselected', async () => {

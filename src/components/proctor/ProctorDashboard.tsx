@@ -9,7 +9,6 @@ import { PresenceIndicator } from './PresenceIndicator';
 import { StudentCard } from './StudentCard';
 import { StudentDetailPanel, type StudentDrawerTab } from './StudentDetailPanel';
 import { ExamGroupCard } from './ExamGroupCard';
-import { isScheduleReadyToStart } from '../../utils/scheduleUtils';
 import { examRepository } from '../../services/examRepository';
 import { examDeliveryService } from '../../services/examDeliveryService';
 import { backendPost } from '../../services/backendBridge';
@@ -176,7 +175,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                 : schedule.status === 'cancelled'
                   ? 'cancelled'
                   : 'not_started'),
-          isReadyToStart: isScheduleReadyToStart(schedule, runtime, now),
+          isReadyToStart: examDeliveryService.isScheduleReadyToStart(schedule, runtime, now),
           currentLiveSection: runtime?.currentSectionKey ?? null,
           studentCount,
           activeCount,
@@ -484,12 +483,11 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     });
   };
 
-  const controlDisabled = !selectedScheduleId;
+  const controlDisabled = !selectedScheduleId || !selectedGroup;
   const selectedRuntimeStatus = selectedGroup?.runtimeStatus ?? 'not_started';
   const controlsBusy = pendingCohortAction !== null;
   const startDisabled =
     controlDisabled ||
-    !selectedGroup?.isReadyToStart ||
     selectedRuntimeStatus === 'live' ||
     selectedRuntimeStatus === 'paused' ||
     selectedRuntimeStatus === 'completed' ||
@@ -498,7 +496,6 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const getStartDisabledReason = (): string | undefined => {
     if (controlsBusy) return 'An action is already in progress.';
     if (controlDisabled) return 'Select a cohort to enable controls.';
-    if (!selectedGroup?.isReadyToStart) return 'This cohort is not ready to start yet.';
     if (selectedRuntimeStatus === 'live') return 'The exam is already live.';
     if (selectedRuntimeStatus === 'paused') return 'The exam is paused; resume or complete it instead.';
     if (selectedRuntimeStatus === 'completed') return 'The exam has already been completed.';

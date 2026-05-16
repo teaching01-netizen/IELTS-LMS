@@ -50,6 +50,46 @@ function toTextLines(value: string): string[] {
     .filter(Boolean);
 }
 
+function wordLimitFromScoringRule(rule: string): number | null {
+  switch (rule) {
+    case 'ONE_WORD':
+      return 1;
+    case 'TWO_WORDS':
+      return 2;
+    case 'THREE_WORDS':
+      return 3;
+    default:
+      return null;
+  }
+}
+
+function splitVariants(value: string): string[] {
+  if (!value.trim()) return [];
+  return value
+    .split('|')
+    .map((variant) => variant.trim())
+    .filter(Boolean);
+}
+
+function countWords(value: string): number {
+  return value.split(/\s+/).filter(Boolean).length;
+}
+
+function findFirstVariantOverWordLimit(input: { correctAnswer?: string; acceptedAnswers?: string[] }, maxWords: number): string | null {
+  const variants: string[] = [];
+  for (const line of input.acceptedAnswers ?? []) {
+    variants.push(...splitVariants(line));
+  }
+  if (variants.length === 0 && input.correctAnswer) {
+    variants.push(...splitVariants(input.correctAnswer));
+  }
+
+  for (const variant of variants) {
+    if (countWords(variant) > maxWords) return variant;
+  }
+  return null;
+}
+
 function getDefaultScoringRule(descriptor: StudentQuestionDescriptor): string {
   if (descriptor.isSubAnswerTreeLeaf) {
     return 'sub_answer_tree';
@@ -217,6 +257,20 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
     if (!form.reason.trim()) {
       setMutationError('Reason is required.');
       return;
+    }
+
+    const maxWords = wordLimitFromScoringRule(form.scoringRule);
+    if (maxWords && (!form.correctOptionIds || form.correctOptionIds.length === 0)) {
+      const offending = findFirstVariantOverWordLimit(
+        { correctAnswer: form.correctAnswer ?? undefined, acceptedAnswers: form.acceptedAnswers ?? [] },
+        maxWords,
+      );
+      if (offending) {
+        setMutationError(
+          `Answer variant "${offending}" exceeds the ${form.scoringRule} limit. Increase the scoring rule or remove the variant.`,
+        );
+        return;
+      }
     }
 
     setMutating(true);

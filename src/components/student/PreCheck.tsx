@@ -13,7 +13,7 @@ import type {
 } from '../../types/studentAttempt';
 import { Button } from '../ui/Button';
 import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
-import { isAppleMobileDevice } from './fullscreen';
+import { isAppleMobileDevice } from './appleMobileDevice';
 
 interface PreCheckProps {
   config?: ExamConfig | undefined;
@@ -101,10 +101,6 @@ function runChecks(config?: ExamConfig): StudentPreCheckResult {
   const mobileDevice = isMobileDevice(userAgent);
   const appleMobileDevice = isAppleMobileDevice(userAgent);
   const policy = getStudentIntegritySecurityPolicy(config);
-  const fullscreenRequired = config?.security.requireFullscreen ?? false;
-  const fullscreenSupported =
-    typeof document.documentElement.requestFullscreen === 'function' ||
-    'webkitRequestFullscreen' in document.documentElement;
   const storageAvailable = canUseStorage();
   const screenDetailsSupported = 'getScreenDetails' in window;
   const javascriptReady =
@@ -112,9 +108,7 @@ function runChecks(config?: ExamConfig): StudentPreCheckResult {
     typeof window.clearInterval === 'function';
   const heartbeatReady = javascriptReady && navigator.onLine;
 
-  const secureModeEnabled = Boolean(
-    config?.security.requireFullscreen || config?.security.detectSecondaryScreen,
-  );
+  const secureModeEnabled = Boolean(config?.security.detectSecondaryScreen);
   const mobileAllowed = !secureModeEnabled || appleMobileDevice;
   const mobileCompatibilityOk = !mobileDevice || mobileAllowed;
 
@@ -130,12 +124,12 @@ function runChecks(config?: ExamConfig): StudentPreCheckResult {
     label: 'Browser compatibility',
     message: browserSupported
       ? appleMobileDevice && secureModeEnabled
-        ? 'iPad secure mode is best-effort; fullscreen may need to be restored after typing or scrolling.'
+        ? 'iPad secure mode is best-effort; external display verification may be limited.'
         : `${browser.family.toUpperCase()} ${browser.version ?? ''}`.trim()
       : appleMobileDevice && secureModeEnabled
-        ? 'iPad secure mode is best-effort; fullscreen may need to be restored after typing or scrolling.'
+        ? 'iPad secure mode is best-effort; external display verification may be limited.'
         : mobileDevice && !mobileAllowed
-        ? 'Mobile/iPad is supported only in non-secure mode. Disable fullscreen and secondary screen detection, or use a computer.'
+        ? 'Mobile/iPad is supported only in non-secure mode. Disable secondary screen detection, or use a computer.'
         : 'Use Chrome 111+, Edge, Safari, or Firefox.',
     required: true,
     status: browserSupported ? 'pass' : 'fail',
@@ -151,19 +145,6 @@ function runChecks(config?: ExamConfig): StudentPreCheckResult {
     required: true,
     status: javascriptReady ? 'pass' : 'fail',
     icon: Shield,
-  };
-
-  const fullscreenCheck: CheckItem = {
-    id: 'fullscreen',
-    label: 'Fullscreen API',
-    message: !fullscreenRequired
-      ? 'Fullscreen is optional for this exam.'
-      : fullscreenSupported
-        ? 'Fullscreen is available.'
-        : 'This browser cannot enforce fullscreen mode.',
-    required: fullscreenRequired,
-    status: !fullscreenRequired || fullscreenSupported ? 'pass' : 'fail',
-    icon: Monitor,
   };
 
   const storageCheck: CheckItem = {
@@ -223,7 +204,6 @@ function runChecks(config?: ExamConfig): StudentPreCheckResult {
     checks: [
       browserCheck,
       javascriptCheck,
-      fullscreenCheck,
       storageCheck,
       onlineCheck,
       screenCheck,

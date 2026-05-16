@@ -11,7 +11,6 @@ import { StudentPostExamView } from './StudentPostExamView';
 import { SubmitConfirmation } from './SubmitConfirmation';
 import { WarningOverlay } from './WarningOverlay';
 import { useStudentAutoSubmitBoundary } from './useStudentAutoSubmitBoundary';
-import { requestStudentFullscreen } from './fullscreen';
 import {
   canDecreaseStudentPassageReadability,
   canIncreaseStudentPassageReadability,
@@ -20,7 +19,6 @@ import {
 } from './accessibilityScale';
 import { defaultStudentHighlightColor } from './highlightPalette';
 import { StudentHighlightSelectionManagerProvider } from './highlightSelectionManager';
-import { useStudentFullscreenWarning } from './useStudentFullscreenWarning';
 import { useStudentSubmissionOrchestration } from './useStudentSubmissionOrchestration';
 import { useStudentTabletMode } from './tabletMode';
 import { shouldOfferTimeExtension } from './timeExtensionPolicy';
@@ -295,17 +293,6 @@ export function StudentApp({
   }, [latestPendingWarning]);
 
   const {
-    fullscreenWarningOpen,
-    fullscreenWarningMessage,
-    fullscreenWarningSeverity,
-  } = useStudentFullscreenWarning({
-    effectivePhase,
-    showWarnings: examState.config.progression.showWarnings,
-    requireFullscreen: examState.config.security.requireFullscreen,
-    violations: runtimeState.violations,
-  });
-
-  const {
     latestTabSwitchViolation,
     shouldShowTabSwitchWarning,
     tabSwitchSeverity,
@@ -321,7 +308,6 @@ export function StudentApp({
     acknowledgeTranslation,
   } = useStudentWarningVisibility({
     effectivePhase,
-    fullscreenWarningOpen,
     violations: runtimeState.violations,
     security: {
       tabSwitchRule: examState.config.security.tabSwitchRule,
@@ -447,17 +433,6 @@ export function StudentApp({
       document.removeEventListener('touchcancel', handleTouchEnd, true);
     };
   }, [effectivePhase, tabletMode]);
-
-  const requestFullscreenFromOverlay = useMemo(() => {
-    return {
-      label: 'Return to Fullscreen',
-      onClick: () => {
-        void requestStudentFullscreen().catch(() => {
-          // Best-effort only.
-        });
-      },
-    };
-  }, []);
 
   const shouldShowTimeExtension = shouldOfferTimeExtension({
     config: examState.config,
@@ -849,19 +824,6 @@ export function StudentApp({
           showCountdown={false}
           onAcknowledge={() => {
             acknowledgeSecondaryScreen();
-          }}
-        />
-      ) : null}
-
-      {examState.config.progression.showWarnings ? (
-        <WarningOverlay
-          isOpen={fullscreenWarningOpen}
-          severity={fullscreenWarningSeverity}
-          message={fullscreenWarningMessage}
-          showCountdown={false}
-          actionButton={requestFullscreenFromOverlay}
-          onAcknowledge={() => {
-            requestFullscreenFromOverlay.onClick();
           }}
         />
       ) : null}

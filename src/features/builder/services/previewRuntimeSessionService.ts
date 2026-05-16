@@ -109,13 +109,6 @@ function createPrecheckPayload() {
         status: 'pass' as const,
       },
       {
-        id: 'fullscreen' as const,
-        label: 'Fullscreen API',
-        message: 'Preview runtime precheck bypass.',
-        required: false,
-        status: 'pass' as const,
-      },
-      {
         id: 'storage' as const,
         label: 'Secure local storage',
         message: 'Preview runtime precheck bypass.',

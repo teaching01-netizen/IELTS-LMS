@@ -233,7 +233,7 @@ export async function completePreCheckIfPresent(page: Page) {
     await expect(continueButton).toBeEnabled({ timeout: 60_000 });
     const stepBefore = (await stepIndicator.textContent().catch(() => ''))?.trim() ?? '';
 
-    // In production, a transient fullscreen/permission overlay can intercept pointer events.
+    // In production, a transient permission overlay can intercept pointer events.
     // Force-click to progress once the button is enabled.
     await continueButton.click({ force: true });
 

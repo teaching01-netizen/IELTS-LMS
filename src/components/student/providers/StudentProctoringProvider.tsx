@@ -8,11 +8,7 @@ import React, {
 } from 'react';
 import { saveStudentAuditEvent } from '@services/studentAuditService';
 import { ExamConfig, ViolationSeverity } from '../../../types';
-import {
-  getFullscreenElement,
-  isAppleMobileDevice,
-  requestStudentFullscreen,
-} from '../fullscreen';
+import { isAppleMobileDevice } from '../appleMobileDevice';
 import { useStudentAttempt } from './StudentAttemptProvider';
 import { useStudentRuntime } from './StudentRuntimeProvider';
 
@@ -90,8 +86,6 @@ export function ProctoringProvider({
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
   const shouldPreventTranslation = config.security.preventTranslation !== false;
   const cooldownByTypeRef = useRef<Record<string, number>>({});
-  const fullscreenReentryAttempts = useRef(0);
-  const fullscreenEntryAttemptedRef = useRef(false);
   const viewportBaselineHeightRef = useRef<number>(getViewportHeight());
   const defaultViolationCooldownMs = 5_000;
   const secondaryScreenViolationCooldownMs = 15_000;
@@ -117,7 +111,7 @@ export function ProctoringProvider({
     const lastViolationAt = cooldownByTypeRef.current[type] ?? 0;
 
     const violationCooldownMs =
-      type === 'TAB_SWITCH' || type === 'FULLSCREEN_EXIT'
+      type === 'TAB_SWITCH'
         ? 0
         : type === 'SECONDARY_SCREEN'
           ? secondaryScreenViolationCooldownMs
@@ -265,28 +259,6 @@ export function ProctoringProvider({
     scheduleId,
   ]);
 
-  const requestFullscreen = useCallback(async (): Promise<boolean> => {
-    try {
-      return await requestStudentFullscreen();
-    } catch {
-      return false;
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!enabled || runtimeState.phase !== 'exam' || !config.security.requireFullscreen) {
-      fullscreenEntryAttemptedRef.current = false;
-      return;
-    }
-
-    if (getFullscreenElement() || fullscreenEntryAttemptedRef.current) {
-      return;
-    }
-
-    fullscreenEntryAttemptedRef.current = true;
-    void requestFullscreen();
-  }, [config.security.requireFullscreen, enabled, requestFullscreen, runtimeState.phase]);
-
   useEffect(() => {
     const translateMetaId = 'student-notranslate-meta';
     const root = document.documentElement;
@@ -433,10 +405,7 @@ export function ProctoringProvider({
 
     let tabSwitchDebounceTimer: number | null = null;
     let lastTabSwitchTime = 0;
-    let fullscreenReentryTimer: number | null = null;
     let secondaryScreenCheckTimer: number | null = null;
-    let fullscreenExitDeferTimer: number | null = null;
-    let fullscreenExitDeferStartedAt = 0;
     let closeSignalAt = 0;
     let lastViewportResizeAt = 0;
 
@@ -445,11 +414,7 @@ export function ProctoringProvider({
     const visibilityCloseCorrelationDelayMs = 500;
     const tabSwitchDedupeWindowMs = 300;
     const secondaryScreenCheckIntervalMs = 3_000;
-    const fullscreenExitDeferCheckDelayMs = 400;
-    const fullscreenExitMaxDeferMs = 8_000;
-    const fullscreenGestureAttemptCooldownMs = 1_500;
-    const fullscreenViewportSettleMs = 1_000;
-    let lastFullscreenGestureAttemptAt = 0;
+    const viewportSettleMs = 1_000;
 
     const recordCloseSignal = (eventType: string) => {
       if (runtimeState.phase !== 'exam') {
@@ -546,14 +511,6 @@ export function ProctoringProvider({
 
     const isIosWebKit = isAppleMobileDevice(navigator.userAgent);
 
-    const clearFullscreenExitDefer = () => {
-      if (fullscreenExitDeferTimer) {
-        window.clearTimeout(fullscreenExitDeferTimer);
-        fullscreenExitDeferTimer = null;
-      }
-      fullscreenExitDeferStartedAt = 0;
-    };
-
     const isKeyboardLikelyOpen = () => {
       const baseline = viewportBaselineHeightRef.current;
       const current = getViewportHeight();
@@ -567,7 +524,7 @@ export function ProctoringProvider({
       }
 
       const focusedTextInput = isTextInputElement(document.activeElement);
-      const viewportRecentlyChanged = Date.now() - lastViewportResizeAt < fullscreenViewportSettleMs;
+      const viewportRecentlyChanged = Date.now() - lastViewportResizeAt < viewportSettleMs;
 
       return focusedTextInput || isKeyboardLikelyOpen() || viewportRecentlyChanged;
     };
@@ -586,154 +543,6 @@ export function ProctoringProvider({
       }, closeSignalDelayMs);
     };
 
-    const shouldDeferFullscreenExit = () => {
-      if (!isIosWebKit) {
-        return false;
-      }
-
-      const focusedTextInput = isTextInputElement(document.activeElement);
-      const viewportRecentlyChanged = Date.now() - lastViewportResizeAt < fullscreenViewportSettleMs;
-      return focusedTextInput || isKeyboardLikelyOpen() || viewportRecentlyChanged;
-    };
-
-    const handleFullscreenChange = async (options: { forceEnforce?: boolean } = {}) => {
-      if (runtimeState.phase !== 'exam' || !config.security.requireFullscreen) {
-        return;
-      }
-
-      if (getFullscreenElement()) {
-        fullscreenReentryAttempts.current = 0;
-        clearFullscreenExitDefer();
-        const currentHeight = getViewportHeight();
-        viewportBaselineHeightRef.current = Math.max(viewportBaselineHeightRef.current, currentHeight);
-        return;
-      }
-
-      if (!options.forceEnforce && shouldDeferFullscreenExit()) {
-        if (!fullscreenExitDeferStartedAt) {
-          fullscreenExitDeferStartedAt = Date.now();
-        }
-
-        if (fullscreenExitDeferTimer) {
-          window.clearTimeout(fullscreenExitDeferTimer);
-        }
-
-        fullscreenExitDeferTimer = window.setTimeout(() => {
-          fullscreenExitDeferTimer = null;
-
-          if (getFullscreenElement()) {
-            clearFullscreenExitDefer();
-            return;
-          }
-
-          const elapsed = Date.now() - fullscreenExitDeferStartedAt;
-          if (shouldDeferFullscreenExit() && elapsed < fullscreenExitMaxDeferMs) {
-            // Keep deferring until the keyboard/focus settles or we hit the cap.
-            void handleFullscreenChange();
-            return;
-          }
-
-          clearFullscreenExitDefer();
-          void handleFullscreenChange({ forceEnforce: true });
-        }, fullscreenExitDeferCheckDelayMs);
-
-        return;
-      }
-
-      const projectedViolationCount = runtimeState.fullscreenViolationCount + 1;
-
-      if (projectedViolationCount >= config.security.fullscreenMaxViolations) {
-        handleViolation(
-          'FULLSCREEN_EXIT',
-          'Maximum fullscreen violations exceeded. Exam terminated.',
-          'critical',
-        );
-        return;
-      }
-
-      handleViolation(
-        'FULLSCREEN_EXIT',
-        config.security.fullscreenAutoReentry
-          ? 'Fullscreen mode was exited. Please return to fullscreen to continue.'
-          : 'You have exited fullscreen mode. The examination must be taken in fullscreen.',
-        'high',
-      );
-
-      if (!config.security.fullscreenAutoReentry) {
-        return;
-      }
-
-      const attemptReentry = async (attempt: number): Promise<void> => {
-        if (attempt >= 3) {
-          void saveStudentAuditEvent(
-            scheduleId,
-            'VIOLATION_DETECTED',
-            {
-              severity: 'high',
-              message: 'Failed to re-enter fullscreen after multiple attempts.',
-              violationType: 'FULLSCREEN_REENTRY_FAILED',
-              attemptCount: attempt,
-            },
-            attemptState.attemptId ?? undefined,
-          );
-          fullscreenReentryAttempts.current = 0;
-          return;
-        }
-
-        const success = await requestFullscreen();
-        if (success) {
-          fullscreenReentryAttempts.current = 0;
-          return;
-        }
-
-        fullscreenReentryAttempts.current = attempt + 1;
-        fullscreenReentryTimer = window.setTimeout(() => {
-          void attemptReentry(attempt + 1);
-        }, 1_000 * (attempt + 1));
-      };
-
-      await attemptReentry(0);
-    };
-
-    const handleFullscreenChangeEvent = () => {
-      void handleFullscreenChange();
-    };
-
-    const attemptFullscreenOnGesture = (event: PointerEvent | TouchEvent) => {
-      if (
-        runtimeState.phase !== 'exam' ||
-        !config.security.requireFullscreen ||
-        !config.security.fullscreenAutoReentry
-      ) {
-        return;
-      }
-
-      if (!isIosWebKit) {
-        return;
-      }
-
-      if (getFullscreenElement()) {
-        return;
-      }
-
-      const now = Date.now();
-      if (now - lastFullscreenGestureAttemptAt < fullscreenGestureAttemptCooldownMs) {
-        return;
-      }
-      lastFullscreenGestureAttemptAt = now;
-      void requestFullscreen();
-    };
-
-    const handleFocusOut = () => {
-      if (runtimeState.phase !== 'exam' || !config.security.requireFullscreen) {
-        return;
-      }
-
-      if (fullscreenExitDeferStartedAt) {
-        void handleFullscreenChange();
-      }
-    };
-
     const handleViewportResize = () => {
       if (!isIosWebKit) {
         return;
@@ -744,25 +553,13 @@ export function ProctoringProvider({
       if (!isTextInputElement(document.activeElement) && currentHeight > viewportBaselineHeightRef.current) {
         viewportBaselineHeightRef.current = currentHeight;
       }
-
-      if (fullscreenExitDeferStartedAt && !isKeyboardLikelyOpen()) {
-        void handleFullscreenChange();
-      }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
     window.addEventListener('pagehide', handlePageHide);
     window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('fullscreenchange', handleFullscreenChangeEvent);
-    document.addEventListener(
-      'webkitfullscreenchange' as unknown as 'fullscreenchange',
-      handleFullscreenChangeEvent,
-    );
-    document.addEventListener('focusout', handleFocusOut, true);
     window.visualViewport?.addEventListener('resize', handleViewportResize);
-    document.addEventListener('pointerup', attemptFullscreenOnGesture, true);
-    document.addEventListener('touchend', attemptFullscreenOnGesture, true);
 
     if (runtimeState.phase === 'exam' && config.security.detectSecondaryScreen) {
       secondaryScreenCheckTimer = window.setInterval(() => {
@@ -775,23 +572,9 @@ export function ProctoringProvider({
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('fullscreenchange', handleFullscreenChangeEvent);
-      document.removeEventListener(
-        'webkitfullscreenchange' as unknown as 'fullscreenchange',
-        handleFullscreenChangeEvent,
-      );
-      document.removeEventListener('focusout', handleFocusOut, true);
       window.visualViewport?.removeEventListener('resize', handleViewportResize);
-      document.removeEventListener('pointerup', attemptFullscreenOnGesture, true);
-      document.removeEventListener('touchend', attemptFullscreenOnGesture, true);
       if (tabSwitchDebounceTimer) {
         window.clearTimeout(tabSwitchDebounceTimer);
-      }
-      if (fullscreenReentryTimer) {
-        window.clearTimeout(fullscreenReentryTimer);
-      }
-      if (fullscreenExitDeferTimer) {
-        window.clearTimeout(fullscreenExitDeferTimer);
       }
       if (secondaryScreenCheckTimer) {
         window.clearInterval(secondaryScreenCheckTimer);
@@ -804,9 +587,6 @@ export function ProctoringProvider({
     enabled,
     handleViolation,
     attemptState.pendingMutationCount,
-    requestFullscreen,
-    runtimeActions,
-    runtimeState.fullscreenViolationCount,
     runtimeState.phase,
     attemptState.attemptId,
     scheduleId,

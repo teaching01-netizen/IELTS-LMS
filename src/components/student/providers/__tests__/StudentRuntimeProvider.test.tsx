@@ -90,7 +90,6 @@ const mockConfig: ExamConfig = {
     overallRounding: 'nearest-0.5',
   },
   security: {
-    requireFullscreen: true,
     tabSwitchRule: 'warn',
     detectSecondaryScreen: true,
     blockClipboard: true,
@@ -98,8 +97,6 @@ const mockConfig: ExamConfig = {
     preventAutofill: true,
     preventAutocorrect: true,
     preventTranslation: true,
-    fullscreenAutoReentry: true,
-    fullscreenMaxViolations: 3,
     proctoringFlags: {
       webcam: true,
       audio: true,
@@ -318,16 +315,14 @@ describe('StudentRuntimeProvider', () => {
     const { result } = renderRuntime();
 
     act(() => {
-      result.current.actions.addViolation('FULLSCREEN_EXIT', 'high', 'Exited fullscreen');
+      result.current.actions.addViolation('TAB_SWITCH', 'high', 'Tab switched');
     });
     expect(result.current.state.violations).toHaveLength(1);
-    expect(result.current.state.fullscreenViolationCount).toBe(1);
 
     act(() => {
       result.current.actions.clearViolations();
     });
     expect(result.current.state.violations).toHaveLength(0);
-    expect(result.current.state.fullscreenViolationCount).toBe(0);
   });
 
   it('advances runtime-backed modules immediately on submit', () => {

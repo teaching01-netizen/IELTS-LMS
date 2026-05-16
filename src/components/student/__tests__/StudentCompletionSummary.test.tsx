@@ -22,7 +22,6 @@ describe('Student completion summary', () => {
 
   it('shows student info and hides per-section answer counts after exam completion', async () => {
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
 
     const state: ExamState = {

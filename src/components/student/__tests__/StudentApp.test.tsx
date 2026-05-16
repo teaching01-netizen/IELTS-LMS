@@ -1789,7 +1789,7 @@ describe('StudentApp runtime-backed mode', () => {
     expect((screen.getAllByRole('radio') as HTMLInputElement[])[1]?.checked).toBe(true);
   });
 
-  it('does not render the completion screen when attempt phase is post-exam but terminal is unverified (fullscreen exit regression)', async () => {
+  it('does not render the completion screen when attempt phase is post-exam but terminal is unverified', async () => {
     vi.useFakeTimers();
 
     const runtimeSnapshot: ExamSessionRuntime = {
@@ -1849,10 +1849,10 @@ describe('StudentApp runtime-backed mode', () => {
       violations: [
         {
           id: 'violation-1',
-          type: 'FULLSCREEN_EXIT',
+          type: 'TAB_SWITCH',
           severity: 'high',
           timestamp: '2026-01-01T00:00:00.000Z',
-          description: 'Fullscreen exited',
+          description: 'Tab switched',
         },
       ],
       proctorStatus: 'active',
@@ -1907,7 +1907,7 @@ describe('StudentApp runtime-backed mode', () => {
     });
 
     expect(screen.queryByText(/Examination Complete!/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Fullscreen exited/i)).toBeInTheDocument();
+    expect(screen.getByText(/Tab switched/i)).toBeInTheDocument();
 
     vi.useRealTimers();
   });
@@ -2253,7 +2253,6 @@ describe('StudentApp runtime-backed mode', () => {
     const hiddenSpy = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
 
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.security.tabSwitchRule = 'warn';
 
@@ -2411,7 +2410,6 @@ describe('StudentApp runtime-backed mode', () => {
 
   it('shows a blocking black overlay when screenshot shortcut is detected', async () => {
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.security.tabSwitchRule = 'none';
     config.security.antiScreenshotGuardEnabled = true;
@@ -2571,7 +2569,6 @@ describe('StudentApp runtime-backed mode', () => {
 
   it('does not show screenshot blackout overlay when anti-screenshot guard is disabled', () => {
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.security.tabSwitchRule = 'none';
     config.security.antiScreenshotGuardEnabled = false;
@@ -2673,7 +2670,6 @@ describe('StudentApp runtime-backed mode', () => {
 
   it('auto-submits a runtime-backed section at 00:00 and locks the UI', async () => {
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.progression.autoSubmit = true;
 
@@ -2803,7 +2799,6 @@ describe('StudentApp runtime-backed mode', () => {
 
   it('auto-submits a runtime-backed section when loading with a server-confirmed 00:00 boundary', async () => {
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.progression.autoSubmit = true;
 
@@ -2963,7 +2958,6 @@ describe('StudentApp runtime-backed mode', () => {
     });
 
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.progression.autoSubmit = false;
     config.progression.unansweredSubmissionPolicy = 'allow';
@@ -3184,7 +3178,6 @@ describe('StudentApp runtime-backed mode', () => {
     });
 
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.progression.autoSubmit = true;
 
@@ -3408,7 +3401,6 @@ describe('StudentApp runtime-backed mode', () => {
     );
 
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.progression.autoSubmit = true;
 
@@ -3625,7 +3617,6 @@ describe('StudentApp runtime-backed mode', () => {
     window.sessionStorage.clear();
 
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.progression.autoSubmit = false;
     config.progression.unansweredSubmissionPolicy = 'block';
@@ -3735,7 +3726,6 @@ describe('StudentApp runtime-backed mode', () => {
     window.sessionStorage.clear();
 
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.progression.autoSubmit = false;
     config.progression.unansweredSubmissionPolicy = 'confirm';
@@ -3849,7 +3839,6 @@ describe('StudentApp runtime-backed mode', () => {
     window.sessionStorage.clear();
 
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.progression.autoSubmit = false;
     config.progression.unansweredSubmissionPolicy = 'allow';
@@ -3956,7 +3945,6 @@ describe('StudentApp runtime-backed mode', () => {
 
   it('shows the finish action for the final self-paced module', async () => {
     const config = createDefaultConfig('Academic', 'Academic');
-    config.security.requireFullscreen = false;
     config.security.detectSecondaryScreen = false;
     config.progression.autoSubmit = true;
     config.sections.listening.enabled = false;

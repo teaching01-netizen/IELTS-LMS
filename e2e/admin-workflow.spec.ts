@@ -158,7 +158,6 @@ test.describe('Admin workflow', () => {
 
     // Configure security settings
     await page.getByRole('button', { name: 'Security' }).click();
-    await page.getByLabel('Require Fullscreen').check();
     await page.getByLabel('Detect Tab Switching').check();
     await page.getByLabel('Low Severity Threshold').fill('5');
     await page.getByLabel('Medium Severity Threshold').fill('3');

@@ -607,7 +607,6 @@ export interface ExamConfig {
     overallRounding: 'nearest-0.5' | 'floor' | 'ceil';
   };
   security: {
-    requireFullscreen: boolean;
     tabSwitchRule: 'none' | 'warn' | 'terminate';
     detectSecondaryScreen: boolean;
     blockClipboard: boolean;
@@ -615,8 +614,12 @@ export interface ExamConfig {
     preventAutofill: boolean;
     preventAutocorrect: boolean;
     preventTranslation: boolean;
-    fullscreenAutoReentry: boolean;
-    fullscreenMaxViolations: number;
+    /** @deprecated Fullscreen anti-cheat was removed; legacy configs may still contain this key. */
+    requireFullscreen?: boolean | undefined;
+    /** @deprecated Fullscreen anti-cheat was removed; legacy configs may still contain this key. */
+    fullscreenAutoReentry?: boolean | undefined;
+    /** @deprecated Fullscreen anti-cheat was removed; legacy configs may still contain this key. */
+    fullscreenMaxViolations?: number | undefined;
     heartbeatIntervalSeconds?: number | undefined;
     heartbeatMissThreshold?: number | undefined;
     heartbeatWarningThreshold?: number | undefined;

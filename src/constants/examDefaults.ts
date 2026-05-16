@@ -394,7 +394,6 @@ const buildDefaultConfig = (
       overallRounding: 'nearest-0.5'
     },
     security: {
-      requireFullscreen: true,
       tabSwitchRule: 'warn',
       detectSecondaryScreen: true,
       blockClipboard: true,
@@ -402,8 +401,6 @@ const buildDefaultConfig = (
       preventAutofill: true,
       preventAutocorrect: true,
       preventTranslation: true,
-      fullscreenAutoReentry: true,
-      fullscreenMaxViolations: 3,
       heartbeatIntervalSeconds: 15,
       heartbeatMissThreshold: 3,
       heartbeatWarningThreshold: 2,
@@ -512,6 +509,12 @@ export const normalizeExamConfig = (config?: DeepPartial<ExamConfig>): ExamConfi
           ...config.security.severityThresholds,
         }
       : base.security.severityThresholds;
+  const {
+    requireFullscreen: _legacyRequireFullscreen,
+    fullscreenAutoReentry: _legacyFullscreenAutoReentry,
+    fullscreenMaxViolations: _legacyFullscreenMaxViolations,
+    ...normalizedSecurityOverrides
+  } = config.security ?? {};
 
   const normalized = {
     ...base,
@@ -542,7 +545,7 @@ export const normalizeExamConfig = (config?: DeepPartial<ExamConfig>): ExamConfi
     },
     security: {
       ...base.security,
-      ...config.security,
+      ...normalizedSecurityOverrides,
       antiScreenshotGuardEnabled:
         config.security?.antiScreenshotGuardEnabled ?? base.security.antiScreenshotGuardEnabled,
       proctoringFlags: {

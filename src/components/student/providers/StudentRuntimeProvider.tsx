@@ -59,7 +59,6 @@ interface RuntimeReducerState {
   submittedModules: ModuleType[];
   waitingForCohortAdvance: boolean;
   violations: Violation[];
-  fullscreenViolationCount: number;
   proctorStatus: StudentAttempt['proctorStatus'];
   proctorNote: string | null;
   submittedAt: string | null;
@@ -179,10 +178,6 @@ type RuntimeAction =
   | { type: 'terminate_exam' }
   | { type: 'transition_blocking'; reason: ManagedBlockingReason; active: boolean }
   | { type: 'set_attempt_sync_state'; state: AttemptSyncState };
-
-function countFullscreenViolations(violations: Violation[]) {
-  return violations.filter((violation) => violation.type === 'FULLSCREEN_EXIT').length;
-}
 
 function getDroppedMutationMarker(
   dropped: StudentAttempt['recovery']['lastDroppedMutations'],
@@ -404,7 +399,6 @@ function createInitialRuntimeState(
     submittedModules: [],
     waitingForCohortAdvance: false,
     violations: attemptSnapshot?.violations ?? [],
-    fullscreenViolationCount: countFullscreenViolations(attemptSnapshot?.violations ?? []),
     proctorStatus: attemptSnapshot?.proctorStatus ?? 'active',
     proctorNote: attemptSnapshot?.proctorNote ?? null,
     submittedAt: attemptSnapshot?.submittedAt ?? null,
@@ -546,7 +540,6 @@ function runtimeReducer(
         ...state,
         phase: nextPhase,
         violations: mergedViolations,
-        fullscreenViolationCount: countFullscreenViolations(mergedViolations),
         proctorStatus: nextProctorStatus,
         proctorNote: nextProctorNote,
         submittedAt: nextSubmittedAt,
@@ -623,7 +616,6 @@ function runtimeReducer(
         currentModule: nextCurrentModule,
         currentQuestionId: nextCurrentQuestionId,
         violations: mergedViolations,
-        fullscreenViolationCount: countFullscreenViolations(mergedViolations),
         proctorStatus: action.snapshot.proctorStatus,
         proctorNote: action.snapshot.proctorNote,
         submittedAt: nextSubmittedAt,
@@ -745,17 +737,12 @@ function runtimeReducer(
       return {
         ...state,
         violations: [...state.violations, newViolation],
-        fullscreenViolationCount:
-          action.violationType === 'FULLSCREEN_EXIT'
-            ? state.fullscreenViolationCount + 1
-            : state.fullscreenViolationCount,
       };
     }
     case 'clear_violations':
       return {
         ...state,
         violations: [],
-        fullscreenViolationCount: 0,
       };
     case 'terminate_exam':
       return {

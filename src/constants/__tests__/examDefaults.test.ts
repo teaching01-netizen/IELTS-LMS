@@ -150,6 +150,20 @@ describe('examDefaults standards', () => {
     expect(config.security.antiScreenshotGuardEnabled).toBe(true);
   });
 
+  it('strips deleted fullscreen anti-cheat keys from legacy configs', () => {
+    const config = normalizeExamConfig({
+      security: {
+        requireFullscreen: true,
+        fullscreenAutoReentry: true,
+        fullscreenMaxViolations: 3,
+      },
+    });
+
+    expect('requireFullscreen' in config.security).toBe(false);
+    expect('fullscreenAutoReentry' in config.security).toBe(false);
+    expect('fullscreenMaxViolations' in config.security).toBe(false);
+  });
+
   it('keeps single-task writing configs single-task after normalization', () => {
     const config = normalizeExamConfig({
       sections: {

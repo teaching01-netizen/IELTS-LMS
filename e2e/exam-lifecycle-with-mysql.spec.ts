@@ -57,9 +57,6 @@ async function createExamViaAPI(page: Page, title: string): Promise<string> {
           proctoringControls: { webcam: true, audio: true, screen: true },
           screenDetection: {
             detectSecondaryScreen: true,
-            fullscreen: 'required',
-            fullscreenAutoReentry: true,
-            fullscreenMaxViolations: 3,
           },
           inputProtection: { preventAutofill: true, preventAutocorrect: true },
           tabSwitchRule: 'warn',
@@ -355,9 +352,6 @@ test.describe('Exam Lifecycle with Real MySQL Database', () => {
             proctoringControls: { webcam: true, audio: true, screen: true },
             screenDetection: {
               detectSecondaryScreen: true,
-              fullscreen: 'required',
-              fullscreenAutoReentry: true,
-              fullscreenMaxViolations: 3,
             },
             inputProtection: { preventAutofill: true, preventAutocorrect: true },
             tabSwitchRule: 'warn',

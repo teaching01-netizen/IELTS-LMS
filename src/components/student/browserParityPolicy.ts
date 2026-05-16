@@ -1,4 +1,4 @@
-import { isAppleMobileDevice } from './fullscreen';
+import { isAppleMobileDevice } from './appleMobileDevice';
 
 export interface SplitPaneBoundsPolicy {
   minMaterialWidthPx: number;

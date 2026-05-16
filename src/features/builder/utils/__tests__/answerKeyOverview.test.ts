@@ -75,7 +75,6 @@ function baseState(): ExamState {
       delivery: { launchMode: 'proctor_start', transitionMode: 'auto_with_proctor_override', allowedExtensionMinutes: [] },
       scoring: { overallRounding: 'nearest-0.5' },
       security: {
-        requireFullscreen: false,
         tabSwitchRule: 'none',
         detectSecondaryScreen: false,
         blockClipboard: false,
@@ -83,8 +82,6 @@ function baseState(): ExamState {
         preventAutofill: true,
         preventAutocorrect: true,
         preventTranslation: false,
-        fullscreenAutoReentry: false,
-        fullscreenMaxViolations: 0,
         proctoringFlags: { webcam: false, audio: false, screen: false },
       },
     },
@@ -253,4 +250,3 @@ describe('answerKeyOverview.applyAnswerKeyEdit', () => {
     expect(tree[0].children[1].acceptedAnswers).toEqual(['two']);
   });
 });
-

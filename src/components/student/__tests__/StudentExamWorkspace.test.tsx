@@ -109,7 +109,6 @@ function renderWorkspace(module: 'reading' | 'listening' | 'writing' | 'speaking
       onResetPassageReadability={vi.fn()}
       onCloseNavigator={onCloseNavigator}
       security={createExamState().config.security ?? {
-        requireFullscreen: true,
         tabSwitchRule: 'warn',
         detectSecondaryScreen: false,
         blockClipboard: false,
@@ -117,8 +116,6 @@ function renderWorkspace(module: 'reading' | 'listening' | 'writing' | 'speaking
         preventAutofill: false,
         preventAutocorrect: false,
         preventTranslation: false,
-        fullscreenAutoReentry: false,
-        fullscreenMaxViolations: 3,
       }}
     />,
   );

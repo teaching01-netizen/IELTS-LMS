@@ -1,4 +1,4 @@
-import type { ExamSessionRuntime } from '../types/domain';
+import type { ExamSchedule, ExamSessionRuntime } from '../types/domain';
 import type { ExamConfig, ModuleType, ValidationError } from '../types';
 import { normalizeExamConfig } from '../constants/examDefaults';
 import {
@@ -29,6 +29,18 @@ export interface ScheduleWindowValidationResult {
   plannedDurationMinutes: number;
   windowMinutes: number;
   errors: ValidationError[];
+}
+
+export interface DerivedScheduleWindow {
+  startTime: string;
+  endTime: string;
+  plannedDurationMinutes: number;
+}
+
+export interface ScheduleWindowSnapshot {
+  startTime: string;
+  endTime: string;
+  plannedDurationMinutes: number;
 }
 
 export interface RuntimeMutationResult {
@@ -107,6 +119,82 @@ export class ExamDeliveryService {
       sections,
       plannedDurationMinutes: runningOffset,
     };
+  }
+
+  deriveProctorStartScheduleWindow(
+    config: ExamConfig,
+    now: Date | string = new Date(),
+  ): DerivedScheduleWindow {
+    const plan = this.buildSectionPlan(config);
+    const start = typeof now === 'string' ? new Date(now) : new Date(now.getTime());
+    const end = new Date(start.getTime() + plan.plannedDurationMinutes * 60_000);
+
+    return {
+      startTime: start.toISOString(),
+      endTime: end.toISOString(),
+      plannedDurationMinutes: plan.plannedDurationMinutes,
+    };
+  }
+
+  resolveProctorStartScheduleWindow(options: {
+    config: ExamConfig;
+    now?: Date | string;
+    existingSchedule?: ScheduleWindowSnapshot | null | undefined;
+  }): DerivedScheduleWindow {
+    if (options.existingSchedule) {
+      return {
+        startTime: options.existingSchedule.startTime,
+        endTime: options.existingSchedule.endTime,
+        plannedDurationMinutes: options.existingSchedule.plannedDurationMinutes,
+      };
+    }
+
+    return this.deriveProctorStartScheduleWindow(options.config, options.now ?? new Date());
+  }
+
+  isScheduleWindowOpen(
+    schedule: Pick<ExamSchedule, 'startTime' | 'endTime'>,
+    now: Date | string = new Date(),
+  ): boolean {
+    const nowMs = typeof now === 'string' ? toMs(now) : now.getTime();
+    const startMs = toMs(schedule.startTime);
+    const endMs = toMs(schedule.endTime);
+
+    if (nowMs == null || startMs == null || endMs == null) {
+      return false;
+    }
+
+    return nowMs >= startMs && nowMs < endMs;
+  }
+
+  isScheduleReadyToStart(
+    schedule: Pick<ExamSchedule, 'status' | 'startTime' | 'endTime'>,
+    runtime?: Pick<ExamSessionRuntime, 'status'> | null,
+    now: Date | string = new Date(),
+  ): boolean {
+    if (schedule.status !== 'scheduled') {
+      return false;
+    }
+
+    if (runtime && runtime.status !== 'not_started') {
+      return false;
+    }
+
+    return this.isScheduleWindowOpen(schedule, now);
+  }
+
+  formatExamGroupScheduledStartTime(iso: string): string {
+    const parsed = new Date(iso);
+    if (!Number.isFinite(parsed.getTime())) {
+      return 'Invalid time';
+    }
+
+    return parsed.toLocaleString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: 'short',
+    });
   }
 
   validateScheduleWindow(
