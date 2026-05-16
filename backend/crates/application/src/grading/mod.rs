@@ -3272,33 +3272,18 @@ enum ObjectiveExpectedAnswer {
 
 impl ObjectiveExpectedAnswer {
     fn matches(&self, value: &Value, scoring_rule: &str) -> bool {
+        let _ = scoring_rule;
         match self {
             Self::TextAnyOf(expected) => {
                 let values = strict_text_values(value);
                 let Some(answer) = values.first() else {
                     return false;
                 };
-                if !strict_word_count_within_limit(answer, scoring_rule) {
-                    return false;
-                }
-                expected.contains(answer)
+                expected.contains(answer.trim())
             }
             Self::ExactSet(expected) => strict_text_set(value) == *expected,
         }
     }
-}
-
-fn strict_word_count_within_limit(answer: &str, scoring_rule: &str) -> bool {
-    let max_words = match scoring_rule {
-        "ONE_WORD" => Some(1usize),
-        "TWO_WORDS" => Some(2usize),
-        "THREE_WORDS" => Some(3usize),
-        _ => None,
-    };
-    let Some(max_words) = max_words else {
-        return true;
-    };
-    answer.split_whitespace().count() <= max_words
 }
 
 fn compute_objective_auto_grading_results(
@@ -4334,6 +4319,24 @@ mod tests {
             Some("Discuss both views.")
         );
         assert_eq!(entries[1].1.get("text").and_then(Value::as_str), Some(""));
+    }
+
+    #[test]
+    fn objective_text_matches_ignores_word_limit_rules() {
+        let expected = ObjectiveExpectedAnswer::TextAnyOf(
+            ["crowd".to_owned(), "crowd noise".to_owned()]
+                .into_iter()
+                .collect(),
+        );
+        let value = Value::String("crowd noise".to_owned());
+        assert!(expected.matches(&value, "ONE_WORD"));
+    }
+
+    #[test]
+    fn objective_text_matches_trims_student_answer_before_matching() {
+        let expected = ObjectiveExpectedAnswer::TextAnyOf(["NOT GIVEN".to_owned()].into_iter().collect());
+        let value = Value::String("NOT GIVEN   ".to_owned());
+        assert!(expected.matches(&value, "ONE_WORD"));
     }
 
     #[test]

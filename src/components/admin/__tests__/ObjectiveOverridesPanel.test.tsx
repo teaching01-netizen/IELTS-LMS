@@ -114,7 +114,7 @@ describe('ObjectiveOverridesPanel', () => {
     });
   });
 
-  it('auto-upgrades scoringRule when answer key variants exceed the selected word limit', async () => {
+  it('uses exact_match scoringRule for text overrides even when keys include multi-word variants', async () => {
     const { examRepository } = await import('../../../services/examRepository');
     const { gradingService } = await import('../../../services/gradingService');
 
@@ -175,8 +175,55 @@ describe('ObjectiveOverridesPanel', () => {
       expect(gradingService.upsertObjectiveOverride).toHaveBeenCalledWith(
         'sched-1',
         'q-reading-1',
-        expect.objectContaining({ scoringRule: 'TWO_WORDS' }),
+        expect.objectContaining({ scoringRule: 'exact_match' }),
       );
     });
+  });
+
+  it('defaults TFNG overrides to exact_match even if legacy answerRule fields exist', async () => {
+    const { examRepository } = await import('../../../services/examRepository');
+    const { gradingService } = await import('../../../services/gradingService');
+
+    (examRepository.getVersionById as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      contentSnapshot: {
+        reading: {
+          passages: [
+            {
+              id: 'p1',
+              title: 'Passage 1',
+              blocks: [
+                {
+                  id: 'b1',
+                  type: 'TFNG',
+                  instruction: 'Answer',
+                  // Legacy content may include answerRule, but TFNG should still grade as exact match.
+                  answerRule: 'ONE_WORD',
+                  mode: 'TFNG',
+                  questions: [{ id: 'q-reading-1', statement: 'Statement', correctAnswer: 'NOT GIVEN', answerRule: 'ONE_WORD' }],
+                },
+              ],
+            },
+          ],
+        },
+        listening: { parts: [] },
+      },
+    });
+
+    (gradingService.getObjectiveOverrides as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: [],
+    });
+
+    render(<ObjectiveOverridesPanel scheduleId="sched-1" publishedVersionId="ver-1" />);
+
+    fireEvent.click(screen.getByText('Session Settings'));
+    await waitFor(() => {
+      expect(screen.getByText(/READING • Q1/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText(/READING • Q1/i));
+
+    const scoringRuleSelect = screen.getByDisplayValue('exact_match');
+    expect(scoringRuleSelect).toBeTruthy();
   });
 });

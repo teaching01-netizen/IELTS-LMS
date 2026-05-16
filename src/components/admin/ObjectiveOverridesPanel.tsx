@@ -110,6 +110,20 @@ function getDefaultScoringRule(descriptor: StudentQuestionDescriptor): string {
   }
 
   const { block, question } = descriptor;
+  if (block.type === 'TFNG') {
+    return 'exact_match';
+  }
+  if (
+    block.type === 'CLOZE'
+    || block.type === 'SHORT_ANSWER'
+    || block.type === 'SENTENCE_COMPLETION'
+    || block.type === 'NOTE_COMPLETION'
+    || block.type === 'TABLE_COMPLETION'
+    || block.type === 'DIAGRAM_LABELING'
+    || block.type === 'FLOW_CHART'
+  ) {
+    return 'exact_match';
+  }
   const maybeRule =
     question && typeof (question as { answerRule?: unknown }).answerRule === 'string'
       ? String((question as { answerRule?: string }).answerRule)

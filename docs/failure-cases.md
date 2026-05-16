@@ -30,6 +30,28 @@ Purpose: turn incidents and bug fixes into durable memory for humans and AI agen
 
 ---
 
+## 2026-05-16: Objective Text Grading Ignores Word-Limit Rules
+
+### Symptom
+Objective text questions could be marked `Incorrect` even when the student's answer appeared in the answer key variants (e.g. `crowd | crowd noise`), because the configured scoring rule was `ONE_WORD`.
+
+### Scope
+Backend objective auto-grading for text answers (Reading/Listening), plus schedule-scoped overrides and regrade/backfill flows.
+
+### Root Cause
+Word-limit scoring rules (`ONE_WORD`/`TWO_WORDS`/`THREE_WORDS`) were enforced during grading, but many legacy keys and overrides contain multi-word variants (including `NOT GIVEN`). This created unreachable key variants and widespread grading confusion.
+
+### Fix
+- Grade objective text answers by exact OR-match against answer-key variants and ignore word-limit rules for correctness.
+- Trim student answers before matching to avoid invisible trailing/leading whitespace mismatches.
+
+### Regression Protection
+- Tests: `backend/crates/application/src/grading/mod.rs`
+- Rules/Docs updated: `docs/failure-cases.md`
+
+### Invariant
+For objective text answers, `|` variants are logical OR and must not be invalidated by word-limit scoring rules.
+
 ## 2026-05-16: Correct Answer Display Included Unreachable Variants Under ONE_WORD
 
 ### Symptom
@@ -39,7 +61,7 @@ Grading review UI could show a student's answer as `Incorrect` while also displa
 Admin grading/review UI correct-answer display for objective text questions (Cloze/Short Answer/Sentence Completion/Note Completion).
 
 ### Root Cause
-The UI displayed all accepted-answer variants from the exam snapshot without considering the configured `answerRule` word limit. The backend enforces `ONE_WORD`/`TWO_WORDS`/`THREE_WORDS` as a hard upper bound, so multi-word variants in the key are unreachable when the rule is `ONE_WORD`.
+The UI displayed all accepted-answer variants from the exam snapshot without considering the configured `answerRule` word limit. The backend also enforced word-limit rules during grading at the time, making multi-word variants unreachable under `ONE_WORD`.
 
 ### Fix
 - Auto-upgrade objective override scoring rules (`ONE_WORD`/`TWO_WORDS`/`THREE_WORDS`) to match the longest provided answer-key variant so staff-entered `a | b` behaves as an OR list.
