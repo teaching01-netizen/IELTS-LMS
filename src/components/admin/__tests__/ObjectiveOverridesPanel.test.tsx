@@ -11,7 +11,9 @@ vi.mock('../../../services/examRepository', () => ({
 
 vi.mock('../../../services/gradingService', () => ({
   gradingService: {
+    getObjectiveGradingSource: vi.fn(),
     getObjectiveOverrides: vi.fn(),
+    regradeObjectiveLatestDraft: vi.fn(),
     upsertObjectiveOverride: vi.fn(),
     deleteObjectiveOverride: vi.fn(),
   },
@@ -67,6 +69,11 @@ describe('ObjectiveOverridesPanel', () => {
     (gradingService.upsertObjectiveOverride as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       success: true,
       data: { regradeReport: { sectionsUpdated: 1 } },
+    });
+
+    (gradingService.getObjectiveGradingSource as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { draftVersionId: null },
     });
 
     (gradingService.deleteObjectiveOverride as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -147,6 +154,11 @@ describe('ObjectiveOverridesPanel', () => {
       data: [],
     });
 
+    (gradingService.getObjectiveGradingSource as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { draftVersionId: null },
+    });
+
     (gradingService.upsertObjectiveOverride as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       success: true,
       data: { regradeReport: { sectionsUpdated: 1 } },
@@ -212,6 +224,11 @@ describe('ObjectiveOverridesPanel', () => {
     (gradingService.getObjectiveOverrides as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       success: true,
       data: [],
+    });
+
+    (gradingService.getObjectiveGradingSource as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { draftVersionId: null },
     });
 
     render(<ObjectiveOverridesPanel scheduleId="sched-1" publishedVersionId="ver-1" />);

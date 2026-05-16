@@ -340,6 +340,10 @@ export interface ObjectiveLatestDraftRegradeResponse {
   regradeReport: ObjectiveAutoGradingBackfillReport;
 }
 
+export interface ObjectiveGradingSourceResponse {
+  draftVersionId?: string | null | undefined;
+}
+
 export interface ObjectiveOverrideMutationResponse {
   overrideRow?: GradingScheduleObjectiveOverrideRow | undefined;
   deleted?: boolean | undefined;

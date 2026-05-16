@@ -201,7 +201,6 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [mutationResult, setMutationResult] = useState<ObjectiveOverrideMutationResponse | null>(null);
   const [mutating, setMutating] = useState(false);
-  const [scheduleRegradeReason, setScheduleRegradeReason] = useState('');
   const [scheduleRegrading, setScheduleRegrading] = useState(false);
   const [scheduleRegradeError, setScheduleRegradeError] = useState<string | null>(null);
   const [scheduleRegradeResult, setScheduleRegradeResult] = useState<ObjectiveLatestDraftRegradeResponse | null>(null);
@@ -233,13 +232,18 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
 
     const run = async () => {
       try {
-        const [version, overrideResult] = await Promise.all([
-          examRepository.getVersionById(publishedVersionId),
+        const [sourceResult, overrideResult] = await Promise.all([
+          gradingService.getObjectiveGradingSource(scheduleId),
           gradingService.getObjectiveOverrides(scheduleId),
         ]);
+        const versionId =
+          sourceResult.success && sourceResult.data?.draftVersionId
+            ? sourceResult.data.draftVersionId
+            : publishedVersionId;
+        const version = await examRepository.getVersionById(versionId);
         if (cancelled) return;
         if (!version?.contentSnapshot) {
-          throw new Error('Could not load published exam snapshot for this schedule.');
+          throw new Error('Could not load exam snapshot for this schedule.');
         }
         const examState = version.contentSnapshot as ExamState;
         setQuestions(buildQuestionItems(examState));
@@ -362,19 +366,14 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
     setScheduleRegradeError(null);
     setScheduleRegradeResult(null);
 
-    if (!scheduleRegradeReason.trim()) {
-      setScheduleRegradeError('Reason is required.');
-      return;
-    }
-
     setScheduleRegrading(true);
     try {
-      const result = await gradingService.regradeObjectiveLatestDraft(scheduleId, { reason: scheduleRegradeReason });
+      const reason = `Manual refresh (${new Date().toISOString()})`;
+      const result = await gradingService.regradeObjectiveLatestDraft(scheduleId, { reason });
       if (!result.success || !result.data) {
         throw new Error(result.error ?? 'Failed to regrade objective sections');
       }
       setScheduleRegradeResult(result.data);
-      setScheduleRegradeReason('');
     } catch (error) {
       setScheduleRegradeError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -400,15 +399,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
         <div className="border-t border-gray-200 px-4 py-4">
           <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
             <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-              <label className="block flex-1">
-                <div className="text-xs font-semibold text-gray-700">Regrade objective sections (latest draft)</div>
-                <input
-                  value={scheduleRegradeReason}
-                  onChange={(e) => setScheduleRegradeReason(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
-                  placeholder="Reason (required)"
-                />
-              </label>
+              <div className="text-xs font-semibold text-gray-700">Regrade objective sections (latest draft)</div>
               <button
                 type="button"
                 onClick={() => void handleScheduleRegradeLatestDraft()}

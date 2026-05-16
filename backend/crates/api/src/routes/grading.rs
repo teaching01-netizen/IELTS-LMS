@@ -121,6 +121,35 @@ pub async fn list_objective_overrides(
     Ok(ApiResponse::success_with_request_id(rows, request_id.0))
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveGradingSourceResponse {
+    pub draft_version_id: Option<String>,
+}
+
+pub async fn get_objective_grading_source(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    Path(schedule_id): Path<Uuid>,
+) -> Result<ApiResponse<ObjectiveGradingSourceResponse>, ApiError> {
+    authorize_schedule_for_overrides(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
+    let service = grading_service(&state);
+    let started = Instant::now();
+    let draft_version_id = service
+        .get_schedule_objective_grading_source_version_id(&ctx, schedule_id)
+        .await?;
+    state
+        .telemetry
+        .observe_db_operation("grading.get_objective_grading_source", started.elapsed());
+    Ok(ApiResponse::success_with_request_id(
+        ObjectiveGradingSourceResponse { draft_version_id },
+        request_id.0,
+    ))
+}
+
 pub async fn upsert_objective_override(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,

@@ -133,7 +133,15 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
     void (async () => {
       try {
-        const version = await examRepository.getVersionById(publishedVersionId);
+        const scheduleId = submission?.scheduleId;
+        const sourceResult = scheduleId
+          ? await gradingService.getObjectiveGradingSource(scheduleId)
+          : { success: false as const };
+        const versionId =
+          sourceResult.success && sourceResult.data?.draftVersionId
+            ? sourceResult.data.draftVersionId
+            : publishedVersionId;
+        const version = await examRepository.getVersionById(versionId);
         if (seq !== examLoadSeq.current) return;
 
         if (!version) {
@@ -153,7 +161,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         }
       }
     })();
-  }, [submission?.publishedVersionId]);
+  }, [submission?.publishedVersionId, submission?.scheduleId]);
 
   const loadData = useCallback(async () => {
     const seq = ++submissionLoadSeq.current;

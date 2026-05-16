@@ -38,6 +38,7 @@ import {
   ReleaseAction,
   ReleaseEvent,
   GradingScheduleObjectiveOverrideRow,
+  ObjectiveGradingSourceResponse,
   ObjectiveOverrideDeleteRequest,
   ObjectiveOverrideMutationResponse,
   ObjectiveLatestDraftRegradeRequest,
@@ -205,6 +206,23 @@ export class GradingService {
       return { success: true, data: overrides };
     } catch (error) {
       return { success: false, error: `Failed to load objective overrides: ${error}` };
+    }
+  }
+
+  async getObjectiveGradingSource(
+    scheduleId: string,
+  ): Promise<GradingServiceResult<ObjectiveGradingSourceResponse>> {
+    try {
+      if (!isBackendGradingEnabled()) {
+        return { success: false, error: 'Objective grading source requires backend grading.' };
+      }
+
+      const source = await backendGet<ObjectiveGradingSourceResponse>(
+        `/v1/grading/schedules/${scheduleId}/objective-grading-source`,
+      );
+      return { success: true, data: source };
+    } catch (error) {
+      return { success: false, error: `Failed to load objective grading source: ${error}` };
     }
   }
 

@@ -1483,6 +1483,24 @@ impl GradingService {
         Ok(rows)
     }
 
+    pub async fn get_schedule_objective_grading_source_version_id(
+        &self,
+        ctx: &ActorContext,
+        schedule_id: Uuid,
+    ) -> Result<Option<String>, GradingError> {
+        let schedule_id_db = schedule_id.to_string();
+        if ctx.schedule_scope_id.as_deref() != Some(&schedule_id_db)
+            && !matches!(ctx.role, ActorRole::Admin | ActorRole::AdminObserver)
+        {
+            return Err(GradingError::Validation(
+                "Missing schedule scope for objective grading source access.".to_owned(),
+            ));
+        }
+
+        self.load_schedule_objective_grading_source_version_id(&schedule_id_db)
+            .await
+    }
+
     pub async fn upsert_schedule_objective_override(
         &self,
         ctx: &ActorContext,
@@ -2467,6 +2485,7 @@ impl GradingService {
             FROM student_attempts a
             JOIN exam_schedules s ON s.id = a.schedule_id
             WHERE a.submitted_at IS NOT NULL
+              AND a.id IS NOT NULL
               AND a.schedule_id = 
             "#,
         );

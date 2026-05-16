@@ -217,6 +217,10 @@ pub fn build_router(state: AppState) -> Router {
                     get(grading::list_objective_overrides),
                 )
                 .route(
+                    "/schedules/:schedule_id/objective-grading-source",
+                    get(grading::get_objective_grading_source),
+                )
+                .route(
                     "/schedules/:schedule_id/objective-overrides/:question_id",
                     put(grading::upsert_objective_override)
                         .delete(grading::delete_objective_override),
