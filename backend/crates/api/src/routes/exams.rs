@@ -1,14 +1,16 @@
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 use ielts_backend_application::builder::{BuilderError, BuilderService};
+use ielts_backend_application::version_serializer::VersionSerializer;
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::exam::{
-    CreateExamRequest, ExamEntity, ExamValidationSummary, ExamVersion, ExamVersionSummary,
-    PublishExamRequest, SaveDraftRequest, UpdateExamRequest,
+    CreateExamRequest, ExamEntity, ExamValidationSummary, ExamVersion,
+    ExamVersionBuilderContent, ExamVersionMetadata, ExamVersionSummary, PublishExamRequest,
+    SaveDraftRequest, UpdateExamRequest, VersionProjection,
 };
 use ielts_backend_infrastructure::authorization::AuthorizationService;
 use std::time::Instant;
@@ -188,6 +190,107 @@ pub async fn get_version(
     Ok(response)
 }
 
+/// Version with projection support for lazy-loading and payload reduction.
+///
+/// Query parameters:
+/// - `projection`: `full` (default), `metadata`, `builder`, `grading`
+///
+/// Projections:
+/// - `metadata`: Returns only version metadata with content sizes (fastest)
+/// - `builder`: Returns content with answers stripped (smaller payload)
+/// - `grading`: Returns full content with answers (same as full)
+/// - `full`: Returns everything (backward compatible)
+pub async fn get_version_with_projection(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    headers: HeaderMap,
+    Path(version_id): Path<Uuid>,
+    Query(query): Query<VersionQuery>,
+) -> Result<Response, ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    let ctx = principal.actor_context();
+    let service = BuilderService::new(state.db_pool());
+    let started = Instant::now();
+
+    let projection = query.projection.unwrap_or_default();
+
+    let response = match projection {
+        VersionProjection::Metadata => {
+            let metadata = service
+                .get_version_metadata(&ctx, version_id.to_string())
+                .await?;
+            state.telemetry.observe_db_operation(
+                "builder.get_version_metadata",
+                started.elapsed(),
+            );
+
+            let etag = metadata_etag(&metadata);
+            if if_none_match_matches(&headers, &etag) {
+                let mut resp = StatusCode::NOT_MODIFIED.into_response();
+                apply_version_cache_headers(resp.headers_mut(), &etag);
+                return Ok(resp);
+            }
+
+            let mut resp =
+                Json(ApiResponse::success_with_request_id(metadata, request_id.0)).into_response();
+            apply_version_cache_headers(resp.headers_mut(), &etag);
+            resp
+        }
+        VersionProjection::Builder => {
+            let version = service.get_version(&ctx, version_id.to_string()).await?;
+            state
+                .telemetry
+                .observe_db_operation("builder.get_version", started.elapsed());
+
+            let etag = builder_content_etag(&version);
+            if if_none_match_matches(&headers, &etag) {
+                let mut resp = StatusCode::NOT_MODIFIED.into_response();
+                apply_version_cache_headers(resp.headers_mut(), &etag);
+                return Ok(resp);
+            }
+
+            let (content_snapshot, config_snapshot) = VersionSerializer::to_builder_content(
+                &version.content_snapshot.0,
+                &version.config_snapshot.0,
+            );
+
+            let builder_content = ExamVersionBuilderContent {
+                content_snapshot,
+                config_snapshot,
+            };
+
+            let mut resp = Json(ApiResponse::success_with_request_id(
+                builder_content,
+                request_id.0,
+            ))
+            .into_response();
+            apply_version_cache_headers(resp.headers_mut(), &etag);
+            resp
+        }
+        VersionProjection::Full | VersionProjection::Grading => {
+            let version = service.get_version(&ctx, version_id.to_string()).await?;
+            state
+                .telemetry
+                .observe_db_operation("builder.get_version", started.elapsed());
+
+            let etag = version_etag(&version);
+            if if_none_match_matches(&headers, &etag) {
+                let mut resp = StatusCode::NOT_MODIFIED.into_response();
+                apply_version_cache_headers(resp.headers_mut(), &etag);
+                return Ok(resp);
+            }
+
+            let mut resp =
+                Json(ApiResponse::success_with_request_id(version, request_id.0)).into_response();
+            apply_version_cache_headers(resp.headers_mut(), &etag);
+            resp
+        }
+    };
+
+    Ok(response)
+}
+
 fn version_etag(version: &ExamVersion) -> String {
     format!(
         r#""exam-version:{}:{}:{}:{}""#,
@@ -214,6 +317,34 @@ fn apply_version_cache_headers(headers: &mut HeaderMap, etag: &str) {
     if let Ok(value) = HeaderValue::from_str(etag) {
         headers.insert(header::ETAG, value);
     }
+}
+
+/// Query parameters for version endpoint
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct VersionQuery {
+    /// Content projection type: full, metadata, builder, grading
+    pub projection: Option<VersionProjection>,
+}
+
+/// Generate ETag for ExamVersionMetadata (includes size fields)
+fn metadata_etag(metadata: &ExamVersionMetadata) -> String {
+    format!(
+        r#""exam-version-metadata:{}:{}:{}:{}:{}""#,
+        metadata.id,
+        metadata.revision,
+        metadata.is_draft,
+        metadata.is_published,
+        metadata.content_size_bytes.unwrap_or(0)
+    )
+}
+
+/// Generate ETag for builder content (includes size hint from original)
+fn builder_content_etag(version: &ExamVersion) -> String {
+    format!(
+        r#""exam-version-builder:{}:{}:{}:{}""#,
+        version.id, version.revision, version.is_draft, version.is_published
+    )
 }
 
 pub async fn list_versions(

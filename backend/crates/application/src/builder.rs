@@ -1,7 +1,8 @@
 use chrono::Utc;
 use ielts_backend_domain::exam::{
     CreateExamRequest, ExamEntity, ExamEvent, ExamEventAction, ExamValidationSummary, ExamVersion,
-    ExamVersionSummary, PublishExamRequest, SaveDraftRequest, UpdateExamRequest, ValidationIssue,
+    ExamVersionMetadata, ExamVersionSummary, PublishExamRequest, SaveDraftRequest,
+    UpdateExamRequest, ValidationIssue,
 };
 use ielts_backend_infrastructure::{
     actor_context::ActorContext, authorization::AuthorizationService,
@@ -666,6 +667,55 @@ impl BuilderService {
         }
 
         compact_duplicate_legacy_writing_chart_image(&mut version.content_snapshot.0);
+
+        Ok(version)
+    }
+
+    /// Get version metadata only, without loading large content/config snapshots.
+    ///
+    /// This is significantly faster than `get_version` because:
+    /// 1. It doesn't load the large JSON columns (content_snapshot, config_snapshot)
+    /// 2. It uses OCTET_LENGTH to compute sizes without transferring the data
+    /// 3. Returns metadata useful for client-side lazy-loading decisions
+    pub async fn get_version_metadata(
+        &self,
+        ctx: &ActorContext,
+        version_id: String,
+    ) -> Result<ExamVersionMetadata, BuilderError> {
+        let version = sqlx::query_as::<_, ExamVersionMetadata>(
+            r#"
+            SELECT
+                id,
+                CAST(exam_id AS CHAR) AS exam_id,
+                version_number,
+                CAST(parent_version_id AS CHAR) AS parent_version_id,
+                validation_snapshot,
+                CAST(created_by AS CHAR) AS created_by,
+                created_at,
+                publish_notes,
+                is_draft,
+                is_published,
+                revision,
+                OCTET_LENGTH(content_snapshot) AS content_size_bytes,
+                OCTET_LENGTH(config_snapshot) AS config_size_bytes
+            FROM exam_versions
+            WHERE id = ?
+            "#,
+        )
+        .bind(&version_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(BuilderError::NotFound)?;
+
+        // Check authorization: user must have access to the exam
+        let exam = self.get_exam(ctx, version.exam_id.clone()).await?;
+        if let Some(org_id_str) = &exam.organization_id {
+            if let Ok(org_id) = Uuid::parse_str(org_id_str) {
+                if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
+                    return Err(BuilderError::NotFound);
+                }
+            }
+        }
 
         Ok(version)
     }

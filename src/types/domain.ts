@@ -153,6 +153,42 @@ export interface ExamVersionSummary {
 }
 
 /**
+ * Metadata-only representation with content size hints for lazy-loading.
+ * Used when client needs version info but not the full content.
+ */
+export interface ExamVersionMetadata {
+  id: string;
+  examId: string;
+  versionNumber: number;
+  parentVersionId: string | null;
+  validationSnapshot?: ExamVersionValidationSnapshot | undefined;
+  createdBy: string;
+  createdAt: string;
+  publishNotes?: string | undefined;
+  isDraft: boolean;
+  isPublished: boolean;
+  revision: number;
+  /** Approximate size of contentSnapshot in bytes */
+  contentSizeBytes?: number | null | undefined;
+  /** Approximate size of configSnapshot in bytes */
+  configSizeBytes?: number | null | undefined;
+}
+
+/**
+ * Content projection for builder mode (answers stripped for smaller payload).
+ * Used for lazy-loading content after metadata is loaded.
+ */
+export interface ExamVersionBuilderContent {
+  contentSnapshot: ExamState;
+  configSnapshot: ExamConfig;
+}
+
+/**
+ * Content projection type for version requests.
+ */
+export type VersionProjection = 'full' | 'metadata' | 'builder' | 'grading';
+
+/**
  * Audit event for exam lifecycle tracking
  */
 export interface ExamEvent {

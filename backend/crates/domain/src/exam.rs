@@ -506,3 +506,54 @@ pub struct ExamValidationSummary {
     pub warnings: Vec<ValidationIssue>,
     pub validated_at: DateTime<Utc>,
 }
+
+/// Metadata-only representation for lists and lazy-loading
+/// Contains version info plus content size hints for client-side decisions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
+#[serde(rename_all = "camelCase")]
+pub struct ExamVersionMetadata {
+    pub id: String,
+    pub exam_id: String,
+    pub version_number: i32,
+    pub parent_version_id: Option<String>,
+    pub validation_snapshot: Option<ExamValidationSnapshot>,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+    pub publish_notes: Option<String>,
+    pub is_draft: bool,
+    pub is_published: bool,
+    pub revision: i32,
+    /// Approximate size of content_snapshot in bytes (computed via OCTET_LENGTH)
+    pub content_size_bytes: Option<i64>,
+    /// Approximate size of config_snapshot in bytes (computed via OCTET_LENGTH)
+    pub config_size_bytes: Option<i64>,
+}
+
+/// Content projection for builder mode (answers stripped for smaller payload)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExamVersionBuilderContent {
+    pub content_snapshot: serde_json::Value,
+    pub config_snapshot: serde_json::Value,
+}
+
+/// Query parameter for content projection
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionProjection {
+    /// Full version with all data (default, backward compatible)
+    Full,
+    /// Metadata only (no content snapshots)
+    Metadata,
+    /// Builder mode (content with answers stripped)
+    Builder,
+    /// Grading mode (content with answers included)
+    Grading,
+}
+
+impl Default for VersionProjection {
+    fn default() -> Self {
+        Self::Full
+    }
+}

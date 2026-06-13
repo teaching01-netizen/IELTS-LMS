@@ -453,4 +453,33 @@ describe('StudentWriting a11y', () => {
       expect(event.defaultPrevented).toBe(true);
     }
   });
+
+  it('normalizes Google Drive chart image URLs for browser display', () => {
+    const state = createExamState();
+    const driveUrl = 'https://drive.google.com/file/d/1AbCDefG123456/view?usp=sharing';
+    state.writing.task1Chart = {
+      id: 'chart-1',
+      type: 'bar',
+      title: 'Task 1 chart',
+      labels: ['A'],
+      values: [10],
+      imageSrc: driveUrl,
+    };
+
+    render(
+      <StudentWriting
+        state={state}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    const stimulusImage = screen.getByRole('button', { name: /task 1 chart/i }).querySelector('img');
+    expect(stimulusImage).toBeInTheDocument();
+    expect(stimulusImage?.getAttribute('src')).toContain('drive.google.com/thumbnail');
+    expect(stimulusImage?.getAttribute('src')).not.toBe(driveUrl);
+  });
 });

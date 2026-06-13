@@ -9,6 +9,8 @@ import {
   ExamEntity,
   ExamVersion,
   ExamVersionSummary,
+  ExamVersionMetadata,
+  ExamVersionBuilderContent,
   ExamEvent,
   ExamSchedule,
   ExamSessionRuntime,
@@ -32,6 +34,7 @@ import {
   mapBackendExamEntity,
   mapBackendExamEvent,
   mapBackendExamVersion,
+  mapBackendExamVersionMetadata,
   mapBackendExamVersionSummary,
   mapBackendRuntime,
   mapBackendSchedule,
@@ -52,6 +55,8 @@ export interface IExamRepository {
   getAllVersions(examId: string): Promise<ExamVersion[]>;
   getVersionSummaries(examId: string): Promise<ExamVersionSummary[]>;
   getVersionById(id: string): Promise<ExamVersion | null>;
+  getVersionMetadata(id: string): Promise<ExamVersionMetadata | null>;
+  getVersionBuilderContent(id: string): Promise<ExamVersionBuilderContent | null>;
   saveVersion(version: ExamVersion): Promise<void>;
   
   // Exam Event operations
@@ -146,6 +151,32 @@ export class BackendExamRepository implements IExamRepository {
     try {
       const version = await backendGet<any>(`/v1/versions/${id}`);
       return mapBackendExamVersion(version);
+    } catch (error) {
+      if (isBackendNotFound(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  async getVersionMetadata(id: string): Promise<ExamVersionMetadata | null> {
+    try {
+      const metadata = await backendGet<any>(`/v1/versions/${id}?projection=metadata`);
+      return mapBackendExamVersionMetadata(metadata);
+    } catch (error) {
+      if (isBackendNotFound(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  async getVersionBuilderContent(id: string): Promise<ExamVersionBuilderContent | null> {
+    try {
+      const content = await backendGet<any>(`/v1/versions/${id}?projection=builder`);
+      return content;
     } catch (error) {
       if (isBackendNotFound(error)) {
         return null;

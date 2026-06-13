@@ -13,6 +13,7 @@ import type {
   ExamSchedule,
   ExamSessionRuntime,
   ExamVersion,
+  ExamVersionMetadata,
   ExamVersionSummary,
   SectionRuntimeState,
 } from '../types/domain';
@@ -78,6 +79,22 @@ type BackendExamVersionSummary = {
   publishNotes?: string | null | undefined;
   isDraft: boolean;
   isPublished: boolean;
+};
+
+type BackendExamVersionMetadata = {
+  id: string;
+  examId: string;
+  versionNumber: number;
+  parentVersionId?: string | null | undefined;
+  validationSnapshot?: ExamVersion['validationSnapshot'] | null | undefined;
+  createdBy: string;
+  createdAt: string;
+  publishNotes?: string | null | undefined;
+  isDraft: boolean;
+  isPublished: boolean;
+  revision: number;
+  contentSizeBytes?: number | null | undefined;
+  configSizeBytes?: number | null | undefined;
 };
 
 type BackendExamEvent = {
@@ -471,6 +488,24 @@ export function mapBackendExamVersionSummary(payload: BackendExamVersionSummary)
     publishNotes: payload.publishNotes ?? undefined,
     isDraft: payload.isDraft,
     isPublished: payload.isPublished,
+  };
+}
+
+export function mapBackendExamVersionMetadata(payload: BackendExamVersionMetadata): ExamVersionMetadata {
+  return {
+    id: payload.id,
+    examId: payload.examId,
+    versionNumber: payload.versionNumber,
+    parentVersionId: payload.parentVersionId ?? null,
+    validationSnapshot: payload.validationSnapshot ?? undefined,
+    createdBy: payload.createdBy,
+    createdAt: payload.createdAt,
+    publishNotes: payload.publishNotes ?? undefined,
+    isDraft: payload.isDraft,
+    isPublished: payload.isPublished,
+    revision: payload.revision,
+    contentSizeBytes: payload.contentSizeBytes ?? null,
+    configSizeBytes: payload.configSizeBytes ?? null,
   };
 }
 

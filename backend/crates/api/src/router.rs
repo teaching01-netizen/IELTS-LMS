@@ -83,7 +83,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .nest(
             "/api/v1/versions",
-            Router::new().route("/:version_id", get(exams::get_version)),
+            Router::new().route("/:version_id", get(exams::get_version_with_projection)),
         )
         .nest(
             "/api/v1/schedules",

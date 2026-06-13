@@ -12,3 +12,4 @@ pub mod results;
 pub mod scheduling;
 pub mod student_access;
 pub mod validation;
+pub mod version_serializer;
