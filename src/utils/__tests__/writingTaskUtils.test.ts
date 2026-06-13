@@ -68,4 +68,62 @@ describe('writingTaskUtils', () => {
     expect(writing.task1Prompt).toBe('Updated Task 1');
     expect(writing.task2Prompt).toBe('Updated Task 2');
   });
+
+  it('prefers canonical task chart data over legacy task1Chart fallback', () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+    const writing = {
+      ...createWritingState(),
+      task1Chart: {
+        id: 'legacy-chart',
+        title: 'Legacy chart',
+        type: 'bar' as const,
+        labels: ['Legacy'],
+        values: [1],
+        imageSrc: 'data:image/png;base64,legacy',
+      },
+      tasks: [
+        {
+          taskId: 'task1',
+          prompt: 'Task 1 prompt',
+          chart: {
+            id: 'canonical-chart',
+            title: 'Canonical chart',
+            type: 'bar' as const,
+            labels: ['Canonical'],
+            values: [2],
+            imageSrc: 'data:image/png;base64,canonical',
+          },
+        },
+        { taskId: 'task2', prompt: 'Task 2 prompt' },
+      ],
+    };
+
+    const task = getWritingTaskContent(writing, config.sections.writing.tasks, 'task1');
+
+    expect(task.chart?.id).toBe('canonical-chart');
+    expect(task.chart?.imageSrc).toBe('data:image/png;base64,canonical');
+  });
+
+  it('does not mirror canonical task chart images into legacy task1Chart', () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+    const writing = replaceWritingTaskContents(createWritingState(), config.sections.writing.tasks, [
+      {
+        taskId: 'task1',
+        prompt: 'Updated Task 1',
+        chart: {
+          id: 'chart-1',
+          title: 'Canonical chart',
+          type: 'bar',
+          labels: ['A'],
+          values: [1],
+          imageSrc: 'data:image/png;base64,canonical',
+        },
+      },
+      { taskId: 'task2', prompt: 'Updated Task 2' },
+    ]);
+
+    expect(writing.tasks?.[0]?.chart?.imageSrc).toBe('data:image/png;base64,canonical');
+    expect(writing.task1Chart?.title).toBe('Canonical chart');
+    expect(writing.task1Chart?.imageSrc).toBeUndefined();
+  });
 });

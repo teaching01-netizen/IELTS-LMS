@@ -6,6 +6,7 @@ use ielts_backend_domain::exam::{
 use ielts_backend_infrastructure::{
     actor_context::ActorContext, authorization::AuthorizationService,
 };
+use serde_json::Value;
 use sqlx::{MySql, MySqlPool, QueryBuilder};
 use thiserror::Error;
 use uuid::Uuid;
@@ -13,6 +14,41 @@ use uuid::Uuid;
 use crate::validation::validate_exam_content;
 
 const MAX_DRAFT_VERSIONS_PER_EXAM: usize = 3;
+
+fn compact_duplicate_legacy_writing_chart_image(content: &mut Value) {
+    let canonical_image_src = content
+        .pointer("/writing/tasks")
+        .and_then(Value::as_array)
+        .and_then(|tasks| {
+            tasks
+                .iter()
+                .find(|task| task.get("taskId").and_then(Value::as_str) == Some("task1"))
+                .or_else(|| tasks.first())
+        })
+        .and_then(|task| task.pointer("/chart/imageSrc"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+
+    let Some(canonical_image_src) = canonical_image_src else {
+        return;
+    };
+
+    let legacy_image_src = content
+        .pointer("/writing/task1Chart/imageSrc")
+        .and_then(Value::as_str);
+
+    if legacy_image_src != Some(canonical_image_src.as_str()) {
+        return;
+    }
+
+    if let Some(task1_chart) = content
+        .pointer_mut("/writing/task1Chart")
+        .and_then(Value::as_object_mut)
+    {
+        task1_chart.remove("imageSrc");
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum BuilderError {
@@ -24,6 +60,70 @@ pub enum BuilderError {
     NotFound,
     #[error("Validation error: {0}")]
     Validation(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::compact_duplicate_legacy_writing_chart_image;
+
+    #[test]
+    fn compact_duplicate_legacy_writing_chart_image_removes_only_identical_legacy_image() {
+        let image_src = format!("data:image/png;base64,{}", "A".repeat(1024));
+        let mut content = json!({
+            "writing": {
+                "task1Chart": {
+                    "id": "chart-1",
+                    "title": "Legacy chart",
+                    "imageSrc": image_src
+                },
+                "tasks": [{
+                    "taskId": "task1",
+                    "chart": {
+                        "id": "chart-1",
+                        "title": "Canonical chart",
+                        "imageSrc": image_src
+                    }
+                }]
+            }
+        });
+
+        compact_duplicate_legacy_writing_chart_image(&mut content);
+
+        assert!(content["writing"]["task1Chart"].get("imageSrc").is_none());
+        assert_eq!(
+            content["writing"]["tasks"][0]["chart"]["imageSrc"],
+            image_src
+        );
+        assert_eq!(content["writing"]["task1Chart"]["title"], "Legacy chart");
+    }
+
+    #[test]
+    fn compact_duplicate_legacy_writing_chart_image_keeps_different_legacy_image() {
+        let mut content = json!({
+            "writing": {
+                "task1Chart": {
+                    "id": "chart-1",
+                    "imageSrc": "data:image/png;base64,legacy"
+                },
+                "tasks": [{
+                    "taskId": "task1",
+                    "chart": {
+                        "id": "chart-1",
+                        "imageSrc": "data:image/png;base64,canonical"
+                    }
+                }]
+            }
+        });
+
+        compact_duplicate_legacy_writing_chart_image(&mut content);
+
+        assert_eq!(
+            content["writing"]["task1Chart"]["imageSrc"],
+            "data:image/png;base64,legacy"
+        );
+    }
 }
 
 pub struct BuilderService {
@@ -530,11 +630,30 @@ impl BuilderService {
         ctx: &ActorContext,
         version_id: String,
     ) -> Result<ExamVersion, BuilderError> {
-        let version = sqlx::query_as::<_, ExamVersion>("SELECT * FROM exam_versions WHERE id = ?")
-            .bind(&version_id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(BuilderError::NotFound)?;
+        let mut version = sqlx::query_as::<_, ExamVersion>(
+            r#"
+            SELECT
+                id,
+                CAST(exam_id AS CHAR) AS exam_id,
+                version_number,
+                CAST(parent_version_id AS CHAR) AS parent_version_id,
+                content_snapshot,
+                config_snapshot,
+                validation_snapshot,
+                CAST(created_by AS CHAR) AS created_by,
+                created_at,
+                publish_notes,
+                is_draft,
+                is_published,
+                revision
+            FROM exam_versions
+            WHERE id = ?
+            "#,
+        )
+        .bind(&version_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(BuilderError::NotFound)?;
 
         // Check authorization: user must have access to the exam
         let exam = self.get_exam(ctx, version.exam_id.clone()).await?;
@@ -545,6 +664,8 @@ impl BuilderService {
                 }
             }
         }
+
+        compact_duplicate_legacy_writing_chart_image(&mut version.content_snapshot.0);
 
         Ok(version)
     }

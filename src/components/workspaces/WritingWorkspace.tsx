@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Upload, Library, ChartColumnBig, Sparkles, Bold, Italic, Underline, AlignLeft, AlignCenter, List, Undo, Redo, BarChart3, Clock, Target, TrendingUp, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Library, ChartColumnBig, Sparkles, Bold, Italic, Underline, AlignLeft, AlignCenter, List, Undo, Redo, BarChart3, Clock, Target, TrendingUp, ChevronLeft, ChevronRight, Link as LinkIcon } from 'lucide-react';
 import { ExamState, PromptTemplateRecord, RubricDefinition, WritingChartData, WritingTaskContent, WritingTaskType } from '../../types';
 import { syncConfigWithStandards } from '../../constants/examDefaults';
 import { PromptTemplateLibrary } from '../PromptTemplateLibrary';
@@ -14,13 +14,6 @@ import { WritingTaskPanel } from '../WritingTaskPanel';
 import { normalizeImageUrl } from '../../utils/imageUrl';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { WritingChartPreview } from '../writing/WritingChartPreview';
-
-const toDataUrl = (file: File) =>
-  new Promise<string>((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.readAsDataURL(file);
-  });
 
 const syncWritingRubricWeights = (state: ExamState, rubric: RubricDefinition): ExamState => {
   const nextConfig = syncConfigWithStandards({
@@ -381,40 +374,49 @@ export function WritingWorkspace({
                             <p className="text-xs font-black text-gray-400 uppercase tracking-[0.2em]">
                               Chart Builder
                             </p>
-                            <p className="text-sm text-gray-500 mt-1">Upload a chart or build a simple one.</p>
+                            <p className="text-sm text-gray-500 mt-1">Paste a Google Drive chart image URL or build a simple chart.</p>
                           </div>
                           <ChartColumnBig className="text-amber-500" size={18} />
                         </div>
 
                         <div className="grid gap-3">
-                          <label className="rounded-2xl border border-dashed border-gray-300 bg-white px-4 py-4 text-sm text-gray-600 hover:border-amber-300 cursor-pointer flex items-center gap-3">
-                            <Upload size={16} />
-                            Upload chart image
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={async (event) => {
-                                const file = event.target.files?.[0];
-                                if (!file) {
-                                  return;
-                                }
-
-                                const imageSrc = await toDataUrl(file);
-                                updateTask(task.id, (currentTask) => ({
-                                  ...currentTask,
-                                  chart: {
-                                    id: currentTask.chart?.id ?? 'task1-chart',
-                                    title: file.name,
-                                    type: currentTask.chart?.type ?? 'bar',
-                                    labels: currentTask.chart?.labels ?? ['A', 'B', 'C'],
-                                    values: currentTask.chart?.values ?? [3, 5, 4],
-                                    imageSrc,
-                                  },
-                                }));
-                              }}
-                            />
-                          </label>
+                          <div>
+                            <label
+                              htmlFor={`chart-image-url-${task.id}`}
+                              className="block"
+                            >
+                              <span className="block text-[10px] font-semibold text-gray-500 mb-2">
+                                Chart image URL
+                              </span>
+                              <span className="relative block">
+                                <LinkIcon size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input
+                                  id={`chart-image-url-${task.id}`}
+                                  type="url"
+                                  aria-label="Chart image URL"
+                                  value={taskContent.chart?.imageSrc ?? ''}
+                                  onChange={(event) =>
+                                    updateTask(task.id, (currentTask) => ({
+                                      ...currentTask,
+                                      chart: {
+                                        id: currentTask.chart?.id ?? 'task1-chart',
+                                        title: currentTask.chart?.title ?? 'Task 1 chart',
+                                        type: currentTask.chart?.type ?? 'bar',
+                                        labels: currentTask.chart?.labels ?? ['A', 'B', 'C'],
+                                        values: currentTask.chart?.values ?? [3, 5, 4],
+                                        imageSrc: event.target.value,
+                                      },
+                                    }))
+                                  }
+                                  placeholder="https://drive.google.com/file/d/... or https://example.com/chart.png"
+                                  className="w-full rounded-2xl border border-gray-200 bg-white py-3 pl-11 pr-4 text-sm outline-none focus:border-amber-500"
+                                />
+                              </span>
+                            </label>
+                            <p className="mt-2 text-xs text-gray-500">
+                              Google Drive share links are converted for preview when possible. The file must be shared so anyone with the link can access it.
+                            </p>
+                          </div>
 
                           <input
                             value={taskContent.chart?.title ?? 'Task 1 chart'}

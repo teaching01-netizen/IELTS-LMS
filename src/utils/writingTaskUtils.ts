@@ -1,5 +1,16 @@
 import type { ExamState, WritingTaskConfig, WritingTaskContent } from '../types';
 
+const legacyTask1ChartSnapshot = (
+  chart: WritingTaskContent['chart'],
+): WritingTaskContent['chart'] => {
+  if (!chart?.imageSrc) {
+    return chart;
+  }
+
+  const { imageSrc: _imageSrc, ...legacyChart } = chart;
+  return legacyChart;
+};
+
 const getLegacyTaskContent = (
   writing: ExamState['writing'],
   taskId: string,
@@ -62,7 +73,9 @@ export function replaceWritingTaskContents(
     ...writing,
     task1Prompt: task1?.prompt ?? writing.task1Prompt,
     task2Prompt: task2?.prompt ?? writing.task2Prompt,
-    task1Chart: task1?.chart ?? (task1 ? undefined : writing.task1Chart),
+    task1Chart: task1?.chart
+      ? legacyTask1ChartSnapshot(task1.chart)
+      : (task1 ? undefined : writing.task1Chart),
     tasks: normalizedTasks,
   };
 }

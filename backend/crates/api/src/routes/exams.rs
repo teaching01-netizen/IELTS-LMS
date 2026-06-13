@@ -1,6 +1,7 @@
 use axum::{
     extract::{Extension, Path, State},
-    http::StatusCode,
+    http::{header, HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use ielts_backend_application::builder::{BuilderError, BuilderService};
@@ -162,13 +163,57 @@ pub async fn get_version(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
+    headers: HeaderMap,
     Path(version_id): Path<Uuid>,
-) -> Result<ApiResponse<ExamVersion>, ApiError> {
+) -> Result<Response, ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
+    let started = Instant::now();
     let version = service.get_version(&ctx, version_id.to_string()).await?;
-    Ok(ApiResponse::success_with_request_id(version, request_id.0))
+    state
+        .telemetry
+        .observe_db_operation("builder.get_version", started.elapsed());
+
+    let etag = version_etag(&version);
+    if if_none_match_matches(&headers, &etag) {
+        let mut response = StatusCode::NOT_MODIFIED.into_response();
+        apply_version_cache_headers(response.headers_mut(), &etag);
+        return Ok(response);
+    }
+
+    let mut response =
+        Json(ApiResponse::success_with_request_id(version, request_id.0)).into_response();
+    apply_version_cache_headers(response.headers_mut(), &etag);
+    Ok(response)
+}
+
+fn version_etag(version: &ExamVersion) -> String {
+    format!(
+        r#""exam-version:{}:{}:{}:{}""#,
+        version.id, version.revision, version.is_draft, version.is_published
+    )
+}
+
+fn if_none_match_matches(headers: &HeaderMap, etag: &str) -> bool {
+    headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|candidate| candidate.trim() == etag || candidate.trim() == "*")
+        })
+}
+
+fn apply_version_cache_headers(headers: &mut HeaderMap, etag: &str) {
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=0, must-revalidate"),
+    );
+    if let Ok(value) = HeaderValue::from_str(etag) {
+        headers.insert(header::ETAG, value);
+    }
 }
 
 pub async fn list_versions(

@@ -722,6 +722,139 @@ async fn publish_revalidates_the_current_draft_before_marking_it_published() {
 }
 
 #[tokio::test]
+async fn get_version_compacts_duplicate_legacy_chart_image_and_supports_etag() {
+    let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
+    let seeded = seed_exam(database.pool()).await;
+    let auth = mysql::create_authenticated_user(
+        database.pool(),
+        UserRole::Builder,
+        "builder@example.com",
+        "Builder",
+    )
+    .await;
+    let service = BuilderService::new(database.pool().clone());
+    let chart_image = format!("data:image/png;base64,{}", "A".repeat(128 * 1024));
+    let saved_version = service
+        .save_draft(
+            &contract_actor(),
+            seeded.id.clone(),
+            SaveDraftRequest {
+                content_snapshot: json!({
+                    "reading": {"passages": []},
+                    "listening": {"parts": []},
+                    "writing": {
+                        "task1Prompt": "Describe the chart.",
+                        "task2Prompt": "Discuss the topic.",
+                        "task1Chart": {
+                            "id": "chart-1",
+                            "title": "Duplicated chart",
+                            "type": "bar",
+                            "labels": ["A"],
+                            "values": [1],
+                            "imageSrc": chart_image
+                        },
+                        "tasks": [
+                            {
+                                "taskId": "task1",
+                                "prompt": "Describe the chart.",
+                                "chart": {
+                                    "id": "chart-1",
+                                    "title": "Duplicated chart",
+                                    "type": "bar",
+                                    "labels": ["A"],
+                                    "values": [1],
+                                    "imageSrc": chart_image
+                                }
+                            },
+                            {"taskId": "task2", "prompt": "Discuss the topic."}
+                        ]
+                    },
+                    "speaking": {"part1Topics": [], "cueCard": "", "part3Discussion": []}
+                }),
+                config_snapshot: json!({
+                    "general": {"title": seeded.title},
+                    "sections": {"writing": {"enabled": true}}
+                }),
+                revision: seeded.revision,
+            },
+        )
+        .await
+        .expect("save duplicated image draft");
+    let app = build_router(app_state(database.pool().clone()));
+
+    let unauthorized = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/versions/{}", saved_version.id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .clone()
+        .oneshot(
+            auth.with_auth(
+                Request::builder().uri(format!("/api/v1/versions/{}", saved_version.id)),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let etag = response
+        .headers()
+        .get("etag")
+        .expect("etag header")
+        .to_str()
+        .expect("etag string")
+        .to_owned();
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "private, max-age=0, must-revalidate"
+    );
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["success"], true);
+    assert_eq!(json["data"]["id"], saved_version.id);
+    assert!(json["data"]["contentSnapshot"].is_object());
+    assert!(json["data"]["configSnapshot"].is_object());
+    assert_eq!(
+        json["data"]["contentSnapshot"]["writing"]["tasks"][0]["chart"]["imageSrc"],
+        chart_image
+    );
+    assert_eq!(
+        json["data"]["contentSnapshot"]["writing"]["task1Chart"]["title"],
+        "Duplicated chart"
+    );
+    assert!(json["data"]["contentSnapshot"]["writing"]["task1Chart"]
+        .get("imageSrc")
+        .is_none());
+
+    let not_modified = app
+        .oneshot(
+            auth.with_auth(
+                Request::builder().uri(format!("/api/v1/versions/{}", saved_version.id)),
+            )
+            .header("if-none-match", etag)
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(not_modified.status(), StatusCode::NOT_MODIFIED);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
 async fn get_events_returns_exam_history_for_the_exam() {
     let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
     let seeded = seed_exam(database.pool()).await;
