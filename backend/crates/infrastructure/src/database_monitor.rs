@@ -97,6 +97,7 @@ pub async fn inspect_outbox_backlog(
             COALESCE(TIMESTAMPDIFF(SECOND, MIN(created_at), NOW()), 0) AS oldest_age_seconds
         FROM outbox_events
         WHERE published_at IS NULL
+          AND failed_at IS NULL
         "#,
     )
     .fetch_one(pool)

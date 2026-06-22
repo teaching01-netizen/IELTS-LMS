@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use ielts_backend_domain::schedule::LiveUpdateEvent;
 use serde_json::Value;
-use sqlx::MySqlPool;
+use sqlx::{MySql, MySqlPool, Transaction};
 
 #[derive(Debug, Clone)]
 pub struct LiveUpdateBusRepository {
@@ -46,6 +46,36 @@ impl LiveUpdateBusRepository {
         .bind(&event.event)
         .bind(Value::Null)
         .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn enqueue_in_tx(
+        tx: &mut Transaction<'_, MySql>,
+        origin_instance_id: &str,
+        event: &LiveUpdateEvent,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO live_update_events (
+                origin_instance_id,
+                event_kind,
+                event_target_id,
+                event_revision,
+                event_name,
+                event_payload,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, NOW())
+            "#,
+        )
+        .bind(origin_instance_id)
+        .bind(&event.kind)
+        .bind(&event.id)
+        .bind(event.revision)
+        .bind(&event.event)
+        .bind(Value::Null)
+        .execute(tx.as_mut())
         .await?;
         Ok(())
     }

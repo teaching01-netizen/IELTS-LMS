@@ -17,11 +17,22 @@ delivery, grading projection, and maintenance. It runs while an HTTP request or 
 then performs a final recovery pass after `BACKGROUND_IDLE_GRACE_SECS` (default 60) and becomes
 quiescent. Idle database connections close after `DB_POOL_IDLE_TIMEOUT_SECS` (default 60).
 
+The coordinator's command queue is bounded by `BACKGROUND_COMMAND_QUEUE_CAP` (default 256), and a
+request waits at most `BACKGROUND_WAKE_TIMEOUT_MS` (default 10000) for critical recovery. Queue
+saturation or a recovery deadline returns `503` instead of growing memory or waiting indefinitely.
+
 The first non-probe request after an application-level idle period waits for recovery before route
 handling. Runtime recovery uses persisted section deadlines and can advance across multiple elapsed
 sections. This preserves timer fairness across sleep and cold boot rather than restarting a section
 timer from wake time. Each recovered transition remains an append-only audit event with an
-`effectiveAt` timestamp.
+`effectiveAt` timestamp and inserts its cross-instance live-update row in the same database
+transaction.
+
+Only timer reconciliation gates request admission. Outbox delivery, grading projection, live-update
+polling, retention, storage inspection, and media cleanup run as isolated best-effort active cycles;
+their failures are logged without making unrelated requests unavailable. Outbox failures use bounded
+exponential backoff and become terminal after eight attempts. Terminal rows remain traceable and are
+excluded from active-backlog health calculations.
 
 OTLP export is disabled automatically in activity-driven mode because exporter traffic prevents
 sleep. The Docker image no longer has a recurring `HEALTHCHECK`; Railway's deployment healthcheck in
@@ -34,6 +45,8 @@ Set these variables on the combined backend service and enable Serverless in Rai
 ```dotenv
 BACKGROUND_RUNTIME_MODE=activity_driven
 BACKGROUND_IDLE_GRACE_SECS=60
+BACKGROUND_COMMAND_QUEUE_CAP=256
+BACKGROUND_WAKE_TIMEOUT_MS=10000
 DB_POOL_IDLE_TIMEOUT_SECS=60
 DB_POOL_MIN_CONNECTIONS=0
 API_OTEL_EXPORTER_OTLP_ENDPOINT=
@@ -55,3 +68,5 @@ projections are reconciled before normal handling resumes. Railway may return a 
 platform-level wake request; clients must retry idempotent requests.
 
 Rollback does not require a code rollback: set `BACKGROUND_RUNTIME_MODE=continuous` and redeploy.
+The startup script normalizes aliases, case, and surrounding whitespace exactly as the Rust parser;
+unknown values fail safely to continuous mode.

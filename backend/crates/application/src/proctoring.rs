@@ -10,6 +10,7 @@ use ielts_backend_infrastructure::{
     actor_context::{ActorContext, ActorRole},
     authorization::AuthorizationService,
     live_mode::LiveModeService,
+    live_update_bus::LiveUpdateBusRepository,
     outbox::OutboxRepository,
 };
 use serde_json::{json, Value};
@@ -1149,13 +1150,24 @@ impl ProctoringService {
         &self,
         limit: i64,
     ) -> Result<Vec<AutoAdvanceOutcome>, ProctoringError> {
-        self.reconcile_expired_sections_at(Utc::now(), limit).await
+        self.reconcile_expired_sections_at_with_origin(Utc::now(), limit, "runtime-auto-advance")
+            .await
     }
 
     pub async fn reconcile_expired_sections_at(
         &self,
         as_of: DateTime<Utc>,
         limit: i64,
+    ) -> Result<Vec<AutoAdvanceOutcome>, ProctoringError> {
+        self.reconcile_expired_sections_at_with_origin(as_of, limit, "runtime-reconciler")
+            .await
+    }
+
+    pub async fn reconcile_expired_sections_at_with_origin(
+        &self,
+        as_of: DateTime<Utc>,
+        limit: i64,
+        origin_instance_id: &str,
     ) -> Result<Vec<AutoAdvanceOutcome>, ProctoringError> {
         let limit = limit.max(1);
         let candidates = sqlx::query_as::<_, AutoAdvanceCandidateRow>(
@@ -1198,7 +1210,7 @@ impl ProctoringService {
                 Err(_) => continue,
             };
             if let Some(revision) = self
-                .reconcile_schedule_if_expired(schedule_id, as_of)
+                .reconcile_schedule_if_expired(schedule_id, as_of, origin_instance_id)
                 .await?
             {
                 outcomes.push(AutoAdvanceOutcome {
@@ -1215,6 +1227,7 @@ impl ProctoringService {
         &self,
         schedule_id: Uuid,
         as_of: DateTime<Utc>,
+        origin_instance_id: &str,
     ) -> Result<Option<i64>, ProctoringError> {
         let mut tx = self.pool.begin().await?;
 
@@ -1359,6 +1372,18 @@ impl ProctoringService {
                 )
                 .await?;
 
+                LiveUpdateBusRepository::enqueue_in_tx(
+                    &mut tx,
+                    origin_instance_id,
+                    &ielts_backend_domain::schedule::LiveUpdateEvent {
+                        kind: "schedule_runtime".to_owned(),
+                        id: schedule_id.to_string(),
+                        revision: i64::from(runtime.revision + transition_count),
+                        event: "auto_advance_section".to_owned(),
+                    },
+                )
+                .await?;
+
                 sections[active_index].status = SectionRuntimeStatus::Completed;
                 sections[next_index].status = SectionRuntimeStatus::Live;
                 sections[next_index].actual_start_at = Some(effective_at);
@@ -1403,6 +1428,17 @@ impl ProctoringService {
                 "SESSION_END",
                 None,
                 Some(json!({ "reason": completion_reason, "effectiveAt": effective_at })),
+            )
+            .await?;
+            LiveUpdateBusRepository::enqueue_in_tx(
+                &mut tx,
+                origin_instance_id,
+                &ielts_backend_domain::schedule::LiveUpdateEvent {
+                    kind: "schedule_runtime".to_owned(),
+                    id: schedule_id.to_string(),
+                    revision: i64::from(runtime.revision + transition_count),
+                    event: "auto_advance_section".to_owned(),
+                },
             )
             .await?;
             break;
@@ -1787,6 +1823,7 @@ impl ProctoringService {
             FROM outbox_events
             WHERE aggregate_kind = 'schedule_runtime'
               AND published_at IS NULL
+              AND failed_at IS NULL
               AND created_at <
             "#,
         );

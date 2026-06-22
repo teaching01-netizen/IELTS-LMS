@@ -35,6 +35,8 @@ pub struct AppConfig {
     pub db_pool_idle_timeout_secs: u64,
     pub background_runtime_mode: BackgroundRuntimeMode,
     pub background_idle_grace_secs: u64,
+    pub background_command_queue_cap: usize,
+    pub background_wake_timeout_ms: u64,
     pub worker_poll_interval_ms: u64,
     pub worker_fallback_interval_secs: u64,
     pub grading_projection_enabled: bool,
@@ -163,6 +165,16 @@ impl AppConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.background_idle_grace_secs)
+                .max(1),
+            background_command_queue_cap: env::var("BACKGROUND_COMMAND_QUEUE_CAP")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.background_command_queue_cap)
+                .max(1),
+            background_wake_timeout_ms: env::var("BACKGROUND_WAKE_TIMEOUT_MS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.background_wake_timeout_ms)
                 .max(1),
             worker_poll_interval_ms: env::var("WORKER_POLL_INTERVAL_MS")
                 .ok()
@@ -607,6 +619,8 @@ impl Default for AppConfig {
             db_pool_idle_timeout_secs: 60,
             background_runtime_mode: BackgroundRuntimeMode::Continuous,
             background_idle_grace_secs: 60,
+            background_command_queue_cap: 256,
+            background_wake_timeout_ms: 10_000,
             worker_poll_interval_ms: 1000,
             worker_fallback_interval_secs: 10,
             grading_projection_enabled: true,
@@ -719,6 +733,8 @@ mod tests {
         );
         assert_eq!(config.background_idle_grace_secs, 60);
         assert_eq!(config.db_pool_idle_timeout_secs, 60);
+        assert_eq!(config.background_command_queue_cap, 256);
+        assert_eq!(config.background_wake_timeout_ms, 10_000);
     }
 
     #[test]

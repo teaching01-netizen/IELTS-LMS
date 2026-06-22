@@ -131,6 +131,7 @@ async fn run_outbox_cycle(
         outbox_published = outbox.published,
         outbox_wakeups_notified = outbox.wakeups_notified,
         outbox_failed = outbox.failed,
+        outbox_terminal_failures = outbox.terminal_failures,
         outbox_duration_ms = outbox.duration_ms,
         grading_projection_enabled = projection.enabled,
         grading_projection_schedule_rows = projection.schedule_rows_synced,
@@ -227,8 +228,9 @@ async fn drain_outbox_until_empty(
         total.published += batch.published;
         total.wakeups_notified += batch.wakeups_notified;
         total.failed += batch.failed;
+        total.terminal_failures += batch.terminal_failures;
 
-        if batch.claimed == 0 {
+        if batch.claimed == 0 || batch.published == 0 {
             break;
         }
 

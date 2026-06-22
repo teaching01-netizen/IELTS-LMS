@@ -24,10 +24,17 @@ pub fn spawn_runtime_auto_advance(state: AppState) -> Option<tokio::task::JoinHa
         loop {
             interval.tick().await;
 
-            match service.auto_advance_expired_sections(250).await {
+            match service
+                .reconcile_expired_sections_at_with_origin(
+                    chrono::Utc::now(),
+                    250,
+                    &state.instance_id,
+                )
+                .await
+            {
                 Ok(outcomes) => {
                     for outcome in outcomes {
-                        state.publish_live_update(LiveUpdateEvent {
+                        state.live_updates.publish(LiveUpdateEvent {
                             kind: "schedule_runtime".to_owned(),
                             id: outcome.schedule_id.to_string(),
                             revision: outcome.runtime_revision,

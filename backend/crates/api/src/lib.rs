@@ -49,7 +49,6 @@ pub async fn run() -> std::io::Result<()> {
         let background = spawn_activity_driven_background(state.clone())
             .await
             .map_err(std::io::Error::other)?;
-        background.activate().await.map_err(std::io::Error::other)?;
         state = state.with_background_runtime(background);
         tracing::info!(
             idle_grace_secs = state.config.background_idle_grace_secs,

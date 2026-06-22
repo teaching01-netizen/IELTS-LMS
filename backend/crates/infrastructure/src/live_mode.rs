@@ -34,6 +34,7 @@ impl LiveModeService {
                 WHERE aggregate_kind = 'schedule_runtime'
                   AND aggregate_id = ?
                   AND published_at IS NULL
+                  AND failed_at IS NULL
                   AND created_at < ?
                 "#,
             )
@@ -43,7 +44,7 @@ impl LiveModeService {
             .await?
         } else {
             sqlx::query_scalar(
-                "SELECT COUNT(*) FROM outbox_events WHERE published_at IS NULL AND created_at < ?",
+                "SELECT COUNT(*) FROM outbox_events WHERE published_at IS NULL AND failed_at IS NULL AND created_at < ?",
             )
             .bind(threshold)
             .fetch_one(&self.pool)

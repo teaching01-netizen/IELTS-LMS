@@ -50,6 +50,9 @@ const PROCTOR_MIGRATIONS: &[&str] = &[
     "0010_auth_security.sql",
     "0014_student_attempt_presence.sql",
     "0015_operation_write_hardening.sql",
+    "0017_production_hardening.sql",
+    "0018_exam_day_concurrency_hardening.sql",
+    "0030_outbox_retry_policy.sql",
 ];
 
 #[tokio::test]
@@ -1168,7 +1171,7 @@ async fn runtime_reconciliation_preserves_wall_clock_across_multiple_expired_sec
     .expect("backdate active section");
 
     let outcomes = ProctoringService::new(database.pool().clone())
-        .reconcile_expired_sections_at(as_of, 250)
+        .reconcile_expired_sections_at_with_origin(as_of, 250, "contract-runtime-reconciler")
         .await
         .expect("reconcile elapsed timeline");
     assert_eq!(outcomes.len(), 1);
@@ -1208,6 +1211,15 @@ async fn runtime_reconciliation_preserves_wall_clock_across_multiple_expired_sec
     .await
     .expect("count effective timeline audit rows");
     assert_eq!(effective_audit_count, 8);
+
+    let durable_update_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM live_update_events WHERE origin_instance_id = 'contract-runtime-reconciler' AND event_kind = 'schedule_runtime' AND event_target_id = ? AND event_name = 'auto_advance_section'",
+    )
+    .bind(schedule.id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .expect("count durable runtime update events");
+    assert_eq!(durable_update_count, 4);
 
     database.shutdown().await;
 }

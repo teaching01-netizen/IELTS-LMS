@@ -18,7 +18,7 @@ use std::{
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 
 use crate::{
-    background::BackgroundRuntimeHandle,
+    background::{BackgroundRuntimeHandle, BackgroundWebsocketLease},
     http::{auth::parse_cookie, response::ApiError},
     state::AppState,
 };
@@ -43,21 +43,14 @@ struct DisconnectReason {
     reason: String,
 }
 
-struct BackgroundWebsocketGuard(Option<BackgroundRuntimeHandle>);
+struct BackgroundWebsocketGuard {
+    _lease: Option<BackgroundWebsocketLease>,
+}
 
 impl BackgroundWebsocketGuard {
     fn new(background: Option<BackgroundRuntimeHandle>) -> Self {
-        if let Some(handle) = &background {
-            handle.websocket_opened();
-        }
-        Self(background)
-    }
-}
-
-impl Drop for BackgroundWebsocketGuard {
-    fn drop(&mut self) {
-        if let Some(handle) = &self.0 {
-            handle.websocket_closed();
+        Self {
+            _lease: background.map(|handle| handle.websocket_opened()),
         }
     }
 }

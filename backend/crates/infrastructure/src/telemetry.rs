@@ -92,6 +92,8 @@ pub struct Telemetry {
     process_memory_profile_collection_failures: Counter,
     rate_limiter_buckets: Gauge<i64, AtomicI64>,
     request_route_fallback_total: Counter,
+    background_wake_duration: Family<OutcomeLabels, Histogram>,
+    background_wake_failures: Family<OutcomeLabels, Counter>,
     storage_budget_threshold_hits: Family<ThresholdLabels, Counter>,
     grading_projection_lag_seconds: Gauge<i64, AtomicI64>,
     grading_projection_cycle_duration_seconds: Histogram,
@@ -156,6 +158,11 @@ impl Telemetry {
         let process_memory_profile_collection_failures = Counter::default();
         let rate_limiter_buckets = Gauge::<i64, AtomicI64>::default();
         let request_route_fallback_total = Counter::default();
+        let background_wake_duration =
+            Family::<OutcomeLabels, Histogram>::new_with_constructor(|| {
+                Histogram::new(exponential_buckets(0.001, 2.0, 16))
+            });
+        let background_wake_failures = Family::<OutcomeLabels, Counter>::default();
         let storage_budget_threshold_hits = Family::<ThresholdLabels, Counter>::default();
         let grading_projection_lag_seconds = Gauge::<i64, AtomicI64>::default();
         let grading_projection_cycle_duration_seconds =
@@ -311,6 +318,16 @@ impl Telemetry {
             request_route_fallback_total.clone(),
         );
         registry.register(
+            "backend_background_wake_duration_seconds",
+            "Time spent waiting for activity-driven critical recovery, grouped by outcome.",
+            background_wake_duration.clone(),
+        );
+        registry.register(
+            "backend_background_wake_failures",
+            "Count of activity-driven wake failures, grouped by outcome.",
+            background_wake_failures.clone(),
+        );
+        registry.register(
             "backend_storage_budget_threshold_hits_total",
             "Number of times storage budget checks have hit a given severity.",
             storage_budget_threshold_hits.clone(),
@@ -367,6 +384,8 @@ impl Telemetry {
             process_memory_profile_collection_failures,
             rate_limiter_buckets,
             request_route_fallback_total,
+            background_wake_duration,
+            background_wake_failures,
             storage_budget_threshold_hits,
             grading_projection_lag_seconds,
             grading_projection_cycle_duration_seconds,
@@ -511,6 +530,18 @@ impl Telemetry {
         self.request_route_fallback_total.inc();
     }
 
+    pub fn observe_background_wake(&self, outcome: &str, duration: Duration) {
+        let labels = OutcomeLabels {
+            outcome: outcome.to_owned(),
+        };
+        self.background_wake_duration
+            .get_or_create(&labels)
+            .observe(duration.as_secs_f64());
+        if outcome != "success" {
+            self.background_wake_failures.get_or_create(&labels).inc();
+        }
+    }
+
     pub fn observe_storage_budget(&self, total_bytes: u64, level_label: &str, severity_code: i64) {
         self.storage_budget_bytes
             .set(i64::try_from(total_bytes).unwrap_or(i64::MAX));
@@ -637,6 +668,20 @@ mod tests {
         )
         .expect("failure counter value");
         assert_eq!(metric_value, 2.0);
+    }
+
+    #[test]
+    fn render_includes_background_wake_metrics_by_outcome() {
+        let telemetry = Telemetry::new();
+        telemetry.observe_background_wake("success", std::time::Duration::from_millis(4));
+        telemetry.observe_background_wake("queue_full", std::time::Duration::from_millis(1));
+
+        let rendered = telemetry.render().expect("render metrics");
+        assert!(rendered.contains("backend_background_wake_duration_seconds"));
+        assert!(
+            rendered.contains("backend_background_wake_failures_total{outcome=\"queue_full\"} 1"),
+            "{rendered}"
+        );
     }
 
     #[test]

@@ -17,6 +17,7 @@ const INFRA_MIGRATIONS: &[&str] = &[
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
     "0017_production_hardening.sql",
+    "0030_outbox_retry_policy.sql",
 ];
 
 // These tests use PostgreSQL-specific LISTEN/NOTIFY mechanism which doesn't exist in MySQL.
@@ -75,6 +76,63 @@ async fn outbox_insert_triggers_wakeup_notification() {
         .await
         .expect("enqueue outbox event");
     assert_eq!(created.aggregate_id, "schedule-456");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn failed_oldest_batch_does_not_starve_a_later_eligible_event() {
+    let database = mysql::TestDatabase::new(INFRA_MIGRATIONS).await;
+    let repository = OutboxRepository::new(database.pool().clone());
+
+    for index in 0..100 {
+        repository
+            .enqueue(
+                "poison",
+                &format!("poison-{index}"),
+                1,
+                "poison_event",
+                &json!({ "invalid": true }),
+            )
+            .await
+            .expect("enqueue poison event");
+    }
+
+    let poison_batch = repository
+        .claim_batch(100, "poison-worker", 60)
+        .await
+        .expect("claim poison batch");
+    assert_eq!(poison_batch.len(), 100);
+    let claim_token = poison_batch[0].claim_token.clone().expect("claim token");
+    for event in poison_batch {
+        repository
+            .mark_failed(
+                &claim_token,
+                event.id,
+                event.publish_attempts,
+                "malformed payload",
+            )
+            .await
+            .expect("schedule poison retry");
+    }
+
+    let later = repository
+        .enqueue(
+            "schedule_runtime",
+            "later-event",
+            1,
+            "runtime_changed",
+            &json!({ "scheduleId": "later-event" }),
+        )
+        .await
+        .expect("enqueue later event");
+
+    let next_batch = repository
+        .claim_batch(100, "next-worker", 60)
+        .await
+        .expect("claim next eligible batch");
+    assert_eq!(next_batch.len(), 1);
+    assert_eq!(next_batch[0].id, later.id);
 
     database.shutdown().await;
 }

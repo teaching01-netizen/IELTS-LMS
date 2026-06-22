@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use ielts_backend_application::delivery::finalize_pending_schedule_attempts;
 use ielts_backend_infrastructure::config::AppConfig;
-use ielts_backend_infrastructure::outbox::{OutboxEvent, OutboxRepository};
+use ielts_backend_infrastructure::outbox::{OutboxEvent, OutboxRepository, RetryDisposition};
 use serde::Deserialize;
 use sqlx::MySqlPool;
 use uuid::Uuid;
@@ -16,6 +16,7 @@ pub struct OutboxRunReport {
     pub published: u64,
     pub wakeups_notified: u64,
     pub failed: u64,
+    pub terminal_failures: u64,
     pub duration_ms: u64,
 }
 
@@ -55,6 +56,7 @@ pub async fn run_once(
     let mut publishable_ids = Vec::new();
     let mut published_events = Vec::new();
     let mut failed = 0_u64;
+    let mut terminal_failures = 0_u64;
 
     for event in &events {
         if claim_token.is_empty() {
@@ -68,9 +70,17 @@ pub async fn run_once(
             }
             Err(error_message) => {
                 failed += 1;
-                repository
-                    .mark_failed(&claim_token, event.id, &error_message)
+                let disposition = repository
+                    .mark_failed(
+                        &claim_token,
+                        event.id,
+                        event.publish_attempts,
+                        &error_message,
+                    )
                     .await?;
+                if disposition == RetryDisposition::Terminal {
+                    terminal_failures += 1;
+                }
             }
         }
     }
@@ -100,6 +110,7 @@ pub async fn run_once(
         published,
         wakeups_notified,
         failed,
+        terminal_failures,
         duration_ms: started.elapsed().as_millis() as u64,
     })
 }

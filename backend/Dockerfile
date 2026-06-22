@@ -56,6 +56,7 @@ COPY --from=backend-builder /app/backend/target/release/migrate /app/migrate
 COPY --from=backend-builder /app/backend/target/release/ielts-backend-worker /app/worker
 COPY --from=frontend-builder /app/dist /app/frontend/dist
 COPY backend/migrations /app/migrations
+COPY backend/scripts/normalize-background-runtime-mode.sh /app/normalize-background-runtime-mode.sh
 
 RUN cat > /app/start.sh << 'EOF'
 #!/bin/bash
@@ -79,8 +80,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT="${API_OTEL_EXPORTER_OTLP_ENDPOINT}" \
 /app/api &
 API_PID=$!
 
-BACKGROUND_RUNTIME_MODE="${BACKGROUND_RUNTIME_MODE:-continuous}"
-if [[ "${BACKGROUND_RUNTIME_MODE}" == "activity_driven" || "${BACKGROUND_RUNTIME_MODE}" == "activity-driven" ]]; then
+BACKGROUND_RUNTIME_MODE="$(/app/normalize-background-runtime-mode.sh "${BACKGROUND_RUNTIME_MODE:-continuous}")"
+if [[ "${BACKGROUND_RUNTIME_MODE}" == "activity_driven" ]]; then
     trap 'kill "$API_PID" 2>/dev/null || true' INT TERM EXIT
     set +e
     wait "$API_PID"
@@ -104,7 +105,7 @@ wait || true
 exit "$STATUS"
 EOF
 
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh /app/normalize-background-runtime-mode.sh
 
 EXPOSE 8080
 

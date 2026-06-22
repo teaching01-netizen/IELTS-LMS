@@ -7,7 +7,6 @@ use axum::{
 };
 
 use crate::{
-    background::BackgroundRuntimeHandle,
     frontend,
     http::request_id::request_id_middleware,
     routes::{
@@ -16,15 +15,8 @@ use crate::{
     },
     state::AppState,
 };
+use std::time::Instant;
 use tower_http::compression::CompressionLayer;
-
-struct BackgroundRequestGuard(BackgroundRuntimeHandle);
-
-impl Drop for BackgroundRequestGuard {
-    fn drop(&mut self) {
-        self.0.request_finished();
-    }
-}
 
 pub fn build_router(state: AppState) -> Router {
     let middleware_state = state.clone();
@@ -326,16 +318,26 @@ async fn background_activity_middleware(
         return next.run(request).await;
     };
 
-    if let Err(error) = background.request_started().await {
-        tracing::error!(error = %error, "request background recovery failed");
-        return (
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "Service recovery failed; retry the request.",
-        )
-            .into_response();
-    }
-
-    let _request_guard = BackgroundRequestGuard(background);
+    let wake_started = Instant::now();
+    let _request_guard = match background.request_started().await {
+        Ok(guard) => {
+            state
+                .telemetry
+                .observe_background_wake("success", wake_started.elapsed());
+            guard
+        }
+        Err(error) => {
+            state
+                .telemetry
+                .observe_background_wake(error.as_label(), wake_started.elapsed());
+            tracing::error!(error = %error, "request background recovery failed");
+            return (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "Service recovery failed; retry the request.",
+            )
+                .into_response();
+        }
+    };
     next.run(request).await
 }
 
@@ -356,20 +358,22 @@ mod tests {
 
     #[async_trait]
     impl BackgroundJobs for FailingRecovery {
-        async fn recover(&mut self) -> Result<(), String> {
+        async fn recover_critical(&mut self) -> Result<(), String> {
             Err("database unavailable".to_owned())
         }
 
-        async fn active_cycle(&mut self) -> Result<(), String> {
-            Ok(())
-        }
+        async fn active_cycle(&mut self) {}
     }
 
     fn app_with_failing_recovery() -> axum::Router {
         let handle = spawn_background_runtime_with_jobs(
-            BackgroundRuntimeMode::ActivityDriven,
-            Duration::from_secs(60),
-            Duration::from_millis(10),
+            crate::background::CoordinatorConfig {
+                mode: BackgroundRuntimeMode::ActivityDriven,
+                grace: Duration::from_secs(60),
+                tick: Duration::from_millis(10),
+                command_capacity: 8,
+                wake_timeout: Duration::from_secs(1),
+            },
             FailingRecovery,
         );
         build_router(AppState::new(AppConfig::default()).with_background_runtime(handle))
