@@ -175,8 +175,8 @@ export interface ExamVersionMetadata {
 }
 
 /**
- * Content projection for builder mode (answers stripped for smaller payload).
- * Used for lazy-loading content after metadata is loaded.
+ * Lossless editable content projection for builder/admin consumers.
+ * Answer-key and configuration fields must be preserved.
  */
 export interface ExamVersionBuilderContent {
   contentSnapshot: ExamState;

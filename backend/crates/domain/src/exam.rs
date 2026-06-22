@@ -530,7 +530,8 @@ pub struct ExamVersionMetadata {
     pub config_size_bytes: Option<i64>,
 }
 
-/// Content projection for builder mode (answers stripped for smaller payload)
+/// Lossless editable content projection for builder/admin consumers.
+/// Answer-key and configuration fields must be preserved in this projection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExamVersionBuilderContent {

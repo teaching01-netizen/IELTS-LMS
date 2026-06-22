@@ -8,9 +8,9 @@ use ielts_backend_application::builder::{BuilderError, BuilderService};
 use ielts_backend_application::version_serializer::VersionSerializer;
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::exam::{
-    CreateExamRequest, ExamEntity, ExamValidationSummary, ExamVersion,
-    ExamVersionBuilderContent, ExamVersionMetadata, ExamVersionSummary, PublishExamRequest,
-    SaveDraftRequest, UpdateExamRequest, VersionProjection,
+    CreateExamRequest, ExamEntity, ExamValidationSummary, ExamVersion, ExamVersionBuilderContent,
+    ExamVersionMetadata, ExamVersionSummary, PublishExamRequest, SaveDraftRequest,
+    UpdateExamRequest, VersionProjection,
 };
 use ielts_backend_infrastructure::authorization::AuthorizationService;
 use std::time::Instant;
@@ -197,7 +197,7 @@ pub async fn get_version(
 ///
 /// Projections:
 /// - `metadata`: Returns only version metadata with content sizes (fastest)
-/// - `builder`: Returns content with answers stripped (smaller payload)
+/// - `builder`: Returns lossless editable content for builder/admin consumers
 /// - `grading`: Returns full content with answers (same as full)
 /// - `full`: Returns everything (backward compatible)
 pub async fn get_version_with_projection(
@@ -220,10 +220,9 @@ pub async fn get_version_with_projection(
             let metadata = service
                 .get_version_metadata(&ctx, version_id.to_string())
                 .await?;
-            state.telemetry.observe_db_operation(
-                "builder.get_version_metadata",
-                started.elapsed(),
-            );
+            state
+                .telemetry
+                .observe_db_operation("builder.get_version_metadata", started.elapsed());
 
             let etag = metadata_etag(&metadata);
             if if_none_match_matches(&headers, &etag) {
@@ -339,10 +338,10 @@ fn metadata_etag(metadata: &ExamVersionMetadata) -> String {
     )
 }
 
-/// Generate ETag for builder content (includes size hint from original)
+/// Generate a schema-versioned ETag for the lossless builder projection.
 fn builder_content_etag(version: &ExamVersion) -> String {
     format!(
-        r#""exam-version-builder:{}:{}:{}:{}""#,
+        r#""exam-version-builder-v2:{}:{}:{}:{}""#,
         version.id, version.revision, version.is_draft, version.is_published
     )
 }
@@ -446,5 +445,38 @@ impl From<BuilderError> for ApiError {
                 &err.to_string(),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use serde_json::json;
+
+    use super::builder_content_etag;
+    use ielts_backend_domain::exam::ExamVersion;
+
+    #[test]
+    fn builder_content_etag_versions_the_lossless_projection() {
+        let version = ExamVersion {
+            id: "version-1".to_owned(),
+            exam_id: "exam-1".to_owned(),
+            version_number: 1,
+            parent_version_id: None,
+            content_snapshot: json!({}).into(),
+            config_snapshot: json!({}).into(),
+            validation_snapshot: None,
+            created_by: "builder-1".to_owned(),
+            created_at: Utc::now(),
+            publish_notes: None,
+            is_draft: true,
+            is_published: false,
+            revision: 0,
+        };
+
+        assert_eq!(
+            builder_content_etag(&version),
+            r#""exam-version-builder-v2:version-1:0:true:false""#
+        );
     }
 }

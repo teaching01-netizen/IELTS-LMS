@@ -11,7 +11,7 @@
  * - Reduced bandwidth when only metadata is needed
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { hydrateExamState } from '@services/examAdapterService';
 import { examRepository } from '@services/examRepository';
 import type { ExamVersionMetadata } from '../../../types/domain';
@@ -66,26 +66,38 @@ export function useLazyVersionLoad(
   const [isMetadataLoading, setIsMetadataLoading] = useState(true);
   const [isContentLoading, setIsContentLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const generationRef = useRef(0);
+  const contentRequestRef = useRef<{ versionId: string; promise: Promise<void> } | null>(null);
 
   // Load metadata immediately
   useEffect(() => {
     let cancelled = false;
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    contentRequestRef.current = null;
+
+    setMetadata(null);
+    setState(null);
+    setIsContentLoading(false);
+    setError(null);
 
     const loadMetadata = async () => {
       setIsMetadataLoading(true);
-      setError(null);
 
       try {
         const meta = await examRepository.getVersionMetadata(versionId);
-        if (!cancelled) {
+        if (!meta) {
+          throw new Error(`Version ${versionId} not found`);
+        }
+        if (!cancelled && generationRef.current === generation) {
           setMetadata(meta);
         }
       } catch (err) {
-        if (!cancelled) {
+        if (!cancelled && generationRef.current === generation) {
           setError(err as Error);
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && generationRef.current === generation) {
           setIsMetadataLoading(false);
         }
       }
@@ -99,27 +111,49 @@ export function useLazyVersionLoad(
   }, [versionId]);
 
   // Lazy-load content
-  const loadContent = useCallback(async () => {
-    if (state || isContentLoading) {
-      return; // Already loaded or loading
+  const loadContent = useCallback((): Promise<void> => {
+    if (state) {
+      return Promise.resolve();
     }
 
+    const existingRequest = contentRequestRef.current;
+    if (existingRequest?.versionId === versionId) {
+      return existingRequest.promise;
+    }
+
+    const generation = generationRef.current;
     setIsContentLoading(true);
     setError(null);
 
-    try {
-      const content = await examRepository.getVersionBuilderContent(versionId);
-      if (content) {
-        // Hydrate the content snapshot into a full ExamState
-        const hydrated = hydrateExamState(content.contentSnapshot);
+    const request = (async () => {
+      try {
+        const content = await examRepository.getVersionBuilderContent(versionId);
+        if (!content) {
+          throw new Error(`Version ${versionId} content not found`);
+        }
+        if (generationRef.current !== generation) {
+          return;
+        }
+        const hydrated = hydrateExamState({
+          ...content.contentSnapshot,
+          config: content.configSnapshot ?? content.contentSnapshot.config,
+        });
         setState(hydrated);
+      } catch (err) {
+        if (generationRef.current === generation) {
+          setError(err as Error);
+        }
+      } finally {
+        if (generationRef.current === generation) {
+          setIsContentLoading(false);
+          contentRequestRef.current = null;
+        }
       }
-    } catch (err) {
-      setError(err as Error);
-    } finally {
-      setIsContentLoading(false);
-    }
-  }, [versionId, state, isContentLoading]);
+    })();
+
+    contentRequestRef.current = { versionId, promise: request };
+    return request;
+  }, [versionId, state]);
 
   // Auto-load content if requested
   useEffect(() => {
@@ -159,6 +193,9 @@ export function useVersionMetadata(versionId: string) {
 
       try {
         const meta = await examRepository.getVersionMetadata(versionId);
+        if (!meta) {
+          throw new Error(`Version ${versionId} not found`);
+        }
         if (!cancelled) {
           setMetadata(meta);
         }

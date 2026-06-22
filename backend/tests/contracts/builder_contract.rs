@@ -722,7 +722,7 @@ async fn publish_revalidates_the_current_draft_before_marking_it_published() {
 }
 
 #[tokio::test]
-async fn get_version_compacts_duplicate_legacy_chart_image_and_supports_etag() {
+async fn get_version_projections_preserve_contracts_authorization_and_etag() {
     let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
     let seeded = seed_exam(database.pool()).await;
     let auth = mysql::create_authenticated_user(
@@ -740,7 +740,17 @@ async fn get_version_compacts_duplicate_legacy_chart_image_and_supports_etag() {
             seeded.id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
-                    "reading": {"passages": []},
+                    "reading": {"passages": [{"blocks": [{
+                        "id": "block-1",
+                        "type": "SHORT_ANSWER",
+                        "answerRule": "ONE_WORD",
+                        "answerTree": [{"id": "leaf-1", "acceptedAnswers": ["alpha"]}],
+                        "questions": [{
+                            "id": "question-1",
+                            "correctAnswer": "alpha",
+                            "acceptedAnswers": ["alpha", "Alpha"]
+                        }]
+                    }]}]},
                     "listening": {"parts": []},
                     "writing": {
                         "task1Prompt": "Describe the chart.",
@@ -837,6 +847,143 @@ async fn get_version_compacts_duplicate_legacy_chart_image_and_supports_etag() {
     assert!(json["data"]["contentSnapshot"]["writing"]["task1Chart"]
         .get("imageSrc")
         .is_none());
+
+    let metadata_response = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/versions/{}?projection=metadata",
+                saved_version.id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(metadata_response.status(), StatusCode::OK);
+    let metadata_etag = metadata_response
+        .headers()
+        .get("etag")
+        .expect("metadata etag")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let body = to_bytes(metadata_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let metadata_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(metadata_json["data"]["id"], saved_version.id);
+    assert!(metadata_json["data"]["contentSizeBytes"].as_i64().unwrap() > 0);
+    assert!(metadata_json["data"].get("contentSnapshot").is_none());
+
+    let metadata_not_modified = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/versions/{}?projection=metadata",
+                saved_version.id
+            )))
+            .header("if-none-match", metadata_etag)
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(metadata_not_modified.status(), StatusCode::NOT_MODIFIED);
+
+    let legacy_builder_etag = format!(
+        r#""exam-version-builder:{}:{}:{}:{}""#,
+        saved_version.id,
+        saved_version.revision,
+        saved_version.is_draft,
+        saved_version.is_published
+    );
+    let builder_response = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/versions/{}?projection=builder",
+                saved_version.id
+            )))
+            .header("if-none-match", legacy_builder_etag.as_str())
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(builder_response.status(), StatusCode::OK);
+    let builder_etag = builder_response
+        .headers()
+        .get("etag")
+        .expect("builder etag")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(builder_etag, legacy_builder_etag);
+    assert!(builder_etag.starts_with(r#""exam-version-builder-v2:"#));
+    let body = to_bytes(builder_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let builder_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let projected_question =
+        &builder_json["data"]["contentSnapshot"]["reading"]["passages"][0]["blocks"][0];
+    assert_eq!(projected_question["answerRule"], "ONE_WORD");
+    assert_eq!(
+        projected_question["answerTree"][0]["acceptedAnswers"][0],
+        "alpha"
+    );
+    assert_eq!(projected_question["questions"][0]["correctAnswer"], "alpha");
+    assert_eq!(
+        projected_question["questions"][0]["acceptedAnswers"][1],
+        "Alpha"
+    );
+    assert_eq!(
+        builder_json["data"]["configSnapshot"]["general"]["title"],
+        seeded.title
+    );
+
+    let builder_not_modified = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/versions/{}?projection=builder",
+                saved_version.id
+            )))
+            .header("if-none-match", builder_etag)
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(builder_not_modified.status(), StatusCode::NOT_MODIFIED);
+
+    let grading_response = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/versions/{}?projection=grading",
+                saved_version.id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(grading_response.status(), StatusCode::OK);
+
+    let invalid_projection = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/versions/{}?projection=student",
+                saved_version.id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_projection.status(), StatusCode::BAD_REQUEST);
 
     let not_modified = app
         .oneshot(
