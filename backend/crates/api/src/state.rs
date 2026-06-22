@@ -12,7 +12,7 @@ use sqlx::mysql::MySqlPoolOptions;
 use sqlx::MySqlPool;
 use uuid::Uuid;
 
-use crate::live_updates::LiveUpdateHub;
+use crate::{background::BackgroundRuntimeHandle, live_updates::LiveUpdateHub};
 
 #[derive(Clone, Debug)]
 pub struct AppState {
@@ -25,6 +25,7 @@ pub struct AppState {
     pub distributed_rate_limiter: Option<DistributedRateLimiter>,
     pub live_update_bus: Option<LiveUpdateBusRepository>,
     pub instance_id: String,
+    pub background_runtime: Option<BackgroundRuntimeHandle>,
 }
 
 impl AppState {
@@ -45,6 +46,7 @@ impl AppState {
             distributed_rate_limiter: None,
             live_update_bus: None,
             instance_id: format!("api-{}", Uuid::new_v4()),
+            background_runtime: None,
         }
     }
 
@@ -69,7 +71,13 @@ impl AppState {
             )),
             live_update_bus: Some(LiveUpdateBusRepository::new(pool)),
             instance_id: format!("api-{}", Uuid::new_v4()),
+            background_runtime: None,
         }
+    }
+
+    pub fn with_background_runtime(mut self, handle: BackgroundRuntimeHandle) -> Self {
+        self.background_runtime = Some(handle);
+        self
     }
 
     pub async fn from_config(config: AppConfig) -> Result<Self, sqlx::Error> {
@@ -78,6 +86,7 @@ impl AppState {
                 let pool = MySqlPoolOptions::new()
                     .max_connections(config.db_pool_max_connections)
                     .acquire_timeout(Duration::from_millis(config.db_pool_acquire_timeout_ms))
+                    .idle_timeout(Some(Duration::from_secs(config.db_pool_idle_timeout_secs)))
                     .connect(database_url)
                     .await?;
 

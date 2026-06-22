@@ -18,7 +18,8 @@ use ielts_backend_api::{
     router::build_router, runtime_auto_advance::spawn_runtime_auto_advance, state::AppState,
 };
 use ielts_backend_application::{
-    builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
+    builder::BuilderService, delivery::DeliveryService, proctoring::ProctoringService,
+    scheduling::SchedulingService,
 };
 use ielts_backend_domain::{
     attempt::StudentBootstrapRequest,
@@ -1121,6 +1122,93 @@ async fn runtime_auto_advance_completes_expired_section_and_emits_event() {
 
     auto_advance_task.abort();
     server.abort();
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn runtime_reconciliation_preserves_wall_clock_across_multiple_expired_sections() {
+    let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: None,
+            },
+        )
+        .await
+        .expect("start runtime");
+
+    let runtime_id: String =
+        sqlx::query_scalar("SELECT id FROM exam_session_runtimes WHERE schedule_id = ?")
+            .bind(schedule.id.to_string())
+            .fetch_one(database.pool())
+            .await
+            .expect("load runtime id");
+    let as_of = Utc::now();
+    let first_started_at = as_of - Duration::minutes(5);
+    sqlx::query(
+        "UPDATE exam_session_runtime_sections SET planned_duration_minutes = 1 WHERE runtime_id = ?",
+    )
+    .bind(&runtime_id)
+    .execute(database.pool())
+    .await
+    .expect("shorten all sections");
+    sqlx::query(
+        "UPDATE exam_session_runtime_sections SET actual_start_at = ? WHERE runtime_id = ? AND status = 'live'",
+    )
+    .bind(first_started_at)
+    .bind(&runtime_id)
+    .execute(database.pool())
+    .await
+    .expect("backdate active section");
+
+    let outcomes = ProctoringService::new(database.pool().clone())
+        .reconcile_expired_sections_at(as_of, 250)
+        .await
+        .expect("reconcile elapsed timeline");
+    assert_eq!(outcomes.len(), 1);
+
+    let (runtime_status, active_section): (String, Option<String>) =
+        sqlx::query_as("SELECT status, active_section_key FROM exam_session_runtimes WHERE id = ?")
+            .bind(&runtime_id)
+            .fetch_one(database.pool())
+            .await
+            .expect("load reconciled runtime");
+    assert_eq!(runtime_status, "completed");
+    assert_eq!(active_section, None);
+
+    let section_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM exam_session_runtime_sections WHERE runtime_id = ? AND status = 'completed'",
+    )
+    .bind(&runtime_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("count completed sections");
+    assert_eq!(section_count, 4);
+
+    let auto_submit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM outbox_events WHERE aggregate_id = ? AND event_family = 'auto_submit_schedule_attempts_requested'",
+    )
+    .bind(schedule.id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .expect("count auto-submit events");
+    assert_eq!(auto_submit_count, 1);
+
+    let effective_audit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND actor = 'system' AND JSON_EXTRACT(payload, '$.effectiveAt') IS NOT NULL",
+    )
+    .bind(schedule.id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .expect("count effective timeline audit rows");
+    assert_eq!(effective_audit_count, 8);
+
     database.shutdown().await;
 }
 

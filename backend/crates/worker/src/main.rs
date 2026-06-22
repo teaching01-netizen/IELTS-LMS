@@ -47,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let pool = MySqlPoolOptions::new()
         .max_connections(config.db_pool_max_connections)
         .acquire_timeout(Duration::from_millis(config.db_pool_acquire_timeout_ms))
+        .idle_timeout(Some(Duration::from_secs(config.db_pool_idle_timeout_secs)))
         .connect(&database_url)
         .await?;
     let fallback_interval = Duration::from_secs(config.worker_fallback_interval_secs);

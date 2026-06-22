@@ -2,6 +2,27 @@ use std::env;
 
 use crate::database_monitor::StorageBudgetThresholds;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BackgroundRuntimeMode {
+    #[default]
+    Continuous,
+    ActivityDriven,
+}
+
+impl BackgroundRuntimeMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "continuous" => Some(Self::Continuous),
+            "activity_driven" | "activity-driven" => Some(Self::ActivityDriven),
+            _ => None,
+        }
+    }
+
+    pub fn is_activity_driven(self) -> bool {
+        self == Self::ActivityDriven
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppConfig {
     pub api_host: String,
@@ -11,6 +32,9 @@ pub struct AppConfig {
     pub database_direct_url: Option<String>,
     pub db_pool_max_connections: u32,
     pub db_pool_acquire_timeout_ms: u64,
+    pub db_pool_idle_timeout_secs: u64,
+    pub background_runtime_mode: BackgroundRuntimeMode,
+    pub background_idle_grace_secs: u64,
     pub worker_poll_interval_ms: u64,
     pub worker_fallback_interval_secs: u64,
     pub grading_projection_enabled: bool,
@@ -126,6 +150,20 @@ impl AppConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.db_pool_acquire_timeout_ms),
+            db_pool_idle_timeout_secs: env::var("DB_POOL_IDLE_TIMEOUT_SECS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.db_pool_idle_timeout_secs)
+                .max(1),
+            background_runtime_mode: env::var("BACKGROUND_RUNTIME_MODE")
+                .ok()
+                .and_then(|value| BackgroundRuntimeMode::parse(&value))
+                .unwrap_or(default.background_runtime_mode),
+            background_idle_grace_secs: env::var("BACKGROUND_IDLE_GRACE_SECS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.background_idle_grace_secs)
+                .max(1),
             worker_poll_interval_ms: env::var("WORKER_POLL_INTERVAL_MS")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -566,6 +604,9 @@ impl Default for AppConfig {
             database_direct_url: None,
             db_pool_max_connections: 20,
             db_pool_acquire_timeout_ms: 3000,
+            db_pool_idle_timeout_secs: 60,
+            background_runtime_mode: BackgroundRuntimeMode::Continuous,
+            background_idle_grace_secs: 60,
             worker_poll_interval_ms: 1000,
             worker_fallback_interval_secs: 10,
             grading_projection_enabled: true,
@@ -666,7 +707,32 @@ fn resolve_rate_limit_count(specific: Option<&str>, global: Option<u32>, default
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_api_port, resolve_rate_limit_count, AppConfig};
+    use super::{resolve_api_port, resolve_rate_limit_count, AppConfig, BackgroundRuntimeMode};
+
+    #[test]
+    fn background_runtime_defaults_to_continuous_with_short_idle_connections() {
+        let config = AppConfig::default();
+
+        assert_eq!(
+            config.background_runtime_mode,
+            BackgroundRuntimeMode::Continuous
+        );
+        assert_eq!(config.background_idle_grace_secs, 60);
+        assert_eq!(config.db_pool_idle_timeout_secs, 60);
+    }
+
+    #[test]
+    fn background_runtime_mode_accepts_only_documented_values() {
+        assert_eq!(
+            BackgroundRuntimeMode::parse("activity_driven"),
+            Some(BackgroundRuntimeMode::ActivityDriven)
+        );
+        assert_eq!(
+            BackgroundRuntimeMode::parse(" CONTINUOUS "),
+            Some(BackgroundRuntimeMode::Continuous)
+        );
+        assert_eq!(BackgroundRuntimeMode::parse("sometimes"), None);
+    }
 
     #[test]
     fn default_frontend_dist_dir_points_at_the_runtime_image_path() {

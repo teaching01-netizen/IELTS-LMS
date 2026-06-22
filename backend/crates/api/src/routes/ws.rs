@@ -18,6 +18,7 @@ use std::{
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 
 use crate::{
+    background::BackgroundRuntimeHandle,
     http::{auth::parse_cookie, response::ApiError},
     state::AppState,
 };
@@ -40,6 +41,25 @@ enum OutboundItem {
 struct DisconnectReason {
     code: u16,
     reason: String,
+}
+
+struct BackgroundWebsocketGuard(Option<BackgroundRuntimeHandle>);
+
+impl BackgroundWebsocketGuard {
+    fn new(background: Option<BackgroundRuntimeHandle>) -> Self {
+        if let Some(handle) = &background {
+            handle.websocket_opened();
+        }
+        Self(background)
+    }
+}
+
+impl Drop for BackgroundWebsocketGuard {
+    fn drop(&mut self) {
+        if let Some(handle) = &self.0 {
+            handle.websocket_closed();
+        }
+    }
 }
 
 async fn send_with_timeout<S>(sink: &mut S, msg: Message, timeout: Duration) -> Result<(), ()>
@@ -200,6 +220,7 @@ async fn handle_socket(
     user_id: String,
     user_role: UserRole,
 ) {
+    let _background_guard = BackgroundWebsocketGuard::new(state.background_runtime.clone());
     let queue_cap = state.config.websocket_outbound_queue_cap.max(1);
     let slow_client_disconnect =
         Duration::from_millis(state.config.websocket_slow_client_disconnect_ms.max(1));
