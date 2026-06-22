@@ -1072,6 +1072,7 @@ fn app_state(pool: sqlx::MySqlPool) -> AppState {
         distributed_rate_limiter: None,
         live_update_bus: None,
         instance_id: "test-instance".to_owned(),
+        background_runtime: None,
     }
 }
 
