@@ -1,10 +1,13 @@
 use axum::{
-    middleware,
+    extract::{Request, State},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, patch, post, put},
     Router,
 };
 
 use crate::{
+    background::BackgroundRuntimeHandle,
     frontend,
     http::request_id::request_id_middleware,
     routes::{
@@ -15,8 +18,17 @@ use crate::{
 };
 use tower_http::compression::CompressionLayer;
 
+struct BackgroundRequestGuard(BackgroundRuntimeHandle);
+
+impl Drop for BackgroundRequestGuard {
+    fn drop(&mut self) {
+        self.0.request_finished();
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
     let middleware_state = state.clone();
+    let background_state = state.clone();
 
     Router::new()
         .route("/healthz", get(health::healthz))
@@ -290,9 +302,109 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/ws/*path", get(ws::websocket_live))
         .fallback(frontend::serve_frontend)
         .layer(middleware::from_fn_with_state(
+            background_state,
+            background_activity_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
             middleware_state,
             request_id_middleware,
         ))
         .layer(CompressionLayer::new())
         .with_state(state)
+}
+
+async fn background_activity_middleware(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if matches!(request.uri().path(), "/healthz" | "/readyz" | "/metrics") {
+        return next.run(request).await;
+    }
+
+    let Some(background) = state.background_runtime.clone() else {
+        return next.run(request).await;
+    };
+
+    if let Err(error) = background.request_started().await {
+        tracing::error!(error = %error, "request background recovery failed");
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "Service recovery failed; retry the request.",
+        )
+            .into_response();
+    }
+
+    let _request_guard = BackgroundRequestGuard(background);
+    next.run(request).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_router;
+    use crate::{
+        background::{spawn_background_runtime_with_jobs, BackgroundJobs},
+        state::AppState,
+    };
+    use async_trait::async_trait;
+    use axum::{body::Body, http::Request};
+    use ielts_backend_infrastructure::config::{AppConfig, BackgroundRuntimeMode};
+    use std::time::Duration;
+    use tower::ServiceExt;
+
+    struct FailingRecovery;
+
+    #[async_trait]
+    impl BackgroundJobs for FailingRecovery {
+        async fn recover(&mut self) -> Result<(), String> {
+            Err("database unavailable".to_owned())
+        }
+
+        async fn active_cycle(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn app_with_failing_recovery() -> axum::Router {
+        let handle = spawn_background_runtime_with_jobs(
+            BackgroundRuntimeMode::ActivityDriven,
+            Duration::from_secs(60),
+            Duration::from_millis(10),
+            FailingRecovery,
+        );
+        build_router(AppState::new(AppConfig::default()).with_background_runtime(handle))
+    }
+
+    #[tokio::test]
+    async fn health_probe_does_not_activate_background_recovery() {
+        let response = app_with_failing_recovery()
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn real_request_fails_closed_when_wake_recovery_fails() {
+        let response = app_with_failing_recovery()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/auth/session")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
 }

@@ -9,6 +9,7 @@ pub mod http {
     pub mod response;
 }
 
+pub mod background;
 pub mod frontend;
 pub mod live_updates;
 pub mod router;
@@ -21,28 +22,49 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 
 use crate::{
-    live_updates::spawn_live_update_listener, router::build_router,
-    runtime_auto_advance::spawn_runtime_auto_advance, state::AppState,
+    background::spawn_activity_driven_background, live_updates::spawn_live_update_listener,
+    router::build_router, runtime_auto_advance::spawn_runtime_auto_advance, state::AppState,
 };
 
 pub async fn run() -> std::io::Result<()> {
     let config = AppConfig::from_env();
-    ielts_backend_infrastructure::tracing::init_tracing(
-        "ielts-backend-api",
-        config.otel_exporter_otlp_endpoint.as_deref(),
-    )
-    .map_err(std::io::Error::other)?;
+    let activity_driven = config.background_runtime_mode.is_activity_driven();
+    let otlp_endpoint = if activity_driven {
+        None
+    } else {
+        config.otel_exporter_otlp_endpoint.as_deref()
+    };
+    ielts_backend_infrastructure::tracing::init_tracing("ielts-backend-api", otlp_endpoint)
+        .map_err(std::io::Error::other)?;
+    if activity_driven && config.otel_exporter_otlp_endpoint.is_some() {
+        tracing::warn!(
+            "OTLP export is disabled in activity-driven mode because telemetry traffic prevents Railway sleep"
+        );
+    }
     let bind_address = config.bind_address();
-    let state = AppState::from_config(config)
+    let mut state = AppState::from_config(config)
         .await
         .map_err(std::io::Error::other)?;
-    let _live_updates = spawn_live_update_listener(
-        state.config.clone(),
-        state.live_updates.clone(),
-        state.live_update_bus.clone(),
-        state.instance_id.clone(),
-    );
-    let _runtime_auto_advance = spawn_runtime_auto_advance(state.clone());
+    if activity_driven {
+        let background = spawn_activity_driven_background(state.clone())
+            .await
+            .map_err(std::io::Error::other)?;
+        background.activate().await.map_err(std::io::Error::other)?;
+        state = state.with_background_runtime(background);
+        tracing::info!(
+            idle_grace_secs = state.config.background_idle_grace_secs,
+            db_pool_idle_timeout_secs = state.config.db_pool_idle_timeout_secs,
+            "activity-driven background runtime enabled"
+        );
+    } else {
+        let _live_updates = spawn_live_update_listener(
+            state.config.clone(),
+            state.live_updates.clone(),
+            state.live_update_bus.clone(),
+            state.instance_id.clone(),
+        );
+        let _runtime_auto_advance = spawn_runtime_auto_advance(state.clone());
+    }
     spawn_rate_limiter_cleanup(state.rate_limiter.clone());
     let app = build_router(state);
     let listener = TcpListener::bind(&bind_address).await?;

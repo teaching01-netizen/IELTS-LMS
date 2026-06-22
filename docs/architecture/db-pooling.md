@@ -10,6 +10,8 @@ Pool sizing must respect MySQL `max_connections`, especially during exam autosav
 - Env wiring + defaults: `backend/crates/infrastructure/src/config.rs`
   - `DB_POOL_MAX_CONNECTIONS` (default `20`)
   - `DB_POOL_ACQUIRE_TIMEOUT_MS` (default `3000`)
+  - `DB_POOL_IDLE_TIMEOUT_SECS` (default `60`) closes unused connections so an idle
+    Railway Serverless service stops emitting database traffic
   - `RESOURCE_PROFILE=low` clamps pool connections to `min(DB_POOL_MAX_CONNECTIONS, 3)`
 
 ## Invariant
@@ -69,4 +71,3 @@ Use the existing prod-like load scripts to measure your current environment:
 If you need to support 200+ students reliably, raise MySQL `max_connections` and size the pool
 accordingly (or introduce a pooling proxy like transaction-level pooling) rather than relying on a
 tiny `max_connections`.
-

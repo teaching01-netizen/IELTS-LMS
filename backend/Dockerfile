@@ -46,7 +46,6 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 ENV FRONTEND_DIST_DIR=/app/frontend/dist
@@ -80,9 +79,18 @@ OTEL_EXPORTER_OTLP_ENDPOINT="${API_OTEL_EXPORTER_OTLP_ENDPOINT}" \
 /app/api &
 API_PID=$!
 
+BACKGROUND_RUNTIME_MODE="${BACKGROUND_RUNTIME_MODE:-continuous}"
+if [[ "${BACKGROUND_RUNTIME_MODE}" == "activity_driven" || "${BACKGROUND_RUNTIME_MODE}" == "activity-driven" ]]; then
+    trap 'kill "$API_PID" 2>/dev/null || true' INT TERM EXIT
+    set +e
+    wait "$API_PID"
+    STATUS=$?
+    set -e
+    exit "$STATUS"
+fi
+
 /app/worker &
 WORKER_PID=$!
-
 trap 'kill "$API_PID" "$WORKER_PID" 2>/dev/null || true' INT TERM EXIT
 
 set +e
@@ -99,8 +107,5 @@ EOF
 RUN chmod +x /app/start.sh
 
 EXPOSE 8080
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f "http://localhost:${API_PORT:-${PORT:-4000}}/healthz" || exit 1
 
 CMD ["/app/start.sh"]
