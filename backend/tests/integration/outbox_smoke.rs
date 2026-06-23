@@ -3,7 +3,10 @@ mod mysql;
 
 use serde_json::json;
 
-use ielts_backend_infrastructure::outbox::OutboxRepository;
+use ielts_backend_infrastructure::{
+    database_monitor::inspect_outbox_backlog,
+    outbox::{OutboxRepository, MAX_OUTBOX_ATTEMPTS},
+};
 
 const INFRA_MIGRATIONS: &[&str] = &[
     "0001_roles.sql",
@@ -133,6 +136,62 @@ async fn failed_oldest_batch_does_not_starve_a_later_eligible_event() {
         .expect("claim next eligible batch");
     assert_eq!(next_batch.len(), 1);
     assert_eq!(next_batch[0].id, later.id);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn backlog_snapshot_reports_active_and_terminal_rows_separately() {
+    let database = mysql::TestDatabase::new(INFRA_MIGRATIONS).await;
+    let repository = OutboxRepository::new(database.pool().clone());
+
+    repository
+        .enqueue(
+            "schedule_runtime",
+            "active-event",
+            1,
+            "runtime_changed",
+            &json!({ "scheduleId": "active-event" }),
+        )
+        .await
+        .expect("enqueue active event");
+    let terminal = repository
+        .enqueue(
+            "schedule_runtime",
+            "terminal-event",
+            1,
+            "runtime_changed",
+            &json!({ "scheduleId": "terminal-event" }),
+        )
+        .await
+        .expect("enqueue terminal event");
+
+    let claimed = repository
+        .claim_batch(2, "terminal-worker", 60)
+        .await
+        .expect("claim terminal event");
+    let claimed_terminal = claimed
+        .into_iter()
+        .find(|event| event.id == terminal.id)
+        .expect("terminal event claimed");
+    let claim_token = claimed_terminal.claim_token.expect("claim token");
+    repository
+        .mark_failed(
+            &claim_token,
+            terminal.id,
+            MAX_OUTBOX_ATTEMPTS,
+            "retry budget exhausted",
+        )
+        .await
+        .expect("mark event terminal");
+
+    let snapshot = inspect_outbox_backlog(database.pool())
+        .await
+        .expect("inspect outbox backlog");
+    assert_eq!(snapshot.pending_count, 1);
+    assert_eq!(snapshot.terminal_count, 1);
+    assert!(snapshot.oldest_age_seconds >= 0);
+    assert!(snapshot.oldest_terminal_age_seconds >= 0);
 
     database.shutdown().await;
 }

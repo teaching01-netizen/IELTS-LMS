@@ -32,7 +32,13 @@ Only timer reconciliation gates request admission. Outbox delivery, grading proj
 polling, retention, storage inspection, and media cleanup run as isolated best-effort active cycles;
 their failures are logged without making unrelated requests unavailable. Outbox failures use bounded
 exponential backoff and become terminal after eight attempts. Terminal rows remain traceable and are
-excluded from active-backlog health calculations.
+excluded from active-backlog health calculations. Prometheus reports terminal row count and oldest
+terminal age separately so operators can alert without changing student-visible degraded state.
+
+Wake commands whose callers have already exceeded `BACKGROUND_WAKE_TIMEOUT_MS` are discarded before
+starting recovery and do not extend the activity window. Within an active cycle, outbox and grading
+projection failures are isolated from each other. Storage inspection falls back to the normal,
+least-aggressive retention policy, and retention failure does not suppress media cleanup.
 
 OTLP export is disabled automatically in activity-driven mode because exporter traffic prevents
 sleep. The Docker image no longer has a recurring `HEALTHCHECK`; Railway's deployment healthcheck in

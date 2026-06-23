@@ -2,7 +2,9 @@ use crate::state::AppState;
 use chrono::Utc;
 use ielts_backend_application::proctoring::ProctoringService;
 use ielts_backend_domain::schedule::LiveUpdateEvent;
-use ielts_backend_infrastructure::database_monitor::{inspect_storage_budget, StorageBudgetLevel};
+use ielts_backend_infrastructure::database_monitor::{
+    inspect_storage_budget, StorageBudgetLevel, StorageBudgetSnapshot,
+};
 use ielts_backend_worker::jobs;
 use std::time::{Duration, Instant};
 
@@ -39,6 +41,50 @@ struct ApiBackgroundJobs {
     last_runtime_at: Instant,
     last_worker_at: Instant,
     last_maintenance_at: Option<Instant>,
+}
+
+#[async_trait::async_trait]
+trait BestEffortJobOperations {
+    async fn run_outbox(&mut self) -> Result<(), String>;
+    async fn run_grading_projection(&mut self) -> Result<(), String>;
+    async fn inspect_storage(&mut self) -> Result<StorageBudgetSnapshot, String>;
+    async fn run_retention(&mut self, level: StorageBudgetLevel) -> Result<(), String>;
+    async fn run_media_cleanup(&mut self) -> Result<(), String>;
+}
+
+async fn run_best_effort_worker_jobs<J: BestEffortJobOperations>(jobs: &mut J) {
+    if let Err(error) = jobs.run_outbox().await {
+        tracing::error!(error = %error, "background outbox cycle failed");
+    }
+    if let Err(error) = jobs.run_grading_projection().await {
+        tracing::error!(error = %error, "background grading projection cycle failed");
+    }
+}
+
+async fn run_best_effort_maintenance_jobs<J: BestEffortJobOperations>(jobs: &mut J) {
+    let storage_level = match jobs.inspect_storage().await {
+        Ok(storage) => {
+            if storage.level != StorageBudgetLevel::Normal {
+                tracing::warn!(
+                    level = storage.level.as_label(),
+                    bytes = storage.total_bytes,
+                    "storage budget threshold reached during background maintenance"
+                );
+            }
+            storage.level
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "background storage inspection failed");
+            StorageBudgetLevel::Normal
+        }
+    };
+
+    if let Err(error) = jobs.run_retention(storage_level).await {
+        tracing::error!(error = %error, "background retention cycle failed");
+    }
+    if let Err(error) = jobs.run_media_cleanup().await {
+        tracing::error!(error = %error, "background media cleanup cycle failed");
+    }
 }
 
 impl ApiBackgroundJobs {
@@ -105,8 +151,11 @@ impl ApiBackgroundJobs {
         }
         Ok(())
     }
+}
 
-    async fn run_worker_cycle(&self) -> Result<(), String> {
+#[async_trait::async_trait]
+impl BestEffortJobOperations for ApiBackgroundJobs {
+    async fn run_outbox(&mut self) -> Result<(), String> {
         let pool = self.state.db_pool();
         for _ in 0..MAX_OUTBOX_BATCHES_PER_CYCLE {
             let report = jobs::outbox::run_once(
@@ -120,35 +169,40 @@ impl ApiBackgroundJobs {
                 break;
             }
         }
-        jobs::grading_projection::run_once(pool, &self.state.config)
+        Ok(())
+    }
+
+    async fn run_grading_projection(&mut self) -> Result<(), String> {
+        jobs::grading_projection::run_once(self.state.db_pool(), &self.state.config)
             .await
             .map_err(|error| error.to_string())?;
         Ok(())
     }
 
-    async fn run_maintenance(&self) -> Result<(), String> {
-        let pool = self.state.db_pool();
-        let storage =
-            inspect_storage_budget(&pool, self.state.config.storage_budget_thresholds.clone())
-                .await
-                .map_err(|error| error.to_string())?;
+    async fn inspect_storage(&mut self) -> Result<StorageBudgetSnapshot, String> {
+        inspect_storage_budget(
+            &self.state.db_pool(),
+            self.state.config.storage_budget_thresholds.clone(),
+        )
+        .await
+        .map_err(|error| error.to_string())
+    }
+
+    async fn run_retention(&mut self, level: StorageBudgetLevel) -> Result<(), String> {
         jobs::retention::run_once_with_config_and_budget(
-            pool.clone(),
+            self.state.db_pool(),
             &self.state.config,
-            storage.level,
+            level,
         )
         .await
         .map_err(|error| error.to_string())?;
-        jobs::media::run_once(pool)
+        Ok(())
+    }
+
+    async fn run_media_cleanup(&mut self) -> Result<(), String> {
+        jobs::media::run_once(self.state.db_pool())
             .await
             .map_err(|error| error.to_string())?;
-        if storage.level != StorageBudgetLevel::Normal {
-            tracing::warn!(
-                level = storage.level.as_label(),
-                bytes = storage.total_bytes,
-                "storage budget threshold reached during background maintenance"
-            );
-        }
         Ok(())
     }
 }
@@ -185,21 +239,14 @@ impl BackgroundJobs for ApiBackgroundJobs {
             }
         }
         if cycle_due(&mut self.last_worker_at, worker_interval, now) {
-            if let Err(error) = self.run_worker_cycle().await {
-                tracing::error!(error = %error, "background worker cycle failed");
-            }
+            run_best_effort_worker_jobs(self).await;
         }
         if self
             .last_maintenance_at
             .is_none_or(|last| now.duration_since(last) >= maintenance_interval)
         {
             self.last_maintenance_at = Some(now);
-            match self.run_maintenance().await {
-                Ok(()) => {}
-                Err(error) => {
-                    tracing::error!(error = %error, "background maintenance cycle failed");
-                }
-            }
+            run_best_effort_maintenance_jobs(self).await;
         }
     }
 }
@@ -214,8 +261,69 @@ fn cycle_due(last_run_at: &mut Instant, interval: Duration, now: Instant) -> boo
 
 #[cfg(test)]
 mod tests {
-    use super::cycle_due;
+    use super::{
+        cycle_due, run_best_effort_maintenance_jobs, run_best_effort_worker_jobs,
+        BestEffortJobOperations,
+    };
+    use async_trait::async_trait;
+    use ielts_backend_infrastructure::database_monitor::{
+        StorageBudgetLevel, StorageBudgetSnapshot,
+    };
     use std::time::{Duration, Instant};
+
+    #[derive(Default)]
+    struct RecordingBestEffortJobs {
+        calls: Vec<&'static str>,
+        fail_outbox: bool,
+        fail_storage_inspection: bool,
+        fail_retention: bool,
+        retention_level: Option<StorageBudgetLevel>,
+    }
+
+    #[async_trait]
+    impl BestEffortJobOperations for RecordingBestEffortJobs {
+        async fn run_outbox(&mut self) -> Result<(), String> {
+            self.calls.push("outbox");
+            if self.fail_outbox {
+                Err("outbox unavailable".to_owned())
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn run_grading_projection(&mut self) -> Result<(), String> {
+            self.calls.push("grading");
+            Ok(())
+        }
+
+        async fn inspect_storage(&mut self) -> Result<StorageBudgetSnapshot, String> {
+            self.calls.push("storage");
+            if self.fail_storage_inspection {
+                Err("storage inspection unavailable".to_owned())
+            } else {
+                Ok(StorageBudgetSnapshot {
+                    total_bytes: 0,
+                    level: StorageBudgetLevel::Warning,
+                    largest_relations: Vec::new(),
+                })
+            }
+        }
+
+        async fn run_retention(&mut self, level: StorageBudgetLevel) -> Result<(), String> {
+            self.calls.push("retention");
+            self.retention_level = Some(level);
+            if self.fail_retention {
+                Err("retention unavailable".to_owned())
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn run_media_cleanup(&mut self) -> Result<(), String> {
+            self.calls.push("media");
+            Ok(())
+        }
+    }
 
     #[test]
     fn cycle_due_fires_at_boundary_and_resets_from_observed_time() {
@@ -230,5 +338,43 @@ mod tests {
         ));
         assert!(cycle_due(&mut last_run_at, interval, started_at + interval));
         assert_eq!(last_run_at, started_at + interval);
+    }
+
+    #[tokio::test]
+    async fn outbox_failure_does_not_suppress_grading_projection() {
+        let mut jobs = RecordingBestEffortJobs {
+            fail_outbox: true,
+            ..RecordingBestEffortJobs::default()
+        };
+
+        run_best_effort_worker_jobs(&mut jobs).await;
+
+        assert_eq!(jobs.calls, vec!["outbox", "grading"]);
+    }
+
+    #[tokio::test]
+    async fn storage_inspection_failure_uses_normal_retention_policy() {
+        let mut jobs = RecordingBestEffortJobs {
+            fail_storage_inspection: true,
+            ..RecordingBestEffortJobs::default()
+        };
+
+        run_best_effort_maintenance_jobs(&mut jobs).await;
+
+        assert_eq!(jobs.calls, vec!["storage", "retention", "media"]);
+        assert_eq!(jobs.retention_level, Some(StorageBudgetLevel::Normal));
+    }
+
+    #[tokio::test]
+    async fn retention_failure_does_not_suppress_media_cleanup() {
+        let mut jobs = RecordingBestEffortJobs {
+            fail_retention: true,
+            ..RecordingBestEffortJobs::default()
+        };
+
+        run_best_effort_maintenance_jobs(&mut jobs).await;
+
+        assert_eq!(jobs.calls, vec!["storage", "retention", "media"]);
+        assert_eq!(jobs.retention_level, Some(StorageBudgetLevel::Warning));
     }
 }

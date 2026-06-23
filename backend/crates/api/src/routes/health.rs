@@ -92,9 +92,12 @@ pub async fn metrics(
 
     if let Some(pool) = state.db_pool_opt() {
         if let Ok(backlog) = inspect_outbox_backlog(&pool).await {
-            state
-                .telemetry
-                .observe_outbox_backlog(backlog.pending_count, backlog.oldest_age_seconds);
+            state.telemetry.observe_outbox_backlog(
+                backlog.pending_count,
+                backlog.oldest_age_seconds,
+                backlog.terminal_count,
+                backlog.oldest_terminal_age_seconds,
+            );
         }
 
         if let Ok(storage) =

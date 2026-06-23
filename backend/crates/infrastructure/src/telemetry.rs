@@ -82,6 +82,8 @@ pub struct Telemetry {
     websocket_connections: Gauge<i64, AtomicI64>,
     outbox_backlog_events: Gauge<i64, AtomicI64>,
     outbox_oldest_age_seconds: Gauge<i64, AtomicI64>,
+    outbox_terminal_events: Gauge<i64, AtomicI64>,
+    outbox_oldest_terminal_age_seconds: Gauge<i64, AtomicI64>,
     storage_budget_bytes: Gauge<i64, AtomicI64>,
     storage_budget_level: Gauge<i64, AtomicI64>,
     process_resident_memory_bytes: Gauge<i64, AtomicI64>,
@@ -148,6 +150,8 @@ impl Telemetry {
         let websocket_connections = Gauge::<i64, AtomicI64>::default();
         let outbox_backlog_events = Gauge::<i64, AtomicI64>::default();
         let outbox_oldest_age_seconds = Gauge::<i64, AtomicI64>::default();
+        let outbox_terminal_events = Gauge::<i64, AtomicI64>::default();
+        let outbox_oldest_terminal_age_seconds = Gauge::<i64, AtomicI64>::default();
         let storage_budget_bytes = Gauge::<i64, AtomicI64>::default();
         let storage_budget_level = Gauge::<i64, AtomicI64>::default();
         let process_resident_memory_bytes = Gauge::<i64, AtomicI64>::default();
@@ -268,6 +272,16 @@ impl Telemetry {
             outbox_oldest_age_seconds.clone(),
         );
         registry.register(
+            "backend_outbox_terminal_events",
+            "Number of unpublished outbox rows that exhausted their retry budget.",
+            outbox_terminal_events.clone(),
+        );
+        registry.register(
+            "backend_outbox_oldest_terminal_age_seconds",
+            "Age in seconds since the oldest unpublished outbox row became terminal.",
+            outbox_oldest_terminal_age_seconds.clone(),
+        );
+        registry.register(
             "backend_storage_budget_bytes",
             "Current database size in bytes.",
             storage_budget_bytes.clone(),
@@ -374,6 +388,8 @@ impl Telemetry {
             websocket_connections,
             outbox_backlog_events,
             outbox_oldest_age_seconds,
+            outbox_terminal_events,
+            outbox_oldest_terminal_age_seconds,
             storage_budget_bytes,
             storage_budget_level,
             process_resident_memory_bytes,
@@ -493,11 +509,21 @@ impl Telemetry {
         self.websocket_connections.set(count.max(0));
     }
 
-    pub fn observe_outbox_backlog(&self, pending_count: u64, oldest_age_seconds: i64) {
+    pub fn observe_outbox_backlog(
+        &self,
+        pending_count: u64,
+        oldest_age_seconds: i64,
+        terminal_count: u64,
+        oldest_terminal_age_seconds: i64,
+    ) {
         self.outbox_backlog_events
             .set(i64::try_from(pending_count).unwrap_or(i64::MAX));
         self.outbox_oldest_age_seconds
             .set(oldest_age_seconds.max(0));
+        self.outbox_terminal_events
+            .set(i64::try_from(terminal_count).unwrap_or(i64::MAX));
+        self.outbox_oldest_terminal_age_seconds
+            .set(oldest_terminal_age_seconds.max(0));
     }
 
     pub fn set_process_resident_memory_bytes(&self, resident_bytes: u64) {
@@ -682,6 +708,18 @@ mod tests {
             rendered.contains("backend_background_wake_failures_total{outcome=\"queue_full\"} 1"),
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn render_includes_active_and_terminal_outbox_metrics() {
+        let telemetry = Telemetry::new();
+        telemetry.observe_outbox_backlog(3, 12, 2, 40);
+
+        let rendered = telemetry.render().expect("render metrics");
+        assert!(rendered.contains("backend_outbox_backlog_events 3"));
+        assert!(rendered.contains("backend_outbox_oldest_age_seconds 12"));
+        assert!(rendered.contains("backend_outbox_terminal_events 2"));
+        assert!(rendered.contains("backend_outbox_oldest_terminal_age_seconds 40"));
     }
 
     #[test]

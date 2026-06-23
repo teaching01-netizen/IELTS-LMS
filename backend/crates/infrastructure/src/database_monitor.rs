@@ -8,6 +8,8 @@ use sqlx::MySqlPool;
 pub struct OutboxBacklogSnapshot {
     pub pending_count: u64,
     pub oldest_age_seconds: i64,
+    pub terminal_count: u64,
+    pub oldest_terminal_age_seconds: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -93,11 +95,26 @@ pub async fn inspect_outbox_backlog(
     let row = sqlx::query_as::<_, OutboxBacklogRow>(
         r#"
         SELECT
-            COUNT(*) AS pending_count,
-            COALESCE(TIMESTAMPDIFF(SECOND, MIN(created_at), NOW()), 0) AS oldest_age_seconds
+            COUNT(CASE WHEN failed_at IS NULL THEN 1 END) AS pending_count,
+            COALESCE(
+                TIMESTAMPDIFF(
+                    SECOND,
+                    MIN(CASE WHEN failed_at IS NULL THEN created_at END),
+                    NOW()
+                ),
+                0
+            ) AS oldest_age_seconds,
+            COUNT(CASE WHEN failed_at IS NOT NULL THEN 1 END) AS terminal_count,
+            COALESCE(
+                TIMESTAMPDIFF(
+                    SECOND,
+                    MIN(CASE WHEN failed_at IS NOT NULL THEN failed_at END),
+                    NOW()
+                ),
+                0
+            ) AS oldest_terminal_age_seconds
         FROM outbox_events
         WHERE published_at IS NULL
-          AND failed_at IS NULL
         "#,
     )
     .fetch_one(pool)
@@ -106,6 +123,8 @@ pub async fn inspect_outbox_backlog(
     Ok(OutboxBacklogSnapshot {
         pending_count: row.pending_count.max(0) as u64,
         oldest_age_seconds: row.oldest_age_seconds.max(0),
+        terminal_count: row.terminal_count.max(0) as u64,
+        oldest_terminal_age_seconds: row.oldest_terminal_age_seconds.max(0),
     })
 }
 
@@ -208,6 +227,8 @@ pub async fn inspect_grading_projection_snapshot(
 struct OutboxBacklogRow {
     pending_count: i64,
     oldest_age_seconds: i64,
+    terminal_count: i64,
+    oldest_terminal_age_seconds: i64,
 }
 
 #[derive(sqlx::FromRow)]

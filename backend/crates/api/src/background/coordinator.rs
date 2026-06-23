@@ -171,6 +171,9 @@ where
                 let Some(BackgroundCommand::Wake(reply)) = command_rx.recv().await else {
                     break;
                 };
+                if reply.is_closed() {
+                    continue;
+                }
                 match jobs.lock().await.recover_critical().await {
                     Ok(()) => {
                         actor_activity
@@ -192,6 +195,9 @@ where
                     let Some(BackgroundCommand::Wake(reply)) = command else {
                         break;
                     };
+                    if reply.is_closed() {
+                        continue;
+                    }
                     actor_activity
                         .lock()
                         .expect("background activity lock poisoned")
@@ -344,6 +350,29 @@ mod tests {
         async fn active_cycle(&mut self) {}
     }
 
+    struct ExpiredWakeRecovery {
+        recoveries: usize,
+        first_started: Arc<Notify>,
+        release_first: Arc<Notify>,
+        unexpected_recovery: Arc<Notify>,
+    }
+
+    #[async_trait]
+    impl BackgroundJobs for ExpiredWakeRecovery {
+        async fn recover_critical(&mut self) -> Result<(), String> {
+            self.recoveries += 1;
+            if self.recoveries == 1 {
+                self.first_started.notify_one();
+                self.release_first.notified().await;
+            } else {
+                self.unexpected_recovery.notify_one();
+            }
+            Err("database unavailable".to_owned())
+        }
+
+        async fn active_cycle(&mut self) {}
+    }
+
     struct BlockingActiveCycle {
         active_started: Arc<Notify>,
         release: Arc<Notify>,
@@ -427,6 +456,39 @@ mod tests {
             spawn_background_runtime_with_jobs(config(1, Duration::from_millis(10)), SlowRecovery);
 
         assert_eq!(runtime.activate().await, Err(WakeError::TimedOut));
+    }
+
+    #[tokio::test]
+    async fn timed_out_queued_wakes_do_not_run_recovery_after_callers_leave() {
+        let first_started = Arc::new(Notify::new());
+        let release_first = Arc::new(Notify::new());
+        let unexpected_recovery = Arc::new(Notify::new());
+        let runtime = spawn_background_runtime_with_jobs(
+            config(8, Duration::from_millis(10)),
+            ExpiredWakeRecovery {
+                recoveries: 0,
+                first_started: first_started.clone(),
+                release_first: release_first.clone(),
+                unexpected_recovery: unexpected_recovery.clone(),
+            },
+        );
+
+        let first_runtime = runtime.clone();
+        let first = tokio::spawn(async move { first_runtime.activate().await });
+        first_started.notified().await;
+        let second_runtime = runtime.clone();
+        let second = tokio::spawn(async move { second_runtime.activate().await });
+
+        assert_eq!(first.await.unwrap(), Err(WakeError::TimedOut));
+        assert_eq!(second.await.unwrap(), Err(WakeError::TimedOut));
+
+        release_first.notify_one();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), unexpected_recovery.notified())
+                .await
+                .is_err(),
+            "an abandoned wake triggered another recovery"
+        );
     }
 
     #[tokio::test]
