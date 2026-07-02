@@ -35,6 +35,12 @@ export function AccessibilitySettings({
     } else if (!isOpen && dialog.open) {
       dialog.close();
     }
+
+    return () => {
+      if (dialog.open) {
+        dialog.close();
+      }
+    };
   }, [isOpen]);
 
   const fontSizes = [
