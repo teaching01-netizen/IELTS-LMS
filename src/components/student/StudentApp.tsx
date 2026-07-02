@@ -141,6 +141,7 @@ export function StudentApp({
   const { setShowTimeExtensionRequest } = uiActions;
   const timeExtensionReason =
     typeof uiState.timeExtensionReason === 'string' ? uiState.timeExtensionReason : '';
+  const timeExtensionDialogRef = useRef<HTMLDialogElement>(null);
   const highlightColor = defaultStudentHighlightColor;
   const highlightClassName = undefined;
   const highlightEnabled = true;
@@ -446,6 +447,23 @@ export function StudentApp({
       setShowTimeExtensionRequest(true);
     }
   }, [shouldShowTimeExtension, setShowTimeExtensionRequest]);
+
+  useEffect(() => {
+    const dialog = timeExtensionDialogRef.current;
+    if (!dialog) return;
+
+    if (uiState.showTimeExtensionRequest && !uiState.timeExtensionGranted && !dialog.open) {
+      dialog.showModal();
+    } else if ((!uiState.showTimeExtensionRequest || uiState.timeExtensionGranted) && dialog.open) {
+      dialog.close();
+    }
+
+    return () => {
+      if (dialog.open) {
+        dialog.close();
+      }
+    };
+  }, [uiState.showTimeExtensionRequest, uiState.timeExtensionGranted]);
 
   const handleTimeExtensionRequest = () => {
     if (timeExtensionReason.trim()) {
@@ -841,45 +859,44 @@ export function StudentApp({
         unansweredSubmissionPolicy={unansweredSubmissionPolicy}
       />
 
-      {uiState.showTimeExtensionRequest && !uiState.timeExtensionGranted ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="time-extension-title"
-        >
-          <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8">
-            <h2 id="time-extension-title" className="text-xl font-black text-gray-900 mb-3">
-              Request Time Extension
-            </h2>
-            <p className="text-sm text-gray-700 leading-6 mb-4">
-              You have 5 minutes remaining. If you need additional time due to accessibility
-              needs, you may request an extension.
-            </p>
-            <div className="mb-4">
-              <label
-                htmlFor="extension-reason"
-                className="block text-sm font-semibold text-gray-900 mb-2"
-              >
-                Please explain why you need an extension:
-              </label>
-              <textarea
-                id="extension-reason"
-                value={timeExtensionReason}
-                onChange={(event) => uiActions.setTimeExtensionReason(event.target.value)}
-                className="w-full border border-gray-300 rounded-sm px-3 py-2 min-h-[120px]"
-                aria-label="Extension reason"
-              />
-            </div>
-            <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={() => uiActions.setShowTimeExtensionRequest(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleTimeExtensionRequest}>Request +5 Minutes</Button>
-            </div>
-          </div>
+      <dialog
+        ref={timeExtensionDialogRef}
+        onClose={() => uiActions.setShowTimeExtensionRequest(false)}
+        className="rounded-lg shadow-xl max-w-md w-full p-6 md:p-8"
+        aria-labelledby="time-extension-title"
+      >
+        <h2 id="time-extension-title" className="text-xl font-black text-gray-900 mb-3">
+          Request Time Extension
+        </h2>
+        <p className="text-sm text-gray-700 leading-6 mb-4">
+          You have 5 minutes remaining. If you need additional time due to accessibility
+          needs, you may request an extension.
+        </p>
+        <div className="mb-4">
+          <label
+            htmlFor="extension-reason"
+            className="block text-sm font-semibold text-gray-900 mb-2"
+          >
+            Please explain why you need an extension:
+          </label>
+          <textarea
+            id="extension-reason"
+            value={timeExtensionReason}
+            onChange={(event) => uiActions.setTimeExtensionReason(event.target.value)}
+            className="w-full border border-gray-300 rounded-sm px-3 py-2 min-h-[120px]"
+            aria-describedby="extension-reason-hint"
+          />
+          <span id="extension-reason-hint" className="sr-only">
+            Enter the reason for your time extension request
+          </span>
         </div>
-      ) : null}
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="secondary" onClick={() => uiActions.setShowTimeExtensionRequest(false)}>
+            Cancel
+          </Button>
+          <Button type="button" onClick={handleTimeExtensionRequest}>Request +5 Minutes</Button>
+        </div>
+      </dialog>
 
       <AccessibilitySettings
         isOpen={uiState.showAccessibility}
