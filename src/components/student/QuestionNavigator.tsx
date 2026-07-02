@@ -88,6 +88,7 @@ export function QuestionNavigator({
           Question Navigator
         </h2>
         <button
+          type="button"
           onClick={onClose}
           className="p-2 md:p-2.5 text-gray-500 hover:bg-gray-100 rounded-md"
           aria-label="Close question navigator"
@@ -130,6 +131,7 @@ export function QuestionNavigator({
 
                 return (
                   <button
+                    type="button"
                     key={question.id}
                     onClick={() => onNavigate(question.id)}
                     className={`
