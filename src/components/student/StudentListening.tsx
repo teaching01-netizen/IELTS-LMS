@@ -149,7 +149,7 @@ export function StudentListening({
     return currentDiagramBlocks.length > 0 ? currentDiagramBlocks : diagramBlocks;
   }, [activePart?.blocks, currentQ?.blockId, currentQuestionId]);
   const diagramBlocksInMaterialPane = useMemo(
-    () => activeDiagramBlocks.filter((block) => block.referenceImagePlacement !== 'instruction'),
+    () => activeDiagramBlocks.filter((block) => !isInstructionReferencePlacement(block)),
     [activeDiagramBlocks],
   );
   const hiddenDiagramReferenceBlockIds = useMemo(
