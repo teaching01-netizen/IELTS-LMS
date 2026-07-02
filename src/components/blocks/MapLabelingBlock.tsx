@@ -5,6 +5,7 @@ import { MIN_HEIGHTS } from '../../constants/uiConstants';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
+import { BlockInstructionField } from './BlockInstructionField';
 
 interface Props {
   block: QuestionBlock;
@@ -108,17 +109,12 @@ export const MapLabelingBlock: React.FC<Props> = ({
       <div className="p-6">
         <div className="mb-5">
           <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Map / Diagram Labeling</div>
-          <input 
-            type="text" 
-            value={mapBlock.instruction} 
-            onChange={(e) => updateBlock({ ...mapBlock, instruction: e.target.value })}
-            onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...mapBlock, instruction: nextValue }))}
-            className={`w-full text-sm font-medium text-gray-800 outline-none border-b ${getFieldError('instruction') ? 'border-red-500 bg-red-50' : 'border-transparent hover:border-gray-200 focus:border-blue-700'} bg-transparent transition-colors px-1 py-0.5 rounded-sm mb-3`}
+          <BlockInstructionField
+            value={mapBlock.instruction}
+            onChange={(instruction) => updateBlock({ ...mapBlock, instruction })}
+            errorMessage={getFieldError('instruction')?.message}
             placeholder="Label the map below."
           />
-          {getFieldError('instruction') && (
-            <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle size={10} /> {getFieldError('instruction')!.message}</p>
-          )}
         </div>
 
         <div className="mb-4 rounded-sm border border-gray-200 bg-gray-50 px-3 py-2">

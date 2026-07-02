@@ -4,6 +4,7 @@ import { MoreVertical, Plus, Trash2, GripVertical, ArrowUp, ArrowDown, AlertCirc
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
+import { BlockInstructionField } from './BlockInstructionField';
 
 interface Props {
   block: QuestionBlock;
@@ -72,17 +73,12 @@ export const MultiSelectMCQBlock: React.FC<Props> = ({ block, startNum, endNum, 
       <div className="p-6">
         <div className="mb-5">
           <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Multi-Select MCQ</div>
-          <input 
-            type="text" 
-            value={mcqBlock.instruction} 
-            onChange={(e) => updateBlock({ ...mcqBlock, instruction: e.target.value })}
-            onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...mcqBlock, instruction: nextValue }))}
-            className={`w-full text-sm font-medium text-gray-800 outline-none border-b ${getFieldError('instruction') ? 'border-red-500 bg-red-50' : 'border-transparent hover:border-gray-200 focus:border-blue-700'} bg-transparent transition-colors px-1 py-0.5 rounded-sm mb-3`}
+          <BlockInstructionField
+            value={mcqBlock.instruction}
+            onChange={(instruction) => updateBlock({ ...mcqBlock, instruction })}
+            errorMessage={getFieldError('instruction')?.message}
             placeholder="Instruction text..."
           />
-          {getFieldError('instruction') && (
-            <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle size={10} /> {getFieldError('instruction')!.message}</p>
-          )}
         </div>
         <InsertedImagesEditor
           images={mcqBlock.insertedImages}

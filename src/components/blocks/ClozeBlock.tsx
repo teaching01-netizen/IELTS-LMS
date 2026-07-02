@@ -13,6 +13,7 @@ import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
 import { buildAcceptedAnswerFields, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
 import { maxVariantWordCountFromAcceptedAnswers, suggestUpgradedAnswerRule } from '../../utils/answerRuleAutoUpgrade';
+import { BlockInstructionField } from './BlockInstructionField';
 
 interface Props {
   block: QuestionBlock;
@@ -142,17 +143,12 @@ export const ClozeBlock: React.FC<Props> = ({
       <div className="p-6">
         <div className="mb-5">
           <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Summary Completion</div>
-          <input 
-            type="text" 
-            value={clozeBlock.instruction} 
-            onChange={(e) => updateBlock({ ...clozeBlock, instruction: e.target.value })}
-            onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...clozeBlock, instruction: nextValue }))}
-            className={`w-full text-sm font-medium text-gray-800 outline-none border-b ${getFieldError('instruction') ? 'border-red-500 bg-red-50' : 'border-transparent hover:border-gray-200 focus:border-blue-700'} bg-transparent transition-colors px-1 py-0.5 rounded-sm mb-3`}
+          <BlockInstructionField
+            value={clozeBlock.instruction}
+            onChange={(instruction) => updateBlock({ ...clozeBlock, instruction })}
+            errorMessage={getFieldError('instruction')?.message}
             placeholder="Complete the summary below. Choose NO MORE THAN TWO WORDS from the passage for each answer."
           />
-          {getFieldError('instruction') && (
-            <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle size={10} /> {getFieldError('instruction')!.message}</p>
-          )}
 
           <InsertedImagesEditor
             images={clozeBlock.insertedImages}

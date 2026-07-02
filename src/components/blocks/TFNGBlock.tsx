@@ -4,6 +4,7 @@ import { MoreVertical, Plus, Trash2, GripVertical, ArrowUp, ArrowDown, AlertCirc
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
+import { BlockInstructionField } from './BlockInstructionField';
 
 interface Props {
   block: QuestionBlock;
@@ -104,18 +105,16 @@ export const TFNGBlock: React.FC<Props> = ({ block, startNum, endNum, updateBloc
                 </button>
               </div>
             </div>
-            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Instruction:</div>
-            <input 
-              type="text" 
-              value={tfngBlock.instruction} 
-              onChange={(e) => updateBlock({ ...tfngBlock, instruction: e.target.value })}
-              onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...tfngBlock, instruction: nextValue }))}
-              className={`w-full text-sm font-medium text-gray-800 outline-none border-b ${getFieldError('instruction') ? 'border-red-500 bg-red-50' : 'border-transparent hover:border-gray-200 focus:border-blue-700'} bg-transparent transition-colors px-1 py-0.5 rounded-sm`}
-              placeholder={mode === 'TFNG' ? 'Do the following statements agree with the information given?' : 'Do the following statements agree with the writer\'s views?'}
+            <BlockInstructionField
+              value={tfngBlock.instruction}
+              onChange={(instruction) => updateBlock({ ...tfngBlock, instruction })}
+              errorMessage={getFieldError('instruction')?.message}
+              placeholder={
+                mode === 'TFNG'
+                  ? 'Do the following statements agree with the information given?'
+                  : "Do the following statements agree with the writer's views?"
+              }
             />
-            {getFieldError('instruction') && (
-              <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle size={10} /> {getFieldError('instruction')!.message}</p>
-            )}
           </div>
         </div>
         <InsertedImagesEditor

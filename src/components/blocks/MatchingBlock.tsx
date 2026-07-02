@@ -4,6 +4,7 @@ import { MoreVertical, Plus, Trash2, GripVertical, ArrowRight, ArrowUp, ArrowDow
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
+import { BlockInstructionField } from './BlockInstructionField';
 
 interface Props {
   block: QuestionBlock;
@@ -95,17 +96,12 @@ export const MatchingBlock: React.FC<Props> = ({ block, startNum, endNum, update
       <div className="p-6">
         <div className="mb-6">
           <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Matching Headings</div>
-          <input 
-            type="text" 
-            value={matchingBlock.instruction} 
-            onChange={(e) => updateBlock({ ...matchingBlock, instruction: e.target.value })}
-            onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => updateBlock({ ...matchingBlock, instruction: nextValue }))}
-            className={`w-full text-sm font-medium text-gray-800 outline-none border-b ${getFieldError('instruction') ? 'border-red-500 bg-red-50' : 'border-transparent hover:border-gray-200 focus:border-blue-700'} bg-transparent transition-colors px-1 py-0.5 rounded-sm mb-3`}
+          <BlockInstructionField
+            value={matchingBlock.instruction}
+            onChange={(instruction) => updateBlock({ ...matchingBlock, instruction })}
+            errorMessage={getFieldError('instruction')?.message}
             placeholder="Choose the correct heading for each paragraph from the list of headings below."
           />
-          {getFieldError('instruction') && (
-            <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle size={10} /> {getFieldError('instruction')!.message}</p>
-          )}
         </div>
         <InsertedImagesEditor
           images={matchingBlock.insertedImages}
