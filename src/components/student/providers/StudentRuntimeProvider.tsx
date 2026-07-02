@@ -992,14 +992,43 @@ export function StudentRuntimeProvider({
       return;
     }
 
-    const timerId = window.setInterval(() => {
+    const scheduleVisibleSecondTick = () => {
+      const deadlineAt = runtimeSnapshot?.currentSectionDeadlineAt;
+      if (!deadlineAt) {
+        return 1_000;
+      }
+
+      const deadlineMs = Date.parse(deadlineAt);
+      if (!Number.isFinite(deadlineMs)) {
+        return 1_000;
+      }
+
+      const adjustedNowMs = Date.now() + clockOffsetMs;
+      const remainingMs = Math.max(0, deadlineMs - adjustedNowMs);
+      const msUntilNextVisibleSecond = remainingMs % 1_000;
+      return Math.max(100, msUntilNextVisibleSecond === 0 ? 1_000 : msUntilNextVisibleSecond + 5);
+    };
+
+    let cancelled = false;
+    let timerId: number | null = null;
+
+    const tick = () => {
+      if (cancelled) {
+        return;
+      }
       setDerivedClockNowMs(Date.now());
-    }, 250);
+      timerId = window.setTimeout(tick, scheduleVisibleSecondTick());
+    };
+
+    timerId = window.setTimeout(tick, scheduleVisibleSecondTick());
 
     return () => {
-      window.clearInterval(timerId);
+      cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
     };
-  }, [runtimeBacked, runtimeState.phase]);
+  }, [clockOffsetMs, runtimeBacked, runtimeSnapshot, runtimeState.phase]);
 
   useEffect(() => {
     if (

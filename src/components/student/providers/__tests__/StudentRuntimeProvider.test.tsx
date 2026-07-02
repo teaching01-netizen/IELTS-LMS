@@ -425,4 +425,58 @@ describe('StudentRuntimeProvider', () => {
 
     expect(result.current.state.phase).toBe('exam');
   });
+
+  it('updates runtime-backed display time only when the visible second changes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
+
+    function DisplayProbe() {
+      const { state } = useStudentRuntime();
+      return <div data-testid="remaining">{state.displayTimeRemaining}</div>;
+    }
+
+    render(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={() => undefined}
+        runtimeBacked
+        runtimeSnapshot={createRuntimeSnapshot('writing')}
+        attemptSnapshot={{
+          ...buildCompletedPreCheckAttempt(),
+          phase: 'exam',
+          currentModule: 'writing',
+          currentQuestionId: 'task1',
+        }}
+      >
+        <DisplayProbe />
+      </StudentRuntimeProvider>,
+    );
+
+    expect(screen.getByTestId('remaining')).toHaveTextContent('120');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(setIntervalSpy).not.toHaveBeenCalledWith(expect.any(Function), 250);
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1_000);
+
+    const scheduledSecondTicks = setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1_000).length;
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+
+    expect(setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1_000)).toHaveLength(
+      scheduledSecondTicks,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(
+      setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1_000).length,
+    ).toBeGreaterThan(scheduledSecondTicks);
+    vi.useRealTimers();
+  });
 });

@@ -15,6 +15,11 @@ vi.mock('../providers/StudentAttemptProvider', () => ({
       flushAnswerDurabilityNow: (...args: unknown[]) => flushAnswerDurabilityNowMock(...args),
     },
   }),
+  useOptionalStudentAttemptControls: () => ({
+    getScheduleId: () => 'sched-ctx',
+    getAttemptId: () => 'attempt-ctx',
+    flushAnswerDurabilityNow: (...args: unknown[]) => flushAnswerDurabilityNowMock(...args),
+  }),
 }));
 
 describe('ProtectedSelect', () => {

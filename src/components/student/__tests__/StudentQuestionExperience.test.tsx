@@ -8,11 +8,14 @@ import type {
   ExamState,
   MatchingFeaturesBlock,
   MultiMCQBlock,
+  QuestionBlock,
   SingleMCQBlock,
   SentenceCompletionBlock,
   TableCompletionBlock,
 } from '../../../types';
+import type { StudentQuestionDescriptor } from '../../../services/examAdapterService';
 import { QuestionRenderer } from '../QuestionRenderer';
+import { StudentQuestionBlockSection } from '../StudentQuestionBlockSection';
 import { StudentFooter } from '../StudentFooter';
 import { StudentHeader } from '../StudentHeader';
 import { StudentListening } from '../StudentListening';
@@ -89,6 +92,69 @@ describe('student question experience', () => {
     expect(screen.getByRole('combobox', { name: 'Category selection for question 1' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Category A' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Category B' })).toBeInTheDocument();
+  });
+
+  it('marks only non-active question blocks as safe offscreen render candidates', () => {
+    const block: QuestionBlock = {
+      id: 'short-2',
+      type: 'SHORT_ANSWER',
+      instruction: 'Answer the question.',
+      questions: [{ id: 'q2', prompt: 'Prompt', correctAnswer: 'A' }],
+      answerRule: 'ONE_WORD',
+    } as QuestionBlock;
+    const blockQuestions: StudentQuestionDescriptor[] = [
+      {
+        id: 'q2',
+        blockId: 'short-2',
+        groupId: 'p1',
+        groupLabel: 'Passage 1',
+        isMulti: false,
+        correctCount: 1,
+        answerKey: 'q2',
+        block,
+        question: (block as any).questions[0],
+      } as StudentQuestionDescriptor,
+    ];
+
+    const { container, rerender } = render(
+      <StudentQuestionBlockSection
+        block={block}
+        blockQuestions={blockQuestions}
+        allQuestions={blockQuestions}
+        answers={{ q2: '' }}
+        currentQuestionId="q1"
+        flags={{}}
+        onAnswerChange={() => undefined}
+        tabletMode={false}
+        answerCompact={false}
+        highlightEnabled={false}
+        getBlockStartQuestionNumber={() => 2}
+        renderBlockInstruction={(instruction) => <p>{instruction}</p>}
+        expandedQuestionGapClassName="space-y-8"
+      />,
+    );
+
+    expect(container.firstElementChild).toHaveClass('student-question-block-deferred');
+
+    rerender(
+      <StudentQuestionBlockSection
+        block={block}
+        blockQuestions={blockQuestions}
+        allQuestions={blockQuestions}
+        answers={{ q2: '' }}
+        currentQuestionId="q2"
+        flags={{}}
+        onAnswerChange={() => undefined}
+        tabletMode={false}
+        answerCompact={false}
+        highlightEnabled={false}
+        getBlockStartQuestionNumber={() => 2}
+        renderBlockInstruction={(instruction) => <p>{instruction}</p>}
+        expandedQuestionGapClassName="space-y-8"
+      />,
+    );
+
+    expect(container.firstElementChild).not.toHaveClass('student-question-block-deferred');
   });
 
   it('uses full-width compact controls for classification in narrow tablet panes', () => {

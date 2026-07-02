@@ -88,6 +88,12 @@ interface StudentAttemptContextValue {
   actions: StudentAttemptActions;
 }
 
+interface StudentAttemptControlContextValue {
+  getScheduleId: () => string | undefined;
+  getAttemptId: () => string | undefined;
+  flushAnswerDurabilityNow: () => void;
+}
+
 interface StudentAttemptProviderProps {
   children: ReactNode;
   scheduleId?: string | undefined;
@@ -101,6 +107,8 @@ type AttemptPatch = Omit<Partial<StudentAttempt>, 'integrity' | 'recovery'> & {
 };
 
 const StudentAttemptContext = createContext<StudentAttemptContextValue | null>(null);
+const StudentAttemptControlContext =
+  createContext<StudentAttemptControlContextValue | null>(null);
 const ANSWER_DURABLE_WRITE_DEBOUNCE_MS = 100;
 const BOUNDARY_IMMEDIATE_DURABILITY_THRESHOLD_SECONDS = 20;
 
@@ -297,6 +305,10 @@ export function StudentAttemptProvider({
   const [attempt, setAttempt] = useState<StudentAttempt | null>(attemptSnapshot);
   const [pendingMutationCount, setPendingMutationCount] = useState(0);
   const attemptRef = useRef<StudentAttempt | null>(attemptSnapshot);
+  const controlScheduleIdRef = useRef<string | undefined>(
+    scheduleId ?? attemptSnapshot?.scheduleId,
+  );
+  const controlAttemptIdRef = useRef<string | undefined>(attemptSnapshot?.id);
   const observedPositionRef = useRef<string>(
     JSON.stringify({
       phase: attemptSnapshot?.phase ?? 'pre-check',
@@ -314,9 +326,16 @@ export function StudentAttemptProvider({
 
   const syncAttemptState = useCallback((nextAttempt: StudentAttempt) => {
     attemptRef.current = nextAttempt;
+    controlScheduleIdRef.current = scheduleId ?? nextAttempt.scheduleId;
+    controlAttemptIdRef.current = nextAttempt.id;
     setAttempt(nextAttempt);
     setRuntimeAttemptSyncState(nextAttempt.recovery.syncState);
-  }, [setRuntimeAttemptSyncState]);
+  }, [scheduleId, setRuntimeAttemptSyncState]);
+
+  useEffect(() => {
+    controlScheduleIdRef.current = scheduleId ?? attemptRef.current?.scheduleId;
+    controlAttemptIdRef.current = attemptRef.current?.id;
+  }, [attempt, scheduleId]);
 
   const setStorageDurabilityBlocking = useCallback((active: boolean) => {
     if (active) {
@@ -662,7 +681,7 @@ export function StudentAttemptProvider({
     if (!persistenceEnabled) {
       const currentAttempt = attemptRef.current;
       const sameAttempt = currentAttempt?.id === attemptSnapshot.id;
-      const ephemeralAttempt =
+      const ephemeralAttempt: StudentAttempt =
         sameAttempt && currentAttempt
           ? {
               ...currentAttempt,
@@ -681,13 +700,13 @@ export function StudentAttemptProvider({
               recovery: {
                 ...currentAttempt.recovery,
                 pendingMutationCount: 0,
-                syncState: 'idle',
+                syncState: 'idle' as AttemptSyncState,
               },
             }
           : mergeAttempt(attemptSnapshot, {
               recovery: {
                 pendingMutationCount: 0,
-                syncState: 'idle',
+                syncState: 'idle' as AttemptSyncState,
               },
             });
       attemptRef.current = ephemeralAttempt;
@@ -1426,10 +1445,21 @@ export function StudentAttemptProvider({
     dismissDroppedMutationsBanner,
   ]);
 
+  const controlValue = useMemo<StudentAttemptControlContextValue>(
+    () => ({
+      getScheduleId: () => controlScheduleIdRef.current,
+      getAttemptId: () => controlAttemptIdRef.current,
+      flushAnswerDurabilityNow,
+    }),
+    [flushAnswerDurabilityNow],
+  );
+
   return (
-    <StudentAttemptContext.Provider value={value}>
-      {children}
-    </StudentAttemptContext.Provider>
+    <StudentAttemptControlContext.Provider value={controlValue}>
+      <StudentAttemptContext.Provider value={value}>
+        {children}
+      </StudentAttemptContext.Provider>
+    </StudentAttemptControlContext.Provider>
   );
 }
 
@@ -1443,4 +1473,8 @@ export function useStudentAttempt() {
 
 export function useOptionalStudentAttempt(): StudentAttemptContextValue | null {
   return useContext(StudentAttemptContext);
+}
+
+export function useOptionalStudentAttemptControls(): StudentAttemptControlContextValue | null {
+  return useContext(StudentAttemptControlContext);
 }

@@ -39,3 +39,37 @@ Floating highlight toolbar actions must not clear, replace, or steal focus from 
 
 ### Related Memory
 - `docs/failure-cases.md`
+
+## Student Answer Control Responsiveness
+
+### Owning Module
+Student answer entry responsiveness is owned by the student UI and attempt persistence modules:
+
+- `src/components/student/StudentWriting.tsx`
+- `src/components/student/ProtectedInput.tsx`
+- `src/components/student/ProtectedSelect.tsx`
+- `src/components/student/ProtectedChoiceInput.tsx`
+- `src/components/student/providers/StudentAttemptProvider.tsx`
+- `src/components/student/protectedAnswerControlLifecycle.ts`
+
+### Invariant
+Typing must update the focused DOM control immediately and must not require a full attempt-context render for every keystroke.
+
+Draft persistence may be debounced for smoothness, but lifecycle boundaries must synchronously commit the latest DOM value before page hide, tab close, freeze, blur, task switch, or submit review.
+
+Student-visible saved/verified state must continue to reflect persisted durability, not only the live DOM draft.
+
+### Must Not Break
+- Latest answer text is committed on `pagehide`, `visibilitychange` to hidden, `freeze`, `beforeunload`, blur/focusout, task switch, and submit.
+- Undo/redo guard continues to block or restore history mutations and emit audit events.
+- Autofill/replacement suspicion audit events continue to include schedule/attempt context when available.
+- Objective answer controls do not subscribe to the full attempt state if they only need audit ids and durability flush.
+- Timer display remains fair and cannot gain time through reduced render cadence.
+
+### Regression Protection
+- `src/components/student/__tests__/StudentTypingPerformance.test.tsx`
+- `src/components/student/__tests__/ProtectedInput.test.tsx`
+- `src/components/student/__tests__/ProtectedSelect.test.tsx`
+- `src/components/student/__tests__/ProtectedChoiceInput.test.tsx`
+- `src/components/student/__tests__/StudentWriting.lifecycle.test.tsx`
+- `src/components/student/providers/__tests__/StudentRuntimeProvider.test.tsx`

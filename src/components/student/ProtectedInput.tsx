@@ -1,8 +1,9 @@
 import React, { useRef, useEffect } from 'react';
 import { ExamConfig } from '../../types';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
-import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
+import { useOptionalStudentAttemptControls } from './providers/StudentAttemptProvider';
 import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
+import { registerProtectedAnswerControlLifecycle } from './protectedAnswerControlLifecycle';
 
 type ProtectedInputSecurity = Pick<
   ExamConfig['security'],
@@ -25,9 +26,10 @@ export function ProtectedInput({
   className = '',
   ...inputProps
 }: ProtectedInputProps) {
-  const attemptContext = useOptionalStudentAttempt();
-  const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
-  const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
+  const attemptControls = useOptionalStudentAttemptControls();
+  const getResolvedSessionId = () => sessionId ?? attemptControls?.getScheduleId();
+  const getResolvedStudentId = () => studentId ?? attemptControls?.getAttemptId();
+  const flushAnswerDurabilityNow = () => attemptControls?.flushAnswerDurabilityNow();
   const { onInput: userOnInput, onChange: userOnChange, onBlur: userOnBlur, ...restInputProps } =
     inputProps;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,13 +40,13 @@ export function ProtectedInput({
   const deferredRescueTimerRef = useRef<number | null>(null);
   const onChangeRef = useRef<typeof userOnChange>(userOnChange);
   const controlledValueRef = useRef(inputProps.value);
-  const flushAnswerDurabilityNowRef = useRef(attemptContext?.actions.flushAnswerDurabilityNow);
+  const flushAnswerDurabilityNowRef = useRef(flushAnswerDurabilityNow);
 
   useEffect(() => {
     onChangeRef.current = userOnChange;
     controlledValueRef.current = inputProps.value;
-    flushAnswerDurabilityNowRef.current = attemptContext?.actions.flushAnswerDurabilityNow;
-  }, [attemptContext, inputProps.value, userOnChange]);
+    flushAnswerDurabilityNowRef.current = flushAnswerDurabilityNow;
+  }, [attemptControls, inputProps.value, userOnChange]);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -99,37 +101,10 @@ export function ProtectedInput({
       onLiveValueChange?.(latestDomValueRef.current);
     };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'hidden') return;
-      latestDomValueRef.current = input.value;
-      maybeCommitDomValue();
-    };
-
-    const handlePageHide = () => {
-      latestDomValueRef.current = input.value;
-      maybeCommitDomValue();
-    };
-
-    const handleFreeze = () => {
-      latestDomValueRef.current = input.value;
-      maybeCommitDomValue();
-    };
-
-    const handleFocusOut = () => {
-      latestDomValueRef.current = input.value;
-      maybeCommitDomValue();
-      scheduleDeferredDomCommit();
-    };
-
     const handleBlur = () => {
       latestDomValueRef.current = input.value;
       maybeCommitDomValue();
       scheduleDeferredDomCommit();
-    };
-
-    const handleBeforeUnload = () => {
-      latestDomValueRef.current = input.value;
-      maybeCommitDomValue();
     };
 
     const releaseUndoRedoGuard = registerAnswerUndoRedoGuard({
@@ -167,7 +142,7 @@ export function ProtectedInput({
       },
       onBlocked: (signal) => {
         saveStudentAuditEvent(
-          resolvedSessionId,
+          getResolvedSessionId(),
           signal.kind === 'undo' ? 'UNDO_BLOCKED' : 'REDO_BLOCKED',
           {
             surface: 'objective',
@@ -175,12 +150,12 @@ export function ProtectedInput({
             via: signal.via,
             cancelable: signal.cancelable,
           },
-          resolvedStudentId,
+          getResolvedStudentId(),
         );
       },
       onRestored: (signal) => {
         saveStudentAuditEvent(
-          resolvedSessionId,
+          getResolvedSessionId(),
           signal.kind === 'undo' ? 'UNDO_RESTORED' : 'REDO_RESTORED',
           {
             surface: 'objective',
@@ -188,19 +163,22 @@ export function ProtectedInput({
             via: signal.via,
             cancelable: signal.cancelable,
           },
-          resolvedStudentId,
+          getResolvedStudentId(),
         );
       },
+    });
+    const releaseLifecycle = registerProtectedAnswerControlLifecycle({
+      element: input,
+      commitDomValue: () => {
+        latestDomValueRef.current = input.value;
+        maybeCommitDomValue();
+      },
+      scheduleDeferredCommit: scheduleDeferredDomCommit,
     });
 
     input.addEventListener('input', handleNativeInput);
     input.addEventListener('change', handleNativeChange);
-    document.addEventListener('focusout', handleFocusOut, true);
     input.addEventListener('blur', handleBlur);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('pagehide', handlePageHide);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('freeze', handleFreeze as EventListener);
 
     return () => {
       if (deferredRescueTimerRef.current !== null) {
@@ -209,15 +187,11 @@ export function ProtectedInput({
       }
       input.removeEventListener('input', handleNativeInput);
       input.removeEventListener('change', handleNativeChange);
-      document.removeEventListener('focusout', handleFocusOut, true);
       input.removeEventListener('blur', handleBlur);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('pagehide', handlePageHide);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('freeze', handleFreeze as EventListener);
+      releaseLifecycle();
       releaseUndoRedoGuard();
     };
-  }, [onLiveValueChange, resolvedSessionId, resolvedStudentId]);
+  }, [attemptControls, onLiveValueChange, sessionId, studentId]);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -227,14 +201,14 @@ export function ProtectedInput({
       if (event.inputType === 'insertReplacementText') {
         // This is likely autofill or autocorrect
         saveStudentAuditEvent(
-          resolvedSessionId,
+          getResolvedSessionId(),
           'AUTOFILL_SUSPECTED',
           {
             inputType: event.inputType,
             data: event.data,
             targetName: input.name || 'unknown',
           },
-          resolvedStudentId,
+          getResolvedStudentId(),
         );
       }
     };
@@ -251,7 +225,7 @@ export function ProtectedInput({
       
       if (valueChange > 50 && timeSinceKeydown > 500) {
         saveStudentAuditEvent(
-          resolvedSessionId,
+          getResolvedSessionId(),
           'REPLACEMENT_SUSPECTED',
           {
             previousLength: previousValue.length,
@@ -259,7 +233,7 @@ export function ProtectedInput({
             timeSinceKeydown,
             targetName: input.name || 'unknown',
           },
-          resolvedStudentId,
+          getResolvedStudentId(),
         );
       }
       
@@ -279,7 +253,7 @@ export function ProtectedInput({
       input.removeEventListener('input', handleInput);
       input.removeEventListener('keydown', handleKeydown);
     };
-  }, [resolvedSessionId, resolvedStudentId]);
+  }, [attemptControls, sessionId, studentId]);
 
   return (
     <input

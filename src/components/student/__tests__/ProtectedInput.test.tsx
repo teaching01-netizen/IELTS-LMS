@@ -20,6 +20,11 @@ vi.mock('../providers/StudentAttemptProvider', () => ({
       flushAnswerDurabilityNow: (...args: unknown[]) => flushAnswerDurabilityNowMock(...args),
     },
   }),
+  useOptionalStudentAttemptControls: () => ({
+    getScheduleId: () => 'sched-ctx',
+    getAttemptId: () => 'attempt-ctx',
+    flushAnswerDurabilityNow: (...args: unknown[]) => flushAnswerDurabilityNowMock(...args),
+  }),
 }));
 
 describe('ProtectedInput', () => {
@@ -27,6 +32,34 @@ describe('ProtectedInput', () => {
     saveStudentAuditEventMock.mockReset();
     flushAnswerDurabilityNowMock.mockReset();
     vi.restoreAllMocks();
+  });
+
+  it('shares lifecycle listeners across protected text inputs', () => {
+    const documentAddSpy = vi.spyOn(document, 'addEventListener');
+    const windowAddSpy = vi.spyOn(window, 'addEventListener');
+
+    const { unmount } = render(
+      <>
+        <ProtectedInput security={{ preventAutofill: true, preventAutocorrect: true } as any} name="a" />
+        <ProtectedInput security={{ preventAutofill: true, preventAutocorrect: true } as any} name="b" />
+        <ProtectedInput security={{ preventAutofill: true, preventAutocorrect: true } as any} name="c" />
+      </>,
+    );
+
+    const documentLifecycleAdds = documentAddSpy.mock.calls.filter(([eventName]) =>
+      ['focusout', 'visibilitychange', 'freeze'].includes(String(eventName)),
+    );
+    const windowLifecycleAdds = windowAddSpy.mock.calls.filter(([eventName]) =>
+      ['pagehide', 'beforeunload'].includes(String(eventName)),
+    );
+
+    expect(documentLifecycleAdds.filter(([eventName]) => eventName === 'focusout')).toHaveLength(1);
+    expect(documentLifecycleAdds.filter(([eventName]) => eventName === 'visibilitychange')).toHaveLength(1);
+    expect(documentLifecycleAdds.filter(([eventName]) => eventName === 'freeze')).toHaveLength(1);
+    expect(windowLifecycleAdds.filter(([eventName]) => eventName === 'pagehide')).toHaveLength(1);
+    expect(windowLifecycleAdds.filter(([eventName]) => eventName === 'beforeunload')).toHaveLength(1);
+
+    unmount();
   });
 
   it('does not emit paste audit events (clipboard enforcement lives at document level)', () => {

@@ -394,6 +394,10 @@
     line-height: inherit !important;
   }
 
+  .student-question-block-deferred {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 18rem;
+  }
 
   /* Accessibility: Live region announcements */
   .sr-only {

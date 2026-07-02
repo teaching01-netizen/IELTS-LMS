@@ -31,6 +31,13 @@ interface StudentWritingProps {
   registerLiveWritingAnswer?: ((taskId: string, text: string) => void) | undefined;
 }
 
+const WRITING_DRAFT_COMMIT_DEBOUNCE_MS = 300;
+
+type WritingDraftPreview = {
+  taskId: string;
+  text: string;
+};
+
 function normalizeWritingPlainText(value: string): string {
   return value.replace(/\r\n?/g, '\n');
 }
@@ -121,15 +128,24 @@ export function StudentWriting({
   const [activeTaskId, setActiveTaskId] = useState<string>(
     resolvedCurrentQuestionTaskId ?? configuredTaskIds[0] ?? 'task1',
   );
+  const [draftPreview, setDraftPreview] = useState<WritingDraftPreview>(() => {
+    const initialTaskId = resolvedCurrentQuestionTaskId ?? configuredTaskIds[0] ?? 'task1';
+    return {
+      taskId: initialTaskId,
+      text: readWritingAnswerByTaskId(writingAnswers, initialTaskId),
+    };
+  });
   const [isEditorFocused, setIsEditorFocused] = useState(false);
-  const [localDraftsByTask, setLocalDraftsByTask] = useState<Record<string, string>>({});
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const lastKeydownRef = useRef<number>(0);
   const previousValueRef = useRef<string>('');
   const lastCommittedDraftByTaskRef = useRef<Record<string, string>>({});
   const deferredBlurCommitTimerRef = useRef<number | null>(null);
+  const draftCommitTimerRef = useRef<number | null>(null);
+  const liveDraftsByTaskRef = useRef<Record<string, string>>({});
   const editorHasFocusRef = useRef(false);
   const commitEditorDraftRef = useRef<() => void>(() => undefined);
+  const previousResolvedTaskIdRef = useRef<string | null>(resolvedCurrentQuestionTaskId);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const { handleDrag, leftWidth, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
@@ -140,23 +156,45 @@ export function StudentWriting({
   });
 
   const currentTask = writingConfig.tasks.find((t) => t.id === activeTaskId) || writingConfig.tasks[0];
-  const externalCurrentText = readWritingAnswerByTaskId(writingAnswers, activeTaskId);
-  const currentText = localDraftsByTask[activeTaskId] ?? externalCurrentText;
-  const showEditorPlaceholder = !isEditorFocused && currentText.trim().length === 0;
+  const readLiveDraftForTask = useCallback(
+    (taskId: string) => {
+      const liveDraft = liveDraftsByTaskRef.current[taskId];
+      return typeof liveDraft === 'string'
+        ? liveDraft
+        : readWritingAnswerByTaskId(writingAnswers, taskId);
+    },
+    [writingAnswers],
+  );
+
+  const currentText = readLiveDraftForTask(activeTaskId);
+  const previewText =
+    draftPreview.taskId === activeTaskId ? draftPreview.text : currentText;
+  const showEditorPlaceholder = !isEditorFocused && previewText.trim().length === 0;
+
+  const clearScheduledDraftCommit = useCallback(() => {
+    if (draftCommitTimerRef.current !== null) {
+      window.clearTimeout(draftCommitTimerRef.current);
+      draftCommitTimerRef.current = null;
+    }
+  }, []);
 
   const commitDraftText = useCallback(
     (taskId: string, rawText: string, options?: { flushDurability?: boolean }) => {
       const normalizedText = normalizeWritingPlainText(rawText);
       const previous = lastCommittedDraftByTaskRef.current[taskId] ?? '';
+      liveDraftsByTaskRef.current = {
+        ...liveDraftsByTaskRef.current,
+        [taskId]: normalizedText,
+      };
       if (normalizedText !== previous) {
         onWritingChange(taskId, normalizedText);
         lastCommittedDraftByTaskRef.current[taskId] = normalizedText;
       }
-      setLocalDraftsByTask((current) => (
-        current[taskId] === normalizedText
+      setDraftPreview((current) =>
+        current.taskId === taskId && current.text === normalizedText
           ? current
-          : { ...current, [taskId]: normalizedText }
-      ));
+          : { taskId, text: normalizedText },
+      );
       registerLiveWritingAnswer?.(taskId, normalizedText);
       if (options?.flushDurability !== false) {
         attemptContext?.actions.flushAnswerDurabilityNow?.();
@@ -166,14 +204,28 @@ export function StudentWriting({
     [attemptContext, onWritingChange, registerLiveWritingAnswer],
   );
 
-  const commitEditorDraft = useCallback(() => {
-    if (!editorRef.current) {
-      return;
-    }
+  const scheduleDraftCommit = useCallback(
+    (taskId: string, text: string) => {
+      clearScheduledDraftCommit();
+      draftCommitTimerRef.current = window.setTimeout(() => {
+        draftCommitTimerRef.current = null;
+        commitDraftText(taskId, text, { flushDurability: false });
+      }, WRITING_DRAFT_COMMIT_DEBOUNCE_MS);
+    },
+    [clearScheduledDraftCommit, commitDraftText],
+  );
 
-    const committed = commitDraftText(activeTaskId, readEditorPlainText(editorRef.current));
-    writeEditorPlainText(editorRef.current, committed);
-  }, [activeTaskId, commitDraftText]);
+  const commitEditorDraft = useCallback(() => {
+    const editor = editorRef.current;
+    clearScheduledDraftCommit();
+    const committed = commitDraftText(
+      activeTaskId,
+      editor ? readEditorPlainText(editor) : readLiveDraftForTask(activeTaskId),
+    );
+    if (editor) {
+      writeEditorPlainText(editor, committed);
+    }
+  }, [activeTaskId, clearScheduledDraftCommit, commitDraftText, readLiveDraftForTask]);
 
   useEffect(() => {
     commitEditorDraftRef.current = commitEditorDraft;
@@ -196,10 +248,15 @@ export function StudentWriting({
   }, [registerDraftCommit]);
 
   useEffect(() => {
+    const previousResolvedTaskId = previousResolvedTaskIdRef.current;
+    previousResolvedTaskIdRef.current = resolvedCurrentQuestionTaskId;
+
     if (
       resolvedCurrentQuestionTaskId &&
-      resolvedCurrentQuestionTaskId !== activeTaskId
+      resolvedCurrentQuestionTaskId !== activeTaskId &&
+      previousResolvedTaskId !== resolvedCurrentQuestionTaskId
     ) {
+      commitEditorDraftRef.current();
       setActiveTaskId(resolvedCurrentQuestionTaskId);
     }
   }, [activeTaskId, resolvedCurrentQuestionTaskId]);
@@ -208,11 +265,12 @@ export function StudentWriting({
     const editor = editorRef.current;
     if (!editor) return;
     if (editorHasFocusRef.current) return;
-    if (currentText !== readEditorPlainText(editor)) {
-      writeEditorPlainText(editor, currentText);
-      previousValueRef.current = readEditorPlainText(editor);
+    writeEditorPlainText(editor, currentText);
+    previousValueRef.current = readEditorPlainText(editor);
+    if (typeof liveDraftsByTaskRef.current[activeTaskId] !== 'string') {
+      lastCommittedDraftByTaskRef.current[activeTaskId] = readEditorPlainText(editor);
+      setDraftPreview({ taskId: activeTaskId, text: currentText });
     }
-    lastCommittedDraftByTaskRef.current[activeTaskId] = readEditorPlainText(editor);
   }, [activeTaskId, currentText]);
 
   useEffect(() => {
@@ -221,8 +279,9 @@ export function StudentWriting({
         window.clearTimeout(deferredBlurCommitTimerRef.current);
         deferredBlurCommitTimerRef.current = null;
       }
+      clearScheduledDraftCommit();
     };
-  }, []);
+  }, [clearScheduledDraftCommit]);
 
   useEffect(() => {
     if (timeRemaining === 0) {
@@ -376,7 +435,7 @@ export function StudentWriting({
   const minWords = currentTask.minWords || 150;
   const currentChart = currentTaskContent?.chart;
 
-  const wordCount = currentText.trim() === '' ? 0 : currentText.trim().split(/\s+/).length;
+  const wordCount = previewText.trim() === '' ? 0 : previewText.trim().split(/\s+/).length;
 
   const isWordCountMet = wordCount >= minWords;
   const isWordCountWarning = wordCount > 0 && wordCount < minWords && wordCount >= minWords * 0.9;
@@ -403,12 +462,17 @@ export function StudentWriting({
   const handleEditorInput = () => {
     if (editorRef.current) {
       const textContent = readEditorPlainText(editorRef.current);
-      setLocalDraftsByTask((current) => (
-        current[activeTaskId] === textContent
+      liveDraftsByTaskRef.current = {
+        ...liveDraftsByTaskRef.current,
+        [activeTaskId]: textContent,
+      };
+      registerLiveWritingAnswer?.(activeTaskId, textContent);
+      setDraftPreview((current) =>
+        current.taskId === activeTaskId && current.text === textContent
           ? current
-          : { ...current, [activeTaskId]: textContent }
-      ));
-      onWritingChange(activeTaskId, textContent);
+          : { taskId: activeTaskId, text: textContent },
+      );
+      scheduleDraftCommit(activeTaskId, textContent);
     }
   };
 
@@ -597,8 +661,14 @@ export function StudentWriting({
               )}
               <textarea
                 ref={editorRef}
-                value={currentText}
+                defaultValue={currentText}
                 onChange={handleEditorInput}
+                onCompositionEnd={() => {
+                  if (editorRef.current) {
+                    clearScheduledDraftCommit();
+                    commitDraftText(activeTaskId, readEditorPlainText(editorRef.current));
+                  }
+                }}
                 aria-label="Writing response"
                   onFocus={() => {
                     editorHasFocusRef.current = true;
@@ -608,6 +678,7 @@ export function StudentWriting({
                     editorHasFocusRef.current = false;
                     setIsEditorFocused(false);
                     if (editorRef.current) {
+                      clearScheduledDraftCommit();
                       const committed = commitDraftText(activeTaskId, readEditorPlainText(editorRef.current));
                       writeEditorPlainText(editorRef.current, committed);
                     }

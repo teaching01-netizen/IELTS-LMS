@@ -1,17 +1,10 @@
 import React from 'react';
-import { ArrowLeft, ArrowRight, Flag } from 'lucide-react';
-import { getBlockQuestionCount } from '../../utils/examUtils';
-import {
-  getQuestionStartNumber,
-  type StudentQuestionDescriptor,
-} from '../../services/examAdapterService';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
+import type { StudentQuestionDescriptor } from '../../services/examAdapterService';
 import type { QuestionAnswer, QuestionBlock } from '../../types';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
-import { QuestionRenderer } from './QuestionRenderer';
-import { SubAnswerTreeQuestionList } from './SubAnswerTreeQuestionList';
-import { formatQuestionRange } from './questionRangeLabel';
-import { resolveSharedStudentAnswerMeta } from './resolveSharedStudentAnswerMeta';
+import { StudentQuestionBlockSection } from './StudentQuestionBlockSection';
 
 interface StudentQuestionPanelProps {
   blocks: QuestionBlock[];
@@ -38,48 +31,6 @@ interface StudentQuestionPanelProps {
   renderBlockInstruction: (instruction: string) => React.ReactNode;
   expandedQuestionGapClassName?: string | undefined;
   hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
-}
-
-function FlagButton({
-  flagged,
-  tabletMode,
-  onClick,
-}: {
-  flagged: boolean;
-  tabletMode: boolean;
-  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
-}) {
-  if (tabletMode) {
-    return (
-      <div className="flex justify-end">
-        <button
-          onClick={onClick}
-          className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition-all ${
-            flagged
-              ? 'bg-amber-700 text-white border-amber-700'
-              : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
-          }`}
-          title={flagged ? 'Unflag question' : 'Flag question'}
-        >
-          <Flag size={14} className={flagged ? 'fill-current' : ''} />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <button
-      onClick={onClick}
-      className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
-        flagged
-          ? 'bg-amber-700 text-white'
-          : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-      }`}
-      title={flagged ? 'Unflag question' : 'Flag question'}
-    >
-      <Flag size={14} className={flagged ? 'fill-current' : ''} />
-    </button>
-  );
 }
 
 export function StudentQuestionPanel({
@@ -109,7 +60,18 @@ export function StudentQuestionPanel({
   const hasNext = currentIndex >= 0 && currentIndex < allQuestions.length - 1;
   const previousQuestion = hasPrev ? allQuestions[currentIndex - 1] : undefined;
   const nextQuestion = hasNext ? allQuestions[currentIndex + 1] : undefined;
-  const getAnswerValue = (answerKey: string): QuestionAnswer => answers[answerKey] ?? null;
+  const questionsByBlockId = React.useMemo(() => {
+    const map = new Map<string, StudentQuestionDescriptor[]>();
+    for (const question of allQuestions) {
+      const current = map.get(question.blockId);
+      if (current) {
+        current.push(question);
+      } else {
+        map.set(question.blockId, [question]);
+      }
+    }
+    return map;
+  }, [allQuestions]);
 
   return (
     <div className={`relative flex h-full min-w-0 flex-col min-h-0 ${tabletMode ? 'w-[var(--question-pane-width)] min-w-[48px]' : 'w-full md:min-w-[320px] lg:w-[var(--question-pane-width)]'}`}>
@@ -124,152 +86,28 @@ export function StudentQuestionPanel({
         data-testid={panelTestId}
         style={contentZoomStyle}
       >
-        {blocks.map((block) => {
-          const blockQuestions = allQuestions.filter((question) => question.blockId === block.id);
-          const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
-          const treeQuestions = blockQuestions.filter((question) => question.isSubAnswerTreeLeaf);
-          const rootNumbers = Array.from(
-            new Set(
-              blockQuestions
-                .map((question) => question.rootNumber)
-                .filter((value): value is number => typeof value === 'number'),
-            ),
-          ).sort((left, right) => left - right);
-          const blockStartQ = getBlockStartQuestionNumber(block.id);
-          const numberedBlockStart = rootNumbers[0] ?? blockStartQ;
-          const numberedBlockEnd =
-            rootNumbers[rootNumbers.length - 1] ??
-            blockStartQ + getBlockQuestionCount(block) - 1;
-
-          return (
-            <div key={block.id} className={`${answerCompact ? 'space-y-3 mb-3 md:mb-4' : 'space-y-4 md:space-y-6 mb-4 md:mb-6'}`}>
-              <div className={answerCompact ? 'mb-2' : 'mb-3 md:mb-4'}>
-                {numberedBlockStart !== numberedBlockEnd ? (
-                  <h3 className={`font-bold text-gray-900 break-words [overflow-wrap:anywhere] ${answerCompact ? 'mb-1 text-sm md:text-base' : 'mb-1 md:mb-2 text-base md:text-lg'}`}>
-                    Questions {formatQuestionRange(numberedBlockStart, numberedBlockEnd)}
-                  </h3>
-                ) : null}
-                {renderBlockInstruction(block.instruction)}
-              </div>
-
-              <div className={answerCompact ? 'space-y-5' : expandedQuestionGapClassName}>
-                {treeQuestions.length > 0 ? (
-                  <SubAnswerTreeQuestionList
-                    questions={treeQuestions}
-                    answers={answers}
-                    currentQuestionId={currentQuestionId}
-                    flags={flags}
-                    onToggleFlag={onToggleFlag}
-                    tabletMode={tabletMode}
-                    onAnswerChange={onAnswerChange}
-                  />
-                ) : ('questions' in block) ? (
-                  block.questions.map((question, questionIndex) => {
-                    const questionEntries = blockQuestions.filter((entry) => entry.question?.id === question.id);
-                    const firstEntry = questionEntries[0];
-                    const globalQuestionNumber =
-                      (firstEntry ? getQuestionStartNumber(allQuestions, firstEntry.id) : null) ??
-                      blockStartQ + questionIndex;
-                    const isActive = questionEntries.some((entry) => entry.id === currentQuestionId);
-                    const inlineFlags = block.type === 'SENTENCE_COMPLETION' || block.type === 'NOTE_COMPLETION';
-                    const flagId = firstEntry?.id;
-                    const answerKey = firstEntry?.answerKey ?? question.id;
-
-                    return (
-                      <div
-                        key={question.id}
-                        id={!inlineFlags && flagId ? `question-${flagId}` : undefined}
-                        className={`relative ${tabletMode ? 'space-y-2' : ''}`}
-                      >
-                        {onToggleFlag && flagId && !inlineFlags ? (
-                          <FlagButton
-                            flagged={Boolean(flags[flagId])}
-                            tabletMode={tabletMode}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onToggleFlag(flagId);
-                            }}
-                          />
-                        ) : null}
-                        <QuestionRenderer
-                          question={question}
-                          block={block}
-                          number={globalQuestionNumber}
-                          answer={getAnswerValue(answerKey)}
-                          onChange={(value, meta) =>
-                            onAnswerChange(
-                              answerKey,
-                              value,
-                              resolveSharedStudentAnswerMeta({
-                                value,
-                                slotId: firstEntry?.id,
-                                defaultEntryAnswerIndex: firstEntry?.answerIndex,
-                                slotCount: questionEntries.length,
-                                incomingMeta: meta,
-                              }),
-                            )
-                          }
-                          registerLiveAnswer={({ value }: { value: QuestionAnswer }) =>
-                            registerLiveAnswer?.(answerKey, value)
-                          }
-                          isFlagged={flagId ? Boolean(flags[flagId]) : false}
-                          isActive={isActive}
-                          slotIds={questionEntries.map((entry) => entry.id)}
-                          slotNumbers={questionEntries.map((entry, index) => entry.rootNumber ?? (blockStartQ + index))}
-                          currentQuestionId={currentQuestionId}
-                          flags={flags}
-                          onToggleFlag={onToggleFlag}
-                          tabletMode={tabletMode}
-                          compactPane={answerCompact}
-                          highlightEnabled={highlightEnabled}
-                          highlightColor={highlightColor}
-                          hideDiagramReference={hideDiagramReferenceForBlock?.(block.id)}
-                        />
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div key={block.id} className="relative">
-                    {onToggleFlag && singleBlockQuestion ? (
-                      <FlagButton
-                        flagged={Boolean(flags[singleBlockQuestion.id])}
-                        tabletMode={tabletMode}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onToggleFlag(singleBlockQuestion.id);
-                        }}
-                      />
-                    ) : null}
-                    <QuestionRenderer
-                      question={null}
-                      block={block}
-                      number={(singleBlockQuestion ? getQuestionStartNumber(allQuestions, singleBlockQuestion.id) : null) ?? blockStartQ}
-                      answer={getAnswerValue(singleBlockQuestion?.answerKey ?? block.id)}
-                      onChange={(value, meta) =>
-                        onAnswerChange(singleBlockQuestion?.answerKey ?? block.id, value, meta)
-                      }
-                      registerLiveAnswer={({ value }: { value: QuestionAnswer }) =>
-                        registerLiveAnswer?.(singleBlockQuestion?.answerKey ?? block.id, value)
-                      }
-                      isFlagged={singleBlockQuestion ? Boolean(flags[singleBlockQuestion.id]) : false}
-                      isActive={blockQuestions.some((entry) => entry.id === currentQuestionId)}
-                      slotIds={blockQuestions.map((entry) => entry.id)}
-                      slotNumbers={blockQuestions.map((entry, index) => entry.rootNumber ?? (blockStartQ + index))}
-                      currentQuestionId={currentQuestionId}
-                      flags={flags}
-                      onToggleFlag={onToggleFlag}
-                      tabletMode={tabletMode}
-                      compactPane={answerCompact}
-                      highlightEnabled={highlightEnabled}
-                      highlightColor={highlightColor}
-                      hideDiagramReference={hideDiagramReferenceForBlock?.(block.id)}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+        {blocks.map((block) => (
+          <StudentQuestionBlockSection
+            key={block.id}
+            block={block}
+            blockQuestions={questionsByBlockId.get(block.id) ?? []}
+            allQuestions={allQuestions}
+            answers={answers}
+            currentQuestionId={currentQuestionId}
+            flags={flags}
+            onAnswerChange={onAnswerChange}
+            onToggleFlag={onToggleFlag}
+            tabletMode={tabletMode}
+            answerCompact={answerCompact}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+            registerLiveAnswer={registerLiveAnswer}
+            getBlockStartQuestionNumber={getBlockStartQuestionNumber}
+            renderBlockInstruction={renderBlockInstruction}
+            expandedQuestionGapClassName={expandedQuestionGapClassName}
+            hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
+          />
+        ))}
       </div>
 
       <div className={`absolute ${tabletMode ? 'bottom-4 right-4' : 'bottom-16 md:bottom-20 right-4 md:right-6'} flex shadow-md z-20`}>

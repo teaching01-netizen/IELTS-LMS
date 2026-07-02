@@ -1,12 +1,13 @@
 import React, { useEffect, useRef } from 'react';
-import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
+import { useOptionalStudentAttemptControls } from './providers/StudentAttemptProvider';
+import { registerProtectedAnswerControlLifecycle } from './protectedAnswerControlLifecycle';
 
 type ProtectedSelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
   onLiveValueChange?: ((value: string) => void) | undefined;
 };
 
 export function ProtectedSelect({ ...selectProps }: ProtectedSelectProps) {
-  const attemptContext = useOptionalStudentAttempt();
+  const attemptControls = useOptionalStudentAttemptControls();
   const { onChange: userOnChange, onBlur: userOnBlur, onLiveValueChange, ...restSelectProps } = selectProps;
   const selectRef = useRef<HTMLSelectElement>(null);
   const lastRescuedDomValueRef = useRef<string | null>(null);
@@ -14,13 +15,13 @@ export function ProtectedSelect({ ...selectProps }: ProtectedSelectProps) {
   const deferredRescueTimerRef = useRef<number | null>(null);
   const onChangeRef = useRef<typeof userOnChange>(userOnChange);
   const controlledValueRef = useRef(selectProps.value);
-  const flushAnswerDurabilityNowRef = useRef(attemptContext?.actions.flushAnswerDurabilityNow);
+  const flushAnswerDurabilityNowRef = useRef(() => attemptControls?.flushAnswerDurabilityNow());
 
   useEffect(() => {
     onChangeRef.current = userOnChange;
     controlledValueRef.current = selectProps.value;
-    flushAnswerDurabilityNowRef.current = attemptContext?.actions.flushAnswerDurabilityNow;
-  }, [attemptContext, selectProps.value, userOnChange]);
+    flushAnswerDurabilityNowRef.current = () => attemptControls?.flushAnswerDurabilityNow();
+  }, [attemptControls, selectProps.value, userOnChange]);
 
   useEffect(() => {
     const select = selectRef.current;
@@ -67,46 +68,23 @@ export function ProtectedSelect({ ...selectProps }: ProtectedSelectProps) {
       onLiveValueChange?.(latestDomValueRef.current);
     };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'hidden') return;
-      latestDomValueRef.current = select.value;
-      maybeCommitDomValue();
-    };
-
-    const handlePageHide = () => {
-      latestDomValueRef.current = select.value;
-      maybeCommitDomValue();
-    };
-
-    const handleFreeze = () => {
-      latestDomValueRef.current = select.value;
-      maybeCommitDomValue();
-    };
-
-    const handleFocusOut = () => {
-      latestDomValueRef.current = select.value;
-      maybeCommitDomValue();
-      scheduleDeferredDomCommit();
-    };
-
     const handleBlur = () => {
       latestDomValueRef.current = select.value;
       maybeCommitDomValue();
       scheduleDeferredDomCommit();
     };
 
-    const handleBeforeUnload = () => {
-      latestDomValueRef.current = select.value;
-      maybeCommitDomValue();
-    };
+    const releaseLifecycle = registerProtectedAnswerControlLifecycle({
+      element: select,
+      commitDomValue: () => {
+        latestDomValueRef.current = select.value;
+        maybeCommitDomValue();
+      },
+      scheduleDeferredCommit: scheduleDeferredDomCommit,
+    });
 
     select.addEventListener('change', handleNativeChange);
-    document.addEventListener('focusout', handleFocusOut, true);
     select.addEventListener('blur', handleBlur);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('pagehide', handlePageHide);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('freeze', handleFreeze as EventListener);
 
     return () => {
       if (deferredRescueTimerRef.current !== null) {
@@ -114,14 +92,10 @@ export function ProtectedSelect({ ...selectProps }: ProtectedSelectProps) {
         deferredRescueTimerRef.current = null;
       }
       select.removeEventListener('change', handleNativeChange);
-      document.removeEventListener('focusout', handleFocusOut, true);
       select.removeEventListener('blur', handleBlur);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('pagehide', handlePageHide);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('freeze', handleFreeze as EventListener);
+      releaseLifecycle();
     };
-  }, [onLiveValueChange]);
+  }, [attemptControls, onLiveValueChange]);
 
   return (
     <select
