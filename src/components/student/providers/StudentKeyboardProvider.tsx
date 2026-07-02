@@ -103,7 +103,7 @@ function isScreenshotShortcut(event: KeyboardEvent): boolean {
 export function KeyboardProvider({ children }: KeyboardProviderProps) {
   const { state: runtimeState, actions: runtimeActions, examState } = useStudentRuntime();
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
-  const { state: uiState, actions: uiActions } = useStudentUI();
+  const { actions: uiActions } = useStudentUI();
   const { handleViolation } = useProctoring();
 
   const sessionId = attemptState.attempt?.scheduleId;

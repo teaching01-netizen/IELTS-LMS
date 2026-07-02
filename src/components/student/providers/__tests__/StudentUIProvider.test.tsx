@@ -80,3 +80,24 @@ describe('StudentUIProvider time extension state', () => {
     expect(context!.state.timeExtensionReason).toBe('');
   });
 });
+
+describe('StudentUIProvider removed help modal contract', () => {
+  it('does not expose help modal state or actions', () => {
+    let context: ReturnType<typeof useStudentUI> | null = null;
+
+    function Probe() {
+      context = useStudentUI();
+      return null;
+    }
+
+    render(
+      <StudentUIProvider>
+        <Probe />
+      </StudentUIProvider>,
+    );
+
+    expect(context).not.toBeNull();
+    expect('showHelp' in context!.state).toBe(false);
+    expect('setShowHelp' in context!.actions).toBe(false);
+  });
+});

@@ -9,7 +9,6 @@ import {
 
 interface UIState {
   showNavigator: boolean;
-  showHelp: boolean;
   showSubmitConfirm: boolean;
   showAccessibility: boolean;
   showTimeExtensionRequest: boolean;
@@ -28,7 +27,6 @@ interface UIState {
 
 interface UIActions {
   setShowNavigator: (show: boolean) => void;
-  setShowHelp: (show: boolean) => void;
   setShowSubmitConfirm: (show: boolean) => void;
   setShowAccessibility: (show: boolean) => void;
   setShowTimeExtensionRequest: (show: boolean) => void;
@@ -60,7 +58,6 @@ interface UIProviderProps {
 
 export function StudentUIProvider({ children }: UIProviderProps) {
   const [showNavigator, setShowNavigator] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showAccessibility, setShowAccessibility] = useState(false);
   const [showTimeExtensionRequest, setShowTimeExtensionRequest] = useState(false);
@@ -149,7 +146,6 @@ export function StudentUIProvider({ children }: UIProviderProps) {
 
   const state: UIState = {
     showNavigator,
-    showHelp,
     showSubmitConfirm,
     showAccessibility,
     showTimeExtensionRequest,
@@ -161,7 +157,6 @@ export function StudentUIProvider({ children }: UIProviderProps) {
 
   const actions: UIActions = {
     setShowNavigator,
-    setShowHelp,
     setShowSubmitConfirm,
     setShowAccessibility,
     setShowTimeExtensionRequest,

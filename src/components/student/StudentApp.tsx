@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { countAnsweredQuestions, countQuestionSlots } from '@services/examAdapterService';
 import { Button } from '../ui/Button';
 import { AccessibilitySettings } from './AccessibilitySettings';
-import { HelpModal } from './HelpModal';
 import { Lobby } from './Lobby';
 import { PreCheck } from './PreCheck';
 import { StudentExamWorkspace } from './StudentExamWorkspace';
@@ -840,8 +839,6 @@ export function StudentApp({
           }}
         />
       ) : null}
-
-      <HelpModal isOpen={uiState.showHelp} onClose={() => uiActions.setShowHelp(false)} />
 
       <SubmitConfirmation
         isOpen={uiState.showSubmitConfirm}
