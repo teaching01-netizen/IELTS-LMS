@@ -34,7 +34,7 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
           </div>
           <h2 id="help-modal-title" className="text-lg md:text-xl font-bold text-gray-900">Keyboard Shortcuts</h2>
         </div>
-        <button onClick={onClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors" aria-label="Close help">
+        <button type="button" onClick={onClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors" aria-label="Close help">
           <X size={18} />
         </button>
       </div>
@@ -84,6 +84,7 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
 
       <div className="p-4 sm:p-6 border-t border-gray-200 bg-gray-50 rounded-b-lg">
         <button
+          type="button"
           onClick={onClose}
           className="w-full px-4 py-2 md:py-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium transition-colors text-sm md:text-base"
         >
