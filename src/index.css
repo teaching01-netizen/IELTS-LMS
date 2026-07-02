@@ -109,22 +109,22 @@
   --radius-xl: 3px;
 }
 
-/* Native dialog styles for accessible modals */
-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.5);
-}
-
-dialog {
-  border: none;
-  padding: 0;
-}
-
-dialog[open] {
-  max-height: 90vh;
-  max-width: 90vw;
-}
-
 @layer base {
+  /* Native dialog styles for accessible modals */
+  dialog::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  dialog {
+    border: none;
+    padding: 0;
+  }
+
+  dialog[open] {
+    max-height: 90vh;
+    max-width: 90vw;
+  }
+
   body {
     @apply font-sans bg-white text-gray-900 antialiased;
   }
