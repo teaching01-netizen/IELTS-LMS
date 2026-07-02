@@ -53,6 +53,7 @@ export function StudentHeader({
 }: StudentHeaderProps) {
   void onClearHighlights;
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const exitDialogRef = useRef<HTMLDialogElement>(null);
   const [showTabletZoomControls, setShowTabletZoomControls] = useState(false);
   const [tabletZoomControlsStyle, setTabletZoomControlsStyle] = useState<React.CSSProperties>({
     top: 0,
@@ -142,6 +143,23 @@ export function StudentHeader({
       window.removeEventListener('resize', handleResize);
     };
   }, [showTabletZoomControls, tabletMode, updateTabletZoomControlsPosition]);
+
+  useEffect(() => {
+    const dialog = exitDialogRef.current;
+    if (!dialog) return;
+
+    if (showExitConfirm && !dialog.open) {
+      dialog.showModal();
+    } else if (!showExitConfirm && dialog.open) {
+      dialog.close();
+    }
+
+    return () => {
+      if (dialog.open) {
+        dialog.close();
+      }
+    };
+  }, [showExitConfirm]);
 
   const renderOverlayPanel = useCallback((panel: React.ReactNode) => {
     if (typeof document === 'undefined') {
@@ -400,35 +418,33 @@ export function StudentHeader({
         )}
       </div>
 
-      {showExitConfirm && (
-        <dialog
-          open
-          onClose={() => setShowExitConfirm(false)}
-          className="rounded-lg shadow-xl max-w-md w-full p-6"
-          aria-labelledby="exit-confirm-title"
-        >
-          <h3 id="exit-confirm-title" className="text-xl font-black text-gray-900 mb-3">Exit Exam?</h3>
-          <p className="text-gray-700 mb-6 leading-relaxed">
-            Your exam progress has been autosaved, but leaving now may interrupt your session.
-          </p>
-          <div className="flex gap-3 justify-end">
-            <button
-              type="button"
-              onClick={() => setShowExitConfirm(false)}
-              className="px-4 py-2 border border-gray-300 rounded-sm text-gray-700 font-bold"
-            >
-              Stay
-            </button>
-            <button
-              type="button"
-              onClick={confirmExit}
-              className="px-4 py-2 bg-red-600 text-white rounded-sm font-bold"
-            >
-              Exit
-            </button>
-          </div>
-        </dialog>
-      )}
+      <dialog
+        ref={exitDialogRef}
+        onClose={() => setShowExitConfirm(false)}
+        className="rounded-lg shadow-xl max-w-md w-full p-6"
+        aria-labelledby="exit-confirm-title"
+      >
+        <h3 id="exit-confirm-title" className="text-xl font-black text-gray-900 mb-3">Exit Exam?</h3>
+        <p className="text-gray-700 mb-6 leading-relaxed">
+          Your exam progress has been autosaved, but leaving now may interrupt your session.
+        </p>
+        <div className="flex gap-3 justify-end">
+          <button
+            type="button"
+            onClick={() => setShowExitConfirm(false)}
+            className="px-4 py-2 border border-gray-300 rounded-sm text-gray-700 font-bold"
+          >
+            Stay
+          </button>
+          <button
+            type="button"
+            onClick={confirmExit}
+            className="px-4 py-2 bg-red-600 text-white rounded-sm font-bold"
+          >
+            Exit
+          </button>
+        </div>
+      </dialog>
     </header>
   );
 }
