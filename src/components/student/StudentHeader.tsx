@@ -401,30 +401,33 @@ export function StudentHeader({
       </div>
 
       {showExitConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-sm max-w-md w-full p-6">
-            <h3 className="text-xl font-black text-gray-900 mb-3">Exit Exam?</h3>
-            <p className="text-gray-700 mb-6 leading-relaxed">
-              Your exam progress has been autosaved, but leaving now may interrupt your session.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                type="button"
-                onClick={() => setShowExitConfirm(false)}
-                className="px-4 py-2 border border-gray-300 rounded-sm text-gray-700 font-bold"
-              >
-                Stay
-              </button>
-              <button
-                type="button"
-                onClick={confirmExit}
-                className="px-4 py-2 bg-red-600 text-white rounded-sm font-bold"
-              >
-                Exit
-              </button>
-            </div>
+        <dialog
+          open
+          onClose={() => setShowExitConfirm(false)}
+          className="rounded-lg shadow-xl max-w-md w-full p-6"
+          aria-labelledby="exit-confirm-title"
+        >
+          <h3 id="exit-confirm-title" className="text-xl font-black text-gray-900 mb-3">Exit Exam?</h3>
+          <p className="text-gray-700 mb-6 leading-relaxed">
+            Your exam progress has been autosaved, but leaving now may interrupt your session.
+          </p>
+          <div className="flex gap-3 justify-end">
+            <button
+              type="button"
+              onClick={() => setShowExitConfirm(false)}
+              className="px-4 py-2 border border-gray-300 rounded-sm text-gray-700 font-bold"
+            >
+              Stay
+            </button>
+            <button
+              type="button"
+              onClick={confirmExit}
+              className="px-4 py-2 bg-red-600 text-white rounded-sm font-bold"
+            >
+              Exit
+            </button>
           </div>
-        </div>
+        </dialog>
       )}
     </header>
   );
