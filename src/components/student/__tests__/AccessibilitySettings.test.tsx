@@ -1,7 +1,21 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeAll } from 'vitest';
 import { AccessibilitySettings } from '../AccessibilitySettings';
+
+// jsdom doesn't implement HTMLDialogElement — polyfill showModal/close for tests
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal =
+    HTMLDialogElement.prototype.showModal ||
+    function (this: HTMLDialogElement) {
+      (this as any).open = true;
+    };
+  HTMLDialogElement.prototype.close =
+    HTMLDialogElement.prototype.close ||
+    function (this: HTMLDialogElement) {
+      (this as any).open = false;
+    };
+});
 
 describe('AccessibilitySettings', () => {
   it('keeps zoom and highlight controls out of the modal', () => {
