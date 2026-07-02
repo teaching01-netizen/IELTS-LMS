@@ -6,7 +6,6 @@ import {
   Clock,
   Contrast,
   LayoutGrid,
-  Menu,
   Minus,
   Plus,
   RefreshCw,
@@ -15,7 +14,6 @@ import {
 import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
 
 interface StudentHeaderProps {
-  onExit: () => void;
   testTakerId?: string | undefined;
   timeRemaining?: number | undefined;
   autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | null | undefined;
@@ -29,12 +27,9 @@ interface StudentHeaderProps {
   onZoomOut?: (() => void) | undefined;
   onZoomReset?: (() => void) | undefined;
   isExamActive?: boolean | undefined;
-  showExitButton?: boolean | undefined;
-  confirmExitWhenExamActive?: boolean | undefined;
 }
 
 export function StudentHeader({
-  onExit,
   testTakerId,
   timeRemaining,
   autoSaveStatus,
@@ -48,12 +43,8 @@ export function StudentHeader({
   onZoomOut,
   onZoomReset,
   isExamActive = false,
-  showExitButton = true,
-  confirmExitWhenExamActive = true,
 }: StudentHeaderProps) {
   void onClearHighlights;
-  const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const exitDialogRef = useRef<HTMLDialogElement>(null);
   const [showTabletZoomControls, setShowTabletZoomControls] = useState(false);
   const [tabletZoomControlsStyle, setTabletZoomControlsStyle] = useState<React.CSSProperties>({
     top: 0,
@@ -70,19 +61,6 @@ export function StudentHeader({
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const handleExit = () => {
-    if (isExamActive && confirmExitWhenExamActive) {
-      setShowExitConfirm(true);
-    } else {
-      onExit();
-    }
-  };
-
-  const confirmExit = () => {
-    setShowExitConfirm(false);
-    onExit();
   };
 
   const updateTabletZoomControlsPosition = useCallback(() => {
@@ -143,23 +121,6 @@ export function StudentHeader({
       window.removeEventListener('resize', handleResize);
     };
   }, [showTabletZoomControls, tabletMode, updateTabletZoomControlsPosition]);
-
-  useEffect(() => {
-    const dialog = exitDialogRef.current;
-    if (!dialog) return;
-
-    if (showExitConfirm && !dialog.open) {
-      dialog.showModal();
-    } else if (!showExitConfirm && dialog.open) {
-      dialog.close();
-    }
-
-    return () => {
-      if (dialog.open) {
-        dialog.close();
-      }
-    };
-  }, [showExitConfirm]);
 
   const renderOverlayPanel = useCallback((panel: React.ReactNode) => {
     if (typeof document === 'undefined') {
@@ -402,49 +363,7 @@ export function StudentHeader({
             </button>
           </>
         )}
-        {showExitButton && (
-          <>
-            <div className="w-px h-5 md:h-6 lg:h-8 bg-gray-200 mx-0.5 md:mx-1 lg:mx-2 hidden sm:block"></div>
-            <button
-              type="button"
-              onClick={handleExit}
-              className="flex items-center gap-1 md:gap-1.5 lg:gap-2 px-2 md:px-2.5 lg:px-3 py-1.5 md:py-2 bg-gray-50 text-gray-900 font-bold text-[length:var(--student-control-font-size)] rounded-sm flex-shrink-0"
-              aria-label={isExamActive ? 'Exit exam' : 'Exit preview'}
-            >
-              <Menu size={14} strokeWidth={2.5} />
-              <span className="hidden sm:inline">Exit</span>
-            </button>
-          </>
-        )}
       </div>
-
-      <dialog
-        ref={exitDialogRef}
-        onClose={() => setShowExitConfirm(false)}
-        className="rounded-lg shadow-xl max-w-md w-full p-6"
-        aria-labelledby="exit-confirm-title"
-      >
-        <h3 id="exit-confirm-title" className="text-xl font-black text-gray-900 mb-3">Exit Exam?</h3>
-        <p className="text-gray-700 mb-6 leading-relaxed">
-          Your exam progress has been autosaved, but leaving now may interrupt your session.
-        </p>
-        <div className="flex gap-3 justify-end">
-          <button
-            type="button"
-            onClick={() => setShowExitConfirm(false)}
-            className="px-4 py-2 border border-gray-300 rounded-sm text-gray-700 font-bold"
-          >
-            Stay
-          </button>
-          <button
-            type="button"
-            onClick={confirmExit}
-            className="px-4 py-2 bg-red-600 text-white rounded-sm font-bold"
-          >
-            Exit
-          </button>
-        </div>
-      </dialog>
     </header>
   );
 }

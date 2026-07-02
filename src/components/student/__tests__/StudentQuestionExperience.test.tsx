@@ -1306,9 +1306,7 @@ describe('student question experience', () => {
 
     render(
       <StudentHeader
-        onExit={() => {}}
         timeRemaining={1200}
-        isExamActive
         onOpenNavigator={onOpenNavigator}
       />,
     );
@@ -1326,9 +1324,7 @@ describe('student question experience', () => {
 
     render(
       <StudentHeader
-        onExit={() => {}}
         timeRemaining={1200}
-        isExamActive
         zoom={1.25}
         onOpenAccessibility={onOpenAccessibility}
         onZoomIn={onZoomIn}
@@ -1360,9 +1356,7 @@ describe('student question experience', () => {
 
     render(
       <StudentHeader
-        onExit={() => {}}
         timeRemaining={1200}
-        isExamActive
         tabletMode
         zoom={1.1}
         onOpenAccessibility={onOpenAccessibility}
@@ -1399,9 +1393,7 @@ describe('student question experience', () => {
 
     const { rerender } = render(
       <StudentHeader
-        onExit={() => {}}
         timeRemaining={1200}
-        isExamActive
         onOpenAccessibility={onOpenAccessibility}
       />,
     );
@@ -1416,9 +1408,7 @@ describe('student question experience', () => {
 
     rerender(
       <StudentHeader
-        onExit={() => {}}
         timeRemaining={1200}
-        isExamActive
         zoom={1}
         onOpenAccessibility={onOpenAccessibility}
         onOpenNavigator={onOpenNavigator}
@@ -1431,31 +1421,6 @@ describe('student question experience', () => {
     const readingTimerSlot = screen.getByTestId('student-header-timer-slot');
     expect(readingTimerSlot.className).toBe(timerSlotClassName);
     expect(screen.getByRole('button', { name: /open question navigator/i })).toBeInTheDocument();
-  });
-
-  it('hides the header exit control when requested', () => {
-    render(
-      <StudentHeader
-        onExit={() => {}}
-        timeRemaining={1200}
-        isExamActive
-        showExitButton={false}
-      />,
-    );
-
-    expect(screen.queryByRole('button', { name: /exit exam/i })).not.toBeInTheDocument();
-  });
-
-  it('shows the header exit control by default outside active exam mode', () => {
-    render(
-      <StudentHeader
-        onExit={() => {}}
-        timeRemaining={1200}
-        isExamActive={false}
-      />,
-    );
-
-    expect(screen.getByRole('button', { name: /exit preview/i })).toBeInTheDocument();
   });
 
   it('wires the listening transport controls to the audio element', async () => {

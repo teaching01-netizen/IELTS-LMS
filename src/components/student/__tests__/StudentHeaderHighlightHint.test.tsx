@@ -7,7 +7,6 @@ describe('StudentHeader highlight hint', () => {
   it('shows a highlight usage hint when highlight is enabled for reading/listening', () => {
     render(
       <StudentHeader
-        onExit={() => {}}
         testTakerId="W000000"
         timeRemaining={60}
         highlightEnabled
@@ -22,7 +21,6 @@ describe('StudentHeader highlight hint', () => {
   it('does not show the hint when highlight is disabled', () => {
     render(
       <StudentHeader
-        onExit={() => {}}
         testTakerId="W000000"
         timeRemaining={60}
         highlightEnabled={false}

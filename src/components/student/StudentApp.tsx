@@ -117,12 +117,10 @@ function formatRuntimeTime(seconds: number) {
 
 interface StudentAppProps {
   showSubmitControls?: boolean | undefined;
-  allowExitDuringExam?: boolean | undefined;
 }
 
 export function StudentApp({
   showSubmitControls = true,
-  allowExitDuringExam = false,
 }: StudentAppProps) {
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
@@ -714,7 +712,6 @@ export function StudentApp({
         Skip to main content
       </a>
       <StudentHeader
-        onExit={onExit}
         testTakerId={attemptState.attempt?.candidateId ?? undefined}
         timeRemaining={runtimeState.displayTimeRemaining}
         highlightEnabled={highlightEnabled}
@@ -726,8 +723,6 @@ export function StudentApp({
             : undefined
         }
         isExamActive={effectivePhase === 'exam'}
-        showExitButton={allowExitDuringExam || effectivePhase !== 'exam'}
-        confirmExitWhenExamActive={!allowExitDuringExam}
       />
 
       <StudentHighlightSelectionManagerProvider>
