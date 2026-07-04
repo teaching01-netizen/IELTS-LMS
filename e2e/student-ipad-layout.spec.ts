@@ -17,6 +17,14 @@ async function expectFooterInsideViewport(page: Page, label: RegExp) {
   expect(box!.bottom).toBeLessThanOrEqual(viewport!.height);
 }
 
+async function expectThinTabletResizer(page: Page, testId: string) {
+  const resizer = page.getByTestId(testId);
+  await expect(resizer).toBeVisible();
+  const box = await resizer.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeLessThanOrEqual(32);
+}
+
 test.describe('student exam iPad layout', () => {
   test.use({ storageState: BUILDER_STORAGE_STATE_PATH });
 
@@ -32,6 +40,7 @@ test.describe('student exam iPad layout', () => {
     await expect(passagePane).toBeVisible();
     await expect(questionPane).toBeVisible();
     await expect(splitPane).toHaveCSS('flex-direction', 'row');
+    await expectThinTabletResizer(page, 'reading-pane-resizer');
     await expectFooterInsideViewport(page, /question navigation and progress/i);
 
     const passageBox = await passagePane.boundingBox();
@@ -51,6 +60,7 @@ test.describe('student exam iPad layout', () => {
 
     await expect(splitPane).toBeVisible();
     await expect(splitPane).toHaveCSS('flex-direction', 'row');
+    await expectThinTabletResizer(page, 'reading-pane-resizer');
     await expectFooterInsideViewport(page, /question navigation and progress/i);
 
     const passageBox = await passagePane.boundingBox();
@@ -73,12 +83,14 @@ test.describe('student exam iPad layout', () => {
     await expect(promptPane).toBeVisible();
     await expect(editorPane).toBeVisible();
     await expect(editor).toBeVisible();
+    await expectThinTabletResizer(page, 'writing-pane-resizer');
     await expectFooterInsideViewport(page, /writing task navigation and submission/i);
 
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.reload();
     await expect(page.getByTestId('writing-split-pane')).toHaveCSS('flex-direction', 'row');
     await expect(page.getByRole('textbox', { name: /writing response/i })).toBeVisible();
+    await expectThinTabletResizer(page, 'writing-pane-resizer');
     await expectFooterInsideViewport(page, /writing task navigation and submission/i);
   });
 });

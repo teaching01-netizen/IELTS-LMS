@@ -1,10 +1,10 @@
 import React from 'react';
-import { ArrowLeftRight } from 'lucide-react';
 import type { QuestionAnswer } from '../../types';
 import type { StudentQuestionDescriptor } from '@services/examAdapterService';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import type { StudentHighlightColor } from './highlightPalette';
 import { StudentQuestionPanel } from './StudentQuestionPanel';
+import { StudentSplitPaneResizer } from './StudentSplitPaneResizer';
 
 interface StudentMaterialWithQuestionPaneProps {
   isTabletMode: boolean;
@@ -12,6 +12,7 @@ interface StudentMaterialWithQuestionPaneProps {
   splitPaneStyle: React.CSSProperties | undefined;
   leftWidth: number;
   onDividerPointerDown: ((event: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => void);
+  onDividerKeyDown: ((event: React.KeyboardEvent<HTMLDivElement>) => void);
   workspaceTestId: string;
   dividerAriaLabel: string;
   dividerTestId: string;
@@ -49,6 +50,7 @@ export function StudentMaterialWithQuestionPane({
   splitPaneStyle,
   leftWidth,
   onDividerPointerDown,
+  onDividerKeyDown,
   workspaceTestId,
   dividerAriaLabel,
   dividerTestId,
@@ -67,20 +69,14 @@ export function StudentMaterialWithQuestionPane({
       >
         {materialPane}
 
-        <div
-          onMouseDown={onDividerPointerDown}
-          onTouchStart={onDividerPointerDown}
-          className={`${isTabletMode ? 'absolute inset-y-0 z-20 flex w-11 items-center justify-center' : 'hidden w-4 lg:flex relative items-center justify-center flex-shrink-0'} bg-gray-400 cursor-col-resize touch-none hover:bg-gray-600 transition-colors`}
-          style={isTabletMode ? { left: `calc(${leftWidth}% - 22px)` } : undefined}
-          role="separator"
-          aria-label={dividerAriaLabel}
-          aria-orientation="vertical"
-          data-testid={dividerTestId}
-        >
-          <div className={`${isTabletMode ? 'h-[5.5rem] w-14' : 'h-10 w-8'} bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none`}>
-            <ArrowLeftRight size={isTabletMode ? 22 : 14} className="text-gray-600" />
-          </div>
-        </div>
+        <StudentSplitPaneResizer
+          isTabletMode={isTabletMode}
+          leftWidth={leftWidth}
+          onDividerPointerDown={onDividerPointerDown}
+          onDividerKeyDown={onDividerKeyDown}
+          ariaLabel={dividerAriaLabel}
+          testId={dividerTestId}
+        />
 
         <StudentQuestionPanel
           blocks={questionPanel.blocks}

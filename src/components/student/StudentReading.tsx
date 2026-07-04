@@ -180,7 +180,7 @@ export function StudentReading({
     };
   }, [clampedContentZoom, isTabletMode, supportsCssZoom]);
   const questionContainerRef = useRef<HTMLDivElement>(null);
-  const { answerCompact, handleDrag, leftWidth, materialCompact, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+  const { answerCompact, handleDrag, handleKeyboardResize, leftWidth, materialCompact, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: '--reading-pane-width',
     dividerMode: isTabletMode ? 'overlay' : 'consumes-space',
@@ -332,6 +332,7 @@ export function StudentReading({
       splitPaneStyle={splitPaneStyle}
       leftWidth={leftWidth}
       onDividerPointerDown={handleDrag}
+      onDividerKeyDown={handleKeyboardResize}
       workspaceTestId="reading-split-workspace"
       dividerAriaLabel="Resize reading passage and answer panels"
       dividerTestId="reading-pane-resizer"

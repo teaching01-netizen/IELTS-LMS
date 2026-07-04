@@ -137,12 +137,15 @@ describe('StudentWriting a11y', () => {
     expect(workspace).toHaveStyle({
       '--writing-prompt-pane-width': '50%',
       '--writing-editor-pane-width': 'calc(50%)',
-      '--split-divider-width': '32px',
+      '--split-divider-width': '8px',
     });
-    expect(resizer).toHaveClass('w-11');
+    expect(resizer).toHaveAttribute('role', 'slider');
+    expect(resizer).toHaveAttribute('aria-valuenow', '50');
+    expect(resizer).toHaveClass('w-8');
     expect(resizer).toHaveClass('absolute');
-    expect(resizer.querySelector('.w-14')).toBeInTheDocument();
-    expect(resizer.querySelector('.h-\\[5\\.5rem\\]')).toBeInTheDocument();
+    expect(resizer.querySelector('.w-2')).toBeInTheDocument();
+    expect(resizer.querySelector('.w-8')).toBeInTheDocument();
+    expect(resizer.querySelector('.h-16')).toBeInTheDocument();
   });
 
   it('offsets tablet writing header and placeholder away from the splitter overlay', () => {
@@ -163,13 +166,13 @@ describe('StudentWriting a11y', () => {
     if (!headerRow) {
       throw new Error('Expected writing header row to render');
     }
-    expect(headerRow).toHaveClass('pl-10');
+    expect(headerRow).toHaveClass('pl-8');
     expect(headerRow).toHaveClass('pr-3');
 
     const placeholder = screen.getByText('Write your answer here…');
-    expect(placeholder).toHaveClass('left-10');
-    expect(placeholder).toHaveClass('md:left-10');
-    expect(placeholder).toHaveClass('lg:left-10');
+    expect(placeholder).toHaveClass('left-8');
+    expect(placeholder).toHaveClass('md:left-8');
+    expect(placeholder).toHaveClass('lg:left-8');
   });
 
   it('renders a single writing placeholder when empty and unfocused', () => {
@@ -241,12 +244,15 @@ describe('StudentWriting a11y', () => {
     expect(workspace).toHaveStyle({
       '--writing-prompt-pane-width': '50%',
       '--writing-editor-pane-width': 'calc(50%)',
-      '--split-divider-width': '32px',
+      '--split-divider-width': '8px',
     });
-    expect(resizer).toHaveClass('w-11');
+    expect(resizer).toHaveAttribute('role', 'slider');
+    expect(resizer).toHaveAttribute('aria-valuenow', '50');
+    expect(resizer).toHaveClass('w-8');
     expect(resizer).toHaveClass('absolute');
-    expect(resizer.querySelector('.w-14')).toBeInTheDocument();
-    expect(resizer.querySelector('.h-\\[5\\.5rem\\]')).toBeInTheDocument();
+    expect(resizer.querySelector('.w-2')).toBeInTheDocument();
+    expect(resizer.querySelector('.w-8')).toBeInTheDocument();
+    expect(resizer.querySelector('.h-16')).toBeInTheDocument();
   });
 
   it('offsets tablet writing header and editor content away from the splitter overlay', () => {
@@ -267,13 +273,13 @@ describe('StudentWriting a11y', () => {
     if (!headerRow) {
       throw new Error('Expected writing header row to render');
     }
-    expect(headerRow).toHaveClass('pl-10');
+    expect(headerRow).toHaveClass('pl-8');
     expect(headerRow).toHaveClass('pr-3');
 
     const editor = screen.getByRole('textbox', { name: /writing response/i });
-    expect(editor).toHaveClass('pl-10');
-    expect(editor).toHaveClass('md:pl-10');
-    expect(editor).toHaveClass('lg:pl-10');
+    expect(editor).toHaveClass('pl-8');
+    expect(editor).toHaveClass('md:pl-8');
+    expect(editor).toHaveClass('lg:pl-8');
   });
 
   it('preserves builder-authored HTML prompt formatting in the writing exam', () => {

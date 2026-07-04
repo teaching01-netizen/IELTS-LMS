@@ -1048,13 +1048,17 @@ describe('student question experience', () => {
     expect(workspace).toHaveStyle({
       '--reading-pane-width': '40%',
       '--question-pane-width': 'calc(60%)',
-      '--split-divider-width': '32px',
+      '--split-divider-width': '8px',
     });
-    expect(screen.getByTestId('reading-pane-resizer')).toBeInTheDocument();
-    expect(screen.getByTestId('reading-pane-resizer')).toHaveClass('w-11');
-    expect(screen.getByTestId('reading-pane-resizer')).toHaveClass('absolute');
-    expect(screen.getByTestId('reading-pane-resizer').querySelector('.w-14')).toBeInTheDocument();
-    expect(screen.getByTestId('reading-pane-resizer').querySelector('.h-\\[5\\.5rem\\]')).toBeInTheDocument();
+    const readingResizer = screen.getByTestId('reading-pane-resizer');
+    expect(readingResizer).toBeInTheDocument();
+    expect(readingResizer).toHaveAttribute('role', 'slider');
+    expect(readingResizer).toHaveAttribute('aria-valuenow', '40');
+    expect(readingResizer).toHaveClass('w-8');
+    expect(readingResizer).toHaveClass('absolute');
+    expect(readingResizer.querySelector('.w-2')).toBeInTheDocument();
+    expect(readingResizer.querySelector('.h-16')).toBeInTheDocument();
+    expect(readingResizer.querySelector('.w-8')).toBeInTheDocument();
     expect(workspace.querySelector('.min-w-\\[48px\\]')).toBeInTheDocument();
     expect(screen.queryByTestId('reading-split-presets')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /set split to material wider/i })).not.toBeInTheDocument();
@@ -1065,6 +1069,17 @@ describe('student question experience', () => {
     expect(screen.queryByText('Answers wider')).not.toBeInTheDocument();
     expect(screen.queryByText(/select passage text to highlight it/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(readingResizer, { key: 'ArrowRight' });
+    expect(workspace).toHaveStyle({
+      '--reading-pane-width': '45%',
+      '--question-pane-width': 'calc(55%)',
+    });
+    fireEvent.keyDown(readingResizer, { key: 'ArrowLeft' });
+    expect(workspace).toHaveStyle({
+      '--reading-pane-width': '40%',
+      '--question-pane-width': 'calc(60%)',
+    });
 
     const readingWorkspaceRect = vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,
@@ -1921,16 +1936,20 @@ describe('student question experience', () => {
     expect(workspace).toHaveStyle({
       '--listening-pane-width': '40%',
       '--question-pane-width': 'calc(60%)',
-      '--split-divider-width': '32px',
+      '--split-divider-width': '8px',
     });
-    expect(screen.getByTestId('listening-pane-resizer')).toBeInTheDocument();
+    const listeningResizer = screen.getByTestId('listening-pane-resizer');
+    expect(listeningResizer).toBeInTheDocument();
+    expect(listeningResizer).toHaveAttribute('role', 'slider');
+    expect(listeningResizer).toHaveAttribute('aria-valuenow', '40');
     expect(screen.queryByText(/staff instructions/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/use the invigilator audio system/i)).not.toBeInTheDocument();
     expect(screen.getByText(/answer the question using the words you hear/i)).toBeInTheDocument();
-    expect(screen.getByTestId('listening-pane-resizer')).toHaveClass('w-11');
-    expect(screen.getByTestId('listening-pane-resizer')).toHaveClass('absolute');
-    expect(screen.getByTestId('listening-pane-resizer').querySelector('.w-14')).toBeInTheDocument();
-    expect(screen.getByTestId('listening-pane-resizer').querySelector('.h-\\[5\\.5rem\\]')).toBeInTheDocument();
+    expect(listeningResizer).toHaveClass('w-8');
+    expect(listeningResizer).toHaveClass('absolute');
+    expect(listeningResizer.querySelector('.w-2')).toBeInTheDocument();
+    expect(listeningResizer.querySelector('.h-16')).toBeInTheDocument();
+    expect(listeningResizer.querySelector('.w-8')).toBeInTheDocument();
     expect(workspace.querySelector('.min-w-\\[48px\\]')).toBeInTheDocument();
     expect(screen.queryByTestId('listening-split-presets')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /set split to material wider/i })).not.toBeInTheDocument();
@@ -1941,6 +1960,17 @@ describe('student question experience', () => {
     expect(screen.queryByText('Answers wider')).not.toBeInTheDocument();
     expect(screen.queryByText(/select reference text to highlight it/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(listeningResizer, { key: 'ArrowRight' });
+    expect(workspace).toHaveStyle({
+      '--listening-pane-width': '45%',
+      '--question-pane-width': 'calc(55%)',
+    });
+    fireEvent.keyDown(listeningResizer, { key: 'ArrowLeft' });
+    expect(workspace).toHaveStyle({
+      '--listening-pane-width': '40%',
+      '--question-pane-width': 'calc(60%)',
+    });
 
     const listeningWorkspaceRect = vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,

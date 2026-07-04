@@ -105,7 +105,7 @@ export function StudentListening({
   const [volume, setVolume] = useState(70);
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const { answerCompact, handleDrag, leftWidth, materialCompact, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+  const { answerCompact, handleDrag, handleKeyboardResize, leftWidth, materialCompact, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: '--listening-pane-width',
     dividerMode: isTabletMode ? 'overlay' : 'consumes-space',
@@ -282,6 +282,7 @@ export function StudentListening({
       splitPaneStyle={splitPaneStyle}
       leftWidth={leftWidth}
       onDividerPointerDown={handleDrag}
+      onDividerKeyDown={handleKeyboardResize}
       workspaceTestId="listening-split-workspace"
       dividerAriaLabel="Resize listening material and answer panels"
       dividerTestId="listening-pane-resizer"

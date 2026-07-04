@@ -1,10 +1,17 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from 'react';
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  TouchEvent as ReactTouchEvent,
+} from 'react';
 import { getSplitPaneBoundsPolicy } from './browserParityPolicy';
+import {
+  STUDENT_DESKTOP_SPLIT_DIVIDER_WIDTH_PX,
+  STUDENT_TABLET_SPLIT_DIVIDER_WIDTH_PX,
+} from './splitPaneDimensions';
 
 const DEFAULT_LEFT_WIDTH = 40;
-const TABLET_DIVIDER_WIDTH = 32;
-const DESKTOP_DIVIDER_WIDTH = 16;
 
 interface UseSplitPaneResizeOptions {
   isTabletMode: boolean;
@@ -32,7 +39,9 @@ export function useSplitPaneResize({
 }: UseSplitPaneResizeOptions) {
   const [leftWidth, setLeftWidth] = useState(defaultLeftWidth);
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const dividerWidth = isTabletMode ? TABLET_DIVIDER_WIDTH : DESKTOP_DIVIDER_WIDTH;
+  const dividerWidth = isTabletMode
+    ? STUDENT_TABLET_SPLIT_DIVIDER_WIDTH_PX
+    : STUDENT_DESKTOP_SPLIT_DIVIDER_WIDTH_PX;
   const dividerConsumesSpace = dividerMode === 'consumes-space';
 
   const clampWidth = useCallback(
@@ -93,6 +102,37 @@ export function useSplitPaneResize({
     [clampWidth],
   );
 
+  const handleKeyboardResize = useCallback(
+    (event: ReactKeyboardEvent) => {
+      const step = event.shiftKey ? 10 : 5;
+      const keyDeltas: Record<string, number> = {
+        ArrowLeft: -step,
+        ArrowDown: -step,
+        ArrowRight: step,
+        ArrowUp: step,
+      };
+      const delta = keyDeltas[event.key];
+
+      if (typeof delta === 'number') {
+        event.preventDefault();
+        setLeftWidth((currentWidth) => clampWidth(currentWidth + delta));
+        return;
+      }
+
+      if (event.key === 'Home') {
+        event.preventDefault();
+        setLeftWidth(clampWidth(0));
+        return;
+      }
+
+      if (event.key === 'End') {
+        event.preventDefault();
+        setLeftWidth(clampWidth(100));
+      }
+    },
+    [clampWidth],
+  );
+
   const splitPaneStyle = useMemo(
     () =>
       ({
@@ -111,6 +151,7 @@ export function useSplitPaneResize({
   return {
     answerCompact,
     handleDrag,
+    handleKeyboardResize,
     leftWidth,
     materialCompact,
     splitPaneStyle,

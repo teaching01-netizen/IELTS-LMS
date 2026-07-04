@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { ExamState } from '../../types';
-import { ArrowLeftRight, Check, X } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { getWritingTaskContent } from '../../utils/writingTaskUtils';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
@@ -9,6 +9,7 @@ import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
 import { useSplitPaneResize } from './useSplitPaneResize';
 import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
+import { StudentSplitPaneResizer } from './StudentSplitPaneResizer';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -147,7 +148,7 @@ export function StudentWriting({
   const commitEditorDraftRef = useRef<() => void>(() => undefined);
   const previousResolvedTaskIdRef = useRef<string | null>(resolvedCurrentQuestionTaskId);
   const [showReviewModal, setShowReviewModal] = useState(false);
-  const { handleDrag, leftWidth, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+  const { handleDrag, handleKeyboardResize, leftWidth, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: '--writing-prompt-pane-width',
     answerPaneWidthProperty: '--writing-editor-pane-width',
@@ -606,20 +607,14 @@ export function StudentWriting({
           </div>
         </div>
 
-        <div 
-          onMouseDown={handleDrag}
-          onTouchStart={handleDrag}
-          className={`${isTabletMode ? 'absolute inset-y-0 z-20 flex w-11 items-center justify-center' : 'hidden w-4 lg:flex relative items-center justify-center flex-shrink-0'} bg-gray-400 cursor-col-resize touch-none hover:bg-gray-600 transition-colors`}
-          style={isTabletMode ? { left: `calc(${leftWidth}% - 22px)` } : undefined}
-          role="separator"
-          aria-label="Resize writing prompt and answer panels"
-          aria-orientation="vertical"
-          data-testid="writing-pane-resizer"
-        >
-          <div className={`${isTabletMode ? 'h-[5.5rem] w-14' : 'h-10 w-8'} bg-white border border-gray-400 flex items-center justify-center absolute z-10 shadow-sm pointer-events-none`}>
-            <ArrowLeftRight size={isTabletMode ? 22 : 14} className="text-gray-600" />
-          </div>
-        </div>
+        <StudentSplitPaneResizer
+          isTabletMode={isTabletMode}
+          leftWidth={leftWidth}
+          onDividerPointerDown={handleDrag}
+          onDividerKeyDown={handleKeyboardResize}
+          ariaLabel="Resize writing prompt and answer panels"
+          testId="writing-pane-resizer"
+        />
 
         <div
           className={`h-full flex flex-col relative ${
@@ -632,7 +627,7 @@ export function StudentWriting({
             <div className="relative flex flex-1 min-h-0 w-full flex-col">
               <div
                 className={`flex flex-col gap-2 border-b border-gray-200 bg-gray-50 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-600 sm:flex-row sm:items-center sm:justify-between ${
-                  isTabletMode ? 'pl-10 pr-3' : 'px-3'
+                  isTabletMode ? 'pl-8 pr-3' : 'px-3'
                 }`}
               >
                 <span>Writing Response</span>
@@ -653,7 +648,7 @@ export function StudentWriting({
               {showEditorPlaceholder && (
                   <div
                     className={`pointer-events-none absolute top-14 md:top-16 lg:top-20 text-base md:text-lg leading-relaxed text-gray-400 font-serif select-none ${
-                      isTabletMode ? 'left-10 md:left-10 lg:left-10' : 'left-4 md:left-6 lg:left-8'
+                      isTabletMode ? 'left-8 md:left-8 lg:left-8' : 'left-4 md:left-6 lg:left-8'
                     }`}
                   >
                     Write your answer here…
@@ -690,7 +685,7 @@ export function StudentWriting({
                   onContextMenu={blockWritingEditorInteraction}
                 className={`flex-1 w-full text-base md:text-lg leading-relaxed text-gray-800 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
                   isTabletMode
-                    ? 'pt-4 pr-4 pb-4 pl-10 md:pt-6 md:pr-6 md:pb-6 md:pl-10 lg:pt-8 lg:pr-8 lg:pb-8 lg:pl-10'
+                    ? 'pt-4 pr-4 pb-4 pl-8 md:pt-6 md:pr-6 md:pb-6 md:pl-8 lg:pt-8 lg:pr-8 lg:pb-8 lg:pl-8'
                     : 'p-4 md:p-6 lg:p-8'
                 } h-full min-h-0 resize-none whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
                 data-student-zoom-scroll
