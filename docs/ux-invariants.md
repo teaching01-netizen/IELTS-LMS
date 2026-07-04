@@ -2,6 +2,33 @@
 
 Purpose: keep student-facing interaction rules explicit so future UI changes do not accidentally weaken exam usability or integrity.
 
+## Proctor Overview Session Buckets
+
+### Owning Module
+Proctor overview cohort visibility is owned by the proctor UI module:
+
+- `src/components/proctor/ProctorDashboard.tsx`
+- `src/components/proctor/proctorOverviewSessions.ts`
+- `src/features/proctor/hooks/useProctorRouteController.ts`
+
+### Invariant
+Completed and cancelled cohorts are terminal for active monitoring, but they remain part of the hydrated proctor data set for audit/history review.
+
+The Active overview must show only actionable or upcoming cohorts: scheduled, ready, live, and paused. Completed and cancelled cohorts must move to Past instead of remaining mixed into Active.
+
+The Past overview must show completed and cancelled cohorts and allow status filtering without deleting, archiving, or mutating schedule records. Backend/controller hydration must not filter terminal summaries before the UI can place them in Past.
+
+### Must Not Break
+- Completing an exam must not make its schedule disappear from proctor history.
+- Cancelled cohorts must remain discoverable from Past.
+- Opening a Past cohort must keep terminal controls disabled through the existing runtime-status guards.
+- Hard delete/archive actions must stay out of the proctor overview until schedule, submissions, grading, and audit retention policy is explicitly modeled.
+
+### Regression Protection
+- `src/components/proctor/__tests__/proctorOverviewSessions.test.ts`
+- `src/components/proctor/__tests__/ProctorDashboard.test.tsx`
+- `src/features/proctor/hooks/__tests__/useProctorRouteController.backend.test.tsx`
+
 ## Student Text Selection And Highlighting
 
 ### Owning Module

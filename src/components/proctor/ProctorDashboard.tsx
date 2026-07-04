@@ -15,6 +15,13 @@ import { backendPost } from '../../services/backendBridge';
 import { useStudentFilters } from './hooks/useStudentFilters';
 import { logger } from '../../utils/logger';
 import type { ProctorScheduleMetrics } from '../../features/proctor/contracts';
+import {
+  filterPastSessionGroups,
+  getOverviewBucket,
+  parsePastSessionStatusFilter,
+  type OverviewBucket,
+  type PastSessionStatusFilter,
+} from './proctorOverviewSessions';
 
 interface ProctorDashboardProps {
   schedules: ExamSchedule[];
@@ -77,6 +84,8 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [listDensity, setListDensity] = useState<'compact' | 'comfortable'>('compact');
   const [drawerTab, setDrawerTab] = useState<StudentDrawerTab>('timeline');
+  const [overviewBucket, setOverviewBucket] = useState<OverviewBucket>('active');
+  const [pastStatusFilter, setPastStatusFilter] = useState<PastSessionStatusFilter>('all');
   const [pendingCohortAction, setPendingCohortAction] = useState<CohortControlAction | null>(null);
   const [confirmAction, setConfirmAction] = useState<'complete' | null>(null);
   const [confirmDisciplineAction, setConfirmDisciplineAction] = useState<
@@ -199,6 +208,24 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const selectedGroup = selectedScheduleId ? scheduleGroups.find((group) => group.scheduleId === selectedScheduleId) : undefined;
   const selectedRuntime = selectedScheduleId ? runtimeSnapshots.find((runtime) => runtime.scheduleId === selectedScheduleId) : undefined;
   const selectedStudent = enrichedSessions.find((session) => session.id === selectedStudentId);
+  const activeSessionGroups = useMemo(
+    () => scheduleGroups.filter((group) => getOverviewBucket(group) === 'active'),
+    [scheduleGroups],
+  );
+  const allPastSessionGroups = useMemo(() => filterPastSessionGroups(scheduleGroups, 'all'), [scheduleGroups]);
+  const visiblePastSessionGroups = useMemo(
+    () => filterPastSessionGroups(scheduleGroups, pastStatusFilter),
+    [pastStatusFilter, scheduleGroups],
+  );
+  const overviewSessionGroups = overviewBucket === 'active' ? activeSessionGroups : visiblePastSessionGroups;
+  const overviewEmptyMessage =
+    overviewBucket === 'active'
+      ? 'No active sessions'
+      : pastStatusFilter === 'completed'
+        ? 'No completed sessions'
+        : pastStatusFilter === 'cancelled'
+          ? 'No cancelled sessions'
+          : 'No past sessions';
   const selectedScheduleAlerts = alerts.filter((alert) =>
     selectedScheduleId ? enrichedSessions.some((session) => session.scheduleId === selectedScheduleId && session.studentId === alert.studentId) : true,
   );
@@ -870,10 +897,67 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
 
       <section className="min-h-0 overflow-auto px-6 py-5">
         {!selectedScheduleId ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {scheduleGroups.map((group) => (
-              <ExamGroupCard key={group.id} group={group} onClick={() => handleSelectSchedule(group.scheduleId)} />
-            ))}
+          <div className="grid gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div role="tablist" aria-label="Overview sessions" className="inline-flex rounded-md border border-slate-200 bg-white p-1">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={overviewBucket === 'active'}
+                  aria-label={`Active sessions (${activeSessionGroups.length})`}
+                  onClick={() => setOverviewBucket('active')}
+                  className={`inline-flex min-h-9 items-center gap-2 rounded px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 ${overviewBucket === 'active' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}
+                >
+                  Active
+                  <span className={`text-xs ${overviewBucket === 'active' ? 'text-slate-300' : 'text-slate-400'}`}>{activeSessionGroups.length}</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={overviewBucket === 'past'}
+                  aria-label={`Past sessions (${allPastSessionGroups.length})`}
+                  onClick={() => setOverviewBucket('past')}
+                  className={`inline-flex min-h-9 items-center gap-2 rounded px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 ${overviewBucket === 'past' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'}`}
+                >
+                  Past
+                  <span className={`text-xs ${overviewBucket === 'past' ? 'text-slate-300' : 'text-slate-400'}`}>{allPastSessionGroups.length}</span>
+                </button>
+              </div>
+              {overviewBucket === 'past' ? (
+                <select
+                  aria-label="Past status"
+                  value={pastStatusFilter}
+                  onChange={(event) => {
+                    const nextFilter = parsePastSessionStatusFilter(event.target.value);
+                    if (nextFilter) {
+                      setPastStatusFilter(nextFilter);
+                    }
+                  }}
+                  className="min-h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+                >
+                  <option value="all">All past</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              ) : null}
+            </div>
+
+            {overviewSessionGroups.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {overviewSessionGroups.map((group) => (
+                  <ExamGroupCard key={group.id} group={group} onClick={() => handleSelectSchedule(group.scheduleId)} />
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-slate-200 bg-white px-6 py-10 text-center">
+                <p className="text-sm font-semibold text-slate-900">{overviewEmptyMessage}</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {overviewBucket === 'active'
+                    ? 'Completed and cancelled cohorts are available from Past.'
+                    : 'Change the Past status filter to review other terminal cohorts.'}
+                </p>
+              </div>
+            )}
           </div>
         ) : selectedStudent ? (
           <div className="grid h-full min-h-[560px] gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">

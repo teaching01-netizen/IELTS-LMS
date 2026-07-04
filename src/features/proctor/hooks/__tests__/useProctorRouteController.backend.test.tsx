@@ -399,6 +399,90 @@ describe('useProctorRouteController backend mode', () => {
     });
   });
 
+  it('keeps completed and cancelled summaries hydrated for the overview Past bucket', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_PROCTORING', 'true');
+    const completedSchedule = {
+      ...buildSchedule(),
+      id: 'sched-completed',
+      status: 'completed',
+      cohortName: 'Completed Cohort',
+    };
+    const cancelledSchedule = {
+      ...buildSchedule2(),
+      id: 'sched-cancelled',
+      status: 'cancelled',
+      cohortName: 'Cancelled Cohort',
+    };
+    const completedRuntime = {
+      ...buildRuntime(),
+      id: 'runtime-completed',
+      scheduleId: 'sched-completed',
+      status: 'completed',
+      actualEndAt: '2026-01-01T12:00:00.000Z',
+      activeSectionKey: null,
+      currentSectionKey: null,
+      currentSectionRemainingSeconds: 0,
+      sections: buildRuntime().sections.map((section) => ({ ...section, status: 'completed' })),
+    };
+    const cancelledRuntime = {
+      ...buildRuntime2(),
+      id: 'runtime-cancelled',
+      scheduleId: 'sched-cancelled',
+      status: 'cancelled',
+      actualEndAt: '2026-01-01T12:00:00.000Z',
+      activeSectionKey: null,
+      currentSectionKey: null,
+      currentSectionRemainingSeconds: 0,
+      sections: buildRuntime2().sections.map((section) => ({
+        ...section,
+        runtimeId: 'runtime-cancelled',
+        status: 'completed',
+        completionReason: 'cancelled',
+      })),
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse([
+        {
+          schedule: completedSchedule,
+          runtime: completedRuntime,
+          studentCount: 2,
+          activeCount: 0,
+          alertCount: 0,
+          violationCount: 1,
+          degradedLiveMode: false,
+        },
+        {
+          schedule: cancelledSchedule,
+          runtime: cancelledRuntime,
+          studentCount: 3,
+          activeCount: 0,
+          alertCount: 0,
+          violationCount: 0,
+          degradedLiveMode: false,
+        },
+      ]),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useProctorRouteController(), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.schedules.map((schedule) => schedule.status)).toEqual(['completed', 'cancelled']);
+    });
+
+    expect(result.current.runtimeSnapshots.map((runtime) => runtime.status)).toEqual(['completed', 'cancelled']);
+    expect(result.current.scheduleMetrics).toMatchObject({
+      'sched-completed': { studentCount: 2, activeCount: 0, violationCount: 1 },
+      'sched-cancelled': { studentCount: 3, activeCount: 0, violationCount: 0 },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/proctor/sessions',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('hydrates roster, alerts, and audit data through the backend proctor endpoints', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_PROCTORING', 'true');
     const fetchMock = vi

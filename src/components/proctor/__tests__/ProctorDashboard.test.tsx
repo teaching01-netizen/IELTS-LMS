@@ -143,6 +143,103 @@ describe('ProctorDashboard runtime controls', () => {
     expect(onStartScheduledSession).toHaveBeenCalledWith('sched-1');
   });
 
+  it('keeps completed and cancelled cohorts out of Active until Past is selected', () => {
+    const completedSchedule: ExamSchedule = {
+      ...baseSchedule,
+      id: 'sched-completed',
+      proctorDisplayName: 'Completed Exam',
+      cohortName: 'Completed Cohort',
+      status: 'completed',
+      startTime: '2026-01-01T00:00:00.000Z',
+    };
+    const cancelledSchedule: ExamSchedule = {
+      ...baseSchedule,
+      id: 'sched-cancelled',
+      proctorDisplayName: 'Cancelled Exam',
+      cohortName: 'Cancelled Cohort',
+      status: 'cancelled',
+      startTime: '2026-01-01T00:05:00.000Z',
+    };
+
+    render(
+      <DashboardHarness
+        schedules={[baseSchedule, completedSchedule, cancelledSchedule]}
+        runtimeSnapshots={[]}
+        sessions={[]}
+        alerts={[]}
+        onUpdateSessions={vi.fn()}
+        onUpdateAlerts={vi.fn()}
+        onStartScheduledSession={vi.fn()}
+        onPauseCohort={vi.fn()}
+        onResumeCohort={vi.fn()}
+        onEndSectionNow={vi.fn()}
+        onExtendCurrentSection={vi.fn()}
+        onCompleteExam={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /monitor completed exam for cohort completed cohort/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /monitor cancelled exam for cohort cancelled cohort/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /past sessions/i }));
+
+    expect(screen.queryByRole('button', { name: /monitor mock exam for cohort cohort a/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /monitor completed exam for cohort completed cohort/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /monitor cancelled exam for cohort cancelled cohort/i })).toBeInTheDocument();
+  });
+
+  it('filters Past cohorts by completed or cancelled status', () => {
+    const completedSchedule: ExamSchedule = {
+      ...baseSchedule,
+      id: 'sched-completed',
+      proctorDisplayName: 'Completed Exam',
+      cohortName: 'Completed Cohort',
+      status: 'completed',
+      startTime: '2026-01-01T00:00:00.000Z',
+    };
+    const cancelledSchedule: ExamSchedule = {
+      ...baseSchedule,
+      id: 'sched-cancelled',
+      proctorDisplayName: 'Cancelled Exam',
+      cohortName: 'Cancelled Cohort',
+      status: 'cancelled',
+      startTime: '2026-01-01T00:05:00.000Z',
+    };
+
+    render(
+      <DashboardHarness
+        schedules={[completedSchedule, cancelledSchedule]}
+        runtimeSnapshots={[]}
+        sessions={[]}
+        alerts={[]}
+        onUpdateSessions={vi.fn()}
+        onUpdateAlerts={vi.fn()}
+        onStartScheduledSession={vi.fn()}
+        onPauseCohort={vi.fn()}
+        onResumeCohort={vi.fn()}
+        onEndSectionNow={vi.fn()}
+        onExtendCurrentSection={vi.fn()}
+        onCompleteExam={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/no active sessions/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /past sessions/i }));
+
+    const pastStatusFilter = screen.getByRole('combobox', { name: /past status/i });
+    fireEvent.change(pastStatusFilter, { target: { value: 'completed' } });
+
+    expect(screen.getByRole('button', { name: /monitor completed exam for cohort completed cohort/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /monitor cancelled exam for cohort cancelled cohort/i })).not.toBeInTheDocument();
+
+    fireEvent.change(pastStatusFilter, { target: { value: 'cancelled' } });
+
+    expect(screen.queryByRole('button', { name: /monitor completed exam for cohort completed cohort/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /monitor cancelled exam for cohort cancelled cohort/i })).toBeInTheDocument();
+  });
+
   it('shows an overrun warning when runtime extends past the scheduled window', () => {
     render(
       <DashboardHarness
