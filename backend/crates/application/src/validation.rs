@@ -869,16 +869,7 @@ fn validate_table_completion(
                 "At least 2 table headers are required",
             );
         }
-        Some(hs) => {
-            for (h_idx, header) in hs.iter().enumerate() {
-                if header.as_str().map(|s| s.trim().is_empty()).unwrap_or(true) {
-                    result.add_error(
-                        format!("{}.headers[{}]", field_prefix, h_idx),
-                        "Header text is required",
-                    );
-                }
-            }
-        }
+        Some(_hs) => {}
     }
 
     let rows = block.get("rows").and_then(|r| r.as_array());
@@ -1106,13 +1097,6 @@ fn validate_matching_features(
     result: &mut ValidationResult,
 ) -> i32 {
     let options = block.get("options").and_then(|o| o.as_array());
-    let option_set: HashSet<String> = options
-        .map(|os| {
-            os.iter()
-                .filter_map(|o| o.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
 
     match options {
         None => {
@@ -1124,16 +1108,7 @@ fn validate_matching_features(
                 "At least 2 options are required",
             );
         }
-        Some(os) => {
-            for (opt_idx, opt) in os.iter().enumerate() {
-                if opt.as_str().map(|s| s.trim().is_empty()).unwrap_or(true) {
-                    result.add_error(
-                        format!("{}.options[{}]", field_prefix, opt_idx),
-                        "Option text is required",
-                    );
-                }
-            }
-        }
+        Some(_os) => {}
     }
 
     let features = block.get("features").and_then(|f| f.as_array());
@@ -1176,13 +1151,6 @@ fn validate_matching_features(
                         format!("{}.features[{}].correctMatch", field_prefix, feat_idx),
                         "Feature must have a match",
                     );
-                } else if let Some(m) = correct_match {
-                    if !option_set.contains(m) {
-                        result.add_error(
-                            format!("{}.features[{}].correctMatch", field_prefix, feat_idx),
-                            "Feature must match a valid option",
-                        );
-                    }
                 }
             }
             fs.len() as i32

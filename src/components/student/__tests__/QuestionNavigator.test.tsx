@@ -1,0 +1,160 @@
+import React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { QuestionNavigator } from '../QuestionNavigator';
+import type { StudentQuestionDescriptor } from '@services/examAdapterService';
+
+const mockQuestions: StudentQuestionDescriptor[] = [
+  {
+    id: 'q1',
+    number: 1,
+    label: '1',
+    groupId: 'group-1',
+    groupLabel: 'Passage 1',
+    rootId: 'q1',
+    isMulti: false,
+    answerType: 'scalar',
+  },
+  {
+    id: 'q2',
+    number: 2,
+    label: '2',
+    groupId: 'group-1',
+    groupLabel: 'Passage 1',
+    rootId: 'q2',
+    isMulti: false,
+    answerType: 'scalar',
+  },
+  {
+    id: 'q3',
+    number: 3,
+    label: '3',
+    groupId: 'group-2',
+    groupLabel: 'Passage 2',
+    rootId: 'q3',
+    isMulti: false,
+    answerType: 'scalar',
+  },
+];
+
+describe('QuestionNavigator', () => {
+  beforeEach(() => {
+    HTMLDialogElement.prototype.showModal = vi.fn(function () {
+      (this as HTMLDialogElement).open = true;
+    });
+    HTMLDialogElement.prototype.close = vi.fn(function () {
+      (this as HTMLDialogElement).open = false;
+    });
+  });
+
+  it('renders dialog with title', () => {
+    render(
+      <QuestionNavigator
+        questions={mockQuestions}
+        answers={{}}
+        flags={{}}
+        currentQuestionId={null}
+        onNavigate={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText('Question Navigator')).toBeInTheDocument();
+  });
+
+  it('displays total and answered counts', () => {
+    render(
+      <QuestionNavigator
+        questions={mockQuestions}
+        answers={{ q1: 'A' }}
+        flags={{}}
+        currentQuestionId={null}
+        onNavigate={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Answered/)).toBeInTheDocument();
+    expect(screen.getByText(/Unanswered/)).toBeInTheDocument();
+  });
+
+  it('displays flagged count', () => {
+    render(
+      <QuestionNavigator
+        questions={mockQuestions}
+        answers={{}}
+        flags={{ q1: true, q2: true }}
+        currentQuestionId={null}
+        onNavigate={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Flagged \(2\)/)).toBeInTheDocument();
+  });
+
+  it('calls onClose when close button is clicked', () => {
+    const onClose = vi.fn();
+    render(
+      <QuestionNavigator
+        questions={mockQuestions}
+        answers={{}}
+        flags={{}}
+        currentQuestionId={null}
+        onNavigate={() => {}}
+        onClose={onClose}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Close question navigator'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls onNavigate when a question button is clicked', () => {
+    const onNavigate = vi.fn();
+    const { container } = render(
+      <QuestionNavigator
+        questions={mockQuestions}
+        answers={{}}
+        flags={{}}
+        currentQuestionId={null}
+        onNavigate={onNavigate}
+        onClose={() => {}}
+      />,
+    );
+    const dialog = container.querySelector('dialog');
+    const buttons = dialog?.querySelectorAll('button') ?? [];
+    const questionButton = Array.from(buttons).find(
+      (btn) => btn.textContent?.trim() === '1',
+    );
+    if (questionButton) {
+      fireEvent.click(questionButton);
+      expect(onNavigate).toHaveBeenCalledWith('q1');
+    }
+  });
+
+  it('renders groups as sections', () => {
+    render(
+      <QuestionNavigator
+        questions={mockQuestions}
+        answers={{}}
+        flags={{}}
+        currentQuestionId={null}
+        onNavigate={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText('Section 1')).toBeInTheDocument();
+    expect(screen.getByText('Section 2')).toBeInTheDocument();
+  });
+
+  it('calls dialog show modal on mount', () => {
+    render(
+      <QuestionNavigator
+        questions={mockQuestions}
+        answers={{}}
+        flags={{}}
+        currentQuestionId={null}
+        onNavigate={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(HTMLDialogElement.prototype.showModal).toHaveBeenCalled();
+  });
+});

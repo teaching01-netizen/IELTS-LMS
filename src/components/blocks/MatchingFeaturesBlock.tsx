@@ -59,6 +59,11 @@ export function MatchingFeaturesBlock({
     updateBlock({ ...block, options: [...block.options, ''] });
   };
 
+  const removeOption = (index: number) => {
+    const newOptions = block.options.filter((_, i) => i !== index);
+    updateBlock({ ...block, options: newOptions });
+  };
+
   return (
     <div className="bg-white border border-gray-200 rounded-sm shadow-sm p-6">
       <div className="flex items-center justify-between mb-4">
@@ -97,15 +102,18 @@ export function MatchingFeaturesBlock({
         </div>
         <div className="flex flex-wrap gap-2 mb-2">
           {block.options.map((option, index) => (
-            <input key={index} type="text" value={option} onChange={(e) => {
-              const newOptions = [...block.options];
-              newOptions[index] = e.target.value;
-              updateOptions(newOptions);
-            }} onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => {
-              const newOptions = [...block.options];
-              newOptions[index] = nextValue;
-              updateOptions(newOptions);
-            })} className="w-32 border border-gray-300 rounded px-2 py-1 text-sm" placeholder={`Option ${index + 1}`} />
+            <div key={index} className="flex items-center gap-1">
+              <input key={index} type="text" value={option} onChange={(e) => {
+                const newOptions = [...block.options];
+                newOptions[index] = e.target.value;
+                updateOptions(newOptions);
+              }} onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => {
+                const newOptions = [...block.options];
+                newOptions[index] = nextValue;
+                updateOptions(newOptions);
+              })} className="w-32 border border-gray-300 rounded px-2 py-1 text-sm" placeholder={`Option ${index + 1}`} />
+              <button onClick={() => removeOption(index)} className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"><Trash2 size={12} /></button>
+            </div>
           ))}
         </div>
       </div>
