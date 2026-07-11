@@ -1,30 +1,12 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { readBackendE2EManifest } from './support/backendE2e';
 import {
   completePreCheckIfPresent,
   deterministicWcode,
   openStudentSessionWithRetry,
-  startLobbyIfPresent,
   studentCheckIn,
   stubScreenDetails,
 } from './support/studentUi';
-
-async function enterRuntimeBackedExam(
-  page: Page,
-  scheduleId: string,
-  wcode: string,
-) {
-  await studentCheckIn(page, scheduleId, {
-    wcode,
-    email: `e2e+${wcode.toLowerCase()}@example.com`,
-    fullName: 'E2E Candidate',
-  });
-  await openStudentSessionWithRetry(page, scheduleId, wcode);
-  await completePreCheckIfPresent(page);
-  await startLobbyIfPresent(page);
-  await openStudentSessionWithRetry(page, scheduleId, wcode);
-  await expect(page.getByLabel('Answer for question 1')).toBeVisible({ timeout: 30_000 });
-}
 
 test.describe('Student queue admission flow', () => {
   test.describe.configure({ timeout: 120_000 });
@@ -105,7 +87,7 @@ test.describe('Student queue admission flow', () => {
     await context.close();
   });
 
-  test('start exam button transitions from lobby to exam', async ({
+  test('waiting room has no student-owned exam start action', async ({
     browser,
   }, testInfo) => {
     const manifest = readBackendE2EManifest();
@@ -124,22 +106,10 @@ test.describe('Student queue admission flow', () => {
     await openStudentSessionWithRetry(page, manifest.student.scheduleId, wcode);
     await completePreCheckIfPresent(page);
 
-    const startExam = page.getByRole('button', { name: 'Start Exam' });
-    const startVisible = await startExam.isVisible().catch(() => false);
-
-    if (startVisible) {
-      await startExam.click();
-
-      await expect
-        .poll(async () => {
-          const answerField = page.getByLabel('Answer for question 1');
-          const writingEditor = page.locator('[contenteditable="true"]').first();
-          if (await answerField.isVisible().catch(() => false)) return 'exam';
-          if (await writingEditor.isVisible().catch(() => false)) return 'exam';
-          return 'pending';
-        }, { timeout: 30_000 })
-        .toBe('exam');
-    }
+    await expect(page.getByRole('heading', { name: 'Waiting for the exam to start' })).toBeVisible();
+    await expect(page.getByText('Waiting for proctor')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start Exam' })).not.toBeVisible();
+    await expect(page.getByLabel('Answer for question 1')).not.toBeVisible();
 
     await context.close();
   });

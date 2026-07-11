@@ -1,10 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import {
-  Globe,
-  Lock,
-  Monitor,
-  Shield,
-} from 'lucide-react';
+import { Globe, Lock, Monitor, Shield } from 'lucide-react';
 import type { ExamConfig } from '../../types';
 import { getStudentIntegritySecurityPolicy } from '../../services/studentIntegrityService';
 import type {
@@ -12,11 +7,14 @@ import type {
   StudentPreCheckResult,
 } from '../../types/studentAttempt';
 import { Button } from '../ui/Button';
-import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
 import { isAppleMobileDevice } from './appleMobileDevice';
+import { ExamEntryCard } from './ExamEntryCard';
 
 interface PreCheckProps {
   config?: ExamConfig | undefined;
+  examTitle?: string | undefined;
+  candidateName?: string | null | undefined;
+  candidateId?: string | null | undefined;
   onComplete: (result: StudentPreCheckResult) => Promise<void> | void;
   onExit: () => void;
 }
@@ -211,7 +209,7 @@ function runChecks(config?: ExamConfig): StudentPreCheckResult {
   };
 }
 
-export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
+export function PreCheck({ config, examTitle = 'Exam', candidateName, candidateId, onComplete, onExit }: PreCheckProps) {
   const [isRunning, setIsRunning] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<StudentPreCheckResult | null>(null);
@@ -240,8 +238,8 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
     setIsSubmitting(true);
     try {
       await onComplete(result);
-    } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : 'Unable to continue. Please try again.');
+    } catch {
+      setSubmitError('We could not continue to the waiting room. Please try again.');
       return;
     } finally {
       setIsSubmitting(false);
@@ -249,36 +247,8 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen w-full bg-gray-50 p-3 sm:p-4 md:p-6 lg:p-8">
-      <div className="bg-white rounded-sm shadow-[0_8px_24px_rgba(9,30,66,0.08)] max-w-2xl w-full overflow-hidden border border-gray-100 flex flex-col max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)] md:max-h-[calc(100vh-4rem)] lg:max-h-[calc(100vh-5rem)]">
-        <div className="px-3 sm:px-4 md:px-6 lg:px-10 py-3 sm:py-4 md:py-6 lg:py-8 border-b border-gray-200 bg-white flex-shrink-0">
-          <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 tracking-tight leading-tight">
-            System checking
-          </h2>
-        </div>
-
-        <div className="p-3 sm:p-4 md:p-6 lg:p-10 overflow-y-auto flex-1">
-          <div className="flex flex-col items-center justify-center py-10 sm:py-14 md:py-20">
-            {isRunning ? (
-              <>
-                <LoadingMark size="md" className="bg-gray-300" />
-                <SrLoadingText>System checking…</SrLoadingText>
-              </>
-            ) : null}
-            <div className="mt-3 text-sm sm:text-base font-semibold text-gray-900">
-              System checking
-            </div>
-          </div>
-
-          {submitError ? (
-            <div className="mt-4 rounded-sm border border-red-200 bg-red-50 p-3 text-xs sm:text-sm text-red-900">
-              {submitError}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="p-3 sm:p-4 md:p-6 lg:px-10 border-t border-gray-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 sm:gap-3 md:gap-4 flex-shrink-0 bg-white">
-          <div className="flex gap-2 sm:gap-3 md:gap-4 w-full md:w-auto">
+    <ExamEntryCard mode="briefing" config={config} examTitle={examTitle} candidateName={candidateName} candidateId={candidateId} error={submitError} footer={
+          <div className="flex gap-3">
             <Button
               variant="secondary"
               onClick={onExit}
@@ -286,7 +256,7 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
               disabled={isSubmitting}
               className="flex-1 md:flex-none text-[10px] sm:text-xs"
             >
-              Exit
+              Leave exam
             </Button>
             <Button
               variant="primary"
@@ -297,11 +267,9 @@ export function PreCheck({ config, onComplete, onExit }: PreCheckProps) {
               size="sm"
               className="flex-1 md:flex-none min-w-[80px] sm:min-w-[100px] md:min-w-[120px] text-[10px] sm:text-xs"
             >
-              {isSubmitting ? 'Saving…' : 'Continue'}
+              {isSubmitting ? 'Continuing…' : 'Continue to waiting room'}
             </Button>
           </div>
-        </div>
-      </div>
-    </div>
+    } />
   );
 }

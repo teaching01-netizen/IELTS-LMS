@@ -341,7 +341,7 @@ describe('StudentRuntimeProvider', () => {
     expect(result.current.state.currentModule).toBe('reading');
   });
 
-  it('does not regress back to pre-check after continue when stale runtime-backed snapshots arrive', () => {
+  it('keeps a completed runtime-backed pre-check in lobby while stale not-started snapshots arrive', () => {
     const runtimeNotStarted: ExamSessionRuntime = {
       ...createRuntimeSnapshot('listening'),
       status: 'not_started',
@@ -360,7 +360,7 @@ describe('StudentRuntimeProvider', () => {
           <button
             type="button"
             onClick={() => {
-              runtime.actions.setPhase('exam');
+              runtime.actions.setPhase('lobby');
             }}
           >
             Continue
@@ -383,7 +383,7 @@ describe('StudentRuntimeProvider', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+    expect(screen.getByTestId('phase')).toHaveTextContent('lobby');
 
     const staleRefreshAttempt: StudentAttempt = {
       ...initialAttempt,
@@ -402,10 +402,10 @@ describe('StudentRuntimeProvider', () => {
       </StudentRuntimeProvider>,
     );
 
-    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+    expect(screen.getByTestId('phase')).toHaveTextContent('lobby');
   });
 
-  it('boots runtime-backed delivery in exam phase once pre-check is completed', () => {
+  it('boots completed runtime-backed pre-check in lobby until the runtime is live', () => {
     const runtimeNotStarted: ExamSessionRuntime = {
       ...createRuntimeSnapshot('listening'),
       status: 'not_started',
@@ -423,7 +423,33 @@ describe('StudentRuntimeProvider', () => {
       runtimeSnapshot: runtimeNotStarted,
     });
 
-    expect(result.current.state.phase).toBe('exam');
+    expect(result.current.state.phase).toBe('lobby');
+  });
+
+  it.each(['exam', 'post-exam'] as const)('normalizes stale %s attempt phase to lobby while runtime is inactive', (phase) => {
+    const runtimeNotStarted = { ...createRuntimeSnapshot('listening'), status: 'not_started' as const, currentSectionKey: null, activeSectionKey: null, sections: [] };
+    const { result } = renderRuntime({ attemptSnapshot: { ...buildCompletedPreCheckAttempt(), phase }, runtimeBacked: true, runtimeSnapshot: runtimeNotStarted });
+    expect(result.current.state.phase).toBe('lobby');
+  });
+
+  it.each(['not_started', 'cancelled'] as const)('rejects stale active keys when runtime status is %s', (status) => {
+    const hostile = { ...createRuntimeSnapshot('listening'), status, currentSectionKey: 'listening' as const, activeSectionKey: 'listening' as const };
+    const { result } = renderRuntime({ attemptSnapshot: { ...buildCompletedPreCheckAttempt(), phase: 'exam' }, runtimeBacked: true, runtimeSnapshot: hostile });
+    expect(result.current.state.phase).toBe('lobby');
+  });
+
+  it('automatically promotes the waiting lobby when runtime hydration becomes live', () => {
+    const inactive = { ...createRuntimeSnapshot('listening'), status: 'not_started' as const, currentSectionKey: null, activeSectionKey: null, sections: [] };
+    const attempt = buildCompletedPreCheckAttempt();
+    function Phase() { return <span data-testid="phase">{useStudentRuntime().state.phase}</span>; }
+    const { rerender } = render(<StudentRuntimeProvider state={mockExamState} onExit={vi.fn()} attemptSnapshot={attempt} runtimeBacked runtimeSnapshot={inactive}><Phase /></StudentRuntimeProvider>);
+    expect(screen.getByTestId('phase')).toHaveTextContent('lobby');
+    rerender(
+      <StudentRuntimeProvider state={mockExamState} onExit={vi.fn()} attemptSnapshot={attempt} runtimeBacked runtimeSnapshot={createRuntimeSnapshot('listening')}>
+        <Phase />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
   });
 
   it('updates runtime-backed display time only when the visible second changes', async () => {

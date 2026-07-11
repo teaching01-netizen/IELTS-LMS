@@ -341,8 +341,9 @@ function getInitialPhase(
     return 'pre-check';
   }
 
-  if (runtimeBacked && attemptSnapshot.phase === 'pre-check') {
-    return 'exam';
+  if (runtimeBacked && attemptSnapshot.integrity.preCheck?.completedAt) {
+    const runtimeIsActive = runtimeSnapshot?.status === 'live' || runtimeSnapshot?.status === 'paused';
+    return runtimeIsActive ? 'exam' : 'lobby';
   }
 
   if (!runtimeBacked && attemptSnapshot.phase === 'post-exam') {
@@ -451,9 +452,8 @@ function runtimeReducer(
         Boolean(state.submittedAt) ||
         isRuntimeStructurallyCompleted(action.snapshot);
       const runtimeStatus = action.snapshot?.status ?? null;
-      const hasActiveSection = Boolean(action.snapshot?.currentSectionKey);
       const shouldPromoteToExamPhase =
-        !terminalVerified && (runtimeStatus === 'live' || runtimeStatus === 'paused' || hasActiveSection);
+        !terminalVerified && (runtimeStatus === 'live' || runtimeStatus === 'paused');
       if (action.preserveLocalAdvance && !terminalVerified) {
         return state;
       }
@@ -462,11 +462,7 @@ function runtimeReducer(
           ? 'post-exam'
           : shouldPromoteToExamPhase
             ? 'exam'
-            : state.phase === 'pre-check'
-              ? 'pre-check'
-              : state.phase === 'lobby'
-                ? 'lobby'
-                : 'exam';
+            : state.phase === 'pre-check' ? 'pre-check' : 'lobby';
       const nextQuestionId = moduleChanged ? action.nextQuestionId : state.currentQuestionId;
       const snapshotTimeRemaining = action.snapshot?.currentSectionRemainingSeconds;
       const nextTimeRemaining =
@@ -514,9 +510,12 @@ function runtimeReducer(
         nextProctorStatus === 'terminated' ||
         Boolean(nextSubmittedAt) ||
         isRuntimeStructurallyCompleted(action.runtimeSnapshot);
+      const runtimeIsActive = action.runtimeSnapshot?.status === 'live' || action.runtimeSnapshot?.status === 'paused';
       const nextPhase =
         terminalVerified
           ? 'post-exam'
+          : action.runtimeBacked && !runtimeIsActive && action.snapshot.integrity.preCheck?.completedAt
+            ? 'lobby'
           : action.snapshot.phase === 'post-exam'
             ? action.runtimeBacked
               ? state.phase === 'pre-check'
@@ -564,25 +563,18 @@ function runtimeReducer(
         Boolean(nextSubmittedAt) ||
         isRuntimeStructurallyCompleted(action.runtimeSnapshot);
       const runtimeStatus = action.runtimeBacked ? action.runtimeSnapshot?.status ?? null : null;
-      const hasActiveSection = Boolean(action.runtimeSnapshot?.currentSectionKey);
       const shouldPromoteToExamPhase =
         action.runtimeBacked &&
         !terminalVerified &&
-        (runtimeStatus === 'live' || runtimeStatus === 'paused' || hasActiveSection);
+        (runtimeStatus === 'live' || runtimeStatus === 'paused');
       const completedPreCheckInRuntimeBackedFlow =
         action.runtimeBacked && Boolean(action.snapshot.integrity.preCheck?.completedAt);
-      const shouldPreserveExamPhaseAfterPreCheck =
-        completedPreCheckInRuntimeBackedFlow &&
-        state.phase === 'exam' &&
-        action.snapshot.phase === 'pre-check' &&
-        !shouldPromoteToExamPhase &&
-        !terminalVerified;
       const nextPhase = terminalVerified
         ? 'post-exam'
-        : shouldPreserveExamPhaseAfterPreCheck
-          ? 'exam'
         : shouldPromoteToExamPhase
           ? 'exam'
+        : completedPreCheckInRuntimeBackedFlow
+          ? 'lobby'
         : action.snapshot.phase === 'post-exam'
           ? action.runtimeBacked
             ? state.phase === 'pre-check'
