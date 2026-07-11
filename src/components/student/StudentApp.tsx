@@ -116,10 +116,12 @@ function formatRuntimeTime(seconds: number) {
 
 interface StudentAppProps {
   showSubmitControls?: boolean | undefined;
+  allowPreviewStart?: boolean | undefined;
 }
 
 export function StudentApp({
   showSubmitControls = true,
+  allowPreviewStart = false,
 }: StudentAppProps) {
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
@@ -640,9 +642,12 @@ export function StudentApp({
         <main id="main-content" role="main">
           <PreCheck
             config={examState.config}
+            examTitle={attemptState.attempt?.examTitle ?? examState.title}
+            candidateName={attemptState.attempt?.candidateName}
+            candidateId={attemptState.attempt?.candidateId}
             onComplete={async (result) => {
               await attemptActions.recordPreCheckResult(result);
-              runtimeActions.setPhase(runtimeState.runtimeBacked ? 'exam' : 'lobby');
+              runtimeActions.setPhase('lobby');
             }}
             onExit={onExit}
           />
@@ -652,14 +657,19 @@ export function StudentApp({
     );
   }
 
-  if (!shouldRenderPostExam && !runtimeState.runtimeBacked && effectivePhase === 'lobby') {
+  if (!shouldRenderPostExam && effectivePhase === 'lobby') {
     return (
       <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900" style={studentShellStyle}>
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
         <main id="main-content" role="main">
-          <Lobby state={examState} onStart={runtimeActions.startExam} onExit={onExit} />
+          <Lobby
+            state={examState}
+            candidateName={attemptState.attempt?.candidateName}
+            candidateId={attemptState.attempt?.candidateId}
+            onPreviewStart={allowPreviewStart ? runtimeActions.startExam : undefined}
+          />
         </main>
         {finalSubmitOverlay}
       </div>

@@ -332,3 +332,13 @@ Student proctoring runtime, student pre-check, builder/admin security configurat
 
 ### Invariant
 Do not reintroduce browser fullscreen as an anti-cheat requirement. Integrity enforcement remains in tab-switch, secondary-screen, translation, screenshot, clipboard, audit, and threshold flows.
+
+---
+
+## 2026-07-11: Student Briefing Must Not Start a Runtime-Backed Exam
+
+### Failure case
+Displaying compatibility checks or a student-owned start button can imply readiness that was not persisted and can bypass the proctor-controlled start boundary.
+
+### Invariant
+Compatibility checks run silently and their complete result is persisted before entering the waiting room. A runtime-backed student remains in the waiting room until server runtime hydration reports an active exam; only the proctor/server owns timer start.

@@ -1,4 +1,5 @@
 import { expect, type BrowserContext, type Page } from '@playwright/test';
+import { ADMIN_STORAGE_STATE_PATH } from './backendE2e';
 
 export function deterministicWcode(seed: string): string {
   let hash = 0;
@@ -12,8 +13,8 @@ export function deterministicWcode(seed: string): string {
 
 export async function stubScreenDetails(context: BrowserContext) {
   await context.addInitScript(() => {
-    // The student pre-check requires `getScreenDetails` for non-Safari browsers.
-    // Playwright browsers do not currently expose it, so we provide a minimal stub.
+    // Compatibility details are collected silently and still include screen support.
+    // Playwright browsers do not expose this API, so provide a minimal stub.
     (window as any).getScreenDetails = async () => ({ screens: [window.screen] });
   });
 }
@@ -201,16 +202,15 @@ export async function openStudentCheckIn(page: Page, scheduleId: string) {
 }
 
 export async function completePreCheckIfPresent(page: Page) {
-  const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-  await compatibilityCheck.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
-  const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-  if (!isCompatibilityCheckVisible) {
+  const briefing = page.getByRole('heading', { name: 'Before you continue' });
+  await briefing.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
+  const isBriefingVisible = await briefing.isVisible().catch(() => false);
+  if (!isBriefingVisible) {
     return;
   }
 
-  const acknowledgement = page.getByRole('checkbox', { name: /I understand Safari/i });
-  const continueButton = page.getByRole('button', { name: 'Continue' });
-  const waitingForStart = page.getByRole('heading', { name: /Waiting for start/i });
+  const continueButton = page.getByRole('button', { name: 'Continue to waiting room' });
+  const waitingForStart = page.getByRole('heading', { name: 'Waiting for the exam to start' });
   const startExam = page.getByRole('button', { name: 'Start Exam' });
   const answerField = page.getByLabel(/Answer for question/i).first();
   const writingEditor = page.locator('[contenteditable="true"]').first();
@@ -220,15 +220,11 @@ export async function completePreCheckIfPresent(page: Page) {
 
   const attempts = 5;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (!(await compatibilityCheck.isVisible().catch(() => false))) return;
+    if (!(await briefing.isVisible().catch(() => false))) return;
     if (await waitingForStart.isVisible().catch(() => false)) return;
     if (await startExam.isVisible().catch(() => false)) return;
     if (await answerField.isVisible().catch(() => false)) return;
     if (await writingEditor.isVisible().catch(() => false)) return;
-
-    if (await acknowledgement.isVisible().catch(() => false)) {
-      await acknowledgement.check().catch(() => {});
-    }
 
     await expect(continueButton).toBeEnabled({ timeout: 60_000 });
     const stepBefore = (await stepIndicator.textContent().catch(() => ''))?.trim() ?? '';
@@ -244,7 +240,7 @@ export async function completePreCheckIfPresent(page: Page) {
           if (await startExam.isVisible().catch(() => false)) return 'lobby';
           if (await answerField.isVisible().catch(() => false)) return 'answer';
           if (await writingEditor.isVisible().catch(() => false)) return 'writing';
-          if (!(await compatibilityCheck.isVisible().catch(() => false))) return 'detached';
+          if (!(await briefing.isVisible().catch(() => false))) return 'detached';
 
           const stepAfter = (await stepIndicator.textContent().catch(() => ''))?.trim() ?? '';
           if (stepAfter && stepBefore && stepAfter !== stepBefore) return 'step_changed';
@@ -256,17 +252,41 @@ export async function completePreCheckIfPresent(page: Page) {
       .not.toBe('pending');
   }
 
-  // Still stuck in compatibility check after repeated continues.
-  throw new Error('Precheck did not complete after repeated Continue clicks.');
+  throw new Error('Exam briefing did not continue to the waiting room after repeated attempts.');
 }
 
 export async function startLobbyIfPresent(page: Page) {
-  const startExam = page.getByRole('button', { name: 'Start Exam' });
-  await startExam.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {});
-  const startExamVisible = await startExam.isVisible().catch(() => false);
-  if (startExamVisible) {
-    await startExam.click();
+  const waiting = page.getByRole('heading', { name: 'Waiting for the exam to start' });
+  if (!(await waiting.isVisible().catch(() => false))) return;
+  await expect(page.getByRole('button', { name: 'Start Exam' })).not.toBeVisible();
+
+  const scheduleId = page.url().match(/\/student\/([^/]+)/)?.[1];
+  const browser = page.context().browser();
+  if (!scheduleId || !browser) throw new Error('Cannot authoritatively start runtime without schedule and browser context.');
+  const controlContext = await browser.newContext({
+    storageState: process.env['ADMIN_STORAGE_STATE'] || ADMIN_STORAGE_STATE_PATH,
+  });
+  try {
+    const cookies = await controlContext.cookies();
+    const csrfNames = [process.env['AUTH_CSRF_COOKIE_NAME'], '__Host-csrf', 'csrf'].filter((value): value is string => Boolean(value));
+    const csrfToken = cookies.find((cookie) => csrfNames.includes(cookie.name))?.value;
+    if (!csrfToken) throw new Error('Admin E2E storage state is missing its CSRF cookie.');
+    const response = await controlContext.request.post(`/api/v1/schedules/${scheduleId}/runtime/commands`, {
+      headers: { 'x-csrf-token': csrfToken },
+      data: { action: 'start_runtime' },
+    });
+    if (!response.ok() && response.status() !== 409) {
+      throw new Error(`Authoritative runtime start failed: ${response.status()} ${(await response.text()).slice(0, 200)}`);
+    }
+  } finally {
+    await controlContext.close();
   }
+
+  await expect.poll(async () => {
+    if (await page.getByLabel(/Answer for question/i).first().isVisible().catch(() => false)) return 'exam';
+    if (await page.locator('[contenteditable="true"]').first().isVisible().catch(() => false)) return 'exam';
+    return 'waiting';
+  }, { timeout: 60_000 }).toBe('exam');
 }
 
 export async function acknowledgeWarningOverlayIfPresent(page: Page) {
@@ -288,7 +308,8 @@ export async function openStudentSessionWithRetry(
   const targetUrl = `/student/${scheduleId}/${candidateId}`;
   const loadingError = page.getByRole('heading', { name: 'Loading Error' });
   const retryButton = page.getByRole('button', { name: 'Retry' });
-  const preCheckHeading = page.getByRole('heading', { name: 'System checking' });
+  const preCheckHeading = page.getByRole('heading', { name: 'Before you continue' });
+  const waitingRoomHeading = page.getByRole('heading', { name: 'Waiting for the exam to start' });
   const answerField = page.getByLabel('Answer for question 1');
   const finishButton = page.getByRole('button', { name: 'Finish' });
   const reviewButton = page.getByRole('button', { name: 'Review & Submit' });
@@ -317,6 +338,10 @@ export async function openStudentSessionWithRetry(
 
       const hasPreCheck = await preCheckHeading.isVisible().catch(() => false);
       if (hasPreCheck) {
+        return;
+      }
+
+      if (await waitingRoomHeading.isVisible().catch(() => false)) {
         return;
       }
 

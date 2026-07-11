@@ -23,6 +23,7 @@ interface StudentAppWrapperProps {
   allowExitDuringExam?: boolean | undefined;
   persistenceEnabled?: boolean | undefined;
   enableMonitoring?: boolean | undefined;
+  allowPreviewStart?: boolean | undefined;
 }
 
 export function StudentAppWrapper({
@@ -37,12 +38,14 @@ export function StudentAppWrapper({
   allowExitDuringExam = false,
   persistenceEnabled = true,
   enableMonitoring = true,
+  allowPreviewStart = false,
 }: StudentAppWrapperProps) {
   const app = (
     <StudentUIProvider>
       <KeyboardProvider>
         <StudentApp
           showSubmitControls={showSubmitControls}
+          allowPreviewStart={allowPreviewStart}
           allowExitDuringExam={allowExitDuringExam}
         />
       </KeyboardProvider>

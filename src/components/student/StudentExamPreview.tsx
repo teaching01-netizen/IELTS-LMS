@@ -135,6 +135,7 @@ export function StudentExamPreview({ state, examId, initialModule }: StudentExam
 
   return (
     <StudentAppWrapper
+      allowPreviewStart
       key={`legacy-preview-${examId}-${previewModule}`}
       state={previewState}
       onExit={handleExit}

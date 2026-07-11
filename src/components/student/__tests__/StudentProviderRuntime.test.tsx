@@ -176,7 +176,8 @@ describe('Student Provider Runtime Integration', () => {
     );
 
     expect(screen.queryByRole('heading', { name: /system checking/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /start exam/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /waiting for the exam to start/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /start exam/i })).not.toBeInTheDocument();
   });
 
   it('treats runtime refresh callbacks without runtime snapshot as attempt-backed state', () => {
@@ -311,7 +312,7 @@ describe('Student Provider Runtime Integration', () => {
     );
 
     // Should show pre-check screen when not runtime-backed
-    expect(screen.getByRole('heading', { name: /system checking/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /before you continue/i })).toBeInTheDocument();
   });
 
   it('handles runtime not_started status by showing blocking overlay', () => {
@@ -329,7 +330,7 @@ describe('Student Provider Runtime Integration', () => {
     );
 
     // Should show waiting overlay when runtime hasn't started
-    expect(screen.getByText(/waiting for start/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /waiting for the exam to start/i })).toBeInTheDocument();
   });
 
   it('syncs currentSectionKey changes across provider updates', async () => {
@@ -424,7 +425,7 @@ describe('Student Provider Runtime Integration', () => {
 
     // Should not crash when runtimeSnapshot is null
     // This is a regression test for error handling
-    expect(screen.getByRole('heading', { name: /system checking/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /before you continue/i })).toBeInTheDocument();
   });
 
   it('handles partial runtime snapshot data gracefully', () => {

@@ -264,6 +264,7 @@ function RuntimePreviewSurface({
       </div>
 
       <StudentAppWrapper
+        allowPreviewStart
         key={`preview-runtime-${examId}-${previewModule}-${previewSession.scheduleId}`}
         state={state}
         onExit={onExit}
