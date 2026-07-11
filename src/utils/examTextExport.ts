@@ -11,7 +11,12 @@ import type {
 import { resolveAcceptedAnswers } from './acceptedAnswers';
 import { htmlToPlainText } from './htmlText';
 import { getInsertedImages, supportsInsertedImages } from './insertedImages';
-import { getCanonicalTableCells } from './tableCompletion';
+import {
+  enumerateBlockQuestionUnits,
+  sentenceBlankGroupKey,
+  tableCellGroupKey,
+  type QuestionUnit,
+} from './examUtils';
 
 const EXAM_SEPARATOR = '='.repeat(92);
 const SUBSECTION_SEPARATOR = '-'.repeat(68);
@@ -123,23 +128,9 @@ function renderBlock(
     });
   }
 
+  // Per-block context lines that are not tied to a single question unit.
   switch (block.type) {
-    case 'TFNG': {
-      block.questions.forEach((question) => {
-        const body = toPlainText(question.statement) || '(empty statement)';
-        pushQuestion(context, body, question.correctAnswer);
-      });
-      break;
-    }
-    case 'CLOZE': {
-      block.questions.forEach((question) => {
-        const body = toPlainText(question.prompt) || '(empty prompt)';
-        const answer = resolveAcceptedAnswers(question).join(' | ');
-        pushQuestion(context, body, answer);
-      });
-      break;
-    }
-    case 'MATCHING': {
+    case 'MATCHING':
       if (block.headings.length > 0) {
         context.lines.push('Choices:');
         block.headings.forEach((heading) => {
@@ -149,20 +140,90 @@ function renderBlock(
           );
         });
       }
-      block.questions.forEach((question) => {
-        const body = `Paragraph ${toPlainText(question.paragraphLabel) || question.id}`;
-        const answer = mapMatchingHeadingDisplay(block, question.correctHeading);
-        pushQuestion(context, body, answer);
+      break;
+    case 'TABLE_COMPLETION':
+      if (block.headers.length > 0) {
+        context.lines.push(`Headers: ${block.headers.map((header) => toPlainText(header)).join(' | ')}`);
+      }
+      block.rows.forEach((row, rowIndex) => {
+        const normalizedRow = row.map((cell) => toPlainText(cell)).join(' | ');
+        context.lines.push(`Row ${rowIndex + 1}: ${normalizedRow}`);
       });
+      break;
+    case 'CLASSIFICATION':
+      if (block.categories.length > 0) {
+        context.lines.push(
+          `Categories: ${block.categories.map((category) => toPlainText(category)).join(' | ')}`,
+        );
+      }
+      break;
+    case 'MATCHING_FEATURES':
+      if (block.options.length > 0) {
+        context.lines.push(
+          `Options: ${block.options.map((option) => toPlainText(option)).join(' | ')}`,
+        );
+      }
+      break;
+    case 'NOTE_COMPLETION':
+      block.questions.forEach((question, questionIndex) => {
+        const noteText = toPlainText(question.noteText);
+        if (noteText) {
+          context.lines.push(`Note ${questionIndex + 1}:`);
+          pushMultiline(context.lines, '  ', noteText);
+        }
+      });
+      break;
+    case 'DIAGRAM_LABELING': {
+      const image = toPlainText(block.imageUrl);
+      if (image) {
+        context.lines.push(`Diagram image: ${image}`);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+
+  // The export is driven entirely by the same enumeration the canonical
+  // question count uses, so a block can never render a different set of
+  // questions than it reports.
+  enumerateBlockQuestionUnits(block).forEach((unit) => {
+    renderUnit(context, block, unit);
+  });
+}
+
+function renderUnit(
+  context: QuestionRenderContext,
+  block: QuestionBlock,
+  unit: QuestionUnit,
+): void {
+  switch (block.type) {
+    case 'TFNG': {
+      const question = block.questions.find((candidate) => candidate.id === unit.questionId);
+      if (question) {
+        pushQuestion(context, toPlainText(question.statement) || '(empty statement)', question.correctAnswer);
+      }
+      break;
+    }
+    case 'CLOZE': {
+      const question = block.questions.find((candidate) => candidate.id === unit.questionId);
+      if (question) {
+        pushQuestion(context, toPlainText(question.prompt) || '(empty prompt)', resolveAcceptedAnswers(question).join(' | '));
+      }
+      break;
+    }
+    case 'MATCHING': {
+      const question = block.questions.find((candidate) => candidate.id === unit.questionId);
+      if (question) {
+        pushQuestion(context, `Paragraph ${toPlainText(question.paragraphLabel) || question.id}`, mapMatchingHeadingDisplay(block, question.correctHeading));
+      }
       break;
     }
     case 'MAP': {
-      block.questions.forEach((question) => {
-        const label = toPlainText(question.label) || question.id;
-        const body = `${label} (x:${question.x}, y:${question.y})`;
-        const answer = toPlainText(question.correctAnswer);
-        pushQuestion(context, body, answer);
-      });
+      const question = block.questions.find((candidate) => candidate.id === unit.questionId);
+      if (question) {
+        pushQuestion(context, `${toPlainText(question.label) || question.id} (x:${question.x}, y:${question.y})`, toPlainText(question.correctAnswer));
+      }
       break;
     }
     case 'MULTI_MCQ': {
@@ -182,110 +243,98 @@ function renderBlock(
       break;
     }
     case 'SINGLE_MCQ': {
-      context.lines.push(`Stem: ${toPlainText(block.stem)}`);
-      block.options.forEach((option, index) => {
+      const subQuestion = Array.isArray(block.questions)
+        ? block.questions.find((candidate) => candidate.id === unit.questionId)
+        : undefined;
+      const stem = subQuestion?.stem || block.stem;
+      const options = subQuestion && subQuestion.options.length > 0 ? subQuestion.options : block.options;
+      context.lines.push(`Stem: ${toPlainText(stem)}`);
+      options.forEach((option, index) => {
         context.lines.push(`  ${formatOptionWithLetter(option, index)}`);
       });
-      const correctOption = block.options.find((option) => option.isCorrect);
+      const correctOption = options.find((option) => option.isCorrect);
       const answer = correctOption
-        ? buildMcqAnswerDisplay(block.options, [correctOption.id])
+        ? buildMcqAnswerDisplay(options, [correctOption.id])
         : '';
-      pushQuestion(context, toPlainText(block.stem), answer);
+      pushQuestion(context, toPlainText(stem), answer);
       break;
     }
     case 'SHORT_ANSWER': {
-      block.questions.forEach((question) => {
-        const body = toPlainText(question.prompt) || '(empty prompt)';
-        const answer = resolveAcceptedAnswers(question).join(' | ');
-        pushQuestion(context, body, answer);
-      });
+      const question = block.questions.find((candidate) => candidate.id === unit.questionId);
+      if (question) {
+        pushQuestion(context, toPlainText(question.prompt) || '(empty prompt)', resolveAcceptedAnswers(question).join(' | '));
+      }
       break;
     }
     case 'SENTENCE_COMPLETION': {
-      block.questions.forEach((question) => {
-        const sentence = toPlainText(question.sentence) || '(empty sentence)';
-        question.blanks.forEach((blank, blankIndex) => {
-          const body = `${sentence} [Blank ${blankIndex + 1}]`;
-          const answer = resolveAcceptedAnswers(blank).join(' | ');
-          pushQuestion(context, body, answer);
-        });
-      });
+      for (const question of block.questions) {
+        const blanks = question.blanks.filter(
+          (blank) => sentenceBlankGroupKey(question.id, blank) === unit.questionId,
+        );
+        if (blanks.length > 0) {
+          const sentence = toPlainText(question.sentence) || '(empty sentence)';
+          const labels = blanks.map((blank) => `Blank ${(blank.position ?? 0) + 1}`).join(', ');
+          const answer = blanks.map((blank) => resolveAcceptedAnswers(blank).join(' | ')).join(' | ');
+          pushQuestion(context, `${sentence} [${labels}]`, answer);
+          break;
+        }
+      }
       break;
     }
     case 'DIAGRAM_LABELING': {
-      const image = toPlainText(block.imageUrl);
-      if (image) {
-        context.lines.push(`Diagram image: ${image}`);
+      const label = block.labels.find((candidate) => candidate.id === unit.questionId);
+      if (label) {
+        pushQuestion(context, toPlainText(label.prompt) || 'Label', toPlainText(label.correctAnswer));
       }
-      block.labels.forEach((label, labelIndex) => {
-        const body = toPlainText(label.prompt) || `Label ${labelIndex + 1}`;
-        const answer = toPlainText(label.correctAnswer);
-        pushQuestion(context, body, answer);
-      });
       break;
     }
     case 'FLOW_CHART': {
-      block.steps.forEach((step, stepIndex) => {
-        const label = toPlainText(step.label) || `Step ${stepIndex + 1}`;
-        const answer = toPlainText(step.correctAnswer);
-        pushQuestion(context, label, answer);
-      });
+      const step = block.steps.find((candidate) => candidate.id === unit.questionId);
+      if (step) {
+        pushQuestion(context, toPlainText(step.label) || 'Step', toPlainText(step.correctAnswer));
+      }
       break;
     }
     case 'TABLE_COMPLETION': {
-      if (block.headers.length > 0) {
-        context.lines.push(`Headers: ${block.headers.map((header) => toPlainText(header)).join(' | ')}`);
+      const cell = block.cells.find(
+        (candidate) => tableCellGroupKey(block.id, candidate) === unit.questionId,
+      );
+      if (cell) {
+        pushQuestion(context, `Cell row ${cell.row + 1}, col ${cell.col + 1}`, resolveAcceptedAnswers(cell).join(' | '));
       }
-      block.rows.forEach((row, rowIndex) => {
-        const normalizedRow = row.map((cell) => toPlainText(cell)).join(' | ');
-        context.lines.push(`Row ${rowIndex + 1}: ${normalizedRow}`);
-      });
-      getCanonicalTableCells(block).forEach((cell) => {
-        const body = `Cell row ${cell.row + 1}, col ${cell.col + 1}`;
-        const answer = resolveAcceptedAnswers(cell).join(' | ');
-        pushQuestion(context, body, answer);
-      });
       break;
     }
     case 'NOTE_COMPLETION': {
-      block.questions.forEach((question, questionIndex) => {
-        const noteText = toPlainText(question.noteText);
-        if (noteText) {
-          context.lines.push(`Note ${questionIndex + 1}:`);
-          pushMultiline(context.lines, '  ', noteText);
+      for (let questionIndex = 0; questionIndex < block.questions.length; questionIndex += 1) {
+        const question = block.questions[questionIndex];
+        if (!question) continue;
+        const blankIndex = question.blanks.findIndex((candidate) => candidate.id === unit.questionId);
+        if (blankIndex >= 0) {
+          const blank = question.blanks[blankIndex];
+          if (blank) {
+            pushQuestion(
+              context,
+              `Note ${questionIndex + 1} blank ${blankIndex + 1}`,
+              resolveAcceptedAnswers(blank).join(' | '),
+            );
+          }
+          break;
         }
-        question.blanks.forEach((blank, blankIndex) => {
-          const body = `Note ${questionIndex + 1} blank ${blankIndex + 1}`;
-          const answer = resolveAcceptedAnswers(blank).join(' | ');
-          pushQuestion(context, body, answer);
-        });
-      });
+      }
       break;
     }
     case 'CLASSIFICATION': {
-      if (block.categories.length > 0) {
-        context.lines.push(
-          `Categories: ${block.categories.map((category) => toPlainText(category)).join(' | ')}`,
-        );
+      const item = block.items.find((candidate) => candidate.id === unit.questionId);
+      if (item) {
+        pushQuestion(context, toPlainText(item.text) || item.id, toPlainText(item.correctCategory));
       }
-      block.items.forEach((item) => {
-        const body = toPlainText(item.text) || item.id;
-        const answer = toPlainText(item.correctCategory);
-        pushQuestion(context, body, answer);
-      });
       break;
     }
     case 'MATCHING_FEATURES': {
-      if (block.options.length > 0) {
-        context.lines.push(
-          `Options: ${block.options.map((option) => toPlainText(option)).join(' | ')}`,
-        );
+      const feature = block.features.find((candidate) => candidate.id === unit.questionId);
+      if (feature) {
+        pushQuestion(context, toPlainText(feature.text) || feature.id, toPlainText(feature.correctMatch));
       }
-      block.features.forEach((feature) => {
-        const body = toPlainText(feature.text) || feature.id;
-        const answer = toPlainText(feature.correctMatch);
-        pushQuestion(context, body, answer);
-      });
       break;
     }
   }

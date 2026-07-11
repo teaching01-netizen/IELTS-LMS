@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialExamState } from '../../services/examAdapterService';
-import type { Exam, QuestionBlock } from '../../types';
+import type { Exam, QuestionBlock, SingleMCQBlock } from '../../types';
 import {
   buildExamTextExport,
   buildExamTextExportFilename,
@@ -341,5 +341,101 @@ describe('examTextExport', () => {
   it('builds filename using yyyy-mm-dd format', () => {
     const filename = buildExamTextExportFilename(new Date('2026-04-30T12:00:00.000Z'));
     expect(filename).toBe('exam-export-2026-04-30.txt');
+  });
+
+  it('exports every SINGLE_MCQ sub-question (regression: 40 shown but only 30 exported)', () => {
+    const exam = createExamFixture('exam-1', 'SingleMcq Subquestions');
+    const readingBlocks = exam.content.reading.passages[0]?.blocks ?? [];
+    const singleMcq = readingBlocks.find(
+      (block) => block.type === 'SINGLE_MCQ',
+    ) as SingleMCQBlock | undefined;
+
+    expect(singleMcq).toBeDefined();
+
+    const subStems = [
+      'Sub question one stem.',
+      'Sub question two stem.',
+      'Sub question three stem.',
+    ];
+
+    if (singleMcq) {
+      singleMcq.questions = [
+        {
+          id: 'single-q-1',
+          stem: subStems[0],
+          options: [
+            { id: 'a', text: 'One A', isCorrect: true },
+            { id: 'b', text: 'One B', isCorrect: false },
+          ],
+        },
+        {
+          id: 'single-q-2',
+          stem: subStems[1],
+          options: [
+            { id: 'a', text: 'Two A', isCorrect: false },
+            { id: 'b', text: 'Two B', isCorrect: true },
+          ],
+        },
+        {
+          id: 'single-q-3',
+          stem: subStems[2],
+          options: [
+            { id: 'a', text: 'Three A', isCorrect: true },
+            { id: 'b', text: 'Three B', isCorrect: false },
+          ],
+        },
+      ];
+    }
+
+    const output = buildExamTextExport([exam], new Date('2026-04-30T12:00:00.000Z'));
+
+    // Every SINGLE_MCQ sub-question must appear in the export, otherwise the
+    // admin "total questions" count (which includes sub-questions) lies about
+    // what the file actually contains.
+    subStems.forEach((stem) => {
+      expect(output).toContain(stem);
+    });
+
+    const exportedSubQuestions = subStems.filter((stem) => output.includes(stem)).length;
+    expect(exportedSubQuestions).toBe(subStems.length);
+
+    // Each sub-question produces its own answer-key entry.
+    expect(output).toContain('A. One A');
+    expect(output).toContain('B. Two B');
+    expect(output).toContain('A. Three A');
+  });
+
+  it('does not drop SINGLE_MCQ sub-questions across a realistic 40-question exam', () => {
+    const exam = createExamFixture('exam-40', 'Forty Questions');
+    const readingBlocks = exam.content.reading.passages[0]?.blocks ?? [];
+    const singleMcq = readingBlocks.find(
+      (block) => block.type === 'SINGLE_MCQ',
+    ) as SingleMCQBlock | undefined;
+
+    const subStems = Array.from(
+      { length: 10 },
+      (_, index) => `Sub question ${index + 1} stem.`,
+    );
+
+    if (singleMcq) {
+      singleMcq.questions = subStems.map((stem, index) => ({
+        id: `single-q-${index + 1}`,
+        stem,
+        options: [
+          { id: 'a', text: `Opt A ${index + 1}`, isCorrect: index % 2 === 0 },
+          { id: 'b', text: `Opt B ${index + 1}`, isCorrect: index % 2 === 1 },
+        ],
+      }));
+    }
+
+    const output = buildExamTextExport([exam], new Date('2026-04-30T12:00:00.000Z'));
+
+    // All 10 sub-questions must survive the export instead of collapsing into a
+    // single block-level question.
+    subStems.forEach((stem) => {
+      expect(output).toContain(stem);
+    });
+    const exportedSubQuestions = subStems.filter((stem) => output.includes(stem)).length;
+    expect(exportedSubQuestions).toBe(subStems.length);
   });
 });

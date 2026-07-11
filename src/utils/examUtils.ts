@@ -6,11 +6,139 @@ import {
   SingleMCQBlock, ShortAnswerBlock, SentenceCompletionBlock, DiagramLabelingBlock,
   FlowChartBlock, TableCompletionBlock, NoteCompletionBlock, ClassificationBlock,
   MatchingFeaturesBlock, ShortAnswerQuestion, SentenceCompletionQuestion,
-  NoteCompletionQuestion, ClassificationItem, MatchingFeature, SingleMCQQuestion
+  NoteCompletionQuestion, ClassificationItem, MatchingFeature, SingleMCQQuestion,
+  SentenceBlank, TableCell, QuestionType
 } from '../types';
 import { createDefaultConfig, normalizeExamConfig } from '../constants/examDefaults';
 import { hydrateExamState } from '../services/examAdapterService';
 import { resolveAcceptedAnswers } from './acceptedAnswers';
+
+/**
+ * A single question as far as counting, numbering, and TXT export are concerned.
+ *
+ * This is the ONE source of truth for "what questions does a block contain".
+ * Both `getBlockQuestionCount` and the TXT export derive from it, so the two can
+ * never silently disagree (the bug class that dropped SINGLE_MCQ sub-questions
+ * from the export while the count still included them).
+ */
+export interface QuestionUnit {
+  blockId: string;
+  blockType: QuestionType;
+  /** Stable id for the question/blank/label/feature this unit represents; null for block-level units (e.g. MULTI_MCQ). */
+  questionId: string | null;
+  /** Answer slots this unit occupies in global numbering (MULTI_MCQ = requiredSelections, everything else = 1). */
+  slotCount: number;
+}
+
+/** Stable grouping key for a SENTENCE_COMPLETION blank, matching the canonical count model. */
+export function sentenceBlankGroupKey(questionId: string, blank: SentenceBlank): string {
+  const groupId = normalizeScoreGroupId(blank.scoreGroupId);
+  return groupId ? `sentence:${questionId}:group:${groupId}` : `sentence:${questionId}:slot:${blank.id}`;
+}
+
+/** Stable grouping key for a TABLE_COMPLETION cell, matching the canonical count model. */
+export function tableCellGroupKey(blockId: string, cell: TableCell): string {
+  const groupId = normalizeScoreGroupId(cell.scoreGroupId);
+  return groupId ? `table:${blockId}:group:${groupId}` : `table:${blockId}:slot:${cell.id}`;
+}
+
+export const enumerateBlockQuestionUnits = (block: QuestionBlock): QuestionUnit[] => {
+  switch (block.type) {
+    case 'TFNG':
+    case 'CLOZE':
+    case 'MATCHING':
+    case 'MAP':
+    case 'SHORT_ANSWER':
+      return block.questions.map((question) => ({
+        blockId: block.id,
+        blockType: block.type,
+        questionId: question.id,
+        slotCount: 1,
+      }));
+    case 'MULTI_MCQ':
+      return [{
+        blockId: block.id,
+        blockType: block.type,
+        questionId: null,
+        slotCount: Math.max(1, block.requiredSelections),
+      }];
+    case 'SINGLE_MCQ':
+      if (Array.isArray(block.questions) && block.questions.length > 0) {
+        return block.questions.map((question) => ({
+          blockId: block.id,
+          blockType: block.type,
+          questionId: question.id,
+          slotCount: 1,
+        }));
+      }
+      return [{ blockId: block.id, blockType: block.type, questionId: null, slotCount: 1 }];
+    case 'SENTENCE_COMPLETION': {
+      const units: QuestionUnit[] = [];
+      for (const question of block.questions) {
+        const seen = new Set<string>();
+        for (const blank of question.blanks) {
+          const key = sentenceBlankGroupKey(question.id, blank);
+          if (!seen.has(key)) {
+            seen.add(key);
+            units.push({ blockId: block.id, blockType: block.type, questionId: key, slotCount: 1 });
+          }
+        }
+      }
+      return units;
+    }
+    case 'DIAGRAM_LABELING':
+      return block.labels.map((label) => ({
+        blockId: block.id,
+        blockType: block.type,
+        questionId: label.id,
+        slotCount: 1,
+      }));
+    case 'FLOW_CHART':
+      return block.steps.map((step) => ({
+        blockId: block.id,
+        blockType: block.type,
+        questionId: step.id,
+        slotCount: 1,
+      }));
+    case 'TABLE_COMPLETION': {
+      const seen = new Set<string>();
+      const units: QuestionUnit[] = [];
+      for (const cell of block.cells) {
+        const key = tableCellGroupKey(block.id, cell);
+        if (!seen.has(key)) {
+          seen.add(key);
+          units.push({ blockId: block.id, blockType: block.type, questionId: key, slotCount: 1 });
+        }
+      }
+      return units;
+    }
+    case 'NOTE_COMPLETION': {
+      const units: QuestionUnit[] = [];
+      for (const question of block.questions) {
+        for (const blank of question.blanks) {
+          units.push({ blockId: block.id, blockType: block.type, questionId: blank.id, slotCount: 1 });
+        }
+      }
+      return units;
+    }
+    case 'CLASSIFICATION':
+      return block.items.map((item) => ({
+        blockId: block.id,
+        blockType: block.type,
+        questionId: item.id,
+        slotCount: 1,
+      }));
+    case 'MATCHING_FEATURES':
+      return block.features.map((feature) => ({
+        blockId: block.id,
+        blockType: block.type,
+        questionId: feature.id,
+        slotCount: 1,
+      }));
+    default:
+      return [];
+  }
+};
 
 const normalizeScoreGroupId = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
@@ -18,62 +146,8 @@ const normalizeScoreGroupId = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-export const getBlockQuestionCount = (block: QuestionBlock): number => {
-  switch (block.type) {
-    case 'TFNG':
-      return block.questions.length;
-    case 'CLOZE':
-      return block.questions.length;
-    case 'MATCHING':
-      return block.questions.length;
-    case 'MAP':
-      return block.questions.length;
-    case 'MULTI_MCQ':
-      return block.requiredSelections;
-    case 'SINGLE_MCQ':
-      return Array.isArray(block.questions) && block.questions.length > 0 ? block.questions.length : 1;
-    case 'SHORT_ANSWER':
-      return block.questions.length;
-    case 'SENTENCE_COMPLETION':
-      return block.questions.reduce((acc, q) => {
-        const slotIds = new Set<string>();
-        q.blanks.forEach((blank) => {
-          const groupId = normalizeScoreGroupId(blank.scoreGroupId);
-          if (groupId) {
-            slotIds.add(`sentence:${q.id}:group:${groupId}`);
-          } else {
-            slotIds.add(`sentence:${q.id}:slot:${blank.id}`);
-          }
-        });
-        return acc + slotIds.size;
-      }, 0);
-    case 'DIAGRAM_LABELING':
-      return block.labels.length;
-    case 'FLOW_CHART':
-      return block.steps.length;
-    case 'TABLE_COMPLETION':
-      return (() => {
-        const slotIds = new Set<string>();
-        block.cells.forEach((cell) => {
-          const groupId = normalizeScoreGroupId(cell.scoreGroupId);
-          if (groupId) {
-            slotIds.add(`table:${block.id}:group:${groupId}`);
-          } else {
-            slotIds.add(`table:${block.id}:slot:${cell.id}`);
-          }
-        });
-        return slotIds.size;
-      })();
-    case 'NOTE_COMPLETION':
-      return block.questions.reduce((acc, q) => acc + q.blanks.length, 0);
-    case 'CLASSIFICATION':
-      return block.items.length;
-    case 'MATCHING_FEATURES':
-      return block.features.length;
-    default:
-      return 0;
-  }
-};
+export const getBlockQuestionCount = (block: QuestionBlock): number =>
+  enumerateBlockQuestionUnits(block).reduce((acc, unit) => acc + unit.slotCount, 0);
 
 export const getBlockSpan = (blocks: QuestionBlock[], startNumber: number): { startNum: number; endNum: number }[] => {
   let currentNum = startNumber;

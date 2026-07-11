@@ -342,3 +342,33 @@ Displaying compatibility checks or a student-owned start button can imply readin
 
 ### Invariant
 Compatibility checks run silently and their complete result is persisted before entering the waiting room. A runtime-backed student remains in the waiting room until server runtime hydration reports an active exam; only the proctor/server owns timer start.
+
+---
+
+## 2026-07-11: TXT Export Drops SINGLE_MCQ Sub-Questions
+
+### Symptom
+Bulk "Export to TXT" produced an incomplete file: an exam reported as N questions (e.g. 40) in the admin UI only wrote ~N-10 questions (e.g. 30). The missing questions and answer-key rows belonged to `SINGLE_MCQ` blocks that carry a `questions` array of sub-questions.
+
+### Scope
+`src/utils/examTextExport.ts` `renderBlock` `SINGLE_MCQ` case, plus the TXT export triggered from `src/components/admin/AdminExams.tsx` `handleBulkExport`.
+
+### Root Cause
+`SingleMCQBlock` has an optional `questions?: SingleMCQQuestion[]` (types.ts:226) used when one MCQ block holds several independent questions, each with its own stem/options. The canonical question count (`getBlockQuestionCount`, examUtils.ts:34) counts `block.questions.length`, matching the student renderer (QuestionRenderer.tsx `renderSingleMCQ`, gradingAnswerUtils.ts). But `renderBlock`'s `SINGLE_MCQ` case ignored `block.questions` entirely and emitted a single question from `block.stem`/`block.options`, so every sub-question beyond the first disappeared from the export (and its answer key). The deeper cause was two independent, hand-maintained definitions of "the questions in a block" — one in `getBlockQuestionCount` (count) and one in `renderBlock` (export) — which had already drifted for `SINGLE_MCQ`.
+
+### Fix (systematic)
+Introduced a single source of truth, `enumerateBlockQuestionUnits(block): QuestionUnit[]` in `src/utils/examUtils.ts`, that returns one unit per answerable slot with `{ blockId, blockType, questionId, slotCount }`. Both consumers now derive from it:
+- `getBlockQuestionCount` sums `slotCount` over the enumerated units (so count and export can never disagree on cardinality).
+- `renderBlock` in `src/utils/examTextExport.ts` was refactored to a per-block context section plus `enumerateBlockQuestionUnits(block).forEach(unit => renderUnit(...))`, with `renderUnit` switching on `unit.blockType`. `SINGLE_MCQ` renders each sub-question from `block.questions[x]` when present, falling back to block-level rendering when empty.
+Sub-block grouping (`sentenceBlankGroupKey`, `tableCellGroupKey`) and `scoreGroupId` dedup follow the count model exactly. Multi-select is emitted as one unit with `slotCount = requiredSelections`.
+
+### Regression Protection
+- `src/utils/__tests__/examTextExport.drift.test.ts` — drift guard: for a fixture exercising all 14 block types, the number of exported `Q*` answer-key rows must equal the number of units from `enumerateBlockQuestionUnits`. Mutation-verified: skipping `SINGLE_MCQ` units makes the test fail (RED).
+- `src/utils/__tests__/examTextExport.test.ts` — "exports every SINGLE_MCQ sub-question" and "does not drop SINGLE_MCQ sub-questions across a realistic 40-question exam".
+- `src/utils/__tests__/examUtils.questionCounting.test.ts` — count equals source-of-truth enumeration across all block types.
+
+### Invariant
+The TXT export and `getBlockQuestionCount`/`getExamStatsFromState` must derive question cardinality from the same `enumerateBlockQuestionUnits` enumeration. Any new question-bearing array on a block must be added there once; both count and export follow automatically. Do not re-introduce block-specific count vs. render logic in two places.
+
+### Note (separate, pre-existing, out of scope)
+`MULTI_MCQ` is rendered as one question spanning slots (e.g. `Q1-2`) while `getBlockQuestionCount` returns `requiredSelections`. This makes the canonical "total questions" count larger than the number of answer-key lines for multi-select blocks by design (one question, multiple slots). Do not "fix" by inflating the export; reconcile the counting model deliberately if the discrepancy becomes user-visible.
