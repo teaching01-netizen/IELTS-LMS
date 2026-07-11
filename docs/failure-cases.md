@@ -30,6 +30,33 @@ Purpose: turn incidents and bug fixes into durable memory for humans and AI agen
 
 ---
 
+## 2026-07-11: Student Pre-Check Made Silent (Input Form → Waiting Room, No Button)
+
+### Symptom
+After check-in, students landed on a briefing screen and had to click **Continue to waiting room** before reaching the proctor-controlled waiting room. The extra manual step confused students about when the exam actually begins.
+
+### Scope
+Student exam entry flow: `PreCheck`, `ExamEntryCard`, `Lobby`, `StudentApp` pre-check phase, and the E2E student helpers/specs. No backend or runtime timing changes.
+
+### Root Cause
+`PreCheck` coupled the silent compatibility checks + audit persistence to a user-driven button. Advancing to the waiting room (`setPhase('lobby')`) only happened on click, so there was no way to reach the waiting room without an extra action.
+
+### Fix
+- Extracted the pure check logic into `src/components/student/preCheckChecks.ts` (`runPreCheckChecks`).
+- Rewrote `PreCheck` to render the waiting room immediately and run the checks + persist the pre-check **silently on mount**, retrying idempotently (2s backoff) until it succeeds. No buttons.
+- Folded the essential briefing guidance (timer starts only when the proctor starts; autosave; reconnect same device) into `ExamEntryCard` waiting content, and removed the now-dead `briefing` mode.
+- E2E `completePreCheckIfPresent` no longer clicks a button — it only settles on the resulting waiting/exam state.
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/PreCheck.test.tsx` (silent auto-submit, no buttons, retry-on-failure), `src/components/student/__tests__/preCheckChecks.test.ts`, `src/components/student/__tests__/Lobby.test.tsx` (folded guidance), `src/components/student/__tests__/StudentProviderRuntime.test.tsx` (pre-check phase renders the waiting room).
+- E2E: `e2e/student-precheck.spec.ts` (form → waiting room, no briefing/continue button, silent precheck POST persisted).
+- Docs updated: `docs/superpowers/specs/2026-07-11-student-exam-briefing-waiting-room-design.md`.
+
+### Invariant
+Compatibility checks are advisory but MUST still be persisted for audit — persistence stays idempotent (idempotency key in `recordPreCheckResult`) and retries in the background; failing/incompatible checks never block reaching the waiting room. Students still expose no start control; the exam opens only when the proctor's runtime goes live, which remains the sole production `lobby → exam` transition.
+
+---
+
 ## 2026-05-16: Objective Text Grading Ignores Word-Limit Rules
 
 ### Symptom

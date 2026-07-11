@@ -649,7 +649,6 @@ export function StudentApp({
               await attemptActions.recordPreCheckResult(result);
               runtimeActions.setPhase('lobby');
             }}
-            onExit={onExit}
           />
         </main>
         {finalSubmitOverlay}

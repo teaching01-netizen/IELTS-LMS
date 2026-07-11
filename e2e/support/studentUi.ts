@@ -202,57 +202,29 @@ export async function openStudentCheckIn(page: Page, scheduleId: string) {
 }
 
 export async function completePreCheckIfPresent(page: Page) {
-  const briefing = page.getByRole('heading', { name: 'Before you continue' });
-  await briefing.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
-  const isBriefingVisible = await briefing.isVisible().catch(() => false);
-  if (!isBriefingVisible) {
-    return;
-  }
-
-  const continueButton = page.getByRole('button', { name: 'Continue to waiting room' });
+  // The briefing/"Continue to waiting room" step was removed: after check-in the
+  // student lands directly in the waiting room while compatibility checks are run
+  // and persisted silently. This helper now only settles on the resulting state
+  // (waiting room, lobby preview, or an already-started exam) without any click.
   const waitingForStart = page.getByRole('heading', { name: 'Waiting for the exam to start' });
   const startExam = page.getByRole('button', { name: 'Start Exam' });
   const answerField = page.getByLabel(/Answer for question/i).first();
   const writingEditor = page.locator('[contenteditable="true"]').first();
-  const stepIndicator = page.getByText(/Step\\s+\\d+\\s+of\\s+\\d+/i).first();
 
   const timeoutMs = Number(process.env['E2E_PROD_PRECHECK_SAVE_TIMEOUT_MS'] ?? '120000');
 
-  const attempts = 5;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (!(await briefing.isVisible().catch(() => false))) return;
-    if (await waitingForStart.isVisible().catch(() => false)) return;
-    if (await startExam.isVisible().catch(() => false)) return;
-    if (await answerField.isVisible().catch(() => false)) return;
-    if (await writingEditor.isVisible().catch(() => false)) return;
-
-    await expect(continueButton).toBeEnabled({ timeout: 60_000 });
-    const stepBefore = (await stepIndicator.textContent().catch(() => ''))?.trim() ?? '';
-
-    // In production, a transient permission overlay can intercept pointer events.
-    // Force-click to progress once the button is enabled.
-    await continueButton.click({ force: true });
-
-    await expect
-      .poll(
-        async () => {
-          if (await waitingForStart.isVisible().catch(() => false)) return 'waiting';
-          if (await startExam.isVisible().catch(() => false)) return 'lobby';
-          if (await answerField.isVisible().catch(() => false)) return 'answer';
-          if (await writingEditor.isVisible().catch(() => false)) return 'writing';
-          if (!(await briefing.isVisible().catch(() => false))) return 'detached';
-
-          const stepAfter = (await stepIndicator.textContent().catch(() => ''))?.trim() ?? '';
-          if (stepAfter && stepBefore && stepAfter !== stepBefore) return 'step_changed';
-
-          return 'pending';
-        },
-        { timeout: Math.max(30_000, timeoutMs) },
-      )
-      .not.toBe('pending');
-  }
-
-  throw new Error('Exam briefing did not continue to the waiting room after repeated attempts.');
+  await expect
+    .poll(
+      async () => {
+        if (await waitingForStart.isVisible().catch(() => false)) return 'waiting';
+        if (await startExam.isVisible().catch(() => false)) return 'lobby';
+        if (await answerField.isVisible().catch(() => false)) return 'answer';
+        if (await writingEditor.isVisible().catch(() => false)) return 'writing';
+        return 'pending';
+      },
+      { timeout: Math.max(30_000, timeoutMs) },
+    )
+    .not.toBe('pending');
 }
 
 export async function startLobbyIfPresent(page: Page) {
@@ -308,7 +280,6 @@ export async function openStudentSessionWithRetry(
   const targetUrl = `/student/${scheduleId}/${candidateId}`;
   const loadingError = page.getByRole('heading', { name: 'Loading Error' });
   const retryButton = page.getByRole('button', { name: 'Retry' });
-  const preCheckHeading = page.getByRole('heading', { name: 'Before you continue' });
   const waitingRoomHeading = page.getByRole('heading', { name: 'Waiting for the exam to start' });
   const answerField = page.getByLabel('Answer for question 1');
   const finishButton = page.getByRole('button', { name: 'Finish' });
@@ -334,11 +305,6 @@ export async function openStudentSessionWithRetry(
       if (hasLoadingError) {
         shouldRetry = true;
         break;
-      }
-
-      const hasPreCheck = await preCheckHeading.isVisible().catch(() => false);
-      if (hasPreCheck) {
-        return;
       }
 
       if (await waitingRoomHeading.isVisible().catch(() => false)) {

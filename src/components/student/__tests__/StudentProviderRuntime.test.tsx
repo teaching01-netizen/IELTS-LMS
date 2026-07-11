@@ -311,8 +311,8 @@ describe('Student Provider Runtime Integration', () => {
       />
     );
 
-    // Should show pre-check screen when not runtime-backed
-    expect(screen.getByRole('heading', { name: /before you continue/i })).toBeInTheDocument();
+    // Pre-check phase now shows the waiting room directly (no briefing button)
+    expect(screen.getByRole('heading', { name: /waiting for the exam to start/i })).toBeInTheDocument();
   });
 
   it('handles runtime not_started status by showing blocking overlay', () => {
@@ -425,7 +425,7 @@ describe('Student Provider Runtime Integration', () => {
 
     // Should not crash when runtimeSnapshot is null
     // This is a regression test for error handling
-    expect(screen.getByRole('heading', { name: /before you continue/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /waiting for the exam to start/i })).toBeInTheDocument();
   });
 
   it('handles partial runtime snapshot data gracefully', () => {

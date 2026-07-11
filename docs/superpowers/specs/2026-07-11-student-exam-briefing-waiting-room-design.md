@@ -6,9 +6,9 @@ Replace the student-facing system-check screen with an exam briefing, then keep 
 
 ## Student flow
 
-1. Show the exam title, candidate, enabled sections, configured section durations, total configured duration, and essential timer/recovery guidance.
-2. Run the existing compatibility checks silently. Selecting **Continue to waiting room** persists the existing pre-check payload and audit record before advancing.
-3. Show the same card shell in a waiting state. Keep exam information visible, replace actions with **Waiting for proctor**, and expose no student start control.
+1. After the student submits the check-in form, take them straight into the waiting room. There is no intermediate briefing screen and no "continue"/"next" button.
+2. Run the existing compatibility checks silently on arrival and persist the pre-check payload and audit record in the background, retrying idempotently until it succeeds. No student action is required.
+3. The waiting room shows the exam title, candidate, enabled sections, configured section durations, total configured duration, and the essential timer/recovery guidance, with **Waiting for proctor** and no student start control.
 4. Transition automatically when the server runtime becomes live. The server deadline remains authoritative for elapsed and remaining time.
 
 ## Content contract
