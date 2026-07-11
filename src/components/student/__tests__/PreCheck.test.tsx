@@ -32,9 +32,10 @@ describe('PreCheck', () => {
     expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.getByText('C-42')).toBeInTheDocument();
     expect(screen.getByText('1 hour 30 minutes')).toBeInTheDocument();
-    expect(screen.getByText('Waiting for proctor')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing your connection');
+    expect(screen.queryByText('Waiting for proctor')).not.toBeInTheDocument();
     expect(
-      screen.getByText('The timer will begin when the proctor starts the exam.', { exact: false }),
+      screen.getByText('The timer starts when the proctor begins the exam.', { exact: false }),
     ).toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: 'Continue to waiting room' })).not.toBeInTheDocument();
@@ -55,5 +56,6 @@ describe('PreCheck', () => {
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(2), { timeout: 4_000 });
     expect(screen.getByRole('heading', { name: 'Waiting for the exam to start' })).toBeInTheDocument();
+    expect(screen.getByText(/having trouble reaching the server/i)).toBeInTheDocument();
   });
 });

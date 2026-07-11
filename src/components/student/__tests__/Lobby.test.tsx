@@ -30,16 +30,28 @@ describe('Lobby', () => {
     expect(screen.getByText('Test Exam')).toBeInTheDocument();
     expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.getByText('C-42')).toBeInTheDocument();
+    expect(screen.getByText('Exam').className).toContain('text-gray-600');
     const sections = screen.getAllByTestId('exam-section');
     expect(sections[0]).toHaveTextContent('Reading');
     expect(sections[0]).toHaveTextContent('1 hour');
     expect(sections[1]).toHaveTextContent('Listening');
     expect(sections[1]).toHaveTextContent('30 minutes');
     expect(screen.getByText('1 hour 30 minutes')).toBeInTheDocument();
-    expect(screen.getByText('You are ready. Please keep this page open. The exam will begin automatically when the proctor starts it.')).toBeInTheDocument();
-    expect(screen.getByText('Your exam timer will not begin while you are waiting. The timer will begin when the proctor starts the exam.')).toBeInTheDocument();
-    expect(screen.getByText('Your answers will be saved automatically. If your connection is interrupted, return using the same device and browser. Refreshing or leaving the page will not pause the timer after the exam begins.')).toBeInTheDocument();
-    expect(screen.getByText('Waiting for proctor')).toBeInTheDocument();
+    expect(
+      screen.getByText("You're checked in and waiting for the exam to start. Please keep this page open."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Your exam timer will not begin while you are waiting. The timer starts when the proctor begins the exam.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Your answers save automatically. If your connection drops, return on the same device and browser. Once the exam begins, refreshing or leaving this page will not pause the timer.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for the proctor to start the exam');
+    expect(screen.queryByText('Waiting for proctor')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /start exam/i })).not.toBeInTheDocument();
   });
 

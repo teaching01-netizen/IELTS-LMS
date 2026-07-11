@@ -11,5 +11,5 @@ interface LobbyProps {
 }
 
 export function Lobby({ state, candidateName, candidateId, onPreviewStart }: LobbyProps) {
-  return <ExamEntryCard config={state.config} examTitle={state.title} candidateName={candidateName} candidateId={candidateId} footer={onPreviewStart ? <Button variant="primary" onClick={onPreviewStart}>Start Exam</Button> : undefined} />;
+  return <ExamEntryCard config={state.config} examTitle={state.title} candidateName={candidateName} candidateId={candidateId} status="waiting" footer={onPreviewStart ? <Button variant="primary" onClick={onPreviewStart}>Start Exam</Button> : undefined} />;
 }
