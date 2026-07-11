@@ -137,8 +137,7 @@ export function QuestionNavigator({
                     className={`
                       relative ${question.isMulti ? 'px-2.5 md:px-3 min-w-[2.75rem] md:min-w-[3.25rem]' : 'w-11 md:w-12'} h-11 md:h-12 rounded-md flex items-center justify-center text-[length:var(--student-control-font-size)] font-medium transition-all
                       ${isCurrent ? 'ring-2 ring-blue-500 ring-offset-2' : ''}
-                      ${isFullyComplete ? 'bg-green-500 text-white hover:bg-green-600' : isAnswered ? 'bg-green-200 text-green-800' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
-                      ${isFlagged && !isAnswered ? 'bg-amber-100 text-amber-800 border border-amber-300' : ''}
+                      ${isFlagged ? 'bg-amber-100 text-amber-800 border border-amber-300' : isFullyComplete ? 'bg-green-500 text-white hover:bg-green-600' : isAnswered ? 'bg-green-200 text-green-800' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
                     `}
                   >
                     {getQuestionNumberLabel(questions, question.id)}

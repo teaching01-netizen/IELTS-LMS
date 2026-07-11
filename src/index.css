@@ -121,6 +121,7 @@
   }
 
   dialog[open] {
+    margin: auto;
     max-height: 90vh;
     max-width: 90vw;
   }

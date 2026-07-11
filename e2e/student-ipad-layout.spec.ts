@@ -25,6 +25,17 @@ async function expectThinTabletResizer(page: Page, testId: string) {
   expect(box!.width).toBeLessThanOrEqual(32);
 }
 
+async function expectCenteredInViewport(page: Page, label: RegExp) {
+  const dialog = page.getByRole('dialog', { name: label });
+  await expect(dialog).toBeVisible();
+  const box = await dialog.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(Math.abs(box!.x + box!.width / 2 - viewport!.width / 2)).toBeLessThanOrEqual(1);
+  expect(Math.abs(box!.y + box!.height / 2 - viewport!.height / 2)).toBeLessThanOrEqual(1);
+}
+
 test.describe('student exam iPad layout', () => {
   test.use({ storageState: BUILDER_STORAGE_STATE_PATH });
 
@@ -68,6 +79,19 @@ test.describe('student exam iPad layout', () => {
     expect(passageBox).not.toBeNull();
     expect(questionBox).not.toBeNull();
     expect(passageBox!.right).toBeLessThanOrEqual(questionBox!.x + 20);
+  });
+
+  test('Question Navigator stays centered in both iPad orientations', async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await openPreview(page, 'reading');
+
+    await page.getByRole('button', { name: /open question navigator/i }).click();
+    await expectCenteredInViewport(page, /question navigator/i);
+
+    await page.getByRole('button', { name: /close question navigator/i }).click();
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.getByRole('button', { name: /open question navigator/i }).click();
+    await expectCenteredInViewport(page, /question navigator/i);
   });
 
   test('Writing remains usable in both iPad orientations', async ({ page }) => {

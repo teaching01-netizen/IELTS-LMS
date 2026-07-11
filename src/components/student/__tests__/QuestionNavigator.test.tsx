@@ -12,6 +12,7 @@ const mockQuestions: StudentQuestionDescriptor[] = [
     groupId: 'group-1',
     groupLabel: 'Passage 1',
     rootId: 'q1',
+    answerKey: 'q1',
     isMulti: false,
     answerType: 'scalar',
   },
@@ -22,6 +23,7 @@ const mockQuestions: StudentQuestionDescriptor[] = [
     groupId: 'group-1',
     groupLabel: 'Passage 1',
     rootId: 'q2',
+    answerKey: 'q2',
     isMulti: false,
     answerType: 'scalar',
   },
@@ -32,6 +34,7 @@ const mockQuestions: StudentQuestionDescriptor[] = [
     groupId: 'group-2',
     groupLabel: 'Passage 2',
     rootId: 'q3',
+    answerKey: 'q3',
     isMulti: false,
     answerType: 'scalar',
   },
@@ -88,6 +91,38 @@ describe('QuestionNavigator', () => {
       />,
     );
     expect(screen.getByText(/Flagged \(2\)/)).toBeInTheDocument();
+  });
+
+  it('keeps an answered question visibly flagged until the student unflags it', () => {
+    const { rerender } = render(
+      <QuestionNavigator
+        questions={mockQuestions}
+        answers={{}}
+        flags={{ q1: true }}
+        currentQuestionId={null}
+        onNavigate={() => {}}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '1' })).toHaveClass('bg-amber-100');
+
+    rerender(
+      <QuestionNavigator
+        questions={mockQuestions}
+        answers={{ q1: 'A' }}
+        flags={{ q1: true }}
+        currentQuestionId={null}
+        onNavigate={() => {}}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '1' })).toHaveClass(
+      'bg-amber-100',
+      'text-amber-800',
+      'border-amber-300',
+    );
   });
 
   it('calls onClose when close button is clicked', () => {

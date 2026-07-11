@@ -2,6 +2,29 @@
 
 Purpose: keep student-facing interaction rules explicit so future UI changes do not accidentally weaken exam usability or integrity.
 
+## Student Exam Dialog Positioning
+
+### Owning Module
+
+Native modal positioning is owned by the shared dialog base styles in `src/index.css`. Student consumers include Question Navigator, Accessibility Settings, and the Time Extension request dialog.
+
+### Invariant
+
+Every open native modal dialog must remain centered in the visual viewport. Tailwind's element reset must not override the automatic margins required for native dialog centering.
+
+Trigger-anchored popovers and dropdowns are not modal dialogs and remain positioned relative to their controls.
+
+### Must Not Break
+
+- Native `showModal()` top-layer, focus, inert-background, close, and backdrop behavior must remain intact.
+- Dialogs must retain their `90vw` and `90vh` viewport limits and internal scrolling behavior.
+- Custom warning, submission, integrity, and blocking overlays must keep their existing explicit positioning and behavior.
+
+### Regression Protection
+
+- `src/components/student/__tests__/StudentDialogCss.test.ts`
+- `e2e/student-ipad-layout.spec.ts`
+
 ## Proctor Overview Session Buckets
 
 ### Owning Module
