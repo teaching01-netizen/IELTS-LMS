@@ -47,9 +47,8 @@ The frontend queued the `flag` mutation and mirrored it into local durable state
 - No database migration or navigation behavior change was required.
 
 ### Regression Protection
-- Frontend repository/backend contract: `src/services/__tests__/studentAttemptRepository.backend.test.ts`
-- Backend API route contract: `backend/crates/api/src/routes/student.rs`
-- Existing application flag behavior: `backend/crates/application/src/delivery/mod.rs`
+- Tests: `src/services/__tests__/studentAttemptRepository.backend.test.ts`, `backend/crates/api/src/routes/student.rs`, `backend/crates/application/src/delivery/mod.rs`
+- Diagnostics: none added
 - Rules/Docs updated: `docs/failure-cases.md`, `docs/architecture/student-mutation-outbox.md`
 
 ### Invariant

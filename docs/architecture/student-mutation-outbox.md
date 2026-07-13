@@ -5,7 +5,7 @@
 The student app persists answer changes and review flags as an **append-only mutation queue** that is:
 
 - coalesced locally (latest write wins per logical key),
-- written durably (local mirror + checkpoint),
+- written to a durable local mirror for all queued mutations, with checkpoint writes for answer-bearing queues,
 - flushed to the backend in batches (`mutations:batch`) when online,
 - and reflected back into the UI via `syncState` + `pendingMutationCount`.
 
