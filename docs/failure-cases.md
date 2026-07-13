@@ -30,6 +30,33 @@ Purpose: turn incidents and bug fixes into durable memory for humans and AI agen
 
 ---
 
+## 2026-07-13: Student Review Mark Disappears After a Later Answer Save
+
+### Symptom
+A student marked Q20 for review, navigated to and answered Q12, and then saw the Q20 Mark state disappear.
+
+### Scope
+Student attempt persistence and the strict frontend-backend mutation contract. This was a durability failure, distinct from the 2026-07-11 Question Navigator styling fix that made flagged questions visually amber even when answered.
+
+### Root Cause
+The frontend queued the `flag` mutation and mirrored it into local durable state, but `toOperationCommand` did not map it to a wire command. A chunk containing only flag mutations therefore produced no mapped commands and was removed from the pending queue without an HTTP POST. When a later answer save returned the authoritative attempt without the Q20 flag, that response replaced the local state and the Mark disappeared.
+
+### Fix
+- Added an additive strict frontend mapping from local `flag` mutations to `SetFlag` with a boolean `value`.
+- Added the strict backend `SetFlag` command and mapped it to the existing domain `Flag` mutation, preserving the existing authentication, section validation, objective-lock enforcement, and append-only/idempotent persistence path.
+- No database migration or navigation behavior change was required.
+
+### Regression Protection
+- Frontend repository/backend contract: `src/services/__tests__/studentAttemptRepository.backend.test.ts`
+- Backend API route contract: `backend/crates/api/src/routes/student.rs`
+- Existing application flag behavior: `backend/crates/application/src/delivery/mod.rs`
+- Rules/Docs updated: `docs/failure-cases.md`, `docs/architecture/student-mutation-outbox.md`
+
+### Invariant
+Student-visible Mark/Unmark state must match the persisted attempt, be idempotent, and survive later answer saves, refresh, and reconnect. Only intentional section-transition pruning may remove pending flags that belong to a different section.
+
+---
+
 ## 2026-07-11: Student Pre-Check Made Silent (Input Form → Waiting Room, No Button)
 
 ### Symptom
