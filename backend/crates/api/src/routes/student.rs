@@ -1599,13 +1599,19 @@ mod tests {
                 "type": "SetFlag",
                 "questionId": "q1",
                 "value": true
+            }, {
+                "mutationId": "m-flag-2",
+                "baseRevision": 8,
+                "type": "SetFlag",
+                "questionId": "q2",
+                "value": false
             }]
         });
 
         let (attempt_id, mutations) = parse_mutation_batch_request(payload).unwrap();
 
         assert_eq!(attempt_id, "attempt-1");
-        assert_eq!(mutations.len(), 1);
+        assert_eq!(mutations.len(), 2);
         assert_eq!(mutations[0].id, "m-flag-1");
         assert_eq!(mutations[0].base_revision, Some(7));
         assert_eq!(
@@ -1613,6 +1619,15 @@ mod tests {
             MutationCommand::Flag(QuestionValueMutationPayload {
                 question_id: "q1".to_owned(),
                 value: Value::Bool(true),
+            })
+        );
+        assert_eq!(mutations[1].id, "m-flag-2");
+        assert_eq!(mutations[1].base_revision, Some(8));
+        assert_eq!(
+            mutations[1].command,
+            MutationCommand::Flag(QuestionValueMutationPayload {
+                question_id: "q2".to_owned(),
+                value: Value::Bool(false),
             })
         );
     }
@@ -1630,8 +1645,8 @@ mod tests {
             }]
         });
 
-        let parsed = serde_json::from_value::<ApiMutationBatchRequest>(payload);
-        assert!(parsed.is_err());
+        let err = parse_mutation_batch_request(payload).unwrap_err();
+        assert_eq!(err.code, "VALIDATION_ERROR");
     }
 
     #[test]
@@ -1648,8 +1663,8 @@ mod tests {
             }]
         });
 
-        let parsed = serde_json::from_value::<ApiMutationBatchRequest>(payload);
-        assert!(parsed.is_err());
+        let err = parse_mutation_batch_request(payload).unwrap_err();
+        assert_eq!(err.code, "VALIDATION_ERROR");
     }
 
     #[test]
