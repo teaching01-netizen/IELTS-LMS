@@ -633,6 +633,170 @@ describe('studentAttemptRepository backend mode', () => {
     expect(cachedAttempts[0]?.answers).toEqual({ q1: 'A' });
   });
 
+  it('persists flag and unflag mutations across later answer flushes and refresh hydration', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          schedule: buildSchedule(),
+          version: buildVersion(),
+          runtime: null,
+          attempt: buildBackendAttempt(),
+          attemptCredential: buildAttemptCredential(),
+          degradedLiveMode: false,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          attempt: buildBackendAttempt({
+            flags: { q20: true },
+            updatedAt: '2026-01-01T09:01:00.000Z',
+            revision: 2,
+          }),
+          appliedMutationCount: 1,
+          serverAcceptedThroughSeq: 1,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          attempt: buildBackendAttempt({
+            answers: { q12: 'A' },
+            flags: { q20: true },
+            updatedAt: '2026-01-01T09:02:00.000Z',
+            revision: 3,
+          }),
+          appliedMutationCount: 1,
+          serverAcceptedThroughSeq: 2,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          attempt: buildBackendAttempt({
+            answers: { q12: 'A' },
+            flags: { q20: false },
+            updatedAt: '2026-01-01T09:03:00.000Z',
+            revision: 4,
+          }),
+          appliedMutationCount: 1,
+          serverAcceptedThroughSeq: 3,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          attempt: buildBackendAttempt({
+            answers: { q12: 'A' },
+            flags: { q20: false },
+            updatedAt: '2026-01-01T09:03:00.000Z',
+            revision: 4,
+          }),
+          attemptCredential: buildAttemptCredential(),
+          runtime: null,
+        }),
+      );
+    global.fetch = fetchMock as typeof fetch;
+
+    const attempt = await studentAttemptRepository.createAttempt({
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      currentModule: 'reading',
+    });
+
+    await studentAttemptRepository.savePendingMutations(attempt.id, [
+      {
+        id: 'mutation-flag-q20',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-01T09:00:30.000Z',
+        type: 'flag',
+        payload: { questionId: 'q20', value: true },
+      },
+    ]);
+    await studentAttemptRepository.saveAttempt({
+      ...attempt,
+      flags: { q20: true },
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).mutations).toEqual([
+      {
+        mutationId: 'mutation-flag-q20',
+        baseRevision: 1,
+        type: 'SetFlag',
+        questionId: 'q20',
+        value: true,
+      },
+    ]);
+    let cachedAttempt = (await studentAttemptRepository.getAttemptsByScheduleId('sched-1'))[0];
+    expect(cachedAttempt?.flags.q20).toBe(true);
+
+    await studentAttemptRepository.savePendingMutations(attempt.id, [
+      {
+        id: 'mutation-answer-q12',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-01T09:01:30.000Z',
+        type: 'answer',
+        payload: { questionId: 'q12', value: 'A' },
+      },
+    ]);
+    await studentAttemptRepository.saveAttempt({
+      ...cachedAttempt!,
+      answers: { q12: 'A' },
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)).mutations).toEqual([
+      {
+        mutationId: 'mutation-answer-q12',
+        baseRevision: 2,
+        type: 'SetScalar',
+        questionId: 'q12',
+        value: 'A',
+      },
+    ]);
+    cachedAttempt = (await studentAttemptRepository.getAttemptsByScheduleId('sched-1'))[0];
+    expect(cachedAttempt?.recovery.serverAcceptedThroughSeq).toBe(2);
+    expect(cachedAttempt?.flags.q20).toBe(true);
+
+    await studentAttemptRepository.savePendingMutations(attempt.id, [
+      {
+        id: 'mutation-unflag-q20',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-01T09:02:30.000Z',
+        type: 'flag',
+        payload: { questionId: 'q20', value: false },
+      },
+    ]);
+    await studentAttemptRepository.saveAttempt({
+      ...cachedAttempt!,
+      flags: { q20: false },
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body)).mutations).toEqual([
+      {
+        mutationId: 'mutation-unflag-q20',
+        baseRevision: 3,
+        type: 'SetFlag',
+        questionId: 'q20',
+        value: false,
+      },
+    ]);
+
+    const refreshedAttempt = await studentAttemptRepository.getAttemptByScheduleId(
+      'sched-1',
+      'student-sched-1-alice',
+    );
+    expect(refreshedAttempt?.flags.q20).toBe(false);
+
+    cachedAttempt = (await studentAttemptRepository.getAttemptsByScheduleId('sched-1'))[0];
+    expect(cachedAttempt?.flags.q20).toBe(false);
+  });
+
   it('serializes concurrent saveAttempt flushes for the same attempt to avoid duplicate mutation batches', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
     const deferredBatch = createDeferredResponse();

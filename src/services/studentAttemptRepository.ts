@@ -1039,6 +1039,13 @@ type OperationCommandPayload =
       baseRevision: number;
       type: 'ClearEssayText';
       taskId: string;
+    }
+  | {
+      mutationId: string;
+      baseRevision: number;
+      type: 'SetFlag';
+      questionId: string;
+      value: boolean;
     };
 
 function toOperationCommand(
@@ -1201,6 +1208,21 @@ function toOperationCommand(
       baseRevision,
       type: 'ClearEssayText',
       taskId,
+    };
+  }
+
+  if (mutation.type === 'flag') {
+    const questionId = mutation.payload.questionId;
+    const value = mutation.payload.value;
+    if (typeof questionId !== 'string' || !questionId.trim() || typeof value !== 'boolean') {
+      return null;
+    }
+    return {
+      mutationId: mutation.id,
+      baseRevision,
+      type: 'SetFlag',
+      questionId,
+      value,
     };
   }
 
