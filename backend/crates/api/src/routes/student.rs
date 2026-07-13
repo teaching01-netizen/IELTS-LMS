@@ -344,6 +344,11 @@ enum ApiMutationCommandPayload {
         #[serde(rename = "questionId")]
         question_id: String,
     },
+    SetFlag {
+        #[serde(rename = "questionId")]
+        question_id: String,
+        value: bool,
+    },
     SetEssayText {
         #[serde(rename = "taskId")]
         task_id: String,
@@ -394,6 +399,12 @@ impl ApiMutationCommandPayload {
             Self::ClearChoice { question_id } => {
                 MutationCommand::ClearChoice(QuestionIdMutationPayload {
                     question_id: question_id.clone(),
+                })
+            }
+            Self::SetFlag { question_id, value } => {
+                MutationCommand::Flag(QuestionValueMutationPayload {
+                    question_id: question_id.clone(),
+                    value: Value::Bool(*value),
                 })
             }
             Self::SetEssayText { task_id, value } => {
@@ -1576,6 +1587,69 @@ mod tests {
             }
             other => panic!("Expected SetSlot command, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn mutation_batch_accepts_set_flag_and_preserves_base_revision() {
+        let payload = json!({
+            "attemptId": "attempt-1",
+            "mutations": [{
+                "mutationId": "m-flag-1",
+                "baseRevision": 7,
+                "type": "SetFlag",
+                "questionId": "q1",
+                "value": true
+            }]
+        });
+
+        let (attempt_id, mutations) = parse_mutation_batch_request(payload).unwrap();
+
+        assert_eq!(attempt_id, "attempt-1");
+        assert_eq!(mutations.len(), 1);
+        assert_eq!(mutations[0].id, "m-flag-1");
+        assert_eq!(mutations[0].base_revision, Some(7));
+        assert_eq!(
+            mutations[0].command,
+            MutationCommand::Flag(QuestionValueMutationPayload {
+                question_id: "q1".to_owned(),
+                value: Value::Bool(true),
+            })
+        );
+    }
+
+    #[test]
+    fn mutation_batch_set_flag_rejects_string_value() {
+        let payload = json!({
+            "attemptId": "attempt-1",
+            "mutations": [{
+                "mutationId": "m-flag-1",
+                "baseRevision": 0,
+                "type": "SetFlag",
+                "questionId": "q1",
+                "value": "true"
+            }]
+        });
+
+        let parsed = serde_json::from_value::<ApiMutationBatchRequest>(payload);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn mutation_batch_set_flag_rejects_unknown_command_fields() {
+        let payload = json!({
+            "attemptId": "attempt-1",
+            "mutations": [{
+                "mutationId": "m-flag-1",
+                "baseRevision": 0,
+                "type": "SetFlag",
+                "questionId": "q1",
+                "value": true,
+                "answers": ["A", "B"]
+            }]
+        });
+
+        let parsed = serde_json::from_value::<ApiMutationBatchRequest>(payload);
+        assert!(parsed.is_err());
     }
 
     #[test]
