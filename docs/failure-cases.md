@@ -43,7 +43,7 @@ The frontend queued the `flag` mutation and mirrored it into local durable state
 
 ### Fix
 - Added an additive strict frontend mapping from local `flag` mutations to `SetFlag` with a boolean `value`.
-- Added the strict backend `SetFlag` command and mapped it to the existing domain `Flag` mutation, preserving the existing authentication, section validation, objective-lock enforcement, and append-only/idempotent persistence path.
+- Added the strict backend `SetFlag` command and mapped it to the existing domain `Flag` mutation, preserving the existing authentication, section validation, objective-lock enforcement, append-only/idempotent persistence path, and audit/trace behavior.
 - No database migration or navigation behavior change was required.
 
 ### Regression Protection
