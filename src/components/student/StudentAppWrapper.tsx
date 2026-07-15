@@ -50,7 +50,10 @@ export function StudentAppWrapper({
     ].join(':')
   }`;
   const app = (
-    <StudentHighlightPersistenceProvider namespace={highlightPersistenceNamespace}>
+    <StudentHighlightPersistenceProvider
+      key={highlightPersistenceNamespace}
+      namespace={highlightPersistenceNamespace}
+    >
       <StudentUIProvider>
         <KeyboardProvider>
           <StudentApp

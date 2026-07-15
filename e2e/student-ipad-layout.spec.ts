@@ -167,6 +167,47 @@ test.describe('student exam iPad layout', () => {
     await expect(page.getByRole('button', { name: /apply .* highlight/i })).toHaveCount(0);
   });
 
+  test('Reading question copy highlights and erases without changing answer controls', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openPreview(page, 'reading');
+
+    const questionPane = page.getByTestId('reading-question-pane');
+    const answerControls = questionPane.locator('input, select, textarea');
+    expect(await answerControls.count()).toBeGreaterThan(0);
+    const answerOwner = answerControls
+      .first()
+      .locator('xpath=ancestor::*[.//*[@data-student-highlightable="true"]][1]');
+    const questionSurface = answerOwner
+      .locator('[data-student-highlightable="true"]')
+      .filter({ hasText: /[\s\S]{4}/ })
+      .first();
+    await expect(questionSurface).toBeVisible();
+    const questionText = (await questionSurface.textContent()) ?? '';
+    expect(questionText.length).toBeGreaterThanOrEqual(4);
+    const selectionEnd = Math.min(4, questionText.length);
+
+    const snapshotAnswerControls = () =>
+      answerControls.evaluateAll((controls) =>
+        controls.map((control) => ({
+          checked: control instanceof HTMLInputElement ? control.checked : null,
+          value: (control as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value,
+        })),
+      );
+    const answerStateBefore = await snapshotAnswerControls();
+
+    const highlightButton = page.getByRole('button', { name: 'Highlight' });
+    const eraseButton = page.getByRole('button', { name: 'Erase highlights' });
+    await highlightButton.click();
+    await completeHighlightSelection(questionSurface, 0, selectionEnd);
+    await expect(questionSurface.locator('mark[data-highlighted="true"]')).toHaveCount(1);
+    expect(await snapshotAnswerControls()).toEqual(answerStateBefore);
+
+    await eraseButton.click();
+    await completeHighlightSelection(questionSurface, 0, selectionEnd);
+    await expect(questionSurface.locator('mark[data-highlighted="true"]')).toHaveCount(0);
+    expect(await snapshotAnswerControls()).toEqual(answerStateBefore);
+  });
+
   test('Question Navigator stays centered in both iPad orientations', async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await openPreview(page, 'reading');
