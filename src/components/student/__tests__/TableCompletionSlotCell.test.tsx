@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TableCompletionSlotCell } from '../TableCompletionSlotCell';
 
 vi.mock('../ProtectedInput', () => ({
-  ProtectedInput: ({ value, onChange, ...props }: any) => (
+  ProtectedInput: ({ value, onChange, sessionId: _sessionId, studentId: _studentId, ...props }: any) => (
     <input
       {...props}
       value={value ?? ''}
@@ -15,11 +15,14 @@ vi.mock('../ProtectedInput', () => ({
 }));
 
 vi.mock('../FormattedText', () => ({
-  FormattedText: ({ text, ...props }: any) => <span {...props}>{text}</span>,
+  FormattedText: ({ text, highlightSurfaceId, className }: any) => (
+    <span data-highlight-surface-id={highlightSurfaceId} className={className}>{text}</span>
+  ),
 }));
 
 const defaultProps = {
   slotId: 'slot-1',
+  highlightSurfaceIdPrefix: 'question:table-1:slot-1',
   isActive: false,
   isFlagged: false,
   promptPrefixText: 'The answer is',
@@ -59,6 +62,14 @@ describe('TableCompletionSlotCell', () => {
     );
     expect(screen.getByText('The answer is')).toBeInTheDocument();
     expect(screen.getByText('.')).toBeInTheDocument();
+    expect(screen.getByText('The answer is')).toHaveAttribute(
+      'data-highlight-surface-id',
+      'question:table-1:slot-1:prefix',
+    );
+    expect(screen.getByText('.')).toHaveAttribute(
+      'data-highlight-surface-id',
+      'question:table-1:slot-1:suffix',
+    );
   });
 
   it('renders the input with correct aria-label', () => {

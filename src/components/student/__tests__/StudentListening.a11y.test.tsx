@@ -1,9 +1,18 @@
-import React from 'react';
-import { render, screen } from '@testing-library/react';
+import React, { useEffect } from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { createDefaultConfig } from '../../../constants/examDefaults';
 import type { ExamState } from '../../../types';
 import { StudentListening } from '../StudentListening';
+import { StudentHighlightPersistenceProvider } from '../highlightV2Persistence';
+import { readPersistedSurfaceRanges } from '../highlight/highlightStore';
+import { StudentUIProvider, useStudentUI } from '../providers/StudentUIProvider';
+
+function HighlightMode({ children }: { children: React.ReactNode }) {
+  const { actions: { setHighlightToolMode } } = useStudentUI();
+  useEffect(() => setHighlightToolMode('highlight'), [setHighlightToolMode]);
+  return children;
+}
 
 function createExamState(): ExamState {
   const config = createDefaultConfig('Academic', 'Academic');
@@ -77,5 +86,49 @@ describe('StudentListening a11y', () => {
     expect(screen.getByText('highlight')).toBeInTheDocument();
     expect(container.querySelector('strong')).not.toBeNull();
     expect(screen.queryByText(/<strong>/i)).not.toBeInTheDocument();
+  });
+
+  it('persists block instruction highlights under the owning listening block id', () => {
+    const state = createExamState();
+    state.listening.parts[0] = {
+      ...state.listening.parts[0],
+      blocks: [{
+        id: 'listening-block',
+        type: 'SHORT_ANSWER',
+        instruction: 'Listen and answer.',
+        questions: [{ id: 'listening-q1', prompt: 'Who speaks?', correctAnswer: 'Sam' }],
+      }],
+    } as any;
+    render(
+      <StudentHighlightPersistenceProvider namespace="test:listening-instruction">
+        <StudentUIProvider>
+          <HighlightMode>
+            <StudentListening
+              state={state}
+              answers={{}}
+              onAnswerChange={() => undefined}
+              currentQuestionId="listening-q1"
+              onNavigate={() => undefined}
+              highlightEnabled
+            />
+          </HighlightMode>
+        </StudentUIProvider>
+      </StudentHighlightPersistenceProvider>,
+    );
+    const textNode = screen.getByText('Listen and answer.').firstChild!;
+    const range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, 6);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent(document, new Event('pointerup'));
+
+    expect(
+      readPersistedSurfaceRanges(
+        'test:listening-instruction',
+        'question:listening:listening-block:instruction',
+      )?.ranges,
+    ).toHaveLength(1);
   });
 });

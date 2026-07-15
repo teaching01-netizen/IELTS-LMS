@@ -4,6 +4,28 @@ import { describe, expect, it, vi } from 'vitest';
 import type { StudentQuestionDescriptor } from '../../../services/examAdapterService';
 import { SubAnswerTreeQuestionList } from '../SubAnswerTreeQuestionList';
 
+vi.mock('../FormattedText', () => ({
+  FormattedText: ({
+    text,
+    highlightEnabled,
+    highlightColor,
+    highlightSurfaceId,
+  }: {
+    text: string;
+    highlightEnabled?: boolean;
+    highlightColor?: string;
+    highlightSurfaceId?: string;
+  }) => (
+    <span
+      data-highlight-enabled={String(Boolean(highlightEnabled))}
+      data-highlight-color={highlightColor}
+      data-highlight-surface-id={highlightSurfaceId}
+    >
+      {text}
+    </span>
+  ),
+}));
+
 function buildTreeDescriptor(overrides: Partial<StudentQuestionDescriptor> = {}): StudentQuestionDescriptor {
   return {
     id: 'tree-block::tree::root-a::leaf-a',
@@ -40,11 +62,20 @@ describe('SubAnswerTreeQuestionList', () => {
         questions={[question]}
         answers={{ [question.id]: '' }}
         currentQuestionId={question.id}
+        highlightEnabled
+        highlightColor="purple"
         onAnswerChange={vi.fn()}
       />, 
     );
 
-    expect(screen.getByText('Top prompt text')).toBeInTheDocument();
+    const prompt = screen.getByText('Top prompt text');
+    expect(prompt).toBeInTheDocument();
+    expect(prompt).toHaveAttribute('data-highlight-enabled', 'true');
+    expect(prompt).toHaveAttribute('data-highlight-color', 'purple');
+    expect(prompt).toHaveAttribute(
+      'data-highlight-surface-id',
+      'question:tree-block:tree-block::tree::root::root-a:root-prompt',
+    );
     expect(screen.getByText('1.')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Answer for question 1' })).toBeInTheDocument();
   });

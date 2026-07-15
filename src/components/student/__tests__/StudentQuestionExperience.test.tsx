@@ -157,6 +157,36 @@ describe('student question experience', () => {
     expect(container.firstElementChild).not.toHaveClass('student-question-block-deferred');
   });
 
+  it('passes the owning block id to instruction rendering', () => {
+    const block = {
+      id: 'instruction-owner',
+      type: 'SHORT_ANSWER',
+      instruction: 'Answer briefly.',
+      questions: [],
+    } as any;
+    const renderBlockInstruction = vi.fn(() => <p>Answer briefly.</p>);
+
+    render(
+      <StudentQuestionBlockSection
+        block={block}
+        blockQuestions={[]}
+        allQuestions={[]}
+        answers={{}}
+        currentQuestionId={null}
+        flags={{}}
+        onAnswerChange={() => undefined}
+        tabletMode={false}
+        answerCompact={false}
+        highlightEnabled
+        getBlockStartQuestionNumber={() => 1}
+        renderBlockInstruction={renderBlockInstruction}
+        expandedQuestionGapClassName="space-y-8"
+      />,
+    );
+
+    expect(renderBlockInstruction).toHaveBeenCalledWith('Answer briefly.', 'instruction-owner');
+  });
+
   it('uses full-width compact controls for classification in narrow tablet panes', () => {
     const block: ClassificationBlock = {
       id: 'classify-compact',

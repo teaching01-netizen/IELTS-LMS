@@ -5,6 +5,7 @@ import type { StudentHighlightColor } from './highlightPalette';
 
 export type TableCompletionSlotCellProps = {
   slotId: string;
+  highlightSurfaceIdPrefix: string;
   isActive: boolean;
   isFlagged: boolean;
   promptPrefixText: string;
@@ -26,6 +27,7 @@ export type TableCompletionSlotCellProps = {
 
 export function TableCompletionSlotCell({
   slotId,
+  highlightSurfaceIdPrefix,
   isActive,
   isFlagged,
   promptPrefixText,
@@ -54,6 +56,7 @@ export function TableCompletionSlotCell({
             text={promptPrefixText}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
+            highlightSurfaceId={`${highlightSurfaceIdPrefix}:prefix`}
           />
           <span className="mx-1 inline-flex items-center gap-2 align-middle">
             <span className="font-bold text-gray-900">{slotNumber}.</span>
@@ -78,6 +81,7 @@ export function TableCompletionSlotCell({
             text={promptSuffixText}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
+            highlightSurfaceId={`${highlightSurfaceIdPrefix}:suffix`}
           />
         </div>
         <div className="flex justify-end">

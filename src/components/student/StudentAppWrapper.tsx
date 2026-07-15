@@ -10,6 +10,7 @@ import { StudentNetworkProvider } from './providers/StudentNetworkProvider';
 import { ProctoringProvider } from './providers/StudentProctoringProvider';
 import { StudentRuntimeProvider } from './providers/StudentRuntimeProvider';
 import { StudentUIProvider } from './providers/StudentUIProvider';
+import { StudentHighlightPersistenceProvider } from './highlightV2Persistence';
 
 interface StudentAppWrapperProps {
   state: ExamState;
@@ -40,16 +41,26 @@ export function StudentAppWrapper({
   enableMonitoring = true,
   allowPreviewStart = false,
 }: StudentAppWrapperProps) {
+  const highlightPersistenceNamespace = `attempt:${
+    attemptSnapshot?.id ??
+    [
+      attemptSnapshot?.studentKey ?? attemptSnapshot?.candidateId ?? 'preview',
+      attemptSnapshot?.examId ?? state.title,
+      scheduleId ?? 'unscheduled',
+    ].join(':')
+  }`;
   const app = (
-    <StudentUIProvider>
-      <KeyboardProvider>
-        <StudentApp
-          showSubmitControls={showSubmitControls}
-          allowPreviewStart={allowPreviewStart}
-          allowExitDuringExam={allowExitDuringExam}
-        />
-      </KeyboardProvider>
-    </StudentUIProvider>
+    <StudentHighlightPersistenceProvider namespace={highlightPersistenceNamespace}>
+      <StudentUIProvider>
+        <KeyboardProvider>
+          <StudentApp
+            showSubmitControls={showSubmitControls}
+            allowPreviewStart={allowPreviewStart}
+            allowExitDuringExam={allowExitDuringExam}
+          />
+        </KeyboardProvider>
+      </StudentUIProvider>
+    </StudentHighlightPersistenceProvider>
   );
 
   return (

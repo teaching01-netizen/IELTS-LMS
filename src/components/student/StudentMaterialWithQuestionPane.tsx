@@ -38,7 +38,7 @@ interface StudentMaterialWithQuestionPaneProps {
     contentZoomStyle: React.CSSProperties | undefined;
     panelTestId: string;
     getBlockStartQuestionNumber: (blockId: string) => number;
-    renderBlockInstruction: (instruction: string) => React.ReactNode;
+    renderBlockInstruction: (instruction: string, blockId: string) => React.ReactNode;
     expandedQuestionGapClassName?: string | undefined;
     hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
   };

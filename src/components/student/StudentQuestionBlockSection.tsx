@@ -32,7 +32,7 @@ export interface StudentQuestionBlockSectionProps {
   highlightColor?: StudentHighlightColor | undefined;
   registerLiveAnswer?: ((answerKey: string, value: QuestionAnswer) => void) | undefined;
   getBlockStartQuestionNumber: (blockId: string) => number;
-  renderBlockInstruction: (instruction: string) => React.ReactNode;
+  renderBlockInstruction: (instruction: string, blockId: string) => React.ReactNode;
   expandedQuestionGapClassName: string;
   hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
 }
@@ -181,7 +181,7 @@ export const StudentQuestionBlockSection = React.memo(
               Questions {formatQuestionRange(numberedBlockStart, numberedBlockEnd)}
             </h3>
           ) : null}
-          {renderBlockInstruction(block.instruction)}
+          {renderBlockInstruction(block.instruction, block.id)}
         </div>
 
         <div className={answerCompact ? 'space-y-5' : expandedQuestionGapClassName}>
@@ -193,6 +193,8 @@ export const StudentQuestionBlockSection = React.memo(
               flags={flags}
               onToggleFlag={onToggleFlag}
               tabletMode={tabletMode}
+              highlightEnabled={highlightEnabled}
+              highlightColor={highlightColor}
               onAnswerChange={onAnswerChange}
             />
           ) : ('questions' in block) ? (

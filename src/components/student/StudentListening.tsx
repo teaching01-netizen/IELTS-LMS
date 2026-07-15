@@ -253,7 +253,7 @@ export function StudentListening({
       ? audioRef.current.duration
       : 0;
   const currentSeconds = totalSeconds > 0 ? (progress / 100) * totalSeconds : 0;
-  const renderBlockInstruction = (instruction: string) => {
+  const renderBlockInstruction = (instruction: string, blockId: string) => {
     if (!instruction.trim()) {
       return null;
     }
@@ -266,6 +266,7 @@ export function StudentListening({
           text={instruction}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
+          highlightSurfaceId={`question:listening:${blockId}:instruction`}
         />
       </div>
     );

@@ -1,8 +1,30 @@
-import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import React, { useEffect } from 'react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ExamState } from '../../../types';
 import { StudentReading } from '../StudentReading';
+import { QuestionRenderer } from '../QuestionRenderer';
+import {
+  createInMemoryHighlightSelectionPort,
+  StudentHighlightSelectionPortProvider,
+} from '../highlightSelectionPort';
+import { StudentUIProvider, useStudentUI } from '../providers/StudentUIProvider';
+import { StudentHighlightPersistenceProvider } from '../highlightV2Persistence';
+import { readPersistedSurfaceRanges } from '../highlight/highlightStore';
+
+function HighlightMode({ children }: { children: React.ReactNode }) {
+  const { actions } = useStudentUI();
+  const { setHighlightToolMode } = actions;
+  useEffect(() => setHighlightToolMode('highlight'), [setHighlightToolMode]);
+  return (
+    <>
+      <button data-testid="set-erase-mode" onClick={() => setHighlightToolMode('erase')}>
+        Test erase mode
+      </button>
+      {children}
+    </>
+  );
+}
 
 function createState(): ExamState {
   return {
@@ -274,25 +296,87 @@ describe('StudentReading passage readability controls', () => {
     getSelectionSpy.mockRestore();
   });
 
-  it('marks the visible question number and prompt row as highlightable selection text', () => {
+  it('creates and erases a mark in question copy while keeping the answer input excluded', () => {
+    const port = createInMemoryHighlightSelectionPort({
+      selection: { start: 0, end: 4, selectedText: 'What' },
+      selectionText: 'What',
+    });
     const { container } = render(
-      <StudentReading
-        state={createState()}
-        answers={{}}
-        onAnswerChange={() => {}}
-        currentQuestionId="q1"
-        onNavigate={() => {}}
-        highlightEnabled
-      />,
+      <StudentHighlightSelectionPortProvider port={port}>
+        <StudentHighlightPersistenceProvider namespace="test:question-copy">
+          <StudentUIProvider>
+            <HighlightMode>
+              <QuestionRenderer
+                block={createState().reading.passages[0].blocks[0]}
+                question={createState().reading.passages[0].blocks[0].questions[0]}
+                number={1}
+                answer=""
+                onChange={() => {}}
+                highlightEnabled
+              />
+            </HighlightMode>
+          </StudentUIProvider>
+        </StudentHighlightPersistenceProvider>
+      </StudentHighlightSelectionPortProvider>,
     );
 
-    const questionSlot = container.querySelector('#question-q1');
-    expect(questionSlot).not.toBeNull();
-    const questionNumber = screen.getByText('1.');
-    const questionPrompt = screen.getByText('What is the answer?');
+    act(() => port.emit());
+    const mark = container.querySelector('mark[data-highlighted="true"]');
+    expect(mark).not.toBeNull();
+    expect(mark).toHaveTextContent('What');
+    expect(
+      readPersistedSurfaceRanges('test:question-copy', 'question:q-block:q1:prompt')?.ranges,
+    ).toHaveLength(1);
+    expect(mark?.closest('[data-student-highlightable="true"]')).not.toBeNull();
+    expect(screen.getByRole('textbox')).not.toHaveAttribute('data-student-highlightable');
+    expect(screen.getByRole('textbox').closest('[data-student-highlightable="true"]')).toBeNull();
 
-    expect(questionNumber.closest('[data-student-highlightable="true"]')).not.toBeNull();
-    expect(questionPrompt.closest('[data-student-highlightable="true"]')).not.toBeNull();
-    expect(questionSlot?.querySelector('input')?.closest('[data-student-highlightable="true"]')).toBeNull();
+    act(() => actionsSetEraseMode(container));
+    port.setSnapshot({
+      selection: { start: 0, end: 4, selectedText: 'What' },
+      selectionText: 'What',
+    });
+    act(() => port.emit());
+    expect(container.querySelector('mark[data-highlighted="true"]')).toBeNull();
+  });
+
+  it('persists block instruction highlights under the owning reading block id', () => {
+    render(
+      <StudentHighlightPersistenceProvider namespace="test:reading-instruction">
+        <StudentUIProvider>
+          <HighlightMode>
+            <StudentReading
+              state={createState()}
+              answers={{}}
+              onAnswerChange={() => {}}
+              currentQuestionId="q1"
+              onNavigate={() => {}}
+              highlightEnabled
+            />
+          </HighlightMode>
+        </StudentUIProvider>
+      </StudentHighlightPersistenceProvider>,
+    );
+    const textNode = screen.getByText('Answer the question.').firstChild!;
+    const range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, 6);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent(document, new Event('pointerup'));
+
+    expect(
+      readPersistedSurfaceRanges(
+        'test:reading-instruction',
+        'question:reading:q-block:instruction',
+      )?.ranges,
+    ).toHaveLength(1);
   });
 });
+
+function actionsSetEraseMode(container: HTMLElement) {
+  const button = container.querySelector('[data-testid="set-erase-mode"]');
+  if (!(button instanceof HTMLButtonElement)) throw new Error('Expected erase mode test control');
+  button.click();
+}

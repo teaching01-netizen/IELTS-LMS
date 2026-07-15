@@ -96,14 +96,8 @@ export function QuestionRenderer({
   const isCompactPane = tabletMode && compactPane;
   const fieldIndentClass = tabletMode ? 'ml-0' : 'ml-9';
   const inputWidthClass = isCompactPane ? 'w-full min-w-0 max-w-full' : tabletMode ? 'max-w-full' : 'max-w-md';
-  const selectableTextProps = {
-    'data-student-highlightable': 'true',
-    style: {
-      WebkitUserSelect: 'text',
-      userSelect: 'text',
-      touchAction: 'auto',
-    },
-  } as const;
+  const getHighlightSurfaceId = (ownerId: string, slot: string) =>
+    `question:${block.id}:${ownerId}:${slot}`;
 
   const getSlotId = (index: number, fallback: string) => slotIds[index] ?? fallback;
   const hasDuplicateSlotNumbers = React.useMemo(() => {
@@ -200,10 +194,11 @@ export function QuestionRenderer({
           text={extraCopy}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
+          highlightSurfaceId={getHighlightSurfaceId(slotId, 'extra-copy-top')}
         />
       ) : null}
       <div className={isCompactPane ? 'flex flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
-        <span className="min-w-[2rem] font-bold text-gray-900" {...selectableTextProps}>{slotNumber}.</span>
+        <FormattedText as="span" className="min-w-[2rem] font-bold text-gray-900" text={`${slotNumber}.`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(slotId, 'number')} />
         <ProtectedInput
           type="text"
           name={slotId}
@@ -225,6 +220,7 @@ export function QuestionRenderer({
           text={extraCopy}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
+          highlightSurfaceId={getHighlightSurfaceId(slotId, 'extra-copy-bottom')}
         />
       ) : null}
     </div>
@@ -239,7 +235,7 @@ export function QuestionRenderer({
 
     return (
       <fieldset className="flex flex-col gap-4">
-        <legend className="flex gap-3 items-start" {...selectableTextProps}>
+        <legend className="flex gap-3 items-start">
           <div className="mt-0.5 flex h-6 min-w-[1.75rem] items-center justify-center border-2 border-blue-500 text-[length:var(--student-chip-font-size)] font-bold text-blue-600">
             {number}
           </div>
@@ -249,6 +245,7 @@ export function QuestionRenderer({
             text={q.statement}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
+            highlightSurfaceId={getHighlightSurfaceId(q.id, 'statement')}
           />
         </legend>
         <div className={`${fieldIndentClass} flex flex-col gap-3`}>
@@ -273,7 +270,7 @@ export function QuestionRenderer({
     void clozeBlock;
     return (
       <div className="flex flex-col gap-3">
-        <div className="flex gap-3" {...selectableTextProps}>
+        <div className="flex gap-3">
           <span className="min-w-[1.75rem] font-bold text-gray-900">{number}.</span>
           <FormattedText
             as="span"
@@ -281,6 +278,7 @@ export function QuestionRenderer({
             text={q.prompt}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
+            highlightSurfaceId={getHighlightSurfaceId(q.id, 'prompt')}
           />
         </div>
         <div className={`${fieldIndentClass} mt-2`}>
@@ -304,10 +302,8 @@ export function QuestionRenderer({
   const renderMatching = (matchingBlock: MatchingBlock, q: MatchingQuestion) => (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-4">
-          <span className="min-w-[1.75rem] font-bold text-gray-900" {...selectableTextProps}>{number}.</span>
-        <span className="font-medium text-gray-800 text-[length:var(--student-control-font-size)]" {...selectableTextProps}>
-          Paragraph {q.paragraphLabel}
-        </span>
+          <FormattedText as="span" className="min-w-[1.75rem] font-bold text-gray-900" text={`${number}.`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'number')} />
+        <FormattedText as="span" className="font-medium text-gray-800 text-[length:var(--student-control-font-size)]" text={`Paragraph ${q.paragraphLabel}`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'paragraph-label')} />
 
         <select
           value={typeof answer === 'string' ? answer : ''}
@@ -345,7 +341,7 @@ export function QuestionRenderer({
 
     return (
       <fieldset className="flex flex-col gap-4">
-        <legend className="flex gap-3" {...selectableTextProps}>
+        <legend className="flex gap-3">
           <span className="min-w-[1.75rem] font-bold text-gray-900">{blockNum}.</span>
         <FormattedText
           as="span"
@@ -353,6 +349,7 @@ export function QuestionRenderer({
           text={mcqBlock.stem || 'Select the correct options:'}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
+          highlightSurfaceId={getHighlightSurfaceId(mcqBlock.id, 'stem')}
         />
         </legend>
         <div className={`${fieldIndentClass} space-y-3`}>
@@ -388,8 +385,8 @@ export function QuestionRenderer({
                   {isSelected ? <div className="h-3 w-3 bg-white" style={{ clipPath: 'polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%)' }}></div> : null}
                 </div>
                 <div className="flex gap-2">
-                  <span className="font-bold text-gray-700" {...selectableTextProps}>{letter}.</span>
-                  <FormattedText as="span" className="text-gray-800" text={option.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
+                  <FormattedText as="span" className="font-bold text-gray-700" text={`${letter}.`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(`${mcqBlock.id}:${option.id}`, 'option-letter')} />
+                  <FormattedText as="span" className="text-gray-800" text={option.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(`${mcqBlock.id}:${option.id}`, 'option-text')} />
                 </div>
               </label>
             );
@@ -411,11 +408,9 @@ export function QuestionRenderer({
         hint="Tap to zoom the map"
       />
       <div className="flex flex-col gap-3">
-        <div className="flex gap-3" {...selectableTextProps}>
+        <div className="flex gap-3">
           <span className="min-w-[1.75rem] font-bold text-gray-900">{num}.</span>
-          <span className="text-gray-800">
-            Label <FormattedText as="span" className="text-gray-800" text={q.label} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
-          </span>
+          <FormattedText as="span" className="text-gray-800" text={`Label ${q.label}`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'label')} />
         </div>
         <div className={`${fieldIndentClass} mt-2`}>
           <ProtectedInput
@@ -448,7 +443,7 @@ export function QuestionRenderer({
 
     return (
       <fieldset className="flex flex-col gap-4">
-        <legend className="flex gap-3" {...selectableTextProps}>
+        <legend className="flex gap-3">
           <span className="min-w-[1.75rem] font-bold text-gray-900">{blockNum}.</span>
           <FormattedText
             as="span"
@@ -456,6 +451,7 @@ export function QuestionRenderer({
             text={stem}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
+            highlightSurfaceId={getHighlightSurfaceId(questionLevel?.id ?? mcqBlock.id, 'stem')}
           />
         </legend>
         <div className={`${fieldIndentClass} space-y-3`}>
@@ -471,13 +467,14 @@ export function QuestionRenderer({
                   className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
                 <div className="flex gap-2">
-                  <span className="font-bold text-gray-700" {...selectableTextProps}>{letter}.</span>
+                  <FormattedText as="span" className="font-bold text-gray-700" text={`${letter}.`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(`${questionLevel?.id ?? mcqBlock.id}:${option.id}`, 'option-letter')} />
                   <FormattedText
                     as="span"
                     className="text-gray-800"
                     text={option.text}
                     highlightEnabled={highlightEnabled}
                     highlightColor={highlightColor}
+                    highlightSurfaceId={getHighlightSurfaceId(`${questionLevel?.id ?? mcqBlock.id}:${option.id}`, 'option-text')}
                   />
                 </div>
               </label>
@@ -492,9 +489,9 @@ export function QuestionRenderer({
     void shortBlock;
     return (
       <div className="flex flex-col gap-3">
-        <div className="flex gap-3" {...selectableTextProps}>
+        <div className="flex gap-3">
           <span className="min-w-[1.75rem] font-bold text-gray-900">{num}.</span>
-          <FormattedText as="span" className="text-gray-800" text={q.prompt} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
+          <FormattedText as="span" className="text-gray-800" text={q.prompt} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'prompt')} />
         </div>
         <div className={`${fieldIndentClass} mt-2`}>
           <ProtectedInput
@@ -524,7 +521,7 @@ export function QuestionRenderer({
         <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
           {parts.map((part, index) => (
             <React.Fragment key={`${q.id}-${index}`}>
-              <FormattedText as="span" text={part} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
+              <FormattedText as="span" text={part} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, `sentence-segment-${index}`)} />
               {index < blanks ? (
                 (() => {
                   const slotId = getSlotId(index, `${q.id}:${index}`);
@@ -575,7 +572,7 @@ export function QuestionRenderer({
         <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
           {parts.map((part, index) => (
             <React.Fragment key={`${noteQuestion.id}-${index}`}>
-              <FormattedText as="span" text={part} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
+              <FormattedText as="span" text={part} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(noteQuestion.id, `note-segment-${index}`)} />
               {index < blanks ? (
                 (() => {
                   const slotId = getSlotId(index, `${noteQuestion.id}:${index}`);
@@ -749,6 +746,7 @@ export function QuestionRenderer({
                     text={header}
                     highlightEnabled={highlightEnabled}
                     highlightColor={highlightColor}
+                    highlightSurfaceId={getHighlightSurfaceId(tableBlock.id, `header-${index}`)}
                   />
                 </th>
               ))}
@@ -772,6 +770,7 @@ export function QuestionRenderer({
                           text={cellValue}
                           highlightEnabled={highlightEnabled}
                           highlightColor={highlightColor}
+                          highlightSurfaceId={getHighlightSurfaceId(tableBlock.id, `cell-${rowIndex}-${cellIndex}`)}
                         />
                       </td>
                     );
@@ -830,6 +829,7 @@ export function QuestionRenderer({
                       <TableCompletionSlotCell
                         key={slot.cell.id}
                         slotId={slot.slotId}
+                        highlightSurfaceIdPrefix={`question:${tableBlock.id}:${slot.slotId}`}
                         isActive={currentQuestionId === slot.slotId}
                         isFlagged={Boolean(flags[slot.slotId])}
                         promptPrefixText={promptPrefixText}
@@ -884,6 +884,7 @@ export function QuestionRenderer({
                                   text={segment}
                                   highlightEnabled={highlightEnabled}
                                   highlightColor={highlightColor}
+                                  highlightSurfaceId={getHighlightSurfaceId(tableBlock.id, `cell-${rowIndex}-${cellIndex}-segment-${segmentIndex}`)}
                                 />
                                 {segmentIndex < placeholderCount && slot ? (
                                   <span
@@ -952,7 +953,7 @@ export function QuestionRenderer({
               <div className={`flex flex-col gap-3 ${isCompactPane ? '' : 'md:flex-row md:items-center'}`}>
                 <div className="flex items-start gap-3 md:flex-1">
                   <span className="min-w-[2rem] font-bold text-gray-900">{slotNumber}.</span>
-                  <FormattedText as="span" className="text-gray-800" text={item.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
+                  <FormattedText as="span" className="text-gray-800" text={item.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(slotId, 'item-text')} />
                 </div>
                 <div className={isCompactPane ? 'flex w-full flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
                   <select
@@ -996,7 +997,7 @@ export function QuestionRenderer({
               <div className={`flex flex-col gap-3 ${isCompactPane ? '' : 'md:flex-row md:items-center'}`}>
                 <div className="flex items-start gap-3 md:flex-1">
                   <span className="min-w-[2rem] font-bold text-gray-900">{slotNumber}.</span>
-                  <FormattedText as="span" className="text-gray-800" text={feature.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} />
+                  <FormattedText as="span" className="text-gray-800" text={feature.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(slotId, 'feature-text')} />
                 </div>
                 <div className={isCompactPane ? 'flex w-full flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
                   <select

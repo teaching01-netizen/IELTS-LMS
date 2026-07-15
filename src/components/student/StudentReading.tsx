@@ -220,7 +220,7 @@ export function StudentReading({
     const block = activePassage?.blocks.find((entry) => entry.id === blockId);
     return block ? isInstructionReferencePlacement(block) : false;
   };
-  const renderBlockInstruction = (instruction: string) => {
+  const renderBlockInstruction = (instruction: string, blockId: string) => {
     return (
       <div className={`rounded-lg border border-gray-200 bg-gray-50 ${answerCompact ? 'px-2 py-1.5' : 'px-3 py-2'}`}>
         <FormattedText
@@ -229,6 +229,7 @@ export function StudentReading({
           text={instruction}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
+          highlightSurfaceId={`question:reading:${blockId}:instruction`}
         />
       </div>
     );

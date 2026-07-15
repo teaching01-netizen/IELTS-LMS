@@ -5,6 +5,7 @@ import type { StudentQuestionDescriptor } from '../../services/examAdapterServic
 import { ProtectedInput } from './ProtectedInput';
 import { Flag } from 'lucide-react';
 import { FormattedText } from './FormattedText';
+import type { StudentHighlightColor } from './highlightPalette';
 
 interface SubAnswerTreeQuestionListProps {
   questions: StudentQuestionDescriptor[];
@@ -13,6 +14,8 @@ interface SubAnswerTreeQuestionListProps {
   flags?: Record<string, boolean>;
   onToggleFlag?: ((id: string) => void) | undefined;
   tabletMode?: boolean;
+  highlightEnabled?: boolean;
+  highlightColor?: StudentHighlightColor | undefined;
   onAnswerChange: (
     answerKey: string,
     answer: QuestionAnswer,
@@ -27,6 +30,8 @@ export function SubAnswerTreeQuestionList({
   flags = {},
   onToggleFlag,
   tabletMode = false,
+  highlightEnabled = false,
+  highlightColor,
   onAnswerChange,
 }: SubAnswerTreeQuestionListProps) {
   const rootOrder = new Map<string, number>();
@@ -81,7 +86,14 @@ export function SubAnswerTreeQuestionList({
           {group.prompt ? (
             <div className="flex gap-3">
               <span className="min-w-[1.75rem] font-bold text-gray-900">{group.rootNumber}.</span>
-              <FormattedText as="span" className="text-gray-800" text={group.prompt} />
+              <FormattedText
+                as="span"
+                className="text-gray-800"
+                text={group.prompt}
+                highlightEnabled={highlightEnabled}
+                highlightColor={highlightColor}
+                highlightSurfaceId={`question:${questions[0]?.blockId ?? 'unknown'}:${group.rootId}:root-prompt`}
+              />
             </div>
           ) : null}
           <div className={`${tabletMode ? 'ml-0' : 'ml-9'} space-y-2`}>
