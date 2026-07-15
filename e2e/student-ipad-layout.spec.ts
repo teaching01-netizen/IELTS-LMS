@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BUILDER_STORAGE_STATE_PATH, readBackendE2EManifest } from './support/backendE2e';
 
 async function openPreview(page: Page, module: 'reading' | 'writing') {
@@ -36,10 +36,8 @@ async function expectCenteredInViewport(page: Page, label: RegExp) {
   expect(Math.abs(box!.y + box!.height / 2 - viewport!.height / 2)).toBeLessThanOrEqual(1);
 }
 
-async function completeHighlightSelection(page: Page, start: number, end: number) {
-  await page.evaluate(({ start, end }) => {
-    const surface = document.querySelector<HTMLElement>('[data-student-highlightable="true"]');
-    if (!surface) throw new Error('Expected highlightable surface');
+async function completeHighlightSelection(surface: Locator, start: number, end: number) {
+  await surface.evaluate((surface, { start, end }) => {
     const walker = document.createTreeWalker(surface, NodeFilter.SHOW_TEXT);
     let cursor = 0;
     let startNode: Node | null = null;
@@ -121,35 +119,50 @@ test.describe('student exam iPad layout', () => {
     await openPreview(page, 'reading');
 
     const highlightButton = page.getByRole('button', { name: 'Highlight' });
-    const optionsButton = page.getByRole('button', { name: 'Choose highlight color or erase' });
+    const optionsButton = page.getByRole('button', { name: 'Choose highlight color' });
+    const eraseButton = page.getByRole('button', { name: 'Erase highlights' });
+    const passageSurface = page
+      .getByTestId('reading-passage-pane')
+      .locator('[data-student-highlightable="true"]')
+      .first();
     await expect(highlightButton).toBeVisible();
-    expect((await highlightButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    expect((await optionsButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expect(optionsButton).toBeVisible();
+    await expect(eraseButton).toBeVisible();
+    const highlightBox = await highlightButton.boundingBox();
+    const optionsBox = await optionsButton.boundingBox();
+    const eraseBox = await eraseButton.boundingBox();
+    expect(highlightBox).not.toBeNull();
+    expect(optionsBox).not.toBeNull();
+    expect(eraseBox).not.toBeNull();
+    expect(highlightBox!.width).toBeGreaterThanOrEqual(44);
+    expect(highlightBox!.height).toBeGreaterThanOrEqual(44);
+    expect(optionsBox!.width).toBeGreaterThanOrEqual(44);
+    expect(optionsBox!.height).toBeGreaterThanOrEqual(44);
+    expect(eraseBox!.width).toBeGreaterThanOrEqual(44);
+    expect(eraseBox!.height).toBeGreaterThanOrEqual(44);
     await highlightButton.click();
     await expect(page.getByRole('button', { name: 'Highlighting' })).toBeVisible();
 
-    await completeHighlightSelection(page, 0, 4);
+    await completeHighlightSelection(passageSurface, 0, 4);
     await expect(page.locator('mark[data-highlighted="true"]')).toHaveCount(1);
-    await completeHighlightSelection(page, 5, 9);
+    await completeHighlightSelection(passageSurface, 5, 9);
     await expect(page.locator('mark[data-highlighted="true"]')).toHaveCount(2);
 
     await optionsButton.click();
-    const optionsBox = await optionsButton.boundingBox();
     const paletteBox = await page.getByRole('group', { name: 'Highlight options' }).boundingBox();
-    expect(optionsBox).not.toBeNull();
     expect(paletteBox).not.toBeNull();
     expect(paletteBox!.x + paletteBox!.width).toBeLessThanOrEqual(optionsBox!.x + optionsBox!.width + 1);
     expect(paletteBox!.x).toBeGreaterThanOrEqual(12);
     await page.getByRole('button', { name: 'Blue' }).click();
-    await completeHighlightSelection(page, 10, 14);
+    await completeHighlightSelection(passageSurface, 10, 14);
     await expect(page.locator('mark[data-highlight-color="blue"]')).toHaveCount(1);
 
     await page.getByTestId('reading-passage-pane').evaluate((element) => element.scrollTo(0, element.scrollHeight));
     await expect(page.getByRole('button', { name: 'Highlighting' })).toBeVisible();
-    await optionsButton.click();
-    await page.getByRole('button', { name: 'Erase highlights' }).click();
-    await expect(page.getByRole('button', { name: 'Erasing' })).toBeVisible();
-    await completeHighlightSelection(page, 0, 4);
+    await eraseButton.click();
+    await expect(eraseButton).toHaveAttribute('aria-pressed', 'true');
+    await expect(highlightButton).toHaveAttribute('aria-pressed', 'false');
+    await completeHighlightSelection(passageSurface, 0, 4);
     await expect(page.locator('mark[data-highlighted="true"]')).toHaveCount(2);
     await expect(page.getByRole('button', { name: /apply .* highlight/i })).toHaveCount(0);
   });
@@ -171,21 +184,29 @@ test.describe('student exam iPad layout', () => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await openPreview(page, 'writing');
 
-    const splitPane = page.getByTestId('writing-split-pane');
-    const promptPane = page.getByTestId('writing-prompt-pane');
-    const editorPane = page.getByTestId('writing-editor-pane');
+    const splitPane = page.getByTestId('writing-split-workspace');
+    const promptPane = page.getByTestId('writing-task-prompt');
+    const promptSurface = promptPane.locator('[data-student-highlightable="true"]');
     const editor = page.getByRole('textbox', { name: /writing response/i });
 
     await expect(splitPane).toHaveCSS('flex-direction', 'row');
     await expect(promptPane).toBeVisible();
-    await expect(editorPane).toBeVisible();
     await expect(editor).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Highlight' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Erase highlights' })).toBeVisible();
+    await expect(promptSurface).toHaveCount(1);
+    await expect(editor).not.toHaveAttribute('data-student-highlightable');
+    expect(await editor.evaluate((element) => element.closest('[data-student-highlightable="true"]'))).toBeNull();
+
+    await page.getByRole('button', { name: 'Highlight' }).click();
+    await completeHighlightSelection(promptSurface, 0, 4);
+    await expect(promptPane.locator('mark[data-highlighted="true"]')).toHaveCount(1);
     await expectThinTabletResizer(page, 'writing-pane-resizer');
     await expectFooterInsideViewport(page, /writing task navigation and submission/i);
 
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.reload();
-    await expect(page.getByTestId('writing-split-pane')).toHaveCSS('flex-direction', 'row');
+    await expect(page.getByTestId('writing-split-workspace')).toHaveCSS('flex-direction', 'row');
     await expect(page.getByRole('textbox', { name: /writing response/i })).toBeVisible();
     await expectThinTabletResizer(page, 'writing-pane-resizer');
     await expectFooterInsideViewport(page, /writing task navigation and submission/i);
