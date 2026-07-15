@@ -36,6 +36,41 @@ async function expectCenteredInViewport(page: Page, label: RegExp) {
   expect(Math.abs(box!.y + box!.height / 2 - viewport!.height / 2)).toBeLessThanOrEqual(1);
 }
 
+async function completeHighlightSelection(page: Page, start: number, end: number) {
+  await page.evaluate(({ start, end }) => {
+    const surface = document.querySelector<HTMLElement>('[data-student-highlightable="true"]');
+    if (!surface) throw new Error('Expected highlightable surface');
+    const walker = document.createTreeWalker(surface, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let startNode: Node | null = null;
+    let endNode: Node | null = null;
+    let startOffset = 0;
+    let endOffset = 0;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const length = node.textContent?.length ?? 0;
+      if (!startNode && start <= cursor + length) {
+        startNode = node;
+        startOffset = Math.max(0, start - cursor);
+      }
+      if (end <= cursor + length) {
+        endNode = node;
+        endOffset = Math.max(0, end - cursor);
+        break;
+      }
+      cursor += length;
+    }
+    if (!startNode || !endNode) throw new Error('Selection offsets exceed surface text');
+    const range = document.createRange();
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  }, { start, end });
+}
+
 test.describe('student exam iPad layout', () => {
   test.use({ storageState: BUILDER_STORAGE_STATE_PATH });
 
@@ -79,6 +114,38 @@ test.describe('student exam iPad layout', () => {
     expect(passageBox).not.toBeNull();
     expect(questionBox).not.toBeNull();
     expect(passageBox!.right).toBeLessThanOrEqual(questionBox!.x + 20);
+  });
+
+  test('Reading highlight tool applies repeatedly, switches color, erases, and survives scrolling', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openPreview(page, 'reading');
+
+    const highlightButton = page.getByRole('button', { name: 'Highlight' });
+    const optionsButton = page.getByRole('button', { name: 'Choose highlight color or erase' });
+    await expect(highlightButton).toBeVisible();
+    expect((await highlightButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await optionsButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await highlightButton.click();
+    await expect(page.getByRole('button', { name: 'Highlighting' })).toBeVisible();
+
+    await completeHighlightSelection(page, 0, 4);
+    await expect(page.locator('mark[data-highlighted="true"]')).toHaveCount(1);
+    await completeHighlightSelection(page, 5, 9);
+    await expect(page.locator('mark[data-highlighted="true"]')).toHaveCount(2);
+
+    await optionsButton.click();
+    await page.getByRole('button', { name: 'Blue' }).click();
+    await completeHighlightSelection(page, 10, 14);
+    await expect(page.locator('mark[data-highlight-color="blue"]')).toHaveCount(1);
+
+    await page.getByTestId('reading-passage-pane').evaluate((element) => element.scrollTo(0, element.scrollHeight));
+    await expect(page.getByRole('button', { name: 'Highlighting' })).toBeVisible();
+    await optionsButton.click();
+    await page.getByRole('button', { name: 'Erase highlights' }).click();
+    await expect(page.getByRole('button', { name: 'Erasing' })).toBeVisible();
+    await completeHighlightSelection(page, 0, 4);
+    await expect(page.locator('mark[data-highlighted="true"]')).toHaveCount(2);
+    await expect(page.getByRole('button', { name: /apply .* highlight/i })).toHaveCount(0);
   });
 
   test('Question Navigator stays centered in both iPad orientations', async ({ page }) => {

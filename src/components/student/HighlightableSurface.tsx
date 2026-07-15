@@ -1,18 +1,11 @@
 import React, { useMemo } from 'react';
 import type { RefObject } from 'react';
-import { HighlightSelectionToolbar } from './HighlightSelectionToolbar';
-import type { StudentHighlightColor } from './highlightPalette';
 
 interface HighlightableSurfaceProps {
   as: 'div' | 'p' | 'span';
   className?: string | undefined;
   html: string;
   containerRef?: RefObject<HTMLElement | null> | undefined;
-  showToolbar?: boolean | undefined;
-  toolbarPosition?: { left: number; top: number } | null | undefined;
-  canEraseSelection?: boolean | undefined;
-  onApplyColor?: ((color: StudentHighlightColor) => void) | undefined;
-  onEraseSelection?: (() => void) | undefined;
   hint?: string | null | undefined;
 }
 
@@ -21,11 +14,6 @@ export function HighlightableSurface({
   className,
   html,
   containerRef,
-  showToolbar = false,
-  toolbarPosition = null,
-  canEraseSelection = false,
-  onApplyColor,
-  onEraseSelection,
   hint = null,
 }: HighlightableSurfaceProps) {
   const Tag = as as any;
@@ -42,14 +30,6 @@ export function HighlightableSurface({
         data-student-highlightable="true"
         style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
         dangerouslySetInnerHTML={innerHtml}
-      />
-      <HighlightSelectionToolbar
-        visible={Boolean(showToolbar && toolbarPosition && onApplyColor && onEraseSelection)}
-        left={toolbarPosition?.left ?? 0}
-        top={toolbarPosition?.top ?? 0}
-        canEraseSelection={canEraseSelection}
-        onApplyColor={(color) => onApplyColor?.(color)}
-        onEraseSelection={() => onEraseSelection?.()}
       />
       {hint ? (
         <div

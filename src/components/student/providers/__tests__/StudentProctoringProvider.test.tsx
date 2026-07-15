@@ -902,7 +902,11 @@ describe('StudentProctoringProvider', () => {
 
     expect(document.documentElement.getAttribute('translate')).toBe('no');
     expect(document.documentElement.classList.contains('notranslate')).toBe(true);
-    expect(document.head.querySelector('#student-notranslate-meta')).not.toBeNull();
+    expect(document.documentElement.classList.contains('student-translation-guard-active')).toBe(true);
+    expect(document.head.querySelector('#student-notranslate-meta')).toMatchObject({
+      name: 'google',
+      content: 'notranslate',
+    });
   });
 
   it('removes notranslate markers on unmount', async () => {
@@ -925,6 +929,78 @@ describe('StudentProctoringProvider', () => {
 
     expect(document.documentElement.getAttribute('translate')).toBeNull();
     expect(document.documentElement.classList.contains('notranslate')).toBe(false);
+    expect(document.documentElement.classList.contains('student-translation-guard-active')).toBe(false);
+    expect(document.head.querySelector('#student-notranslate-meta')).toBeNull();
+  });
+
+  it('self-heals marker tampering and records only one cooldown-deduplicated violation', async () => {
+    const harness = renderHarness();
+
+    await act(async () => {
+      document.documentElement.removeAttribute('translate');
+      document.documentElement.classList.remove('notranslate', 'student-translation-guard-active');
+      document.querySelector('#student-notranslate-meta')?.remove();
+      await Promise.resolve();
+    });
+
+    expect(document.documentElement).toHaveAttribute('translate', 'no');
+    expect(document.documentElement).toHaveClass('notranslate', 'student-translation-guard-active');
+    expect(document.head.querySelector('#student-notranslate-meta')).toMatchObject({
+      name: 'google',
+      content: 'notranslate',
+    });
+    expect(
+      harness.result.current.runtime.state.violations.filter(
+        (violation) => violation.type === 'TRANSLATION_DETECTED',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('replaces invalid same-id nodes and restores the genuine meta to document head', async () => {
+    renderHarness();
+
+    await act(async () => {
+      const invalidMarker = document.createElement('div');
+      invalidMarker.id = 'student-notranslate-meta';
+      document.getElementById('student-notranslate-meta')?.replaceWith(invalidMarker);
+      await Promise.resolve();
+    });
+
+    let marker = document.getElementById('student-notranslate-meta');
+    expect(marker).toBeInstanceOf(HTMLMetaElement);
+    expect(marker?.parentElement).toBe(document.head);
+    expect(marker).toMatchObject({ name: 'google', content: 'notranslate' });
+
+    await act(async () => {
+      document.body.appendChild(marker!);
+      await Promise.resolve();
+    });
+
+    marker = document.getElementById('student-notranslate-meta');
+    expect(marker).toBeInstanceOf(HTMLMetaElement);
+    expect(marker?.parentElement).toBe(document.head);
+    expect(document.body.querySelector('#student-notranslate-meta')).toBeNull();
+  });
+
+  it('cleans all owned markers when translation prevention is disabled or the exam phase exits', async () => {
+    const harness = renderHarness();
+
+    act(() => {
+      harness.result.current.runtime.actions.setPhase('completed');
+    });
+
+    expect(document.documentElement).not.toHaveAttribute('translate');
+    expect(document.documentElement).not.toHaveClass('notranslate', 'student-translation-guard-active');
+    expect(document.head.querySelector('#student-notranslate-meta')).toBeNull();
+
+    harness.unmount();
+    renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, preventTranslation: false },
+    });
+
+    expect(document.documentElement).not.toHaveAttribute('translate');
+    expect(document.documentElement).not.toHaveClass('notranslate', 'student-translation-guard-active');
     expect(document.head.querySelector('#student-notranslate-meta')).toBeNull();
   });
 

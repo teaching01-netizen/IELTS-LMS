@@ -15,6 +15,7 @@ describe('SecurityTab', () => {
     expect(screen.queryByText(/auto re-enter fullscreen/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/max fullscreen violations/i)).not.toBeInTheDocument();
     expect(screen.getByText(/translation warning/i)).toBeInTheDocument();
+    expect(screen.getByText(/best-effort deterrence/i)).toBeInTheDocument();
     expect(screen.getByText(/anti-screenshot guard/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText(/translation warning/i));

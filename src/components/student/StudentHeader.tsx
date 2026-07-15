@@ -2,22 +2,33 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Bell,
+  Check,
   CheckCircle,
+  ChevronDown,
   Clock,
   Contrast,
   LayoutGrid,
+  Eraser,
+  Highlighter,
   Minus,
   Plus,
   RefreshCw,
   Wifi,
 } from 'lucide-react';
 import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
+import { getStudentHighlightPaletteEntry, studentHighlightPalette, type StudentHighlightColor } from './highlightPalette';
+import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 
 interface StudentHeaderProps {
   testTakerId?: string | undefined;
   timeRemaining?: number | undefined;
   autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | null | undefined;
   highlightEnabled?: boolean | undefined;
+  highlightToolMode?: StudentHighlightToolMode | undefined;
+  highlightColor?: StudentHighlightColor | undefined;
+  onToggleHighlightMode?: (() => void) | undefined;
+  onSelectHighlightColor?: ((color: StudentHighlightColor) => void) | undefined;
+  onSelectEraseMode?: (() => void) | undefined;
   onOpenAccessibility?: (() => void) | undefined;
   onOpenNavigator?: (() => void) | undefined;
   onClearHighlights?: (() => void) | undefined;
@@ -34,6 +45,11 @@ export function StudentHeader({
   timeRemaining,
   autoSaveStatus,
   highlightEnabled = false,
+  highlightToolMode = 'off',
+  highlightColor = 'yellow',
+  onToggleHighlightMode,
+  onSelectHighlightColor,
+  onSelectEraseMode,
   onOpenAccessibility,
   onOpenNavigator,
   onClearHighlights,
@@ -46,6 +62,9 @@ export function StudentHeader({
 }: StudentHeaderProps) {
   void onClearHighlights;
   const [showTabletZoomControls, setShowTabletZoomControls] = useState(false);
+  const [showHighlightOptions, setShowHighlightOptions] = useState(false);
+  const highlightOptionsTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const highlightOptionsPanelRef = useRef<HTMLDivElement | null>(null);
   const [tabletZoomControlsStyle, setTabletZoomControlsStyle] = useState<React.CSSProperties>({
     top: 0,
     left: 0,
@@ -55,7 +74,45 @@ export function StudentHeader({
   const tabletZoomPanelRef = useRef<HTMLDivElement | null>(null);
   const showZoomControls = zoom !== undefined && onZoomIn && onZoomOut && onZoomReset;
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
-  const shouldShowHighlightHint = Boolean(highlightEnabled && onOpenNavigator);
+  const shouldShowHighlightTool = Boolean(
+    highlightEnabled && isExamActive && onOpenNavigator && onToggleHighlightMode,
+  );
+  const activePaletteEntry = getStudentHighlightPaletteEntry(highlightColor);
+  const highlightButtonLabel =
+    highlightToolMode === 'erase'
+      ? 'Erasing'
+      : highlightToolMode === 'highlight'
+        ? 'Highlighting'
+        : 'Highlight';
+
+  const closeHighlightOptions = useCallback(() => {
+    setShowHighlightOptions(false);
+    queueMicrotask(() => highlightOptionsTriggerRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!showHighlightOptions) return;
+    const panel = highlightOptionsPanelRef.current;
+    const preferred = panel?.querySelector<HTMLButtonElement>(`button[data-highlight-color="${highlightColor}"]`);
+    (preferred ?? panel?.querySelector<HTMLButtonElement>('button'))?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeHighlightOptions();
+    };
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (target && (panel?.contains(target) || highlightOptionsTriggerRef.current?.contains(target))) return;
+      closeHighlightOptions();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+    };
+  }, [closeHighlightOptions, highlightColor, showHighlightOptions]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -230,9 +287,84 @@ export function StudentHeader({
         className="flex min-w-0 max-w-full items-center justify-end gap-1.5 md:gap-2 lg:gap-4 text-gray-700 flex-shrink-0 overflow-x-auto no-scrollbar justify-self-end"
         data-testid="student-header-controls-slot"
       >
-        {shouldShowHighlightHint ? (
-          <div className="hidden sm:flex items-center rounded-sm border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-700">
-            Tip: Select text to highlight
+        {shouldShowHighlightTool ? (
+          <div className="relative flex shrink-0">
+            <button
+              type="button"
+              onClick={onToggleHighlightMode}
+              className={`flex min-h-11 items-center gap-1.5 rounded-l-sm border px-2.5 text-[length:var(--student-control-font-size)] font-bold focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
+                highlightToolMode === 'off'
+                  ? 'border-gray-300 bg-white text-gray-800'
+                  : 'border-blue-700 bg-blue-50 text-blue-950 shadow-inner'
+              }`}
+              aria-pressed={highlightToolMode !== 'off'}
+              aria-label={highlightButtonLabel}
+            >
+              {highlightToolMode === 'erase' ? <Eraser size={16} /> : <Highlighter size={16} />}
+              <span className="hidden md:inline">{highlightButtonLabel}</span>
+              {highlightToolMode !== 'erase' ? (
+                <span className={`h-3 w-3 rounded-full border border-gray-700 ${activePaletteEntry.swatchClassName}`} aria-hidden="true" />
+              ) : null}
+            </button>
+            <button
+              ref={highlightOptionsTriggerRef}
+              type="button"
+              onClick={() => setShowHighlightOptions((open) => !open)}
+              className="flex min-h-11 min-w-11 items-center justify-center rounded-r-sm border border-l-0 border-gray-300 bg-white text-gray-800 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
+              aria-label="Choose highlight color or erase"
+              aria-expanded={showHighlightOptions}
+            >
+              <ChevronDown size={16} />
+            </button>
+            {showHighlightOptions
+              ? renderOverlayPanel(
+                  <div
+                ref={highlightOptionsPanelRef}
+                role="group"
+                className="fixed right-3 top-14 z-[90] mt-2 min-w-48 rounded-md border border-gray-200 bg-white p-1.5 shadow-xl md:top-16"
+                aria-label="Highlight options"
+              >
+                {studentHighlightPalette.map((entry) => (
+                  <button
+                    key={entry.id}
+                    data-highlight-color={entry.id}
+                    type="button"
+                    onClick={() => {
+                      onSelectHighlightColor?.(entry.id);
+                      closeHighlightOptions();
+                    }}
+                    className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700"
+                    aria-label={entry.label}
+                  >
+                    <span className={`h-5 w-5 rounded-sm border border-gray-500 ${entry.swatchClassName}`} aria-hidden="true" />
+                    <span className="flex-1 text-left">{entry.label}</span>
+                    {highlightToolMode === 'highlight' && highlightColor === entry.id ? <Check size={16} aria-hidden="true" /> : null}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-gray-200" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelectEraseMode?.();
+                    closeHighlightOptions();
+                  }}
+                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700"
+                  aria-label="Erase highlights"
+                >
+                  <Eraser size={18} aria-hidden="true" />
+                  <span className="flex-1 text-left">Erase</span>
+                  {highlightToolMode === 'erase' ? <Check size={16} aria-hidden="true" /> : null}
+                </button>
+                  </div>,
+                )
+              : null}
+            <span className="sr-only" role="status" aria-live="polite">
+              {highlightToolMode === 'highlight'
+                ? `Highlighting with ${activePaletteEntry.label}`
+                : highlightToolMode === 'erase'
+                  ? 'Erasing highlights'
+                  : ''}
+            </span>
           </div>
         ) : null}
         {autoSaveStatus && (

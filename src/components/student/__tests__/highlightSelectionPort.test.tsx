@@ -26,7 +26,6 @@ describe('highlight selection port', () => {
         selectedText: 'beta',
       },
       selectionText: 'beta',
-      toolbarPosition: { left: 40, top: 10 },
     });
 
     const initial = port.readSelection(document.createElement('div'));
@@ -36,7 +35,6 @@ describe('highlight selection port', () => {
     const cleared = port.readSelection(document.createElement('div'));
     expect(cleared.selection).toBeNull();
     expect(cleared.selectionText).toBe('');
-    expect(cleared.toolbarPosition).toBeNull();
   });
 
   it('reads and clears browser selection through adapter seam', () => {
@@ -76,7 +74,6 @@ describe('highlight selection port', () => {
     const snapshot = port.readSelection(host, { enforceSingleBlock: true });
     expect(snapshot.selection?.selectedText).toBe('beta');
     expect(snapshot.selectionText).toBe('beta');
-    expect(snapshot.toolbarPosition).toEqual({ left: 60, top: 40 });
 
     port.clearSelection();
     expect(removeAllRanges).toHaveBeenCalledTimes(1);

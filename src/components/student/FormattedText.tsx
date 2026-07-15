@@ -4,6 +4,7 @@ import { escapeHtml } from './highlight/htmlEscape';
 import { type StudentHighlightColor } from './highlightPalette';
 import { HighlightableSurface } from './HighlightableSurface';
 import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';
+import { useOptionalStudentUI, type StudentHighlightToolMode } from './providers/StudentUIProvider';
 
 type FormattedTextProps = {
   text: string;
@@ -11,6 +12,7 @@ type FormattedTextProps = {
   as?: 'span' | 'div' | 'p';
   highlightEnabled?: boolean | undefined;
   highlightColor?: StudentHighlightColor | undefined;
+  highlightToolMode?: StudentHighlightToolMode | undefined;
   highlightClassName?: string | undefined;
   highlightSurfaceId?: string | undefined;
   preserveInlineEmphasis?: boolean | undefined;
@@ -21,10 +23,14 @@ export function FormattedText({
   as = 'span',
   highlightEnabled = false,
   highlightColor,
+  highlightToolMode,
   highlightClassName,
   highlightSurfaceId,
   preserveInlineEmphasis = false,
 }: FormattedTextProps) {
+  const studentUI = useOptionalStudentUI();
+  const resolvedHighlightToolMode =
+    highlightToolMode ?? studentUI?.state.accessibilitySettings.highlightToolMode ?? 'off';
   const Tag = as as any;
   const shouldSplitParagraphs = as === 'div' && /\n\n/.test(text);
   const paragraphTexts = useMemo(() => {
@@ -76,18 +82,14 @@ export function FormattedText({
   const {
     containerRef,
     renderedHtml,
-    canHighlightSelection,
-    canEraseSelection,
-    applySelectionHighlight,
-    eraseSelectionHighlight,
     hint,
-    selectionToolbarPosition,
   } = useHighlightSurfaceV2({
     enabled: highlightEnabled,
     surfaceId: highlightSurfaceId ?? defaultSurfaceId,
     baseHtml: initialHtml,
     highlightColor,
     highlightClassName,
+    toolMode: resolvedHighlightToolMode,
   });
   if (highlightEnabled || renderedHtml !== initialHtml) {
     return (
@@ -96,11 +98,6 @@ export function FormattedText({
         containerRef={containerRef}
         className={classes}
         html={renderedHtml}
-        showToolbar={canHighlightSelection}
-        toolbarPosition={selectionToolbarPosition}
-        canEraseSelection={canEraseSelection}
-        onApplyColor={applySelectionHighlight}
-        onEraseSelection={eraseSelectionHighlight}
         hint={hint}
       />
     );

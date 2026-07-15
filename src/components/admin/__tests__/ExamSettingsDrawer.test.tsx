@@ -107,6 +107,17 @@ describe('ExamSettingsDrawer standards tab', () => {
 });
 
 describe('ExamSettingsDrawer security tab', () => {
+  it('describes translation protection as best-effort deterrence', () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+
+    render(
+      <ExamSettingsDrawer isOpen onClose={() => {}} config={config} onChange={vi.fn()} />
+    );
+
+    fireEvent.click(screen.getByText('Security'));
+    expect(screen.getByText(/best-effort deterrence/i)).toBeInTheDocument();
+  });
+
   it('allows toggling anti-screenshot guard', () => {
     const config = createDefaultConfig('Academic', 'Academic');
     const onChange = vi.fn();

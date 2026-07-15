@@ -39,6 +39,12 @@ function submitForm(wcode = 'W250334') {
   fireEvent.change(screen.getByLabelText(/full name/i), {
     target: { value: 'Student One' },
   });
+  fireEvent.change(screen.getByLabelText(/nickname/i), {
+    target: { value: 'student-one' },
+  });
+  fireEvent.change(screen.getByLabelText(/IELTS Course/i), {
+    target: { value: 'IELTS Academic' },
+  });
   fireEvent.click(screen.getByRole('button', { name: /continue/i }));
 }
 
@@ -75,6 +81,8 @@ describe('StudentEntryRoute', () => {
         wcode: 'W250334',
         email: 'student@example.com',
         studentName: 'Student One',
+        nickname: 'student-one',
+        ieltsCourse: 'IELTS Academic',
       });
     });
 
@@ -281,6 +289,8 @@ describe('StudentEntryRoute', () => {
         wcode: 'guest-alpha_01',
         email: 'student@example.com',
         studentName: 'Student One',
+        nickname: 'student-one',
+        ieltsCourse: 'IELTS Academic',
       });
     });
 
@@ -312,6 +322,8 @@ describe('StudentEntryRoute', () => {
         wcode: 'W250334',
         email: 'student@example.com',
         studentName: 'Student One',
+        nickname: 'student-one',
+        ieltsCourse: 'IELTS Academic',
       });
     });
 
@@ -344,6 +356,8 @@ describe('StudentEntryRoute', () => {
         wcode: rawAccessCode,
         email: 'student@example.com',
         studentName: 'Student One',
+        nickname: 'student-one',
+        ieltsCourse: 'IELTS Academic',
       });
     });
 

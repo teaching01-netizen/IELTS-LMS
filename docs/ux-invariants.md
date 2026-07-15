@@ -72,11 +72,20 @@ Cross-block selections are allowed within the same highlight surface. Cross-surf
 
 Answer controls must stay outside highlightable selection boundaries. Students may select displayed reading/question text, but inputs, textareas, selects, contenteditable regions, and answer-control wrapper elements must not become highlight targets.
 
-Floating highlight toolbar actions must not clear, replace, or steal focus from the text selection they are acting on before apply/remove consumes the captured selection.
+Highlighting is tool-first. In active Reading and Listening exams, students choose Highlight or Erase from the persistent header control, then complete a native text selection. The active operation runs immediately and remains active for subsequent selections. With the tool off, selection stays native and no range mutation or selection clearing occurs.
+
+The floating cursor-following toolbar, toolbar coordinates, and transient captured-selection fallback must not be reintroduced. They conflict with iPad selection handles and can interrupt the gesture they are meant to act on.
+
+When translation deterrence is active, iOS callout suppression is scoped to
+`[data-student-highlightable="true"]` text and descendants. It must preserve native text
+selection and must never expand onto answer controls. Translation deterrence is best effort on
+unmanaged devices; it cannot guarantee that browser or operating-system translation is blocked.
 
 ### Must Not Break
 - Native drag selection must work for reading passage title/body and visible question display text in exam mode.
 - Highlight apply/remove must act on the latest valid captured selection for the active highlight surface only.
+- Highlight mode remains active across question/passage navigation, but resets when leaving Reading/Listening, entering blocking/submission UI, or ending the exam.
+- Persisted marks continue to hydrate and render while the tool is off.
 - Highlighting must not create nested highlight marks when recoloring or reapplying over already-highlighted text.
 - Persisted highlights must be tied to the rendered surface text and must reset when that text changes.
 

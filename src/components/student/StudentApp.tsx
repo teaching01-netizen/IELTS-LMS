@@ -16,7 +16,6 @@ import {
   getStudentPassageReadabilityLabel,
   getStudentTypographyScale,
 } from './accessibilityScale';
-import { defaultStudentHighlightColor } from './highlightPalette';
 import { StudentHighlightSelectionManagerProvider } from './highlightSelectionManager';
 import { useStudentSubmissionOrchestration } from './useStudentSubmissionOrchestration';
 import { useStudentTabletMode } from './tabletMode';
@@ -30,6 +29,7 @@ import { resolveObjectiveAnswerUpdate } from './resolveObjectiveAnswerUpdate';
 import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
 import { shouldLockViewportForExamSession } from './browserParityPolicy';
 import { emitAnswerMutationDebugLog } from './answerMutationDebug';
+import { isStudentHighlightToolContextActive } from './studentHighlightToolContext';
 import type { StudentAnswerMutationMeta, StudentAnswerValue } from '../../types/studentAttempt';
 
 function getBlockingCopy(reason: ReturnType<typeof useStudentRuntime>['state']['blocking']['reason']) {
@@ -137,12 +137,11 @@ export function StudentApp({
   const studentTypography = getStudentTypographyScale(uiState.accessibilitySettings.fontSize);
   useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
-  const { setShowTimeExtensionRequest } = uiActions;
+  const { resetHighlightTool, setShowTimeExtensionRequest } = uiActions;
   const timeExtensionReason =
     typeof uiState.timeExtensionReason === 'string' ? uiState.timeExtensionReason : '';
   const timeExtensionDialogRef = useRef<HTMLDialogElement>(null);
-  const highlightColor = defaultStudentHighlightColor;
-  const highlightClassName = undefined;
+  const highlightColor = uiState.accessibilitySettings.highlightColor;
   const highlightEnabled = true;
   const attemptAnswers = attemptState.attempt?.answers ?? {};
   const attemptWritingAnswers = attemptState.attempt?.writingAnswers ?? {};
@@ -278,6 +277,28 @@ export function StudentApp({
       submitModule: runtimeActions.submitModule,
     },
   });
+
+  useEffect(() => {
+    const isHighlightCapableContext = isStudentHighlightToolContextActive({
+      phase: effectivePhase,
+      module: runtimeState.currentModule,
+      blockingReason: runtimeState.blocking.reason,
+      submitConfirmOpen: uiState.showSubmitConfirm,
+      finalSubmitIdle: finalSubmitStatus === 'idle',
+    });
+
+    if (!isHighlightCapableContext && uiState.accessibilitySettings.highlightToolMode !== 'off') {
+      resetHighlightTool();
+    }
+  }, [
+    effectivePhase,
+    finalSubmitStatus,
+    resetHighlightTool,
+    runtimeState.blocking.reason,
+    runtimeState.currentModule,
+    uiState.accessibilitySettings.highlightToolMode,
+    uiState.showSubmitConfirm,
+  ]);
 
   useEffect(() => {
     if (!latestPendingWarning) {
@@ -723,6 +744,11 @@ export function StudentApp({
         testTakerId={attemptState.attempt?.candidateId ?? undefined}
         timeRemaining={runtimeState.displayTimeRemaining}
         highlightEnabled={highlightEnabled}
+        highlightToolMode={uiState.accessibilitySettings.highlightToolMode}
+        highlightColor={highlightColor}
+        onToggleHighlightMode={uiActions.toggleHighlightMode}
+        onSelectHighlightColor={uiActions.setHighlightColor}
+        onSelectEraseMode={() => uiActions.setHighlightToolMode('erase')}
         tabletMode={tabletMode}
         onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
         onOpenNavigator={
@@ -748,7 +774,6 @@ export function StudentApp({
           displayTimeRemaining={runtimeState.displayTimeRemaining}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
-          highlightClassName={highlightClassName}
           passageReadabilityLabel={getStudentPassageReadabilityLabel(
             uiState.accessibilitySettings.passageReadabilityLevel,
           )}

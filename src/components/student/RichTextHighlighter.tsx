@@ -4,6 +4,7 @@ import { escapeHtml } from './highlight/htmlEscape';
 import { HighlightableSurface } from './HighlightableSurface';
 import { type StudentHighlightColor } from './highlightPalette';
 import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';
+import { useOptionalStudentUI, type StudentHighlightToolMode } from './providers/StudentUIProvider';
 
 interface RichTextHighlighterProps {
   content: string;
@@ -12,6 +13,7 @@ interface RichTextHighlighterProps {
   as?: 'div' | 'p' | 'span';
   className?: string | undefined;
   highlightColor?: StudentHighlightColor | undefined;
+  highlightToolMode?: StudentHighlightToolMode | undefined;
   highlightClassName?: string | undefined;
   highlightSurfaceId?: string | undefined;
 }
@@ -22,23 +24,17 @@ export function RichTextHighlighter({
   as = 'div',
   className,
   highlightColor,
+  highlightToolMode,
   highlightClassName,
   highlightSurfaceId,
 }: RichTextHighlighterProps) {
+  const studentUI = useOptionalStudentUI();
+  const resolvedHighlightToolMode =
+    highlightToolMode ?? studentUI?.state.accessibilitySettings.highlightToolMode ?? 'off';
   const initialHtml = useMemo(
     () => (contentType === 'html' ? sanitizeHtml(content) : escapeHtml(content)),
     [content, contentType],
   );
-
-  if (!enabled) {
-    return (
-      <HighlightableSurface
-        as={as}
-        className={className}
-        html={initialHtml}
-      />
-    );
-  }
 
   const instanceId = useId();
   const defaultSurfaceId = useMemo(
@@ -48,18 +44,14 @@ export function RichTextHighlighter({
   const {
     containerRef,
     renderedHtml,
-    canHighlightSelection,
-    canEraseSelection,
-    applySelectionHighlight,
-    eraseSelectionHighlight,
     hint,
-    selectionToolbarPosition,
   } = useHighlightSurfaceV2({
     enabled,
     surfaceId: highlightSurfaceId ?? defaultSurfaceId,
     baseHtml: initialHtml,
     highlightClassName,
     highlightColor,
+    toolMode: resolvedHighlightToolMode,
   });
   return (
     <HighlightableSurface
@@ -67,11 +59,6 @@ export function RichTextHighlighter({
       containerRef={containerRef}
       className={className}
       html={renderedHtml}
-      showToolbar={canHighlightSelection}
-      toolbarPosition={selectionToolbarPosition}
-      canEraseSelection={canEraseSelection}
-      onApplyColor={applySelectionHighlight}
-      onEraseSelection={eraseSelectionHighlight}
       hint={hint}
     />
   );

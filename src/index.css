@@ -282,6 +282,13 @@
     color: inherit;
   }
 
+  .student-translation-guard-active [data-student-highlightable="true"],
+  .student-translation-guard-active [data-student-highlightable="true"] * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
   .student-stimulus-content p {
     margin-top: var(--student-reading-paragraph-spacing, 1rem);
     margin-bottom: var(--student-reading-paragraph-spacing, 1rem);

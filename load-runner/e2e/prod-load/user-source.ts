@@ -6,6 +6,8 @@ export interface VirtualUser {
   email: string;
   password: string;
   candidateId?: string;
+  nickname?: string;
+  ieltsCourse?: string;
 }
 
 function parseCsv(content: string): VirtualUser[] {
@@ -24,6 +26,8 @@ function parseCsv(content: string): VirtualUser[] {
   const emailIdx = index('email');
   const passwordIdx = index('password');
   const candidateIdIdx = index('candidateId');
+  const nicknameIdx = index('nickname');
+  const ieltsCourseIdx = index('ieltsCourse');
 
   if (userIdIdx < 0 || emailIdx < 0 || passwordIdx < 0) {
     throw new Error('CSV must include headers: userId,email,password (candidateId optional).');
@@ -35,6 +39,8 @@ function parseCsv(content: string): VirtualUser[] {
     const email = cells[emailIdx] ?? '';
     const password = cells[passwordIdx] ?? '';
     const candidateId = candidateIdIdx >= 0 ? (cells[candidateIdIdx] ?? '') : '';
+    const nickname = nicknameIdx >= 0 ? (cells[nicknameIdx] ?? '') : '';
+    const ieltsCourse = ieltsCourseIdx >= 0 ? (cells[ieltsCourseIdx] ?? '') : '';
 
     if (!userId || !email || !password) {
       throw new Error(`Invalid CSV row ${rowIdx + 2}: userId,email,password are required.`);
@@ -45,6 +51,8 @@ function parseCsv(content: string): VirtualUser[] {
       email,
       password,
       ...(candidateId ? { candidateId } : {}),
+      ...(nickname ? { nickname } : {}),
+      ...(ieltsCourse ? { ieltsCourse } : {}),
     };
   });
 }
@@ -68,6 +76,8 @@ function parseJson(content: string): VirtualUser[] {
       email: String(record.email),
       password: String(record.password),
       ...(record.candidateId ? { candidateId: String(record.candidateId) } : {}),
+      ...(record.nickname ? { nickname: String(record.nickname) } : {}),
+      ...(record.ieltsCourse ? { ieltsCourse: String(record.ieltsCourse) } : {}),
     };
   });
 }

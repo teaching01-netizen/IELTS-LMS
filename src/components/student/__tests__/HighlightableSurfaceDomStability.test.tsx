@@ -4,11 +4,11 @@ import { describe, expect, it } from 'vitest';
 import { HighlightableSurface } from '../HighlightableSurface';
 
 describe('HighlightableSurface DOM stability', () => {
-  it('does not replace inner text nodes when only toolbar visibility changes', () => {
+  it('does not replace inner text nodes when rerendered with unchanged HTML', () => {
     const html = '<p>Hello <strong>world</strong></p>';
 
     const { container, rerender } = render(
-      <HighlightableSurface as="div" html={html} showToolbar={false} />,
+      <HighlightableSurface as="div" html={html} />,
     );
 
     const surface = container.querySelector('[data-student-highlightable="true"]') as HTMLElement;
@@ -18,15 +18,7 @@ describe('HighlightableSurface DOM stability', () => {
     expect(beforeTextNode).not.toBeNull();
 
     rerender(
-      <HighlightableSurface
-        as="div"
-        html={html}
-        showToolbar
-        toolbarPosition={{ left: 10, top: 10 }}
-        canEraseSelection={false}
-        onApplyColor={() => {}}
-        onEraseSelection={() => {}}
-      />,
+      <HighlightableSurface as="div" html={html} />,
     );
 
     const afterSurface = container.querySelector('[data-student-highlightable="true"]') as HTMLElement;
@@ -34,4 +26,3 @@ describe('HighlightableSurface DOM stability', () => {
     expect(afterTextNode).toBe(beforeTextNode);
   });
 });
-

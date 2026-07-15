@@ -327,7 +327,7 @@ describe('StudentApp runtime-backed mode', () => {
     },
   };
 
-  it('does not render highlight controls in exam mode', async () => {
+  it('renders the persistent highlight tool in Reading exam mode without a floating toolbar', async () => {
     render(
       <StudentAppWrapper
         state={readingState}
@@ -339,10 +339,14 @@ describe('StudentApp runtime-backed mode', () => {
     );
 
     await screen.findByRole('timer', { name: /time remaining/i });
-    expect(screen.queryByRole('button', { name: /open highlight options/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: /highlight options/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /erase selected text/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Highlight' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose highlight color or erase' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /apply yellow highlight/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Highlight' }));
+    expect(screen.getByRole('button', { name: 'Highlighting' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Highlight' })).toBeInTheDocument());
   });
 
   it('keeps tablet footer viewport height stable while an editable field is focused', async () => {

@@ -175,13 +175,36 @@ async function defaultLoginOrRegister(page: Page, user: VirtualUser, registerUrl
     (await fillFirst(
     [
       'input#email',
-      'input[name=\"email\"]',
-      'input[type=\"email\"]',
-      'input[autocomplete=\"email\"]',
-      'input[placeholder*=\"Email\" i]',
+      'input[name="email"]',
+      'input[type="email"]',
+      'input[autocomplete="email"]',
+      'input[placeholder*="Email" i]',
     ],
     user.email,
   ));
+
+  // Optional-but-required-on-newer-deployments profile fields. Filled when present
+  // so the check-in form validates; skipped silently on deployments without them.
+  const nicknameValue = (user.nickname ?? user.userId).trim() || user.userId;
+  await fillByLabel(/nickname/i, nicknameValue)
+    .then((ok) =>
+      ok
+        ? ok
+        : fillFirst(['input#nickname', 'input[name="nickname"]', 'input[placeholder*="Nickname" i]'], nicknameValue),
+    )
+    .catch(() => false);
+
+  const ieltsCourseValue = (user.ieltsCourse ?? 'IELTS Academic').trim() || 'IELTS Academic';
+  await fillByLabel(/IELTS Course/i, ieltsCourseValue)
+    .then((ok) =>
+      ok
+        ? ok
+        : fillFirst(
+            ['input#ieltsCourse', 'input[name="ieltsCourse"]', 'input[placeholder*="IELTS Course" i]'],
+            ieltsCourseValue,
+          ),
+    )
+    .catch(() => false);
 
   if (!wcodeFilled || !fullNameFilled || !emailFilled) {
     throw new Error(

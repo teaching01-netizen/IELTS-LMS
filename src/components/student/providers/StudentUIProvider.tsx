@@ -7,6 +7,8 @@ import {
   type StudentPassageReadabilityLevel,
 } from '../accessibilityScale';
 
+export type StudentHighlightToolMode = 'off' | 'highlight' | 'erase';
+
 interface UIState {
   showNavigator: boolean;
   showSubmitConfirm: boolean;
@@ -20,7 +22,7 @@ interface UIState {
     highContrast: boolean;
     zoom: number;
     passageReadabilityLevel: StudentPassageReadabilityLevel;
-    highlightMode: boolean;
+    highlightToolMode: StudentHighlightToolMode;
     highlightColor: StudentHighlightColor;
   };
 }
@@ -42,6 +44,8 @@ interface UIActions {
   decreasePassageReadability: () => void;
   resetPassageReadability: () => void;
   toggleHighlightMode: () => void;
+  setHighlightToolMode: (mode: StudentHighlightToolMode) => void;
+  resetHighlightTool: () => void;
   setHighlightColor: (color: StudentHighlightColor) => void;
 }
 
@@ -69,7 +73,7 @@ export function StudentUIProvider({ children }: UIProviderProps) {
     highContrast: false,
     zoom: 1,
     passageReadabilityLevel: DEFAULT_STUDENT_PASSAGE_READABILITY_LEVEL,
-    highlightMode: false,
+    highlightToolMode: 'off' as StudentHighlightToolMode,
     highlightColor: defaultStudentHighlightColor,
   });
 
@@ -137,11 +141,26 @@ export function StudentUIProvider({ children }: UIProviderProps) {
   }, []);
 
   const toggleHighlightMode = useCallback(() => {
-    setAccessibilitySettings(prev => ({ ...prev, highlightMode: !prev.highlightMode }));
+    setAccessibilitySettings((prev) => ({
+      ...prev,
+      highlightToolMode: prev.highlightToolMode === 'off' ? 'highlight' : 'off',
+    }));
   }, []);
 
   const setHighlightColor = useCallback((color: StudentHighlightColor) => {
-    setAccessibilitySettings((prev) => ({ ...prev, highlightColor: color }));
+    setAccessibilitySettings((prev) => ({
+      ...prev,
+      highlightColor: color,
+      highlightToolMode: 'highlight',
+    }));
+  }, []);
+
+  const setHighlightToolMode = useCallback((mode: StudentHighlightToolMode) => {
+    setAccessibilitySettings((prev) => ({ ...prev, highlightToolMode: mode }));
+  }, []);
+
+  const resetHighlightTool = useCallback(() => {
+    setAccessibilitySettings((prev) => ({ ...prev, highlightToolMode: 'off' }));
   }, []);
 
   const state: UIState = {
@@ -172,6 +191,8 @@ export function StudentUIProvider({ children }: UIProviderProps) {
     decreasePassageReadability,
     resetPassageReadability,
     toggleHighlightMode,
+    setHighlightToolMode,
+    resetHighlightTool,
     setHighlightColor,
   };
 
@@ -188,4 +209,8 @@ export function useStudentUI() {
     throw new Error('useStudentUI must be used within StudentUIProvider');
   }
   return context;
+}
+
+export function useOptionalStudentUI() {
+  return useContext(UIContext);
 }

@@ -1349,7 +1349,7 @@ function ExamSettingsDrawerComponent({
                   <label className="p-4 flex items-center justify-between cursor-pointer">
                     <div>
                       <p className="text-sm font-semibold text-gray-900">Translation Warning</p>
-                      <p className="text-[10px] text-gray-500">Block page translation markers and warn when translation is detected</p>
+                      <p className="text-[10px] text-gray-500">Best-effort deterrence for page and selected-text translation, with warnings when detected</p>
                     </div>
                     <input 
                       type="checkbox" 

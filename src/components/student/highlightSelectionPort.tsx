@@ -9,11 +9,10 @@ import { subscribeSelectionObserver } from './highlight/selectionObserver';
 export interface SurfaceSelectionSnapshot {
   selection: HighlightSelectionV2 | null;
   selectionText: string;
-  toolbarPosition: { left: number; top: number } | null;
 }
 
 export interface HighlightSelectionPort {
-  subscribe: (onSelectionChange: () => void) => () => void;
+  subscribe: (onSelectionChange: () => boolean) => () => void;
   readSelection: (
     container: HTMLElement,
     options?: CaptureSelectionOptions,
@@ -23,26 +22,6 @@ export interface HighlightSelectionPort {
 
 function normalizeSelectionText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
-}
-
-function safeToolbarPosition(selection: Selection): { left: number; top: number } | null {
-  if (selection.rangeCount === 0) {
-    return null;
-  }
-
-  try {
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-    const left = rect.left + rect.width / 2;
-    // Anchor to the bottom of the selected text so the toolbar renders below it.
-    const top = rect.bottom + window.scrollY;
-    if (!Number.isFinite(left) || !Number.isFinite(top)) {
-      return null;
-    }
-    return { left, top };
-  } catch {
-    return { left: 0, top: window.scrollY };
-  }
 }
 
 export function createBrowserHighlightSelectionPort(): HighlightSelectionPort {
@@ -57,7 +36,6 @@ export function createBrowserHighlightSelectionPort(): HighlightSelectionPort {
         return {
           selection: null,
           selectionText: '',
-          toolbarPosition: null,
         };
       }
 
@@ -65,7 +43,6 @@ export function createBrowserHighlightSelectionPort(): HighlightSelectionPort {
       return {
         selection,
         selectionText: normalizeSelectionText(browserSelection.toString()),
-        toolbarPosition: selection ? safeToolbarPosition(browserSelection) : null,
       };
     },
 
@@ -82,9 +59,8 @@ export function createInMemoryHighlightSelectionPort(initial?: SurfaceSelectionS
   let snapshot: SurfaceSelectionSnapshot = initial ?? {
     selection: null,
     selectionText: '',
-    toolbarPosition: null,
   };
-  const listeners = new Set<() => void>();
+  const listeners = new Set<() => boolean>();
 
   return {
     subscribe(onSelectionChange) {
@@ -100,7 +76,6 @@ export function createInMemoryHighlightSelectionPort(initial?: SurfaceSelectionS
       snapshot = {
         selection: null,
         selectionText: '',
-        toolbarPosition: null,
       };
     },
     setSnapshot(nextSnapshot) {

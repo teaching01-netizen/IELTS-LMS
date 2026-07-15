@@ -339,6 +339,27 @@ Cross-block selections are valid within a single highlight surface. Cross-surfac
 
 ---
 
+## 2026-07-13: Translation Deterrence Must Preserve Student Selection
+
+### Failure case
+Browser translation markers can be removed after exam startup, and iOS selected-text Translate is
+outside the page's complete control. Broad event blocking or callout suppression would also break
+the student-owned selection/highlight workflow and answer controls.
+
+### Invariant
+During an enabled exam, the student translation guard self-heals its document markers and records
+cooldown-deduplicated medium violations through the existing audit flow. Callout suppression is
+limited to active `[data-student-highlightable="true"]` content, preserves text selection, and does
+not cover answer controls. This is best-effort deterrence on unmanaged devices, not hard blocking.
+
+### Regression protection
+- `src/components/student/providers/__tests__/StudentProctoringProvider.test.tsx`
+- `src/components/student/__tests__/StudentTranslationGuardCss.test.ts`
+- `src/features/builder/components/__tests__/SecurityTab.test.tsx`
+- `src/components/admin/__tests__/ExamSettingsDrawer.test.tsx`
+
+---
+
 ## 2026-05-13: Dragstart Anti-Cheat Blocks Native Text Selection
 
 ### Symptom
@@ -425,3 +446,27 @@ The TXT export and `getBlockQuestionCount`/`getExamStatsFromState` must derive q
 
 ### Note (separate, pre-existing, out of scope)
 `MULTI_MCQ` is rendered as one question spanning slots (e.g. `Q1-2`) while `getBlockQuestionCount` returns `requiredSelections`. This makes the canonical "total questions" count larger than the number of answer-key lines for multi-select blocks by design (one question, multiple slots). Do not "fix" by inflating the export; reconcile the counting model deliberately if the discrepancy becomes user-visible.
+
+---
+
+## 2026-07-13: Cursor-Following Highlight Controls Disrupt iPad Selection
+
+### Symptom
+On iPad, selecting passage or question text caused the highlight palette to appear beside the current range. The new interactive element could overlap native selection handles, move as the handles were adjusted, and collapse the selection before the student completed the gesture.
+
+### Root Cause
+The old flow reacted to intermediate `selectionchange` snapshots and coupled selection capture to cursor-relative toolbar coordinates. iPad may emit overlapping pointer, mouse, and touch completion events for one gesture, so a toolbar-first mutation path also risked duplicate commands.
+
+### Fix
+- Move Highlight, five accessible color choices, and Erase into a persistent header split control.
+- Apply the active command only after selection completion; keep it active for repeated use.
+- Deduplicate synchronous pointer/mouse/touch compatibility events and clear native selection only after a successful enabled-mode command.
+- Keep persisted rendering independent from whether the tool is active.
+
+### Regression Protection
+- `src/components/student/__tests__/StudentHeaderHighlightHint.test.tsx`
+- `src/components/student/__tests__/highlightPersistence.test.tsx`
+- `src/components/student/highlight/__tests__/selectionObserver.test.ts`
+
+### Invariant
+Do not restore cursor-following highlight UI or mutate ranges from intermediate drag snapshots. Tool-off selection must remain native and non-mutating.
