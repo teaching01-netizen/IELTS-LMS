@@ -15,7 +15,24 @@ vi.mock('../StudentListening', () => ({
 }));
 
 vi.mock('../StudentWriting', () => ({
-  StudentWriting: () => <div data-testid="writing-module">writing</div>,
+  StudentWriting: ({
+    highlightEnabled,
+    highlightColor,
+    highlightClassName,
+  }: {
+    highlightEnabled?: boolean;
+    highlightColor?: string;
+    highlightClassName?: string;
+  }) => (
+    <div
+      data-testid="writing-module"
+      data-highlight-enabled={String(highlightEnabled)}
+      data-highlight-color={highlightColor}
+      data-highlight-class-name={highlightClassName}
+    >
+      writing
+    </div>
+  ),
 }));
 
 vi.mock('../StudentSpeaking', () => ({
@@ -142,7 +159,9 @@ describe('StudentExamWorkspace', () => {
   it('renders writing module without footer', () => {
     renderWorkspace('writing');
 
-    expect(screen.getByTestId('writing-module')).toBeInTheDocument();
+    expect(screen.getByTestId('writing-module')).toHaveAttribute('data-highlight-enabled', 'false');
+    expect(screen.getByTestId('writing-module')).toHaveAttribute('data-highlight-color', 'yellow');
+    expect(screen.getByTestId('writing-module')).toHaveAttribute('data-highlight-class-name', '');
     expect(screen.queryByTestId('workspace-footer-submit')).not.toBeInTheDocument();
   });
 });

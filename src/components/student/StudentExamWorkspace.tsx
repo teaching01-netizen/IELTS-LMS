@@ -149,6 +149,9 @@ export function StudentExamWorkspace({
             showSubmitButton={showSubmitControls}
             tabletMode={tabletMode}
             registerLiveWritingAnswer={onRegisterLiveWritingAnswer}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+            highlightClassName={highlightClassName}
           />
         ) : null}
 

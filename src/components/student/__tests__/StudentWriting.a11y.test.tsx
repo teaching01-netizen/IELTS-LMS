@@ -1,9 +1,25 @@
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createDefaultConfig } from '../../../constants/examDefaults';
 import type { ExamState } from '../../../types';
 import { StudentWriting } from '../StudentWriting';
+import { StudentHighlightPersistenceProvider } from '../highlightV2Persistence';
+import {
+  createInMemoryHighlightSelectionPort,
+  StudentHighlightSelectionPortProvider,
+} from '../highlightSelectionPort';
+import { StudentUIProvider, useStudentUI } from '../providers/StudentUIProvider';
+
+function HighlightModeControls() {
+  const { actions } = useStudentUI();
+  return (
+    <>
+      <button type="button" onClick={() => actions.setHighlightToolMode('highlight')}>Use highlight</button>
+      <button type="button" onClick={() => actions.setHighlightToolMode('erase')}>Use erase</button>
+    </>
+  );
+}
 
 function createExamState(): ExamState {
   const config = createDefaultConfig('Academic', 'Academic');
@@ -41,25 +57,123 @@ function createExamState(): ExamState {
 }
 
 describe('StudentWriting a11y', () => {
-	  it('renders an accessible writing editor', () => {
-	    render(
-	      <StudentWriting
-	        state={createExamState()}
-	        writingAnswers={{}}
-	        onWritingChange={() => undefined}
-	        onSubmit={() => undefined}
-	        currentQuestionId={null}
-	        onNavigate={() => undefined}
-	      />,
-	    );
+  it('applies and erases a prompt highlight without making the writing editor highlightable', () => {
+    const state = createExamState();
+    state.writing.task1Prompt = '<p>Highlight <strong>this prompt</strong>.</p>';
+    const port = createInMemoryHighlightSelectionPort({
+      selection: { start: 0, end: 9, selectedText: 'Highlight' },
+      selectionText: 'Highlight',
+    });
 
-	    const editor = screen.getByRole('textbox', { name: /writing response/i });
-	    expect(editor.tagName).toBe('TEXTAREA');
-	    expect(editor.getAttribute('class')).toMatch(/focus-visible/);
-	    expect(editor).toHaveClass('flex-1');
-	    expect(editor).toHaveClass('w-full');
-	    expect(editor).toHaveClass('overflow-y-auto');
-	  });
+    render(
+      <StudentHighlightPersistenceProvider namespace="writing-interaction">
+        <StudentHighlightSelectionPortProvider port={port}>
+          <StudentUIProvider>
+            <HighlightModeControls />
+            <StudentWriting
+              state={state}
+              writingAnswers={{}}
+              onWritingChange={() => undefined}
+              onSubmit={() => undefined}
+              currentQuestionId={null}
+              onNavigate={() => undefined}
+              highlightEnabled
+              highlightColor="blue"
+              highlightClassName="test-highlight"
+            />
+          </StudentUIProvider>
+        </StudentHighlightSelectionPortProvider>
+      </StudentHighlightPersistenceProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use highlight' }));
+    act(() => port.emit());
+
+    const prompt = screen.getByTestId('writing-task-prompt');
+    const mark = prompt.querySelector('mark[data-highlighted="true"]');
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    expect(mark).toHaveTextContent('Highlight');
+    expect(mark).toHaveClass('test-highlight');
+    expect(editor.closest('[data-student-highlightable="true"]')).toBeNull();
+
+    port.setSnapshot({
+      selection: { start: 0, end: 9, selectedText: 'Highlight' },
+      selectionText: 'Highlight',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Use erase' }));
+    act(() => port.emit());
+
+    expect(prompt.querySelector('mark[data-highlighted="true"]')).toBeNull();
+  });
+
+  it('does not render Task 1 highlight ranges on Task 2 during a task switch', () => {
+    const state = createExamState();
+    state.config.sections.writing.tasks.push({
+      id: 'task2',
+      label: 'Task 2',
+      taskType: 'task2',
+      minWords: 250,
+      recommendedTime: 40,
+    });
+    state.writing.task1Prompt = 'Alpha prompt';
+    state.writing.task2Prompt = 'Bravo prompt';
+    const port = createInMemoryHighlightSelectionPort({
+      selection: { start: 0, end: 5, selectedText: 'Alpha' },
+      selectionText: 'Alpha',
+    });
+
+    render(
+      <StudentHighlightSelectionPortProvider port={port}>
+        <StudentUIProvider>
+          <HighlightModeControls />
+          <StudentWriting
+            state={state}
+            writingAnswers={{}}
+            onWritingChange={() => undefined}
+            onSubmit={() => undefined}
+            currentQuestionId={null}
+            onNavigate={() => undefined}
+            highlightEnabled
+          />
+        </StudentUIProvider>
+      </StudentHighlightSelectionPortProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use highlight' }));
+    act(() => port.emit());
+    const taskOneSurface = screen
+      .getByTestId('writing-task-prompt')
+      .querySelector('[data-student-highlightable="true"]');
+    expect(taskOneSurface?.querySelector('mark')).toHaveTextContent('Alpha');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Task 2' }));
+
+    const taskTwoPrompt = screen.getByTestId('writing-task-prompt');
+    const taskTwoSurface = taskTwoPrompt.querySelector('[data-student-highlightable="true"]');
+    expect(taskTwoPrompt).toHaveTextContent('Bravo prompt');
+    expect(taskTwoPrompt.querySelector('mark')).toBeNull();
+    expect(taskTwoSurface).not.toBe(taskOneSurface);
+  });
+
+  it('renders an accessible writing editor', () => {
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    expect(editor.tagName).toBe('TEXTAREA');
+    expect(editor.getAttribute('class')).toMatch(/focus-visible/);
+    expect(editor).toHaveClass('flex-1');
+    expect(editor).toHaveClass('w-full');
+    expect(editor).toHaveClass('overflow-y-auto');
+  });
 
   it('resizes writing panes using the workspace bounds', () => {
     render(

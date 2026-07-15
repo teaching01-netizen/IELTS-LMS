@@ -3,13 +3,14 @@ import { ExamState } from '../../types';
 import { Check, X } from 'lucide-react';
 import { getWritingTaskContent } from '../../utils/writingTaskUtils';
 import { saveStudentAuditEvent } from '../../services/studentAuditService';
-import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
 import { useSplitPaneResize } from './useSplitPaneResize';
 import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 import { StudentSplitPaneResizer } from './StudentSplitPaneResizer';
+import { RichTextHighlighter } from './RichTextHighlighter';
+import type { StudentHighlightColor } from './highlightPalette';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -30,6 +31,9 @@ interface StudentWritingProps {
   showSubmitButton?: boolean | undefined;
   tabletMode?: boolean | undefined;
   registerLiveWritingAnswer?: ((taskId: string, text: string) => void) | undefined;
+  highlightEnabled?: boolean | undefined;
+  highlightColor?: StudentHighlightColor | undefined;
+  highlightClassName?: string | undefined;
 }
 
 const WRITING_DRAFT_COMMIT_DEBOUNCE_MS = 300;
@@ -117,6 +121,9 @@ export function StudentWriting({
   showSubmitButton = true,
   tabletMode = false,
   registerLiveWritingAnswer,
+  highlightEnabled = false,
+  highlightColor,
+  highlightClassName,
 }: StudentWritingProps) {
   const isTabletMode = Boolean(tabletMode);
   const attemptContext = useOptionalStudentAttempt();
@@ -432,7 +439,6 @@ export function StudentWriting({
   const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
   const currentPrompt = currentTaskContent?.prompt ?? '';
   const currentPromptContainsMarkup = /<[^>]+>/.test(currentPrompt);
-  const sanitizedPromptHtml = sanitizeHtml(currentPrompt);
   const minWords = currentTask.minWords || 150;
   const currentChart = currentTaskContent?.chart;
 
@@ -598,11 +604,15 @@ export function StudentWriting({
               data-testid="writing-task-prompt"
               className="student-stimulus-content max-w-none text-gray-900 whitespace-break-spaces break-words [overflow-wrap:anywhere]"
             >
-              {currentPromptContainsMarkup ? (
-                <div dangerouslySetInnerHTML={{ __html: sanitizedPromptHtml }} />
-              ) : (
-                currentPrompt
-              )}
+              <RichTextHighlighter
+                key={currentTask.id}
+                content={currentPrompt}
+                contentType={currentPromptContainsMarkup ? 'html' : 'text'}
+                enabled={highlightEnabled}
+                highlightColor={highlightColor}
+                highlightClassName={highlightClassName}
+                highlightSurfaceId={`writing:prompt:${currentTask.id}`}
+              />
             </div>
           </div>
         </div>
