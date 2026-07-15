@@ -15,7 +15,6 @@ describe('StudentHeader highlight tool', () => {
         onToggleHighlightMode={() => {}}
         onSelectHighlightColor={() => {}}
         onSelectEraseMode={() => {}}
-        onOpenNavigator={() => {}}
         isExamActive
       />,
     );
@@ -24,6 +23,10 @@ describe('StudentHeader highlight tool', () => {
     expect(mainButton.tagName).toBe('BUTTON');
     expect(mainButton).toHaveClass('min-h-11');
     expect(mainButton).toHaveAttribute('aria-pressed', 'false');
+    const eraseButton = screen.getByRole('button', { name: 'Erase highlights' });
+    expect(eraseButton).toHaveClass('min-h-11');
+    expect(eraseButton).toHaveClass('min-w-11');
+    expect(eraseButton).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByText('Tip: Select text to highlight')).toBeNull();
   });
 
@@ -48,7 +51,7 @@ describe('StudentHeader highlight tool', () => {
     expect(screen.getByRole('button', { name: 'Highlighting' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('status')).toHaveTextContent('Highlighting with Yellow');
 
-    const trigger = screen.getByRole('button', { name: 'Choose highlight color or erase' });
+    const trigger = screen.getByRole('button', { name: 'Choose highlight color' });
     fireEvent.click(trigger);
     for (const name of ['Yellow', 'Pink', 'Green', 'Blue', 'Purple']) {
       expect(screen.getByRole('button', { name })).toHaveClass('min-h-11');
@@ -57,7 +60,7 @@ describe('StudentHeader highlight tool', () => {
     expect(onSelectHighlightColor).toHaveBeenCalledWith('blue');
     await waitFor(() => expect(trigger).toHaveFocus());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Choose highlight color or erase' }));
+    expect(screen.queryByRole('button', { name: 'Erase highlights' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Erase highlights' }));
     expect(onSelectEraseMode).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(trigger).toHaveFocus());
@@ -76,7 +79,7 @@ describe('StudentHeader highlight tool', () => {
         isExamActive
       />,
     );
-    const trigger = screen.getByRole('button', { name: 'Choose highlight color or erase' });
+    const trigger = screen.getByRole('button', { name: 'Choose highlight color' });
     fireEvent.click(trigger);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Green' })).toHaveFocus());
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -104,7 +107,7 @@ describe('StudentHeader highlight tool', () => {
       />,
     );
 
-    const trigger = screen.getByRole('button', { name: 'Choose highlight color or erase' });
+    const trigger = screen.getByRole('button', { name: 'Choose highlight color' });
     vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
       x: 420,
       y: 10,

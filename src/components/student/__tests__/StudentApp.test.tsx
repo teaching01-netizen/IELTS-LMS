@@ -340,13 +340,31 @@ describe('StudentApp runtime-backed mode', () => {
 
     await screen.findByRole('timer', { name: /time remaining/i });
     expect(screen.getByRole('button', { name: 'Highlight' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Choose highlight color or erase' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose highlight color' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Erase highlights' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /apply yellow highlight/i })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Highlight' }));
     expect(screen.getByRole('button', { name: 'Highlighting' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Highlight' })).toBeInTheDocument());
+  });
+
+  it('renders the persistent highlight tools in Writing exam mode', async () => {
+    render(
+      <StudentAppWrapper
+        state={state}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={createWritingAttemptSnapshot()}
+        runtimeSnapshot={createWritingRuntimeSnapshot()}
+      />,
+    );
+
+    await screen.findByRole('timer', { name: /time remaining/i });
+    expect(screen.getByRole('button', { name: 'Highlight' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose highlight color' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Erase highlights' })).toBeInTheDocument();
   });
 
   it('keeps tablet footer viewport height stable while an editable field is focused', async () => {

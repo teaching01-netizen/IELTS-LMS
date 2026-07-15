@@ -44,6 +44,7 @@ interface UIActions {
   decreasePassageReadability: () => void;
   resetPassageReadability: () => void;
   toggleHighlightMode: () => void;
+  toggleEraseMode: () => void;
   setHighlightToolMode: (mode: StudentHighlightToolMode) => void;
   resetHighlightTool: () => void;
   setHighlightColor: (color: StudentHighlightColor) => void;
@@ -143,7 +144,14 @@ export function StudentUIProvider({ children }: UIProviderProps) {
   const toggleHighlightMode = useCallback(() => {
     setAccessibilitySettings((prev) => ({
       ...prev,
-      highlightToolMode: prev.highlightToolMode === 'off' ? 'highlight' : 'off',
+      highlightToolMode: prev.highlightToolMode === 'highlight' ? 'off' : 'highlight',
+    }));
+  }, []);
+
+  const toggleEraseMode = useCallback(() => {
+    setAccessibilitySettings((prev) => ({
+      ...prev,
+      highlightToolMode: prev.highlightToolMode === 'erase' ? 'off' : 'erase',
     }));
   }, []);
 
@@ -191,6 +199,7 @@ export function StudentUIProvider({ children }: UIProviderProps) {
     decreasePassageReadability,
     resetPassageReadability,
     toggleHighlightMode,
+    toggleEraseMode,
     setHighlightToolMode,
     resetHighlightTool,
     setHighlightColor,

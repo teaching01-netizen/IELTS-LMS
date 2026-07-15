@@ -80,15 +80,10 @@ export function StudentHeader({
   const showZoomControls = zoom !== undefined && onZoomIn && onZoomOut && onZoomReset;
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
   const shouldShowHighlightTool = Boolean(
-    highlightEnabled && isExamActive && onOpenNavigator && onToggleHighlightMode,
+    highlightEnabled && isExamActive && onToggleHighlightMode && onSelectEraseMode,
   );
   const activePaletteEntry = getStudentHighlightPaletteEntry(highlightColor);
-  const highlightButtonLabel =
-    highlightToolMode === 'erase'
-      ? 'Erasing'
-      : highlightToolMode === 'highlight'
-        ? 'Highlighting'
-        : 'Highlight';
+  const highlightButtonLabel = highlightToolMode === 'highlight' ? 'Highlighting' : 'Highlight';
 
   const closeHighlightOptions = useCallback(() => {
     setShowHighlightOptions(false);
@@ -319,25 +314,23 @@ export function StudentHeader({
               type="button"
               onClick={onToggleHighlightMode}
               className={`flex min-h-11 items-center gap-1.5 rounded-l-sm border px-2.5 text-[length:var(--student-control-font-size)] font-bold focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
-                highlightToolMode === 'off'
-                  ? 'border-gray-300 bg-white text-gray-800'
-                  : 'border-blue-700 bg-blue-50 text-blue-950 shadow-inner'
+                highlightToolMode === 'highlight'
+                  ? 'border-blue-700 bg-blue-50 text-blue-950 shadow-inner'
+                  : 'border-gray-300 bg-white text-gray-800'
               }`}
-              aria-pressed={highlightToolMode !== 'off'}
+              aria-pressed={highlightToolMode === 'highlight'}
               aria-label={highlightButtonLabel}
             >
-              {highlightToolMode === 'erase' ? <Eraser size={16} /> : <Highlighter size={16} />}
+              <Highlighter size={16} />
               <span className="hidden md:inline">{highlightButtonLabel}</span>
-              {highlightToolMode !== 'erase' ? (
-                <span className={`h-3 w-3 rounded-full border border-gray-700 ${activePaletteEntry.swatchClassName}`} aria-hidden="true" />
-              ) : null}
+              <span className={`h-3 w-3 rounded-full border border-gray-700 ${activePaletteEntry.swatchClassName}`} aria-hidden="true" />
             </button>
             <button
               ref={highlightOptionsTriggerRef}
               type="button"
               onClick={() => setShowHighlightOptions((open) => !open)}
               className="flex min-h-11 min-w-11 items-center justify-center rounded-r-sm border border-l-0 border-gray-300 bg-white text-gray-800 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
-              aria-label="Choose highlight color or erase"
+              aria-label="Choose highlight color"
               aria-expanded={showHighlightOptions}
             >
               <ChevronDown size={16} />
@@ -368,20 +361,6 @@ export function StudentHeader({
                     {highlightToolMode === 'highlight' && highlightColor === entry.id ? <Check size={16} aria-hidden="true" /> : null}
                   </button>
                 ))}
-                <div className="my-1 border-t border-gray-200" />
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSelectEraseMode?.();
-                    closeHighlightOptions();
-                  }}
-                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700"
-                  aria-label="Erase highlights"
-                >
-                  <Eraser size={18} aria-hidden="true" />
-                  <span className="flex-1 text-left">Erase</span>
-                  {highlightToolMode === 'erase' ? <Check size={16} aria-hidden="true" /> : null}
-                </button>
                   </div>,
                 )
               : null}
@@ -393,6 +372,22 @@ export function StudentHeader({
                   : ''}
             </span>
           </div>
+        ) : null}
+        {shouldShowHighlightTool ? (
+          <button
+            type="button"
+            onClick={onSelectEraseMode}
+            className={`flex min-h-11 min-w-11 shrink-0 items-center gap-1.5 rounded-sm border px-2.5 text-[length:var(--student-control-font-size)] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
+              highlightToolMode === 'erase'
+                ? 'border-blue-700 bg-blue-50 text-blue-950 shadow-inner'
+                : 'border-gray-300 bg-white text-gray-800'
+            }`}
+            aria-pressed={highlightToolMode === 'erase'}
+            aria-label="Erase highlights"
+          >
+            <Eraser size={16} aria-hidden="true" />
+            <span className="hidden md:inline">Erase</span>
+          </button>
         ) : null}
         {autoSaveStatus && (
           <div className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-wider hidden sm:flex">

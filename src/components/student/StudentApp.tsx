@@ -748,7 +748,7 @@ export function StudentApp({
         highlightColor={highlightColor}
         onToggleHighlightMode={uiActions.toggleHighlightMode}
         onSelectHighlightColor={uiActions.setHighlightColor}
-        onSelectEraseMode={() => uiActions.setHighlightToolMode('erase')}
+        onSelectEraseMode={uiActions.toggleEraseMode}
         tabletMode={tabletMode}
         onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
         onOpenNavigator={
