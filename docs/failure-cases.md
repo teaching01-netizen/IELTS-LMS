@@ -470,3 +470,13 @@ The old flow reacted to intermediate `selectionchange` snapshots and coupled sel
 
 ### Invariant
 Do not restore cursor-following highlight UI or mutate ranges from intermediate drag snapshots. Tool-off selection must remain native and non-mutating.
+
+## Student highlight palette hidden by preview controls (2026-07-15)
+
+**Symptom:** In the Reading preview, the fixed preview-section selector covered the first highlight color and made the palette appear to start at Pink.
+
+**Root cause:** The student highlight palette was portaled to the document body but positioned against the viewport edge with a lower stacking layer than builder preview chrome. It was not tethered to its disclosure trigger.
+
+**Policy:** Student header disclosure panels must remain portaled to avoid header overflow clipping, position from their owning trigger with viewport-edge clamping, and render above non-modal preview chrome. Positioning must be recomputed while open when the viewport changes.
+
+**Regression coverage:** `src/components/student/__tests__/StudentHeaderHighlightHint.test.tsx` and `e2e/student-ipad-layout.spec.ts`.

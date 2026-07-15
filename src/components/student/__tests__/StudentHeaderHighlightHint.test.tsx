@@ -90,6 +90,39 @@ describe('StudentHeader highlight tool', () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
+  it('anchors the disclosure below its trigger instead of the viewport edge', async () => {
+    render(
+      <StudentHeader
+        highlightEnabled
+        highlightToolMode="highlight"
+        highlightColor="yellow"
+        onToggleHighlightMode={() => {}}
+        onSelectHighlightColor={() => {}}
+        onSelectEraseMode={() => {}}
+        onOpenNavigator={() => {}}
+        isExamActive
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Choose highlight color or erase' });
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
+      x: 420,
+      y: 10,
+      top: 10,
+      right: 464,
+      bottom: 54,
+      left: 420,
+      width: 44,
+      height: 44,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.click(trigger);
+    const panel = screen.getByRole('group', { name: 'Highlight options' });
+    await waitFor(() => expect(panel).toHaveStyle({ left: '224px', top: '62px', width: '240px' }));
+    expect(panel).not.toHaveClass('right-3');
+  });
+
   it('hides the tool when the exam is inactive or highlighting is unavailable', () => {
     const { rerender } = render(
       <StudentHeader highlightEnabled highlightToolMode="off" highlightColor="yellow" />,

@@ -134,6 +134,12 @@ test.describe('student exam iPad layout', () => {
     await expect(page.locator('mark[data-highlighted="true"]')).toHaveCount(2);
 
     await optionsButton.click();
+    const optionsBox = await optionsButton.boundingBox();
+    const paletteBox = await page.getByRole('group', { name: 'Highlight options' }).boundingBox();
+    expect(optionsBox).not.toBeNull();
+    expect(paletteBox).not.toBeNull();
+    expect(paletteBox!.x + paletteBox!.width).toBeLessThanOrEqual(optionsBox!.x + optionsBox!.width + 1);
+    expect(paletteBox!.x).toBeGreaterThanOrEqual(12);
     await page.getByRole('button', { name: 'Blue' }).click();
     await completeHighlightSelection(page, 10, 14);
     await expect(page.locator('mark[data-highlight-color="blue"]')).toHaveCount(1);

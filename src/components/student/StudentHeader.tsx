@@ -65,6 +65,11 @@ export function StudentHeader({
   const [showHighlightOptions, setShowHighlightOptions] = useState(false);
   const highlightOptionsTriggerRef = useRef<HTMLButtonElement | null>(null);
   const highlightOptionsPanelRef = useRef<HTMLDivElement | null>(null);
+  const [highlightOptionsStyle, setHighlightOptionsStyle] = useState<React.CSSProperties>({
+    top: 0,
+    left: 0,
+    width: 240,
+  });
   const [tabletZoomControlsStyle, setTabletZoomControlsStyle] = useState<React.CSSProperties>({
     top: 0,
     left: 0,
@@ -90,8 +95,27 @@ export function StudentHeader({
     queueMicrotask(() => highlightOptionsTriggerRef.current?.focus());
   }, []);
 
+  const updateHighlightOptionsPosition = useCallback(() => {
+    const trigger = highlightOptionsTriggerRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(240, Math.max(192, window.innerWidth - 24));
+    const left = Math.min(
+      Math.max(12, rect.right - width),
+      Math.max(12, window.innerWidth - width - 12),
+    );
+
+    setHighlightOptionsStyle({
+      top: Math.round(rect.bottom + 8),
+      left: Math.round(left),
+      width,
+    });
+  }, []);
+
   useEffect(() => {
     if (!showHighlightOptions) return;
+    updateHighlightOptionsPosition();
     const panel = highlightOptionsPanelRef.current;
     const preferred = panel?.querySelector<HTMLButtonElement>(`button[data-highlight-color="${highlightColor}"]`);
     (preferred ?? panel?.querySelector<HTMLButtonElement>('button'))?.focus();
@@ -107,12 +131,14 @@ export function StudentHeader({
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('touchstart', onPointerDown);
+    window.addEventListener('resize', updateHighlightOptionsPosition);
     return () => {
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('touchstart', onPointerDown);
+      window.removeEventListener('resize', updateHighlightOptionsPosition);
     };
-  }, [closeHighlightOptions, highlightColor, showHighlightOptions]);
+  }, [closeHighlightOptions, highlightColor, showHighlightOptions, updateHighlightOptionsPosition]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -321,7 +347,8 @@ export function StudentHeader({
                   <div
                 ref={highlightOptionsPanelRef}
                 role="group"
-                className="fixed right-3 top-14 z-[90] mt-2 min-w-48 rounded-md border border-gray-200 bg-white p-1.5 shadow-xl md:top-16"
+                className="fixed z-[130] max-h-[calc(100vh-5rem)] min-w-48 overflow-y-auto rounded-md border border-gray-200 bg-white p-1.5 shadow-xl"
+                style={highlightOptionsStyle}
                 aria-label="Highlight options"
               >
                 {studentHighlightPalette.map((entry) => (
