@@ -30,6 +30,7 @@ import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
 import { shouldLockViewportForExamSession } from './browserParityPolicy';
 import { emitAnswerMutationDebugLog } from './answerMutationDebug';
 import { isStudentHighlightToolContextActive } from './studentHighlightToolContext';
+import { installExamPageZoomGuard } from './examPageZoomGuard';
 import type { StudentAnswerMutationMeta, StudentAnswerValue } from '../../types/studentAttempt';
 
 function getBlockingCopy(reason: ReturnType<typeof useStudentRuntime>['state']['blocking']['reason']) {
@@ -228,6 +229,13 @@ export function StudentApp({
   const effectivePhase =
     runtimeState.phase === 'post-exam' && !shouldRenderPostExam ? 'exam' : runtimeState.phase;
   const runtimeCompletionVerified = isRuntimeStructurallyCompleted(runtimeState.runtimeSnapshot);
+
+  useEffect(() => {
+    if (effectivePhase !== 'exam') {
+      return;
+    }
+    return installExamPageZoomGuard(document);
+  }, [effectivePhase]);
 
   useEffect(() => {
     runtimeStateRef.current = runtimeState;

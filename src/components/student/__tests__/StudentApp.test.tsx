@@ -8,6 +8,7 @@ import { studentAttemptRepository } from '../../../services/studentAttemptReposi
 import type { ExamState } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import type { StudentAttempt } from '../../../types/studentAttempt';
+import { EXAM_VIEWPORT_CONTENT } from '../examPageZoomGuard';
 
 function setWritingEditorText(editor: HTMLElement, value: string) {
   if (editor instanceof HTMLTextAreaElement) {
@@ -226,6 +227,27 @@ function createMatchMediaMock(coarsePointerMatches: boolean) {
 }
 
 describe('StudentApp runtime-backed mode', () => {
+  it('guards native page zoom only during the exam lifecycle', () => {
+    const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]')
+      ?? document.head.appendChild(document.createElement('meta'));
+    viewport.name = 'viewport';
+    viewport.content = 'width=device-width, initial-scale=1.0';
+
+    const { unmount } = render(
+      <StudentAppWrapper
+        state={state}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={createWritingAttemptSnapshot()}
+        runtimeSnapshot={createWritingRuntimeSnapshot()}
+      />,
+    );
+
+    expect(viewport).toHaveAttribute('content', EXAM_VIEWPORT_CONTENT);
+    unmount();
+    expect(viewport).toHaveAttribute('content', 'width=device-width, initial-scale=1.0');
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
