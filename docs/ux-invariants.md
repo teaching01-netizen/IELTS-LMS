@@ -6,7 +6,9 @@ Purpose: keep student-facing interaction rules explicit so future UI changes do 
 
 ### Owning Module
 
-The active exam viewport rectangle is owned by `StudentApp` and the shared student shell CSS in `src/index.css`.
+The active exam viewport rectangle is owned by `StudentApp`,
+`src/components/student/studentExamViewportController.ts`, and the shared student shell CSS in
+`src/index.css`.
 
 ### Invariant
 
@@ -16,6 +18,11 @@ During an active exam, the complete student shell is fixed to the visible browse
 
 - Browser chrome movement must not hide the header or leave blank space below the footer.
 - Software-keyboard shrinkage must not rebase the protected iPad exam height.
+- Initial exam entry, page restoration, and return to a visible tab must use bounded follow-up
+  measurements so a late browser viewport-meta update cannot strand the shell at a stale rectangle.
+- Editable-control focusout must start a bounded settle cycle so the footer returns after the
+  keyboard closes even when no final resize or scroll event fires.
+- Delayed settling must be canceled on cleanup and must never mutate non-exam pages.
 - Safe-area padding, split-pane scrolling, native dialog positioning, and the exam page-zoom guard remain active.
 - Viewport custom properties and active classes are removed when leaving the exam phase.
 - Answer persistence, submission, timer, integrity, and audit behavior are unaffected.
@@ -23,6 +30,7 @@ During an active exam, the complete student shell is fixed to the visible browse
 ### Regression Protection
 
 - `src/components/student/__tests__/StudentApp.test.tsx`
+- `src/components/student/__tests__/studentExamViewportController.test.ts`
 - `src/components/student/__tests__/StudentViewportCss.test.ts`
 - `e2e/student-ipad-layout.spec.ts`
 
