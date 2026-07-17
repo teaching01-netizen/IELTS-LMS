@@ -5,8 +5,17 @@ import { describe, expect, it } from 'vitest';
 describe('student exam visible viewport CSS', () => {
   const css = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8');
 
-  it('fixes the exam shell to the tracked visual viewport top edge', () => {
+  it('fixes the exam shell to the exact tracked visual viewport rectangle', () => {
+    const activeDocumentRule = css.match(
+      /html\.student-exam-active,\s*body\.student-exam-active\s*\{([^}]*)\}/s,
+    )?.[1];
     const shellRule = css.match(/\.student-exam-shell\s*\{([^}]*)\}/s)?.[1];
+
+    expect(activeDocumentRule).toBeDefined();
+    expect(activeDocumentRule).toMatch(
+      /height:\s*var\(--student-viewport-height,\s*100dvh\)\s*;/,
+    );
+    expect(activeDocumentRule).not.toMatch(/height:\s*max\(/);
 
     expect(shellRule).toBeDefined();
     expect(shellRule).toMatch(/position:\s*fixed\s*;/);
@@ -14,7 +23,8 @@ describe('student exam visible viewport CSS', () => {
     expect(shellRule).toMatch(/left:\s*0\s*;/);
     expect(shellRule).toMatch(/right:\s*0\s*;/);
     expect(shellRule).toMatch(
-      /height:\s*max\(var\(--student-viewport-height,\s*100dvh\),\s*100dvh\)\s*;/,
+      /height:\s*var\(--student-viewport-height,\s*100dvh\)\s*;/,
     );
+    expect(shellRule).not.toMatch(/height:\s*max\(/);
   });
 });

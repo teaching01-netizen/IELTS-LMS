@@ -75,8 +75,9 @@ describe('installStudentExamViewportController', () => {
         document.documentElement.style.getPropertyValue('--student-viewport-offset-top'),
       ).toBe('120px');
 
+      vi.advanceTimersByTime(800);
       viewport.set(900, 0);
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(800);
 
       expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
         '900px',
@@ -101,11 +102,10 @@ describe('installStudentExamViewportController', () => {
     });
 
     try {
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(1_600);
       input.focus();
       viewport.set(560, 100);
       viewport.dispatchResize();
-      vi.advanceTimersByTime(500);
 
       expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
         '900px',
@@ -115,8 +115,9 @@ describe('installStudentExamViewportController', () => {
       ).toBe('100px');
 
       input.blur();
+      vi.advanceTimersByTime(800);
       viewport.set(820, 20);
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(800);
 
       expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
         '820px',
@@ -124,6 +125,35 @@ describe('installStudentExamViewportController', () => {
       expect(
         document.documentElement.style.getPropertyValue('--student-viewport-offset-top'),
       ).toBe('20px');
+    } finally {
+      cleanup();
+      viewport.restore();
+    }
+  });
+
+  it('accepts safe native-scale growth but protects passive shrinkage', () => {
+    const viewport = installMutableVisualViewport(900);
+    const cleanup = installStudentExamViewportController({
+      targetWindow: window,
+      targetDocument: document,
+      protectHeight: true,
+    });
+
+    try {
+      vi.advanceTimersByTime(1_600);
+      viewport.set(1000, 0);
+      viewport.dispatchResize();
+
+      expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
+        '1000px',
+      );
+
+      viewport.set(620, 0);
+      viewport.dispatchResize();
+
+      expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
+        '1000px',
+      );
     } finally {
       cleanup();
       viewport.restore();

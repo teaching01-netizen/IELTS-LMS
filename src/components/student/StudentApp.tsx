@@ -149,7 +149,7 @@ export function StudentApp({
   const attemptWritingAnswers = attemptState.attempt?.writingAnswers ?? {};
   const attemptFlags = attemptState.attempt?.flags ?? {};
   const studentShellStyle = {
-    height: 'max(var(--student-viewport-height, 100dvh), 100dvh)',
+    height: 'var(--student-viewport-height, 100dvh)',
     zoom: tabletMode ? 1 : uiState.accessibilitySettings.zoom,
     fontSize: studentTypography.rootFontSize,
     lineHeight: studentTypography.lineHeight,

@@ -852,9 +852,9 @@ describe('StudentApp runtime-backed mode', () => {
         visualViewport.dispatchResize();
       });
 
-      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('1000px');
       expect(container.querySelector('.student-exam-shell')).toHaveStyle({
-        height: 'max(var(--student-viewport-height, 100dvh), 100dvh)',
+        height: 'var(--student-viewport-height, 100dvh)',
       });
 
       act(() => {
@@ -869,7 +869,7 @@ describe('StudentApp runtime-backed mode', () => {
         visualViewport.dispatchResize();
       });
 
-      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('1000px');
     } finally {
       visualViewport.restore();
       window.matchMedia = originalMatchMedia;
