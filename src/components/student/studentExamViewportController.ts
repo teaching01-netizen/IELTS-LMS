@@ -6,6 +6,7 @@ export interface StudentExamViewportControllerOptions {
 
 const SETTLE_DELAYS_MS = [80, 220, 420] as const;
 const NATIVE_SCALE_TOLERANCE = 0.01;
+type ProtectedHeightRebaseMode = 'none' | 'initial' | 'recovery';
 
 function isEditableElement(value: EventTarget | Element | null): value is HTMLElement {
   return (
@@ -26,7 +27,7 @@ export function installStudentExamViewportController({
   const hasAnimationFrame = typeof targetWindow.requestAnimationFrame === 'function';
   let scheduledFrame: number | null = null;
   let protectedHeight: number | null = null;
-  let cycleAllowsRebase = false;
+  let protectedHeightRebaseMode: ProtectedHeightRebaseMode = 'none';
   let disposed = false;
 
   const applyViewportRect = (height: number, offsetTop: number) => {
@@ -50,7 +51,7 @@ export function installStudentExamViewportController({
     const scale = visualViewport?.scale ?? 1;
     const editableFocused = isEditableElement(targetDocument.activeElement);
     const mayRebaseProtectedHeight =
-      cycleAllowsRebase &&
+      protectedHeightRebaseMode !== 'none' &&
       !editableFocused &&
       Math.abs(scale - 1) <= NATIVE_SCALE_TOLERANCE;
 
@@ -85,12 +86,17 @@ export function installStudentExamViewportController({
     return targetWindow.setTimeout(callback, 16);
   };
 
-  const scheduleSettleCycle = (allowProtectedHeightRebase: boolean) => {
+  const scheduleSettleCycle = (requestedRebaseMode: ProtectedHeightRebaseMode) => {
     if (disposed) {
       return;
     }
 
-    cycleAllowsRebase ||= allowProtectedHeightRebase;
+    if (
+      requestedRebaseMode === 'recovery' ||
+      protectedHeightRebaseMode !== 'recovery'
+    ) {
+      protectedHeightRebaseMode = requestedRebaseMode;
+    }
     clearScheduledWork();
     measure();
 
@@ -104,23 +110,23 @@ export function installStudentExamViewportController({
         scheduledTimers.delete(timer);
         measure();
         if (index === SETTLE_DELAYS_MS.length - 1) {
-          cycleAllowsRebase = false;
+          protectedHeightRebaseMode = 'none';
         }
       }, delay);
       scheduledTimers.add(timer);
     });
   };
 
-  const scheduleProtectedMeasurement = () => scheduleSettleCycle(false);
-  const handlePageShow = () => scheduleSettleCycle(true);
+  const scheduleProtectedMeasurement = () => scheduleSettleCycle('none');
+  const handlePageShow = () => scheduleSettleCycle('recovery');
   const handleFocusOut = (event: FocusEvent) => {
     if (isEditableElement(event.target)) {
-      scheduleSettleCycle(true);
+      scheduleSettleCycle('recovery');
     }
   };
   const handleVisibilityChange = () => {
     if (targetDocument.visibilityState === 'visible') {
-      scheduleSettleCycle(true);
+      scheduleSettleCycle('recovery');
     }
   };
   const handleTouch = (event: TouchEvent) => {
@@ -148,7 +154,7 @@ export function installStudentExamViewportController({
   targetDocument.addEventListener('touchmove', handleTouch, true);
   targetDocument.addEventListener('touchend', handleTouch, true);
   targetDocument.addEventListener('touchcancel', handleTouch, true);
-  scheduleSettleCycle(true);
+  scheduleSettleCycle('initial');
 
   let cleanedUp = false;
   return () => {

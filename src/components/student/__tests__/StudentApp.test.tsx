@@ -399,6 +399,133 @@ describe('StudentApp runtime-backed mode', () => {
     expect(screen.getByRole('button', { name: 'Erase highlights' })).toBeInTheDocument();
   });
 
+  it('settles a reused tab to the final visual viewport without keyboard or scroll interaction', async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const originalMatchMedia = window.matchMedia;
+    const originalMaxTouchPoints = Object.getOwnPropertyDescriptor(window.navigator, 'maxTouchPoints');
+    const visualViewport = installVisualViewportMock(640, 120);
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    window.matchMedia = vi.fn(createMatchMediaMock(true)) as unknown as typeof window.matchMedia;
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: 5 });
+
+    try {
+      render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createWritingAttemptSnapshot()}
+          runtimeSnapshot={createWritingRuntimeSnapshot()}
+        />,
+      );
+
+      const root = document.documentElement;
+      await waitFor(() => {
+        expect(root.style.getPropertyValue('--student-viewport-height')).toBe('640px');
+        expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('120px');
+      });
+
+      visualViewport.setHeight(900);
+      visualViewport.setOffsetTop(0);
+
+      await waitFor(
+        () => {
+          expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+          expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('0px');
+        },
+        { timeout: 1_000 },
+      );
+    } finally {
+      visualViewport.restore();
+      window.matchMedia = originalMatchMedia;
+      if (originalInnerWidth) {
+        Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      if (originalMaxTouchPoints) {
+        Object.defineProperty(window.navigator, 'maxTouchPoints', originalMaxTouchPoints);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints');
+      }
+    }
+  });
+
+  it('restores the footer after keyboard dismissal without a final viewport event', async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const originalMatchMedia = window.matchMedia;
+    const originalMaxTouchPoints = Object.getOwnPropertyDescriptor(window.navigator, 'maxTouchPoints');
+    const visualViewport = installVisualViewportMock(900);
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    window.matchMedia = vi.fn(createMatchMediaMock(true)) as unknown as typeof window.matchMedia;
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: 5 });
+
+    try {
+      render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createWritingAttemptSnapshot()}
+          runtimeSnapshot={createWritingRuntimeSnapshot()}
+        />,
+      );
+
+      const root = document.documentElement;
+      await waitFor(() => {
+        expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      });
+
+      const editor = await screen.findByRole('textbox', { name: /writing response/i });
+      act(() => {
+        editor.focus();
+      });
+      act(() => {
+        visualViewport.setHeight(560);
+        visualViewport.setOffsetTop(100);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('100px');
+
+      act(() => {
+        editor.blur();
+      });
+      visualViewport.setHeight(820);
+      visualViewport.setOffsetTop(20);
+
+      await waitFor(
+        () => {
+          expect(root.style.getPropertyValue('--student-viewport-height')).toBe('820px');
+          expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('20px');
+        },
+        { timeout: 1_000 },
+      );
+    } finally {
+      visualViewport.restore();
+      window.matchMedia = originalMatchMedia;
+      if (originalInnerWidth) {
+        Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      if (originalMaxTouchPoints) {
+        Object.defineProperty(window.navigator, 'maxTouchPoints', originalMaxTouchPoints);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints');
+      }
+    }
+  });
+
   it('keeps tablet footer viewport height stable while an editable field is focused', async () => {
     const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');

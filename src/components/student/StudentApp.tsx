@@ -31,6 +31,7 @@ import { shouldLockViewportForExamSession } from './browserParityPolicy';
 import { emitAnswerMutationDebugLog } from './answerMutationDebug';
 import { isStudentHighlightToolContextActive } from './studentHighlightToolContext';
 import { installExamPageZoomGuard } from './examPageZoomGuard';
+import { installStudentExamViewportController } from './studentExamViewportController';
 import type { StudentAnswerMutationMeta, StudentAnswerValue } from '../../types/studentAttempt';
 
 function getBlockingCopy(reason: ReturnType<typeof useStudentRuntime>['state']['blocking']['reason']) {
@@ -168,7 +169,6 @@ export function StudentApp({
   const liveObjectiveAnswersRef = useRef(attemptAnswers);
   const liveWritingAnswersRef = useRef(attemptWritingAnswers);
   const viewportLockForExamSessionRef = useRef<boolean | null>(null);
-  const lockedViewportHeightRef = useRef<number | null>(null);
   const writingDraftCommitRef = useRef<(() => void) | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
@@ -247,7 +247,6 @@ export function StudentApp({
   useEffect(() => {
     if (effectivePhase !== 'exam') {
       viewportLockForExamSessionRef.current = null;
-      lockedViewportHeightRef.current = null;
       return;
     }
 
@@ -365,109 +364,12 @@ export function StudentApp({
       return;
     }
 
-    // Cleanup previously used to clear scheduled refresh timeouts; keep the
-    // registry so the effect teardown never references an undefined identifier.
-    const scheduledRefreshTimers = new Set<number>();
-
-    const root = document.documentElement;
-    const body = document.body;
-    const tabletViewportSessionLocked = viewportLockForExamSessionRef.current === true;
-    let stableViewportHeight =
-      tabletViewportSessionLocked && lockedViewportHeightRef.current !== null
-        ? lockedViewportHeightRef.current
-        : Math.round(window.visualViewport?.height ?? window.innerHeight);
-    const applyViewportRect = (height: number, offsetTop: number) => {
-      root.style.setProperty('--student-viewport-height', `${Math.max(0, Math.round(height))}px`);
-      root.style.setProperty(
-        '--student-viewport-offset-top',
-        `${Math.max(0, Math.round(offsetTop))}px`,
-      );
-    };
-
-    const updateViewportHeight = () => {
-      const visualViewport = window.visualViewport;
-      const nextViewportHeight = Math.round(visualViewport?.height ?? window.innerHeight);
-      const nextViewportOffsetTop = visualViewport?.offsetTop ?? 0;
-      if (!tabletViewportSessionLocked) {
-        applyViewportRect(nextViewportHeight, nextViewportOffsetTop);
-        return;
-      }
-
-      if (lockedViewportHeightRef.current === null) {
-        lockedViewportHeightRef.current = stableViewportHeight;
-      } else {
-        stableViewportHeight = lockedViewportHeightRef.current;
-      }
-
-      applyViewportRect(stableViewportHeight, nextViewportOffsetTop);
-    };
-
-    const handleTouchStart = (event: TouchEvent) => {
-      if (!tabletViewportSessionLocked) {
-        return;
-      }
-
-      if (event.touches.length >= 2) {
-        updateViewportHeight();
-      }
-    };
-
-    const handleTouchMove = (event: TouchEvent) => {
-      if (!tabletViewportSessionLocked) {
-        return;
-      }
-
-      if (event.touches.length >= 2) {
-        updateViewportHeight();
-      }
-    };
-
-    const handleTouchEnd = (event: TouchEvent) => {
-      if (!tabletViewportSessionLocked) {
-        return;
-      }
-
-      if (event.touches.length >= 2) {
-        updateViewportHeight();
-        return;
-      }
-      updateViewportHeight();
-    };
-
-    const handleWindowResize = () => {
-      updateViewportHeight();
-    };
-
-    updateViewportHeight();
-    root.classList.add('student-exam-active');
-    body.classList.add('student-exam-active');
-    window.addEventListener('resize', handleWindowResize);
-    window.addEventListener('orientationchange', handleWindowResize);
-    window.visualViewport?.addEventListener('resize', updateViewportHeight);
-    window.visualViewport?.addEventListener('scroll', updateViewportHeight);
-    document.addEventListener('touchstart', handleTouchStart, true);
-    document.addEventListener('touchmove', handleTouchMove, true);
-    document.addEventListener('touchend', handleTouchEnd, true);
-    document.addEventListener('touchcancel', handleTouchEnd, true);
-
-    return () => {
-      for (const timer of scheduledRefreshTimers) {
-        window.clearTimeout(timer);
-      }
-      root.classList.remove('student-exam-active');
-      body.classList.remove('student-exam-active');
-      root.style.removeProperty('--student-viewport-height');
-      root.style.removeProperty('--student-viewport-offset-top');
-      window.removeEventListener('resize', handleWindowResize);
-      window.removeEventListener('orientationchange', handleWindowResize);
-      window.visualViewport?.removeEventListener('resize', updateViewportHeight);
-      window.visualViewport?.removeEventListener('scroll', updateViewportHeight);
-      document.removeEventListener('touchstart', handleTouchStart, true);
-      document.removeEventListener('touchmove', handleTouchMove, true);
-      document.removeEventListener('touchend', handleTouchEnd, true);
-      document.removeEventListener('touchcancel', handleTouchEnd, true);
-    };
-  }, [effectivePhase, tabletMode]);
+    return installStudentExamViewportController({
+      targetWindow: window,
+      targetDocument: document,
+      protectHeight: viewportLockForExamSessionRef.current === true,
+    });
+  }, [effectivePhase]);
 
   const shouldShowTimeExtension = shouldOfferTimeExtension({
     config: examState.config,
