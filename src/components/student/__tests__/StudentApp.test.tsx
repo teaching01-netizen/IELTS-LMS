@@ -604,7 +604,7 @@ describe('StudentApp runtime-backed mode', () => {
     }
   });
 
-  it('keeps tablet footer viewport height stable when multi-touch pinch starts before scale updates', async () => {
+  it('lets the effective tablet shell grow while keeping pinch shrink protection', async () => {
     const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
     const originalMatchMedia = window.matchMedia;
@@ -617,7 +617,7 @@ describe('StudentApp runtime-backed mode', () => {
     Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: 5 });
 
     try {
-      render(
+      const { container } = render(
         <StudentAppWrapper
           state={state}
           onExit={() => {}}
@@ -630,6 +630,16 @@ describe('StudentApp runtime-backed mode', () => {
       const root = document.documentElement;
       await waitFor(() => {
         expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      });
+
+      act(() => {
+        visualViewport.setHeight(1000);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(container.querySelector('.student-exam-shell')).toHaveStyle({
+        height: 'max(var(--student-viewport-height, 100dvh), 100dvh)',
       });
 
       act(() => {

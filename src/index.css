@@ -210,14 +210,14 @@
 
   html.student-exam-active,
   body.student-exam-active {
-    height: var(--student-viewport-height, 100dvh);
+    height: max(var(--student-viewport-height, 100dvh), 100dvh);
     width: 100%;
     overflow: hidden;
     overscroll-behavior: none;
   }
 
   .student-exam-shell {
-    height: var(--student-viewport-height, 100dvh);
+    height: max(var(--student-viewport-height, 100dvh), 100dvh);
     min-height: 0;
     overflow: hidden;
     overscroll-behavior: none;

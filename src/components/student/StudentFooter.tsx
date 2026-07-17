@@ -80,28 +80,12 @@ export function StudentFooter({
       role="contentinfo"
       aria-label="Question navigation and progress"
     >
-      <div className={`flex items-center justify-between px-2 md:px-3 lg:px-4 ${tabletMode ? 'py-1' : 'py-1.5 md:py-2'}`}>
-        <div className="flex items-center gap-2 md:gap-3 flex-1 overflow-x-auto">
-          <div className="flex items-center gap-1 md:gap-1.5 px-2 md:px-2.5 py-1 bg-gray-50 rounded-sm flex-shrink-0">
-            <span className="text-[length:var(--student-chip-font-size)] font-black text-gray-900">
-              {answeredCount}/{totalQuestions}
-            </span>
-          </div>
-          {showSubmitButton ? (
-            <Button
-              variant={hasUnanswered ? 'warning' : 'primary'}
-              size="sm"
-              className="min-w-[4.25rem] md:min-w-[5rem] shadow-md flex-shrink-0"
-              onClick={onSubmit}
-            >
-              Finish
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 md:gap-3 px-2 md:px-3 lg:px-4 pb-1 md:pb-1.5 overflow-x-auto">
-        {passageGroups.map(({ groupId, groupQuestions, index }) => {
+      <div
+        className={`flex items-center gap-2 md:gap-3 px-2 md:px-3 lg:px-4 ${tabletMode ? 'py-1' : 'py-1.5 md:py-2'}`}
+        data-testid="student-footer-row"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto md:gap-3">
+          {passageGroups.map(({ groupId, groupQuestions, index }) => {
           const isActiveGroup = groupQuestions.some(
             (question) => question.id === currentQuestionId,
           );
@@ -185,7 +169,23 @@ export function StudentFooter({
               ) : null}
             </div>
           );
-        })}
+          })}
+        </div>
+        <div className="flex flex-shrink-0 items-center rounded-sm bg-gray-50 px-2 py-1 md:px-2.5">
+          <span className="text-[length:var(--student-chip-font-size)] font-black text-gray-900">
+            {answeredCount}/{totalQuestions}
+          </span>
+        </div>
+        {showSubmitButton && !tabletMode ? (
+          <Button
+            variant={hasUnanswered ? 'warning' : 'primary'}
+            size="sm"
+            className="min-w-[4.25rem] flex-shrink-0 shadow-md md:min-w-[5rem]"
+            onClick={onSubmit}
+          >
+            Finish
+          </Button>
+        ) : null}
       </div>
     </footer>
   );

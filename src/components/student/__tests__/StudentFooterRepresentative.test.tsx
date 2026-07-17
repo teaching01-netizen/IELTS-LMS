@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { StudentFooter } from '../StudentFooter';
@@ -20,6 +20,46 @@ describe('StudentFooter', () => {
       name: /question navigation and progress/i,
     });
     expect(footer).toHaveClass('student-exam-footer');
+  });
+
+  it('keeps overall progress in the question row and omits the Finish button', () => {
+    render(
+      <StudentFooter
+        questions={[
+          {
+            id: 'q1',
+            blockId: 'block-1',
+            groupId: 'group-1',
+            groupLabel: 'Section 1',
+            isMulti: false,
+            correctCount: 1,
+            answerKey: 'q1',
+            block: {} as any,
+            question: null,
+          },
+          {
+            id: 'q2',
+            blockId: 'block-1',
+            groupId: 'group-1',
+            groupLabel: 'Section 1',
+            isMulti: false,
+            correctCount: 1,
+            answerKey: 'q2',
+            block: {} as any,
+            question: null,
+          },
+        ]}
+        currentQuestionId="q1"
+        onNavigate={() => {}}
+        answers={{}}
+        onSubmit={() => {}}
+        tabletMode
+      />,
+    );
+
+    const row = screen.getByTestId('student-footer-row');
+    expect(within(row).getByText('0/2')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /finish/i })).not.toBeInTheDocument();
   });
 
   it('navigates when selecting a question chip', () => {
