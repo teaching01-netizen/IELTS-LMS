@@ -7,14 +7,20 @@ async function openPreview(page: Page, module: 'reading' | 'writing') {
   await page.waitForLoadState('domcontentloaded');
 }
 
-async function expectFooterInsideViewport(page: Page, label: RegExp) {
-  const footer = page.getByRole('contentinfo', { name: label });
+async function expectExamChromeAlignedToViewport(page: Page, footerLabel: RegExp) {
+  const header = page.getByRole('banner');
+  const footer = page.getByRole('contentinfo', { name: footerLabel });
+  await expect(header).toBeVisible();
   await expect(footer).toBeVisible();
-  const box = await footer.boundingBox();
-  expect(box).not.toBeNull();
+
+  const headerBox = await header.boundingBox();
+  const footerBox = await footer.boundingBox();
   const viewport = page.viewportSize();
+  expect(headerBox).not.toBeNull();
+  expect(footerBox).not.toBeNull();
   expect(viewport).not.toBeNull();
-  expect(box!.bottom).toBeLessThanOrEqual(viewport!.height);
+  expect(Math.abs(headerBox!.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(footerBox!.bottom - viewport!.height)).toBeLessThanOrEqual(1);
 }
 
 async function expectThinTabletResizer(page: Page, testId: string) {
@@ -85,7 +91,7 @@ test.describe('student exam iPad layout', () => {
     await expect(questionPane).toBeVisible();
     await expect(splitPane).toHaveCSS('flex-direction', 'row');
     await expectThinTabletResizer(page, 'reading-pane-resizer');
-    await expectFooterInsideViewport(page, /question navigation and progress/i);
+    await expectExamChromeAlignedToViewport(page, /question navigation and progress/i);
 
     const passageBox = await passagePane.boundingBox();
     const questionBox = await questionPane.boundingBox();
@@ -105,7 +111,7 @@ test.describe('student exam iPad layout', () => {
     await expect(splitPane).toBeVisible();
     await expect(splitPane).toHaveCSS('flex-direction', 'row');
     await expectThinTabletResizer(page, 'reading-pane-resizer');
-    await expectFooterInsideViewport(page, /question navigation and progress/i);
+    await expectExamChromeAlignedToViewport(page, /question navigation and progress/i);
 
     const passageBox = await passagePane.boundingBox();
     const questionBox = await questionPane.boundingBox();
@@ -243,13 +249,13 @@ test.describe('student exam iPad layout', () => {
     await completeHighlightSelection(promptSurface, 0, 4);
     await expect(promptPane.locator('mark[data-highlighted="true"]')).toHaveCount(1);
     await expectThinTabletResizer(page, 'writing-pane-resizer');
-    await expectFooterInsideViewport(page, /writing task navigation and submission/i);
+    await expectExamChromeAlignedToViewport(page, /writing task navigation and submission/i);
 
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.reload();
     await expect(page.getByTestId('writing-split-workspace')).toHaveCSS('flex-direction', 'row');
     await expect(page.getByRole('textbox', { name: /writing response/i })).toBeVisible();
     await expectThinTabletResizer(page, 'writing-pane-resizer');
-    await expectFooterInsideViewport(page, /writing task navigation and submission/i);
+    await expectExamChromeAlignedToViewport(page, /writing task navigation and submission/i);
   });
 });

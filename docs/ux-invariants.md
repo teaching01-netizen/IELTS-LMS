@@ -2,6 +2,30 @@
 
 Purpose: keep student-facing interaction rules explicit so future UI changes do not accidentally weaken exam usability or integrity.
 
+## Student Exam Visible Viewport
+
+### Owning Module
+
+The active exam viewport rectangle is owned by `StudentApp` and the shared student shell CSS in `src/index.css`.
+
+### Invariant
+
+During an active exam, the complete student shell is fixed to the visible browser viewport. The shell tracks the Visual Viewport API's vertical offset while retaining the protected tablet height contract. Header and footer remain non-scrolling flex children; reading, listening, and writing panes own content scrolling.
+
+### Must Not Break
+
+- Browser chrome movement must not hide the header or leave blank space below the footer.
+- Software-keyboard shrinkage must not rebase the protected iPad exam height.
+- Safe-area padding, split-pane scrolling, native dialog positioning, and the exam page-zoom guard remain active.
+- Viewport custom properties and active classes are removed when leaving the exam phase.
+- Answer persistence, submission, timer, integrity, and audit behavior are unaffected.
+
+### Regression Protection
+
+- `src/components/student/__tests__/StudentApp.test.tsx`
+- `src/components/student/__tests__/StudentViewportCss.test.ts`
+- `e2e/student-ipad-layout.spec.ts`
+
 ## Student Exam Dialog Positioning
 
 ### Owning Module
