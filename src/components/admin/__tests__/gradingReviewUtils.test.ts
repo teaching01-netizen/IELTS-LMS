@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { createInitialExamState } from '../../../services/examAdapterService';
+import * as gradingReviewUtils from '../gradingReviewUtils';
 import {
   buildCsvContent,
   buildObjectiveExportRows,
@@ -10,6 +11,21 @@ import {
   OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS,
   WRITING_EXPORT_COLUMNS,
 } from '../gradingReviewUtils';
+
+test('objective exports prefer the persisted draft grading source over the published version', () => {
+  const resolveVersionId = (
+    gradingReviewUtils as unknown as {
+      resolveObjectiveGradingVersionId?: (
+        publishedVersionId: string | undefined,
+        draftVersionId: string | null | undefined,
+      ) => string | undefined;
+    }
+  ).resolveObjectiveGradingVersionId;
+
+  expect(resolveVersionId?.('published-version-1', 'draft-version-2')).toBe(
+    'draft-version-2',
+  );
+});
 
 function createStudentSubmission(id: string, studentId: string, studentName: string) {
   return {
@@ -636,6 +652,61 @@ describe('gradingReviewUtils', () => {
     expect(exportData.rows[0]?.['answer:lq-1']).toBe('Train');
     expect(exportData.rows[0]?.['rightAnswer:lq-1']).toBe('Train');
     expect(exportData.rows[0]?.ieltsBandScore).toBe(2.5);
+  });
+
+  test('exports the authoritative overridden answer used by grading', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.listening.parts = [
+      {
+        id: 'part-1',
+        title: 'Part 1',
+        pins: [],
+        blocks: [
+          {
+            id: 'matching-features-1',
+            type: 'MATCHING_FEATURES',
+            instruction: 'Match each feature.',
+            options: ['Option A', 'Option B'],
+            features: [
+              { id: 'feature-17', text: 'Feature 17', correctMatch: 'Option A' },
+            ],
+          },
+        ],
+      },
+    ] as any;
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      sectionSubmissions: [
+        {
+          submissionId: 'sub-1',
+          sectionSubmission: createSectionSubmission(
+            'sub-1',
+            'listening',
+            { 'matching-features-1': ['i'] },
+            [
+              {
+                questionId: 'matching-features-1:feature-17',
+                studentAnswer: 'i',
+                correctAnswer: 'i',
+                isCorrect: true,
+                awardedScore: 1,
+                maxScore: 1,
+                scoringRule: 'exact_match',
+                hasOverride: true,
+              },
+            ],
+          ),
+        },
+      ],
+      examState,
+      moduleType: 'listening',
+    });
+
+    expect(exportData.rows[0]?.['answer:matching-features-1:feature-17']).toBe('i');
+    expect(exportData.rows[0]?.['rightAnswer:matching-features-1:feature-17']).toBe('i');
+    expect(exportData.rows[0]?.['score:matching-features-1:feature-17']).toBe(1);
   });
 
   test('builds manual-check export with empty total score and correct columns', () => {

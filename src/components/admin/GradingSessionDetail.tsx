@@ -14,6 +14,7 @@ import {
   buildWideObjectiveExport,
   buildWideWritingExport,
   downloadCsvFile,
+  resolveObjectiveGradingVersionId,
   type GradingExportSection,
 } from './gradingReviewUtils';
 import { PerStudentZipPdfExportDialog } from './PerStudentZipPdfExportDialog';
@@ -290,12 +291,20 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     return 'Just now';
   };
 
-  const resolveExamState = async (publishedVersionId?: string): Promise<ExamState | null> => {
-    if (!publishedVersionId) {
+  const resolveExamState = async (
+    scheduleId: string,
+    publishedVersionId?: string,
+  ): Promise<ExamState | null> => {
+    const sourceResult = await gradingService.getObjectiveGradingSource(scheduleId);
+    const versionId = resolveObjectiveGradingVersionId(
+      publishedVersionId,
+      sourceResult.success ? sourceResult.data?.draftVersionId : null,
+    );
+    if (!versionId) {
       return null;
     }
 
-    const version = await examRepository.getVersionById(publishedVersionId);
+    const version = await examRepository.getVersionById(versionId);
     return (version?.contentSnapshot as ExamState | undefined) ?? null;
   };
 
@@ -382,7 +391,10 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         ? 'manual'
         : 'auto';
 
-      const examState = await resolveExamState(fullSession.publishedVersionId);
+      const examState = await resolveExamState(
+        fullSession.scheduleId,
+        fullSession.publishedVersionId,
+      );
       const bundles = await Promise.all(
         fullSubmissions.map(async (submission) => ({
           submission,

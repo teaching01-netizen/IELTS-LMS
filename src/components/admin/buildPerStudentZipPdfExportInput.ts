@@ -16,7 +16,10 @@ import type {
 export interface BuildPerStudentZipPdfExportInputDeps {
   getSectionSubmissionsBySubmissionId: (submissionId: string) => Promise<SectionSubmission[]>;
   getWritingSubmissionsBySubmissionId: (submissionId: string) => Promise<WritingTaskSubmission[]>;
-  resolveExamState: (publishedVersionId?: string) => Promise<ExamState | null>;
+  resolveExamState: (
+    scheduleId: string,
+    publishedVersionId?: string,
+  ) => Promise<ExamState | null>;
 }
 
 export interface BuildPerStudentZipPdfExportInputArgs {
@@ -65,7 +68,10 @@ export async function buildPerStudentZipPdfExportInput(
   );
 
   if (objectiveSections.length > 0) {
-    const examState = await deps.resolveExamState(args.session.publishedVersionId);
+    const examState = await deps.resolveExamState(
+      args.session.scheduleId,
+      args.session.publishedVersionId,
+    );
     const sectionSubmissionsBySubmissionId = new Map<string, SectionSubmission[]>(
       await Promise.all(
         args.selectedSubmissions.map(async (submission) => [
@@ -162,4 +168,3 @@ export async function buildPerStudentZipPdfExportInput(
     })),
   };
 }
-

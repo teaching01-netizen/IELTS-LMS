@@ -36,6 +36,13 @@ export interface ExportSessionContext {
   examTitle: string;
 }
 
+export function resolveObjectiveGradingVersionId(
+  publishedVersionId: string | undefined,
+  draftVersionId: string | null | undefined,
+): string | undefined {
+  return draftVersionId || publishedVersionId;
+}
+
 export interface ObjectiveTracebackItem {
   numberLabel: string;
   questionId: string;
@@ -267,6 +274,17 @@ function buildQuestionResultMap(results: ObjectiveQuestionResult[] | undefined):
   return new Map((results ?? []).map((result) => [result.questionId, result] as const));
 }
 
+function getExportCorrectAnswerDisplay(
+  descriptor: StudentQuestionDescriptor,
+  questionResult: ObjectiveQuestionResult | undefined,
+): string {
+  if (questionResult?.hasOverride && questionResult.correctAnswer.trim() !== '') {
+    return questionResult.correctAnswer;
+  }
+
+  return getCorrectAnswerDisplay(descriptor);
+}
+
 function getGroupedScoringSlotKey(descriptor: StudentQuestionDescriptor): string | null {
   if (typeof descriptor.rootId !== 'string') {
     return null;
@@ -336,7 +354,7 @@ function buildTracebackItem(
     questionId: descriptor.id,
     prompt: getQuestionPrompt(descriptor),
     studentAnswer: getStudentAnswerDisplay(descriptor, answerMap),
-    correctAnswer: getCorrectAnswerDisplay(descriptor),
+    correctAnswer: getExportCorrectAnswerDisplay(descriptor, questionResult),
     correctness,
     awardedScore,
     maxScore,
@@ -386,7 +404,9 @@ function buildGroupedTracebackItem(
 
   const slotLabels = sorted.map((descriptor, index) => getGroupedSlotLabel(descriptor, index));
   const studentAnswerSlots = sorted.map((descriptor) => getStudentAnswerDisplay(descriptor, answerMap));
-  const correctAnswerSlots = sorted.map((descriptor) => getCorrectAnswerDisplay(descriptor));
+  const correctAnswerSlots = sorted.map((descriptor) => (
+    getExportCorrectAnswerDisplay(descriptor, results.get(descriptor.id))
+  ));
   const answerKeys = sorted.map((descriptor) => descriptor.answerKey).filter(Boolean);
 
   const prompt =
@@ -774,7 +794,10 @@ export function buildWideObjectiveExport({
         const descriptor = slot.descriptors[0];
         if (!descriptor) continue;
         row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(descriptor, answerMap);
-        row[`rightAnswer:${descriptor.id}`] = getCorrectAnswerDisplay(descriptor);
+        row[`rightAnswer:${descriptor.id}`] = getExportCorrectAnswerDisplay(
+          descriptor,
+          scoredResults.get(descriptor.id),
+        );
         if (mode === 'auto') {
           row[`score:${descriptor.id}`] = toOptionalNumber(scoredResults.get(descriptor.id)?.awardedScore);
         } else {
@@ -785,7 +808,10 @@ export function buildWideObjectiveExport({
 
       for (const descriptor of slot.descriptors) {
         row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(descriptor, answerMap);
-        row[`rightAnswer:${descriptor.id}`] = getCorrectAnswerDisplay(descriptor);
+        row[`rightAnswer:${descriptor.id}`] = getExportCorrectAnswerDisplay(
+          descriptor,
+          scoredResults.get(descriptor.id),
+        );
         if (mode === 'manual') {
           row[`manualCorrect:${descriptor.id}`] = '';
         }
