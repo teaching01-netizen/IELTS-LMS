@@ -4,6 +4,26 @@ import React from 'react';
 import { FormattedText } from '../FormattedText';
 
 describe('FormattedText paragraph structure', () => {
+  it.each([false, true])(
+    'marks question copy when highlightEnabled=%s',
+    (highlightEnabled) => {
+      const { container } = render(
+        <FormattedText
+          as="span"
+          text="Question copy"
+          highlightEnabled={highlightEnabled}
+          suppressTouchCallout
+        />,
+      );
+
+      const copy = container.firstElementChild as HTMLElement;
+      expect(copy).toHaveAttribute('data-student-question-callout-protected', 'true');
+      if (highlightEnabled) {
+        expect(copy.style.userSelect).toBe('text');
+      }
+    },
+  );
+
   it('renders single-paragraph text without extra <p> wrappers', () => {
     const { container } = render(
       <FormattedText as="div" text="Hello world" />,

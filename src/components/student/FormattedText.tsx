@@ -16,6 +16,7 @@ type FormattedTextProps = {
   highlightClassName?: string | undefined;
   highlightSurfaceId?: string | undefined;
   preserveInlineEmphasis?: boolean | undefined;
+  suppressTouchCallout?: boolean | undefined;
 };
 export function FormattedText({
   text,
@@ -27,6 +28,7 @@ export function FormattedText({
   highlightClassName,
   highlightSurfaceId,
   preserveInlineEmphasis = false,
+  suppressTouchCallout = false,
 }: FormattedTextProps) {
   const studentUI = useOptionalStudentUI();
   const resolvedHighlightToolMode =
@@ -99,6 +101,7 @@ export function FormattedText({
         className={classes}
         html={renderedHtml}
         hint={hint}
+        suppressTouchCallout={suppressTouchCallout}
       />
     );
   }
@@ -125,7 +128,10 @@ export function FormattedText({
 
   if (shouldSplitParagraphs) {
     return (
-      <Tag className={classes}>
+      <Tag
+        className={classes}
+        data-student-question-callout-protected={suppressTouchCallout ? 'true' : undefined}
+      >
         {paragraphSegments.map((segments, pIdx) => (
           <p key={pIdx} className="whitespace-pre-wrap break-words">
             {segments.map((segment, index) => renderSegment(segment, index))}
@@ -136,7 +142,10 @@ export function FormattedText({
   }
 
   return (
-    <Tag className={classes}>
+    <Tag
+      className={classes}
+      data-student-question-callout-protected={suppressTouchCallout ? 'true' : undefined}
+    >
       {paragraphSegments[0]?.map((segment, index) => renderSegment(segment, index))}
     </Tag>
   );

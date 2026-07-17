@@ -54,6 +54,18 @@ function isWithinHighlightableContainer(target: EventTarget | null) {
   return false;
 }
 
+function isWithinQuestionCalloutProtectedText(target: EventTarget | null) {
+  const element = target instanceof HTMLElement
+    ? target
+    : target instanceof Node
+      ? target.parentElement
+      : null;
+
+  return Boolean(
+    element?.closest('[data-student-question-callout-protected="true"]'),
+  );
+}
+
 function hasActiveSelectionWithinHighlightableContainer() {
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed) {
@@ -392,8 +404,10 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       );
     };
 
-    const handleContextMenu = (_event: MouseEvent) => {
-      // Native callout/context menu is intentionally allowed across exam text surfaces.
+    const handleContextMenu = (event: MouseEvent) => {
+      if (isWithinQuestionCalloutProtectedText(event.target)) {
+        event.preventDefault();
+      }
     };
 
     document.addEventListener('keydown', handleKeyDown);

@@ -127,6 +127,12 @@ describe('StudentKeyboardProvider', () => {
           <div data-testid="highlight-target" data-student-highlightable="true">
             Passage text
           </div>
+          <div
+            data-testid="question-copy"
+            data-student-question-callout-protected="true"
+          >
+            Question text
+          </div>
         </>
       );
     }
@@ -169,6 +175,7 @@ describe('StudentKeyboardProvider', () => {
       editor: screen.getByTestId('editor'),
       objectiveInput: screen.getByTestId('objective-input'),
       highlightTarget: screen.getByTestId('highlight-target'),
+      questionCopy: screen.getByTestId('question-copy'),
     };
   }
 
@@ -240,6 +247,40 @@ describe('StudentKeyboardProvider', () => {
 
     expect(event.defaultPrevented).toBe(false);
   });
+
+  it('prevents context menus on protected question copy without recording a violation', () => {
+    const harness = renderHarness();
+    const event = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+    });
+
+    act(() => {
+      harness.questionCopy.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(harness.runtime.state.violations).toHaveLength(0);
+    expect(saveStudentAuditEventMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['editor', 'objectiveInput'] as const)(
+    'allows context menus on the %s answer control',
+    (targetKey) => {
+      const harness = renderHarness();
+      const event = new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+      });
+
+      act(() => {
+        harness[targetKey].dispatchEvent(event);
+      });
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(harness.runtime.state.violations).toHaveLength(0);
+    },
+  );
 
   it('allows copy events from highlightable reading/listening text surfaces', () => {
     const harness = renderHarness();

@@ -4,7 +4,7 @@ import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import type { StudentQuestionDescriptor } from '../../services/examAdapterService';
 import { ProtectedInput } from './ProtectedInput';
 import { Flag } from 'lucide-react';
-import { FormattedText } from './FormattedText';
+import { StudentQuestionText } from './StudentQuestionText';
 import type { StudentHighlightColor } from './highlightPalette';
 
 interface SubAnswerTreeQuestionListProps {
@@ -86,7 +86,7 @@ export function SubAnswerTreeQuestionList({
           {group.prompt ? (
             <div className="flex gap-3">
               <span className="min-w-[1.75rem] font-bold text-gray-900">{group.rootNumber}.</span>
-              <FormattedText
+              <StudentQuestionText
                 as="span"
                 className="text-gray-800"
                 text={group.prompt}

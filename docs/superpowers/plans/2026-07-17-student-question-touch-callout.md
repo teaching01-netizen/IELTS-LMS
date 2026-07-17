@@ -84,6 +84,7 @@ Expected: PASS.
 **Files:**
 - Modify: `src/components/student/QuestionRenderer.tsx`
 - Modify: `src/components/student/SubAnswerTreeQuestionList.tsx`
+- Modify: `src/components/student/TableCompletionSlotCell.tsx`
 - Modify: `src/components/student/StudentReading.tsx`
 - Modify: `src/components/student/StudentListening.tsx`
 - Modify: `src/index.css`
@@ -114,6 +115,7 @@ Replace question-copy `FormattedText` usage with `StudentQuestionText` in:
 
 - every `FormattedText` call in `QuestionRenderer.tsx`;
 - the tree root prompt in `SubAnswerTreeQuestionList.tsx`;
+- table prompt prefixes and suffixes in `TableCompletionSlotCell.tsx`;
 - only `renderBlockInstruction` in `StudentReading.tsx` and `StudentListening.tsx`.
 
 Do not replace the passage/title `FormattedText` in `StudentReading.tsx`, Writing prompt rendering, or any answer control.

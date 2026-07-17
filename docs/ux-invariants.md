@@ -81,6 +81,14 @@ When translation deterrence is active, iOS callout suppression is scoped to
 selection and must never expand onto answer controls. Translation deterrence is best effort on
 unmanaged devices; it cannot guarantee that browser or operating-system translation is blocked.
 
+Displayed question copy may suppress the WebKit touch-and-hold callout through the explicit
+`[data-student-question-callout-protected="true"]` marker. The marked element and text-formatting
+descendants must retain `user-select: text` so native selection and Highlight/Erase continue to
+work. The marker must be applied to exact question-copy elements and must never wrap or be
+applied to `input`, `textarea`, `select`, buttons, contenteditable regions, or other answer
+controls. This remains best-effort browser deterrence; the web application cannot remove
+individual iOS system actions while preserving selection.
+
 ### Must Not Break
 - Native drag selection must work for reading passage title/body and visible question display text in exam mode.
 - Highlight apply/remove must act on the latest valid captured selection for the active highlight surface only.
@@ -95,6 +103,8 @@ unmanaged devices; it cannot guarantee that browser or operating-system translat
 - `src/components/student/__tests__/highlightV2Engine.test.ts`
 - `src/components/student/__tests__/StudentReadingReadabilityControls.test.tsx`
 - `src/components/student/__tests__/StudentQuestionExperience.test.tsx`
+- `src/components/student/__tests__/StudentQuestionCalloutCss.test.ts`
+- `src/components/student/providers/__tests__/StudentKeyboardProvider.test.tsx`
 
 ### Related Memory
 - `docs/failure-cases.md`

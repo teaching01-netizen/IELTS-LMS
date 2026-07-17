@@ -6,6 +6,7 @@ import { getStudentQuestionsForModule } from '../../services/examAdapterService'
 import { prefersReducedMotion } from './prefersReducedMotion';
 import { FormattedText } from './FormattedText';
 import { RichTextHighlighter } from './RichTextHighlighter';
+import { StudentQuestionText } from './StudentQuestionText';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StimulusAnnotation } from '../../types';
@@ -223,7 +224,7 @@ export function StudentReading({
   const renderBlockInstruction = (instruction: string, blockId: string) => {
     return (
       <div className={`rounded-lg border border-gray-200 bg-gray-50 ${answerCompact ? 'px-2 py-1.5' : 'px-3 py-2'}`}>
-        <FormattedText
+        <StudentQuestionText
           as="p"
           className={`${answerCompact ? 'text-xs md:text-sm' : 'text-sm md:text-base'} leading-relaxed text-gray-800 break-words [overflow-wrap:anywhere]`}
           text={instruction}

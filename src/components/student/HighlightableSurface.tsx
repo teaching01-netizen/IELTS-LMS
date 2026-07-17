@@ -7,6 +7,7 @@ interface HighlightableSurfaceProps {
   html: string;
   containerRef?: RefObject<HTMLElement | null> | undefined;
   hint?: string | null | undefined;
+  suppressTouchCallout?: boolean | undefined;
 }
 
 export function HighlightableSurface({
@@ -15,6 +16,7 @@ export function HighlightableSurface({
   html,
   containerRef,
   hint = null,
+  suppressTouchCallout = false,
 }: HighlightableSurfaceProps) {
   const Tag = as as any;
   // If this object identity changes on every render, React may re-apply innerHTML
@@ -28,6 +30,7 @@ export function HighlightableSurface({
         ref={containerRef as any}
         className={className}
         data-student-highlightable="true"
+        data-student-question-callout-protected={suppressTouchCallout ? 'true' : undefined}
         style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
         dangerouslySetInnerHTML={innerHtml}
       />

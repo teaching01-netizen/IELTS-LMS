@@ -94,6 +94,41 @@ describe('student question experience', () => {
     expect(screen.getByRole('option', { name: 'Category B' })).toBeInTheDocument();
   });
 
+  it('marks selectable question copy for callout suppression without marking the answer control', () => {
+    const block = {
+      id: 'short-callout',
+      type: 'SHORT_ANSWER',
+      instruction: 'Answer briefly.',
+      questions: [
+        {
+          id: 'q-callout',
+          prompt: 'Protected question prompt',
+          correctAnswer: 'answer',
+        },
+      ],
+      answerRule: 'ONE_WORD',
+    } as QuestionBlock;
+
+    render(
+      <QuestionRenderer
+        question={(block as any).questions[0]}
+        block={block}
+        number={1}
+        answer=""
+        onChange={() => undefined}
+        highlightEnabled
+      />,
+    );
+
+    const questionCopy = screen.getByText('Protected question prompt');
+    const answerControl = screen.getByRole('textbox', { name: 'Answer for question 1' });
+
+    expect(questionCopy).toHaveAttribute('data-student-question-callout-protected', 'true');
+    expect(questionCopy).toHaveStyle({ userSelect: 'text' });
+    expect(answerControl).not.toHaveAttribute('data-student-question-callout-protected');
+    expect(answerControl.closest('[data-student-question-callout-protected="true"]')).toBeNull();
+  });
+
   it('marks only non-active question blocks as safe offscreen render candidates', () => {
     const block: QuestionBlock = {
       id: 'short-2',
@@ -273,11 +308,16 @@ describe('student question experience', () => {
       />,
     );
 
-    expect(screen.getByText(/no/i)).toBeInTheDocument();
+    expect(screen.getByText(/no/i)).toHaveAttribute(
+      'data-student-question-callout-protected',
+      'true',
+    );
     expect(screen.getByText(/\(red\)/i)).toBeInTheDocument();
     expect(screen.queryByText('no _______ (red)')).not.toBeInTheDocument();
     expect(screen.getByText('5.')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Answer for question 5' })).toBeInTheDocument();
+    const answerControl = screen.getByRole('textbox', { name: 'Answer for question 5' });
+    expect(answerControl).not.toHaveAttribute('data-student-question-callout-protected');
+    expect(answerControl.closest('[data-student-question-callout-protected="true"]')).toBeNull();
   });
 
   it('replaces authored underscore placeholder token inside table completion slot cells', () => {

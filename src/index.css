@@ -289,6 +289,13 @@
     user-select: text;
   }
 
+  [data-student-question-callout-protected="true"],
+  [data-student-question-callout-protected="true"] * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
   .student-stimulus-content p {
     margin-top: var(--student-reading-paragraph-spacing, 1rem);
     margin-bottom: var(--student-reading-paragraph-spacing, 1rem);

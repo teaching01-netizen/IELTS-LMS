@@ -1,6 +1,6 @@
 import React from 'react';
 import { ProtectedInput } from './ProtectedInput';
-import { FormattedText } from './FormattedText';
+import { StudentQuestionText } from './StudentQuestionText';
 import type { StudentHighlightColor } from './highlightPalette';
 
 export type TableCompletionSlotCellProps = {
@@ -50,7 +50,7 @@ export function TableCompletionSlotCell({
     >
       <div className="space-y-2">
         <div className="text-[length:var(--student-control-font-size)] text-gray-800 [white-space:pre-wrap]">
-          <FormattedText
+          <StudentQuestionText
             as="span"
             className="text-[length:var(--student-control-font-size)] text-gray-800"
             text={promptPrefixText}
@@ -75,7 +75,7 @@ export function TableCompletionSlotCell({
               />
             </span>
           </span>
-          <FormattedText
+          <StudentQuestionText
             as="span"
             className="text-[length:var(--student-control-font-size)] text-gray-800"
             text={promptSuffixText}
