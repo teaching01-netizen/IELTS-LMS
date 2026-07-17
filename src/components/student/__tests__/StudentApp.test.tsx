@@ -169,9 +169,10 @@ function createReadingAttemptSnapshot(): StudentAttempt {
   };
 }
 
-function installVisualViewportMock(initialHeight: number) {
+function installVisualViewportMock(initialHeight: number, initialOffsetTop = 0) {
   const visualViewportTarget = new EventTarget();
   let height = initialHeight;
+  let offsetTop = initialOffsetTop;
   let scale = 1;
   const originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
 
@@ -180,6 +181,9 @@ function installVisualViewportMock(initialHeight: number) {
     value: {
       get height() {
         return height;
+      },
+      get offsetTop() {
+        return offsetTop;
       },
       get scale() {
         return scale;
@@ -193,11 +197,17 @@ function installVisualViewportMock(initialHeight: number) {
     setHeight(nextHeight: number) {
       height = nextHeight;
     },
+    setOffsetTop(nextOffsetTop: number) {
+      offsetTop = nextOffsetTop;
+    },
     setScale(nextScale: number) {
       scale = nextScale;
     },
     dispatchResize() {
       visualViewportTarget.dispatchEvent(new Event('resize'));
+    },
+    dispatchScroll() {
+      visualViewportTarget.dispatchEvent(new Event('scroll'));
     },
     restore() {
       if (originalVisualViewport) {
@@ -622,6 +632,62 @@ describe('StudentApp runtime-backed mode', () => {
       }
       if (originalUserAgent) {
         Object.defineProperty(window.navigator, 'userAgent', originalUserAgent);
+      }
+    }
+  });
+
+  it('tracks the visual viewport top offset without rebasing the protected tablet height', async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const originalMatchMedia = window.matchMedia;
+    const originalMaxTouchPoints = Object.getOwnPropertyDescriptor(window.navigator, 'maxTouchPoints');
+    const visualViewport = installVisualViewportMock(900);
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    window.matchMedia = vi.fn(createMatchMediaMock(true)) as unknown as typeof window.matchMedia;
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: 5 });
+
+    try {
+      const { unmount } = render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createWritingAttemptSnapshot()}
+          runtimeSnapshot={createWritingRuntimeSnapshot()}
+        />,
+      );
+
+      const root = document.documentElement;
+      await waitFor(() => {
+        expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+        expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('0px');
+      });
+
+      act(() => {
+        visualViewport.setOffsetTop(164);
+        visualViewport.dispatchScroll();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('164px');
+
+      unmount();
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('');
+    } finally {
+      visualViewport.restore();
+      window.matchMedia = originalMatchMedia;
+      if (originalInnerWidth) {
+        Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      if (originalMaxTouchPoints) {
+        Object.defineProperty(window.navigator, 'maxTouchPoints', originalMaxTouchPoints);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints');
       }
     }
   });

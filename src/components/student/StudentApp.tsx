@@ -376,15 +376,20 @@ export function StudentApp({
       tabletViewportSessionLocked && lockedViewportHeightRef.current !== null
         ? lockedViewportHeightRef.current
         : Math.round(window.visualViewport?.height ?? window.innerHeight);
-    const applyViewportHeight = (height: number) => {
+    const applyViewportRect = (height: number, offsetTop: number) => {
       root.style.setProperty('--student-viewport-height', `${Math.max(0, Math.round(height))}px`);
+      root.style.setProperty(
+        '--student-viewport-offset-top',
+        `${Math.max(0, Math.round(offsetTop))}px`,
+      );
     };
 
     const updateViewportHeight = () => {
       const visualViewport = window.visualViewport;
       const nextViewportHeight = Math.round(visualViewport?.height ?? window.innerHeight);
+      const nextViewportOffsetTop = visualViewport?.offsetTop ?? 0;
       if (!tabletViewportSessionLocked) {
-        applyViewportHeight(nextViewportHeight);
+        applyViewportRect(nextViewportHeight, nextViewportOffsetTop);
         return;
       }
 
@@ -394,7 +399,7 @@ export function StudentApp({
         stableViewportHeight = lockedViewportHeightRef.current;
       }
 
-      applyViewportHeight(stableViewportHeight);
+      applyViewportRect(stableViewportHeight, nextViewportOffsetTop);
     };
 
     const handleTouchStart = (event: TouchEvent) => {
@@ -452,6 +457,7 @@ export function StudentApp({
       root.classList.remove('student-exam-active');
       body.classList.remove('student-exam-active');
       root.style.removeProperty('--student-viewport-height');
+      root.style.removeProperty('--student-viewport-offset-top');
       window.removeEventListener('resize', handleWindowResize);
       window.removeEventListener('orientationchange', handleWindowResize);
       window.visualViewport?.removeEventListener('resize', updateViewportHeight);
