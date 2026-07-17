@@ -6,9 +6,9 @@ Purpose: keep student-facing interaction rules explicit so future UI changes do 
 
 ### Owning Module
 
-The active exam viewport rectangle is owned by `StudentApp`,
-`src/components/student/studentExamViewportController.ts`, and the shared student shell CSS in
-`src/index.css`.
+The active exam viewport rectangle policy is owned by
+`src/components/student/studentExamViewportController.ts`. `StudentApp` installs that controller,
+and the shared student shell CSS in `src/index.css` consumes its published rectangle exactly.
 
 ### Invariant
 
@@ -18,6 +18,12 @@ During an active exam, the complete student shell is fixed to the visible browse
 
 - Browser chrome movement must not hide the header or leave blank space below the footer.
 - Software-keyboard shrinkage must not rebase the protected iPad exam height.
+- `studentExamViewportController.ts` is the only active-exam height policy. CSS must consume
+  `--student-viewport-height` exactly and must not combine it with `vh`, `dvh`, `lvh`, `svh`, a
+  positive minimum height, or another lower bound.
+- Protected sessions accept safe native-scale growth in the controller. Initial entry and editable
+  focusout use a bounded recovery window that may rebase in either direction after keyboard and
+  pinch guards clear.
 - Initial exam entry, page restoration, and return to a visible tab must use bounded follow-up
   measurements so a late browser viewport-meta update cannot strand the shell at a stale rectangle.
 - Editable-control focusout must start a bounded settle cycle so the footer returns after the
