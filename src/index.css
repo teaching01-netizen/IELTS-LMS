@@ -217,6 +217,10 @@
   }
 
   .student-exam-shell {
+    position: fixed;
+    top: var(--student-viewport-offset-top, 0px);
+    left: 0;
+    right: 0;
     height: max(var(--student-viewport-height, 100dvh), 100dvh);
     min-height: 0;
     overflow: hidden;
