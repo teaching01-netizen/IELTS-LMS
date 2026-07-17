@@ -153,5 +153,50 @@ describe('ExamAnswerKeyRoute', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/builder/exam-1/builder');
     });
   });
-});
 
+  it('does not disguise an invalid matching-feature answer as the first option', () => {
+    const state = createInitialExamState('Answer key exam', 'Academic');
+    state.reading.passages[0]!.blocks = [{
+      id: 'matching-features-1',
+      type: 'MATCHING_FEATURES',
+      instruction: 'Match each feature.',
+      options: ['A', 'B', 'C'],
+      features: [{
+        id: 'feature-18',
+        text: 'toys',
+        correctMatch: 'A. They are provided in all tents.',
+      }],
+    }];
+
+    mockController.mockReturnValue({
+      isLoading: false,
+      error: null,
+      exam: {
+        id: 'exam-1',
+        slug: 'exam-1',
+        title: 'Answer key exam',
+        type: 'Academic',
+        status: 'draft',
+        visibility: 'private',
+        owner: 'builder-1',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        currentDraftVersionId: 'ver-1',
+        currentPublishedVersionId: null,
+        canEdit: true,
+        canPublish: true,
+        canDelete: true,
+        schemaVersion: 4,
+      },
+      state,
+      handleUpdateExamContent: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<ExamAnswerKeyRoute />);
+
+    const invalidOption = screen.getByRole('option', {
+      name: 'Invalid saved answer: A. They are provided in all tents.',
+    });
+    expect((invalidOption as HTMLOptionElement).selected).toBe(true);
+  });
+});

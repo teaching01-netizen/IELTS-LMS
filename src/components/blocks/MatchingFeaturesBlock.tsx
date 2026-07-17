@@ -37,8 +37,17 @@ export function MatchingFeaturesBlock({
     updateBlock({ ...block, features: newFeatures });
   };
 
-  const updateOptions = (options: string[]) => {
-    updateBlock({ ...block, options });
+  const updateOption = (index: number, value: string) => {
+    const previousValue = block.options[index];
+    const options = block.options.map((option, optionIndex) => (
+      optionIndex === index ? value : option
+    ));
+    const features = block.features.map((feature) => (
+      previousValue !== '' && feature.correctMatch === previousValue
+        ? { ...feature, correctMatch: value }
+        : feature
+    ));
+    updateBlock({ ...block, options, features });
   };
 
   const addFeature = () => {
@@ -104,15 +113,22 @@ export function MatchingFeaturesBlock({
           {block.options.map((option, index) => (
             <div key={index} className="flex items-center gap-1">
               <input key={index} type="text" value={option} onChange={(e) => {
-                const newOptions = [...block.options];
-                newOptions[index] = e.target.value;
-                updateOptions(newOptions);
+                updateOption(index, e.target.value);
               }} onKeyDown={(e) => handleBoldHotkey(e, (nextValue) => {
-                const newOptions = [...block.options];
-                newOptions[index] = nextValue;
-                updateOptions(newOptions);
+                updateOption(index, nextValue);
               })} className="w-32 border border-gray-300 rounded px-2 py-1 text-sm" placeholder={`Option ${index + 1}`} />
-              <button onClick={() => removeOption(index)} className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"><Trash2 size={12} /></button>
+              <button
+                type="button"
+                onClick={() => removeOption(index)}
+                disabled={block.features.some((feature) => feature.correctMatch === option)}
+                aria-label={`Delete option ${index + 1}`}
+                title={block.features.some((feature) => feature.correctMatch === option)
+                  ? 'Reassign matching features before deleting this option'
+                  : `Delete option ${index + 1}`}
+                className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+              >
+                <Trash2 size={12} />
+              </button>
             </div>
           ))}
         </div>
@@ -136,6 +152,11 @@ export function MatchingFeaturesBlock({
                 placeholder="Feature statement..."
               />
               <select value={feature.correctMatch} onChange={(e) => updateFeature(feature.id, { correctMatch: e.target.value })} className="w-32 border border-gray-300 rounded px-2 py-1 text-sm">
+                {feature.correctMatch && !block.options.includes(feature.correctMatch) ? (
+                  <option value={feature.correctMatch}>
+                    {`Invalid saved answer: ${feature.correctMatch}`}
+                  </option>
+                ) : null}
                 {block.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
               </select>
               <div className="flex items-center gap-1">

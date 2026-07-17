@@ -703,6 +703,9 @@ function AnswerControl({
             className="min-w-[220px] rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-medium text-slate-800"
           >
             <option value="">(none)</option>
+            {current && !options.includes(current) ? (
+              <option value={current}>{`Invalid saved answer: ${current}`}</option>
+            ) : null}
             {options.map((opt: string) => (
               <option key={opt} value={opt}>{opt}</option>
             ))}

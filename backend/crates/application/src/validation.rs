@@ -1097,6 +1097,11 @@ fn validate_matching_features(
     result: &mut ValidationResult,
 ) -> i32 {
     let options = block.get("options").and_then(|o| o.as_array());
+    let option_set: HashSet<&str> = options
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
 
     match options {
         None => {
@@ -1108,7 +1113,21 @@ fn validate_matching_features(
                 "At least 2 options are required",
             );
         }
-        Some(_os) => {}
+        Some(os) => {
+            for (option_idx, option) in os.iter().enumerate() {
+                if option
+                    .as_str()
+                    .map(str::trim)
+                    .map(str::is_empty)
+                    .unwrap_or(true)
+                {
+                    result.add_error(
+                        format!("{}.options[{}]", field_prefix, option_idx),
+                        "Option text is required",
+                    );
+                }
+            }
+        }
     }
 
     let features = block.get("features").and_then(|f| f.as_array());
@@ -1150,6 +1169,11 @@ fn validate_matching_features(
                     result.add_error(
                         format!("{}.features[{}].correctMatch", field_prefix, feat_idx),
                         "Feature must have a match",
+                    );
+                } else if correct_match.is_some_and(|value| !option_set.contains(value)) {
+                    result.add_error(
+                        format!("{}.features[{}].correctMatch", field_prefix, feat_idx),
+                        "Feature must match a valid option",
                     );
                 }
             }
@@ -1592,5 +1616,57 @@ mod tests {
             "unexpected errors: {:?}",
             result.errors
         );
+    }
+
+    #[test]
+    fn matching_features_rejects_an_answer_outside_the_option_set() {
+        let block = json!({
+            "id": "matching-features-1",
+            "type": "MATCHING_FEATURES",
+            "options": ["A", "B", "C"],
+            "features": [{
+                "id": "feature-18",
+                "text": "toys",
+                "correctMatch": "A. They are provided in all tents."
+            }]
+        });
+        let mut result = ValidationResult::new();
+
+        validate_matching_features(
+            block.as_object().expect("matching feature block object"),
+            "content.listening.parts[1].blocks[1]",
+            &mut result,
+        );
+
+        assert!(result.errors.iter().any(|error| {
+            error.field == "content.listening.parts[1].blocks[1].features[0].correctMatch"
+                && error.message == "Feature must match a valid option"
+        }));
+    }
+
+    #[test]
+    fn matching_features_rejects_blank_options() {
+        let block = json!({
+            "id": "matching-features-1",
+            "type": "MATCHING_FEATURES",
+            "options": ["A", "B", ""],
+            "features": [{
+                "id": "feature-18",
+                "text": "toys",
+                "correctMatch": "A"
+            }]
+        });
+        let mut result = ValidationResult::new();
+
+        validate_matching_features(
+            block.as_object().expect("matching feature block object"),
+            "content.listening.parts[1].blocks[1]",
+            &mut result,
+        );
+
+        assert!(result.errors.iter().any(|error| {
+            error.field == "content.listening.parts[1].blocks[1].options[2]"
+                && error.message == "Option text is required"
+        }));
     }
 }
