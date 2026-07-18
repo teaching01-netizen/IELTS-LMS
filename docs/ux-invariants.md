@@ -6,59 +6,40 @@ Purpose: keep student-facing interaction rules explicit so future UI changes do 
 
 ### Owning Module
 
-The active exam viewport rectangle policy is owned by
-`src/components/student/studentExamViewportPolicy.ts` and adapted to browser events by
-`src/components/student/studentExamViewportController.ts`. `StudentApp` installs that controller,
-and the shared student shell CSS in `src/index.css` consumes its published rectangle exactly.
+The active exam shell rectangle and row layout are owned by `src/index.css`. `StudentApp` owns
+only the exam-active lifecycle class and shell markup. No JavaScript module owns viewport geometry.
 
 ### Invariant
 
-During an active exam, the complete student shell is fixed to the visible browser viewport. The
-shell tracks validated viewport geometry while applying independent trust rules to its closed
-height and live visual origin through software-keyboard and pinch transitions on every device.
-Header and footer remain non-scrolling flex children; reading, listening, and writing panes own
-content scrolling.
+The browser layout engine is the sole shell-geometry authority. The fixed `inset: 0` shell is a
+three-row grid: intrinsic header, `minmax(0, 1fr)` workspace, intrinsic footer. Student code never
+persists viewport height, vertical origin, or keyboard visibility.
 
 ### Must Not Break
 
-- Browser chrome movement must not hide the header or leave blank space below the footer.
-- Software-keyboard shrinkage must not replace the last trusted closed shell height on any device.
-- Every valid native-scale Visual Viewport offset must be followed independently during keyboard
-  occlusion and recovery. A keyboard baseline must never restore an older origin.
-- `studentExamViewportPolicy.ts` is the only active-exam height policy. CSS must consume
-  `--student-viewport-height` exactly once it is published and must not combine it with `vh`, `dvh`,
-  `lvh`, `svh`, a positive minimum height, or another lower bound. Ordered `100vh`/`100dvh`
-  declarations may precede it only as progressive fallbacks for older engines or pre-installation.
-- Editable focus arms keyboard shrink protection but does not prove that the keyboard is visible.
-  Retained focus must not prevent recovered growth from becoming the new closed shell height.
-- While the keyboard is visible, the full-height shell does not shrink; the footer stays at the
-  physical screen bottom behind the keyboard.
-- A recovery deadline ends bounded observation; it does not make the last sample trustworthy. A
-  smaller keyboard-recovery sample remains rejected indefinitely across later resize/scroll events.
-- The first native-scale height at or above the closed shell height clears keyboard occlusion even
-  when editable focus remains. Its live offset is accepted independently.
-- An optional zero-height Virtual Keyboard intersection may clear occlusion, but it must never
-  authorize a smaller stale shell height.
-- Bidirectional height rebasing requires bootstrapping while keyboard phase is clear, ordinary
-  stable browser-chrome geometry, or an independently evidenced topology recovery such as
-  orientation or material width change. Editable focus must outrank bootstrap shrinkage.
-- Browser capabilities and lifecycle state determine viewport behavior; browser-family and version
-  checks do not enable or disable the controller.
-- Initial exam entry, page restoration, and return to a visible tab must use bounded follow-up
-  measurements so a late browser viewport-meta update cannot strand the shell at a stale rectangle.
-- Editable-control focusout starts bounded recovery observation but does not reset the live origin.
-  The shell retains its closed height and follows valid offsets until full geometry returns.
-- Delayed settling must be canceled on cleanup and must never mutate non-exam pages.
-- Safe-area padding, split-pane scrolling, native dialog positioning, and the exam page-zoom guard remain active.
-- Viewport custom properties and active classes are removed when leaving the exam phase.
+- The shell uses one constraint system: `position: fixed` with `inset: 0`.
+- Header and footer are non-scrolling, in-flow grid rows. Neither may become sticky or independently
+  fixed.
+- The workspace grid item has `min-height: 0`; reading, listening, and writing panes remain the only
+  content scroll owners.
+- Student production code must not publish viewport-height or viewport-origin CSS custom
+  properties.
+- `VisualViewport`, focus, blur, keyboard, resize, orientation, and lifecycle events must not write
+  shell geometry.
+- Root exam scrolling and overscroll chaining remain disabled.
+- The viewport meta policy requests keyboard overlay behavior only as progressive enhancement. The
+  shell must remain correct when a browser ignores that token.
+- No browser-family, operating-system, device-model, or version branch may select viewport layout.
+- Safe-area padding, split-pane scrolling, native dialog positioning, and the exam page-zoom guard
+  remain active.
+- Exam viewport metadata is restored exactly when leaving the exam phase.
 - Answer persistence, submission, timer, integrity, and audit behavior are unaffected.
 
 ### Regression Protection
 
 - `src/components/student/__tests__/StudentApp.test.tsx`
-- `src/components/student/__tests__/studentExamViewportPolicy.test.ts`
-- `src/components/student/__tests__/studentExamViewportController.test.ts`
 - `src/components/student/__tests__/StudentViewportCss.test.ts`
+- `src/components/student/__tests__/examPageZoomGuard.test.ts`
 - `e2e/student-ipad-layout.spec.ts`
 
 ## Student Exam Dialog Positioning

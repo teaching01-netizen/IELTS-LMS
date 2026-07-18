@@ -30,6 +30,50 @@ Purpose: turn incidents and bug fixes into durable memory for humans and AI agen
 
 ---
 
+## 2026-07-18: Inferred Viewport Geometry Survived Browser Recovery
+
+### Symptom
+Repeated iPad keyboard-dismissal sequences could still leave the exam header or footer displaced.
+The footer could remain above a persistent white gap after either tapping outside an answer or using
+the keyboard-hide control, even though earlier event-order-specific fixes passed automated tests.
+
+### Scope
+The active student exam shell, viewport meta policy, and browser layout tests. Answer entry,
+autosave, submission, timers, integrity, audit, grading, and navigation behavior were unchanged.
+
+### Root Cause
+The application persisted Visual Viewport measurements into layout-viewport CSS. Browser and OS
+combinations control keyboard resize behavior and do not guarantee a complete or consistently
+ordered final event sequence. The application could therefore retain a height or origin after the
+browser had recovered. Additional policy states changed which sequence failed but could not prove
+that stored geometry was current.
+
+### Fix
+- Deleted the viewport geometry policy, browser-event controller, timers, focus coupling, and CSS
+  height/origin variables.
+- Replaced them with one browser-owned fixed `inset: 0` CSS grid containing an intrinsic header,
+  `minmax(0, 1fr)` workspace, and intrinsic footer.
+- Made the workspace and its panes the only scroll owners.
+- Requested `interactive-widget=overlays-content` as progressive enhancement without depending on
+  browser support.
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/StudentApp.test.tsx`,
+  `src/components/student/__tests__/StudentViewportCss.test.ts`,
+  `src/components/student/__tests__/examPageZoomGuard.test.ts`,
+  `e2e/student-ipad-layout.spec.ts`
+- Diagnostics: synthetic Visual Viewport, focus, blur, resize, and scroll events verify that no
+  shell geometry is written.
+- Rules/Docs updated: `docs/ux-invariants.md`,
+  `docs/superpowers/specs/2026-07-18-student-css-viewport-shell-design.md`
+
+### Invariant
+The browser layout engine is the sole shell-geometry authority. The application cannot persist stale
+shell geometry because it stores no viewport height, origin, or keyboard visibility. Temporary
+keyboard-time resizing on historical browsers remains browser-controlled.
+
+---
+
 ## 2026-07-18: Keyboard Dismissal Coupled Focus, Height, and Visual Origin
 
 ### Symptom
