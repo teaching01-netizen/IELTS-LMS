@@ -72,7 +72,12 @@ describe('studentExamViewportPolicy', () => {
     });
     state = reduceStudentExamViewportPolicy(state, { type: 'recovery-finished' });
 
-    expect(state.mode).toBe('stable');
+    state = reduceStudentExamViewportPolicy(state, {
+      type: 'measurement-received',
+      measurement: sample(810, { offsetTop: 10 }),
+    });
+
+    expect(state.mode).toBe('keyboard-recovery');
     expect(state.publishedRect).toEqual({ height: 900, offsetTop: 0 });
   });
 
@@ -85,6 +90,7 @@ describe('studentExamViewportPolicy', () => {
       type: 'measurement-received',
       measurement: sample(950, { layoutHeight: 950 }),
     });
+    expect(state.mode).toBe('stable');
     expect(state.publishedRect.height).toBe(950);
   });
 
@@ -203,8 +209,12 @@ export type StudentExamViewportPolicyEvent =
 Implement one finite/positive measurement normalizer. Prefer `visualHeight`; fall back to
 `layoutHeight`. In `keyboard-active`, preserve baseline height but follow the valid visual
 `offsetTop`. In `keyboard-recovery`, publish the complete baseline and accept only native-scale
-growth. In `bootstrapping`, `stable`, and `topology-recovery`, accept valid native-scale geometry in
-either direction. `pinch-active` and non-native scale retain the trusted rectangle.
+geometry at or above that baseline. A recovery deadline stops the observation loop but leaves the
+policy in `keyboard-recovery` while samples remain smaller; this makes the floor persistent across
+late resize/scroll events. The first native-scale sample at or above the baseline becomes trusted,
+clears the keyboard baseline, and returns to `stable`. In `bootstrapping`, `stable`, and
+`topology-recovery`, accept valid native-scale geometry in either direction. `pinch-active` and
+non-native scale retain the trusted rectangle.
 
 - [ ] **Step 4: Run the pure-policy tests and verify GREEN**
 
@@ -381,6 +391,9 @@ startRecovery('keyboard');  // final editable focusout
 
 The keyboard variant dispatches `editable-focus-left`; it never grants downward rebase permission.
 The bounded frame loop only observes recovery and dispatches `recovery-finished` at the deadline.
+For keyboard recovery, that event stops polling but deliberately does not clear the persistent
+baseline floor. Later passive events remain protected until full-height geometry returns or a
+bootstrap/topology recovery explicitly invalidates the baseline.
 Window resize compares the current layout width with the policy width; a material width change starts
 topology recovery, while height-only keyboard noise is only measured through the current state.
 
