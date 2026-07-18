@@ -219,10 +219,6 @@ if (state.mode === 'bootstrapping' || state.mode === 'topology-recovery') {
   return acceptClosedHeight(state, rect.height, rect.offsetTop, width);
 }
 
-if (state.keyboardPhase === 'clear') {
-  return acceptClosedHeight(state, rect.height, rect.offsetTop, width);
-}
-
 if (rect.height >= state.closedHeight) {
   return {
     ...acceptClosedHeight(state, rect.height, rect.offsetTop, width),
@@ -230,7 +226,25 @@ if (rect.height >= state.closedHeight) {
   };
 }
 
-if (keyboardPositive || state.keyboardPhase === 'armed') {
+if (keyboardPositive) {
+  return {
+    ...publish(state, state.closedHeight, rect.offsetTop),
+    keyboardPhase: 'occluding',
+  };
+}
+
+if (state.keyboardPhase === 'clear') {
+  return acceptClosedHeight(state, rect.height, rect.offsetTop, width);
+}
+
+if (keyboardExplicitlyClear) {
+  return {
+    ...publish(state, state.closedHeight, rect.offsetTop),
+    keyboardPhase: state.editableFocusActive ? 'armed' : 'recovering',
+  };
+}
+
+if (state.keyboardPhase === 'armed') {
   return {
     ...publish(state, state.closedHeight, rect.offsetTop),
     keyboardPhase: 'occluding',
@@ -239,8 +253,7 @@ if (keyboardPositive || state.keyboardPhase === 'armed') {
 
 return {
   ...publish(state, state.closedHeight, rect.offsetTop),
-  keyboardPhase:
-    keyboardExplicitlyClear && state.editableFocusActive ? 'armed' : state.keyboardPhase,
+  keyboardPhase: state.keyboardPhase,
 };
 ```
 
