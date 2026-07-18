@@ -1,7 +1,7 @@
 # Student Exam CSS Viewport Shell Design
 
-**Date:** 2026-07-18  
-**Status:** Approved for implementation planning  
+**Date:** 2026-07-18
+**Status:** Approved for implementation planning
 **Owner:** Student exam UI module
 
 ## Problem
