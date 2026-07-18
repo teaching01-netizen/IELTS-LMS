@@ -13,6 +13,7 @@
 ## File Map
 
 - Modify `src/components/student/StudentApp.tsx`: stop installing the geometry controller, remove the inline height authority, and let CSS own the exam shell layout.
+- Modify `src/components/student/StudentExamWorkspace.tsx`: attach the existing `student-exam-main` hook to the grid's flexible row.
 - Modify `src/index.css`: replace measured height/top and sticky footer rules with the fixed three-row grid and root containment.
 - Modify `src/components/student/examPageZoomGuard.ts`: request `interactive-widget=overlays-content` where supported while preserving zoom protections and exact cleanup.
 - Modify `src/components/student/__tests__/StudentViewportCss.test.ts`: encode the CSS-only shell and prohibit geometry variables.
@@ -168,6 +169,7 @@ uses `resizes-visual`, and `StudentApp` still publishes viewport custom properti
 
 **Files:**
 - Modify: `src/components/student/StudentApp.tsx`
+- Modify: `src/components/student/StudentExamWorkspace.tsx`
 - Modify: `src/index.css`
 - Modify: `src/components/student/examPageZoomGuard.ts`
 - Delete: `src/components/student/studentExamViewportPolicy.ts`
@@ -213,7 +215,21 @@ className={`student-exam-shell w-full bg-gray-50 font-sans text-gray-900 transit
 
 Do not remove `h-screen` from non-exam loading, blocking, or terminal screens in this task.
 
-- [ ] **Step 2: Make CSS the single shell authority**
+- [ ] **Step 2: Mark the workspace as the flexible grid row**
+
+In `StudentExamWorkspace.tsx`, change the main element to:
+
+```tsx
+<main
+  id="main-content"
+  className="student-exam-main flex-1 overflow-hidden relative flex flex-col"
+  role="main"
+>
+```
+
+Do not change the reading, listening, writing, or speaking children.
+
+- [ ] **Step 3: Make CSS the single shell authority**
 
 Replace the active root, shell, and footer rules in `src/index.css` with:
 
@@ -257,7 +273,7 @@ body.student-exam-active {
 Preserve the existing `.student-adaptive-workspace`, pane, separator, question-stepper, and media
 rules below this block. Do not add viewport-unit height fallbacks to the fixed shell.
 
-- [ ] **Step 3: Change the progressive keyboard request**
+- [ ] **Step 4: Change the progressive keyboard request**
 
 Set the constant in `examPageZoomGuard.ts` to:
 
@@ -268,7 +284,7 @@ export const EXAM_VIEWPORT_CONTENT =
 
 Do not change gesture prevention or cleanup behavior.
 
-- [ ] **Step 4: Delete the obsolete geometry implementation and tests**
+- [ ] **Step 5: Delete the obsolete geometry implementation and tests**
 
 Delete these four files in the same patch/commit:
 
@@ -288,7 +304,7 @@ rg -n 'studentExamViewport|--student-viewport-height|--student-viewport-offset-t
 Expected: no matches. A match in a newly rewritten negative test is acceptable only if it is an
 assertion string; production files must have zero matches.
 
-- [ ] **Step 5: Run the focused tests and verify GREEN**
+- [ ] **Step 6: Run the focused tests and verify GREEN**
 
 Run:
 
@@ -302,7 +318,7 @@ npx vitest run \
 
 Expected: all selected tests pass with zero unhandled errors.
 
-- [ ] **Step 6: Run the complete affected component suites**
+- [ ] **Step 7: Run the complete affected component suites**
 
 Run:
 
@@ -315,11 +331,12 @@ npx vitest run \
 
 Expected: all three files pass.
 
-- [ ] **Step 7: Commit the atomic architecture replacement**
+- [ ] **Step 8: Commit the atomic architecture replacement**
 
 ```bash
 git add \
   src/components/student/StudentApp.tsx \
+  src/components/student/StudentExamWorkspace.tsx \
   src/index.css \
   src/components/student/examPageZoomGuard.ts \
   src/components/student/__tests__/StudentViewportCss.test.ts \
@@ -491,6 +508,7 @@ Expected: all test files pass with zero unhandled errors.
 ```bash
 npx eslint \
   src/components/student/StudentApp.tsx \
+  src/components/student/StudentExamWorkspace.tsx \
   src/components/student/examPageZoomGuard.ts \
   src/components/student/__tests__/StudentViewportCss.test.ts \
   src/components/student/__tests__/examPageZoomGuard.test.ts \
