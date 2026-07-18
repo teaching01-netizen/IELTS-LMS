@@ -506,6 +506,22 @@ describe('StudentApp runtime-backed mode', () => {
       });
 
       expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('20px');
+
+      act(() => {
+        visualViewport.setHeight(900);
+        visualViewport.setOffsetTop(180);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('180px');
+
+      act(() => {
+        visualViewport.setOffsetTop(0);
+        visualViewport.dispatchScroll();
+      });
+
       expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('0px');
 
       act(() => {
@@ -515,6 +531,79 @@ describe('StudentApp runtime-backed mode', () => {
       });
 
       expect(root.style.getPropertyValue('--student-viewport-height')).toBe('950px');
+    } finally {
+      visualViewport.restore();
+      window.matchMedia = originalMatchMedia;
+      if (originalInnerWidth) {
+        Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      if (originalMaxTouchPoints) {
+        Object.defineProperty(window.navigator, 'maxTouchPoints', originalMaxTouchPoints);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints');
+      }
+    }
+  });
+
+  it('restores the footer when keyboard-hide retains editable focus', async () => {
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const originalMatchMedia = window.matchMedia;
+    const originalMaxTouchPoints = Object.getOwnPropertyDescriptor(window.navigator, 'maxTouchPoints');
+    const visualViewport = installVisualViewportMock(900);
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+    window.matchMedia = vi.fn(createMatchMediaMock(true)) as unknown as typeof window.matchMedia;
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: 5 });
+
+    try {
+      render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createWritingAttemptSnapshot()}
+          runtimeSnapshot={createWritingRuntimeSnapshot()}
+        />,
+      );
+
+      const root = document.documentElement;
+      await waitFor(() => {
+        expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      });
+
+      const editor = await screen.findByRole('textbox', { name: /writing response/i });
+      act(() => {
+        editor.focus();
+        visualViewport.setHeight(560);
+        visualViewport.setOffsetTop(180);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('180px');
+
+      act(() => {
+        visualViewport.setHeight(950);
+        visualViewport.dispatchResize();
+      });
+
+      expect(document.activeElement).toBe(editor);
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('950px');
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('180px');
+
+      act(() => {
+        visualViewport.setOffsetTop(0);
+        visualViewport.dispatchScroll();
+      });
+
+      expect(document.activeElement).toBe(editor);
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('950px');
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('0px');
     } finally {
       visualViewport.restore();
       window.matchMedia = originalMatchMedia;

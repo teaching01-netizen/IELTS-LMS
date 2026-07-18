@@ -19,6 +19,19 @@ const sample = (
 });
 
 describe('studentExamViewportPolicy', () => {
+  it('protects the closed height when editable focus arrives during bootstrap', () => {
+    let state = createStudentExamViewportPolicy(sample(900));
+    state = reduceStudentExamViewportPolicy(state, { type: 'editable-focus-entered' });
+    state = reduceStudentExamViewportPolicy(state, {
+      type: 'measurement-received',
+      measurement: sample(560, { offsetTop: 100 }),
+    });
+
+    expect(state.mode).toBe('bootstrapping');
+    expect(state.keyboardPhase).toBe('occluding');
+    expect(state.publishedRect).toEqual({ height: 900, offsetTop: 100 });
+  });
+
   it('keeps the live visual origin while tap-outside keyboard recovery settles', () => {
     let state = createStudentExamViewportPolicy(sample(900));
     state = reduceStudentExamViewportPolicy(state, { type: 'recovery-finished' });

@@ -136,7 +136,9 @@ export function reduceStudentExamViewportPolicy(
         event.measurement.keyboardHeight !== null && event.measurement.keyboardHeight > 0;
       const keyboardExplicitlyClear = event.measurement.keyboardHeight === 0;
 
-      if (state.mode === 'bootstrapping' || state.mode === 'topology-recovery') {
+      const bootstrapMayRebase =
+        state.mode === 'bootstrapping' && state.keyboardPhase === 'clear';
+      if (bootstrapMayRebase || state.mode === 'topology-recovery') {
         return acceptClosedHeight(state, rect.height, rect.offsetTop, layoutWidth);
       }
 

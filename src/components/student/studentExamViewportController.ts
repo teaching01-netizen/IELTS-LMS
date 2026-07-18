@@ -190,7 +190,7 @@ export function installStudentExamViewportController({
   };
 
   const handleWindowResize = () => {
-    const nextWidth = readMeasurement(policy.trustedRect.height, policy.layoutWidth).layoutWidth;
+    const nextWidth = readMeasurement(policy.closedHeight, policy.layoutWidth).layoutWidth;
     if (Math.abs(nextWidth - policy.layoutWidth) >= MATERIAL_WIDTH_CHANGE_PX) {
       startRecovery('topology');
       return;
