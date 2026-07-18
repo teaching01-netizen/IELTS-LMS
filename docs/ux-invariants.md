@@ -7,27 +7,38 @@ Purpose: keep student-facing interaction rules explicit so future UI changes do 
 ### Owning Module
 
 The active exam viewport rectangle policy is owned by
+`src/components/student/studentExamViewportPolicy.ts` and adapted to browser events by
 `src/components/student/studentExamViewportController.ts`. `StudentApp` installs that controller,
 and the shared student shell CSS in `src/index.css` consumes its published rectangle exactly.
 
 ### Invariant
 
-During an active exam, the complete student shell is fixed to the visible browser viewport. The shell tracks the Visual Viewport API's vertical offset while retaining the protected tablet height contract. Header and footer remain non-scrolling flex children; reading, listening, and writing panes own content scrolling.
+During an active exam, the complete student shell is fixed to the visible browser viewport. The
+shell tracks validated viewport geometry while retaining the last trusted full rectangle through
+software-keyboard and pinch transitions on every device. Header and footer remain non-scrolling
+flex children; reading, listening, and writing panes own content scrolling.
 
 ### Must Not Break
 
 - Browser chrome movement must not hide the header or leave blank space below the footer.
-- Software-keyboard shrinkage must not rebase the protected iPad exam height.
-- `studentExamViewportController.ts` is the only active-exam height policy. CSS must consume
-  `--student-viewport-height` exactly and must not combine it with `vh`, `dvh`, `lvh`, `svh`, a
-  positive minimum height, or another lower bound.
-- Protected sessions accept safe native-scale growth in the controller. Initial entry and editable
-  focusout use a bounded recovery window that may rebase in either direction after keyboard and
-  pinch guards clear.
+- Software-keyboard shrinkage must not replace the last trusted full exam rectangle on any device.
+- `studentExamViewportPolicy.ts` is the only active-exam height policy. CSS must consume
+  `--student-viewport-height` exactly once it is published and must not combine it with `vh`, `dvh`,
+  `lvh`, `svh`, a positive minimum height, or another lower bound. Ordered `100vh`/`100dvh`
+  declarations may precede it only as progressive fallbacks for older engines or pre-installation.
+- Editable focus captures the last trusted full viewport rectangle. Keyboard-active and
+  keyboard-recovery states may not replace that rectangle with a smaller sample.
+- A recovery deadline ends bounded observation; it does not make the last sample trustworthy. A
+  smaller keyboard-recovery sample remains rejected indefinitely across later resize/scroll events.
+- The first native-scale rectangle at or above the keyboard baseline clears the keyboard guard.
+  Bidirectional rebasing requires bootstrapping, ordinary stable browser-chrome geometry, or an
+  independently evidenced topology recovery such as orientation or material width change.
+- Browser capabilities and lifecycle state determine viewport behavior; browser-family and version
+  checks do not enable or disable the controller.
 - Initial exam entry, page restoration, and return to a visible tab must use bounded follow-up
   measurements so a late browser viewport-meta update cannot strand the shell at a stale rectangle.
-- Editable-control focusout must start a bounded settle cycle so the footer returns after the
-  keyboard closes even when no final resize or scroll event fires.
+- Editable-control focusout must restore the trusted rectangle immediately and start a bounded
+  observation cycle so a later full rectangle can be captured without a final resize/scroll event.
 - Delayed settling must be canceled on cleanup and must never mutate non-exam pages.
 - Safe-area padding, split-pane scrolling, native dialog positioning, and the exam page-zoom guard remain active.
 - Viewport custom properties and active classes are removed when leaving the exam phase.
@@ -36,6 +47,7 @@ During an active exam, the complete student shell is fixed to the visible browse
 ### Regression Protection
 
 - `src/components/student/__tests__/StudentApp.test.tsx`
+- `src/components/student/__tests__/studentExamViewportPolicy.test.ts`
 - `src/components/student/__tests__/studentExamViewportController.test.ts`
 - `src/components/student/__tests__/StudentViewportCss.test.ts`
 - `e2e/student-ipad-layout.spec.ts`

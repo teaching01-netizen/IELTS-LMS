@@ -30,6 +30,53 @@ Purpose: turn incidents and bug fixes into durable memory for humans and AI agen
 
 ---
 
+## 2026-07-18: Keyboard Dismissal Leaves Footer Above Persistent White Space
+
+### Symptom
+After a student typed an answer and dismissed the software keyboard, the footer returned but stayed
+above the physical bottom of the browser. A large white gap remained below it indefinitely. Opening
+or pasting the exam URL into a reused tab had already been fixed and continued to recover correctly.
+
+### Scope
+The active student exam viewport policy, its browser event adapter, viewport meta policy, and shell
+CSS. Answer entry, autosave, submission, timers, integrity, and audit flows were unaffected.
+
+### Root Cause
+The viewport controller correctly protected a trusted `900px` shell while the keyboard reported
+`560px`, but editable focusout opened a recovery window that allowed downward rebasing. A persistent
+post-keyboard `820px` VisualViewport sample was therefore committed as the new full height. The
+existing controller and StudentApp tests explicitly expected `820px`, so they encoded the failure.
+Ending the recovery timer also removed protection, allowing later stale resize/scroll events to
+recreate the gap.
+
+### Fix
+- Extracted a pure, capability-based viewport state machine with bootstrapping, stable,
+  keyboard-active, keyboard-recovery, pinch, and topology states.
+- Editable focus captures the last trusted full rectangle. Focusout restores it immediately, and
+  smaller samples remain rejected after the bounded observation loop ends.
+- A native-scale rectangle at or above the baseline clears keyboard recovery; initial/reused-tab and
+  independently evidenced topology recovery remain bidirectional.
+- Installed the controller for every active exam without Apple/tablet/browser-version branching.
+- Added validated VisualViewport/layout fallbacks, optional VirtualKeyboard geometry events,
+  explicit `interactive-widget=resizes-visual`, and ordered `100vh`/`100dvh` CSS fallbacks.
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/studentExamViewportPolicy.test.ts`,
+  `src/components/student/__tests__/studentExamViewportController.test.ts`,
+  `src/components/student/__tests__/StudentApp.test.tsx`,
+  `src/components/student/__tests__/examPageZoomGuard.test.ts`,
+  `src/components/student/__tests__/StudentViewportCss.test.ts`
+- Diagnostics: lifecycle transitions are isolated in the pure policy and can be reproduced without
+  a physical software keyboard.
+- Rules/Docs updated: `docs/ux-invariants.md`, `docs/failure-cases.md`
+
+### Invariant
+Focusout is an observation trigger, never permission to shrink the trusted exam viewport. A smaller
+post-keyboard sample cannot move the footer upward unless an independent display-topology transition
+explicitly invalidates the baseline.
+
+---
+
 ## 2026-07-13: Student Review Mark Disappears After a Later Answer Save
 
 ### Symptom
