@@ -474,6 +474,9 @@ describe('StudentWriting a11y', () => {
     });
 
     expect(footer).toHaveClass('student-exam-footer');
+    expect(within(footer).getByTestId('student-writing-footer-row')).toHaveClass(
+      'overflow-x-auto',
+    );
     expect(within(footer).getByRole('button', { name: 'Task 1' })).toBeInTheDocument();
     fireEvent.click(within(footer).getByRole('button', { name: 'Task 2' }));
     expect(onNavigate).toHaveBeenCalledWith('task2');

@@ -20,7 +20,10 @@ async function expectExamChromeAlignedToViewport(page: Page, footerLabel: RegExp
   expect(footerBox).not.toBeNull();
   expect(viewport).not.toBeNull();
   expect(Math.abs(headerBox!.y)).toBeLessThanOrEqual(1);
-  expect(Math.abs(footerBox!.bottom - viewport!.height)).toBeLessThanOrEqual(1);
+  await expect(footer).toHaveCSS('position', 'fixed');
+  expect(footerBox!.x).toBeGreaterThan(0);
+  expect(viewport!.width - footerBox!.x - footerBox!.width).toBeGreaterThan(0);
+  expect(viewport!.height - footerBox!.y - footerBox!.height).toBeGreaterThanOrEqual(0);
 }
 
 async function expectCssOwnedExamShell(page: Page) {
@@ -275,6 +278,11 @@ test.describe('student exam iPad layout', () => {
     await completeHighlightSelection(promptSurface, 0, 4);
     await expect(promptPane.locator('mark[data-highlighted="true"]')).toHaveCount(1);
     await expectThinTabletResizer(page, 'writing-pane-resizer');
+    await expectExamChromeAlignedToViewport(page, /writing task navigation and submission/i);
+
+    await editor.focus();
+    await editor.fill('Keyboard dismissal footer regression');
+    await editor.blur();
     await expectExamChromeAlignedToViewport(page, /writing task navigation and submission/i);
 
     await page.setViewportSize({ width: 1024, height: 768 });

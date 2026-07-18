@@ -710,11 +710,14 @@ export function StudentWriting({
       </div>
 
       <footer
-        className="student-exam-footer border-t border-gray-200 bg-white flex flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.03)]"
+        className="student-exam-footer flex"
         role="contentinfo"
         aria-label="Writing task navigation and submission"
       >
-        <div className="flex items-center gap-2 md:gap-3 px-2 md:px-3 lg:px-4 py-2 md:py-2.5 overflow-x-auto w-full">
+        <div
+          className="flex w-full items-center gap-2 overflow-x-auto overscroll-x-contain px-2 py-2 md:gap-3 md:px-3 md:py-2.5 lg:px-4"
+          data-testid="student-writing-footer-row"
+        >
           {writingConfig.tasks.map((task) => (
             <button
               key={task.id}

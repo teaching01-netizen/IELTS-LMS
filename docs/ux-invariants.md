@@ -12,18 +12,23 @@ only the exam-active lifecycle class and shell markup. No JavaScript module owns
 ### Invariant
 
 The browser layout engine is the sole shell-geometry authority. The fixed `inset: 0` shell is a
-three-row grid: intrinsic header, `minmax(0, 1fr)` workspace, intrinsic footer. Student code never
-persists viewport height, vertical origin, or keyboard visibility.
+two-row grid: intrinsic header and `minmax(0, 1fr)` workspace. The student footer is a fixed,
+safe-area-aware floating navigation pill; the workspace reserves its maximum footprint with CSS.
+Student code never persists viewport height, vertical origin, footer geometry, or keyboard
+visibility.
 
 ### Must Not Break
 
 - The shell uses one constraint system: `position: fixed` with `inset: 0`.
-- Header and footer are non-scrolling, in-flow grid rows. Neither may become sticky or independently
-  fixed.
+- The header is a non-scrolling in-flow grid row. It must not become sticky or independently fixed.
+- Reading, Listening, and Writing footers share `.student-exam-footer`, use fixed positioning, and
+  remain inset from the viewport edges as one floating-pill contract.
+- The footer must not participate in shell track sizing. The workspace owns the corresponding
+  bottom reserve so the final answer controls remain reachable.
 - The workspace grid item has `min-height: 0`; reading, listening, and writing panes remain the only
   content scroll owners.
 - Student production code must not publish viewport-height or viewport-origin CSS custom
-  properties.
+  properties, footer coordinates, or keyboard state.
 - `VisualViewport`, focus, blur, keyboard, resize, orientation, and lifecycle events must not write
   shell geometry.
 - Root exam scrolling and overscroll chaining remain disabled.

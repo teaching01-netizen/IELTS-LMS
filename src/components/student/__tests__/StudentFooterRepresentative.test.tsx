@@ -58,6 +58,7 @@ describe('StudentFooter', () => {
     );
 
     const row = screen.getByTestId('student-footer-row');
+    expect(row).toHaveClass('overflow-x-auto');
     expect(within(row).getByText('0/2')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /finish/i })).not.toBeInTheDocument();
   });

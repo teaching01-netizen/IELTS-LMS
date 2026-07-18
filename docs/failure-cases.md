@@ -618,3 +618,40 @@ Do not restore cursor-following highlight UI or mutate ranges from intermediate 
 **Policy:** Student header disclosure panels must remain portaled to avoid header overflow clipping, position from their owning trigger with viewport-edge clamping, and render above non-modal preview chrome. Positioning must be recomputed while open when the viewport changes.
 
 **Regression coverage:** `src/components/student/__tests__/StudentHeaderHighlightHint.test.tsx` and `e2e/student-ipad-layout.spec.ts`.
+
+---
+
+## 2026-07-18: In-Flow Exam Footer Disappears After Keyboard Dismissal
+
+### Symptom
+
+On affected iPad browser tabs, dismissing the software keyboard left the full-width exam footer
+below the visible screen. The header and fixed previous/next question control remained visible, and
+the footer sometimes returned only after an additional scroll gesture.
+
+### Root Cause
+
+The footer was the final intrinsic row of the fixed exam-shell grid. This coupled footer visibility
+to the browser's restored shell track geometry after keyboard dismissal. The browser could render
+fixed overlay controls while the in-flow footer row remained outside the visible region. Repeated
+JavaScript viewport measurements could not make this reliable because browsers differ in keyboard
+resize policy and may reorder or omit the final viewport event.
+
+### Fix
+
+The exam shell now contains only header and workspace rows. Reading, Listening, and Writing share a
+CSS-only fixed floating footer pill with safe-area insets. The workspace reserves the pill's maximum
+footprint, so the overlay does not cover final answer controls. No viewport measurement, keyboard
+state, resize timer, focus listener, or browser-version branch was introduced.
+
+### Invariant
+
+Do not return `.student-exam-footer` to shell track sizing and do not create a second geometry model
+for it. Footer placement is fixed and CSS-owned; workspace clearance is reserved independently.
+
+### Regression Protection
+
+- `src/components/student/__tests__/StudentViewportCss.test.ts`
+- `src/components/student/__tests__/StudentFooterRepresentative.test.tsx`
+- `src/components/student/__tests__/StudentWriting.a11y.test.tsx`
+- `e2e/student-ipad-layout.spec.ts`

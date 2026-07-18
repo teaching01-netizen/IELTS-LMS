@@ -74,14 +74,14 @@ export function StudentFooter({
 
   return (
     <footer
-      className={`student-exam-footer border-t border-gray-200 bg-white flex flex-col flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.03)] ${
+      className={`student-exam-footer flex flex-col ${
         tabletMode ? 'max-h-24 md:max-h-24' : 'max-h-32 md:max-h-28 lg:max-h-24'
       }`}
       role="contentinfo"
       aria-label="Question navigation and progress"
     >
       <div
-        className={`flex items-center gap-2 md:gap-3 px-2 md:px-3 lg:px-4 ${tabletMode ? 'py-1' : 'py-1.5 md:py-2'}`}
+        className={`flex items-center gap-2 overflow-x-auto overscroll-x-contain md:gap-3 px-2 md:px-3 lg:px-4 ${tabletMode ? 'py-1' : 'py-1.5 md:py-2'}`}
         data-testid="student-footer-row"
       >
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto md:gap-3">
