@@ -169,6 +169,9 @@ export function reduceStudentExamViewportPolicy(
     }
 
     case 'bootstrap-recovery-started':
+      if (state.mode === 'pinch-active') {
+        return state;
+      }
       return {
         ...state,
         mode: 'bootstrapping',
@@ -177,6 +180,9 @@ export function reduceStudentExamViewportPolicy(
       };
 
     case 'topology-recovery-started':
+      if (state.mode === 'pinch-active') {
+        return state;
+      }
       return {
         ...state,
         mode: 'topology-recovery',

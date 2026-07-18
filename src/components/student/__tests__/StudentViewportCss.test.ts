@@ -13,7 +13,7 @@ describe('student exam visible viewport CSS', () => {
 
     expect(activeDocumentRule).toBeDefined();
     expect(activeDocumentRule).toMatch(
-      /height:\s*var\(--student-viewport-height,\s*100dvh\)\s*;/,
+      /height:\s*100vh\s*;[\s\S]*height:\s*100dvh\s*;[\s\S]*height:\s*var\(--student-viewport-height,\s*100dvh\)\s*;/,
     );
     expect(activeDocumentRule).not.toMatch(/height:\s*max\(/);
 
@@ -23,8 +23,9 @@ describe('student exam visible viewport CSS', () => {
     expect(shellRule).toMatch(/left:\s*0\s*;/);
     expect(shellRule).toMatch(/right:\s*0\s*;/);
     expect(shellRule).toMatch(
-      /height:\s*var\(--student-viewport-height,\s*100dvh\)\s*;/,
+      /height:\s*100vh\s*;[\s\S]*height:\s*100dvh\s*;[\s\S]*height:\s*var\(--student-viewport-height,\s*100dvh\)\s*;/,
     );
     expect(shellRule).not.toMatch(/height:\s*max\(/);
+    expect(shellRule).not.toMatch(/min-height:\s*[1-9]/);
   });
 });

@@ -1,5 +1,5 @@
 export const EXAM_VIEWPORT_CONTENT =
-  'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
+  'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, interactive-widget=resizes-visual';
 
 const SAFARI_GESTURE_EVENTS = ['gesturestart', 'gesturechange', 'gestureend'] as const;
 

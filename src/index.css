@@ -210,6 +210,8 @@
 
   html.student-exam-active,
   body.student-exam-active {
+    height: 100vh;
+    height: 100dvh;
     height: var(--student-viewport-height, 100dvh);
     width: 100%;
     overflow: hidden;
@@ -221,6 +223,8 @@
     top: var(--student-viewport-offset-top, 0px);
     left: 0;
     right: 0;
+    height: 100vh;
+    height: 100dvh;
     height: var(--student-viewport-height, 100dvh);
     min-height: 0;
     overflow: hidden;

@@ -455,7 +455,7 @@ describe('StudentApp runtime-backed mode', () => {
     }
   });
 
-  it('restores the footer after keyboard dismissal without a final viewport event', async () => {
+  it('restores the trusted footer after keyboard dismissal and rejects a stale smaller viewport', async () => {
     const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
     const originalMatchMedia = window.matchMedia;
@@ -499,16 +499,22 @@ describe('StudentApp runtime-backed mode', () => {
       act(() => {
         editor.blur();
       });
-      visualViewport.setHeight(820);
-      visualViewport.setOffsetTop(20);
+      act(() => {
+        visualViewport.setHeight(820);
+        visualViewport.setOffsetTop(20);
+        visualViewport.dispatchResize();
+      });
 
-      await waitFor(
-        () => {
-          expect(root.style.getPropertyValue('--student-viewport-height')).toBe('820px');
-          expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('20px');
-        },
-        { timeout: 1_000 },
-      );
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('0px');
+
+      act(() => {
+        visualViewport.setHeight(950);
+        visualViewport.setOffsetTop(0);
+        visualViewport.dispatchResize();
+      });
+
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('950px');
     } finally {
       visualViewport.restore();
       window.matchMedia = originalMatchMedia;
@@ -700,7 +706,7 @@ describe('StudentApp runtime-backed mode', () => {
     }
   });
 
-  it('still updates viewport height during editable focus outside tablet mode', async () => {
+  it('protects keyboard shrinkage without relying on tablet or browser heuristics', async () => {
     const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
     const originalMatchMedia = window.matchMedia;
@@ -742,7 +748,7 @@ describe('StudentApp runtime-backed mode', () => {
         visualViewport.dispatchResize();
       });
 
-      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('600px');
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
     } finally {
       visualViewport.restore();
       window.matchMedia = originalMatchMedia;
@@ -887,7 +893,7 @@ describe('StudentApp runtime-backed mode', () => {
     }
   });
 
-  it('keeps tablet footer locked after pinch ends and does not rebase on orientation change', async () => {
+  it('keeps the footer locked through topology events during the pinch release guard', async () => {
     const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
     const originalMatchMedia = window.matchMedia;
@@ -1024,7 +1030,7 @@ describe('StudentApp runtime-backed mode', () => {
     }
   });
 
-  it('keeps the locked iPad footer height after resize even when live tablet detection flips off', async () => {
+  it('rebases after a material window-width change without device heuristics', async () => {
     const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
     const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
     const originalMatchMedia = window.matchMedia;
@@ -1060,7 +1066,7 @@ describe('StudentApp runtime-backed mode', () => {
         visualViewport.dispatchResize();
       });
 
-      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('560px');
     } finally {
       visualViewport.restore();
       window.matchMedia = originalMatchMedia;

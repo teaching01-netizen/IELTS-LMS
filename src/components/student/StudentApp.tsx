@@ -27,7 +27,6 @@ import { useStudentUI } from './providers/StudentUIProvider';
 import { isRuntimeStructurallyCompleted, isVerifiedTerminalStudentState } from './providers/verifiedTerminalState';
 import { resolveObjectiveAnswerUpdate } from './resolveObjectiveAnswerUpdate';
 import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
-import { shouldLockViewportForExamSession } from './browserParityPolicy';
 import { emitAnswerMutationDebugLog } from './answerMutationDebug';
 import { isStudentHighlightToolContextActive } from './studentHighlightToolContext';
 import { installExamPageZoomGuard } from './examPageZoomGuard';
@@ -129,7 +128,6 @@ export function StudentApp({
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
   const { state: uiState, actions: uiActions } = useStudentUI();
   const tabletMode = useStudentTabletMode();
-  const shouldLockViewportForKeyboard = shouldLockViewportForExamSession(tabletMode);
   const canIncreasePassageReadability = canIncreaseStudentPassageReadability(
     uiState.accessibilitySettings.passageReadabilityLevel,
   );
@@ -168,7 +166,6 @@ export function StudentApp({
   const latestAnswersRef = useRef(attemptAnswers);
   const liveObjectiveAnswersRef = useRef(attemptAnswers);
   const liveWritingAnswersRef = useRef(attemptWritingAnswers);
-  const viewportLockForExamSessionRef = useRef<boolean | null>(null);
   const writingDraftCommitRef = useRef<(() => void) | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
@@ -243,17 +240,6 @@ export function StudentApp({
     liveObjectiveAnswersRef.current = attemptAnswers;
     liveWritingAnswersRef.current = attemptWritingAnswers;
   }, [attemptAnswers, attemptWritingAnswers, runtimeState]);
-
-  useEffect(() => {
-    if (effectivePhase !== 'exam') {
-      viewportLockForExamSessionRef.current = null;
-      return;
-    }
-
-    if (viewportLockForExamSessionRef.current === null) {
-      viewportLockForExamSessionRef.current = shouldLockViewportForKeyboard;
-    }
-  }, [effectivePhase, shouldLockViewportForKeyboard]);
 
   const commitWritingDraft = useCallback(() => {
     writingDraftCommitRef.current?.();
@@ -367,7 +353,6 @@ export function StudentApp({
     return installStudentExamViewportController({
       targetWindow: window,
       targetDocument: document,
-      protectHeight: viewportLockForExamSessionRef.current === true,
     });
   }, [effectivePhase]);
 
