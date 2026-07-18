@@ -14,31 +14,40 @@ and the shared student shell CSS in `src/index.css` consumes its published recta
 ### Invariant
 
 During an active exam, the complete student shell is fixed to the visible browser viewport. The
-shell tracks validated viewport geometry while retaining the last trusted full rectangle through
-software-keyboard and pinch transitions on every device. Header and footer remain non-scrolling
-flex children; reading, listening, and writing panes own content scrolling.
+shell tracks validated viewport geometry while applying independent trust rules to its closed
+height and live visual origin through software-keyboard and pinch transitions on every device.
+Header and footer remain non-scrolling flex children; reading, listening, and writing panes own
+content scrolling.
 
 ### Must Not Break
 
 - Browser chrome movement must not hide the header or leave blank space below the footer.
-- Software-keyboard shrinkage must not replace the last trusted full exam rectangle on any device.
+- Software-keyboard shrinkage must not replace the last trusted closed shell height on any device.
+- Every valid native-scale Visual Viewport offset must be followed independently during keyboard
+  occlusion and recovery. A keyboard baseline must never restore an older origin.
 - `studentExamViewportPolicy.ts` is the only active-exam height policy. CSS must consume
   `--student-viewport-height` exactly once it is published and must not combine it with `vh`, `dvh`,
   `lvh`, `svh`, a positive minimum height, or another lower bound. Ordered `100vh`/`100dvh`
   declarations may precede it only as progressive fallbacks for older engines or pre-installation.
-- Editable focus captures the last trusted full viewport rectangle. Keyboard-active and
-  keyboard-recovery states may not replace that rectangle with a smaller sample.
+- Editable focus arms keyboard shrink protection but does not prove that the keyboard is visible.
+  Retained focus must not prevent recovered growth from becoming the new closed shell height.
+- While the keyboard is visible, the full-height shell does not shrink; the footer stays at the
+  physical screen bottom behind the keyboard.
 - A recovery deadline ends bounded observation; it does not make the last sample trustworthy. A
   smaller keyboard-recovery sample remains rejected indefinitely across later resize/scroll events.
-- The first native-scale rectangle at or above the keyboard baseline clears the keyboard guard.
-  Bidirectional rebasing requires bootstrapping, ordinary stable browser-chrome geometry, or an
-  independently evidenced topology recovery such as orientation or material width change.
+- The first native-scale height at or above the closed shell height clears keyboard occlusion even
+  when editable focus remains. Its live offset is accepted independently.
+- An optional zero-height Virtual Keyboard intersection may clear occlusion, but it must never
+  authorize a smaller stale shell height.
+- Bidirectional height rebasing requires bootstrapping while keyboard phase is clear, ordinary
+  stable browser-chrome geometry, or an independently evidenced topology recovery such as
+  orientation or material width change. Editable focus must outrank bootstrap shrinkage.
 - Browser capabilities and lifecycle state determine viewport behavior; browser-family and version
   checks do not enable or disable the controller.
 - Initial exam entry, page restoration, and return to a visible tab must use bounded follow-up
   measurements so a late browser viewport-meta update cannot strand the shell at a stale rectangle.
-- Editable-control focusout must restore the trusted rectangle immediately and start a bounded
-  observation cycle so a later full rectangle can be captured without a final resize/scroll event.
+- Editable-control focusout starts bounded recovery observation but does not reset the live origin.
+  The shell retains its closed height and follows valid offsets until full geometry returns.
 - Delayed settling must be canceled on cleanup and must never mutate non-exam pages.
 - Safe-area padding, split-pane scrolling, native dialog positioning, and the exam page-zoom guard remain active.
 - Viewport custom properties and active classes are removed when leaving the exam phase.

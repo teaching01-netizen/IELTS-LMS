@@ -30,6 +30,53 @@ Purpose: turn incidents and bug fixes into durable memory for humans and AI agen
 
 ---
 
+## 2026-07-18: Keyboard Dismissal Coupled Focus, Height, and Visual Origin
+
+### Symptom
+After the earlier persistent-height fix, two iPad dismissal paths still displaced the exam shell.
+Tapping outside an answer could hide the header and leave the footer above white space. Using the
+keyboard-hide button left the header visible but could still leave the footer above the physical
+bottom. Both states persisted without another viewport interaction.
+
+### Scope
+The student exam viewport policy, its browser event adapter, and StudentApp viewport regression
+tests. Answer entry, autosave, submission, timers, integrity, audit, and grading were unaffected.
+
+### Root Cause
+The policy still treated focus and keyboard visibility as the same lifecycle and stored height plus
+origin in one trusted rectangle. On tap-outside, `focusout` restored the old baseline origin while
+the browser's Visual Viewport remained panned, clipping the header and displacing the footer. The
+keyboard-hide button could retain input focus, so recovered growth was ignored and the footer kept
+the smaller pre-keyboard shell height. Integration testing also exposed that editable focus during
+the initial reused-tab recovery window allowed bootstrap to accept the keyboard-shrunken height.
+
+### Fix
+- Separated the trusted closed shell height, live native-scale offset, editable-focus state, and
+  keyboard phase in the pure viewport policy.
+- Followed live offset throughout keyboard occlusion and recovery instead of restoring a baseline
+  origin.
+- Accepted recovered growth while focus remains and allowed a later shrink to re-enter keyboard
+  occlusion without requiring another focus event.
+- Preserved the closed height when editable focus arrives during bootstrap.
+- Added optional Virtual Keyboard intersection geometry as a capability signal while ensuring a
+  zero intersection cannot authorize a smaller stale height.
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/studentExamViewportPolicy.test.ts`,
+  `src/components/student/__tests__/studentExamViewportController.test.ts`,
+  `src/components/student/__tests__/StudentApp.test.tsx`
+- Diagnostics: pure policy sequences reproduce both `900/0 -> 560/180 -> blur -> 900/180 -> 900/0`
+  and retained-focus `900/0 -> 560/180 -> 950/180 -> 950/0` without a physical keyboard.
+- Rules/Docs updated: `docs/ux-invariants.md`,
+  `docs/superpowers/specs/2026-07-18-student-viewport-occlusion-design.md`
+
+### Invariant
+Closed shell height, live visual origin, editable focus, and keyboard occlusion have independent
+trust rules. Focus may arm shrink protection but cannot decide whether the keyboard is open, and a
+stored height may never reset a newer valid origin.
+
+---
+
 ## 2026-07-18: Keyboard Dismissal Leaves Footer Above Persistent White Space
 
 ### Symptom
