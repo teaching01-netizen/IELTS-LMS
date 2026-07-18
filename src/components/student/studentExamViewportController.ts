@@ -1,14 +1,22 @@
+import {
+  createStudentExamViewportPolicy,
+  reduceStudentExamViewportPolicy,
+  type StudentExamViewportMeasurement,
+  type StudentExamViewportPolicyEvent,
+} from './studentExamViewportPolicy';
+
 export interface StudentExamViewportControllerOptions {
   targetWindow: Window;
   targetDocument: Document;
-  protectHeight: boolean;
 }
 
 const RECOVERY_WINDOW_MS = 1_500;
 const FRAME_FALLBACK_MS = 16;
 const PINCH_RELEASE_GUARD_MS = 500;
-const NATIVE_SCALE_TOLERANCE = 0.01;
-type RecoveryKind = 'initial' | 'lifecycle';
+const MATERIAL_WIDTH_CHANGE_PX = 1;
+
+type RecoveryKind = 'bootstrap' | 'topology' | 'keyboard';
+type VirtualKeyboardEventTarget = Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
 
 function isEditableElement(value: EventTarget | Element | null): value is HTMLElement {
   return (
@@ -17,73 +25,89 @@ function isEditableElement(value: EventTarget | Element | null): value is HTMLEl
   );
 }
 
+function finitePositive(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : null;
+}
+
+function finiteNonNegative(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : 0;
+}
+
 export function installStudentExamViewportController({
   targetWindow,
   targetDocument,
-  protectHeight,
 }: StudentExamViewportControllerOptions): () => void {
   const root = targetDocument.documentElement;
   const body = targetDocument.body;
   const visualViewport = targetWindow.visualViewport;
+  const virtualKeyboard = (
+    targetWindow.navigator as Navigator & { virtualKeyboard?: VirtualKeyboardEventTarget }
+  ).virtualKeyboard;
   const hasAnimationFrame = typeof targetWindow.requestAnimationFrame === 'function';
   let scheduledFrame: number | null = null;
   let pinchReleaseTimer: number | null = null;
   let recoveryDeadline: number | null = null;
-  let recoveryKind: RecoveryKind | null = null;
-  let protectedHeight: number | null = null;
   let editableFocusActive = isEditableElement(targetDocument.activeElement);
   let pinchActive = false;
-  let pinchGuardUntil = 0;
+  let disposed = false;
   let lastPublishedHeight: number | null = null;
   let lastPublishedOffsetTop: number | null = null;
-  let disposed = false;
 
-  const now = () => Date.now();
+  const readMeasurement = (
+    fallbackHeight = 1,
+    fallbackWidth = 1,
+  ): StudentExamViewportMeasurement => {
+    const visualHeight = finitePositive(visualViewport?.height);
+    const innerHeight = finitePositive(targetWindow.innerHeight);
+    const clientHeight = finitePositive(root.clientHeight);
+    const innerWidth = finitePositive(targetWindow.innerWidth);
+    const clientWidth = finitePositive(root.clientWidth);
 
-  const applyViewportRect = (height: number, offsetTop: number) => {
-    root.style.setProperty('--student-viewport-height', `${height}px`);
-    root.style.setProperty('--student-viewport-offset-top', `${offsetTop}px`);
+    return {
+      visualHeight,
+      layoutHeight: innerHeight ?? clientHeight ?? fallbackHeight,
+      offsetTop: visualHeight === null ? 0 : finiteNonNegative(visualViewport?.offsetTop),
+      layoutWidth: innerWidth ?? clientWidth ?? fallbackWidth,
+      scale: visualHeight === null ? 1 : (finitePositive(visualViewport?.scale) ?? 1),
+    };
   };
 
-  const measure = () => {
+  let policy = createStudentExamViewportPolicy(readMeasurement());
+
+  const publishPolicyRect = () => {
     if (disposed) {
       return;
     }
 
-    const nextHeight = Math.max(
-      0,
-      Math.round(visualViewport?.height ?? targetWindow.innerHeight),
-    );
-    const nextOffsetTop = Math.max(0, Math.round(visualViewport?.offsetTop ?? 0));
-    const scale = visualViewport?.scale ?? 1;
-    const currentTime = now();
-    const editableFocused =
-      editableFocusActive || isEditableElement(targetDocument.activeElement);
-    const pinchProtected =
-      pinchActive ||
-      Math.abs(scale - 1) > NATIVE_SCALE_TOLERANCE ||
-      currentTime < pinchGuardUntil;
-    const recoveryActive =
-      recoveryDeadline !== null && currentTime <= recoveryDeadline;
-
-    if (!protectHeight || protectedHeight === null) {
-      protectedHeight = nextHeight;
-    } else if (!editableFocused && !pinchProtected) {
-      const safeGrowth = nextHeight > protectedHeight;
-      if (safeGrowth || recoveryActive) {
-        protectedHeight = nextHeight;
-      }
+    const { height, offsetTop } = policy.publishedRect;
+    if (height === lastPublishedHeight && offsetTop === lastPublishedOffsetTop) {
+      return;
     }
 
-    const effectiveHeight = protectHeight ? (protectedHeight ?? nextHeight) : nextHeight;
-    if (
-      effectiveHeight !== lastPublishedHeight ||
-      nextOffsetTop !== lastPublishedOffsetTop
-    ) {
-      applyViewportRect(effectiveHeight, nextOffsetTop);
-      lastPublishedHeight = effectiveHeight;
-      lastPublishedOffsetTop = nextOffsetTop;
+    root.style.setProperty('--student-viewport-height', `${height}px`);
+    root.style.setProperty('--student-viewport-offset-top', `${offsetTop}px`);
+    lastPublishedHeight = height;
+    lastPublishedOffsetTop = offsetTop;
+  };
+
+  const dispatchPolicyEvent = (event: StudentExamViewportPolicyEvent) => {
+    if (disposed) {
+      return;
     }
+
+    policy = reduceStudentExamViewportPolicy(policy, event);
+    publishPolicyRect();
+  };
+
+  const measure = () => {
+    dispatchPolicyEvent({
+      type: 'measurement-received',
+      measurement: readMeasurement(policy.trustedRect.height, policy.layoutWidth),
+    });
   };
 
   const scheduleFrame = (callback: () => void) => {
@@ -110,30 +134,37 @@ export function installStudentExamViewportController({
   const runRecoveryFrame = () => {
     scheduledFrame = null;
     measure();
-    if (!disposed && recoveryDeadline !== null && now() < recoveryDeadline) {
+    if (!disposed && recoveryDeadline !== null && Date.now() < recoveryDeadline) {
       scheduledFrame = scheduleFrame(runRecoveryFrame);
-    } else {
-      recoveryDeadline = null;
-      recoveryKind = null;
+      return;
     }
+
+    recoveryDeadline = null;
+    dispatchPolicyEvent({ type: 'recovery-finished' });
   };
 
-  const startRecoveryWindow = (kind: RecoveryKind = 'lifecycle') => {
+  const startRecovery = (kind: RecoveryKind) => {
     if (disposed) {
       return;
     }
 
-    recoveryDeadline = now() + RECOVERY_WINDOW_MS;
-    recoveryKind = kind;
+    if (kind === 'bootstrap') {
+      dispatchPolicyEvent({ type: 'bootstrap-recovery-started' });
+    } else if (kind === 'topology') {
+      dispatchPolicyEvent({ type: 'topology-recovery-started' });
+    } else {
+      dispatchPolicyEvent({ type: 'editable-focus-left' });
+    }
+
+    recoveryDeadline = Date.now() + RECOVERY_WINDOW_MS;
     measure();
     if (scheduledFrame === null) {
       scheduledFrame = scheduleFrame(runRecoveryFrame);
     }
   };
 
-  const cancelRecoveryWindow = () => {
+  const cancelRecovery = () => {
     recoveryDeadline = null;
-    recoveryKind = null;
     cancelScheduledFrame();
   };
 
@@ -147,43 +178,29 @@ export function installStudentExamViewportController({
   };
 
   const handleWindowResize = () => {
-    if (recoveryKind === 'initial') {
-      cancelRecoveryWindow();
+    const nextWidth = readMeasurement(policy.trustedRect.height, policy.layoutWidth).layoutWidth;
+    if (Math.abs(nextWidth - policy.layoutWidth) >= MATERIAL_WIDTH_CHANGE_PX) {
+      startRecovery('topology');
+      return;
     }
+
     measure();
   };
   const handlePassiveViewportChange = () => measure();
-  const handlePageShow = () => startRecoveryWindow();
+  const handlePageShow = () => startRecovery('bootstrap');
   const handleVisibilityChange = () => {
     if (targetDocument.visibilityState === 'visible') {
-      startRecoveryWindow();
+      startRecovery('bootstrap');
     }
   };
-  const handleOrientationChange = () => {
-    const scale = visualViewport?.scale ?? 1;
-    if (
-      !pinchActive &&
-      Math.abs(scale - 1) <= NATIVE_SCALE_TOLERANCE &&
-      now() >= pinchGuardUntil
-    ) {
-      startRecoveryWindow();
-    }
-  };
-  const handleViewportScrollEnd = () => {
-    const scale = visualViewport?.scale ?? 1;
-    if (
-      !editableFocusActive &&
-      !pinchActive &&
-      Math.abs(scale - 1) <= NATIVE_SCALE_TOLERANCE &&
-      now() >= pinchGuardUntil
-    ) {
-      startRecoveryWindow();
-    }
-  };
+  const handleOrientationChange = () => startRecovery('topology');
   const handleFocusIn = (event: FocusEvent) => {
-    if (isEditableElement(event.target)) {
-      editableFocusActive = true;
+    if (!isEditableElement(event.target)) {
+      return;
     }
+
+    editableFocusActive = true;
+    dispatchPolicyEvent({ type: 'editable-focus-entered' });
   };
   const handleFocusOut = (event: FocusEvent) => {
     if (!isEditableElement(event.target)) {
@@ -192,7 +209,7 @@ export function installStudentExamViewportController({
 
     editableFocusActive = isEditableElement(event.relatedTarget);
     if (!editableFocusActive) {
-      startRecoveryWindow();
+      startRecovery('keyboard');
     }
   };
   const handleTouch = (event: TouchEvent) => {
@@ -202,27 +219,22 @@ export function installStudentExamViewportController({
       }
 
       pinchActive = true;
-      cancelRecoveryWindow();
+      cancelRecovery();
       clearPinchReleaseTimer();
-      measure();
+      dispatchPolicyEvent({ type: 'pinch-started' });
       return;
     }
 
-    if (event.touches.length >= 2) {
-      return;
-    }
-    if (!pinchActive) {
-      measure();
+    if (event.touches.length >= 2 || !pinchActive) {
       return;
     }
 
     pinchActive = false;
-    pinchGuardUntil = now() + PINCH_RELEASE_GUARD_MS;
-    cancelRecoveryWindow();
+    cancelRecovery();
     clearPinchReleaseTimer();
-    measure();
     pinchReleaseTimer = targetWindow.setTimeout(() => {
       pinchReleaseTimer = null;
+      dispatchPolicyEvent({ type: 'pinch-finished' });
       measure();
     }, PINCH_RELEASE_GUARD_MS);
   };
@@ -234,7 +246,8 @@ export function installStudentExamViewportController({
   targetWindow.addEventListener('pageshow', handlePageShow);
   visualViewport?.addEventListener('resize', handlePassiveViewportChange);
   visualViewport?.addEventListener('scroll', handlePassiveViewportChange);
-  visualViewport?.addEventListener('scrollend', handleViewportScrollEnd);
+  visualViewport?.addEventListener('scrollend', handlePassiveViewportChange);
+  virtualKeyboard?.addEventListener('geometrychange', handlePassiveViewportChange);
   targetDocument.addEventListener('visibilitychange', handleVisibilityChange);
   targetDocument.addEventListener('focusin', handleFocusIn, true);
   targetDocument.addEventListener('focusout', handleFocusOut, true);
@@ -242,7 +255,11 @@ export function installStudentExamViewportController({
   targetDocument.addEventListener('touchmove', handleTouch, true);
   targetDocument.addEventListener('touchend', handleTouch, true);
   targetDocument.addEventListener('touchcancel', handleTouch, true);
-  startRecoveryWindow('initial');
+  publishPolicyRect();
+  startRecovery('bootstrap');
+  if (editableFocusActive) {
+    dispatchPolicyEvent({ type: 'editable-focus-entered' });
+  }
 
   let cleanedUp = false;
   return () => {
@@ -253,7 +270,6 @@ export function installStudentExamViewportController({
     cleanedUp = true;
     disposed = true;
     recoveryDeadline = null;
-    recoveryKind = null;
     cancelScheduledFrame();
     clearPinchReleaseTimer();
     root.classList.remove('student-exam-active');
@@ -265,7 +281,8 @@ export function installStudentExamViewportController({
     targetWindow.removeEventListener('pageshow', handlePageShow);
     visualViewport?.removeEventListener('resize', handlePassiveViewportChange);
     visualViewport?.removeEventListener('scroll', handlePassiveViewportChange);
-    visualViewport?.removeEventListener('scrollend', handleViewportScrollEnd);
+    visualViewport?.removeEventListener('scrollend', handlePassiveViewportChange);
+    virtualKeyboard?.removeEventListener('geometrychange', handlePassiveViewportChange);
     targetDocument.removeEventListener('visibilitychange', handleVisibilityChange);
     targetDocument.removeEventListener('focusin', handleFocusIn, true);
     targetDocument.removeEventListener('focusout', handleFocusOut, true);

@@ -64,7 +64,6 @@ describe('installStudentExamViewportController', () => {
     const cleanup = installStudentExamViewportController({
       targetWindow: window,
       targetDocument: document,
-      protectHeight: true,
     });
 
     try {
@@ -91,14 +90,13 @@ describe('installStudentExamViewportController', () => {
     }
   });
 
-  it('preserves keyboard shrinkage and rebases after editable focusout without a final resize', () => {
+  it('keeps the trusted full height when keyboard dismissal geometry remains smaller', () => {
     const viewport = installMutableVisualViewport(900);
     const input = document.createElement('input');
     document.body.append(input);
     const cleanup = installStudentExamViewportController({
       targetWindow: window,
       targetDocument: document,
-      protectHeight: true,
     });
 
     try {
@@ -115,48 +113,171 @@ describe('installStudentExamViewportController', () => {
       ).toBe('100px');
 
       input.blur();
-      vi.advanceTimersByTime(800);
       viewport.set(820, 20);
-      vi.advanceTimersByTime(800);
+      vi.advanceTimersByTime(1_600);
 
       expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
-        '820px',
+        '900px',
       );
       expect(
         document.documentElement.style.getPropertyValue('--student-viewport-offset-top'),
-      ).toBe('20px');
+      ).toBe('0px');
+
+      viewport.set(810, 10);
+      viewport.dispatchResize();
+
+      expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
+        '900px',
+      );
+      expect(
+        document.documentElement.style.getPropertyValue('--student-viewport-offset-top'),
+      ).toBe('0px');
     } finally {
       cleanup();
       viewport.restore();
     }
   });
 
-  it('accepts safe native-scale growth but protects passive shrinkage', () => {
+  it('accepts late native-scale growth after keyboard dismissal', () => {
     const viewport = installMutableVisualViewport(900);
+    const input = document.createElement('input');
+    document.body.append(input);
     const cleanup = installStudentExamViewportController({
       targetWindow: window,
       targetDocument: document,
-      protectHeight: true,
     });
 
     try {
       vi.advanceTimersByTime(1_600);
-      viewport.set(1000, 0);
+      input.focus();
+      viewport.set(560, 100);
       viewport.dispatchResize();
+      input.blur();
+      viewport.set(820, 20);
+      vi.advanceTimersByTime(800);
+      viewport.set(950, 0);
+      vi.advanceTimersByTime(800);
 
       expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
-        '1000px',
+        '950px',
       );
+      expect(
+        document.documentElement.style.getPropertyValue('--student-viewport-offset-top'),
+      ).toBe('0px');
+    } finally {
+      cleanup();
+      viewport.restore();
+    }
+  });
 
-      viewport.set(620, 0);
+  it('accepts native-scale browser chrome shrink after the viewport is stable', () => {
+    const viewport = installMutableVisualViewport(900);
+    const cleanup = installStudentExamViewportController({
+      targetWindow: window,
+      targetDocument: document,
+    });
+
+    try {
+      vi.advanceTimersByTime(1_600);
+      viewport.set(840, 10);
       viewport.dispatchResize();
 
       expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
-        '1000px',
+        '840px',
+      );
+      expect(
+        document.documentElement.style.getPropertyValue('--student-viewport-offset-top'),
+      ).toBe('10px');
+    } finally {
+      cleanup();
+      viewport.restore();
+    }
+  });
+
+  it('falls back to layout height when visual viewport geometry is invalid', () => {
+    const viewport = installMutableVisualViewport(0);
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 777 });
+    const cleanup = installStudentExamViewportController({
+      targetWindow: window,
+      targetDocument: document,
+    });
+
+    try {
+      expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
+        '777px',
       );
     } finally {
       cleanup();
       viewport.restore();
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+    }
+  });
+
+  it('allows an explicit orientation topology change to shrink the trusted viewport', () => {
+    const viewport = installMutableVisualViewport(900);
+    const input = document.createElement('input');
+    document.body.append(input);
+    const cleanup = installStudentExamViewportController({
+      targetWindow: window,
+      targetDocument: document,
+    });
+
+    try {
+      vi.advanceTimersByTime(1_600);
+      input.focus();
+      viewport.set(560, 100);
+      viewport.dispatchResize();
+      viewport.set(700, 0);
+      window.dispatchEvent(new Event('orientationchange'));
+
+      expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
+        '700px',
+      );
+    } finally {
+      cleanup();
+      viewport.restore();
+    }
+  });
+
+  it('uses optional VirtualKeyboard geometry changes and removes the listener on cleanup', () => {
+    const viewport = installMutableVisualViewport(900);
+    const virtualKeyboard = new EventTarget();
+    const originalVirtualKeyboard = Object.getOwnPropertyDescriptor(
+      window.navigator,
+      'virtualKeyboard',
+    );
+    Object.defineProperty(window.navigator, 'virtualKeyboard', {
+      configurable: true,
+      value: virtualKeyboard,
+    });
+    const cleanup = installStudentExamViewportController({
+      targetWindow: window,
+      targetDocument: document,
+    });
+
+    try {
+      viewport.set(950, 0);
+      virtualKeyboard.dispatchEvent(new Event('geometrychange'));
+
+      expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
+        '950px',
+      );
+
+      cleanup();
+      viewport.set(1000, 0);
+      virtualKeyboard.dispatchEvent(new Event('geometrychange'));
+      expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe('');
+    } finally {
+      cleanup();
+      viewport.restore();
+      if (originalVirtualKeyboard) {
+        Object.defineProperty(window.navigator, 'virtualKeyboard', originalVirtualKeyboard);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'virtualKeyboard');
+      }
     }
   });
 
@@ -165,7 +286,6 @@ describe('installStudentExamViewportController', () => {
     const cleanup = installStudentExamViewportController({
       targetWindow: window,
       targetDocument: document,
-      protectHeight: true,
     });
 
     viewport.set(900, 0);
