@@ -23,6 +23,29 @@ async function expectExamChromeAlignedToViewport(page: Page, footerLabel: RegExp
   expect(Math.abs(footerBox!.bottom - viewport!.height)).toBeLessThanOrEqual(1);
 }
 
+async function expectCssOwnedExamShell(page: Page) {
+  const shell = page.locator('.student-exam-shell');
+  await expect(shell).toBeVisible();
+  await expect(shell).toHaveCSS('position', 'fixed');
+  await expect(shell).toHaveCSS('display', 'grid');
+
+  const geometry = await shell.evaluate((element) => ({
+    heightProperty: (element as HTMLElement).style.height,
+    offsetProperty: document.documentElement.style.getPropertyValue(
+      '--student-viewport-offset-top',
+    ),
+    measuredHeightProperty: document.documentElement.style.getPropertyValue(
+      '--student-viewport-height',
+    ),
+  }));
+
+  expect(geometry).toEqual({
+    heightProperty: '',
+    offsetProperty: '',
+    measuredHeightProperty: '',
+  });
+}
+
 async function expectThinTabletResizer(page: Page, testId: string) {
   const resizer = page.getByTestId(testId);
   await expect(resizer).toBeVisible();
@@ -81,6 +104,7 @@ test.describe('student exam iPad layout', () => {
   test('Reading keeps split panes in iPad portrait and keeps controls visible', async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await openPreview(page, 'reading');
+    await expectCssOwnedExamShell(page);
 
     const splitPane = page.getByTestId('reading-split-pane');
     const passagePane = page.getByTestId('reading-passage-pane');
@@ -103,6 +127,7 @@ test.describe('student exam iPad layout', () => {
   test('Reading uses split panes in iPad landscape without hiding the footer', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await openPreview(page, 'reading');
+    await expectCssOwnedExamShell(page);
 
     const splitPane = page.getByTestId('reading-split-pane');
     const passagePane = page.getByTestId('reading-passage-pane');
@@ -230,6 +255,7 @@ test.describe('student exam iPad layout', () => {
   test('Writing remains usable in both iPad orientations', async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await openPreview(page, 'writing');
+    await expectCssOwnedExamShell(page);
 
     const splitPane = page.getByTestId('writing-split-workspace');
     const promptPane = page.getByTestId('writing-task-prompt');
