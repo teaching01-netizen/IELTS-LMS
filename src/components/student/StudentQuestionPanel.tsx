@@ -5,7 +5,6 @@ import type { QuestionAnswer, QuestionBlock } from '../../types';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { StudentQuestionBlockSection } from './StudentQuestionBlockSection';
-import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
 
 interface StudentQuestionPanelProps {
   blocks: QuestionBlock[];
@@ -83,10 +82,7 @@ export function StudentQuestionPanel({
         ref={questionContainerRef}
         data-student-zoom-scroll
         data-testid={panelTestId}
-        style={{
-          ...(contentZoomStyle ?? {}),
-          ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
-        }}
+        style={contentZoomStyle}
       >
         {blocks.map((block) => (
           <StudentQuestionBlockSection

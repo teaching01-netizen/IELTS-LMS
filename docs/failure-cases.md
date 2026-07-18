@@ -621,44 +621,43 @@ Do not restore cursor-following highlight UI or mutate ranges from intermediate 
 
 ---
 
-## 2026-07-18: In-Flow Exam Footer Disappears After Keyboard Dismissal
+## 2026-07-18: Fixed Floating Footer Overlaps iPad Safari Content
 
 ### Symptom
 
-On affected iPad browser tabs, dismissing the software keyboard left the full-width exam footer
-below the visible screen. The header and fixed previous/next question control remained visible, and
-the footer sometimes returned only after an additional scroll gesture.
+On iPad Safari/WebKit tabs with visible browser bars, the floating footer covered the final passage,
+question input, or Writing editor region. Safe-area offsets and per-pane bottom reserves changed the
+size of the gap but did not make the footer consistently align with the visible screen.
 
 ### Root Cause
 
-The footer was the final intrinsic row of the fixed exam-shell grid. This coupled footer visibility
-to the browser's restored shell track geometry after keyboard dismissal. The browser could render
-fixed overlay controls while the in-flow footer row remained outside the visible region. Repeated
-JavaScript viewport measurements could not make this reliable because browsers differ in keyboard
-resize policy and may reorder or omit the final viewport event.
+Both `.student-exam-shell` and `.student-exam-footer` were fixed against the layout viewport, while
+iPad browser bars exposed a smaller visual viewport. The footer was deliberately removed from
+normal flow, and Reading, Listening, and Writing compensated with synthetic bottom padding. That
+overlay architecture could not guarantee content/footer adjacency. Pane transforms were inspected
+but were not footer ancestors, so they were not the containing-block cause.
 
 ### Fix
 
-The exam shell now contains only header and workspace rows. Reading, Listening, and Writing share a
-CSS-only fixed floating footer pill with safe-area insets. The workspace extends to the physical
-viewport bottom behind the pill. Each content scroll owner independently reserves the pill's
-maximum footprint through shared bottom padding and scroll padding, so final answer controls remain
-reachable without creating a full-width empty band. No viewport measurement, keyboard state,
-resize timer, focus listener, or browser-version branch was introduced.
+The shell now uses a normal-flow three-row grid with `100vh`, `100svh`, and `100dvh` height
+fallbacks. The footer is a full-width `position: relative` row with safe-area padding inside its
+surface. Overlay offsets, pill elevation, and per-pane footer reserves were removed. The viewport
+metadata uses `viewport-fit=cover` without forcing `interactive-widget=overlays-content`.
 
-The existing solid white pill and its elevation remain unchanged; this correction changes only
-overlay placement and clearance ownership.
+Browsers with `100dvh` use CSS alone. Older engines receive a lifecycle-scoped
+`--student-visual-viewport-height` value and resize/orientation updates; cleanup restores the prior
+document classes, viewport metadata, and custom property exactly.
 
 ### Invariant
 
-Do not return `.student-exam-footer` to shell track sizing and do not create a second geometry model
-for it. Footer placement is fixed and CSS-owned. The main workspace must extend behind the pill;
-only the actual content scroll owners may reserve its clearance, using the shared style contract.
+The footer must remain in normal flow and must consume real layout space. Do not reintroduce fixed,
+sticky, translated, or bottom-offset footer positioning, and do not compensate for it inside pane
+scroll owners. Safe-area values belong in padding, not footer coordinates.
 
 ### Regression Protection
 
 - `src/components/student/__tests__/StudentViewportCss.test.ts`
-- `src/components/student/__tests__/StudentFooterOverlayLayout.test.ts`
+- `src/components/student/__tests__/StudentFooterInFlowLayout.test.ts`
 - `src/components/student/__tests__/StudentFooterRepresentative.test.tsx`
 - `src/components/student/__tests__/StudentWriting.a11y.test.tsx`
 - `e2e/student-ipad-layout.spec.ts`

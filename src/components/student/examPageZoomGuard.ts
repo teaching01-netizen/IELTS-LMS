@@ -1,9 +1,42 @@
 export const EXAM_VIEWPORT_CONTENT =
-  'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, interactive-widget=overlays-content';
+  'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
 
 const SAFARI_GESTURE_EVENTS = ['gesturestart', 'gesturechange', 'gestureend'] as const;
 
 export function installExamPageZoomGuard(targetDocument: Document): () => void {
+  const root = targetDocument.documentElement;
+  const body = targetDocument.body;
+  const targetWindow = targetDocument.defaultView;
+  const rootHadActiveClass = root.classList.contains('student-exam-active');
+  const bodyHadActiveClass = body.classList.contains('student-exam-active');
+  root.classList.add('student-exam-active');
+  body.classList.add('student-exam-active');
+
+  const originalLegacyViewportHeight = root.style.getPropertyValue(
+    '--student-visual-viewport-height',
+  );
+  const originalLegacyViewportHeightPriority = root.style.getPropertyPriority(
+    '--student-visual-viewport-height',
+  );
+  const supportsDynamicViewportHeight =
+    typeof targetWindow?.CSS?.supports === 'function' &&
+    targetWindow.CSS.supports('height', '100dvh');
+  const visualViewport = targetWindow?.visualViewport;
+  const updateLegacyViewportHeight = () => {
+    if (!targetWindow || supportsDynamicViewportHeight) {
+      return;
+    }
+    const height = visualViewport?.height ?? targetWindow.innerHeight;
+    root.style.setProperty('--student-visual-viewport-height', `${height}px`);
+  };
+
+  updateLegacyViewportHeight();
+  if (!supportsDynamicViewportHeight) {
+    targetWindow?.addEventListener('resize', updateLegacyViewportHeight);
+    targetWindow?.addEventListener('orientationchange', updateLegacyViewportHeight);
+    visualViewport?.addEventListener('resize', updateLegacyViewportHeight);
+  }
+
   let viewport = targetDocument.querySelector<HTMLMetaElement>('meta[name="viewport"]');
   const createdViewport = viewport === null;
 
@@ -44,6 +77,27 @@ export function installExamPageZoomGuard(targetDocument: Document): () => void {
       return;
     }
     cleanedUp = true;
+
+    if (!supportsDynamicViewportHeight) {
+      targetWindow?.removeEventListener('resize', updateLegacyViewportHeight);
+      targetWindow?.removeEventListener('orientationchange', updateLegacyViewportHeight);
+      visualViewport?.removeEventListener('resize', updateLegacyViewportHeight);
+    }
+    if (originalLegacyViewportHeight) {
+      root.style.setProperty(
+        '--student-visual-viewport-height',
+        originalLegacyViewportHeight,
+        originalLegacyViewportHeightPriority,
+      );
+    } else {
+      root.style.removeProperty('--student-visual-viewport-height');
+    }
+    if (!rootHadActiveClass) {
+      root.classList.remove('student-exam-active');
+    }
+    if (!bodyHadActiveClass) {
+      body.classList.remove('student-exam-active');
+    }
 
     targetDocument.removeEventListener('touchmove', preventMultiTouchMove, true);
     for (const eventName of SAFARI_GESTURE_EVENTS) {

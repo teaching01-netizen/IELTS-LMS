@@ -19,7 +19,6 @@ import {
 } from './normalizeReadingPassageText';
 import { isInstructionReferencePlacement } from '../../utils/referenceImagePlacement';
 import { StudentMaterialWithQuestionPane } from './StudentMaterialWithQuestionPane';
-import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -90,7 +89,6 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
         lineHeight: 'var(--student-passage-line-height)',
         WebkitUserSelect: 'text',
         userSelect: 'text',
-        ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
       }}
       data-student-zoom-scroll
     >

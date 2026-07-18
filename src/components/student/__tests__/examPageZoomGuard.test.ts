@@ -37,8 +37,8 @@ describe('installExamPageZoomGuard', () => {
 
     const cleanup = installExamPageZoomGuard(document);
 
-    expect(EXAM_VIEWPORT_CONTENT).toContain('interactive-widget=overlays-content');
-    expect(EXAM_VIEWPORT_CONTENT).not.toContain('interactive-widget=resizes-visual');
+    expect(EXAM_VIEWPORT_CONTENT).toContain('viewport-fit=cover');
+    expect(EXAM_VIEWPORT_CONTENT).not.toContain('interactive-widget=');
     expect(viewport).toHaveAttribute('content', EXAM_VIEWPORT_CONTENT);
     cleanup();
     expect(viewport).toHaveAttribute('content', ORIGINAL_VIEWPORT_CONTENT);
@@ -55,6 +55,41 @@ describe('installExamPageZoomGuard', () => {
     );
     cleanup();
     expect(document.querySelector('meta[name="viewport"]')).toBeNull();
+  });
+
+  it('uses the visual viewport height only as a legacy fallback when dvh is unsupported', () => {
+    setViewport(ORIGINAL_VIEWPORT_CONTENT);
+    const originalCss = window.CSS;
+    const originalVisualViewport = window.visualViewport;
+    const visualViewport = new EventTarget() as VisualViewport;
+    Object.defineProperty(visualViewport, 'height', {
+      configurable: true,
+      value: 700,
+      writable: true,
+    });
+    Object.defineProperty(window, 'CSS', {
+      configurable: true,
+      value: { supports: () => false },
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: visualViewport,
+    });
+
+    const cleanup = installExamPageZoomGuard(document);
+
+    expect(document.documentElement.style.getPropertyValue('--student-visual-viewport-height')).toBe('700px');
+    Object.defineProperty(visualViewport, 'height', { configurable: true, value: 620 });
+    visualViewport.dispatchEvent(new Event('resize'));
+    expect(document.documentElement.style.getPropertyValue('--student-visual-viewport-height')).toBe('620px');
+
+    cleanup();
+    expect(document.documentElement.style.getPropertyValue('--student-visual-viewport-height')).toBe('');
+    Object.defineProperty(window, 'CSS', { configurable: true, value: originalCss });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: originalVisualViewport,
+    });
   });
 
   it('blocks native multi-touch and Safari gesture events but preserves single-touch movement', () => {

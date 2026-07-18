@@ -14,7 +14,6 @@ import { isInstructionReferencePlacement } from '../../utils/referenceImagePlace
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { hasHtmlMarkup } from './normalizeReadingPassageText';
 import { StudentMaterialWithQuestionPane } from './StudentMaterialWithQuestionPane';
-import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -296,10 +295,7 @@ export function StudentListening({
             isTabletMode ? 'w-[var(--listening-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12'
           }`}
           data-student-zoom-scroll
-          style={{
-            ...(tabletContentZoomStyle ?? {}),
-            ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
-          }}
+          style={tabletContentZoomStyle}
         >
           <h2 className={`${materialCompact ? 'mb-2 text-base md:text-lg' : 'mb-4 text-lg md:mb-6 md:text-xl'} font-bold break-words [overflow-wrap:anywhere]`}>{activePart.title}</h2>
 

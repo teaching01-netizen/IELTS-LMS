@@ -2011,10 +2011,8 @@ describe('student question experience', () => {
     const scrollOwners = workspace.querySelectorAll<HTMLElement>('[data-student-zoom-scroll]');
     expect(scrollOwners.length).toBeGreaterThanOrEqual(2);
     scrollOwners.forEach((scrollOwner) => {
-      expect(scrollOwner).toHaveStyle({
-        paddingBottom: 'var(--student-exam-footer-reserve)',
-        scrollPaddingBottom: 'var(--student-exam-footer-reserve)',
-      });
+      expect(scrollOwner.style.paddingBottom).toBe('');
+      expect(scrollOwner.style.scrollPaddingBottom).toBe('');
     });
     const listeningResizer = screen.getByTestId('listening-pane-resizer');
     expect(listeningResizer).toBeInTheDocument();

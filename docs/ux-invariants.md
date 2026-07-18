@@ -6,37 +6,36 @@ Purpose: keep student-facing interaction rules explicit so future UI changes do 
 
 ### Owning Module
 
-The active exam shell rectangle and row layout are owned by `src/index.css`. `StudentApp` owns
-only the exam-active lifecycle class and shell markup. No JavaScript module owns viewport geometry.
+The active exam shell and footer row layout are owned by `src/index.css`. `StudentApp` installs the
+exam lifecycle guard. Modern browsers use CSS dynamic viewport units; the guard publishes a visual
+viewport height only as a capability fallback when `100dvh` is unsupported.
 
 ### Invariant
 
-The browser layout engine is the sole shell-geometry authority. The fixed `inset: 0` shell is a
-two-row grid: intrinsic header and `minmax(0, 1fr)` workspace. The student footer is a fixed,
-safe-area-aware floating navigation pill over the workspace. Each Reading, Listening, and Writing
-scroll owner reserves the pill's maximum footprint with CSS, so content continues behind the pill
-while final controls can scroll above it. Student code never persists viewport height, vertical
-origin, footer geometry, or keyboard visibility.
+The exam shell is a page-layout grid sized in fallback order by `100vh`, `100svh`, and `100dvh`.
+Its rows are intrinsic header, `minmax(0, 1fr)` workspace, and intrinsic footer. Every student
+footer remains in normal flow, so its actual height is reserved and no passage, question, or editor
+content can render underneath it. Safe-area insets are footer padding, never position offsets.
 
 ### Must Not Break
 
-- The shell uses one constraint system: `position: fixed` with `inset: 0`.
+- The shell uses `position: relative`, dynamic viewport height, and
+  `grid-template-rows: auto minmax(0, 1fr) auto`.
 - The header is a non-scrolling in-flow grid row. It must not become sticky or independently fixed.
-- Reading, Listening, and Writing footers share `.student-exam-footer`, use fixed positioning, and
-  remain inset from the viewport edges as one floating-pill contract.
-- The footer must not participate in shell track sizing. `.student-exam-main` must reach the
-  physical viewport bottom and must not create a shell-wide footer reserve or tray.
-- Reading, Listening, objective-question, and Writing scroll owners use the shared footer-clearance
-  style for both bottom padding and scroll padding so final controls remain reachable above the pill.
+- Reading, Listening, and Writing footers share `.student-exam-footer`, use `position: relative`,
+  and participate in their owning layout's footer row.
+- `.student-exam-footer` has no `bottom`, logical bottom inset, elevation, or floating-pill radius.
+- Safe-area bottom/inline values are applied as padding inside the footer surface.
+- Pane scroll owners must not add footer-overlay padding or scroll padding.
 - The workspace grid item has `min-height: 0`; reading, listening, and writing panes remain the only
   content scroll owners.
-- Student production code must not publish viewport-height or viewport-origin CSS custom
-  properties, footer coordinates, or keyboard state.
-- `VisualViewport`, focus, blur, keyboard, resize, orientation, and lifecycle events must not write
-  shell geometry.
+- Browsers supporting `100dvh` must not receive JavaScript viewport geometry. The legacy fallback
+  may publish only `--student-visual-viewport-height` from `VisualViewport.height`/`innerHeight`.
+- No code may publish a viewport origin, footer coordinates, inferred keyboard state, or persisted
+  geometry baseline.
 - Root exam scrolling and overscroll chaining remain disabled.
-- The viewport meta policy requests keyboard overlay behavior only as progressive enhancement. The
-  shell must remain correct when a browser ignores that token.
+- The viewport meta policy includes `viewport-fit=cover` and does not force an interactive-widget
+  resize mode.
 - No browser-family, operating-system, device-model, or version branch may select viewport layout.
 - Safe-area padding, split-pane scrolling, native dialog positioning, and the exam page-zoom guard
   remain active.
@@ -47,6 +46,7 @@ origin, footer geometry, or keyboard visibility.
 
 - `src/components/student/__tests__/StudentApp.test.tsx`
 - `src/components/student/__tests__/StudentViewportCss.test.ts`
+- `src/components/student/__tests__/StudentFooterInFlowLayout.test.ts`
 - `src/components/student/__tests__/examPageZoomGuard.test.ts`
 - `e2e/student-ipad-layout.spec.ts`
 

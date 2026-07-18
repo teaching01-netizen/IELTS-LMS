@@ -237,8 +237,12 @@ describe('StudentApp runtime-backed mode', () => {
     );
 
     expect(viewport).toHaveAttribute('content', EXAM_VIEWPORT_CONTENT);
+    expect(document.documentElement).toHaveClass('student-exam-active');
+    expect(document.body).toHaveClass('student-exam-active');
     unmount();
     expect(viewport).toHaveAttribute('content', 'width=device-width, initial-scale=1.0');
+    expect(document.documentElement).not.toHaveClass('student-exam-active');
+    expect(document.body).not.toHaveClass('student-exam-active');
   });
 
   beforeEach(() => {

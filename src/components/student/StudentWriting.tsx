@@ -11,7 +11,6 @@ import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 import { StudentSplitPaneResizer } from './StudentSplitPaneResizer';
 import { RichTextHighlighter } from './RichTextHighlighter';
 import type { StudentHighlightColor } from './highlightPalette';
-import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -552,7 +551,6 @@ export function StudentWriting({
             style={{
               fontSize: 'var(--student-passage-font-size)',
               lineHeight: 'var(--student-passage-line-height)',
-              ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
             }}
           >
             <div className="flex items-center justify-between mb-4 md:mb-6">
@@ -701,7 +699,6 @@ export function StudentWriting({
                     : 'p-4 md:p-6 lg:p-8'
                 } h-full min-h-0 resize-none whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
                 data-student-zoom-scroll
-                style={STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE}
                 spellCheck={!security.preventAutocorrect}
                 autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
                 autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
