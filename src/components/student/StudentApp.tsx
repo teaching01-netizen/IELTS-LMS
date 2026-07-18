@@ -606,7 +606,7 @@ export function StudentApp({
 
   return (
       <div
-      className={`student-exam-shell w-full bg-gray-50 font-sans text-gray-900 transition-all ${
+      className={`student-exam-shell h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
         uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
       }`}
       style={studentShellStyle}
