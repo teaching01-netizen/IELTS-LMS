@@ -11,6 +11,7 @@ import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 import { StudentSplitPaneResizer } from './StudentSplitPaneResizer';
 import { RichTextHighlighter } from './RichTextHighlighter';
 import type { StudentHighlightColor } from './highlightPalette';
+import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -546,11 +547,12 @@ export function StudentWriting({
           <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-500' : isTimeWarning ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
 
           <div
-            className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 pr-4 md:pr-6 lg:pr-12 pb-6 md:pb-8 font-sans text-gray-900"
+            className="flex-1 overflow-y-auto p-4 pr-4 font-sans text-gray-900 md:p-6 md:pr-6 lg:p-8 lg:pr-12"
             data-student-zoom-scroll
             style={{
               fontSize: 'var(--student-passage-font-size)',
               lineHeight: 'var(--student-passage-line-height)',
+              ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
             }}
           >
             <div className="flex items-center justify-between mb-4 md:mb-6">
@@ -699,6 +701,7 @@ export function StudentWriting({
                     : 'p-4 md:p-6 lg:p-8'
                 } h-full min-h-0 resize-none whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
                 data-student-zoom-scroll
+                style={STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE}
                 spellCheck={!security.preventAutocorrect}
                 autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
                 autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}

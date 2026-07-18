@@ -28,9 +28,7 @@ describe('student exam CSS-owned viewport shell', () => {
     expect(shellRule).not.toMatch(/(?:^|;)\s*(?:height|top):/);
 
     expect(mainRule).toBeDefined();
-    expect(mainRule).toMatch(
-      /padding-block-end:\s*var\(--student-exam-footer-reserve\)\s*;/,
-    );
+    expect(mainRule).not.toMatch(/padding-block-end/);
 
     expect(footerRule).toBeDefined();
     expect(footerRule).toMatch(/position:\s*fixed\s*;/);

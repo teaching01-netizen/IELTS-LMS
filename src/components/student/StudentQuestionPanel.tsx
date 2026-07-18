@@ -5,6 +5,7 @@ import type { QuestionAnswer, QuestionBlock } from '../../types';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { StudentQuestionBlockSection } from './StudentQuestionBlockSection';
+import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
 
 interface StudentQuestionPanelProps {
   blocks: QuestionBlock[];
@@ -78,13 +79,14 @@ export function StudentQuestionPanel({
       <div
         className={`flex-1 overflow-y-auto break-words [overflow-wrap:anywhere] ${
           answerCompact ? 'p-2.5 md:p-3 space-y-4 md:space-y-5' : 'p-4 md:p-5 lg:p-8 space-y-6 md:space-y-8'
-        } pb-20 md:pb-24 ${
-          tabletMode ? 'pb-28 md:pb-28' : ''
         }`}
         ref={questionContainerRef}
         data-student-zoom-scroll
         data-testid={panelTestId}
-        style={contentZoomStyle}
+        style={{
+          ...(contentZoomStyle ?? {}),
+          ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
+        }}
       >
         {blocks.map((block) => (
           <StudentQuestionBlockSection

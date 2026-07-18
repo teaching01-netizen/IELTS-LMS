@@ -640,23 +640,25 @@ resize policy and may reorder or omit the final viewport event.
 ### Fix
 
 The exam shell now contains only header and workspace rows. Reading, Listening, and Writing share a
-CSS-only fixed floating footer pill with safe-area insets. The workspace reserves the pill's maximum
-footprint, so the overlay does not cover final answer controls. No viewport measurement, keyboard
-state, resize timer, focus listener, or browser-version branch was introduced.
+CSS-only fixed floating footer pill with safe-area insets. The workspace extends to the physical
+viewport bottom behind the pill. Each content scroll owner independently reserves the pill's
+maximum footprint through shared bottom padding and scroll padding, so final answer controls remain
+reachable without creating a full-width empty band. No viewport measurement, keyboard state,
+resize timer, focus listener, or browser-version branch was introduced.
 
-The reserved clearance visually continues the white exam canvas. The pill uses a subtle layered
-elevation shadow without a separate grey border, so the functional reserve does not read as a
-full-width dock or tray.
+The existing solid white pill and its elevation remain unchanged; this correction changes only
+overlay placement and clearance ownership.
 
 ### Invariant
 
 Do not return `.student-exam-footer` to shell track sizing and do not create a second geometry model
-for it. Footer placement is fixed and CSS-owned; workspace clearance is reserved independently and
-must use the exam canvas background rather than introducing a contrasting footer tray.
+for it. Footer placement is fixed and CSS-owned. The main workspace must extend behind the pill;
+only the actual content scroll owners may reserve its clearance, using the shared style contract.
 
 ### Regression Protection
 
 - `src/components/student/__tests__/StudentViewportCss.test.ts`
+- `src/components/student/__tests__/StudentFooterOverlayLayout.test.ts`
 - `src/components/student/__tests__/StudentFooterRepresentative.test.tsx`
 - `src/components/student/__tests__/StudentWriting.a11y.test.tsx`
 - `e2e/student-ipad-layout.spec.ts`

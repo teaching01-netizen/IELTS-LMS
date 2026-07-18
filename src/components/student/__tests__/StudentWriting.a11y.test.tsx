@@ -92,6 +92,15 @@ describe('StudentWriting a11y', () => {
     const prompt = screen.getByTestId('writing-task-prompt');
     const mark = prompt.querySelector('mark[data-highlighted="true"]');
     const editor = screen.getByRole('textbox', { name: /writing response/i });
+    const promptScrollOwner = prompt.closest('[data-student-zoom-scroll]');
+    expect(promptScrollOwner).toHaveStyle({
+      paddingBottom: 'var(--student-exam-footer-reserve)',
+      scrollPaddingBottom: 'var(--student-exam-footer-reserve)',
+    });
+    expect(editor).toHaveStyle({
+      paddingBottom: 'var(--student-exam-footer-reserve)',
+      scrollPaddingBottom: 'var(--student-exam-footer-reserve)',
+    });
     expect(mark).toHaveTextContent('Highlight');
     expect(mark).toHaveClass('test-highlight');
     expect(editor.closest('[data-student-highlightable="true"]')).toBeNull();

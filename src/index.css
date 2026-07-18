@@ -238,7 +238,6 @@
     min-width: 0;
     box-sizing: border-box;
     background-color: #fff;
-    padding-block-end: var(--student-exam-footer-reserve);
   }
 
   .student-adaptive-workspace {

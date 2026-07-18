@@ -255,6 +255,10 @@ describe('StudentReading passage readability controls', () => {
     expect(passagePane).not.toBeNull();
     expect(passagePane).toHaveAttribute('data-student-highlightable', 'true');
     expect(passagePane).toHaveStyle({ userSelect: 'text' });
+    expect(passagePane).toHaveStyle({
+      paddingBottom: 'var(--student-exam-footer-reserve)',
+      scrollPaddingBottom: 'var(--student-exam-footer-reserve)',
+    });
   });
 
   it('does not auto-scroll question panel while passage text selection is active', () => {

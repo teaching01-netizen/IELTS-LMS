@@ -9,21 +9,27 @@ async function openPreview(page: Page, module: 'reading' | 'writing') {
 
 async function expectExamChromeAlignedToViewport(page: Page, footerLabel: RegExp) {
   const header = page.getByRole('banner');
+  const workspace = page.locator('.student-exam-main');
   const footer = page.getByRole('contentinfo', { name: footerLabel });
   await expect(header).toBeVisible();
+  await expect(workspace).toBeVisible();
   await expect(footer).toBeVisible();
 
   const headerBox = await header.boundingBox();
+  const workspaceBox = await workspace.boundingBox();
   const footerBox = await footer.boundingBox();
   const viewport = page.viewportSize();
   expect(headerBox).not.toBeNull();
+  expect(workspaceBox).not.toBeNull();
   expect(footerBox).not.toBeNull();
   expect(viewport).not.toBeNull();
   expect(Math.abs(headerBox!.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(workspaceBox!.y + workspaceBox!.height - viewport!.height)).toBeLessThanOrEqual(1);
   await expect(footer).toHaveCSS('position', 'fixed');
   expect(footerBox!.x).toBeGreaterThan(0);
   expect(viewport!.width - footerBox!.x - footerBox!.width).toBeGreaterThan(0);
   expect(viewport!.height - footerBox!.y - footerBox!.height).toBeGreaterThanOrEqual(0);
+  expect(footerBox!.y).toBeLessThan(workspaceBox!.y + workspaceBox!.height);
 }
 
 async function expectCssOwnedExamShell(page: Page) {
