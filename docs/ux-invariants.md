@@ -24,7 +24,8 @@ content can render underneath it. Safe-area insets are footer padding, never pos
 - The header is a non-scrolling in-flow grid row. It must not become sticky or independently fixed.
 - Reading, Listening, and Writing footers share `.student-exam-footer`, use `position: relative`,
   and participate in their owning layout's footer row.
-- `.student-exam-footer` has no `bottom`, logical bottom inset, elevation, or floating-pill radius.
+- `.student-exam-footer` has no `bottom` or logical bottom inset. Its modern pill radius, inset
+  margins, and elevation are presentation only; they must not remove it from normal flow.
 - Safe-area bottom/inline values are applied as padding inside the footer surface.
 - Pane scroll owners must not add footer-overlay padding or scroll padding.
 - The workspace grid item has `min-height: 0`; reading, listening, and writing panes remain the only

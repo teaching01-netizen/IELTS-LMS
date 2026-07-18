@@ -640,9 +640,11 @@ but were not footer ancestors, so they were not the containing-block cause.
 ### Fix
 
 The shell now uses a normal-flow three-row grid with `100vh`, `100svh`, and `100dvh` height
-fallbacks. The footer is a full-width `position: relative` row with safe-area padding inside its
-surface. Overlay offsets, pill elevation, and per-pane footer reserves were removed. The viewport
-metadata uses `viewport-fit=cover` without forcing `interactive-widget=overlays-content`.
+fallbacks. The footer is a `position: relative` row with safe-area padding inside its surface.
+Overlay offsets and per-pane footer reserves were removed. Its inset white-pill appearance is
+preserved with normal-flow margins, radius, and shadow; those visual styles do not participate in
+viewport positioning. The viewport metadata uses `viewport-fit=cover` without forcing
+`interactive-widget=overlays-content`.
 
 Browsers with `100dvh` use CSS alone. Older engines receive a lifecycle-scoped
 `--student-visual-viewport-height` value and resize/orientation updates; cleanup restores the prior

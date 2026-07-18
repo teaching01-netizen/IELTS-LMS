@@ -32,23 +32,24 @@ describe('student exam in-flow viewport shell', () => {
 
     expect(footerRule).toBeDefined();
     expect(footerRule).toMatch(/position:\s*relative\s*;/);
-    expect(footerRule).toMatch(/width:\s*100%\s*;/);
     expect(footerRule).toMatch(/padding-bottom:[^;]*safe-area-inset-bottom/);
-    expect(footerRule).toMatch(/border-top:/);
     expect(footerRule).not.toMatch(/(?:^|;)\s*(?:bottom|inset-block-end)\s*:/);
-    expect(footerRule).not.toMatch(/border-radius:\s*9999px\s*;/);
     expect(css).not.toContain('--student-exam-footer-reserve');
     expect(css).not.toContain('--student-viewport-height');
     expect(css).not.toContain('--student-viewport-offset-top');
   });
 
-  it('renders a full-width footer surface without floating elevation', () => {
+  it('keeps the modern pill surface while its box remains in normal flow', () => {
     const mainRule = css.match(/\.student-exam-main\s*\{([^}]*)\}/s)?.[1];
     const footerRule = css.match(/\.student-exam-footer\s*\{([^}]*)\}/s)?.[1];
 
     expect(mainRule).toMatch(/background-color:\s*#fff\s*;/);
     expect(footerRule).toMatch(/background:\s*#fff\s*;/);
-    expect(footerRule).toMatch(/border-top:/);
-    expect(footerRule).not.toMatch(/box-shadow:/);
+    expect(footerRule).toMatch(/width:\s*calc\(/);
+    expect(footerRule).toMatch(/max-inline-size:\s*96rem\s*;/);
+    expect(footerRule).toMatch(/margin-inline:\s*auto\s*;/);
+    expect(footerRule).toMatch(/border-radius:\s*9999px\s*;/);
+    expect(footerRule).toMatch(/box-shadow:/);
+    expect(footerRule).not.toMatch(/position:\s*(?:fixed|sticky|absolute)\s*;/);
   });
 });
