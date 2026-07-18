@@ -44,6 +44,40 @@ function installMutableVisualViewport(initialHeight: number, initialOffsetTop = 
   };
 }
 
+function installMutableVirtualKeyboard(initialHeight = 0) {
+  const target = new EventTarget();
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'virtualKeyboard');
+  let height = initialHeight;
+  const virtualKeyboard = {
+    get boundingRect() {
+      return { height };
+    },
+    addEventListener: target.addEventListener.bind(target),
+    removeEventListener: target.removeEventListener.bind(target),
+  };
+
+  Object.defineProperty(window.navigator, 'virtualKeyboard', {
+    configurable: true,
+    value: virtualKeyboard,
+  });
+
+  return {
+    setHeight(nextHeight: number) {
+      height = nextHeight;
+    },
+    dispatchGeometryChange() {
+      target.dispatchEvent(new Event('geometrychange'));
+    },
+    restore() {
+      if (original) {
+        Object.defineProperty(window.navigator, 'virtualKeyboard', original);
+      } else {
+        Reflect.deleteProperty(window.navigator, 'virtualKeyboard');
+      }
+    },
+  };
+}
+
 describe('installStudentExamViewportController', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -57,6 +91,101 @@ describe('installStudentExamViewportController', () => {
     document.documentElement.style.removeProperty('--student-viewport-height');
     document.documentElement.style.removeProperty('--student-viewport-offset-top');
     document.body.replaceChildren();
+  });
+
+  it('keeps the live origin while tap-outside keyboard recovery settles', () => {
+    const viewport = installMutableVisualViewport(900);
+    const input = document.createElement('input');
+    document.body.append(input);
+    const cleanup = installStudentExamViewportController({
+      targetWindow: window,
+      targetDocument: document,
+    });
+
+    try {
+      vi.advanceTimersByTime(1_600);
+      input.focus();
+      viewport.set(560, 180);
+      viewport.dispatchResize();
+      input.blur();
+      viewport.set(900, 180);
+      viewport.dispatchResize();
+
+      const root = document.documentElement;
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('900px');
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('180px');
+
+      viewport.set(900, 0);
+      viewport.dispatchResize();
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('0px');
+    } finally {
+      cleanup();
+      viewport.restore();
+    }
+  });
+
+  it('accepts recovered growth when keyboard-hide retains editable focus', () => {
+    const viewport = installMutableVisualViewport(900);
+    const input = document.createElement('input');
+    document.body.append(input);
+    const cleanup = installStudentExamViewportController({
+      targetWindow: window,
+      targetDocument: document,
+    });
+
+    try {
+      vi.advanceTimersByTime(1_600);
+      input.focus();
+      viewport.set(560, 180);
+      viewport.dispatchResize();
+      viewport.set(950, 180);
+      viewport.dispatchResize();
+
+      const root = document.documentElement;
+      expect(document.activeElement).toBe(input);
+      expect(root.style.getPropertyValue('--student-viewport-height')).toBe('950px');
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('180px');
+
+      viewport.set(950, 0);
+      viewport.dispatchResize();
+      expect(root.style.getPropertyValue('--student-viewport-offset-top')).toBe('0px');
+    } finally {
+      cleanup();
+      viewport.restore();
+    }
+  });
+
+  it('does not let zero keyboard geometry authorize a stale smaller height', () => {
+    const viewport = installMutableVisualViewport(900);
+    const virtualKeyboard = installMutableVirtualKeyboard();
+    const input = document.createElement('input');
+    document.body.append(input);
+    const cleanup = installStudentExamViewportController({
+      targetWindow: window,
+      targetDocument: document,
+    });
+
+    try {
+      vi.advanceTimersByTime(1_600);
+      input.focus();
+      virtualKeyboard.setHeight(320);
+      viewport.set(560, 180);
+      virtualKeyboard.dispatchGeometryChange();
+      virtualKeyboard.setHeight(0);
+      viewport.set(820, 20);
+      virtualKeyboard.dispatchGeometryChange();
+
+      expect(document.documentElement.style.getPropertyValue('--student-viewport-height')).toBe(
+        '900px',
+      );
+      expect(
+        document.documentElement.style.getPropertyValue('--student-viewport-offset-top'),
+      ).toBe('20px');
+    } finally {
+      cleanup();
+      viewport.restore();
+      virtualKeyboard.restore();
+    }
   });
 
   it('settles to a final reused-tab viewport even when no resize event fires', () => {
@@ -121,7 +250,7 @@ describe('installStudentExamViewportController', () => {
       );
       expect(
         document.documentElement.style.getPropertyValue('--student-viewport-offset-top'),
-      ).toBe('0px');
+      ).toBe('20px');
 
       viewport.set(810, 10);
       viewport.dispatchResize();
@@ -131,7 +260,7 @@ describe('installStudentExamViewportController', () => {
       );
       expect(
         document.documentElement.style.getPropertyValue('--student-viewport-offset-top'),
-      ).toBe('0px');
+      ).toBe('10px');
     } finally {
       cleanup();
       viewport.restore();

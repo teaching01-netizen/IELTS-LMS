@@ -16,7 +16,12 @@ const PINCH_RELEASE_GUARD_MS = 500;
 const MATERIAL_WIDTH_CHANGE_PX = 1;
 
 type RecoveryKind = 'bootstrap' | 'topology' | 'keyboard';
-type VirtualKeyboardEventTarget = Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
+type VirtualKeyboardEventTarget = Pick<
+  EventTarget,
+  'addEventListener' | 'removeEventListener'
+> & {
+  readonly boundingRect?: Pick<DOMRectReadOnly, 'height'>;
+};
 
 function isEditableElement(value: EventTarget | Element | null): value is HTMLElement {
   return (
@@ -35,6 +40,12 @@ function finiteNonNegative(value: number | null | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
     ? Math.round(value)
     : 0;
+}
+
+function finiteOptionalNonNegative(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : null;
 }
 
 export function installStudentExamViewportController({
@@ -73,6 +84,7 @@ export function installStudentExamViewportController({
       offsetTop: visualHeight === null ? 0 : finiteNonNegative(visualViewport?.offsetTop),
       layoutWidth: innerWidth ?? clientWidth ?? fallbackWidth,
       scale: visualHeight === null ? 1 : (finitePositive(visualViewport?.scale) ?? 1),
+      keyboardHeight: finiteOptionalNonNegative(virtualKeyboard?.boundingRect?.height),
     };
   };
 
@@ -106,7 +118,7 @@ export function installStudentExamViewportController({
   const measure = () => {
     dispatchPolicyEvent({
       type: 'measurement-received',
-      measurement: readMeasurement(policy.trustedRect.height, policy.layoutWidth),
+      measurement: readMeasurement(policy.closedHeight, policy.layoutWidth),
     });
   };
 
