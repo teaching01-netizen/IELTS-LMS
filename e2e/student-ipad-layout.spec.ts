@@ -20,31 +20,21 @@ async function expectExamChromeAlignedToViewport(page: Page, footerLabel: RegExp
   const headerBox = await header.boundingBox();
   const splitWorkspaceBox = await splitWorkspace.boundingBox();
   const footerBox = await footer.boundingBox();
-  const footerMargins = await footer.evaluate((element) => {
-    const styles = getComputedStyle(element);
-    return {
-      blockStart: Number.parseFloat(styles.marginBlockStart) || 0,
-      blockEnd: Number.parseFloat(styles.marginBlockEnd) || 0,
-    };
-  });
   const viewport = page.viewportSize();
   expect(headerBox).not.toBeNull();
   expect(splitWorkspaceBox).not.toBeNull();
   expect(footerBox).not.toBeNull();
   expect(viewport).not.toBeNull();
   expect(Math.abs(headerBox!.y)).toBeLessThanOrEqual(1);
-  await expect(footer).toHaveCSS('position', 'relative');
+  await expect(footer).toHaveCSS('position', 'absolute');
+  await expect(footer).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   expect(
-    Math.abs(
-      splitWorkspaceBox!.y + splitWorkspaceBox!.height
-        - (footerBox!.y - footerMargins.blockStart),
-    ),
+    Math.abs(splitWorkspaceBox!.y + splitWorkspaceBox!.height - viewport!.height),
   ).toBeLessThanOrEqual(1);
-  expect(
-    Math.abs(
-      footerBox!.y + footerBox!.height + footerMargins.blockEnd - viewport!.height,
-    ),
-  ).toBeLessThanOrEqual(1);
+  expect(splitWorkspaceBox!.y + splitWorkspaceBox!.height).toBeGreaterThan(
+    footerBox!.y + footerBox!.height / 2,
+  );
+  expect(footerBox!.y + footerBox!.height).toBeLessThan(viewport!.height);
   expect(footerBox!.x).toBeGreaterThan(0);
   expect(footerBox!.x + footerBox!.width).toBeLessThan(viewport!.width);
 }

@@ -19,6 +19,7 @@ import {
 } from './normalizeReadingPassageText';
 import { isInstructionReferencePlacement } from '../../utils/referenceImagePlacement';
 import { StudentMaterialWithQuestionPane } from './StudentMaterialWithQuestionPane';
+import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -85,6 +86,7 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
       data-student-highlightable="true"
       style={{
         ...(tabletContentZoomStyle ?? {}),
+        ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
         fontSize: 'var(--student-passage-font-size)',
         lineHeight: 'var(--student-passage-line-height)',
         WebkitUserSelect: 'text',

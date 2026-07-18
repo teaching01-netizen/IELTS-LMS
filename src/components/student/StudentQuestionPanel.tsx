@@ -5,6 +5,7 @@ import type { QuestionAnswer, QuestionBlock } from '../../types';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { StudentQuestionBlockSection } from './StudentQuestionBlockSection';
+import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
 
 interface StudentQuestionPanelProps {
   blocks: QuestionBlock[];
@@ -82,7 +83,10 @@ export function StudentQuestionPanel({
         ref={questionContainerRef}
         data-student-zoom-scroll
         data-testid={panelTestId}
-        style={contentZoomStyle}
+        style={{
+          ...(contentZoomStyle ?? {}),
+          ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
+        }}
       >
         {blocks.map((block) => (
           <StudentQuestionBlockSection
@@ -108,7 +112,7 @@ export function StudentQuestionPanel({
         ))}
       </div>
 
-      <div className={`absolute ${tabletMode ? 'bottom-4 right-4' : 'bottom-16 md:bottom-20 right-4 md:right-6'} flex shadow-md z-20`}>
+      <div className={`student-question-stepper absolute ${tabletMode ? 'right-4' : 'right-4 md:right-6'} flex shadow-md z-20`}>
         <button
           onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
           className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}

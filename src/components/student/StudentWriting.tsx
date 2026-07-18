@@ -9,6 +9,7 @@ import { StudentZoomableMedia } from './StudentZoomableMedia';
 import { useSplitPaneResize } from './useSplitPaneResize';
 import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 import { StudentSplitPaneResizer } from './StudentSplitPaneResizer';
+import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
 import { RichTextHighlighter } from './RichTextHighlighter';
 import type { StudentHighlightColor } from './highlightPalette';
 
@@ -549,6 +550,7 @@ export function StudentWriting({
             className="flex-1 overflow-y-auto p-4 pr-4 font-sans text-gray-900 md:p-6 md:pr-6 lg:p-8 lg:pr-12"
             data-student-zoom-scroll
             style={{
+              ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
               fontSize: 'var(--student-passage-font-size)',
               lineHeight: 'var(--student-passage-line-height)',
             }}
@@ -699,6 +701,7 @@ export function StudentWriting({
                     : 'p-4 md:p-6 lg:p-8'
                 } h-full min-h-0 resize-none whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
                 data-student-zoom-scroll
+                style={STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE}
                 spellCheck={!security.preventAutocorrect}
                 autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
                 autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
