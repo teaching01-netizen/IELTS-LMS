@@ -252,6 +252,10 @@
     }
   }
 
+  .student-exam-shell.student-exam-shell {
+    height: var(--student-visual-viewport-height);
+  }
+
   .student-exam-main {
     min-height: 0;
     min-width: 0;

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   EXAM_VIEWPORT_CONTENT,
@@ -57,7 +57,7 @@ describe('installExamPageZoomGuard', () => {
     expect(document.querySelector('meta[name="viewport"]')).toBeNull();
   });
 
-  it('uses the visual viewport height only as a legacy fallback when dvh is unsupported', () => {
+  it('keeps the measured visual viewport height authoritative when dvh is supported', () => {
     setViewport(ORIGINAL_VIEWPORT_CONTENT);
     const originalCss = window.CSS;
     const originalVisualViewport = window.visualViewport;
@@ -69,7 +69,7 @@ describe('installExamPageZoomGuard', () => {
     });
     Object.defineProperty(window, 'CSS', {
       configurable: true,
-      value: { supports: () => false },
+      value: { supports: () => true },
     });
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
@@ -82,6 +82,9 @@ describe('installExamPageZoomGuard', () => {
     Object.defineProperty(visualViewport, 'height', { configurable: true, value: 620 });
     visualViewport.dispatchEvent(new Event('resize'));
     expect(document.documentElement.style.getPropertyValue('--student-visual-viewport-height')).toBe('620px');
+    Object.defineProperty(visualViewport, 'height', { configurable: true, value: 700 });
+    visualViewport.dispatchEvent(new Event('scroll'));
+    expect(document.documentElement.style.getPropertyValue('--student-visual-viewport-height')).toBe('700px');
 
     cleanup();
     expect(document.documentElement.style.getPropertyValue('--student-visual-viewport-height')).toBe('');
@@ -90,6 +93,39 @@ describe('installExamPageZoomGuard', () => {
       configurable: true,
       value: originalVisualViewport,
     });
+  });
+
+  it('resamples the visual viewport after the keyboard focus transition settles', () => {
+    vi.useFakeTimers();
+    setViewport(ORIGINAL_VIEWPORT_CONTENT);
+    const originalVisualViewport = window.visualViewport;
+    const visualViewport = new EventTarget() as VisualViewport;
+    Object.defineProperty(visualViewport, 'height', {
+      configurable: true,
+      value: 420,
+      writable: true,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: visualViewport,
+    });
+
+    const cleanup = installExamPageZoomGuard(document);
+
+    expect(document.documentElement.style.getPropertyValue('--student-visual-viewport-height')).toBe('420px');
+    document.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    Object.defineProperty(visualViewport, 'height', { configurable: true, value: 700 });
+    vi.advanceTimersByTime(700);
+    expect(document.documentElement.style.getPropertyValue('--student-visual-viewport-height')).toBe('700px');
+
+    cleanup();
+    vi.runOnlyPendingTimers();
+    expect(document.documentElement.style.getPropertyValue('--student-visual-viewport-height')).toBe('');
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: originalVisualViewport,
+    });
+    vi.useRealTimers();
   });
 
   it('blocks native multi-touch and Safari gesture events but preserves single-touch movement', () => {

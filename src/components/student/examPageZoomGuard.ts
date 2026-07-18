@@ -12,30 +12,50 @@ export function installExamPageZoomGuard(targetDocument: Document): () => void {
   root.classList.add('student-exam-active');
   body.classList.add('student-exam-active');
 
-  const originalLegacyViewportHeight = root.style.getPropertyValue(
+  const originalViewportHeight = root.style.getPropertyValue(
     '--student-visual-viewport-height',
   );
-  const originalLegacyViewportHeightPriority = root.style.getPropertyPriority(
+  const originalViewportHeightPriority = root.style.getPropertyPriority(
     '--student-visual-viewport-height',
   );
-  const supportsDynamicViewportHeight =
-    typeof targetWindow?.CSS?.supports === 'function' &&
-    targetWindow.CSS.supports('height', '100dvh');
   const visualViewport = targetWindow?.visualViewport;
-  const updateLegacyViewportHeight = () => {
-    if (!targetWindow || supportsDynamicViewportHeight) {
+  const viewportSettleTimers = new Set<number>();
+  const updateViewportHeight = () => {
+    if (!targetWindow) {
       return;
     }
     const height = visualViewport?.height ?? targetWindow.innerHeight;
+    if (!Number.isFinite(height) || height <= 0) {
+      return;
+    }
     root.style.setProperty('--student-visual-viewport-height', `${height}px`);
   };
+  const clearViewportSettleTimers = () => {
+    if (!targetWindow) return;
+    for (const timer of viewportSettleTimers) {
+      targetWindow.clearTimeout(timer);
+    }
+    viewportSettleTimers.clear();
+  };
+  const resampleViewportAfterFocusTransition = () => {
+    if (!targetWindow) return;
+    clearViewportSettleTimers();
+    updateViewportHeight();
+    for (const delay of [100, 300, 600]) {
+      const timer = targetWindow.setTimeout(() => {
+        viewportSettleTimers.delete(timer);
+        updateViewportHeight();
+      }, delay);
+      viewportSettleTimers.add(timer);
+    }
+  };
 
-  updateLegacyViewportHeight();
-  if (!supportsDynamicViewportHeight) {
-    targetWindow?.addEventListener('resize', updateLegacyViewportHeight);
-    targetWindow?.addEventListener('orientationchange', updateLegacyViewportHeight);
-    visualViewport?.addEventListener('resize', updateLegacyViewportHeight);
-  }
+  updateViewportHeight();
+  targetWindow?.addEventListener('resize', updateViewportHeight);
+  targetWindow?.addEventListener('orientationchange', updateViewportHeight);
+  visualViewport?.addEventListener('resize', updateViewportHeight);
+  visualViewport?.addEventListener('scroll', updateViewportHeight);
+  targetDocument.addEventListener('focusout', resampleViewportAfterFocusTransition);
 
   let viewport = targetDocument.querySelector<HTMLMetaElement>('meta[name="viewport"]');
   const createdViewport = viewport === null;
@@ -78,16 +98,17 @@ export function installExamPageZoomGuard(targetDocument: Document): () => void {
     }
     cleanedUp = true;
 
-    if (!supportsDynamicViewportHeight) {
-      targetWindow?.removeEventListener('resize', updateLegacyViewportHeight);
-      targetWindow?.removeEventListener('orientationchange', updateLegacyViewportHeight);
-      visualViewport?.removeEventListener('resize', updateLegacyViewportHeight);
-    }
-    if (originalLegacyViewportHeight) {
+    targetWindow?.removeEventListener('resize', updateViewportHeight);
+    targetWindow?.removeEventListener('orientationchange', updateViewportHeight);
+    visualViewport?.removeEventListener('resize', updateViewportHeight);
+    visualViewport?.removeEventListener('scroll', updateViewportHeight);
+    targetDocument.removeEventListener('focusout', resampleViewportAfterFocusTransition);
+    clearViewportSettleTimers();
+    if (originalViewportHeight) {
       root.style.setProperty(
         '--student-visual-viewport-height',
-        originalLegacyViewportHeight,
-        originalLegacyViewportHeightPriority,
+        originalViewportHeight,
+        originalViewportHeightPriority,
       );
     } else {
       root.style.removeProperty('--student-visual-viewport-height');

@@ -19,6 +19,9 @@ describe('student exam floating footer viewport shell', () => {
     expect(css).toMatch(
       /@supports\s*\(height:\s*100dvh\)[\s\S]*?\.student-exam-shell\.student-exam-shell\s*\{[^}]*height:\s*100dvh\s*;/,
     );
+    expect(css).toMatch(
+      /\.student-exam-shell\.student-exam-shell\s*\{[^}]*height:\s*var\(--student-visual-viewport-height\)\s*;/,
+    );
     expect(shellRule).toMatch(/grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s*;/);
     expect(shellRule).toMatch(/--student-exam-footer-clearance:/);
 
