@@ -37,7 +37,8 @@ describe('installExamPageZoomGuard', () => {
 
     const cleanup = installExamPageZoomGuard(document);
 
-    expect(EXAM_VIEWPORT_CONTENT).toContain('interactive-widget=resizes-visual');
+    expect(EXAM_VIEWPORT_CONTENT).toContain('interactive-widget=overlays-content');
+    expect(EXAM_VIEWPORT_CONTENT).not.toContain('interactive-widget=resizes-visual');
     expect(viewport).toHaveAttribute('content', EXAM_VIEWPORT_CONTENT);
     cleanup();
     expect(viewport).toHaveAttribute('content', ORIGINAL_VIEWPORT_CONTENT);

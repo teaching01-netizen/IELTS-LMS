@@ -30,7 +30,6 @@ import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
 import { emitAnswerMutationDebugLog } from './answerMutationDebug';
 import { isStudentHighlightToolContextActive } from './studentHighlightToolContext';
 import { installExamPageZoomGuard } from './examPageZoomGuard';
-import { installStudentExamViewportController } from './studentExamViewportController';
 import type { StudentAnswerMutationMeta, StudentAnswerValue } from '../../types/studentAttempt';
 
 function getBlockingCopy(reason: ReturnType<typeof useStudentRuntime>['state']['blocking']['reason']) {
@@ -147,7 +146,6 @@ export function StudentApp({
   const attemptWritingAnswers = attemptState.attempt?.writingAnswers ?? {};
   const attemptFlags = attemptState.attempt?.flags ?? {};
   const studentShellStyle = {
-    height: 'var(--student-viewport-height, 100dvh)',
     zoom: tabletMode ? 1 : uiState.accessibilitySettings.zoom,
     fontSize: studentTypography.rootFontSize,
     lineHeight: studentTypography.lineHeight,
@@ -344,17 +342,6 @@ export function StudentApp({
     },
     flushAndSubmitCurrentModuleWithRetry,
   });
-
-  useEffect(() => {
-    if (effectivePhase !== 'exam') {
-      return;
-    }
-
-    return installStudentExamViewportController({
-      targetWindow: window,
-      targetDocument: document,
-    });
-  }, [effectivePhase]);
 
   const shouldShowTimeExtension = shouldOfferTimeExtension({
     config: examState.config,
@@ -619,7 +606,7 @@ export function StudentApp({
 
   return (
       <div
-      className={`student-exam-shell flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
+      className={`student-exam-shell w-full bg-gray-50 font-sans text-gray-900 transition-all ${
         uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
       }`}
       style={studentShellStyle}

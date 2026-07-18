@@ -210,9 +210,6 @@
 
   html.student-exam-active,
   body.student-exam-active {
-    height: 100vh;
-    height: 100dvh;
-    height: var(--student-viewport-height, 100dvh);
     width: 100%;
     overflow: hidden;
     overscroll-behavior: none;
@@ -220,14 +217,12 @@
 
   .student-exam-shell {
     position: fixed;
-    top: var(--student-viewport-offset-top, 0px);
-    left: 0;
-    right: 0;
-    height: 100vh;
-    height: 100dvh;
-    height: var(--student-viewport-height, 100dvh);
-    min-height: 0;
+    inset: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    min-width: 0;
     overflow: hidden;
+    overflow: clip;
     overscroll-behavior: none;
     touch-action: manipulation;
     padding-left: env(safe-area-inset-left, 0);
@@ -247,8 +242,6 @@
   }
 
   .student-exam-footer {
-    position: sticky;
-    bottom: 0;
     left: 0;
     right: 0;
     padding-bottom: max(0.375rem, env(safe-area-inset-bottom, 0));

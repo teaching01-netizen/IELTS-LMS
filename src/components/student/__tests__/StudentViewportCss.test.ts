@@ -2,30 +2,32 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-describe('student exam visible viewport CSS', () => {
+describe('student exam CSS-owned viewport shell', () => {
   const css = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8');
 
-  it('fixes the exam shell to the exact tracked visual viewport rectangle', () => {
+  it('uses one fixed grid constraint system without measured geometry', () => {
     const activeDocumentRule = css.match(
       /html\.student-exam-active,\s*body\.student-exam-active\s*\{([^}]*)\}/s,
     )?.[1];
     const shellRule = css.match(/\.student-exam-shell\s*\{([^}]*)\}/s)?.[1];
+    const footerRule = css.match(/\.student-exam-footer\s*\{([^}]*)\}/s)?.[1];
 
     expect(activeDocumentRule).toBeDefined();
-    expect(activeDocumentRule).toMatch(
-      /height:\s*100vh\s*;[\s\S]*height:\s*100dvh\s*;[\s\S]*height:\s*var\(--student-viewport-height,\s*100dvh\)\s*;/,
-    );
-    expect(activeDocumentRule).not.toMatch(/height:\s*max\(/);
+    expect(activeDocumentRule).toMatch(/overflow:\s*hidden\s*;/);
+    expect(activeDocumentRule).not.toMatch(/--student-viewport-/);
+    expect(activeDocumentRule).not.toMatch(/height:\s*(?:100v|var\()/);
 
     expect(shellRule).toBeDefined();
     expect(shellRule).toMatch(/position:\s*fixed\s*;/);
-    expect(shellRule).toMatch(/top:\s*var\(--student-viewport-offset-top,\s*0px\)\s*;/);
-    expect(shellRule).toMatch(/left:\s*0\s*;/);
-    expect(shellRule).toMatch(/right:\s*0\s*;/);
-    expect(shellRule).toMatch(
-      /height:\s*100vh\s*;[\s\S]*height:\s*100dvh\s*;[\s\S]*height:\s*var\(--student-viewport-height,\s*100dvh\)\s*;/,
-    );
-    expect(shellRule).not.toMatch(/height:\s*max\(/);
-    expect(shellRule).not.toMatch(/min-height:\s*[1-9]/);
+    expect(shellRule).toMatch(/inset:\s*0\s*;/);
+    expect(shellRule).toMatch(/display:\s*grid\s*;/);
+    expect(shellRule).toMatch(/grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto\s*;/);
+    expect(shellRule).not.toMatch(/--student-viewport-/);
+    expect(shellRule).not.toMatch(/(?:^|;)\s*(?:height|top):/);
+
+    expect(footerRule).toBeDefined();
+    expect(footerRule).not.toMatch(/position:\s*(?:sticky|fixed)\s*;/);
+    expect(css).not.toContain('--student-viewport-height');
+    expect(css).not.toContain('--student-viewport-offset-top');
   });
 });

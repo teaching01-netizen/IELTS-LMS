@@ -86,7 +86,11 @@ export function StudentExamWorkspace({
 }: StudentExamWorkspaceProps) {
   return (
     <>
-      <main id="main-content" className="flex-1 overflow-hidden relative flex flex-col" role="main">
+      <main
+        id="main-content"
+        className="student-exam-main flex-1 overflow-hidden relative flex flex-col"
+        role="main"
+      >
         {currentModule === 'reading' ? (
           <StudentReading
             state={examState}
