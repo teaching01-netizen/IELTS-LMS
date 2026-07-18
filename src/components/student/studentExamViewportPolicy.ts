@@ -9,23 +9,26 @@ export interface StudentExamViewportMeasurement {
   offsetTop: number;
   layoutWidth: number;
   scale: number;
+  keyboardHeight: number | null;
 }
 
 export type StudentExamViewportMode =
   | 'bootstrapping'
   | 'stable'
-  | 'keyboard-active'
-  | 'keyboard-recovery'
   | 'pinch-active'
   | 'topology-recovery';
+
+export type StudentExamKeyboardPhase = 'clear' | 'armed' | 'occluding' | 'recovering';
 
 type ResumableStudentExamViewportMode = Exclude<StudentExamViewportMode, 'pinch-active'>;
 
 export interface StudentExamViewportPolicyState {
   mode: StudentExamViewportMode;
-  trustedRect: StudentExamViewportRect;
+  keyboardPhase: StudentExamKeyboardPhase;
+  editableFocusActive: boolean;
+  closedHeight: number;
+  liveOffsetTop: number;
   publishedRect: StudentExamViewportRect;
-  keyboardBaseline: StudentExamViewportRect | null;
   layoutWidth: number;
   modeBeforePinch: ResumableStudentExamViewportMode | null;
 }
@@ -75,18 +78,28 @@ function hasNativeScale(measurement: StudentExamViewportMeasurement): boolean {
   );
 }
 
-function acceptTrustedRect(
+function publish(
   state: StudentExamViewportPolicyState,
-  rect: StudentExamViewportRect,
-  measurement: StudentExamViewportMeasurement,
-  mode: StudentExamViewportMode = state.mode,
+  height: number,
+  offsetTop: number,
 ): StudentExamViewportPolicyState {
   return {
     ...state,
-    mode,
-    trustedRect: rect,
-    publishedRect: rect,
-    layoutWidth: finitePositive(measurement.layoutWidth) ?? state.layoutWidth,
+    liveOffsetTop: offsetTop,
+    publishedRect: { height, offsetTop },
+  };
+}
+
+function acceptClosedHeight(
+  state: StudentExamViewportPolicyState,
+  height: number,
+  offsetTop: number,
+  layoutWidth: number,
+): StudentExamViewportPolicyState {
+  return {
+    ...publish(state, height, offsetTop),
+    closedHeight: height,
+    layoutWidth,
   };
 }
 
@@ -97,9 +110,11 @@ export function createStudentExamViewportPolicy(
 
   return {
     mode: 'bootstrapping',
-    trustedRect: initialRect,
+    keyboardPhase: 'clear',
+    editableFocusActive: false,
+    closedHeight: initialRect.height,
+    liveOffsetTop: initialRect.offsetTop,
     publishedRect: initialRect,
-    keyboardBaseline: null,
     layoutWidth: finitePositive(initialMeasurement.layoutWidth) ?? 1,
     modeBeforePinch: null,
   };
@@ -116,57 +131,63 @@ export function reduceStudentExamViewportPolicy(
         return state;
       }
 
-      if (state.mode === 'keyboard-active') {
-        const baseline = state.keyboardBaseline ?? state.trustedRect;
+      const layoutWidth = finitePositive(event.measurement.layoutWidth) ?? state.layoutWidth;
+      const keyboardPositive =
+        event.measurement.keyboardHeight !== null && event.measurement.keyboardHeight > 0;
+      const keyboardExplicitlyClear = event.measurement.keyboardHeight === 0;
+
+      if (state.mode === 'bootstrapping' || state.mode === 'topology-recovery') {
+        return acceptClosedHeight(state, rect.height, rect.offsetTop, layoutWidth);
+      }
+
+      if (rect.height >= state.closedHeight) {
         return {
-          ...state,
-          publishedRect: {
-            height: baseline.height,
-            offsetTop: rect.offsetTop,
-          },
+          ...acceptClosedHeight(state, rect.height, rect.offsetTop, layoutWidth),
+          keyboardPhase: state.editableFocusActive ? 'armed' : 'clear',
         };
       }
 
-      if (state.mode === 'keyboard-recovery') {
-        const baseline = state.keyboardBaseline ?? state.trustedRect;
-        const fullHeightReturned =
-          rect.height >= baseline.height && rect.offsetTop <= baseline.offsetTop;
-        if (!fullHeightReturned) {
-          return {
-            ...state,
-            publishedRect: baseline,
-          };
-        }
-
+      if (keyboardPositive) {
         return {
-          ...acceptTrustedRect(state, rect, event.measurement, 'stable'),
-          keyboardBaseline: null,
+          ...publish(state, state.closedHeight, rect.offsetTop),
+          keyboardPhase: 'occluding',
         };
       }
 
-      return acceptTrustedRect(state, rect, event.measurement);
+      if (state.keyboardPhase === 'clear') {
+        return acceptClosedHeight(state, rect.height, rect.offsetTop, layoutWidth);
+      }
+
+      if (keyboardExplicitlyClear) {
+        return {
+          ...publish(state, state.closedHeight, rect.offsetTop),
+          keyboardPhase: state.editableFocusActive ? 'armed' : 'recovering',
+        };
+      }
+
+      if (state.keyboardPhase === 'armed') {
+        return {
+          ...publish(state, state.closedHeight, rect.offsetTop),
+          keyboardPhase: 'occluding',
+        };
+      }
+
+      return publish(state, state.closedHeight, rect.offsetTop);
     }
 
-    case 'editable-focus-entered': {
-      const baseline = state.keyboardBaseline ?? state.trustedRect;
+    case 'editable-focus-entered':
       return {
         ...state,
-        mode: 'keyboard-active',
-        keyboardBaseline: baseline,
-        publishedRect: baseline,
+        editableFocusActive: true,
+        keyboardPhase: state.keyboardPhase === 'occluding' ? 'occluding' : 'armed',
       };
-    }
 
-    case 'editable-focus-left': {
-      const baseline = state.keyboardBaseline ?? state.trustedRect;
+    case 'editable-focus-left':
       return {
         ...state,
-        mode: 'keyboard-recovery',
-        keyboardBaseline: baseline,
-        trustedRect: baseline,
-        publishedRect: baseline,
+        editableFocusActive: false,
+        keyboardPhase: 'recovering',
       };
-    }
 
     case 'bootstrap-recovery-started':
       if (state.mode === 'pinch-active') {
@@ -175,7 +196,6 @@ export function reduceStudentExamViewportPolicy(
       return {
         ...state,
         mode: 'bootstrapping',
-        keyboardBaseline: null,
         modeBeforePinch: null,
       };
 
@@ -186,7 +206,7 @@ export function reduceStudentExamViewportPolicy(
       return {
         ...state,
         mode: 'topology-recovery',
-        keyboardBaseline: null,
+        keyboardPhase: state.editableFocusActive ? 'armed' : 'clear',
         modeBeforePinch: null,
       };
 
@@ -198,7 +218,6 @@ export function reduceStudentExamViewportPolicy(
         ...state,
         mode: 'pinch-active',
         modeBeforePinch: state.mode,
-        publishedRect: state.trustedRect,
       };
 
     case 'pinch-finished':

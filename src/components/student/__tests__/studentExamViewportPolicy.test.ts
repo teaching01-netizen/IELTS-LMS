@@ -14,10 +14,61 @@ const sample = (
   offsetTop: 0,
   layoutWidth: 1024,
   scale: 1,
+  keyboardHeight: null,
   ...options,
 });
 
 describe('studentExamViewportPolicy', () => {
+  it('keeps the live visual origin while tap-outside keyboard recovery settles', () => {
+    let state = createStudentExamViewportPolicy(sample(900));
+    state = reduceStudentExamViewportPolicy(state, { type: 'recovery-finished' });
+    state = reduceStudentExamViewportPolicy(state, { type: 'editable-focus-entered' });
+    state = reduceStudentExamViewportPolicy(state, {
+      type: 'measurement-received',
+      measurement: sample(560, { offsetTop: 180 }),
+    });
+    state = reduceStudentExamViewportPolicy(state, { type: 'editable-focus-left' });
+    state = reduceStudentExamViewportPolicy(state, {
+      type: 'measurement-received',
+      measurement: sample(900, { offsetTop: 180 }),
+    });
+
+    expect(state.publishedRect).toEqual({ height: 900, offsetTop: 180 });
+    expect(state.keyboardPhase).toBe('clear');
+
+    state = reduceStudentExamViewportPolicy(state, {
+      type: 'measurement-received',
+      measurement: sample(900, { offsetTop: 0 }),
+    });
+
+    expect(state.publishedRect).toEqual({ height: 900, offsetTop: 0 });
+  });
+
+  it('accepts recovered growth when the keyboard hides but focus remains', () => {
+    let state = createStudentExamViewportPolicy(sample(900));
+    state = reduceStudentExamViewportPolicy(state, { type: 'recovery-finished' });
+    state = reduceStudentExamViewportPolicy(state, { type: 'editable-focus-entered' });
+    state = reduceStudentExamViewportPolicy(state, {
+      type: 'measurement-received',
+      measurement: sample(560, { offsetTop: 180 }),
+    });
+    state = reduceStudentExamViewportPolicy(state, {
+      type: 'measurement-received',
+      measurement: sample(950, { layoutHeight: 950, offsetTop: 180 }),
+    });
+
+    expect(state.editableFocusActive).toBe(true);
+    expect(state.keyboardPhase).toBe('armed');
+    expect(state.publishedRect).toEqual({ height: 950, offsetTop: 180 });
+
+    state = reduceStudentExamViewportPolicy(state, {
+      type: 'measurement-received',
+      measurement: sample(950, { layoutHeight: 950, offsetTop: 0 }),
+    });
+
+    expect(state.publishedRect).toEqual({ height: 950, offsetTop: 0 });
+  });
+
   it('preserves the trusted pre-keyboard rectangle while dismissal geometry stays smaller', () => {
     let state = createStudentExamViewportPolicy(sample(900));
     state = reduceStudentExamViewportPolicy(state, { type: 'recovery-finished' });
@@ -40,8 +91,9 @@ describe('studentExamViewportPolicy', () => {
       measurement: sample(810, { offsetTop: 10 }),
     });
 
-    expect(state.mode).toBe('keyboard-recovery');
-    expect(state.publishedRect).toEqual({ height: 900, offsetTop: 0 });
+    expect(state.mode).toBe('stable');
+    expect(state.keyboardPhase).toBe('recovering');
+    expect(state.publishedRect).toEqual({ height: 900, offsetTop: 10 });
   });
 
   it('accepts late native-scale growth after keyboard dismissal', () => {
@@ -65,6 +117,7 @@ describe('studentExamViewportPolicy', () => {
       measurement: sample(900),
     });
 
+    expect(state.keyboardPhase).toBe('clear');
     expect(state.publishedRect).toEqual({ height: 900, offsetTop: 0 });
 
     state = reduceStudentExamViewportPolicy(state, { type: 'recovery-finished' });
@@ -99,7 +152,8 @@ describe('studentExamViewportPolicy', () => {
     state = reduceStudentExamViewportPolicy(state, { type: 'editable-focus-entered' });
     state = reduceStudentExamViewportPolicy(state, { type: 'editable-focus-left' });
 
-    expect(state.publishedRect).toEqual({ height: 900, offsetTop: 0 });
+    expect(state.keyboardPhase).toBe('recovering');
+    expect(state.publishedRect).toEqual({ height: 900, offsetTop: 100 });
   });
 
   it('ignores invalid and scaled measurements while retaining the trusted rectangle', () => {
