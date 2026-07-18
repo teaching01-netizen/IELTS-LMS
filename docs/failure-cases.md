@@ -644,10 +644,15 @@ CSS-only fixed floating footer pill with safe-area insets. The workspace reserve
 footprint, so the overlay does not cover final answer controls. No viewport measurement, keyboard
 state, resize timer, focus listener, or browser-version branch was introduced.
 
+The reserved clearance visually continues the white exam canvas. The pill uses a subtle layered
+elevation shadow without a separate grey border, so the functional reserve does not read as a
+full-width dock or tray.
+
 ### Invariant
 
 Do not return `.student-exam-footer` to shell track sizing and do not create a second geometry model
-for it. Footer placement is fixed and CSS-owned; workspace clearance is reserved independently.
+for it. Footer placement is fixed and CSS-owned; workspace clearance is reserved independently and
+must use the exam canvas background rather than introducing a contrasting footer tray.
 
 ### Regression Protection
 

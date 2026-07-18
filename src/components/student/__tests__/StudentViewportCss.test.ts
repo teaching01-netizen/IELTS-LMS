@@ -40,4 +40,17 @@ describe('student exam CSS-owned viewport shell', () => {
     expect(css).not.toContain('--student-viewport-height');
     expect(css).not.toContain('--student-viewport-offset-top');
   });
+
+  it('renders the floating pill over a continuous white exam canvas', () => {
+    const mainRule = css.match(/\.student-exam-main\s*\{([^}]*)\}/s)?.[1];
+    const footerRule = css.match(/\.student-exam-footer\s*\{([^}]*)\}/s)?.[1];
+    const footerShadow = footerRule?.match(/box-shadow:\s*([^;]+);/s)?.[1];
+
+    expect(mainRule).toMatch(/background-color:\s*#fff\s*;/);
+    expect(footerRule).not.toMatch(/(?:^|;)\s*border\s*:/);
+    expect(footerShadow).toContain(',');
+    expect(footerShadow).toMatch(/rgba\(9,\s*30,\s*66,\s*0\.08\)/);
+    expect(footerShadow).toMatch(/rgba\(9,\s*30,\s*66,\s*0\.12\)/);
+    expect(footerShadow).not.toMatch(/rgba\([^)]*,\s*0\.2\)/);
+  });
 });
