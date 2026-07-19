@@ -9,6 +9,7 @@ Remove the Builder's manual **Required Correct** control for `MULTI_MCQ` blocks.
 - Builder question editing owns changes to option text and `isCorrect` in `src/components/blocks/MultiSelectMCQBlock.tsx`.
 - Builder answer-key editing also changes `isCorrect` through `src/features/builder/utils/answerKeyOverview.ts`.
 - Student delivery collects an array of selected option IDs under the block answer key. Submitted IDs must remain unchanged and must not be replaced by labels or derived values.
+- Backend delivery validates the same option-ID array and derives its multi-choice maximum/completion slots from marked options.
 - Grading resolves the correct IDs from `option.isCorrect` and compares exact sets, independent of ordering.
 - Grading PDF export consumes the same grading review row model and must show the real submitted option text and marked-correct option text.
 - `requiredSelections` remains in persisted data for backward compatibility, but is a projection of the marked-correct count rather than an independently editable rule.
@@ -20,6 +21,8 @@ Introduce a focused Multi-Select MCQ utility that exposes the correct option IDs
 Builder edit paths synchronize the compatibility field `requiredSelections` whenever correctness changes. The visible question editor removes the manual dropdown and reports the derived marked-correct count. Existing drafts with a mismatched compatibility field are normalized by the next correctness edit, while runtime consumers use the derived count immediately.
 
 Student rendering uses the derived count to cap selections while continuing to persist the selected option-ID array. Numbering and export slot counts use the same derived count so a stale legacy `requiredSelections` value cannot override the answer key.
+
+Backend delivery performs the same derivation when building its answer constraint and completion schema. This prevents the server from rejecting a legitimate option-ID array because of stale compatibility data.
 
 Grading continues exact set comparison using marked option IDs. Empty correct sets are treated as invalid configuration, not as an automatically correct unanswered question.
 

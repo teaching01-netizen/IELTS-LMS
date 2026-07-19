@@ -11,6 +11,7 @@ import type {
   SingleMCQBlock,
 } from '../../../types';
 import { buildAcceptedAnswerFields } from '../../../utils/acceptedAnswers';
+import { setMultiSelectCorrectOptionIds } from '../../../utils/multiSelectMcq';
 import { getQuestionNumberLabel, getStudentQuestionsForModule, type StudentQuestionDescriptor } from '../../../services/examAdapterService';
 
 type SubAnswerTreeNode = {
@@ -326,12 +327,7 @@ export function applyAnswerKeyEdit(
   return updateBlockInState(state, location, (block) => {
     if (edit.kind === 'set_multi_mcq_correct') {
       if (block.type !== 'MULTI_MCQ') return block;
-      const multi = block as MultiMCQBlock;
-      const correctIds = new Set(edit.optionIds);
-      return {
-        ...multi,
-        options: multi.options.map((opt) => ({ ...opt, isCorrect: correctIds.has(opt.id) })),
-      };
+      return setMultiSelectCorrectOptionIds(block as MultiMCQBlock, edit.optionIds);
     }
 
     if (edit.kind === 'set_single_mcq_correct') {

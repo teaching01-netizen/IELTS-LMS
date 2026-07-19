@@ -421,6 +421,7 @@ fn validate_question_block(
 
     match block_type {
         "SINGLE_MCQ" => validate_single_mcq(block_obj, &field_prefix, result),
+        "MULTI_MCQ" => validate_multi_mcq(block_obj, &field_prefix, result),
         "SHORT_ANSWER" => validate_short_answer(block_obj, &field_prefix, result),
         "SENTENCE_COMPLETION" => validate_sentence_completion(block_obj, &field_prefix, result),
         "DIAGRAM_LABELING" => validate_diagram_labeling(block_obj, &field_prefix, result),
@@ -429,13 +430,98 @@ fn validate_question_block(
         "NOTE_COMPLETION" => validate_note_completion(block_obj, &field_prefix, result),
         "CLASSIFICATION" => validate_classification(block_obj, &field_prefix, result),
         "MATCHING_FEATURES" => validate_matching_features(block_obj, &field_prefix, result),
-        "TFNG" | "CLOZE" | "MATCHING" | "MAP" | "MULTI_MCQ" => count_questions_in_block(block_obj),
+        "TFNG" | "CLOZE" | "MATCHING" | "MAP" => count_questions_in_block(block_obj),
         _ => {
             result.add_warning(
                 format!("{}.type", field_prefix),
                 format!("Unknown question type: {}", block_type),
             );
             0
+        }
+    }
+}
+
+fn validate_multi_mcq(
+    block: &serde_json::Map<String, serde_json::Value>,
+    field_prefix: &str,
+    result: &mut ValidationResult,
+) -> i32 {
+    if block
+        .get("stem")
+        .and_then(|stem| stem.as_str())
+        .map(|stem| stem.trim().is_empty())
+        .unwrap_or(true)
+    {
+        result.add_error(
+            format!("{}.stem", field_prefix),
+            "Question stem is required",
+        );
+    }
+
+    let options = block.get("options").and_then(|options| options.as_array());
+    match options {
+        None => {
+            result.add_error(
+                format!("{}.options", field_prefix),
+                "Options are required for MCQ",
+            );
+            0
+        }
+        Some(options) if options.len() < 2 => {
+            result.add_error(
+                format!("{}.options", field_prefix),
+                "At least 2 options are required for MCQ",
+            );
+            0
+        }
+        Some(options) => {
+            let correct_count = options
+                .iter()
+                .filter(|option| {
+                    option
+                        .as_object()
+                        .and_then(|option| option.get("isCorrect"))
+                        .and_then(|is_correct| is_correct.as_bool())
+                        .unwrap_or(false)
+                })
+                .count();
+
+            if correct_count == 0 {
+                result.add_error(
+                    format!("{}.options", field_prefix),
+                    "At least one option must be marked as correct",
+                );
+            }
+
+            for (option_idx, option) in options.iter().enumerate() {
+                if option
+                    .as_object()
+                    .and_then(|option| option.get("id"))
+                    .and_then(|id| id.as_str())
+                    .map(|id| id.trim().is_empty())
+                    .unwrap_or(true)
+                {
+                    result.add_error(
+                        format!("{}.options[{}].id", field_prefix, option_idx),
+                        "Option ID is required",
+                    );
+                }
+
+                if option
+                    .as_object()
+                    .and_then(|option| option.get("text"))
+                    .and_then(|text| text.as_str())
+                    .map(|text| text.trim().is_empty())
+                    .unwrap_or(true)
+                {
+                    result.add_error(
+                        format!("{}.options[{}].text", field_prefix, option_idx),
+                        "Option text is required",
+                    );
+                }
+            }
+
+            correct_count.max(1) as i32
         }
     }
 }
@@ -1616,6 +1702,77 @@ mod tests {
             "unexpected errors: {:?}",
             result.errors
         );
+    }
+
+    #[test]
+    fn multi_mcq_rejects_an_empty_marked_answer_set() {
+        let block = json!({
+            "id": "multi-block",
+            "type": "MULTI_MCQ",
+            "stem": "Choose all that apply.",
+            "requiredSelections": 4,
+            "options": [
+                {"id": "Option-A", "text": "Alpha", "isCorrect": false},
+                {"id": "Option-B", "text": "Beta", "isCorrect": false}
+            ]
+        });
+        let mut result = ValidationResult::new();
+
+        let question_count =
+            validate_question_block(&block, 0, 0, "reading", "passages", "blocks", &mut result);
+
+        assert_eq!(question_count, 1);
+        assert!(result.errors.iter().any(|error| {
+            error.field == "content.reading.passages[0].blocks[0].options"
+                && error.message == "At least one option must be marked as correct"
+        }));
+    }
+
+    #[test]
+    fn multi_mcq_accepts_any_non_empty_marked_answer_count_despite_stale_projection() {
+        let block = json!({
+            "id": "multi-block",
+            "type": "MULTI_MCQ",
+            "stem": "Choose all that apply.",
+            "requiredSelections": 4,
+            "options": [
+                {"id": "Option-A", "text": "Alpha", "isCorrect": true},
+                {"id": "Option-B", "text": "Beta", "isCorrect": false},
+                {"id": "Option-C", "text": "Charlie", "isCorrect": true}
+            ]
+        });
+        let mut result = ValidationResult::new();
+
+        let question_count =
+            validate_question_block(&block, 0, 0, "reading", "passages", "blocks", &mut result);
+
+        assert_eq!(question_count, 2);
+        assert!(
+            result.errors.is_empty(),
+            "unexpected errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn multi_mcq_rejects_an_empty_option_id() {
+        let block = json!({
+            "id": "multi-block",
+            "type": "MULTI_MCQ",
+            "stem": "Choose all that apply.",
+            "options": [
+                {"id": "", "text": "Alpha", "isCorrect": true},
+                {"id": "Option-B", "text": "Beta", "isCorrect": false}
+            ]
+        });
+        let mut result = ValidationResult::new();
+
+        validate_question_block(&block, 0, 0, "reading", "passages", "blocks", &mut result);
+
+        assert!(result.errors.iter().any(|error| {
+            error.field == "content.reading.passages[0].blocks[0].options[0].id"
+                && error.message == "Option ID is required"
+        }));
     }
 
     #[test]

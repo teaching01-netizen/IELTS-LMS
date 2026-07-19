@@ -17,7 +17,7 @@ function countExportedAnswerKeys(output: string): number {
 
 /**
  * The number of rows the export must produce: exactly one per enumerated
- * question unit. MULTI_MCQ contributes one row that spans `requiredSelections`
+ * question unit. MULTI_MCQ contributes one row that spans the marked-correct count
  * slots (rendered as `Q1-2`), which is why `enumerateBlockQuestionUnits`
  * returns a single unit for it.
  */
@@ -117,6 +117,21 @@ function buildAllTypesExam(id: string): Exam {
 }
 
 describe('exam text export vs enumerated question units (drift guard)', () => {
+  it('renders the marked-correct MULTI_MCQ count instead of stale requiredSelections', () => {
+    const exam = buildAllTypesExam('exam-multi-stale');
+    const multi = exam.content.reading.passages[0]?.blocks.find(
+      (block) => block.type === 'MULTI_MCQ',
+    );
+    if (multi?.type === 'MULTI_MCQ') {
+      multi.requiredSelections = 4;
+    }
+
+    const output = buildExamTextExport([exam], new Date('2026-07-11T12:00:00.000Z'));
+
+    expect(output).toContain('Correct options: 2');
+    expect(output).not.toContain('Required selections: 4');
+  });
+
   it('renders exactly one row per enumerated question unit for every block type, including SINGLE_MCQ sub-questions', () => {
     const exam = buildAllTypesExam('exam-all');
     const singleMcq = exam.content.reading.passages[0]?.blocks.find(

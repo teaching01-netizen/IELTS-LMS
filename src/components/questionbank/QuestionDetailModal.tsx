@@ -4,6 +4,7 @@ import { QuestionBankItem } from '../../types';
 import { Button } from '../ui/Button';
 import { resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 import { getCanonicalTableCells } from '../../utils/tableCompletion';
+import { getMultiSelectSelectionLimit } from '../../utils/multiSelectMcq';
 
 interface QuestionDetailModalProps {
   item: QuestionBankItem;
@@ -192,7 +193,7 @@ function renderBlockPreview(item: QuestionBankItem) {
         <div>
           <h3 className="text-sm font-semibold text-gray-700 mb-2">Question Stem</h3>
           <p className="text-gray-900 bg-gray-50 p-3 rounded mb-3">{block.stem}</p>
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Options ({block.options.length}) - Select {block.requiredSelections}</h3>
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Options ({block.options.length}) - Select {getMultiSelectSelectionLimit(block)}</h3>
           <div className="space-y-2">
             {block.options.map((opt, i) => (
               <div key={opt.id} className={`bg-gray-50 p-3 rounded flex items-center gap-2 ${opt.isCorrect ? 'border-2 border-green-500' : ''}`}>

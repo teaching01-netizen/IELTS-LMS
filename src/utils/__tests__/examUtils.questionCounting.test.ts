@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getBlockQuestionCount, getPassageQuestionCount, getPartQuestionCount } from '../examUtils';
+import { getBlockQuestionCount, getPassageQuestionCount, getPartQuestionCount, validateBlock } from '../examUtils';
 import type { QuestionBlock, Passage, ListeningPart } from '../../types';
 
 describe('getBlockQuestionCount', () => {
@@ -49,10 +49,10 @@ describe('getBlockQuestionCount', () => {
     expect(getBlockQuestionCount(block)).toBe(2);
   });
 
-  it('counts MULTI_MCQ by requiredSelections', () => {
+  it('counts MULTI_MCQ by marked-correct options despite stale requiredSelections', () => {
     const block: QuestionBlock = {
       id: 'b1', type: 'MULTI_MCQ', instruction: '', stem: 'S',
-      requiredSelections: 2,
+      requiredSelections: 4,
       options: [
         { id: 'o1', text: 'A', isCorrect: true },
         { id: 'o2', text: 'B', isCorrect: true },
@@ -60,6 +60,27 @@ describe('getBlockQuestionCount', () => {
       ],
     };
     expect(getBlockQuestionCount(block)).toBe(2);
+  });
+
+  it('validates at least one MULTI_MCQ correct option without an independent count requirement', () => {
+    const validBlock: QuestionBlock = {
+      id: 'b1', type: 'MULTI_MCQ', instruction: '', stem: 'S',
+      requiredSelections: 4,
+      options: [
+        { id: 'o1', text: 'A', isCorrect: true },
+        { id: 'o2', text: 'B', isCorrect: false },
+      ],
+    };
+
+    expect(validateBlock(validBlock).isValid).toBe(true);
+
+    const invalidBlock: QuestionBlock = {
+      ...validBlock,
+      options: validBlock.options.map((option) => ({ ...option, isCorrect: false })),
+    };
+    expect(validateBlock(invalidBlock).errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: 'options', message: 'Mark at least one option as correct' }),
+    ]));
   });
 
   it('counts SINGLE_MCQ with questions array', () => {

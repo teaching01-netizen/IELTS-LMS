@@ -572,7 +572,7 @@ Bulk "Export to TXT" produced an incomplete file: an exam reported as N question
 Introduced a single source of truth, `enumerateBlockQuestionUnits(block): QuestionUnit[]` in `src/utils/examUtils.ts`, that returns one unit per answerable slot with `{ blockId, blockType, questionId, slotCount }`. Both consumers now derive from it:
 - `getBlockQuestionCount` sums `slotCount` over the enumerated units (so count and export can never disagree on cardinality).
 - `renderBlock` in `src/utils/examTextExport.ts` was refactored to a per-block context section plus `enumerateBlockQuestionUnits(block).forEach(unit => renderUnit(...))`, with `renderUnit` switching on `unit.blockType`. `SINGLE_MCQ` renders each sub-question from `block.questions[x]` when present, falling back to block-level rendering when empty.
-Sub-block grouping (`sentenceBlankGroupKey`, `tableCellGroupKey`) and `scoreGroupId` dedup follow the count model exactly. Multi-select is emitted as one unit with `slotCount = requiredSelections`.
+Sub-block grouping (`sentenceBlankGroupKey`, `tableCellGroupKey`) and `scoreGroupId` dedup follow the count model exactly. Multi-select is emitted as one unit whose `slotCount` derives from the number of options marked correct.
 
 ### Regression Protection
 - `src/utils/__tests__/examTextExport.drift.test.ts` — drift guard: for a fixture exercising all 14 block types, the number of exported `Q*` answer-key rows must equal the number of units from `enumerateBlockQuestionUnits`. Mutation-verified: skipping `SINGLE_MCQ` units makes the test fail (RED).
@@ -583,7 +583,7 @@ Sub-block grouping (`sentenceBlankGroupKey`, `tableCellGroupKey`) and `scoreGrou
 The TXT export and `getBlockQuestionCount`/`getExamStatsFromState` must derive question cardinality from the same `enumerateBlockQuestionUnits` enumeration. Any new question-bearing array on a block must be added there once; both count and export follow automatically. Do not re-introduce block-specific count vs. render logic in two places.
 
 ### Note (separate, pre-existing, out of scope)
-`MULTI_MCQ` is rendered as one question spanning slots (e.g. `Q1-2`) while `getBlockQuestionCount` returns `requiredSelections`. This makes the canonical "total questions" count larger than the number of answer-key lines for multi-select blocks by design (one question, multiple slots). Do not "fix" by inflating the export; reconcile the counting model deliberately if the discrepancy becomes user-visible.
+`MULTI_MCQ` is rendered as one question spanning slots (e.g. `Q1-2`) while `getBlockQuestionCount` returns the number of options marked correct. This makes the canonical "total questions" count larger than the number of answer-key lines for multi-select blocks by design (one question, multiple slots). Do not "fix" by inflating the export; reconcile the counting model deliberately if the discrepancy becomes user-visible.
 
 ---
 
@@ -663,3 +663,41 @@ scroll owners. Safe-area values belong in padding, not footer coordinates.
 - `src/components/student/__tests__/StudentFooterRepresentative.test.tsx`
 - `src/components/student/__tests__/StudentWriting.a11y.test.tsx`
 - `e2e/student-ipad-layout.spec.ts`
+
+---
+
+## 2026-07-19: Multi-Select Answer Count Drifts Across Builder, Delivery, and Export
+
+### Symptom
+
+A `MULTI_MCQ` block could mark two options correct while storing a different `requiredSelections` value. Builder validation rejected otherwise valid answer keys, the student UI/backend allowed the wrong number of selections, numbering used the wrong slot range, and TXT export displayed the stale count. A malformed empty answer key could also auto-match an unanswered empty set during grading.
+
+### Root cause
+
+Two independently editable fields described one rule: `options[].isCorrect` owned the grading key, while `requiredSelections` owned authoring validation, student limits, backend delivery constraints, and numbering. Deleting or unchecking options did not consistently synchronize them.
+
+### Fix
+
+- `src/utils/multiSelectMcq.ts` is the frontend owner for marked IDs/count, runtime selection limits, safe correctness edits, and safe option removal.
+- Builder correctness edits keep at least one marked option and synchronize `requiredSelections` as a compatibility projection.
+- Student UI, canonical numbering, adapter descriptors, text export, and backend delivery derive the count from marked options.
+- Submitted answers remain the real option-ID array; grading and grading-PDF source rows map those IDs without mutating them.
+- Empty marked-answer sets are publish-invalid and cannot auto-grade as correct in either TypeScript review logic or Rust grading.
+- Frontend review grading compares submitted option IDs exactly, matching the Rust grader; answer-text case and punctuation normalization never applies to IDs.
+- Authoritative backend publish validation enforces the same non-empty marked-answer invariant, requires usable option IDs, derives its slot count from the marked options, and ignores stale `requiredSelections` values.
+
+### Regression protection
+
+- `src/utils/__tests__/multiSelectMcq.test.ts`
+- `src/components/blocks/__tests__/MultiSelectMCQBlock.test.tsx`
+- `src/components/student/__tests__/StudentQuestionExperience.test.tsx`
+- `src/utils/__tests__/examUtils.questionCounting.test.ts`
+- `src/services/__tests__/examAdapterService.studentQuestions.test.ts`
+- `src/components/admin/__tests__/gradingAnswerUtils.test.ts`
+- `src/components/admin/__tests__/gradingReviewUtils.test.ts`
+- `src/utils/__tests__/examTextExport.drift.test.ts`
+- Backend delivery/grading unit tests named `*multi_mcq*`
+
+### Invariant
+
+For `MULTI_MCQ`, `options[].isCorrect` is authoritative. At least one option must be marked correct. Never use `requiredSelections` to decide student limits, completion slots, correct answers, or export content; it exists only for serialized backward compatibility.

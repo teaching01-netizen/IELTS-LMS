@@ -12,6 +12,7 @@ import {
 import { createDefaultConfig, normalizeExamConfig } from '../constants/examDefaults';
 import { hydrateExamState } from '../services/examAdapterService';
 import { resolveAcceptedAnswers } from './acceptedAnswers';
+import { getMultiSelectCorrectCount, getMultiSelectSelectionLimit } from './multiSelectMcq';
 
 /**
  * A single question as far as counting, numbering, and TXT export are concerned.
@@ -26,7 +27,7 @@ export interface QuestionUnit {
   blockType: QuestionType;
   /** Stable id for the question/blank/label/feature this unit represents; null for block-level units (e.g. MULTI_MCQ). */
   questionId: string | null;
-  /** Answer slots this unit occupies in global numbering (MULTI_MCQ = requiredSelections, everything else = 1). */
+  /** Answer slots this unit occupies in global numbering (MULTI_MCQ = marked-correct count, everything else = 1). */
   slotCount: number;
 }
 
@@ -60,7 +61,7 @@ export const enumerateBlockQuestionUnits = (block: QuestionBlock): QuestionUnit[
         blockId: block.id,
         blockType: block.type,
         questionId: null,
-        slotCount: Math.max(1, block.requiredSelections),
+        slotCount: getMultiSelectSelectionLimit(block),
       }];
     case 'SINGLE_MCQ':
       if (Array.isArray(block.questions) && block.questions.length > 0) {
@@ -374,20 +375,16 @@ const validateMultiMCQBlock = (block: MultiMCQBlock): ValidationError[] => {
     errors.push({ blockId: block.id, field: 'stem', message: 'Question stem is required', type: 'error' });
   }
   
-  if (block.requiredSelections < 1 || block.requiredSelections > 4) {
-    errors.push({ blockId: block.id, field: 'requiredSelections', message: 'Required selections must be between 1 and 4', type: 'error' });
-  }
-  
   if (block.options.length < 2) {
     errors.push({ blockId: block.id, field: 'options', message: 'At least 2 options are required', type: 'error' });
   }
   
-  const correctCount = block.options.filter(o => o.isCorrect).length;
-  if (correctCount !== block.requiredSelections) {
+  const correctCount = getMultiSelectCorrectCount(block);
+  if (correctCount < 1) {
     errors.push({
       blockId: block.id,
       field: 'options',
-      message: `Must have exactly ${block.requiredSelections} correct option(s), currently has ${correctCount}`,
+      message: 'Mark at least one option as correct',
       type: 'error'
     });
   }
@@ -896,18 +893,20 @@ const migrateLegacyBlock = (block: LegacyBlock): QuestionBlock => {
         }))
       } as MapBlock;
       
-    case 'MULTI_MCQ':
+    case 'MULTI_MCQ': {
+      const options = (block.options || []).map((o) => ({
+        id: o.id || `o${Date.now()}${Math.random()}`,
+        text: o.text || '',
+        isCorrect: o.isCorrect || false
+      }));
       return {
         ...baseBlock,
         type: 'MULTI_MCQ',
         stem: block.stem || block.instruction || '',
-        requiredSelections: block.correctCount || block.requiredSelections || 2,
-        options: (block.options || []).map((o) => ({
-          id: o.id || `o${Date.now()}${Math.random()}`,
-          text: o.text || '',
-          isCorrect: o.isCorrect || false
-        }))
+        requiredSelections: Math.max(1, options.filter((option) => option.isCorrect).length),
+        options
       } as MultiMCQBlock;
+    }
       
     default:
       return {

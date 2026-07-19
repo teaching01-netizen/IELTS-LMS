@@ -9,6 +9,10 @@ import type {
   WritingTaskContent,
 } from '../types';
 import { resolveAcceptedAnswers } from './acceptedAnswers';
+import {
+  getMultiSelectCorrectOptionIds,
+  getMultiSelectSelectionLimit,
+} from './multiSelectMcq';
 import { htmlToPlainText } from './htmlText';
 import { getInsertedImages, supportsInsertedImages } from './insertedImages';
 import {
@@ -228,17 +232,13 @@ function renderUnit(
     }
     case 'MULTI_MCQ': {
       context.lines.push(`Stem: ${toPlainText(block.stem)}`);
-      context.lines.push(`Required selections: ${block.requiredSelections}`);
+      const answerIds = getMultiSelectCorrectOptionIds(block);
+      context.lines.push(`Correct options: ${answerIds.length}`);
       block.options.forEach((option, index) => {
         context.lines.push(`  ${formatOptionWithLetter(option, index)}`);
       });
-      const answerIds = block.options
-        .filter((option) => option.isCorrect)
-        .map((option) => option.id);
       const answer = buildMcqAnswerDisplay(block.options, answerIds);
-      const slots = Number.isFinite(block.requiredSelections)
-        ? Math.max(1, Math.floor(block.requiredSelections))
-        : 1;
+      const slots = getMultiSelectSelectionLimit(block);
       pushQuestion(context, toPlainText(block.stem), answer, slots);
       break;
     }

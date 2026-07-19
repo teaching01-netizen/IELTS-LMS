@@ -171,6 +171,41 @@ function createWritingTaskSubmission(
 }
 
 describe('gradingReviewUtils', () => {
+  test('keeps real MULTI_MCQ student and correct answers in the grading PDF source rows', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages[0]!.blocks = [{
+      id: 'multi-1',
+      type: 'MULTI_MCQ',
+      instruction: 'Choose the correct options.',
+      stem: 'Pick two',
+      requiredSelections: 4,
+      options: [
+        { id: 'option-a', text: 'Alpha', isCorrect: true },
+        { id: 'option-b', text: 'Beta', isCorrect: false },
+        { id: 'option-c', text: 'Charlie', isCorrect: true },
+      ],
+    }];
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      sectionSubmissions: [{
+        submissionId: 'sub-1',
+        sectionSubmission: createSectionSubmission(
+          'sub-1',
+          'reading',
+          { 'multi-1': ['option-b', 'option-a'] },
+          [],
+        ),
+      }],
+      examState,
+      moduleType: 'reading',
+    });
+
+    expect(exportData.rows[0]?.['answer:multi-1']).toBe('Beta, Alpha');
+    expect(exportData.rows[0]?.['rightAnswer:multi-1']).toBe('Alpha, Charlie');
+  });
+
   test('escapes csv values with commas, quotes, and newlines', () => {
     expect(escapeCsvValue('hello, "world"\nline two')).toBe('"hello, ""world""\nline two"');
   });

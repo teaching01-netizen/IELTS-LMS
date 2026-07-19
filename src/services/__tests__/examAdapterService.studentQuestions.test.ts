@@ -9,6 +9,28 @@ import {
 } from '../examAdapterService';
 
 describe('student question descriptors (student exam core logic)', () => {
+  it('derives MULTI_MCQ descriptor slots from marked options instead of requiredSelections', () => {
+    const state = createInitialExamState('Exam', 'Academic');
+
+    state.reading.passages[0].blocks = [{
+      id: 'm-stale',
+      type: 'MULTI_MCQ',
+      instruction: 'Choose the correct options.',
+      stem: 'Which options are correct?',
+      requiredSelections: 4,
+      options: [
+        { id: 'a', text: 'A', isCorrect: true },
+        { id: 'b', text: 'B', isCorrect: false },
+        { id: 'c', text: 'C', isCorrect: true },
+      ],
+    }];
+
+    const questions = getStudentQuestionsForModule(state, 'reading');
+
+    expect(questions[0]?.correctCount).toBe(2);
+    expect(countQuestionSlots(questions)).toBe(2);
+  });
+
   it('does not treat MULTI_MCQ with requiredSelections=0 as fully answered', () => {
     const state = createInitialExamState('Exam', 'Academic');
 

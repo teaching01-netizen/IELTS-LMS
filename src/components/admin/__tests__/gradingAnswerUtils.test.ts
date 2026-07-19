@@ -211,7 +211,7 @@ describe('gradingAnswerUtils', () => {
         type: 'MULTI_MCQ',
         instruction: '',
         stem: 'Choose two',
-        requiredSelections: 2,
+        requiredSelections: 4,
         options: [
           { id: 'A', text: 'Alpha', isCorrect: true },
           { id: 'B', text: 'Beta', isCorrect: false },
@@ -224,6 +224,59 @@ describe('gradingAnswerUtils', () => {
     expect(getCorrectAnswerDisplay(descriptor)).toBe('Alpha, Charlie');
     expect(getStudentAnswerDisplay(descriptor, { 'block-1': ['C', 'A'] })).toBe('Charlie, Alpha');
     expect(isStudentAnswerCorrect(descriptor, { 'block-1': ['C', 'A'] })).toBe(true);
+  });
+
+  test('MULTI_MCQ: option IDs are compared exactly without answer-text normalization', () => {
+    const descriptor = {
+      id: 'block-exact-ids',
+      blockId: 'block-exact-ids',
+      groupId: 'p1',
+      groupLabel: 'Passage 1',
+      isMulti: true,
+      correctCount: 1,
+      answerKey: 'block-exact-ids',
+      block: {
+        id: 'block-exact-ids',
+        type: 'MULTI_MCQ',
+        instruction: '',
+        stem: 'Choose one',
+        requiredSelections: 1,
+        options: [
+          { id: 'Option-A', text: 'Alpha', isCorrect: true },
+          { id: 'Option-B', text: 'Beta', isCorrect: false },
+        ],
+      },
+      question: null,
+    } as unknown as StudentQuestionDescriptor;
+
+    expect(isStudentAnswerCorrect(descriptor, { 'block-exact-ids': ['option-a'] })).toBe(false);
+    expect(isStudentAnswerCorrect(descriptor, { 'block-exact-ids': ['Option-A'] })).toBe(true);
+  });
+
+  test('MULTI_MCQ: an empty answer key never auto-passes an unanswered student', () => {
+    const descriptor = {
+      id: 'block-empty',
+      blockId: 'block-empty',
+      groupId: 'p1',
+      groupLabel: 'Passage 1',
+      isMulti: true,
+      correctCount: 1,
+      answerKey: 'block-empty',
+      block: {
+        id: 'block-empty',
+        type: 'MULTI_MCQ',
+        instruction: '',
+        stem: 'Malformed answer key',
+        requiredSelections: 1,
+        options: [
+          { id: 'A', text: 'Alpha', isCorrect: false },
+          { id: 'B', text: 'Beta', isCorrect: false },
+        ],
+      },
+      question: null,
+    } as unknown as StudentQuestionDescriptor;
+
+    expect(isStudentAnswerCorrect(descriptor, { 'block-empty': [] })).toBeNull();
   });
 
   test('SENTENCE_COMPLETION: uses answerIndex to resolve correct blank', () => {

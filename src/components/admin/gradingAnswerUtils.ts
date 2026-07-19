@@ -282,14 +282,13 @@ export function getStudentAnswerDisplay(
   return formatAnswerValue(value);
 }
 
-function normalizedSetFromUnknown(value: unknown): Set<string> {
+function exactIdSetFromUnknown(value: unknown): Set<string> {
   if (!Array.isArray(value)) {
     return new Set<string>();
   }
 
   const items = value
     .filter((entry): entry is string => typeof entry === 'string')
-    .map(normalizeComparable)
     .filter((entry) => entry !== '');
 
   return new Set(items);
@@ -308,9 +307,9 @@ export function isStudentAnswerCorrect(
   }
 
   if (descriptor.block.type === 'MULTI_MCQ') {
-    const correctSet = normalizedSetFromUnknown(correct);
-    const studentSet = normalizedSetFromUnknown(student);
-    if (correctSet.size === 0 && studentSet.size === 0) return true;
+    const correctSet = exactIdSetFromUnknown(correct);
+    const studentSet = exactIdSetFromUnknown(student);
+    if (correctSet.size === 0) return null;
     if (correctSet.size !== studentSet.size) return false;
     for (const value of correctSet) {
       if (!studentSet.has(value)) return false;

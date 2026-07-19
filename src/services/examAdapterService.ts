@@ -35,6 +35,7 @@ import {
 } from '../utils/builderEnhancements';
 import { replaceWritingTaskContents } from '../utils/writingTaskUtils';
 import { flattenSubAnswerTree, hasSubAnswerTreeMode } from '../utils/subAnswerTree';
+import { getMultiSelectSelectionLimit } from '../utils/multiSelectMcq';
 
 const MODULE_ORDER: ModuleType[] = ['listening', 'reading', 'writing', 'speaking'];
 
@@ -1075,17 +1076,13 @@ function buildMultiQuestionDescriptor(
   groupId: string,
   groupLabel: string,
 ): StudentQuestionDescriptor {
-  const requiredSelections = Number.isFinite(block.requiredSelections)
-    ? Math.floor(block.requiredSelections)
-    : 0;
-
   return {
     id: block.id,
     blockId: block.id,
     groupId,
     groupLabel,
     isMulti: true,
-    correctCount: Math.max(1, requiredSelections),
+    correctCount: getMultiSelectSelectionLimit(block),
     answerKey: block.id,
     block,
     question: null,

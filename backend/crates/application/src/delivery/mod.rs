@@ -2577,13 +2577,17 @@ fn index_block(
             let Some(block_id) = block_id else {
                 return Ok(());
             };
-            let required = block
-                .get("requiredSelections")
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as usize;
             let mut allowed = HashSet::new();
+            let mut correct_count = 0usize;
             if let Some(options) = block.get("options").and_then(Value::as_array) {
                 for option in options {
+                    if option
+                        .get("isCorrect")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        correct_count += 1;
+                    }
                     if let Some(id) = option.get("id").and_then(Value::as_str) {
                         allowed.insert(id.to_owned());
                     }
@@ -2594,7 +2598,7 @@ fn index_block(
                 block_id,
                 AnswerConstraint::MultiChoice {
                     allowed,
-                    max: required.max(1),
+                    max: correct_count.max(1),
                 },
             );
         }
@@ -4443,6 +4447,78 @@ mod tests {
 
         assert!(schema.constraints.contains_key("legacy-single"));
         assert!(!schema.constraints.contains_key("single-q1"));
+    }
+
+    #[test]
+    fn build_answer_schema_derives_multi_mcq_limit_and_completion_from_marked_options() {
+        let schema = build_answer_schema(&json!({
+            "listening": {
+                "parts": [{
+                    "blocks": [{
+                        "id": "multi-1",
+                        "type": "MULTI_MCQ",
+                        "requiredSelections": 4,
+                        "options": [
+                            { "id": "A", "isCorrect": true },
+                            { "id": "B", "isCorrect": false },
+                            { "id": "C", "isCorrect": true },
+                            { "id": "D", "isCorrect": false }
+                        ]
+                    }]
+                }]
+            }
+        }))
+        .expect("schema");
+
+        let constraint = schema
+            .constraints
+            .get("multi-1")
+            .expect("multi choice constraint");
+        match constraint {
+            AnswerConstraint::MultiChoice { allowed, max } => {
+                assert_eq!(*max, 2);
+                assert_eq!(allowed.len(), 4);
+                assert!(allowed.contains("A"));
+                assert!(allowed.contains("C"));
+            }
+            other => panic!("expected multi choice constraint, found {other:?}"),
+        }
+
+        let submitted_ids = json!(["A", "C"]);
+        validate_answer_value(constraint, &submitted_ids).expect("real option IDs remain valid");
+        assert_eq!(submitted_ids, json!(["A", "C"]));
+        assert!(validate_answer_value(constraint, &json!(["A", "B", "C"])).is_err());
+
+        let completion = compute_answer_completion(&schema, &json!({ "multi-1": ["A", "C"] }));
+        assert_eq!(completion.total_slots, 2);
+        assert_eq!(completion.answered_slots, 2);
+    }
+
+    #[test]
+    fn build_answer_schema_uses_one_safe_slot_when_multi_mcq_has_no_marked_options() {
+        let schema = build_answer_schema(&json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "id": "malformed-multi",
+                        "type": "MULTI_MCQ",
+                        "requiredSelections": 4,
+                        "options": [
+                            { "id": "A", "isCorrect": false },
+                            { "id": "B", "isCorrect": false }
+                        ]
+                    }]
+                }]
+            }
+        }))
+        .expect("schema");
+
+        match schema.constraints.get("malformed-multi") {
+            Some(AnswerConstraint::MultiChoice { max, .. }) => assert_eq!(*max, 1),
+            other => panic!("expected multi choice constraint, found {other:?}"),
+        }
+        let completion = compute_answer_completion(&schema, &json!({}));
+        assert_eq!(completion.total_slots, 1);
     }
 
     #[test]

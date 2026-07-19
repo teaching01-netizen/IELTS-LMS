@@ -119,6 +119,51 @@ function baseState(): ExamState {
 }
 
 describe('answerKeyOverview.applyAnswerKeyEdit', () => {
+  it('keeps one MULTI_MCQ correct option and synchronizes the compatibility count', () => {
+    const state = baseState();
+    state.reading.passages[0]!.blocks.push({
+      id: 'multi-1',
+      type: 'MULTI_MCQ',
+      instruction: '',
+      stem: 'Choose all that apply',
+      requiredSelections: 4,
+      options: [
+        { id: 'a', text: 'A', isCorrect: true },
+        { id: 'b', text: 'B', isCorrect: false },
+      ],
+    });
+
+    const row: AnswerKeyRow = {
+      rowId: 'reading:multi-1',
+      moduleType: 'reading',
+      groupId: 'passage-1',
+      groupLabel: 'Passage 1',
+      blockId: 'multi-1',
+      blockType: 'MULTI_MCQ',
+      descriptorId: 'multi-1',
+      answerKey: 'multi-1',
+      numberLabel: 'Q1',
+      prompt: 'Choose all that apply',
+      sortKey: 'reading:1:1:0',
+      jumpField: 'content.reading.passages[0].blocks[0]',
+    };
+
+    const rejected = applyAnswerKeyEdit(state, row, {
+      kind: 'set_multi_mcq_correct',
+      optionIds: [],
+    });
+    const rejectedBlock = rejected.reading.passages[0]!.blocks[0] as any;
+    expect(rejectedBlock.options.filter((option: any) => option.isCorrect).map((option: any) => option.id)).toEqual(['a']);
+
+    const accepted = applyAnswerKeyEdit(rejected, row, {
+      kind: 'set_multi_mcq_correct',
+      optionIds: ['a', 'b'],
+    });
+    const acceptedBlock = accepted.reading.passages[0]!.blocks[0] as any;
+    expect(acceptedBlock.options.filter((option: any) => option.isCorrect).map((option: any) => option.id)).toEqual(['a', 'b']);
+    expect(acceptedBlock.requiredSelections).toBe(2);
+  });
+
   it('updates short answer accepted answers using accepted answer fields (correctAnswer + acceptedAnswers)', () => {
     const state = baseState();
     state.reading.passages[0]!.blocks.push({

@@ -47,6 +47,7 @@
 - Modify: `src/utils/__tests__/examUtils.questionCounting.test.ts`
 - Modify: `src/services/examAdapterService.ts`
 - Modify: `src/services/__tests__/examAdapterService.studentQuestions.test.ts`
+- Modify: `backend/crates/application/src/delivery/mod.rs`
 
 - [ ] **Step 1: Write one failing student behavior test** with two marked-correct options and stale `requiredSelections: 4`; assert only two options can be selected and the answer callback receives the real two option IDs.
 - [ ] **Step 2: Run the focused student test** and confirm RED.
@@ -54,6 +55,7 @@
 - [ ] **Step 4: Write one failing counting/descriptor test** proving marked-correct count overrides stale `requiredSelections`.
 - [ ] **Step 5: Use the derived count** in canonical question counting and adapter descriptors; rerun both focused suites to GREEN.
 - [ ] **Step 6: Update MULTI_MCQ validation** to require at least one marked option without requiring equality to an independently authored count; run the validation/count tests.
+- [ ] **Step 7: Add a failing backend delivery test** proving stale `requiredSelections` cannot change the accepted ID-array maximum or completion slots; derive both from marked options and run the application crate tests to GREEN.
 
 ### Task 4: Guard grading and export behavior
 
@@ -62,12 +64,14 @@
 - Modify: `src/utils/examTextExport.ts`
 - Modify: `src/utils/__tests__/examTextExport.test.ts`
 - Modify: `src/components/admin/__tests__/gradingReviewUtils.test.ts`
+- Modify: `backend/crates/application/src/grading/mod.rs`
 
 - [ ] **Step 1: Add a grading regression case** with stale `requiredSelections` and assert the exact submitted ID set is compared against `option.isCorrect` IDs.
 - [ ] **Step 2: Run the focused grading test**; if already GREEN, retain it as a characterization/memory artifact.
 - [ ] **Step 3: Add a failing text-export test** proving question slots and answer text follow the marked options rather than stale `requiredSelections`.
 - [ ] **Step 4: Update text export to use the shared utility**, then rerun to GREEN.
 - [ ] **Step 5: Add a grading review/export-row regression** asserting real student answer text and correct option text survive into the PDF input model; run the focused test.
+- [ ] **Step 6: Add a failing backend grading test** proving an empty marked answer key cannot award a point for an empty student array; implement the empty-set guard and run the application crate tests to GREEN.
 
 ### Task 5: Document and verify
 

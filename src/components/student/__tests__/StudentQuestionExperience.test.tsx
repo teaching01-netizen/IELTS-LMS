@@ -576,6 +576,54 @@ describe('student question experience', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(3);
   });
 
+  it('caps multi-select answers by marked options and emits the real option ID array', () => {
+    const onChange = vi.fn();
+    const block: MultiMCQBlock = {
+      id: 'multi-derived-limit',
+      type: 'MULTI_MCQ',
+      instruction: 'Choose the correct options.',
+      stem: 'Pick two answers',
+      requiredSelections: 4,
+      options: [
+        { id: 'real-a', text: 'Answer A', isCorrect: true },
+        { id: 'real-b', text: 'Answer B', isCorrect: false },
+        { id: 'real-c', text: 'Answer C', isCorrect: true },
+      ],
+    };
+
+    function Harness() {
+      const [answer, setAnswer] = React.useState<string[]>([]);
+      return (
+        <QuestionRenderer
+          question={null}
+          block={block}
+          number={1}
+          answer={answer}
+          onChange={(next) => {
+            onChange(next);
+            setAnswer(next as string[]);
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const optionA = screen.getByRole('checkbox', { name: 'Option A. Answer A' });
+    const optionB = screen.getByRole('checkbox', { name: 'Option B. Answer B' });
+    const optionC = screen.getByRole('checkbox', { name: 'Option C. Answer C' });
+
+    fireEvent.click(optionA);
+    fireEvent.click(optionB);
+
+    expect(onChange).toHaveBeenLastCalledWith(['real-a', 'real-b']);
+    expect(optionC).toBeDisabled();
+    expect(screen.getByText('Selections: 2/2 required')).toBeInTheDocument();
+
+    fireEvent.click(optionC);
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
   it('renders SINGLE_MCQ using question-level stem/options when questions[] is present', () => {
     const block: SingleMCQBlock = {
       id: 'single-block-1',

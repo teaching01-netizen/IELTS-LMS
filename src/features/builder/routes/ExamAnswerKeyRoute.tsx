@@ -6,10 +6,10 @@ import { Header } from '@components/Header';
 import { useBuilderRouteController } from '@builder/hooks/useBuilderRouteController';
 import type { ExamState, ModuleType } from '../../../types';
 import { createLatestOnlyAsyncRunner, type LatestOnlyAsyncRunner } from '../../../utils/latestOnlyAsync';
-import { AcceptedAnswersEditor } from '../../../components/blocks/AcceptedAnswersEditor';
+import { AcceptedAnswersEditor } from '@components/blocks/AcceptedAnswersEditor';
 import { resolveAcceptedAnswers } from '../../../utils/acceptedAnswers';
 import { applyAnswerKeyEdit, buildAnswerKeyRows, type AnswerKeyRow } from '../utils/answerKeyOverview';
-import { getStudentQuestionsForModule, type StudentQuestionDescriptor } from '../../../services/examAdapterService';
+import { getStudentQuestionsForModule, type StudentQuestionDescriptor } from '@services/examAdapterService';
 
 type SaveStatus = 'unsaved' | 'saving' | 'saved' | 'error';
 
@@ -570,7 +570,11 @@ function AnswerControl({
 
     case 'MULTI_MCQ': {
       const options = Array.isArray((block as any).options) ? (block as any).options : [];
-      const currentCorrect = new Set(options.filter((opt: any) => opt.isCorrect).map((opt: any) => opt.id));
+      const currentCorrect = new Set<string>(
+        options
+          .filter((opt: any) => opt.isCorrect)
+          .map((opt: any) => String(opt.id)),
+      );
       return (
         <div className="space-y-2">
           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Correct Options</div>
@@ -580,6 +584,7 @@ function AnswerControl({
                 <input
                   type="checkbox"
                   checked={currentCorrect.has(opt.id)}
+                  disabled={currentCorrect.has(opt.id) && currentCorrect.size === 1}
                   onChange={(e) => {
                     const next = new Set(currentCorrect);
                     if (e.target.checked) next.add(opt.id);

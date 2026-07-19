@@ -3,6 +3,12 @@ import { QuestionBlock, MultiMCQBlock as MultiMCQBlockType } from '../../types';
 import { MoreVertical, Plus, Trash2, GripVertical, ArrowUp, ArrowDown, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
+import {
+  getMultiSelectCorrectCount,
+  getMultiSelectSelectionLimit,
+  removeMultiSelectOption,
+  setMultiSelectOptionCorrectness,
+} from '../../utils/multiSelectMcq';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
 import { BlockInstructionField } from './BlockInstructionField';
 
@@ -21,11 +27,11 @@ export const MultiSelectMCQBlock: React.FC<Props> = ({ block, startNum, endNum, 
   
   const mcqBlock = block as MultiMCQBlockType;
   const options = mcqBlock.options || [];
-  const requiredSelections = mcqBlock.requiredSelections || 2;
+  const selectionLimit = getMultiSelectSelectionLimit(mcqBlock);
   
   const getFieldError = (field: string) => errors.find(e => e.field.includes(field));
-  const correctCount = options.filter(o => o.isCorrect).length;
-  const isExactCorrect = correctCount === requiredSelections;
+  const correctCount = getMultiSelectCorrectCount(mcqBlock);
+  const hasCorrectOption = correctCount > 0;
 
   const addOption = () => {
     const newO = { id: createId('opt'), text: '', isCorrect: false };
@@ -33,13 +39,17 @@ export const MultiSelectMCQBlock: React.FC<Props> = ({ block, startNum, endNum, 
   };
 
   const updateOption = (id: string, field: 'text' | 'isCorrect', value: string | boolean) => {
-    const newO = options.map(o => o.id === id ? { ...o, [field]: value } : o);
+    if (field === 'isCorrect') {
+      updateBlock(setMultiSelectOptionCorrectness(mcqBlock, id, Boolean(value)));
+      return;
+    }
+    const text = typeof value === 'string' ? value : String(value);
+    const newO = options.map(o => o.id === id ? { ...o, text } : o);
     updateBlock({ ...mcqBlock, options: newO });
   };
 
   const removeOption = (id: string) => {
-    const newO = options.filter(o => o.id !== id);
-    updateBlock({ ...mcqBlock, options: newO });
+    updateBlock(removeMultiSelectOption(mcqBlock, id));
   };
 
   const toLetter = (num: number) => String.fromCharCode(65 + num);
@@ -103,34 +113,25 @@ export const MultiSelectMCQBlock: React.FC<Props> = ({ block, startNum, endNum, 
           )}
         </div>
         
-        <div className={`border rounded-sm p-4 mb-4 ${isExactCorrect ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+        <div className={`border rounded-sm p-4 mb-4 ${hasCorrectOption ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-3">
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center ${isExactCorrect ? 'bg-green-500 text-white' : 'bg-amber-500 text-white'}`}>
-                {isExactCorrect ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center ${hasCorrectOption ? 'bg-green-500 text-white' : 'bg-amber-500 text-white'}`}>
+                {hasCorrectOption ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
               </div>
               <div className="text-sm">
                 <span className="font-bold text-[10px] uppercase tracking-wider mr-2">Smart Numbering:</span>
-                <span className="text-gray-700">This block counts as <strong>{requiredSelections}</strong> question{requiredSelections > 1 ? 's' : ''}</span>
+                <span className="text-gray-700">This block counts as <strong>{selectionLimit}</strong> question{selectionLimit > 1 ? 's' : ''}</span>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Required Correct:</label>
-              <select 
-                value={requiredSelections} 
-                onChange={(e) => updateBlock({ ...mcqBlock, requiredSelections: parseInt(e.target.value) })}
-                className="border border-gray-200 rounded-sm p-1.5 text-sm outline-none focus:ring-1 focus:ring-blue-700 transition-colors bg-white text-gray-700 font-semibold"
-              >
-                <option value={2}>2</option>
-                <option value={3}>3</option>
-                <option value={4}>4</option>
-              </select>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-green-700">
+              {correctCount} correct option{correctCount === 1 ? '' : 's'} configured
             </div>
           </div>
-          {!isExactCorrect && (
+          {!hasCorrectOption && (
             <p className="text-xs text-amber-700 mt-2 flex items-center gap-1">
               <AlertCircle size={10} /> 
-              Currently {correctCount} correct option{correctCount !== 1 ? 's' : ''} selected. Must have exactly {requiredSelections}.
+              Mark at least one option as correct.
             </p>
           )}
         </div>
@@ -151,6 +152,7 @@ export const MultiSelectMCQBlock: React.FC<Props> = ({ block, startNum, endNum, 
                 <input 
                   type="checkbox" 
                   checked={o.isCorrect} 
+                  disabled={o.isCorrect && correctCount === 1}
                   onChange={(e) => updateOption(o.id, 'isCorrect', e.target.checked)}
                   className="w-4 h-4 text-green-800 rounded-sm focus:ring-green-700 accent-green-800"
                 />
@@ -160,7 +162,10 @@ export const MultiSelectMCQBlock: React.FC<Props> = ({ block, startNum, endNum, 
               </label>
               <button 
                 onClick={() => removeOption(o.id)} 
-                className="text-gray-400 hover:text-red-700 opacity-0 group-hover/item:opacity-100 transition-all p-1 hover:bg-red-50 rounded-sm"
+                aria-label={`Remove option ${o.text || toLetter(i)}`}
+                disabled={o.isCorrect && correctCount === 1}
+                title={o.isCorrect && correctCount === 1 ? 'Mark another correct option before removing this one.' : undefined}
+                className="text-gray-400 hover:text-red-700 opacity-0 group-hover/item:opacity-100 transition-all p-1 hover:bg-red-50 rounded-sm disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
               >
                 <Trash2 size={16} />
               </button>
@@ -176,8 +181,8 @@ export const MultiSelectMCQBlock: React.FC<Props> = ({ block, startNum, endNum, 
           <button onClick={addOption} className="text-sm text-blue-800 flex items-center gap-1.5 hover:bg-blue-50 px-2.5 py-1.5 rounded-sm transition-colors font-semibold">
             <Plus size={14} /> Add Option
           </button>
-          <div className={`text-[10px] font-bold uppercase tracking-widest ${isExactCorrect ? 'text-green-700' : 'text-amber-700'}`}>
-            {correctCount}/{requiredSelections} correct configured
+          <div className={`text-[10px] font-bold uppercase tracking-widest ${hasCorrectOption ? 'text-green-700' : 'text-amber-700'}`}>
+            Answer limit updates automatically
           </div>
         </div>
       </div>

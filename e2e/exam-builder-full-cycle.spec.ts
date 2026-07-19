@@ -275,7 +275,6 @@ async function addReadingPassage(
       questions: any[];
       answerRule?: string;
       stem?: string;
-      requiredSelections?: number;
       options?: any[];
       imageUrl?: string;
     }>;
@@ -303,10 +302,6 @@ async function addReadingPassage(
     
     if (block.stem) {
       await page.getByLabel('Stem').fill(block.stem);
-    }
-    
-    if (block.requiredSelections) {
-      await page.getByLabel('Required selections').fill(block.requiredSelections.toString());
     }
     
     if (block.imageUrl) {

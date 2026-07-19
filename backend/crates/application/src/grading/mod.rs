@@ -3300,7 +3300,7 @@ impl ObjectiveExpectedAnswer {
                 };
                 expected.contains(&normalize_exact_text(answer))
             }
-            Self::ExactSet(expected) => strict_text_set(value) == *expected,
+            Self::ExactSet(expected) => !expected.is_empty() && strict_text_set(value) == *expected,
         }
     }
 }
@@ -4090,9 +4090,6 @@ fn insert_exact_set_spec(
         .map(|value| value.to_owned())
         .filter(|value| !value.is_empty())
         .collect::<HashSet<_>>();
-    if normalized.is_empty() {
-        return;
-    }
     seen.insert(question_id.to_owned());
 
     specs.push(ObjectiveAnswerSpec {
@@ -4713,6 +4710,38 @@ mod tests {
         );
         assert_eq!(results["questionResults"][0]["studentAnswer"], "HALF WAY");
         assert_eq!(results["questionResults"][0]["correctAnswer"], "half way");
+        assert_eq!(results["questionResults"][0]["isCorrect"], false);
+    }
+
+    #[test]
+    fn objective_auto_grading_does_not_accept_empty_multi_mcq_answer_key() {
+        let content_snapshot = json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "id": "multi-1",
+                        "type": "MULTI_MCQ",
+                        "requiredSelections": 0,
+                        "options": [
+                            { "id": "A", "isCorrect": false },
+                            { "id": "B", "isCorrect": false }
+                        ]
+                    }]
+                }]
+            }
+        });
+
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "multi-1": [] }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["totalScore"], 0);
+        assert_eq!(results["maxScore"], 1);
+        assert_eq!(results["questionResults"][0]["questionId"], "multi-1");
         assert_eq!(results["questionResults"][0]["isCorrect"], false);
     }
 

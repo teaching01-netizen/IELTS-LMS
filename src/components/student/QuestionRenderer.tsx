@@ -33,6 +33,7 @@ import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { TableCompletionSlotCell } from './TableCompletionSlotCell';
 import { emitAnswerMutationDebugLog } from './answerMutationDebug';
+import { getMultiSelectSelectionLimit } from '../../utils/multiSelectMcq';
 
 interface QuestionRendererProps {
   question:
@@ -327,6 +328,7 @@ export function QuestionRenderer({
 
   const renderMultiMCQ = (mcqBlock: MultiMCQBlock, blockNum: number) => {
     const selectedOptions = Array.isArray(answer) ? answer : [];
+    const selectionLimit = getMultiSelectSelectionLimit(mcqBlock);
 
     const toggleOption = (optionId: string) => {
       if (selectedOptions.includes(optionId)) {
@@ -334,7 +336,7 @@ export function QuestionRenderer({
         return;
       }
 
-      if (selectedOptions.length < mcqBlock.requiredSelections) {
+      if (selectedOptions.length < selectionLimit) {
         commitAnswerChange([...selectedOptions, optionId]);
       }
     };
@@ -356,7 +358,7 @@ export function QuestionRenderer({
           {mcqBlock.options?.map((option, index) => {
             const letter = String.fromCharCode(65 + index);
             const isSelected = selectedOptions.includes(option.id);
-            const isDisabled = !isSelected && selectedOptions.length >= mcqBlock.requiredSelections;
+            const isDisabled = !isSelected && selectedOptions.length >= selectionLimit;
 
             return (
               <label
@@ -393,7 +395,7 @@ export function QuestionRenderer({
           })}
         </div>
         <div className={`${fieldIndentClass} text-[length:var(--student-meta-font-size)] font-medium text-gray-500`}>
-          Selections: {selectedOptions.length}/{mcqBlock.requiredSelections} required
+          Selections: {selectedOptions.length}/{selectionLimit} required
         </div>
       </fieldset>
     );
