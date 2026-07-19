@@ -20,6 +20,7 @@ import { StudentFooter } from '../StudentFooter';
 import { StudentHeader } from '../StudentHeader';
 import { StudentListening } from '../StudentListening';
 import { StudentReading } from '../StudentReading';
+import { resolveObjectiveAnswerUpdate } from '../resolveObjectiveAnswerUpdate';
 
 describe('student question experience', () => {
   beforeEach(() => {
@@ -622,6 +623,55 @@ describe('student question experience', () => {
 
     fireEvent.click(optionC);
     expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('replaces the multi-select set when an option is unselected', () => {
+    const block: MultiMCQBlock = {
+      id: 'multi-unselect',
+      type: 'MULTI_MCQ',
+      instruction: 'Choose the correct options.',
+      stem: 'Pick two answers',
+      requiredSelections: 2,
+      options: [
+        { id: 'a', text: 'Answer A', isCorrect: true },
+        { id: 'b', text: 'Answer B', isCorrect: true },
+        { id: 'c', text: 'Answer C', isCorrect: false },
+      ],
+    };
+
+    function AttemptHarness() {
+      const [answer, setAnswer] = React.useState<string[]>([]);
+      return (
+        <QuestionRenderer
+          question={null}
+          block={block}
+          number={1}
+          answer={answer}
+          onChange={(next, meta) => {
+            setAnswer((current) => resolveObjectiveAnswerUpdate(
+              current,
+              next,
+              meta,
+            ) as string[]);
+          }}
+        />
+      );
+    }
+
+    render(<AttemptHarness />);
+
+    const optionA = screen.getByRole('checkbox', { name: 'Option A. Answer A' });
+    const optionB = screen.getByRole('checkbox', { name: 'Option B. Answer B' });
+    const optionC = screen.getByRole('checkbox', { name: 'Option C. Answer C' });
+
+    fireEvent.click(optionA);
+    fireEvent.click(optionB);
+    fireEvent.click(optionA);
+
+    expect(optionA).not.toBeChecked();
+    expect(optionB).toBeChecked();
+    expect(optionC).not.toBeDisabled();
+    expect(screen.getByText('Selections: 1/2 required')).toBeInTheDocument();
   });
 
   it('renders SINGLE_MCQ using question-level stem/options when questions[] is present', () => {

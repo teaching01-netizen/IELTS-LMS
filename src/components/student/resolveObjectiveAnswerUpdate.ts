@@ -5,6 +5,10 @@ export function resolveObjectiveAnswerUpdate(
   answer: StudentAnswerValue,
   meta?: StudentAnswerMutationMeta,
 ): StudentAnswerValue {
+  if (meta?.arrayUpdateMode === 'replace' && Array.isArray(answer)) {
+    return answer;
+  }
+
   const hasSlotIntent =
     typeof meta?.slotIndex === 'number' &&
     Number.isInteger(meta.slotIndex) &&

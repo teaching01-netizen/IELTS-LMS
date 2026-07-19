@@ -4,6 +4,7 @@ import type { StudentAnswerValue } from './answers';
 
 export interface StudentAnswerMutationMeta {
   interactionType?: 'typing' | 'discrete' | undefined;
+  arrayUpdateMode?: 'replace' | undefined;
   slotIndex?: number | undefined;
   slotId?: string | undefined;
   slotCount?: number | undefined;

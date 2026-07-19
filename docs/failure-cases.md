@@ -676,12 +676,19 @@ A `MULTI_MCQ` block could mark two options correct while storing a different `re
 
 Two independently editable fields described one rule: `options[].isCorrect` owned the grading key, while `requiredSelections` owned authoring validation, student limits, backend delivery constraints, and numbering. Deleting or unchecking options did not consistently synchronize them.
 
+The student answer resolver also could not distinguish a multi-select set from a positional
+multi-slot array. When an unselection produced a shorter array, the resolver preserved trailing
+positions and could turn `['A', 'B'] -> ['B']` into `['B', 'B']`. Repeating this accumulated duplicate
+IDs, made the displayed selection count reach its limit, and disabled unselected options.
+
 ### Fix
 
 - `src/utils/multiSelectMcq.ts` is the frontend owner for marked IDs/count, runtime selection limits, safe correctness edits, and safe option removal.
 - Builder correctness edits keep at least one marked option and synchronize `requiredSelections` as a compatibility projection.
 - Student UI, canonical numbering, adapter descriptors, text export, and backend delivery derive the count from marked options.
 - Submitted answers remain the real option-ID array; grading and grading-PDF source rows map those IDs without mutating them.
+- Multi-select changes declare whole-array replacement intent so unselection removes IDs instead of
+  entering the positional-slot merge path used by completion questions.
 - Empty marked-answer sets are publish-invalid and cannot auto-grade as correct in either TypeScript review logic or Rust grading.
 - Frontend review grading compares submitted option IDs exactly, matching the Rust grader; answer-text case and punctuation normalization never applies to IDs.
 - Authoritative backend publish validation enforces the same non-empty marked-answer invariant, requires usable option IDs, derives its slot count from the marked options, and ignores stale `requiredSelections` values.
@@ -701,3 +708,7 @@ Two independently editable fields described one rule: `options[].isCorrect` owne
 ### Invariant
 
 For `MULTI_MCQ`, `options[].isCorrect` is authoritative. At least one option must be marked correct. Never use `requiredSelections` to decide student limits, completion slots, correct answers, or export content; it exists only for serialized backward compatibility.
+
+A multi-select answer array is an unordered replacement set of option IDs, not a positional slot
+array. Shorter set updates must replace the prior value; only explicitly slot-scoped mutations may
+preserve sibling array positions.

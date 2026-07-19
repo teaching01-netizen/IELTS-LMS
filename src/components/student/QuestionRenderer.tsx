@@ -332,12 +332,18 @@ export function QuestionRenderer({
 
     const toggleOption = (optionId: string) => {
       if (selectedOptions.includes(optionId)) {
-        commitAnswerChange(selectedOptions.filter((candidate) => candidate !== optionId));
+        commitAnswerChange(
+          selectedOptions.filter((candidate) => candidate !== optionId),
+          { arrayUpdateMode: 'replace', interactionType: 'discrete' },
+        );
         return;
       }
 
       if (selectedOptions.length < selectionLimit) {
-        commitAnswerChange([...selectedOptions, optionId]);
+        commitAnswerChange(
+          [...selectedOptions, optionId],
+          { arrayUpdateMode: 'replace', interactionType: 'discrete' },
+        );
       }
     };
 
