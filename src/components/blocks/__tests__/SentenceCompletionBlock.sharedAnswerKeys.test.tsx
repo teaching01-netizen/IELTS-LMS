@@ -17,7 +17,7 @@ function buildBlock(
         sentence: 'The ____ and ____ are ready.',
         blanks: [
           { id: 'blank-1', correctAnswer: 'alpha', acceptedAnswers: ['alpha', 'beta'], position: 0 },
-          { id: 'blank-2', correctAnswer: 'beta', acceptedAnswers: ['beta', 'gamma'], position: 1 },
+          { id: 'blank-2', correctAnswer: 'beta', acceptedAnswers: ['beta'], position: 1 },
         ],
         answerRule: 'ONE_WORD',
         ...overrides,
@@ -68,12 +68,11 @@ describe('SentenceCompletionBlock shared answer keys', () => {
     fireEvent.click(screen.getByLabelText(sharedAnswerKeyLabel));
 
     expect(screen.getByLabelText(sharedAnswerKeyLabel)).toBeChecked();
-    expect(screen.getAllByText(/^(alpha|beta|gamma)$/).map((chip) => chip.firstChild?.textContent)).toEqual([
+    expect(screen.getAllByText(/^(alpha|beta)$/).map((chip) => chip.firstChild?.textContent)).toEqual([
       'alpha',
       'beta',
-      'gamma',
     ]);
-    expect(getLatestBlock().questions[0]!.sharedAcceptedAnswers).toEqual(['alpha', 'beta', 'gamma']);
+    expect(getLatestBlock().questions[0]!.sharedAcceptedAnswers).toEqual(['alpha', 'beta']);
     expect(getLatestBlock().questions[0]!.blanks).toEqual(blanksBefore);
   });
 
@@ -81,18 +80,22 @@ describe('SentenceCompletionBlock shared answer keys', () => {
     const { getLatestBlock } = renderHarness();
 
     fireEvent.click(screen.getByLabelText(sharedAnswerKeyLabel));
-    const sharedInput = screen.getByPlaceholderText('Answer...');
-    fireEvent.change(sharedInput, { target: { value: 'gamma' } });
+    const sharedInput = screen.getByLabelText('Shared accepted answers for sentence 1–2');
+    fireEvent.change(sharedInput, { target: { value: 'delta' } });
     fireEvent.keyDown(sharedInput, { key: 'Enter' });
+    expect(getLatestBlock().questions[0]!.sharedAcceptedAnswers).toEqual(['alpha', 'beta', 'delta']);
 
     fireEvent.click(screen.getByLabelText(sharedAnswerKeyLabel));
     expect(screen.getByText('Blank 1:')).toBeVisible();
     expect(screen.getByText('Blank 2:')).toBeVisible();
+    expect(screen.getAllByPlaceholderText('Answer...')).toHaveLength(2);
 
     fireEvent.click(screen.getByLabelText(sharedAnswerKeyLabel));
 
-    expect(getLatestBlock().questions[0]!.sharedAcceptedAnswers).toEqual(['alpha', 'beta', 'gamma']);
-    expect(screen.getByText('gamma')).toBeVisible();
+    expect(getLatestBlock().questions[0]!.sharedAcceptedAnswers).toEqual(['alpha', 'beta', 'delta']);
+    expect(screen.getAllByPlaceholderText('Answer...')).toHaveLength(1);
+    expect(screen.getByLabelText('Shared accepted answers for sentence 1–2')).toBeVisible();
+    expect(screen.getByText('delta')).toBeVisible();
   });
 
   it('updates only sharedAcceptedAnswers and upgrades the answer rule in shared mode', () => {
@@ -101,7 +104,7 @@ describe('SentenceCompletionBlock shared answer keys', () => {
     const { getLatestBlock } = renderHarness(initialBlock);
 
     fireEvent.click(screen.getByLabelText(sharedAnswerKeyLabel));
-    const sharedInput = screen.getByPlaceholderText('Answer...');
+    const sharedInput = screen.getByLabelText('Shared accepted answers for sentence 1–2');
     fireEvent.change(sharedInput, { target: { value: 'gamma' } });
     fireEvent.keyDown(sharedInput, { key: 'Enter' });
     fireEvent.change(sharedInput, { target: { value: 'crowd noise' } });
@@ -118,6 +121,22 @@ describe('SentenceCompletionBlock shared answer keys', () => {
     expect(getLatestBlock().questions[0]!.answerRule).toBe('TWO_WORDS');
   });
 
+  it('does not downgrade the answer rule below a multi-word shared key', () => {
+    const { getLatestBlock } = renderHarness(
+      buildBlock({
+        acceptAnyAnswerKey: true,
+        sharedAcceptedAnswers: ['crowd noise'],
+        answerRule: 'TWO_WORDS',
+      }),
+    );
+
+    fireEvent.change(screen.getByDisplayValue('No more than two words'), {
+      target: { value: 'ONE_WORD' },
+    });
+
+    expect(getLatestBlock().questions[0]!.answerRule).toBe('TWO_WORDS');
+  });
+
   it('shows the exact warning when shared keys are fewer than blanks', () => {
     renderHarness(
       buildBlock({
@@ -126,11 +145,9 @@ describe('SentenceCompletionBlock shared answer keys', () => {
       }),
     );
 
-    expect(
-      screen.getByText(
-        'This sentence has fewer unique answer keys than blanks. Students may not be able to receive full credit.',
-      ),
-    ).toBeVisible();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'This sentence has fewer unique answer keys than blanks. Students may not be able to receive full credit.',
+    );
   });
 
   it('adds new sentences with shared answer keys off by default', () => {

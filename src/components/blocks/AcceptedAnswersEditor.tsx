@@ -6,12 +6,14 @@ interface AcceptedAnswersEditorProps {
   value: string[];
   onChange: (next: string[]) => void;
   placeholder?: string;
+  ariaLabel?: string;
 }
 
 export function AcceptedAnswersEditor({
   value,
   onChange,
   placeholder = 'Add an accepted answer...',
+  ariaLabel,
 }: AcceptedAnswersEditorProps) {
   const [draft, setDraft] = useState('');
 
@@ -77,6 +79,7 @@ export function AcceptedAnswersEditor({
           }}
           className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           placeholder={placeholder}
+          aria-label={ariaLabel}
         />
         <button
           type="button"

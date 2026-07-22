@@ -64,10 +64,15 @@ export function SentenceCompletionBlock({
       nextBlanks = nextBlanks.map((blank, index) => ({ ...blank, position: index }));
 
       const nextQuestion = { ...q, ...updates, sentence: nextSentence, blanks: nextBlanks };
-      const requiredWords = Math.max(
-        0,
-        ...nextQuestion.blanks.map((blank) => maxVariantWordCountFromAcceptedAnswers(resolveAcceptedAnswers(blank))),
-      );
+      const requiredWords =
+        nextQuestion.acceptAnyAnswerKey === true
+          ? maxVariantWordCountFromAcceptedAnswers(getSharedSentenceAnswerPool(nextQuestion))
+          : Math.max(
+              0,
+              ...nextQuestion.blanks.map((blank) =>
+                maxVariantWordCountFromAcceptedAnswers(resolveAcceptedAnswers(blank)),
+              ),
+            );
       const upgrade = suggestUpgradedAnswerRule(nextQuestion.answerRule, requiredWords);
       return upgrade ? { ...nextQuestion, answerRule: upgrade } : nextQuestion;
     });
@@ -367,9 +372,14 @@ export function SentenceCompletionBlock({
                         value={getSharedSentenceAnswerPool(question)}
                         onChange={(next) => updateSharedAcceptedAnswers(question.id, next)}
                         placeholder="Answer..."
+                        ariaLabel={`Shared accepted answers for sentence ${getQuestionNumberLabel(index)}`}
                       />
                       {countUniqueSharedSentenceKeys(question) < question.blanks.length ? (
-                        <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                        <p
+                          role="status"
+                          aria-live="polite"
+                          className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                        >
                           This sentence has fewer unique answer keys than blanks. Students may not be able to receive full credit.
                         </p>
                       ) : null}
