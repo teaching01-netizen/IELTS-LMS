@@ -3,7 +3,9 @@ import type {
 } from '../../services/examAdapterService';
 import { getQuestionAnswer } from '../../services/examAdapterService';
 import type { StudentAnswerValue } from '../../types/answers';
+import type { SentenceCompletionQuestion } from '../../types';
 import { normalizeAnswerForMatching, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
+import { getSharedSentenceAnswerPool, matchSharedSentenceAnswers } from '../../utils/sentenceCompletionAnswerPool';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -206,12 +208,23 @@ export function getCorrectAnswerValue(descriptor: StudentQuestionDescriptor): un
 
 export function getCorrectAnswerDisplay(descriptor: StudentQuestionDescriptor): string {
   const acceptedAnswers = getAcceptedAnswersForDescriptor(descriptor);
+  const { block, question } = descriptor;
   if (acceptedAnswers && acceptedAnswers.length > 0) {
     return acceptedAnswers.join(' | ');
   }
 
+  if (
+    block.type === 'SENTENCE_COMPLETION' &&
+    acceptedAnswers !== null &&
+    question &&
+    'blanks' in question &&
+    Array.isArray(question.blanks) &&
+    (question as SentenceCompletionQuestion).acceptAnyAnswerKey === true
+  ) {
+    return acceptedAnswers.join(' | ');
+  }
+
   const correct = getCorrectAnswerValue(descriptor);
-  const { block } = descriptor;
 
   if (block.type === 'MULTI_MCQ') {
     const options = Array.isArray(block.options) ? block.options : [];
@@ -242,6 +255,10 @@ function getAcceptedAnswersForDescriptor(descriptor: StudentQuestionDescriptor):
     case 'SENTENCE_COMPLETION': {
       if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) return null;
       if (typeof answerIndex !== 'number') return null;
+      const sentenceQuestion = question as SentenceCompletionQuestion;
+      if (sentenceQuestion.acceptAnyAnswerKey === true) {
+        return getSharedSentenceAnswerPool(sentenceQuestion);
+      }
       const blank = question.blanks[answerIndex];
       return blank ? resolveAcceptedAnswers(blank) : null;
     }
@@ -280,6 +297,79 @@ export function getStudentAnswerDisplay(
   }
 
   return formatAnswerValue(value);
+}
+
+function getSentenceCompletionQuestion(
+  descriptor: StudentQuestionDescriptor,
+): SentenceCompletionQuestion | null {
+  if (descriptor.block.type !== 'SENTENCE_COMPLETION') {
+    return null;
+  }
+
+  const question = descriptor.question;
+  if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) {
+    return null;
+  }
+
+  return question as SentenceCompletionQuestion;
+}
+
+export function resolveSentenceCompletionCorrectness(
+  descriptors: readonly StudentQuestionDescriptor[],
+  answerMap: Record<string, StudentAnswerValue | undefined>,
+): Map<string, boolean | null> {
+  const correctnessByDescriptor = new Map<string, boolean | null>();
+  const sharedGroups = new Map<string, {
+    question: SentenceCompletionQuestion;
+    descriptors: StudentQuestionDescriptor[];
+  }>();
+
+  for (const descriptor of descriptors) {
+    const question = getSentenceCompletionQuestion(descriptor);
+    if (!question || question.acceptAnyAnswerKey !== true) {
+      correctnessByDescriptor.set(descriptor.id, isStudentAnswerCorrect(descriptor, answerMap));
+      continue;
+    }
+
+    const group = sharedGroups.get(question.id);
+    if (group) {
+      group.descriptors.push(descriptor);
+    } else {
+      sharedGroups.set(question.id, { question, descriptors: [descriptor] });
+    }
+  }
+
+  for (const { question, descriptors: groupDescriptors } of sharedGroups.values()) {
+    const sortedDescriptors = [...groupDescriptors].sort(
+      (left, right) => (left.answerIndex ?? Number.MAX_SAFE_INTEGER) - (right.answerIndex ?? Number.MAX_SAFE_INTEGER),
+    );
+    const gradableDescriptors = sortedDescriptors.filter(
+      (descriptor) =>
+        typeof descriptor.answerIndex === 'number' &&
+        descriptor.answerIndex >= 0 &&
+        descriptor.answerIndex < question.blanks.length,
+    );
+
+    for (const descriptor of sortedDescriptors) {
+      if (!gradableDescriptors.includes(descriptor)) {
+        correctnessByDescriptor.set(descriptor.id, isStudentAnswerCorrect(descriptor, answerMap));
+      }
+    }
+
+    if (gradableDescriptors.length === 0) {
+      continue;
+    }
+
+    const matches = matchSharedSentenceAnswers(
+      gradableDescriptors.map((descriptor) => getQuestionAnswer(descriptor, answerMap)),
+      getSharedSentenceAnswerPool(question),
+    );
+    gradableDescriptors.forEach((descriptor, index) => {
+      correctnessByDescriptor.set(descriptor.id, matches[index] ?? false);
+    });
+  }
+
+  return correctnessByDescriptor;
 }
 
 function exactIdSetFromUnknown(value: unknown): Set<string> {

@@ -7,9 +7,107 @@ import {
   getQuestionPrompt,
   getStudentAnswerDisplay,
   isStudentAnswerCorrect,
+  resolveSentenceCompletionCorrectness,
 } from '../gradingAnswerUtils';
 
+function buildSentenceDescriptor(
+  id: string,
+  answerIndex: number,
+  acceptAnyAnswerKey: boolean,
+  sharedAcceptedAnswers?: string[],
+): StudentQuestionDescriptor {
+  const question = {
+    id: 'sentence-1',
+    sentence: 'The answer is ____ and ____.',
+    blanks: [
+      { id: 'blank-1', correctAnswer: 'alpha', position: 0 },
+      { id: 'blank-2', correctAnswer: 'beta', position: 1 },
+    ],
+    answerRule: 'ONE_WORD',
+    acceptAnyAnswerKey,
+    ...(sharedAcceptedAnswers === undefined ? {} : { sharedAcceptedAnswers }),
+  };
+
+  return {
+    id,
+    blockId: 'sentence-block',
+    groupId: 'passage-1',
+    groupLabel: 'Passage 1',
+    isMulti: false,
+    correctCount: 1,
+    answerKey: 'sentence-1',
+    answerIndex,
+    block: {
+      id: 'sentence-block',
+      type: 'SENTENCE_COMPLETION',
+      instruction: 'Complete the sentence.',
+      questions: [question],
+    },
+    question,
+  } as unknown as StudentQuestionDescriptor;
+}
+
 describe('gradingAnswerUtils', () => {
+  test('grades a shared sentence permutation once across its blanks', () => {
+    const descriptors = [
+      buildSentenceDescriptor('sentence-1:blank-1', 0, true),
+      buildSentenceDescriptor('sentence-1:blank-2', 1, true),
+    ];
+
+    expect(
+      resolveSentenceCompletionCorrectness(descriptors, {
+        'sentence-1': ['beta', 'alpha'],
+      }),
+    ).toEqual(new Map([
+      ['sentence-1:blank-1', true],
+      ['sentence-1:blank-2', true],
+    ]));
+  });
+
+  test('consumes a shared answer key so repeated answers score one slot', () => {
+    const descriptors = [
+      buildSentenceDescriptor('sentence-1:blank-1', 0, true),
+      buildSentenceDescriptor('sentence-1:blank-2', 1, true),
+    ];
+
+    expect(
+      resolveSentenceCompletionCorrectness(descriptors, {
+        'sentence-1': ['alpha', 'alpha'],
+      }),
+    ).toEqual(new Map([
+      ['sentence-1:blank-1', true],
+      ['sentence-1:blank-2', false],
+    ]));
+  });
+
+  test('shared-disabled blank 1 rejects a key configured only on blank 2', () => {
+    const descriptors = [
+      buildSentenceDescriptor('sentence-1:blank-1', 0, false),
+      buildSentenceDescriptor('sentence-1:blank-2', 1, false),
+    ];
+
+    expect(
+      resolveSentenceCompletionCorrectness(descriptors, {
+        'sentence-1': ['beta', ''],
+      }),
+    ).toEqual(new Map([
+      ['sentence-1:blank-1', false],
+      ['sentence-1:blank-2', false],
+    ]));
+  });
+
+  test('displays the effective shared pool for every shared sentence row', () => {
+    const descriptor = buildSentenceDescriptor('sentence-1:blank-1', 0, true);
+
+    expect(getCorrectAnswerDisplay(descriptor)).toBe('alpha | beta');
+  });
+
+  test('does not display hidden blank keys when the shared pool is explicitly empty', () => {
+    const descriptor = buildSentenceDescriptor('sentence-1:blank-1', 0, true, []);
+
+    expect(getCorrectAnswerDisplay(descriptor)).toBe('');
+  });
+
   test('TFNG: formats prompt, correct answer, and correctness', () => {
     const descriptor = {
       id: 'q1',

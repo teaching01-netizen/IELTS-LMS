@@ -16,7 +16,9 @@ import {
   getQuestionPrompt,
   getStudentAnswerDisplay,
   isStudentAnswerCorrect,
+  resolveSentenceCompletionCorrectness,
 } from './gradingAnswerUtils';
+import type { StudentAnswerValue } from '../../types/answers';
 import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
 
 export type GradingExportSection =
@@ -339,11 +341,14 @@ function getGroupedSlotLabel(descriptor: StudentQuestionDescriptor, index: numbe
 function buildTracebackItem(
   descriptor: StudentQuestionDescriptor,
   descriptors: StudentQuestionDescriptor[],
-  answerMap: Record<string, unknown>,
+  answerMap: Record<string, StudentAnswerValue | undefined>,
   results: Map<string, ObjectiveQuestionResult>,
+  correctnessByDescriptor: Map<string, boolean | null>,
 ): ObjectiveTracebackItem {
   const questionResult = results.get(descriptor.id);
-  const computedCorrectness = isStudentAnswerCorrect(descriptor, answerMap);
+  const computedCorrectness = correctnessByDescriptor.has(descriptor.id)
+    ? correctnessByDescriptor.get(descriptor.id) ?? null
+    : isStudentAnswerCorrect(descriptor, answerMap);
   const correctness = questionResult?.isCorrect ?? computedCorrectness;
   const awardedScore =
     questionResult?.awardedScore ?? (computedCorrectness === null ? null : computedCorrectness ? 1 : 0);
@@ -368,8 +373,9 @@ function buildGroupedTracebackItem(
   groupKey: string,
   groupDescriptors: StudentQuestionDescriptor[],
   allDescriptors: StudentQuestionDescriptor[],
-  answerMap: Record<string, unknown>,
+  answerMap: Record<string, StudentAnswerValue | undefined>,
   results: Map<string, ObjectiveQuestionResult>,
+  correctnessByDescriptor: Map<string, boolean | null>,
 ): ObjectiveTracebackItem {
   const sorted = [...groupDescriptors].sort((left, right) => (left.answerIndex ?? 0) - (right.answerIndex ?? 0));
   const representative = sorted[0];
@@ -390,7 +396,9 @@ function buildGroupedTracebackItem(
 
   const slotCorrectness = sorted.map((descriptor) => {
     const questionResult = results.get(descriptor.id);
-    const computed = isStudentAnswerCorrect(descriptor, answerMap);
+    const computed = correctnessByDescriptor.has(descriptor.id)
+      ? correctnessByDescriptor.get(descriptor.id) ?? null
+      : isStudentAnswerCorrect(descriptor, answerMap);
     return questionResult?.isCorrect ?? computed;
   });
 
@@ -445,6 +453,7 @@ export function buildQuestionTracebackGroups(
 
   const descriptors = getStudentQuestionsForModule(examState, moduleType);
   const answerMap = extractObjectiveAnswerMap(sectionSubmission.answers);
+  const correctnessByDescriptor = resolveSentenceCompletionCorrectness(descriptors, answerMap);
   const results = buildQuestionResultMap(sectionSubmission.autoGradingResults?.questionResults);
   const groups = new Map<string, ObjectiveTracebackGroup>();
   const groupedSlotsByGroup = new Map<string, Map<string, StudentQuestionDescriptor[]>>();
@@ -477,11 +486,13 @@ export function buildQuestionTracebackGroups(
     for (const [slotKey, slotDescriptors] of slots.entries()) {
       const groupKey = getGroupedScoringSlotKey(slotDescriptors[0] ?? ({} as StudentQuestionDescriptor));
       if (groupKey) {
-        group.items.push(buildGroupedTracebackItem(slotKey, slotDescriptors, descriptors, answerMap, results));
+        group.items.push(
+          buildGroupedTracebackItem(slotKey, slotDescriptors, descriptors, answerMap, results, correctnessByDescriptor),
+        );
       } else {
         const descriptor = slotDescriptors[0];
         if (!descriptor) continue;
-        group.items.push(buildTracebackItem(descriptor, descriptors, answerMap, results));
+        group.items.push(buildTracebackItem(descriptor, descriptors, answerMap, results, correctnessByDescriptor));
       }
     }
   }
