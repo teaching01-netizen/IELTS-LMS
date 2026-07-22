@@ -554,6 +554,76 @@ async fn get_validation_reports_publish_readiness_for_the_current_draft() {
 }
 
 #[tokio::test]
+async fn save_draft_round_trips_shared_sentence_answer_fields() {
+    let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
+    let seeded = seed_exam(database.pool()).await;
+    let service = BuilderService::new(database.pool().clone());
+
+    let saved_version = service
+        .save_draft(
+            &contract_actor(),
+            seeded.id.clone(),
+            SaveDraftRequest {
+                content_snapshot: json!({
+                    "reading": {
+                        "passages": [{
+                            "id": "passage-1",
+                            "title": "Passage 1",
+                            "content": "Content",
+                            "blocks": [{
+                                "id": "sentence-block",
+                                "type": "SENTENCE_COMPLETION",
+                                "instruction": "Complete the sentence.",
+                                "questions": [{
+                                    "id": "sentence-1",
+                                    "sentence": "The ____ and ____ are ready.",
+                                    "answerRule": "ONE_WORD",
+                                    "acceptAnyAnswerKey": true,
+                                    "sharedAcceptedAnswers": ["alpha", "beta"],
+                                    "blanks": [
+                                        {"id": "blank-1", "correctAnswer": "alpha", "position": 0},
+                                        {"id": "blank-2", "correctAnswer": "beta", "position": 1}
+                                    ]
+                                }]
+                            }]
+                        }]
+                    },
+                    "listening": {"parts": []},
+                    "writing": {},
+                    "speaking": {}
+                }),
+                config_snapshot: json!({
+                    "general": {"title": seeded.title},
+                    "sections": {
+                        "reading": {
+                            "enabled": true,
+                            "bandScoreTable": {"39": 9.0, "38": 8.5}
+                        },
+                        "listening": {"enabled": false},
+                        "writing": {"enabled": false},
+                        "speaking": {"enabled": false}
+                    }
+                }),
+                revision: seeded.revision,
+            },
+        )
+        .await
+        .expect("save shared sentence draft");
+
+    let version = service
+        .get_version(&contract_actor(), saved_version.id.clone())
+        .await
+        .expect("reload shared sentence draft");
+    let question = &version.content_snapshot["reading"]["passages"][0]["blocks"][0]
+        ["questions"][0];
+
+    assert_eq!(question["acceptAnyAnswerKey"], true);
+    assert_eq!(question["sharedAcceptedAnswers"], json!(["alpha", "beta"]));
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
 async fn get_validation_reports_publish_readiness_for_single_mcq_question_list() {
     let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
     let seeded = seed_exam(database.pool()).await;

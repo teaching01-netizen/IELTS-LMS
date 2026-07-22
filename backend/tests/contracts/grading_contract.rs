@@ -770,6 +770,104 @@ async fn objective_block_matrix_answers_are_received_and_sectioned() {
 }
 
 #[tokio::test]
+async fn shared_sentence_grading_contract_preserves_slot_results_for_permutations() {
+    let database = mysql::TestDatabase::new(GRADING_MIGRATIONS).await;
+    let mut content = default_content_snapshot();
+    let sentence_question = content["reading"]["passages"][0]["blocks"][1]["questions"][0]
+        .as_object_mut()
+        .expect("sentence question object");
+    sentence_question.insert("acceptAnyAnswerKey".to_owned(), json!(true));
+    sentence_question.insert("sharedAcceptedAnswers".to_owned(), json!(["cat", "dog"]));
+
+    let schedule = seed_schedule_with_content(
+        database.pool(),
+        "cambridge-19-academic-shared-sentence-contract",
+        "Cambridge 19 Academic Shared Sentence Contract",
+        content,
+    )
+    .await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let submitted_answers = json!({
+        "q-reading-1": "Alpha answer",
+        "q-slot": ["dog", "cat"],
+        "q-listening-1": "Listening response"
+    });
+    bootstrap_and_submit(
+        database.pool(),
+        schedule_id,
+        "shared-sentence-candidate",
+        submitted_answers,
+        json!({"task1": "response", "task2": "response"}),
+        json!({}),
+    )
+    .await;
+
+    let auth = create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "admin-shared-sentence@example.com",
+        "Shared Sentence Admin",
+    )
+    .await;
+    let mut config = AppConfig::default();
+    config.grading_sync_on_read_fallback = true;
+    let app = build_router(AppState::with_pool(config, database.pool().clone()));
+    let session_detail = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/grading/sessions/{}",
+                schedule.id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(session_detail.status(), StatusCode::OK);
+    let session_json = json_body(session_detail).await;
+    let submission_id = session_json["data"]["submissions"][0]["id"]
+        .as_str()
+        .expect("submission id");
+
+    let sections = app
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/grading/submissions/{}/sections",
+                submission_id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(sections.status(), StatusCode::OK);
+    let sections_json = json_body(sections).await;
+    let reading = sections_json["data"]
+        .as_array()
+        .expect("section array")
+        .iter()
+        .find(|section| section["section"] == "reading")
+        .expect("reading section");
+    let question_results = reading["autoGradingResults"]["questionResults"]
+        .as_array()
+        .expect("question results");
+    let slot_results = question_results
+        .iter()
+        .filter(|result| {
+            result["questionId"] == "q-slot:b1" || result["questionId"] == "q-slot:b2"
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(slot_results.len(), 2);
+    assert!(slot_results.iter().all(|result| result["isCorrect"] == true));
+    assert_eq!(slot_results[0]["questionId"], "q-slot:b1");
+    assert_eq!(slot_results[1]["questionId"], "q-slot:b2");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
 async fn objective_block_matrix_auto_scoring_is_correct_per_block() {
     let database = mysql::TestDatabase::new(GRADING_MIGRATIONS).await;
     let schedule = seed_schedule_with_content(

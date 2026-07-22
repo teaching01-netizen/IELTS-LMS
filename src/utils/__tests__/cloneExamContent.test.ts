@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TFNGBlock } from '../../types';
+import type { SentenceCompletionBlock, TFNGBlock } from '../../types';
 import { cloneQuestionBlockWithNewIds, cloneReadingPassageWithNewIds } from '../cloneExamContent';
 import { createInitialExamState } from '../../services/examAdapterService';
 
@@ -83,5 +83,36 @@ describe('cloneExamContent', () => {
     expect(cloned.questions[1].options[1].id).not.toBe(block.questions[1].options[1].id);
     expect(cloned.questions[0].stem).toBe('Question 1');
     expect(cloned.questions[1].stem).toBe('Question 2');
+  });
+
+  it('preserves shared sentence answer settings while regenerating sentence ids', () => {
+    const block: SentenceCompletionBlock = {
+      id: 'sentence-block-1',
+      type: 'SENTENCE_COMPLETION',
+      instruction: 'Complete the sentence.',
+      questions: [{
+        id: 'sentence-question-1',
+        sentence: 'The ____ and ____ are ready.',
+        answerRule: 'ONE_WORD',
+        acceptAnyAnswerKey: true,
+        sharedAcceptedAnswers: ['alpha', 'beta'],
+        blanks: [
+          { id: 'sentence-blank-1', correctAnswer: 'alpha', position: 0 },
+          { id: 'sentence-blank-2', correctAnswer: 'beta', position: 1 },
+        ],
+      }],
+    };
+
+    const cloned = cloneQuestionBlockWithNewIds(block) as SentenceCompletionBlock;
+    const originalQuestion = block.questions[0]!;
+    const clonedQuestion = cloned.questions[0]!;
+
+    expect(cloned.id).not.toBe(block.id);
+    expect(clonedQuestion.id).not.toBe(originalQuestion.id);
+    expect(clonedQuestion.blanks.map((blank) => blank.id)).not.toEqual(
+      originalQuestion.blanks.map((blank) => blank.id),
+    );
+    expect(clonedQuestion.acceptAnyAnswerKey).toBe(true);
+    expect(clonedQuestion.sharedAcceptedAnswers).toEqual(['alpha', 'beta']);
   });
 });
