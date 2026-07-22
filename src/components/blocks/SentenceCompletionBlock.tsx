@@ -11,6 +11,7 @@ import {
 } from '../../utils/acceptedAnswers';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
 import { maxVariantWordCountFromAcceptedAnswers, suggestUpgradedAnswerRule } from '../../utils/answerRuleAutoUpgrade';
+import { countUniqueSharedSentenceKeys, getSharedSentenceAnswerPool } from '../../utils/sentenceCompletionAnswerPool';
 
 interface SentenceCompletionBlockProps {
   block: SentenceCompletionBlockType;
@@ -89,6 +90,42 @@ export function SentenceCompletionBlock({
       const upgrade = suggestUpgradedAnswerRule(q.answerRule, requiredWords);
       return upgrade ? { ...q, blanks: newBlanks, answerRule: upgrade } : { ...q, blanks: newBlanks };
     });
+    updateBlock({ ...block, questions: newQuestions });
+  };
+
+  const updateQuestionSharedAnswerMode = (questionId: string, acceptAnyAnswerKey: boolean) => {
+    const newQuestions = block.questions.map((question) => {
+      if (question.id !== questionId) return question;
+
+      if (!acceptAnyAnswerKey) {
+        return { ...question, acceptAnyAnswerKey: false };
+      }
+
+      const questionWithSharedAnswerKeys = { ...question, acceptAnyAnswerKey: true };
+      const sharedAcceptedAnswers =
+        question.sharedAcceptedAnswers ?? getSharedSentenceAnswerPool(questionWithSharedAnswerKeys);
+      const requiredWords = maxVariantWordCountFromAcceptedAnswers(sharedAcceptedAnswers);
+      const upgrade = suggestUpgradedAnswerRule(question.answerRule, requiredWords);
+
+      return upgrade
+        ? { ...questionWithSharedAnswerKeys, sharedAcceptedAnswers, answerRule: upgrade }
+        : { ...questionWithSharedAnswerKeys, sharedAcceptedAnswers };
+    });
+
+    updateBlock({ ...block, questions: newQuestions });
+  };
+
+  const updateSharedAcceptedAnswers = (questionId: string, sharedAcceptedAnswers: string[]) => {
+    const newQuestions = block.questions.map((question) => {
+      if (question.id !== questionId) return question;
+
+      const requiredWords = maxVariantWordCountFromAcceptedAnswers(sharedAcceptedAnswers);
+      const upgrade = suggestUpgradedAnswerRule(question.answerRule, requiredWords);
+      return upgrade
+        ? { ...question, sharedAcceptedAnswers, answerRule: upgrade }
+        : { ...question, sharedAcceptedAnswers };
+    });
+
     updateBlock({ ...block, questions: newQuestions });
   };
 
@@ -272,6 +309,21 @@ export function SentenceCompletionBlock({
                     <option value="TWO_WORDS">No more than two words</option>
                     <option value="THREE_WORDS">No more than three words</option>
                   </select>
+                  <label
+                    htmlFor={`accept-any-answer-key-${question.id}`}
+                    className="inline-flex items-center gap-1 text-xs text-gray-600"
+                  >
+                    <input
+                      id={`accept-any-answer-key-${question.id}`}
+                      type="checkbox"
+                      checked={question.acceptAnyAnswerKey === true}
+                      onChange={(event) =>
+                        updateQuestionSharedAnswerMode(question.id, event.target.checked)
+                      }
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>Accept any answer key in this sentence</span>
+                  </label>
                   <button
                     onClick={() => removeQuestion(question.id)}
                     className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"
@@ -309,7 +361,20 @@ export function SentenceCompletionBlock({
                       Blank Answers ({question.blanks.length})
                     </label>
                   </div>
-                  {question.blanks.length > 0 ? (
+                  {question.acceptAnyAnswerKey === true ? (
+                    <div className="space-y-2">
+                      <AcceptedAnswersEditor
+                        value={getSharedSentenceAnswerPool(question)}
+                        onChange={(next) => updateSharedAcceptedAnswers(question.id, next)}
+                        placeholder="Answer..."
+                      />
+                      {countUniqueSharedSentenceKeys(question) < question.blanks.length ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                          This sentence has fewer unique answer keys than blanks. Students may not be able to receive full credit.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : question.blanks.length > 0 ? (
                     <div className="space-y-2">
                       {question.blanks.map((blank, blankIndex) => {
                         const slotOffset = getQuestionSlotOffset(index) + blankIndex;
