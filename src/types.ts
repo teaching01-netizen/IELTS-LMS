@@ -263,6 +263,8 @@ export interface SentenceCompletionQuestion {
   sentence: string;
   blanks: SentenceBlank[];
   answerRule: AnswerRule;
+  acceptAnyAnswerKey?: boolean;
+  sharedAcceptedAnswers?: string[];
 }
 
 export interface SentenceCompletionBlock extends BaseQuestionBlock {

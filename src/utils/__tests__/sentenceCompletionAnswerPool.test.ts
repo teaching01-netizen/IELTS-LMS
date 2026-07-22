@@ -1,0 +1,101 @@
+import { describe, expect, it } from 'vitest';
+import type { SentenceCompletionQuestion } from '../../types';
+import {
+  countUniqueSharedSentenceKeys,
+  getEffectiveSentenceAcceptedAnswers,
+  getSharedSentenceAnswerPool,
+  matchSharedSentenceAnswers,
+} from '../sentenceCompletionAnswerPool';
+
+function buildQuestion(
+  overrides: Partial<SentenceCompletionQuestion> = {},
+): SentenceCompletionQuestion {
+  return {
+    id: 'sentence-1',
+    sentence: 'The ____ answer is ____.',
+    answerRule: 'ONE_WORD',
+    blanks: [
+      { id: 'blank-1', position: 0, correctAnswer: 'alpha', acceptedAnswers: ['alpha'] },
+    ],
+    ...overrides,
+  };
+}
+
+describe('sentence completion shared answer pool', () => {
+  it('keeps legacy questions in per-blank mode', () => {
+    const question = buildQuestion({
+      blanks: [
+        { id: 'blank-1', position: 0, correctAnswer: 'alpha', acceptedAnswers: ['alpha', 'a'] },
+        { id: 'blank-2', position: 1, correctAnswer: 'beta', acceptedAnswers: ['beta', 'b'] },
+      ],
+    });
+
+    expect(getEffectiveSentenceAcceptedAnswers(question, 0)).toEqual(['alpha', 'a']);
+    expect(getEffectiveSentenceAcceptedAnswers(question, 1)).toEqual(['beta', 'b']);
+  });
+
+  it('derives the shared pool from all blank keys when the optional pool is absent', () => {
+    const question = buildQuestion({
+      acceptAnyAnswerKey: true,
+      blanks: [
+        { id: 'blank-1', position: 0, correctAnswer: 'alpha', acceptedAnswers: ['alpha'] },
+        { id: 'blank-2', position: 1, correctAnswer: 'beta', acceptedAnswers: ['beta'] },
+      ],
+    });
+
+    expect(getSharedSentenceAnswerPool(question)).toEqual(['alpha', 'beta']);
+    expect(getEffectiveSentenceAcceptedAnswers(question, 0)).toEqual(['alpha', 'beta']);
+    expect(getEffectiveSentenceAcceptedAnswers(question, 1)).toEqual(['alpha', 'beta']);
+  });
+
+  it('deduplicates a derived pool by normalized key while preserving first spelling', () => {
+    const question = buildQuestion({
+      acceptAnyAnswerKey: true,
+      blanks: [
+        { id: 'blank-1', position: 0, correctAnswer: 'Physical Chemistry', acceptedAnswers: ['Physical Chemistry'] },
+        { id: 'blank-2', position: 1, correctAnswer: 'physical-chemistry', acceptedAnswers: ['physical-chemistry', 'THERMODYNAMICS'] },
+      ],
+    });
+
+    expect(getSharedSentenceAnswerPool(question)).toEqual(['Physical Chemistry', 'THERMODYNAMICS']);
+  });
+
+  it('treats an explicitly empty shared pool as authoritative', () => {
+    const question = buildQuestion({
+      acceptAnyAnswerKey: true,
+      sharedAcceptedAnswers: [],
+      blanks: [{ id: 'blank-1', position: 0, correctAnswer: 'alpha', acceptedAnswers: ['alpha'] }],
+    });
+
+    expect(getSharedSentenceAnswerPool(question)).toEqual([]);
+    expect(getEffectiveSentenceAcceptedAnswers(question, 0)).toEqual([]);
+  });
+
+  it('counts case-insensitive normalized keys once', () => {
+    const question = buildQuestion({
+      acceptAnyAnswerKey: true,
+      sharedAcceptedAnswers: ['Physical Chemistry', 'physical-chemistry', 'THERMODYNAMICS'],
+      blanks: [
+        { id: 'blank-1', position: 0, correctAnswer: '', acceptedAnswers: [] },
+        { id: 'blank-2', position: 1, correctAnswer: '', acceptedAnswers: [] },
+      ],
+    });
+
+    expect(countUniqueSharedSentenceKeys(question)).toBe(2);
+  });
+
+  it('allows permutations but consumes one matching key only once', () => {
+    expect(matchSharedSentenceAnswers(['beta', 'alpha'], ['alpha', 'beta'])).toEqual([true, true]);
+    expect(matchSharedSentenceAnswers(['alpha', 'alpha'], ['alpha', 'beta'])).toEqual([true, false]);
+    expect(matchSharedSentenceAnswers(['unknown', 'alpha'], ['alpha', 'beta'])).toEqual([false, true]);
+  });
+
+  it('normalizes non-empty student values and leaves empty values unmatched', () => {
+    expect(
+      matchSharedSentenceAnswers(
+        ['  ALPHA ', '', null, 'physical-chemistry'],
+        ['alpha', 'physical chemistry'],
+      ),
+    ).toEqual([true, false, false, true]);
+  });
+});
