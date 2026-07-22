@@ -13,6 +13,7 @@ import { createDefaultConfig, normalizeExamConfig } from '../constants/examDefau
 import { hydrateExamState } from '../services/examAdapterService';
 import { resolveAcceptedAnswers } from './acceptedAnswers';
 import { getMultiSelectCorrectCount, getMultiSelectSelectionLimit } from './multiSelectMcq';
+import { countUniqueSharedSentenceKeys } from './sentenceCompletionAnswerPool';
 
 /**
  * A single question as far as counting, numbering, and TXT export are concerned.
@@ -482,11 +483,22 @@ const validateSentenceCompletionBlock = (block: SentenceCompletionBlock): Valida
     if (q.blanks.length === 0) {
       errors.push({ blockId: block.id, field: `questions[${i}].blanks`, message: `Sentence ${i + 1} has no blanks`, type: 'error' });
     }
-    q.blanks.forEach((blank, j) => {
-      if (resolveAcceptedAnswers(blank).length === 0) {
-        errors.push({ blockId: block.id, field: `questions[${i}].blanks[${j}].correctAnswer`, message: `Blank ${j + 1} in sentence ${i + 1} has no answer`, type: 'error' });
+    if (q.acceptAnyAnswerKey === true) {
+      if (countUniqueSharedSentenceKeys(q) < q.blanks.length) {
+        errors.push({
+          blockId: block.id,
+          field: `questions[${i}].sharedAcceptedAnswers`,
+          message: `Sentence ${i + 1} answer pool has fewer unique keys than blanks; students may not be able to receive full credit`,
+          type: 'warning',
+        });
       }
-    });
+    } else {
+      q.blanks.forEach((blank, j) => {
+        if (resolveAcceptedAnswers(blank).length === 0) {
+          errors.push({ blockId: block.id, field: `questions[${i}].blanks[${j}].correctAnswer`, message: `Blank ${j + 1} in sentence ${i + 1} has no answer`, type: 'error' });
+        }
+      });
+    }
   });
   
   return errors;

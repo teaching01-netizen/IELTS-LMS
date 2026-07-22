@@ -56,6 +56,51 @@ describe('validateQuestionBlock - placeholder/blanks alignment', () => {
     expect(errors.some((e) => e.field.includes('sentence-0-blank-0'))).toBe(false);
   });
 
+  it('accepts a non-empty shared sentence pool when preserved blank answers are empty', () => {
+    const errors = validateQuestionBlock({
+      id: 'blk-shared-1',
+      type: 'SENTENCE_COMPLETION',
+      instruction: 'Complete the sentence.',
+      questions: [
+        {
+          id: 'q-shared-1',
+          sentence: 'The ____ is ____.',
+          blanks: [
+            { id: 'b-1', correctAnswer: '', acceptedAnswers: [], position: 0 },
+            { id: 'b-2', correctAnswer: '', acceptedAnswers: [], position: 1 },
+          ],
+          answerRule: 'ONE_WORD',
+          acceptAnyAnswerKey: true,
+          sharedAcceptedAnswers: ['answer'],
+        },
+      ],
+    });
+
+    expect(errors.filter((error) => error.field.startsWith('sentence-0-blank-'))).toEqual([]);
+  });
+
+  it('keeps the missing answer error when shared sentence mode is off', () => {
+    const errors = validateQuestionBlock({
+      id: 'blk-shared-2',
+      type: 'SENTENCE_COMPLETION',
+      instruction: 'Complete the sentence.',
+      questions: [
+        {
+          id: 'q-shared-2',
+          sentence: 'The ____ is ____.',
+          blanks: [{ id: 'b-1', correctAnswer: '', acceptedAnswers: [], position: 0 }],
+          answerRule: 'ONE_WORD',
+          acceptAnyAnswerKey: false,
+        },
+      ],
+    });
+
+    expect(errors).toContainEqual({
+      field: 'sentence-0-blank-0',
+      message: 'Blank 1 answer is required',
+    });
+  });
+
   it('accepts note completion blanks when alternatives are provided', () => {
     const errors = validateQuestionBlock({
       id: 'blk-4',

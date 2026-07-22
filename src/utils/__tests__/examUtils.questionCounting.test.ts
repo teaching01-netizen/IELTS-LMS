@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { getBlockQuestionCount, getPassageQuestionCount, getPartQuestionCount, validateBlock } from '../examUtils';
-import type { QuestionBlock, Passage, ListeningPart } from '../../types';
+import { canPublishExam, getBlockQuestionCount, getPassageQuestionCount, getPartQuestionCount, validateBlock } from '../examUtils';
+import type { Exam, QuestionBlock, Passage, ListeningPart } from '../../types';
 
 describe('getBlockQuestionCount', () => {
   it('counts TFNG questions', () => {
@@ -130,6 +130,57 @@ describe('getBlockQuestionCount', () => {
       ],
     };
     expect(getBlockQuestionCount(block)).toBe(2);
+  });
+
+  it('warns for an undersized shared answer pool without blocking validation or publishing', () => {
+    const block: QuestionBlock = {
+      id: 'shared-warning-block',
+      type: 'SENTENCE_COMPLETION',
+      instruction: '',
+      questions: [
+        {
+          id: 'shared-warning-question',
+          sentence: 'The ____ is ____.',
+          blanks: [
+            { id: 'blank-1', correctAnswer: '', acceptedAnswers: [], answerRule: 'ONE_WORD' },
+            { id: 'blank-2', correctAnswer: '', acceptedAnswers: [], answerRule: 'ONE_WORD' },
+          ],
+          answerRule: 'ONE_WORD',
+          acceptAnyAnswerKey: true,
+          sharedAcceptedAnswers: ['alpha', 'ALPHA'],
+        },
+      ],
+    };
+
+    const validation = validateBlock(block);
+    const sharedWarnings = validation.errors.filter(
+      (error) => error.field === 'questions[0].sharedAcceptedAnswers',
+    );
+
+    expect(validation.isValid).toBe(true);
+    expect(validation.errors.some((error) => error.field.includes('.blanks['))).toBe(false);
+    expect(sharedWarnings).toHaveLength(1);
+    expect(sharedWarnings[0]).toEqual(expect.objectContaining({
+      type: 'warning',
+      message: expect.stringContaining('answer pool'),
+    }));
+
+    const publishResult = canPublishExam({
+      title: 'Shared answer key exam',
+      content: {
+        reading: {
+          passages: [{ id: 'passage-1', title: 'Passage', content: 'Content', blocks: [block] }],
+        },
+        listening: {
+          parts: [{ id: 'listening-1', title: 'Listening Part', pins: [], blocks: [] }],
+        },
+      },
+    } as Exam);
+
+    expect(publishResult.canPublish).toBe(true);
+    expect(publishResult.errors.filter(
+      (error) => error.field === 'questions[0].sharedAcceptedAnswers',
+    )).toHaveLength(1);
   });
 
   it('counts DIAGRAM_LABELING labels', () => {

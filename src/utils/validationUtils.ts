@@ -199,11 +199,13 @@ function validateSentenceCompletion(block: SentenceCompletionBlock): ValidationE
     } else if (!q.blanks || q.blanks.length !== placeholderCount) {
       errors.push({ field: `sentence-${index}-blanks`, message: `Sentence ${index + 1} blanks must match the number of ____ placeholders` });
     }
-    q.blanks?.forEach((blank: SentenceBlank, blankIndex: number) => {
-      if (resolveAcceptedAnswers(blank).length === 0) {
-        errors.push({ field: `sentence-${index}-blank-${blankIndex}`, message: `Blank ${blankIndex + 1} answer is required` });
-      }
-    });
+    if (q.acceptAnyAnswerKey !== true) {
+      q.blanks?.forEach((blank: SentenceBlank, blankIndex: number) => {
+        if (resolveAcceptedAnswers(blank).length === 0) {
+          errors.push({ field: `sentence-${index}-blank-${blankIndex}`, message: `Blank ${blankIndex + 1} answer is required` });
+        }
+      });
+    }
     errors.push(
       ...validateGroupedSlotScoring(
         q.blanks ?? [],
