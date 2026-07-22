@@ -998,8 +998,13 @@ export class ExamLifecycleService {
     if (config.sections.reading.enabled) {
       const readingErrors = validateReadingModule(content.reading.passages);
       readingErrors.forEach(e => {
-        errors.push({ field: e.field || 'reading', message: e.message, severity: e.type });
-        if (e.type === 'error') missingFields.push(e.field || 'reading');
+        const field = e.field || 'reading';
+        if (e.type === 'warning') {
+          warnings.push({ field, message: e.message });
+        } else if (e.type === 'error') {
+          errors.push({ field, message: e.message, severity: 'error' });
+          missingFields.push(field);
+        }
       });
 
       const readingQCount = getReadingTotalQuestions(content.reading.passages);
@@ -1022,8 +1027,13 @@ export class ExamLifecycleService {
     if (config.sections.listening.enabled) {
       const listeningErrors = validateListeningModule(content.listening.parts);
       listeningErrors.forEach(e => {
-        errors.push({ field: e.field || 'listening', message: e.message, severity: e.type });
-        if (e.type === 'error') missingFields.push(e.field || 'listening');
+        const field = e.field || 'listening';
+        if (e.type === 'warning') {
+          warnings.push({ field, message: e.message });
+        } else if (e.type === 'error') {
+          errors.push({ field, message: e.message, severity: 'error' });
+          missingFields.push(field);
+        }
       });
 
       const listeningQCount = getListeningTotalQuestions(content.listening.parts);
