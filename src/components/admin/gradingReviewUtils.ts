@@ -1,4 +1,4 @@
-import type { ExamState } from '../../types';
+import type { ExamState, SentenceCompletionQuestion } from '../../types';
 import type {
   ObjectiveQuestionResult,
   SectionSubmission,
@@ -300,8 +300,13 @@ function resolveGroupedScoringRequiredCorrect(groupQuestions: StudentQuestionDes
   const candidates: number[] = [];
 
   for (const question of groupQuestions) {
-    if (question.block.type === 'SENTENCE_COMPLETION' && question.question && question.answerIndex !== undefined) {
-      const blank = question.question.blanks[question.answerIndex];
+    if (
+      question.block.type === 'SENTENCE_COMPLETION'
+      && question.question
+      && 'blanks' in question.question
+      && question.answerIndex !== undefined
+    ) {
+      const blank = (question.question as SentenceCompletionQuestion).blanks[question.answerIndex];
       if (blank?.requiredCorrect !== undefined) {
         candidates.push(blank.requiredCorrect);
       }
@@ -364,8 +369,10 @@ function buildTracebackItem(
     awardedScore,
     maxScore,
     answerKey: descriptor.answerKey,
-    rootId: descriptor.rootId,
-    rootNumberLabel: typeof descriptor.rootNumber === 'number' ? String(descriptor.rootNumber) : undefined,
+    ...(descriptor.rootId === undefined ? {} : { rootId: descriptor.rootId }),
+    ...(typeof descriptor.rootNumber === 'number'
+      ? { rootNumberLabel: String(descriptor.rootNumber) }
+      : {}),
   };
 }
 
@@ -433,7 +440,9 @@ function buildGroupedTracebackItem(
     maxScore,
     answerKey: representative.answerKey,
     rootId: groupKey,
-    rootNumberLabel: typeof representative.rootNumber === 'number' ? String(representative.rootNumber) : undefined,
+    ...(typeof representative.rootNumber === 'number'
+      ? { rootNumberLabel: String(representative.rootNumber) }
+      : {}),
     requiredCorrect,
     answerKeys,
     slotLabels,

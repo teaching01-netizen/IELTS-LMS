@@ -3281,6 +3281,7 @@ struct ObjectiveAnswerSpec {
     correct_answer: Value,
     max_score: i64,
     has_override: bool,
+    shared_answer_group: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -3336,6 +3337,7 @@ fn compute_objective_auto_grading_results(
     let mut total_score = 0i64;
     let mut max_score = 0i64;
     let mut question_results = Vec::with_capacity(specs.len());
+    let mut consumed_shared_answers = HashMap::<String, HashSet<String>>::new();
 
     for spec in specs {
         let question_max = spec.max_score.max(0);
@@ -3344,9 +3346,12 @@ fn compute_objective_auto_grading_results(
             .get(&spec.question_id)
             .cloned()
             .unwrap_or(Value::Null);
-        let is_correct = spec
-            .expected
-            .matches(&student_answer, &spec.scoring_rule);
+        let is_correct = if let Some(group) = spec.shared_answer_group.as_deref() {
+            let consumed = consumed_shared_answers.entry(group.to_owned()).or_default();
+            matches_shared_sentence_answer(&spec.expected, &student_answer, consumed)
+        } else {
+            spec.expected.matches(&student_answer, &spec.scoring_rule)
+        };
         if is_correct {
             total_score += question_max;
         }
@@ -3780,11 +3785,29 @@ fn index_objective_block_scoring_specs(
                         .and_then(Value::as_str)
                         .unwrap_or(fallback_rule)
                         .to_owned();
+                    let shared_mode = block_type == "SENTENCE_COMPLETION"
+                        && question
+                            .get("acceptAnyAnswerKey")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                    let shared_answers = shared_mode
+                        .then(|| resolve_shared_sentence_answers(question));
                     if let Some(blanks) = question.get("blanks").and_then(Value::as_array) {
                         for blank in blanks {
                             let Some(blank_id) = blank.get("id").and_then(Value::as_str) else {
                                 continue;
                             };
+                            if let Some(shared_answers) = shared_answers.as_ref() {
+                                insert_shared_sentence_answer_spec(
+                                    specs,
+                                    seen,
+                                    &format!("{question_id}:{blank_id}"),
+                                    shared_answers,
+                                    &scoring_rule,
+                                    question_id,
+                                );
+                                continue;
+                            }
                             let accepted = resolve_accepted_answers(
                                 blank.get("correctAnswer"),
                                 blank.get("acceptedAnswers"),
@@ -3948,6 +3971,133 @@ fn index_objective_block_scoring_specs(
     }
 }
 
+fn normalize_shared_sentence_answer(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut pending_space = false;
+
+    for character in value.chars().filter_map(|character| match character {
+        '’' | '‘' | '`' => Some('\''),
+        '‐' | '‑' | '‒' | '–' | '—' | '−' | '-' => Some(' '),
+        '\'' => None,
+        '.' | ',' | ';' | ':' | '!' | '?' | '/' | '\\' | '(' | ')' | '[' | ']' | '{'
+        | '}' | '"' => Some(' '),
+        character => Some(character),
+    }) {
+        if character.is_whitespace() {
+            pending_space = !normalized.is_empty();
+            continue;
+        }
+
+        if pending_space && !normalized.ends_with(' ') {
+            normalized.push(' ');
+        }
+        normalized.extend(character.to_lowercase());
+        pending_space = false;
+    }
+
+    normalized.trim().to_owned()
+}
+
+fn split_shared_sentence_answer_variants(value: &str) -> impl Iterator<Item = &str> {
+    value.split('|')
+}
+
+fn resolve_shared_sentence_answers(question: &Value) -> Vec<String> {
+    let mut seen = HashSet::<String>::new();
+    let mut resolved = Vec::<String>::new();
+
+    if let Some(shared_answers) = question
+        .get("sharedAcceptedAnswers")
+        .and_then(Value::as_array)
+    {
+        for answer in shared_answers.iter().filter_map(Value::as_str) {
+            for variant in split_shared_sentence_answer_variants(answer) {
+                let display = variant.trim();
+                let normalized = normalize_shared_sentence_answer(display);
+                if normalized.is_empty() || !seen.insert(normalized) {
+                    continue;
+                }
+                resolved.push(display.to_owned());
+            }
+        }
+        return resolved;
+    }
+
+    if let Some(blanks) = question.get("blanks").and_then(Value::as_array) {
+        for blank in blanks {
+            for answer in resolve_accepted_answers(
+                blank.get("correctAnswer"),
+                blank.get("acceptedAnswers"),
+            ) {
+                let normalized = normalize_shared_sentence_answer(&answer);
+                if normalized.is_empty() || !seen.insert(normalized) {
+                    continue;
+                }
+                resolved.push(answer);
+            }
+        }
+    }
+
+    resolved
+}
+
+fn insert_shared_sentence_answer_spec(
+    specs: &mut Vec<ObjectiveAnswerSpec>,
+    seen: &mut HashSet<String>,
+    question_id: &str,
+    shared_answers: &[String],
+    scoring_rule: &str,
+    shared_answer_question_id: &str,
+) {
+    if seen.contains(question_id) {
+        return;
+    }
+    seen.insert(question_id.to_owned());
+
+    let expected = shared_answers
+        .iter()
+        .map(|answer| normalize_shared_sentence_answer(answer))
+        .filter(|answer| !answer.is_empty())
+        .collect::<HashSet<_>>();
+
+    specs.push(ObjectiveAnswerSpec {
+        question_id: question_id.to_owned(),
+        expected: ObjectiveExpectedAnswer::TextAnyOf(expected),
+        scoring_rule: scoring_rule.to_owned(),
+        correct_answer: Value::String(shared_answers.join(" | ")),
+        max_score: 1,
+        has_override: false,
+        shared_answer_group: Some(format!("sentence:{shared_answer_question_id}:shared")),
+    });
+}
+
+fn matches_shared_sentence_answer(
+    expected: &ObjectiveExpectedAnswer,
+    value: &Value,
+    consumed: &mut HashSet<String>,
+) -> bool {
+    let values = strict_text_values(value);
+    let Some(answer) = values.first() else {
+        return false;
+    };
+    let normalized = normalize_shared_sentence_answer(answer);
+    if normalized.is_empty() || consumed.contains(&normalized) {
+        return false;
+    }
+
+    let is_expected = match expected {
+        ObjectiveExpectedAnswer::TextAnyOf(values) => values
+            .iter()
+            .map(|value| normalize_shared_sentence_answer(value))
+            .any(|value| value == normalized),
+        ObjectiveExpectedAnswer::ExactSet(_) => false,
+    };
+    if is_expected {
+        consumed.insert(normalized);
+    }
+    is_expected
+}
+
 fn register_sub_answer_tree_scoring_specs(
     block: &Value,
     specs: &mut Vec<ObjectiveAnswerSpec>,
@@ -4071,6 +4221,7 @@ fn insert_text_answer_spec(
         correct_answer: Value::String(display_answers.join(" | ")),
         max_score: 1,
         has_override: false,
+        shared_answer_group: None,
     });
 }
 
@@ -4104,6 +4255,7 @@ fn insert_exact_set_spec(
         ),
         max_score: 1,
         has_override: false,
+        shared_answer_group: None,
     });
 }
 
@@ -4372,6 +4524,102 @@ mod tests {
         let expected = ObjectiveExpectedAnswer::TextAnyOf(["NOT GIVEN".to_owned()].into_iter().collect());
         let value = Value::String("NOT GIVEN   ".to_owned());
         assert!(expected.matches(&value, "ONE_WORD"));
+    }
+
+    fn shared_sentence_content_snapshot() -> Value {
+        json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "id": "sentence-block",
+                        "type": "SENTENCE_COMPLETION",
+                        "questions": [{
+                            "id": "sentence-1",
+                            "sentence": "The ____ is ____.",
+                            "answerRule": "ONE_WORD",
+                            "acceptAnyAnswerKey": true,
+                            "sharedAcceptedAnswers": ["alpha", "beta"],
+                            "blanks": [
+                                {"id": "blank-1", "correctAnswer": "alpha"},
+                                {"id": "blank-2", "correctAnswer": "beta"}
+                            ]
+                        }]
+                    }]
+                }]
+            }
+        })
+    }
+
+    #[test]
+    fn shared_sentence_objective_grading_allows_permutations_for_alias_and_materialized_answers() {
+        let content_snapshot = shared_sentence_content_snapshot();
+
+        let alias_results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "sentence-1": ["beta", "alpha"] }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+        let materialized_results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({
+                "sentence-1:blank-1": "beta",
+                "sentence-1:blank-2": "alpha"
+            }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        for results in [alias_results, materialized_results] {
+            assert_eq!(results["totalScore"], 2);
+            assert_eq!(results["maxScore"], 2);
+            assert_eq!(results["questionResults"][0]["questionId"], "sentence-1:blank-1");
+            assert_eq!(results["questionResults"][1]["questionId"], "sentence-1:blank-2");
+            assert_eq!(results["questionResults"][0]["isCorrect"], true);
+            assert_eq!(results["questionResults"][1]["isCorrect"], true);
+        }
+    }
+
+    #[test]
+    fn shared_sentence_objective_grading_consumes_repeated_keys_once() {
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "sentence-1": ["alpha", "alpha"] }),
+            &shared_sentence_content_snapshot(),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["totalScore"], 1);
+        assert_eq!(results["questionResults"][0]["isCorrect"], true);
+        assert_eq!(results["questionResults"][1]["isCorrect"], false);
+    }
+
+    #[test]
+    fn legacy_sentence_objective_grading_keeps_per_blank_matching() {
+        let mut content_snapshot = shared_sentence_content_snapshot();
+        content_snapshot["reading"]["passages"][0]["blocks"][0]["questions"][0]
+            .as_object_mut()
+            .expect("sentence question object")
+            .remove("acceptAnyAnswerKey");
+        content_snapshot["reading"]["passages"][0]["blocks"][0]["questions"][0]
+            .as_object_mut()
+            .expect("sentence question object")
+            .remove("sharedAcceptedAnswers");
+
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "sentence-1": ["beta", "alpha"] }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["totalScore"], 0);
+        assert_eq!(results["questionResults"][0]["isCorrect"], false);
+        assert_eq!(results["questionResults"][1]["isCorrect"], false);
     }
 
     #[test]
