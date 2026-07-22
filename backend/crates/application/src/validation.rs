@@ -804,21 +804,38 @@ fn validate_sentence_completion(
                         );
                     }
                     Some(bs) => {
-                        for (blank_idx, blank) in bs.iter().enumerate() {
-                            if blank
-                                .as_object()
-                                .and_then(|b| b.get("correctAnswer"))
-                                .and_then(|a| a.as_str())
-                                .map(|s| s.trim().is_empty())
-                                .unwrap_or(true)
-                            {
-                                result.add_error(
+                        let shared_mode = q_obj
+                            .get("acceptAnyAnswerKey")
+                            .and_then(|value| value.as_bool())
+                            .unwrap_or(false);
+
+                        if shared_mode {
+                            if shared_sentence_answer_key_count(q_obj) < bs.len() {
+                                result.add_warning(
                                     format!(
-                                        "{}.questions[{}].blanks[{}].correctAnswer",
-                                        field_prefix, q_idx, blank_idx
+                                        "{}.questions[{}].sharedAcceptedAnswers",
+                                        field_prefix, q_idx
                                     ),
-                                    "Blank answer is required",
+                                    "Shared sentence answer pool has fewer unique answer keys than blanks; students may not be able to receive full credit",
                                 );
+                            }
+                        } else {
+                            for (blank_idx, blank) in bs.iter().enumerate() {
+                                if blank
+                                    .as_object()
+                                    .and_then(|b| b.get("correctAnswer"))
+                                    .and_then(|a| a.as_str())
+                                    .map(|s| s.trim().is_empty())
+                                    .unwrap_or(true)
+                                {
+                                    result.add_error(
+                                        format!(
+                                            "{}.questions[{}].blanks[{}].correctAnswer",
+                                            field_prefix, q_idx, blank_idx
+                                        ),
+                                        "Blank answer is required",
+                                    );
+                                }
                             }
                         }
                         blank_count += bs.len() as i32;
@@ -828,6 +845,100 @@ fn validate_sentence_completion(
             blank_count
         }
     }
+}
+
+fn normalize_shared_sentence_answer(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut pending_space = false;
+
+    for character in value.chars().filter_map(|character| match character {
+        '’' | '‘' | '`' => Some('\''),
+        '‐' | '‑' | '‒' | '–' | '—' | '−' | '-' => Some(' '),
+        '\'' => None,
+        '.' | ',' | ';' | ':' | '!' | '?' | '/' | '\\' | '(' | ')' | '[' | ']' | '{'
+        | '}' | '"' => Some(' '),
+        character => Some(character),
+    }) {
+        if character.is_whitespace() {
+            pending_space = !normalized.is_empty();
+            continue;
+        }
+
+        if pending_space && !normalized.ends_with(' ') {
+            normalized.push(' ');
+        }
+        normalized.extend(character.to_lowercase());
+        pending_space = false;
+    }
+
+    normalized.trim().to_owned()
+}
+
+fn split_shared_sentence_answer_variants(value: &str) -> impl Iterator<Item = &str> {
+    value.split('|')
+}
+
+fn resolved_blank_sentence_answers(blank: &serde_json::Value) -> Vec<String> {
+    let Some(blank) = blank.as_object() else {
+        return Vec::new();
+    };
+
+    let mut values = Vec::new();
+    if let Some(accepted_answers) = blank.get("acceptedAnswers").and_then(|value| value.as_array()) {
+        for answer in accepted_answers.iter().filter_map(|value| value.as_str()) {
+            values.extend(
+                split_shared_sentence_answer_variants(answer)
+                    .map(str::trim)
+                    .filter(|answer| !answer.is_empty())
+                    .map(str::to_owned),
+            );
+        }
+    }
+
+    if values.is_empty() {
+        if let Some(correct_answer) = blank.get("correctAnswer").and_then(|value| value.as_str()) {
+            values.extend(
+                split_shared_sentence_answer_variants(correct_answer)
+                    .map(str::trim)
+                    .filter(|answer| !answer.is_empty())
+                    .map(str::to_owned),
+            );
+        }
+    }
+
+    values
+}
+
+fn shared_sentence_answer_key_count(question: &serde_json::Map<String, serde_json::Value>) -> usize {
+    let mut normalized_keys = HashSet::new();
+
+    if let Some(shared_answers) = question
+        .get("sharedAcceptedAnswers")
+        .and_then(|value| value.as_array())
+    {
+        for answer in shared_answers.iter().filter_map(|value| value.as_str()) {
+            for variant in split_shared_sentence_answer_variants(answer) {
+                let normalized = normalize_shared_sentence_answer(variant);
+                if !normalized.is_empty() {
+                    normalized_keys.insert(normalized);
+                }
+            }
+        }
+        return normalized_keys.len();
+    }
+
+    if let Some(blanks) = question.get("blanks").and_then(|value| value.as_array()) {
+        for blank in blanks {
+            for answer in resolved_blank_sentence_answers(blank) {
+                let normalized = normalize_shared_sentence_answer(&answer);
+                if !normalized.is_empty() {
+                    normalized_keys.insert(normalized);
+                }
+            }
+        }
+    }
+
+    normalized_keys.len()
 }
 
 fn validate_diagram_labeling(
@@ -1478,7 +1589,7 @@ fn validate_speaking_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     #[test]
     fn listening_blocks_empty_instruction_reports_parts_blocks_path() {
@@ -1772,6 +1883,118 @@ mod tests {
         assert!(result.errors.iter().any(|error| {
             error.field == "content.reading.passages[0].blocks[0].options[0].id"
                 && error.message == "Option ID is required"
+        }));
+    }
+
+    fn sentence_validation_content(block: Value) -> Value {
+        json!({
+            "reading": {
+                "passages": [{
+                    "id": "passage-1",
+                    "title": "Passage 1",
+                    "content": "Content",
+                    "blocks": [block]
+                }]
+            }
+        })
+    }
+
+    fn sentence_validation_config() -> Value {
+        json!({
+            "sections": {
+                "reading": {
+                    "enabled": true,
+                    "bandScoreTable": {
+                        "1": 1.0, "2": 2.0, "3": 3.0, "4": 4.0, "5": 5.0,
+                        "6": 6.0, "7": 7.0, "8": 8.0, "9": 9.0, "10": 10.0
+                    }
+                },
+                "listening": {"enabled": false},
+                "writing": {"enabled": false},
+                "speaking": {"enabled": false}
+            }
+        })
+    }
+
+    #[test]
+    fn shared_sentence_pool_replaces_preserved_blank_answers_for_validation() {
+        let content = sentence_validation_content(json!({
+            "id": "sentence-block",
+            "type": "SENTENCE_COMPLETION",
+            "instruction": "Complete the sentence.",
+            "questions": [{
+                "id": "sentence-1",
+                "sentence": "The ____ is ____.",
+                "blanks": [
+                    {"id": "blank-1", "correctAnswer": "", "acceptedAnswers": [], "position": 0},
+                    {"id": "blank-2", "correctAnswer": "", "acceptedAnswers": [], "position": 1}
+                ],
+                "answerRule": "ONE_WORD",
+                "acceptAnyAnswerKey": true,
+                "sharedAcceptedAnswers": ["alpha", "beta"]
+            }]
+        }));
+
+        let result = validate_exam_content(&content, &sentence_validation_config());
+
+        assert!(
+            result.errors.iter().all(|error| !error.field.contains("correctAnswer")),
+            "unexpected blank-answer errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn undersized_shared_sentence_pool_is_a_warning_not_an_error() {
+        let content = sentence_validation_content(json!({
+            "id": "sentence-block",
+            "type": "SENTENCE_COMPLETION",
+            "instruction": "Complete the sentence.",
+            "questions": [{
+                "id": "sentence-1",
+                "sentence": "The ____ is ____.",
+                "blanks": [
+                    {"id": "blank-1", "correctAnswer": "", "acceptedAnswers": [], "position": 0},
+                    {"id": "blank-2", "correctAnswer": "", "acceptedAnswers": [], "position": 1}
+                ],
+                "answerRule": "ONE_WORD",
+                "acceptAnyAnswerKey": true,
+                "sharedAcceptedAnswers": ["Physical Chemistry", "physical-chemistry"]
+            }]
+        }));
+
+        let result = validate_exam_content(&content, &sentence_validation_config());
+
+        assert!(result.errors.is_empty(), "unexpected errors: {:?}", result.errors);
+        assert!(result.warnings.iter().any(|warning| {
+            warning.field.contains("sharedAcceptedAnswers")
+                && warning.message.contains("fewer unique answer keys")
+        }));
+        assert!(result.is_valid());
+    }
+
+    #[test]
+    fn legacy_sentence_blank_without_shared_mode_still_requires_an_answer() {
+        let content = sentence_validation_content(json!({
+            "id": "sentence-block",
+            "type": "SENTENCE_COMPLETION",
+            "instruction": "Complete the sentence.",
+            "questions": [{
+                "id": "sentence-1",
+                "sentence": "The ____ is ____.",
+                "blanks": [
+                    {"id": "blank-1", "correctAnswer": "", "acceptedAnswers": [], "position": 0},
+                    {"id": "blank-2", "correctAnswer": "beta", "acceptedAnswers": ["beta"], "position": 1}
+                ],
+                "answerRule": "ONE_WORD"
+            }]
+        }));
+
+        let result = validate_exam_content(&content, &sentence_validation_config());
+
+        assert!(result.errors.iter().any(|error| {
+            error.field.contains("questions[0].blanks[0].correctAnswer")
+                && error.message == "Blank answer is required"
         }));
     }
 
