@@ -108,6 +108,37 @@ describe('SentenceCompletionBlock shared answer keys', () => {
     }
   });
 
+  it('repairs a saved shared pool when shared mode is enabled again', () => {
+    const { getLatestBlock } = renderHarness(buildBlock({
+      sharedAcceptedAnswers: ['physical chemistry', 'Thermodynamics'],
+      blanks: [
+        {
+          id: 'blank-1',
+          correctAnswer: 'physical chemistry',
+          acceptedAnswers: ['Physical Chemistry', 'PHYSICAL CHEMISTRY'],
+          position: 0,
+        },
+        {
+          id: 'blank-2',
+          correctAnswer: 'Thermodynamics',
+          acceptedAnswers: ['THERMODYNAMICS', 'thermodynamics'],
+          position: 1,
+        },
+      ],
+    }));
+
+    fireEvent.click(screen.getByLabelText(sharedAnswerKeyLabel));
+
+    expect(getLatestBlock().questions[0]!.sharedAcceptedAnswers).toEqual([
+      'physical chemistry',
+      'Thermodynamics',
+      'Physical Chemistry',
+      'PHYSICAL CHEMISTRY',
+      'THERMODYNAMICS',
+      'thermodynamics',
+    ]);
+  });
+
   it('preserves shared additions across off and on transitions', () => {
     const { getLatestBlock } = renderHarness();
 

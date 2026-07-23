@@ -11,7 +11,11 @@ import {
 } from '../../utils/acceptedAnswers';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
 import { maxVariantWordCountFromAcceptedAnswers, suggestUpgradedAnswerRule } from '../../utils/answerRuleAutoUpgrade';
-import { countUniqueSharedSentenceKeys, getSharedSentenceAnswerPool } from '../../utils/sentenceCompletionAnswerPool';
+import {
+  countUniqueSharedSentenceKeys,
+  getSharedSentenceAnswerPool,
+  mergeSharedSentenceAnswerPool,
+} from '../../utils/sentenceCompletionAnswerPool';
 
 interface SentenceCompletionBlockProps {
   block: SentenceCompletionBlockType;
@@ -107,8 +111,7 @@ export function SentenceCompletionBlock({
       }
 
       const questionWithSharedAnswerKeys = { ...question, acceptAnyAnswerKey: true };
-      const sharedAcceptedAnswers =
-        question.sharedAcceptedAnswers ?? getSharedSentenceAnswerPool(questionWithSharedAnswerKeys);
+      const sharedAcceptedAnswers = mergeSharedSentenceAnswerPool(questionWithSharedAnswerKeys);
       const requiredWords = maxVariantWordCountFromAcceptedAnswers(sharedAcceptedAnswers);
       const upgrade = suggestUpgradedAnswerRule(question.answerRule, requiredWords);
 

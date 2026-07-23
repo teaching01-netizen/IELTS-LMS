@@ -5,6 +5,7 @@ import {
   getEffectiveSentenceAcceptedAnswers,
   getSharedSentenceAnswerPool,
   matchSharedSentenceAnswers,
+  mergeSharedSentenceAnswerPool,
 } from '../sentenceCompletionAnswerPool';
 
 function buildQuestion(
@@ -93,6 +94,19 @@ describe('sentence completion shared answer pool', () => {
     ]);
   });
 
+  it('merges a saved shared pool with newly discovered blank keys', () => {
+    const question = buildQuestion({
+      acceptAnyAnswerKey: true,
+      sharedAcceptedAnswers: ['alpha'],
+      blanks: [
+        { id: 'blank-1', position: 0, correctAnswer: 'alpha', acceptedAnswers: ['ALPHA'] },
+        { id: 'blank-2', position: 1, correctAnswer: 'beta', acceptedAnswers: ['BETA'] },
+      ],
+    });
+
+    expect(mergeSharedSentenceAnswerPool(question)).toEqual(['alpha', 'ALPHA', 'beta', 'BETA']);
+  });
+
   it('treats an explicitly empty shared pool as authoritative', () => {
     const question = buildQuestion({
       acceptAnyAnswerKey: true,
@@ -102,6 +116,7 @@ describe('sentence completion shared answer pool', () => {
 
     expect(getSharedSentenceAnswerPool(question)).toEqual([]);
     expect(getEffectiveSentenceAcceptedAnswers(question, 0)).toEqual([]);
+    expect(mergeSharedSentenceAnswerPool(question)).toEqual([]);
   });
 
   it('counts case-insensitive normalized keys once', () => {

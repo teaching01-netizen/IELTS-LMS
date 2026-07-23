@@ -36,6 +36,30 @@ export function getSharedSentenceAnswerPool(question: SentenceCompletionQuestion
   return pool;
 }
 
+export function mergeSharedSentenceAnswerPool(question: SentenceCompletionQuestion): string[] {
+  if (question.sharedAcceptedAnswers?.length === 0) {
+    return [];
+  }
+
+  const existingAnswers = question.sharedAcceptedAnswers ?? [];
+  const { sharedAcceptedAnswers: _sharedAcceptedAnswers, ...questionWithoutSharedPool } = question;
+  const derivedAnswers = getSharedSentenceAnswerPool(questionWithoutSharedPool);
+  const seen = new Set<string>();
+  const merged: string[] = [];
+
+  for (const answer of [...existingAnswers, ...derivedAnswers]) {
+    const normalized = normalizeAnswerForAcceptedAnswerKey(answer);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    merged.push(answer);
+  }
+
+  return merged;
+}
+
 export function getEffectiveSentenceAcceptedAnswers(
   question: SentenceCompletionQuestion,
   blankIndex: number,
