@@ -16,6 +16,7 @@ These guards prevent the builder from displaying one key while grading reads a d
 Shared answer-key mode is question-level, defaults off when absent, and changes only how the sentence's blank keys are authored and graded:
 
 - Toggling shared mode preserves each blank's existing answer keys so disabling the mode restores the previous per-blank behavior.
+- Enabling shared mode seeds the pool from each blank's primary and accepted keys, preserving case variants for authoring visibility while removing only equivalent formatting duplicates.
 - The student submission remains one answer per blank in the existing array-backed question answer shape.
-- Shared grading normalizes answers and consumes each accepted key at most once per sentence, so permutations are accepted but repeated use of one key cannot earn full credit.
+- Shared grading still matches case-insensitively and consumes each normalized key at most once per sentence, so case variants do not create extra credit capacity.
 - A shared pool with fewer unique keys than blanks is a warning, not a publish blocker.

@@ -1,5 +1,10 @@
 import type { SentenceCompletionQuestion } from '../types';
-import { normalizeAnswerForMatching, resolveAcceptedAnswers } from './acceptedAnswers';
+import {
+  normalizeAnswerForAcceptedAnswerKey,
+  normalizeAnswerForMatching,
+  resolveAcceptedAnswers,
+  sanitizeAcceptedAnswers,
+} from './acceptedAnswers';
 
 export function getSharedSentenceAnswerPool(question: SentenceCompletionQuestion): string[] {
   if (question.acceptAnyAnswerKey !== true) {
@@ -14,8 +19,11 @@ export function getSharedSentenceAnswerPool(question: SentenceCompletionQuestion
   const pool: string[] = [];
 
   for (const blank of question.blanks) {
-    for (const answer of resolveAcceptedAnswers(blank)) {
-      const normalized = normalizeAnswerForMatching(answer);
+    for (const answer of sanitizeAcceptedAnswers([
+      blank.correctAnswer,
+      ...(blank.acceptedAnswers ?? []),
+    ])) {
+      const normalized = normalizeAnswerForAcceptedAnswerKey(answer);
       if (!normalized || seen.has(normalized)) {
         continue;
       }

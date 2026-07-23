@@ -3972,6 +3972,14 @@ fn index_objective_block_scoring_specs(
 }
 
 fn normalize_shared_sentence_answer(value: &str) -> String {
+    normalize_shared_sentence_answer_with_case(value, true)
+}
+
+fn normalize_shared_sentence_answer_key(value: &str) -> String {
+    normalize_shared_sentence_answer_with_case(value, false)
+}
+
+fn normalize_shared_sentence_answer_with_case(value: &str, fold_case: bool) -> String {
     let mut normalized = String::new();
     let mut pending_space = false;
 
@@ -3991,7 +3999,11 @@ fn normalize_shared_sentence_answer(value: &str) -> String {
         if pending_space && !normalized.ends_with(' ') {
             normalized.push(' ');
         }
-        normalized.extend(character.to_lowercase());
+        if fold_case {
+            normalized.extend(character.to_lowercase());
+        } else {
+            normalized.push(character);
+        }
         pending_space = false;
     }
 
@@ -4013,7 +4025,7 @@ fn resolve_shared_sentence_answers(question: &Value) -> Vec<String> {
         for answer in shared_answers.iter().filter_map(Value::as_str) {
             for variant in split_shared_sentence_answer_variants(answer) {
                 let display = variant.trim();
-                let normalized = normalize_shared_sentence_answer(display);
+                let normalized = normalize_shared_sentence_answer_key(display);
                 if normalized.is_empty() || !seen.insert(normalized) {
                     continue;
                 }
@@ -4025,16 +4037,42 @@ fn resolve_shared_sentence_answers(question: &Value) -> Vec<String> {
 
     if let Some(blanks) = question.get("blanks").and_then(Value::as_array) {
         for blank in blanks {
-            for answer in resolve_accepted_answers(
-                blank.get("correctAnswer"),
-                blank.get("acceptedAnswers"),
-            ) {
-                let normalized = normalize_shared_sentence_answer(&answer);
+            for answer in resolve_shared_blank_sentence_answers(blank) {
+                let normalized = normalize_shared_sentence_answer_key(&answer);
                 if normalized.is_empty() || !seen.insert(normalized) {
                     continue;
                 }
                 resolved.push(answer);
             }
+        }
+    }
+
+    resolved
+}
+
+fn resolve_shared_blank_sentence_answers(blank: &Value) -> Vec<String> {
+    let Some(blank) = blank.as_object() else {
+        return Vec::new();
+    };
+
+    let mut raw_answers = Vec::new();
+    if let Some(correct_answer) = blank.get("correctAnswer").and_then(Value::as_str) {
+        raw_answers.push(correct_answer);
+    }
+    if let Some(accepted_answers) = blank.get("acceptedAnswers").and_then(Value::as_array) {
+        raw_answers.extend(accepted_answers.iter().filter_map(Value::as_str));
+    }
+
+    let mut seen = HashSet::<String>::new();
+    let mut resolved = Vec::new();
+    for answer in raw_answers {
+        for variant in split_shared_sentence_answer_variants(answer) {
+            let display = variant.trim();
+            let normalized = normalize_shared_sentence_answer_key(display);
+            if normalized.is_empty() || !seen.insert(normalized) {
+                continue;
+            }
+            resolved.push(display.to_owned());
         }
     }
 
@@ -4595,6 +4633,40 @@ mod tests {
         assert_eq!(results["totalScore"], 1);
         assert_eq!(results["questionResults"][0]["isCorrect"], true);
         assert_eq!(results["questionResults"][1]["isCorrect"], false);
+    }
+
+    #[test]
+    fn shared_sentence_objective_grading_derives_primary_and_case_variant_keys() {
+        let mut content_snapshot = shared_sentence_content_snapshot();
+        let question = content_snapshot["reading"]["passages"][0]["blocks"][0]["questions"][0]
+            .as_object_mut()
+            .expect("sentence question object");
+        question.remove("sharedAcceptedAnswers");
+        question["blanks"] = json!([
+            {
+                "id": "blank-1",
+                "correctAnswer": "physical chemistry",
+                "acceptedAnswers": ["Physical Chemistry", "PHYSICAL CHEMISTRY"]
+            },
+            {
+                "id": "blank-2",
+                "correctAnswer": "Thermodynamics",
+                "acceptedAnswers": ["THERMODYNAMICS", "thermodynamics"]
+            }
+        ]);
+
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({}),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(
+            results["questionResults"][0]["correctAnswer"],
+            "physical chemistry | Physical Chemistry | PHYSICAL CHEMISTRY | Thermodynamics | THERMODYNAMICS | thermodynamics"
+        );
     }
 
     #[test]

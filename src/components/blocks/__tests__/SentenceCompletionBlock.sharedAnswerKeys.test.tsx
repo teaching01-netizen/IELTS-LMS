@@ -76,6 +76,38 @@ describe('SentenceCompletionBlock shared answer keys', () => {
     expect(getLatestBlock().questions[0]!.blanks).toEqual(blanksBefore);
   });
 
+  it('shows primary and case-variant blank keys in the shared editor', () => {
+    renderHarness(buildBlock({
+      blanks: [
+        {
+          id: 'blank-1',
+          correctAnswer: 'physical chemistry',
+          acceptedAnswers: ['Physical Chemistry', 'PHYSICAL CHEMISTRY'],
+          position: 0,
+        },
+        {
+          id: 'blank-2',
+          correctAnswer: 'Thermodynamics',
+          acceptedAnswers: ['THERMODYNAMICS', 'thermodynamics'],
+          position: 1,
+        },
+      ],
+    }));
+
+    fireEvent.click(screen.getByLabelText(sharedAnswerKeyLabel));
+
+    for (const answer of [
+      'physical chemistry',
+      'Physical Chemistry',
+      'PHYSICAL CHEMISTRY',
+      'Thermodynamics',
+      'THERMODYNAMICS',
+      'thermodynamics',
+    ]) {
+      expect(screen.getByText(answer)).toBeVisible();
+    }
+  });
+
   it('preserves shared additions across off and on transitions', () => {
     const { getLatestBlock } = renderHarness();
 

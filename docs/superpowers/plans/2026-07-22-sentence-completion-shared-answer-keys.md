@@ -137,7 +137,7 @@ Rules for the implementation:
 
 1. `acceptAnyAnswerKey !== true` always returns the selected blank’s existing `resolveAcceptedAnswers(blank)` values.
 2. An explicitly present `sharedAcceptedAnswers` array, including `[]`, is authoritative.
-3. If shared mode is enabled and the field is absent, derive the pool from the ordered union of all `resolveAcceptedAnswers(blank)` values. Deduplicate pool membership using `normalizeAnswerForMatching`, while retaining the first display spelling.
+3. If shared mode is enabled and the field is absent, derive the pool from each blank's primary `correctAnswer` followed by its accepted variants. Deduplicate pool membership using accepted-key normalization (case preserved, formatting normalized), while retaining the first display spelling for each authoring key.
 4. `matchSharedSentenceAnswers` normalizes each non-empty student value with `normalizeAnswerForMatching`, accepts it only if it is in the normalized pool, and consumes that normalized key after the first match. Preserve answer-slot order in the returned boolean array.
 
 - [ ] **Step 4: Run the focused test and verify it passes.**

@@ -884,21 +884,18 @@ fn resolved_blank_sentence_answers(blank: &serde_json::Value) -> Vec<String> {
     };
 
     let mut values = Vec::new();
+    if let Some(correct_answer) = blank.get("correctAnswer").and_then(|value| value.as_str()) {
+        values.extend(
+            split_shared_sentence_answer_variants(correct_answer)
+                .map(str::trim)
+                .filter(|answer| !answer.is_empty())
+                .map(str::to_owned),
+        );
+    }
     if let Some(accepted_answers) = blank.get("acceptedAnswers").and_then(|value| value.as_array()) {
         for answer in accepted_answers.iter().filter_map(|value| value.as_str()) {
             values.extend(
                 split_shared_sentence_answer_variants(answer)
-                    .map(str::trim)
-                    .filter(|answer| !answer.is_empty())
-                    .map(str::to_owned),
-            );
-        }
-    }
-
-    if values.is_empty() {
-        if let Some(correct_answer) = blank.get("correctAnswer").and_then(|value| value.as_str()) {
-            values.extend(
-                split_shared_sentence_answer_variants(correct_answer)
                     .map(str::trim)
                     .filter(|answer| !answer.is_empty())
                     .map(str::to_owned),
@@ -1942,6 +1939,25 @@ mod tests {
             "unexpected blank-answer errors: {:?}",
             result.errors
         );
+    }
+
+    #[test]
+    fn shared_sentence_pool_counts_primary_and_accepted_blank_keys() {
+        let question = json!({
+            "blanks": [
+                {
+                    "correctAnswer": "alpha",
+                    "acceptedAnswers": ["beta"]
+                },
+                {
+                    "correctAnswer": "gamma",
+                    "acceptedAnswers": []
+                }
+            ]
+        });
+        let question_object = question.as_object().expect("sentence question object");
+
+        assert_eq!(shared_sentence_answer_key_count(question_object), 3);
     }
 
     #[test]

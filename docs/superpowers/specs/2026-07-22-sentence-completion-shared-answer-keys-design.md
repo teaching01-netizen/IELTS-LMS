@@ -28,9 +28,11 @@ Add optional question-level fields conceptually equivalent to:
 
 The existing `blanks[].acceptedAnswers` and `correctAnswer` values are never
 overwritten when the toggle changes. Enabling the toggle seeds the shared pool
-from the normalized union of the sentence’s blank keys, only when no shared
-pool exists. Disabling the toggle preserves the shared pool for a later
-re-enable and returns grading to the untouched per-blank keys.
+from each blank’s primary key followed by its accepted variants, preserving
+case variants for authoring visibility and removing only equivalent formatting
+duplicates, only when no shared pool exists. Disabling the toggle preserves the
+shared pool for a later re-enable and returns grading to the untouched
+per-blank keys.
 
 # Behavior
 

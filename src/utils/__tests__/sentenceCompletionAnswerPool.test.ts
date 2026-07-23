@@ -48,7 +48,7 @@ describe('sentence completion shared answer pool', () => {
     expect(getEffectiveSentenceAcceptedAnswers(question, 1)).toEqual(['alpha', 'beta']);
   });
 
-  it('deduplicates a derived pool by normalized key while preserving first spelling', () => {
+  it('deduplicates a derived pool by accepted-key normalization while preserving case variants', () => {
     const question = buildQuestion({
       acceptAnyAnswerKey: true,
       blanks: [
@@ -57,7 +57,40 @@ describe('sentence completion shared answer pool', () => {
       ],
     });
 
-    expect(getSharedSentenceAnswerPool(question)).toEqual(['Physical Chemistry', 'THERMODYNAMICS']);
+    expect(getSharedSentenceAnswerPool(question)).toEqual([
+      'Physical Chemistry',
+      'physical-chemistry',
+      'THERMODYNAMICS',
+    ]);
+  });
+
+  it('preserves case variants when deriving the shared pool from blank keys', () => {
+    const question = buildQuestion({
+      acceptAnyAnswerKey: true,
+      blanks: [
+        {
+          id: 'blank-1',
+          position: 0,
+          correctAnswer: 'physical chemistry',
+          acceptedAnswers: ['Physical Chemistry', 'PHYSICAL CHEMISTRY'],
+        },
+        {
+          id: 'blank-2',
+          position: 1,
+          correctAnswer: 'Thermodynamics',
+          acceptedAnswers: ['THERMODYNAMICS', 'thermodynamics'],
+        },
+      ],
+    });
+
+    expect(getSharedSentenceAnswerPool(question)).toEqual([
+      'physical chemistry',
+      'Physical Chemistry',
+      'PHYSICAL CHEMISTRY',
+      'Thermodynamics',
+      'THERMODYNAMICS',
+      'thermodynamics',
+    ]);
   });
 
   it('treats an explicitly empty shared pool as authoritative', () => {
