@@ -505,4 +505,64 @@ describe('StudentRuntimeProvider', () => {
     ).toBeGreaterThan(scheduledSecondTicks);
     vi.useRealTimers();
   });
+  it('keeps the runtime-backed ticker advancing through equal-revision snapshot churn', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    try {
+      const runtimeSnapshot = {
+        ...createRuntimeSnapshot('writing'),
+        currentSectionRemainingSeconds: 10,
+        currentSectionDeadlineAt: '2026-01-01T00:00:10.000Z',
+        serverNow: '2026-01-01T00:00:00.000Z',
+        revision: 7,
+      };
+      const attemptSnapshot = {
+        ...buildCompletedPreCheckAttempt(),
+        phase: 'exam' as const,
+        currentModule: 'writing' as const,
+        currentQuestionId: 'task1',
+      };
+
+      function DisplayProbe() {
+        const { state } = useStudentRuntime();
+        return <div data-testid="remaining">{state.displayTimeRemaining}</div>;
+      }
+
+      const { rerender } = render(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={attemptSnapshot}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+
+      expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+
+      for (let elapsedMs = 0; elapsedMs < 1_200; elapsedMs += 100) {
+        act(() => {
+          rerender(
+            <StudentRuntimeProvider
+              state={mockExamState}
+              onExit={() => undefined}
+              runtimeBacked
+              runtimeSnapshot={{ ...runtimeSnapshot }}
+              attemptSnapshot={attemptSnapshot}
+            >
+              <DisplayProbe />
+            </StudentRuntimeProvider>,
+          );
+          vi.advanceTimersByTime(100);
+        });
+      }
+
+      expect(screen.getByTestId('remaining')).toHaveTextContent('9');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -785,6 +785,11 @@ export function StudentRuntimeProvider({
   );
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [derivedClockNowMs, setDerivedClockNowMs] = useState(() => Date.now());
+  const runtimeSnapshotRef = useRef(runtimeSnapshot);
+  runtimeSnapshotRef.current = runtimeSnapshot;
+  const clockOffsetMsRef = useRef(clockOffsetMs);
+  clockOffsetMsRef.current = clockOffsetMs;
+
   const lastHydratedAttemptRef = useRef<string | null>(
     attemptSnapshot
       ? `${attemptSnapshot.id}:${attemptSnapshot.updatedAt}:${getDroppedMutationMarker(attemptSnapshot.recovery.lastDroppedMutations) ?? ''}`
@@ -985,7 +990,7 @@ export function StudentRuntimeProvider({
     }
 
     const scheduleVisibleSecondTick = () => {
-      const deadlineAt = runtimeSnapshot?.currentSectionDeadlineAt;
+      const deadlineAt = runtimeSnapshotRef.current?.currentSectionDeadlineAt;
       if (!deadlineAt) {
         return 1_000;
       }
@@ -995,7 +1000,7 @@ export function StudentRuntimeProvider({
         return 1_000;
       }
 
-      const adjustedNowMs = Date.now() + clockOffsetMs;
+      const adjustedNowMs = Date.now() + clockOffsetMsRef.current;
       const remainingMs = Math.max(0, deadlineMs - adjustedNowMs);
       const msUntilNextVisibleSecond = remainingMs % 1_000;
       return Math.max(100, msUntilNextVisibleSecond === 0 ? 1_000 : msUntilNextVisibleSecond + 5);
@@ -1020,7 +1025,7 @@ export function StudentRuntimeProvider({
         window.clearTimeout(timerId);
       }
     };
-  }, [clockOffsetMs, runtimeBacked, runtimeSnapshot, runtimeState.phase]);
+  }, [runtimeBacked, runtimeState.phase]);
 
   useEffect(() => {
     if (
