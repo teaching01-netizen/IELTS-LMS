@@ -646,6 +646,14 @@ async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_an
         .unwrap();
 
     assert_eq!(first.status(), StatusCode::OK);
+    // Session B is an independent client session writing a DIFFERENT
+    // question. Under the base-revision gate (BEX-003/BEX-032) it must base
+    // its batch on the CURRENT revision (post-A), not the bootstrap one —
+    // the contract being verified is that independent sections can both
+    // persist, not that stale bases are tolerated.
+    let first_json = json_body(first).await;
+    let revision_after_first = first_json["data"]["revision"].as_i64().unwrap() as i32;
+    assert!(revision_after_first >= base_revision + 1);
 
     let second = app
         .oneshot(
@@ -661,7 +669,7 @@ async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_an
                         "attemptId": attempt_id.clone(),
                         "mutations": [{
                             "mutationId": "mutation-2",
-                            "baseRevision": base_revision,
+                            "baseRevision": revision_after_first,
                             "type": "SetScalar",
                             "questionId": "r1",
                             "value": "B"
@@ -2819,17 +2827,17 @@ async fn student_not_enrolled_for_schedule_receives_forbidden() {
 }
 
 // BEX-003 — Active client-session ownership, mutation path.
+// BEX-003 — Active client-session ownership, mutation path.
 // Session A accepts q1="A"; Session B then writes the same question from an
-// OLDER base revision. Contract as implemented today: the mutation path does
-// NOT validate `baseRevision` (the envelope carries it but `apply_mutation`
-// never reads it), so Session B's stale write is accepted with 200, the global
-// attempt revision and per-session mutation watermark advance, and Session B's
-// value wins (last-writer-wins). The response never carries `activeSessionId`
-// because the delivery layer currently constructs every conflict detail with
-// `active_session_id: None`. This test pins that behavior so a future change
-// to enforce revision/ownership conflicts is caught deliberately.
+// OLDER base revision. The mutation batch path enforces `baseRevision` against
+// the attempt's current revision: a batch based strictly below the current
+// revision is rejected atomically with 409 CONFLICT / `BASE_REVISION_MISMATCH`
+// carrying `latestRevision`, the accepted per-session mutation watermark
+// (`serverAcceptedThroughSeq`), and the active session that owns the accepted
+// state (`activeSessionId`), so Session A's answer is preserved and no partial
+// state is persisted for Session B's stale batch.
 #[tokio::test]
-async fn mutation_batch_from_second_client_session_with_stale_base_revision_documents_last_writer_wins()
+async fn mutation_batch_from_second_client_session_with_stale_base_revision_returns_conflict_and_preserves_first_client_answer()
 {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
@@ -2902,8 +2910,20 @@ async fn mutation_batch_from_second_client_session_with_stale_base_revision_docu
         )
         .await
         .unwrap();
-    assert_eq!(session_a_response.status(), StatusCode::OK);
-    let session_a_json = json_body(session_a_response).await;
+    let session_a_status = session_a_response.status();
+    let session_a_body = json_body(session_a_response).await;
+    if session_a_status != StatusCode::OK {
+        eprintln!("DEBUG session_a_response body: {session_a_body}");
+        let db_revision: i64 =
+            sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+                .bind(&attempt_id)
+                .fetch_one(database.pool())
+                .await
+                .unwrap();
+        eprintln!("DEBUG base_revision={base_revision} db_revision={db_revision}");
+    }
+    assert_eq!(session_a_status, StatusCode::OK);
+    let session_a_json = session_a_body;
     assert_eq!(session_a_json["data"]["appliedMutationCount"], 1);
     assert_eq!(session_a_json["data"]["serverAcceptedThroughSeq"], 1);
     let revision_after_a = session_a_json["data"]["revision"].as_i64().unwrap();
@@ -2936,22 +2956,44 @@ async fn mutation_batch_from_second_client_session_with_stale_base_revision_docu
         .await
         .unwrap();
 
+    // The stale batch must be rejected atomically: 409 BASE_REVISION_MISMATCH
+    // carrying the current revision, the per-session accepted watermark, and
+    // the active writer session. Session A's answer stays authoritative.
     let session_b_status = session_b_response.status();
     let session_b_json = json_body(session_b_response).await;
     assert_eq!(
         session_b_status,
-        StatusCode::OK,
+        StatusCode::CONFLICT,
         "stale base revision batch: {session_b_json}"
     );
-    assert_eq!(session_b_json["data"]["appliedMutationCount"], 1);
-    assert_eq!(session_b_json["data"]["serverAcceptedThroughSeq"], 1);
-    // The accepted server revision is returned and advanced by exactly one
-    // mutation batch (no other write happened in between).
-    let revision_after_b = session_b_json["data"]["revision"].as_i64().unwrap();
-    assert_eq!(revision_after_b, revision_after_a + 1);
-    assert!(
-        session_b_json["data"].get("activeSessionId").is_none(),
-        "mutation success responses currently do not carry activeSessionId"
+    assert_eq!(session_b_json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        session_b_json["error"]["details"]["reason"],
+        "BASE_REVISION_MISMATCH",
+        "stale batch response: {session_b_json}"
+    );
+    assert_eq!(
+        session_b_json["error"]["details"]["latestRevision"]
+            .as_i64()
+            .unwrap(),
+        revision_after_a,
+        "conflict must report the attempt's current accepted revision"
+    );
+    // The per-session accepted mutation watermark of the requesting session
+    // has not advanced (Session B has no accepted mutations), matching the
+    // `serverAcceptedThroughSeq` semantics of mutation success responses.
+    assert_eq!(
+        session_b_json["error"]["details"]["serverAcceptedThroughSeq"]
+            .as_i64()
+            .unwrap(),
+        0,
+        "stale batch response: {session_b_json}"
+    );
+    // The conflict identifies the session that owns the accepted state.
+    assert_eq!(
+        session_b_json["error"]["details"]["activeSessionId"],
+        "phone-client-1",
+        "stale batch response: {session_b_json}"
     );
 
     let answers: serde_json::Value =
@@ -2961,21 +3003,226 @@ async fn mutation_batch_from_second_client_session_with_stale_base_revision_docu
             .await
             .unwrap();
     assert_eq!(
-        answers["q1"], "B",
-        "last-writer-wins: the second session's value is authoritative today"
+        answers["q1"], "A",
+        "the stale session's batch must not overwrite the first session's accepted answer"
     );
+    let stored_revision: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        stored_revision, revision_after_a as i32,
+        "a rejected stale batch must not advance the attempt revision"
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-003 + BEX-033 — a base-revision conflict is NOT a poison pill. The
+// rejected batch persisted nothing, so re-flushing the SAME mutations at the
+// CURRENT revision (exactly what the client reconciliation does after
+// refetching the session) succeeds and applies each mutation exactly once
+// (idempotency across conflict); a later identical replay is a 200 no-op.
+#[tokio::test]
+async fn mutation_batch_rejected_for_stale_revision_then_replayed_latest_revision_applies_once() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let (bootstrap_a, _session_a) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        "phone-client-1",
+    )
+    .await;
+    let (bootstrap_b, _session_b) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        "computer-client-1",
+    )
+    .await;
+    let attempt_id = bootstrap_a["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token_a = bootstrap_a["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token_b = bootstrap_b["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap_a["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    let batch_uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
+
+    // Session A accepts q1 = "A"; the server revision advances.
+    let session_a_response = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_a)
+                .method("POST")
+                .uri(&batch_uri)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-session-a-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(session_a_response.status(), StatusCode::OK);
+    let session_a_json = json_body(session_a_response).await;
+    let revision_after_a = session_a_json["data"]["revision"].as_i64().unwrap();
+
+    // Session B flushes the target mutation from the stale base → 409, and
+    // NOTHING is persisted for it.
+    let session_b_mutation = json!({
+        "attemptId": attempt_id.clone(),
+        "mutations": [{
+            "mutationId": "mutation-session-b-1",
+            "baseRevision": base_revision,
+            "type": "SetScalar",
+            "questionId": "q1",
+            "value": "B2"
+        }]
+    });
+    let stale_response = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_b)
+                .method("POST")
+                .uri(&batch_uri)
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&session_b_mutation).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stale_response.status(), StatusCode::CONFLICT);
+    let stale_json = json_body(stale_response).await;
+    assert_eq!(
+        stale_json["error"]["details"]["reason"],
+        "BASE_REVISION_MISMATCH",
+        "stale batch response: {stale_json}"
+    );
+    assert_eq!(
+        stale_json["error"]["details"]["latestRevision"]
+            .as_i64()
+            .unwrap(),
+        revision_after_a
+    );
+
+    // The client reconciles: refetch state and re-flush the SAME mutation id
+    // at the CURRENT revision. It must be applied exactly once.
+    let reconciled = json!({
+        "attemptId": attempt_id.clone(),
+        "mutations": [{
+            "mutationId": "mutation-session-b-1",
+            "baseRevision": revision_after_a,
+            "type": "SetScalar",
+            "questionId": "q1",
+            "value": "B2"
+        }]
+    });
+    let retry_response = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_b)
+                .method("POST")
+                .uri(&batch_uri)
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&reconciled).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        retry_response.status(),
+        StatusCode::OK,
+        "replaying the same mutation at the current revision must be accepted"
+    );
+    let retry_json = json_body(retry_response).await;
+    assert_eq!(retry_json["data"]["appliedMutationCount"], 1);
+    assert_eq!(
+        retry_json["data"]["revision"].as_i64().unwrap(),
+        revision_after_a + 1
+    );
+
+    // A later identical replay (e.g. reconnect retry) is a 200 no-op even
+    // though its base is now stale again: already-applied mutation ids
+    // short-circuit BEFORE the base-revision gate (BEX-033).
+    let replay_response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_b)
+                .method("POST")
+                .uri(&batch_uri)
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&reconciled).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay_response.status(), StatusCode::OK);
+    let replay_json = json_body(replay_response).await;
+    assert_eq!(replay_json["data"]["appliedMutationCount"], 0);
+
+    let stored_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
+    )
+    .bind(&attempt_id)
+    .bind("mutation-session-b-1")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_count, 1,
+        "the replayed mutation must be persisted exactly once"
+    );
+
+    let answers: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(answers["q1"], "B2");
 
     database.shutdown().await;
 }
 
 // BEX-003 — Active client-session ownership, submit path.
 // After Session A's mutations advance the attempt revision, Session B submits
-// with a stale `lastSeenRevision`. The submit path DOES enforce revision
+// with a stale `lastSeenRevision`. The submit path enforces revision
 // freshness and returns the documented conflict shape: 409 CONFLICT with
-// reason `BASE_REVISION_MISMATCH` and `latestRevision`. The conflict detail
-// currently never includes `activeSessionId` (the delivery layer always emits
-// `active_session_id: None`), which pins the deviation from the test-plan
-// expectation for the controller to review.
+// reason `BASE_REVISION_MISMATCH`, `latestRevision`, and the active session
+// that owns the accepted state (`activeSessionId`), without sealing the
+// attempt or overwriting the valid session's answer.
 #[tokio::test]
 async fn submit_from_second_client_session_with_stale_revision_returns_base_revision_mismatch_conflict()
 {
@@ -3108,9 +3355,10 @@ async fn submit_from_second_client_session_with_stale_revision_returns_base_revi
             .unwrap(),
         revision_after_a
     );
-    assert!(
-        submit_json["error"]["details"].get("activeSessionId").is_none(),
-        "conflict details currently never include activeSessionId"
+    assert_eq!(
+        submit_json["error"]["details"]["activeSessionId"],
+        "phone-client-1",
+        "the stale submit conflict must identify the session that owns the accepted state: {submit_json}"
     );
 
     // Session A's accepted answer is preserved and the attempt is not sealed.

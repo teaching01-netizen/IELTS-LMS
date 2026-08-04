@@ -336,7 +336,7 @@ impl DeliveryService {
         );
 
         let updated = self
-            .update_attempt(
+            .update_attempt_preserving_revision(
                 attempt.id,
                 phase,
                 attempt.current_module.clone(),
@@ -478,7 +478,7 @@ impl DeliveryService {
             || needs_client_session_id_in_integrity
             || needs_client_session_id_in_recovery
         {
-            self.update_attempt(
+            self.update_attempt_preserving_revision(
                 attempt.id,
                 phase,
                 attempt.current_module.clone(),
@@ -772,6 +772,55 @@ impl DeliveryService {
             });
         }
 
+        // Base-revision conflict gate (BEX-003 / BEX-032).
+        //
+        // A NEW mutation batch must not be allowed to silently overwrite
+        // answers that a newer revision already accepted. Any command whose
+        // `baseRevision` is strictly BELOW the attempt's current revision
+        // means the batch was composed from stale state (e.g. a second client
+        // session that never saw the first session's writes), so the whole
+        // batch is rejected atomically with `BASE_REVISION_MISMATCH` — no
+        // partial state is persisted.
+        //
+        // Tolerance rule: a command is accepted when its base is EQUAL TO OR
+        // ABOVE the current revision. Equal-per-position is intentionally NOT
+        // required because the allowed frontend pipelines intrabatch bases:
+        // `StudentAttemptRepository#flushMutationQueue` composes one chunk
+        // with baseRevision N, N+1, ... (N = last seen server revision)
+        // while the server advances the attempt revision exactly once per
+        // accepted batch. A flush that raced a pushed snapshot (or a client
+        // slightly ahead of the server) therefore legitimately sends bases
+        // strictly above the current revision and must still be accepted.
+        //
+        // The gate runs AFTER the idempotent-replay shortcuts and the
+        // in-batch dedupe short-circuit above, so replayed batches (BEX-033)
+        // and retries whose commands are already persisted keep returning
+        // their cached/successful response instead of a 409. Only commands
+        // NOT yet persisted (`new_mutations`) are scored. Commands without a
+        // baseRevision claim (`base_revision: None` — legacy envelopes) are
+        // not scored: they carry no stale-base signal to enforce.
+        if let Some(stale) = new_mutations.iter().find(|mutation| {
+            mutation
+                .base_revision
+                .is_some_and(|base_revision| base_revision < attempt.revision)
+        }) {
+            let active_session_id = self
+                .load_active_mutation_session_id(tx.as_mut(), &req.attempt_id)
+                .await?;
+            return Err(DeliveryError::Conflict {
+                message: format!(
+                    "Mutation batch is based on revision {} but the attempt is at revision {}; \
+                     reload the latest answers and re-flush from the current revision.",
+                    stale.base_revision.unwrap_or_default(),
+                    attempt.revision
+                ),
+                reason: Some(DeliveryConflictReason::BaseRevisionMismatch),
+                latest_revision: Some(attempt.revision),
+                server_accepted_through_seq: Some(existing_max_seq),
+                active_session_id,
+            });
+        }
+
         let mut applied_mutation_count: usize = 0;
         for mutation in &new_mutations {
             let applied = apply_mutation(
@@ -965,6 +1014,31 @@ impl DeliveryService {
         tx.commit().await?;
 
         Ok(response)
+    }
+
+    /// Identifies the client session that most recently persisted a mutation
+    /// for this attempt — the "active writer" whose accepted answers a stale
+    /// batch/submit would otherwise silently overwrite. Returns `None` when
+    /// the attempt has no accepted mutations yet.
+    async fn load_active_mutation_session_id(
+        &self,
+        conn: &mut MySqlConnection,
+        attempt_id: &str,
+    ) -> Result<Option<String>, DeliveryError> {
+        let client_session_id: Option<String> = sqlx::query_scalar(
+            r#"
+            SELECT client_session_id
+            FROM student_attempt_mutations
+            WHERE attempt_id = ? AND applied_at IS NOT NULL
+            ORDER BY applied_at DESC, client_mutation_id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(attempt_id)
+        .fetch_optional(conn)
+        .await?
+        .flatten();
+        Ok(client_session_id)
     }
 
     async fn load_recently_completed_section_keys_for_grace(
@@ -1277,12 +1351,15 @@ impl DeliveryService {
 
         if let Some(last_seen_revision) = req.last_seen_revision {
             if attempt.revision != last_seen_revision {
+                let active_session_id = self
+                    .load_active_mutation_session_id(tx.as_mut(), &attempt.id)
+                    .await?;
                 return Err(DeliveryError::Conflict {
                     message: "Attempt revision is stale.".to_owned(),
                     reason: Some(DeliveryConflictReason::BaseRevisionMismatch),
                     latest_revision: Some(attempt.revision),
                     server_accepted_through_seq: None,
-                    active_session_id: None,
+                    active_session_id,
                 });
             }
         }
