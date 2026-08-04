@@ -3,6 +3,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useReducer,
@@ -48,6 +49,26 @@ export type BlockingReason =
   | 'device_mismatch'
   | 'storage_unavailable'
   | null;
+export type RuntimeContractIssue =
+  | 'missing_active_section'
+  | 'stale_paused_at'
+  | 'invalid_remaining_seconds'
+  | null;
+
+interface RuntimeTimerAnchor {
+  readonly sectionKey: ModuleType | null;
+  readonly extensionMinutes: number;
+  readonly deadlineMs: number;
+}
+
+interface RuntimeTimerAnchorOptions {
+  readonly runtimeBacked: boolean;
+  readonly phase: ExamPhase;
+  readonly runtime: ExamSessionRuntime | null;
+  readonly nowMs: number;
+  readonly clockOffsetMs: number;
+  readonly currentAnchor: RuntimeTimerAnchor | null;
+}
 
 interface RuntimeReducerState {
   phase: ExamPhase;
@@ -85,6 +106,8 @@ interface RuntimeState extends RuntimeReducerState {
   runtimeStatus: RuntimeStatus | null;
   runtimeSnapshot: ExamSessionRuntime | null;
   submitRequiresConfirmation: boolean;
+  runtimeContractIssue: RuntimeContractIssue;
+  answerControlsLocked: boolean;
 }
 
 interface RuntimeActions {
@@ -107,6 +130,7 @@ interface RuntimeActions {
   terminateExam: () => void;
   transitionBlocking: (reason: ManagedBlockingReason, active?: boolean) => void;
   setAttemptSyncState: (state: AttemptSyncState) => void;
+  refreshRuntime: () => Promise<void>;
 }
 
 interface RuntimeContextValue {
@@ -126,6 +150,7 @@ interface StudentRuntimeProviderProps {
   runtimeBacked?: boolean;
   runtimeSnapshot?: ExamSessionRuntime | null;
   attemptSnapshot?: StudentAttempt | null;
+  onRefreshRuntime?: (() => Promise<void>) | undefined;
 }
 
 type RuntimeAction =
@@ -201,6 +226,162 @@ function getRuntimeSectionExtensionMinutes(
   return typeof section?.extensionMinutes === 'number' ? section.extensionMinutes : null;
 }
 
+function resolveAnchoredDeadlineMs(
+  runtime: ExamSessionRuntime,
+  nowMs: number,
+  clockOffsetMs: number,
+): number | null {
+  if (!Number.isFinite(runtime.currentSectionRemainingSeconds) || runtime.currentSectionRemainingSeconds < 0) {
+    return null;
+  }
+
+  const serverNowMs = runtime.serverNow ? Date.parse(runtime.serverNow) : Number.NaN;
+  const anchoredBaseMs = Number.isFinite(serverNowMs)
+    ? serverNowMs
+    : nowMs + clockOffsetMs;
+  return anchoredBaseMs + runtime.currentSectionRemainingSeconds * 1_000;
+}
+
+function getActiveRuntimeSection(
+  runtime: ExamSessionRuntime | null,
+): ExamSessionRuntime['sections'][number] | null {
+  if (!runtime?.currentSectionKey) {
+    return null;
+  }
+
+  return runtime.sections.find((section) => section.sectionKey === runtime.currentSectionKey) ?? null;
+}
+
+function getRuntimeContractIssue(
+  runtimeBacked: boolean,
+  phase: ExamPhase,
+  runtime: ExamSessionRuntime | null,
+): RuntimeContractIssue {
+  if (!runtimeBacked || phase !== 'exam' || !runtime || runtime.status !== 'live') {
+    return null;
+  }
+
+  if (!runtime.currentSectionKey) {
+    return 'missing_active_section';
+  }
+
+  const activeSection = getActiveRuntimeSection(runtime);
+  if (!activeSection) {
+    return 'missing_active_section';
+  }
+
+  if (activeSection.pausedAt) {
+    return 'stale_paused_at';
+  }
+
+  if (runtime.waitingForNextSection && activeSection.status === 'completed') {
+    return null;
+  }
+
+  if (activeSection.status !== 'live') {
+    return 'missing_active_section';
+  }
+
+  if (
+    !Number.isFinite(runtime.currentSectionRemainingSeconds) ||
+    runtime.currentSectionRemainingSeconds < 0
+  ) {
+    return 'invalid_remaining_seconds';
+  }
+
+  return null;
+}
+
+function getRuntimeExtensionMinutes(runtime: ExamSessionRuntime | null): number {
+  const extensionMinutes = getActiveRuntimeSection(runtime)?.extensionMinutes;
+  return typeof extensionMinutes === 'number' && Number.isFinite(extensionMinutes)
+    ? Math.max(0, extensionMinutes)
+    : 0;
+}
+
+function buildRuntimeTimerIdentity(runtime: ExamSessionRuntime | null): string | null {
+  if (!runtime?.currentSectionKey) {
+    return null;
+  }
+
+  return `${runtime.currentSectionKey}:${getRuntimeExtensionMinutes(runtime)}`;
+}
+
+function parseRuntimeDeadlineMs(runtime: ExamSessionRuntime | null): number | null {
+  if (!runtime || typeof runtime.currentSectionDeadlineAt !== 'string') {
+    return null;
+  }
+
+  const deadlineMs = Date.parse(runtime.currentSectionDeadlineAt);
+  return Number.isFinite(deadlineMs) ? deadlineMs : null;
+}
+
+function resolveRuntimeTimerAnchor(
+  options: RuntimeTimerAnchorOptions,
+): RuntimeTimerAnchor | null {
+  const {
+    runtimeBacked,
+    phase,
+    runtime,
+    nowMs,
+    clockOffsetMs,
+    currentAnchor,
+  } = options;
+  if (!runtimeBacked || phase !== 'exam' || !runtime || runtime.status !== 'live') {
+    return null;
+  }
+
+  const sectionKey = runtime.currentSectionKey;
+  const extensionMinutes = getRuntimeExtensionMinutes(runtime);
+  const timerIdentityChanged =
+    currentAnchor === null ||
+    currentAnchor.sectionKey !== sectionKey ||
+    extensionMinutes > currentAnchor.extensionMinutes;
+  const validDeadlineMs = parseRuntimeDeadlineMs(runtime);
+  const candidateDeadlineMs =
+    validDeadlineMs ?? resolveAnchoredDeadlineMs(runtime, nowMs, clockOffsetMs);
+
+  if (candidateDeadlineMs === null) {
+    return currentAnchor;
+  }
+
+  if (timerIdentityChanged || currentAnchor === null) {
+    return {
+      sectionKey,
+      extensionMinutes,
+      deadlineMs: candidateDeadlineMs,
+    };
+  }
+
+  // A same-section response may shorten the deadline (authoritative correction),
+  // but it must never grant extra time without a verified extension.
+  if (candidateDeadlineMs < currentAnchor.deadlineMs) {
+    return {
+      ...currentAnchor,
+      deadlineMs: candidateDeadlineMs,
+    };
+  }
+
+  return currentAnchor;
+}
+
+function runtimeTimerAnchorsEqual(
+  left: RuntimeTimerAnchor | null,
+  right: RuntimeTimerAnchor | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (left === null || right === null) {
+    return false;
+  }
+  return (
+    left.sectionKey === right.sectionKey &&
+    left.extensionMinutes === right.extensionMinutes &&
+    left.deadlineMs === right.deadlineMs
+  );
+}
+
 function resolveRuntimeDisplayRemainingSeconds(options: {
   runtimeBacked: boolean;
   runtimeSnapshot: ExamSessionRuntime | null;
@@ -208,6 +389,7 @@ function resolveRuntimeDisplayRemainingSeconds(options: {
   fallbackSeconds: number;
   clockOffsetMs: number;
   nowMs: number;
+  authoritativeDeadlineMs: number | null;
 }): number | null {
   if (!options.runtimeBacked || options.phase !== 'exam') {
     return null;
@@ -218,20 +400,16 @@ function resolveRuntimeDisplayRemainingSeconds(options: {
     return options.fallbackSeconds;
   }
 
-  const sectionKey = runtime.currentSectionKey;
-  const activeSection = sectionKey
-    ? runtime.sections.find((section) => section.sectionKey === sectionKey)
-    : null;
+  const activeSection = getActiveRuntimeSection(runtime);
   if (!activeSection || activeSection.status !== 'live' || activeSection.pausedAt) {
     return options.fallbackSeconds;
   }
 
-  if (!runtime.currentSectionDeadlineAt) {
-    return options.fallbackSeconds;
-  }
-
-  const deadlineMs = Date.parse(runtime.currentSectionDeadlineAt);
-  if (!Number.isFinite(deadlineMs)) {
+  const deadlineMs =
+    options.authoritativeDeadlineMs ??
+    parseRuntimeDeadlineMs(runtime) ??
+    resolveAnchoredDeadlineMs(runtime, options.nowMs, options.clockOffsetMs);
+  if (deadlineMs === null) {
     return options.fallbackSeconds;
   }
 
@@ -246,6 +424,7 @@ function deriveBlockingState(
   waitingForCohortAdvance: boolean,
   proctorStatus: StudentAttempt['proctorStatus'],
   blockingReasonOverride: RuntimeReducerState['blockingReasonOverride'],
+  runtimeContractIssue: RuntimeContractIssue,
   timeRemainingSeconds: number,
 ): RuntimeBlockingState {
   const runtimeStatus = runtimeBacked ? runtimeSnapshot?.status ?? 'not_started' : null;
@@ -274,6 +453,19 @@ function deriveBlockingState(
       active: false,
       reason: null,
       runtimeStatus: null,
+      timeRemaining,
+    };
+  }
+
+  if (
+    runtimeContractIssue === 'missing_active_section' ||
+    runtimeContractIssue === 'stale_paused_at' ||
+    runtimeContractIssue === 'invalid_remaining_seconds'
+  ) {
+    return {
+      active: true,
+      reason: 'waiting_for_runtime',
+      runtimeStatus,
       timeRemaining,
     };
   }
@@ -777,6 +969,7 @@ export function StudentRuntimeProvider({
   runtimeBacked = false,
   runtimeSnapshot = null,
   attemptSnapshot = null,
+  onRefreshRuntime,
 }: StudentRuntimeProviderProps) {
   const enabledModules = useMemo(() => getEnabledModules(state.config), [state.config]);
   const [runtimeState, dispatch] = useReducer(
@@ -789,12 +982,45 @@ export function StudentRuntimeProvider({
   runtimeSnapshotRef.current = runtimeSnapshot;
   const clockOffsetMsRef = useRef(clockOffsetMs);
   clockOffsetMsRef.current = clockOffsetMs;
+  const attemptSnapshotRef = useRef(attemptSnapshot);
+  attemptSnapshotRef.current = attemptSnapshot;
+  const runtimeStateRef = useRef(runtimeState);
+  runtimeStateRef.current = runtimeState;
+  const lastTickMonotonicMsRef = useRef<number | null>(null);
+  const lastTickWallMsRef = useRef<number | null>(null);
+  const stallEmittedRef = useRef(false);
+  const displayTimeRemainingRef = useRef<number | undefined>(undefined);
+  const missingDeadlineEpisodeRef = useRef<string | null>(null);
+  const runtimeTimerAnchorRef = useRef<RuntimeTimerAnchor | null>(null);
+  // The anchor of the most recent *committed* render. Held in state so that
+  // deadline resolution during render is a pure function of props/state: the
+  // ref is only written after commit (layout effect) and must never be read
+  // or written while React is rendering.
+  const [committedRuntimeTimerAnchor, setCommittedRuntimeTimerAnchor] = useState<RuntimeTimerAnchor | null>(null);
+  const lastDisplayedTimerRef = useRef<{ identity: string | null; value: number | undefined } | null>(null);
+  const localZeroTimerIdentityRef = useRef<string | null>(null);
+  const runtimeContractEpisodeRef = useRef<string | null>(null);
+  const visibilityRecalculationRef = useRef<number | null>(null);
+  const onRefreshRuntimeRef = useRef(onRefreshRuntime);
+  onRefreshRuntimeRef.current = onRefreshRuntime;
 
   const lastHydratedAttemptRef = useRef<string | null>(
     attemptSnapshot
       ? `${attemptSnapshot.id}:${attemptSnapshot.updatedAt}:${getDroppedMutationMarker(attemptSnapshot.recovery.lastDroppedMutations) ?? ''}`
       : null,
   );
+  const runtimeContractIssue = getRuntimeContractIssue(runtimeBacked, runtimeState.phase, runtimeSnapshot);
+  const runtimeTimerIdentity =
+    runtimeBacked && runtimeState.phase === 'exam' ? buildRuntimeTimerIdentity(runtimeSnapshot) : null;
+  const resolvedRuntimeTimerAnchor = resolveRuntimeTimerAnchor({
+    runtimeBacked,
+    phase: runtimeState.phase,
+    runtime: runtimeSnapshot,
+    nowMs: derivedClockNowMs,
+    clockOffsetMs,
+    currentAnchor: committedRuntimeTimerAnchor,
+  });
+  const runtimeTimerDeadlineMs = resolvedRuntimeTimerAnchor?.deadlineMs ?? null;
   const lastHydratedProctorRef = useRef<string | null>(null);
   const lastHydratedAttemptIdRef = useRef<string | null>(attemptSnapshot?.id ?? null);
   const lastDroppedReconcileMarkerRef = useRef<string | null>(
@@ -962,6 +1188,130 @@ export function StudentRuntimeProvider({
   ]);
 
   useEffect(() => {
+    if (!runtimeBacked || runtimeState.phase !== 'exam' || !runtimeSnapshot) {
+      runtimeContractEpisodeRef.current = null;
+      missingDeadlineEpisodeRef.current = null;
+      return;
+    }
+    if (runtimeSnapshot.status !== 'live') {
+      runtimeContractEpisodeRef.current = null;
+      missingDeadlineEpisodeRef.current = null;
+      return;
+    }
+
+    const activeSection = getActiveRuntimeSection(runtimeSnapshot);
+    if (runtimeContractIssue) {
+      const episodeKey = `${runtimeContractIssue}:${runtimeSnapshot.scheduleId}:${runtimeSnapshot.currentSectionKey ?? 'none'}`;
+      if (runtimeContractEpisodeRef.current === episodeKey) {
+        return;
+      }
+
+      runtimeContractEpisodeRef.current = episodeKey;
+      emitStudentObservabilityMetric(
+        'student_timer_runtime_contract_mismatch_total',
+        withStudentObservabilityDimensions({
+          scheduleId: runtimeSnapshot.scheduleId,
+          attemptId: attemptSnapshot?.id ?? null,
+          endpoint: `/v1/student/sessions/${runtimeSnapshot.scheduleId}/live`,
+          statusCode: 200,
+          reason: runtimeContractIssue,
+          syncState: runtimeState.attemptSyncState,
+          runtimeRevision: runtimeSnapshot.revision ?? null,
+          attemptRevision: attemptSnapshot?.revision ?? null,
+          runtimeStatus: runtimeSnapshot.status,
+          currentSectionKey: runtimeSnapshot.currentSectionKey ?? null,
+          sectionStatus: activeSection?.status ?? null,
+          snapshotRemainingSeconds: runtimeSnapshot.currentSectionRemainingSeconds,
+          deadlineAt: runtimeSnapshot.currentSectionDeadlineAt ?? null,
+          serverNow: runtimeSnapshot.serverNow ?? null,
+          documentVisibilityState:
+            typeof document === 'undefined' || typeof document.visibilityState !== 'string'
+              ? null
+              : document.visibilityState,
+          navigatorOnline: typeof navigator === 'undefined' ? null : navigator.onLine,
+        }),
+      );
+
+      if (onRefreshRuntimeRef.current) {
+        void Promise.resolve(onRefreshRuntimeRef.current()).catch(() => {});
+      }
+      return;
+    }
+
+    runtimeContractEpisodeRef.current = null;
+    const remainingSecondsFinite =
+      Number.isFinite(runtimeSnapshot.currentSectionRemainingSeconds) &&
+      runtimeSnapshot.currentSectionRemainingSeconds >= 0;
+
+    let deadlineIssue: 'missing_live_deadline' | 'invalid_deadline' | null = null;
+    if (runtimeSnapshot.currentSectionDeadlineAt === null || runtimeSnapshot.currentSectionDeadlineAt === undefined) {
+      deadlineIssue = remainingSecondsFinite ? 'missing_live_deadline' : null;
+    } else if (
+      typeof runtimeSnapshot.currentSectionDeadlineAt !== 'string' ||
+      !Number.isFinite(Date.parse(runtimeSnapshot.currentSectionDeadlineAt))
+    ) {
+      deadlineIssue = remainingSecondsFinite ? 'invalid_deadline' : null;
+    }
+
+    if (deadlineIssue === null || !activeSection) {
+      missingDeadlineEpisodeRef.current = null;
+      return;
+    }
+
+    const episodeKey = `${deadlineIssue}:${runtimeSnapshot.scheduleId}:${runtimeSnapshot.currentSectionKey ?? 'none'}`;
+    if (missingDeadlineEpisodeRef.current === episodeKey) {
+      return;
+    }
+    missingDeadlineEpisodeRef.current = episodeKey;
+
+    const anchoredDeadlineMs = resolveAnchoredDeadlineMs(
+      runtimeSnapshot,
+      Date.now(),
+      clockOffsetMsRef.current,
+    );
+    emitStudentObservabilityMetric(
+      deadlineIssue === 'invalid_deadline'
+        ? 'student_timer_invalid_deadline_total'
+        : 'student_timer_missing_deadline_total',
+      withStudentObservabilityDimensions({
+        scheduleId: runtimeSnapshot.scheduleId,
+        attemptId: attemptSnapshot?.id ?? null,
+        endpoint: `/v1/student/sessions/${runtimeSnapshot.scheduleId}/live`,
+        statusCode: 200,
+        reason: deadlineIssue,
+        syncState: runtimeState.attemptSyncState,
+        runtimeRevision: runtimeSnapshot.revision ?? null,
+        attemptRevision: attemptSnapshot?.revision ?? null,
+        runtimeStatus: runtimeSnapshot.status,
+        currentSectionKey: runtimeSnapshot.currentSectionKey ?? null,
+        sectionStatus: activeSection.status,
+        snapshotRemainingSeconds: runtimeSnapshot.currentSectionRemainingSeconds,
+        deadlineAt: runtimeSnapshot.currentSectionDeadlineAt ?? null,
+        serverNow: runtimeSnapshot.serverNow ?? null,
+        documentVisibilityState:
+          typeof document === 'undefined' || typeof document.visibilityState !== 'string'
+            ? null
+            : document.visibilityState,
+        navigatorOnline: typeof navigator === 'undefined' ? null : navigator.onLine,
+        anchoredDeadlineMs,
+        missingDeadline: deadlineIssue === 'missing_live_deadline',
+      }),
+    );
+
+    if (onRefreshRuntimeRef.current) {
+      void Promise.resolve(onRefreshRuntimeRef.current()).catch(() => {});
+    }
+  }, [
+    attemptSnapshot?.id,
+    attemptSnapshot?.revision,
+    runtimeBacked,
+    runtimeContractIssue,
+    runtimeSnapshot,
+    runtimeState.attemptSyncState,
+    runtimeState.phase,
+  ]);
+
+  useEffect(() => {
     if (!runtimeBacked || !runtimeSnapshot?.serverNow) {
       return;
     }
@@ -984,19 +1334,33 @@ export function StudentRuntimeProvider({
     });
   }, [runtimeBacked, runtimeSnapshot?.serverNow]);
 
+  // Commit the timer anchor only after the corresponding snapshot actually
+  // commits. Layout effect: runs synchronously at commit, before paint and
+  // before any passive effect or subsequent render, so an abandoned render
+  // can never leak its deadline into the ref or the committed tree.
+  useLayoutEffect(() => {
+    const nextAnchor = resolveRuntimeTimerAnchor({
+      runtimeBacked,
+      phase: runtimeState.phase,
+      runtime: runtimeSnapshot,
+      nowMs: Date.now(),
+      clockOffsetMs,
+      currentAnchor: runtimeTimerAnchorRef.current,
+    });
+    runtimeTimerAnchorRef.current = nextAnchor;
+    setCommittedRuntimeTimerAnchor((previous) =>
+      runtimeTimerAnchorsEqual(previous, nextAnchor) ? previous : nextAnchor,
+    );
+  }, [clockOffsetMs, runtimeBacked, runtimeSnapshot, runtimeState.phase]);
+
   useEffect(() => {
     if (!runtimeBacked || runtimeState.phase !== 'exam') {
       return;
     }
 
     const scheduleVisibleSecondTick = () => {
-      const deadlineAt = runtimeSnapshotRef.current?.currentSectionDeadlineAt;
-      if (!deadlineAt) {
-        return 1_000;
-      }
-
-      const deadlineMs = Date.parse(deadlineAt);
-      if (!Number.isFinite(deadlineMs)) {
+      const deadlineMs = runtimeTimerAnchorRef.current?.deadlineMs ?? null;
+      if (deadlineMs === null) {
         return 1_000;
       }
 
@@ -1024,6 +1388,191 @@ export function StudentRuntimeProvider({
       if (timerId !== null) {
         window.clearTimeout(timerId);
       }
+    };
+  }, [
+    runtimeBacked,
+    runtimeState.phase,
+    runtimeTimerIdentity,
+    runtimeSnapshot?.status,
+    runtimeSnapshot?.currentSectionDeadlineAt,
+  ]);
+
+  useEffect(() => {
+    if (!runtimeBacked || runtimeState.phase !== 'exam') {
+      return;
+    }
+
+    const recalculateFromDeadline = () => {
+      setDerivedClockNowMs(Date.now());
+    };
+
+    document.addEventListener('visibilitychange', recalculateFromDeadline);
+    window.addEventListener('pageshow', recalculateFromDeadline);
+    window.addEventListener('focus', recalculateFromDeadline);
+    return () => {
+      document.removeEventListener('visibilitychange', recalculateFromDeadline);
+      window.removeEventListener('pageshow', recalculateFromDeadline);
+      window.removeEventListener('focus', recalculateFromDeadline);
+    };
+  }, [runtimeBacked, runtimeState.phase]);
+
+  useEffect(() => {
+    // Record tick observations so the stall detector can compare the visible
+    // remaining-time countdown (monotonic) against real wall-clock elapsed
+    // time. Runs on derived clock changes only (value-based, so it does not
+    // churn on snapshot identity), and reads everything else via refs.
+    // lastTickMonotonicMsRef = expected remaining countdown in ms (monotonic);
+    // lastTickWallMsRef = Date.now() at that observation (wall clock).
+    if (!runtimeBacked || runtimeState.phase !== 'exam') {
+      lastTickMonotonicMsRef.current = null;
+      lastTickWallMsRef.current = null;
+      stallEmittedRef.current = false;
+      return;
+    }
+
+    const runtime = runtimeSnapshotRef.current;
+    if (!runtime || runtime.status !== 'live') {
+      lastTickMonotonicMsRef.current = null;
+      lastTickWallMsRef.current = null;
+      stallEmittedRef.current = false;
+      return;
+    }
+
+    const deadlineMs = runtimeTimerAnchorRef.current?.deadlineMs ?? null;
+    if (deadlineMs === null) {
+      lastTickMonotonicMsRef.current = null;
+      lastTickWallMsRef.current = null;
+      stallEmittedRef.current = false;
+      return;
+    }
+
+    const nowWallMs = Date.now();
+    const adjustedNowMs = nowWallMs + clockOffsetMsRef.current;
+    const expectedRemainingMs = Math.max(0, deadlineMs - adjustedNowMs);
+
+    lastTickMonotonicMsRef.current = expectedRemainingMs;
+    lastTickWallMsRef.current = nowWallMs;
+    stallEmittedRef.current = false;
+
+    const displayRemaining = displayTimeRemainingRef.current;
+    const expectedRemainingSeconds = Math.max(0, Math.ceil(expectedRemainingMs / 1_000));
+    if (typeof displayRemaining === 'number') {
+      const dimensions = withStudentObservabilityDimensions({
+        scheduleId: runtime.scheduleId,
+        attemptId: attemptSnapshotRef.current?.id ?? null,
+        endpoint: `/v1/student/sessions/${runtime.scheduleId}/live`,
+        statusCode: 200,
+        reason: 'deadline_tick',
+        syncState: runtimeStateRef.current.attemptSyncState,
+        runtimeRevision: runtime.revision ?? null,
+        attemptRevision: attemptSnapshotRef.current?.revision ?? null,
+        runtimeStatus: runtime.status,
+        currentSectionKey: runtime.currentSectionKey ?? null,
+        sectionStatus: getActiveRuntimeSection(runtime)?.status ?? null,
+        displayTimeRemaining: displayRemaining,
+        expectedRemainingSeconds,
+        snapshotRemainingSeconds: runtime.currentSectionRemainingSeconds,
+        deadlineAt: runtime.currentSectionDeadlineAt ?? null,
+        serverNow: runtime.serverNow ?? null,
+        clockOffsetMs: clockOffsetMsRef.current,
+        documentVisibilityState:
+          typeof document === 'undefined' || typeof document.visibilityState !== 'string'
+            ? null
+            : document.visibilityState,
+        navigatorOnline: typeof navigator === 'undefined' ? null : navigator.onLine,
+      });
+      emitStudentObservabilityMetric('student_timer_tick_total', dimensions);
+      if (displayRemaining === expectedRemainingSeconds) {
+        emitStudentObservabilityMetric('student_timer_tick_expected_total', dimensions);
+      }
+    }
+  }, [derivedClockNowMs, runtimeBacked, runtimeState.phase]);
+
+  useEffect(() => {
+    if (!runtimeBacked || runtimeState.phase !== 'exam') {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      const runtime = runtimeSnapshotRef.current;
+      if (!runtime || runtime.status !== 'live') {
+        return;
+      }
+      if (typeof document === 'undefined' || document.visibilityState !== 'visible') {
+        return;
+      }
+      if (typeof navigator === 'undefined' || navigator.onLine === false) {
+        return;
+      }
+
+      const sectionKey = runtime.currentSectionKey;
+      const activeSection = sectionKey
+        ? runtime.sections.find((section) => section.sectionKey === sectionKey)
+        : null;
+      if (!activeSection || activeSection.status !== 'live' || activeSection.pausedAt) {
+        return;
+      }
+
+      const deadlineMs = runtimeTimerAnchorRef.current?.deadlineMs ?? null;
+      if (deadlineMs === null) {
+        return;
+      }
+
+      const nowWallMs = Date.now();
+      const adjustedNowMs = nowWallMs + clockOffsetMsRef.current;
+      const expectedRemainingMs = Math.max(0, deadlineMs - adjustedNowMs);
+      const lastTick = lastTickMonotonicMsRef.current;
+      const lastTickWall = lastTickWallMsRef.current;
+
+      if (lastTick === null || lastTickWall === null) {
+        // No observation yet: establish baselines and wait for a real tick.
+        lastTickMonotonicMsRef.current = expectedRemainingMs;
+        lastTickWallMsRef.current = nowWallMs;
+        stallEmittedRef.current = false;
+        return;
+      }
+
+      const expectedRemainingChanged = expectedRemainingMs !== lastTick;
+      const wallElapsedMs = nowWallMs - lastTickWall;
+      const tickStalled = expectedRemainingChanged && wallElapsedMs > 1_500;
+
+      if (!tickStalled) {
+        return;
+      }
+
+      if (stallEmittedRef.current) {
+        return;
+      }
+      stallEmittedRef.current = true;
+
+      const runtimeStateNow = runtimeStateRef.current;
+      emitStudentObservabilityMetric(
+        'student_timer_stall_total',
+        withStudentObservabilityDimensions({
+          scheduleId: runtime.scheduleId,
+          attemptId: attemptSnapshotRef.current?.id ?? null,
+          endpoint: `/v1/student/sessions/${runtime.scheduleId}/live`,
+          statusCode: 200,
+          reason: 'visible_tick_stall',
+          syncState: runtimeStateNow.attemptSyncState,
+          runtimeRevision: runtime.revision ?? null,
+          attemptRevision: attemptSnapshotRef.current?.revision ?? null,
+          runtimeStatus: runtime.status,
+          currentSectionKey: runtime.currentSectionKey ?? null,
+          sectionStatus: activeSection.status,
+          displayTimeRemaining: displayTimeRemainingRef.current ?? null,
+          snapshotRemainingSeconds: runtime.currentSectionRemainingSeconds,
+          deadlineAt: runtime.currentSectionDeadlineAt ?? null,
+          serverNow: runtime.serverNow ?? null,
+          documentVisibilityState: 'visible',
+          navigatorOnline: navigator.onLine,
+          clockOffsetMs: clockOffsetMsRef.current,
+        }),
+      );
+    }, 500);
+
+    return () => {
+      window.clearInterval(intervalId);
     };
   }, [runtimeBacked, runtimeState.phase]);
 
@@ -1063,10 +1612,12 @@ export function StudentRuntimeProvider({
         runtimeState.waitingForCohortAdvance,
         runtimeState.proctorStatus,
         runtimeState.blockingReasonOverride,
+        runtimeContractIssue,
         runtimeState.timeRemaining,
       ),
     [
       runtimeBacked,
+      runtimeContractIssue,
       runtimeState.proctorStatus,
       runtimeSnapshot,
       runtimeState.blockingReasonOverride,
@@ -1075,7 +1626,7 @@ export function StudentRuntimeProvider({
     ],
   );
   const runtimeStatus = runtimeBacked ? runtimeSnapshot?.status ?? 'not_started' : null;
-  const displayTimeRemaining = runtimeState.phase === 'exam'
+  const resolvedDisplayTimeRemaining = runtimeState.phase === 'exam'
     ? runtimeBacked
       ? resolveRuntimeDisplayRemainingSeconds({
           runtimeBacked,
@@ -1084,10 +1635,46 @@ export function StudentRuntimeProvider({
           fallbackSeconds: runtimeState.timeRemaining,
           clockOffsetMs,
           nowMs: derivedClockNowMs,
+          authoritativeDeadlineMs: runtimeTimerDeadlineMs,
         }) ?? runtimeState.timeRemaining
       : runtimeState.timeRemaining
     : undefined;
+
+  let displayTimeRemaining = resolvedDisplayTimeRemaining;
+  if (runtimeTimerIdentity !== null && typeof resolvedDisplayTimeRemaining === 'number') {
+    const previousDisplayedTimer = lastDisplayedTimerRef.current;
+    if (
+      previousDisplayedTimer?.identity === runtimeTimerIdentity &&
+      typeof previousDisplayedTimer.value === 'number'
+    ) {
+      displayTimeRemaining = Math.min(resolvedDisplayTimeRemaining, previousDisplayedTimer.value);
+    }
+  }
+
   const submitRequiresConfirmation = false;
+  const answerControlsLocked =
+    runtimeBacked &&
+    runtimeState.phase === 'exam' &&
+    (blocking.active ||
+      runtimeContractIssue !== null ||
+      displayTimeRemaining === 0 ||
+      localZeroTimerIdentityRef.current === runtimeTimerIdentity);
+  displayTimeRemainingRef.current = displayTimeRemaining;
+
+  useEffect(() => {
+    lastDisplayedTimerRef.current = {
+      identity: runtimeTimerIdentity,
+      value: displayTimeRemaining,
+    };
+
+    if (runtimeTimerIdentity === null || typeof displayTimeRemaining !== 'number') {
+      localZeroTimerIdentityRef.current = null;
+    } else if (displayTimeRemaining === 0) {
+      localZeroTimerIdentityRef.current = runtimeTimerIdentity;
+    } else if (localZeroTimerIdentityRef.current !== runtimeTimerIdentity) {
+      localZeroTimerIdentityRef.current = null;
+    }
+  }, [displayTimeRemaining, runtimeTimerIdentity]);
 
   const setPhase = useCallback((phase: ExamPhase) => {
     dispatch({ type: 'set_phase', phase });
@@ -1186,6 +1773,12 @@ export function StudentRuntimeProvider({
     dispatch({ type: 'set_attempt_sync_state', state: nextState });
   }, []);
 
+  const refreshRuntime = useCallback(async () => {
+    if (onRefreshRuntimeRef.current) {
+      await onRefreshRuntimeRef.current();
+    }
+  }, []);
+
   const value = useMemo<RuntimeContextValue>(() => ({
     state: {
       ...runtimeState,
@@ -1196,6 +1789,8 @@ export function StudentRuntimeProvider({
       runtimeStatus,
       runtimeSnapshot: runtimeBacked ? runtimeSnapshot : null,
       submitRequiresConfirmation,
+      runtimeContractIssue,
+      answerControlsLocked,
     },
     actions: {
       setPhase,
@@ -1211,6 +1806,7 @@ export function StudentRuntimeProvider({
       terminateExam,
       transitionBlocking,
       setAttemptSyncState,
+      refreshRuntime,
     },
     examState: state,
     onExit,
@@ -1218,16 +1814,19 @@ export function StudentRuntimeProvider({
     addViolation,
     allQuestions,
     blocking,
+    answerControlsLocked,
     clearViolations,
     pauseExam,
     displayTimeRemaining,
     onExit,
     resetElapsedTime,
     runtimeBacked,
+    runtimeContractIssue,
     runtimeSnapshot,
     runtimeState,
     runtimeStatus,
     setAttemptSyncState,
+    refreshRuntime,
     transitionBlocking,
     setCurrentModule,
     setCurrentQuestionId,
