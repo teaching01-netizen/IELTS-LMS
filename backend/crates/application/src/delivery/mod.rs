@@ -395,7 +395,11 @@ impl DeliveryService {
 
         // The idempotency record is committed before the audit event so a
         // concurrent replay of the same key can never double-record the
-        // audit (audit events are append-only and must stay singular).
+        // audit (audit events are append-only and must stay singular). A
+        // crash between the two INSERTs means the retry replays with no
+        // audit ever written — accepted trade-off (append-only/no-duplicates
+        // invariant takes priority), consistent with the non-transactional
+        // flow.
         sqlx::query(
             r#"
             INSERT INTO session_audit_logs (
@@ -1671,7 +1675,12 @@ impl DeliveryService {
     /// answers (BEX-003). Acceptable for precheck/bootstrap, which run at
     /// session start before concurrent mutation batches are in flight;
     /// heartbeats must use `update_attempt_heartbeat` instead, which writes
-    /// only `integrity`/`updated_at`.
+    /// only `integrity`/`updated_at`. The duplicate-key adoption path in
+    /// `get_or_create_attempt` also feeds this full-row pass-through, so a
+    /// same-key/different-payload RACE could briefly clobber the attempt row
+    /// with the 409-returning request's integrity before the conflict is
+    /// discovered — benign for identical payloads (the tested case),
+    /// pre-existing wrinkle.
     async fn update_attempt_preserving_revision(
         &self,
         attempt_id: String,

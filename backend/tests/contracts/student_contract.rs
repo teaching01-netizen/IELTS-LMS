@@ -607,6 +607,22 @@ async fn precheck_concurrent_identical_requests_yield_one_logical_result() {
     .unwrap();
     assert_eq!(audit_count, 1, "race must leave exactly one audit event");
 
+    // The attempt-created audit is written only by the winner of the attempt
+    // INSERT (the loser adopts the existing row and returns before it); pin
+    // that it stays singular under the race.
+    let attempt_created_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND target_student_id = ? AND action_type = 'STUDENT_ATTEMPT_CREATED'",
+    )
+    .bind(schedule_id.to_string())
+    .bind(first_json["data"]["id"].as_str().unwrap().to_owned())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        attempt_created_count, 1,
+        "race must leave exactly one attempt-created audit"
+    );
+
     database.shutdown().await;
 }
 

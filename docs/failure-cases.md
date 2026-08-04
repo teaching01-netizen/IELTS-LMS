@@ -881,3 +881,38 @@ never a retryable failure and never "already submitted". The durable record must
 stale frozen payload (replace with the fresh carrier values or drop it) so the next retry
 resubmits with live fields. Converge-on-conflict remains authoritative when the fetch CONFIRMS
 submission.
+
+---
+
+## 2026-08-05: Duplicate-Key Detection Checks Only Numeric 1062 — Dead Branch Under sqlx SQLSTATE Codes
+
+### Symptom
+Concurrent precheck requests with the same idempotency key could surface `500 DATABASE_ERROR`
+(duplicate entry) instead of an idempotent replay or clean `409`; the same failure mode
+threatens duplicate runtime/registration rows.
+
+### Scope
+Precheck flow (`backend/crates/application/src/delivery/mod.rs` — `persist_precheck`,
+`get_or_create_attempt`; `backend/crates/infrastructure/src/idempotency.rs` —
+`store_or_replay`). Pre-existing identical pattern in
+`backend/crates/application/src/scheduling.rs` (`is_mysql_duplicate_key`, ~line 1181).
+
+### Root Cause
+This repo's sqlx (sqlx-mysql 0.7.4) returns the SQLSTATE (`"23000"`) from
+`DatabaseError::code()`, not the numeric MySQL code (`"1062"`). The scheduling helper checks
+only `"1062"`, so its duplicate branch never fires and its two call sites (`start_runtime`,
+`register_student`) fall through to a 500 instead of Conflict/idempotent adoption.
+
+### Fix
+Commit `777a3c2` added two helpers that accept both codes: `is_duplicate_key` in
+`delivery/mod.rs` (~line 2003) and `idempotency.rs` (~line 266). The scheduling.rs helper is
+NOT fixed yet — that file carries unrelated uncommitted work; the fix is deferred until that
+work lands (tracked with the B-3 proctor-start task). Centralizing the helper in
+infrastructure would be a future cleanup.
+
+### Regression Protection
+- Tests: `backend/tests/contracts/student_contract.rs`
+  (`precheck_concurrent_identical_requests_yield_one_logical_result`).
+
+### Invariant
+Unique-constraint races must resolve to the idempotent replay/Conflict outcome, never a 500.
