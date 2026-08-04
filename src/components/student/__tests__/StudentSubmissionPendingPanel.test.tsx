@@ -35,4 +35,30 @@ describe('StudentSubmissionPendingPanel (FEX-051)', () => {
     expect(guidanceToggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText(/Check that you are connected to the internet\./)).not.toBeInTheDocument();
   });
+
+  it('exposes the pending state as a modal alertdialog and moves focus to the primary action (M5)', () => {
+    render(<StudentSubmissionPendingPanel onRetryNow={vi.fn()} />);
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Submission pending' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toHaveAccessibleDescription(/stored on this device/i);
+    expect(dialog.querySelector('[aria-live]')).not.toBeNull();
+    // Initial focus lands on the primary action so keyboard/screen-reader
+    // users can act immediately.
+    expect(screen.getByRole('button', { name: 'Retry now' })).toHaveFocus();
+  });
+
+  it('restores focus to the previously focused element on unmount (M5)', () => {
+    const before = document.createElement('button');
+    before.textContent = 'Before';
+    document.body.appendChild(before);
+    before.focus();
+
+    const { unmount } = render(<StudentSubmissionPendingPanel onRetryNow={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Retry now' })).toHaveFocus();
+
+    unmount();
+    expect(document.activeElement).toBe(before);
+    before.remove();
+  });
 });

@@ -712,3 +712,58 @@ For `MULTI_MCQ`, `options[].isCorrect` is authoritative. At least one option mus
 A multi-select answer array is an unordered replacement set of option IDs, not a positional slot
 array. Shorter set updates must replace the prior value; only explicitly slot-scoped mutations may
 preserve sibling array positions.
+
+---
+
+## 2026-08-05: Submission Response Lost After Server Success → Retry Hash Drift → Idempotency Conflict Loop
+
+### Symptom
+A student's first submit request reached the backend and was accepted, but the response was lost
+(flaky network, proxy timeout). The client recorded a durable "pending submission" and kept
+retrying. If any later mutation-batch response advanced the attempt's revision/sequence counters
+before the first retry fired, the retry carried the drifted fields. The backend's idempotency hash
+(sha256 over the ENTIRE serialized request, keyed by `Idempotency-Key: student-submit-<attemptId>`)
+no longer matched the stored original, so every retry returned 409 CONFLICT and the client rethrew
+into the same loop forever. The student sat on the "Submission pending" panel while the submission
+was actually safe on the server.
+
+### Scope
+Student submit flow (`BackendStudentAttemptRepository.submitAttempt`), the durable pending
+submission record (`PendingStudentSubmission`), and the provider retry loop
+(`StudentAttemptProvider.scheduleBackgroundSubmitRetry`). Backend idempotency behavior in
+`backend/crates/application/src/delivery/mod.rs` is unchanged — it is correct.
+
+### Root Cause
+The retry rebuilt the payload from the LIVE attempt (current revision, current watermark-derived
+`clientFinalSeq`, current `serverAcceptedThroughSeq`, freshly computed hash). Only the answer
+snapshot was frozen. The backend idempotency hash covers all of these fields, so any drift between
+first request and retry produced a permanent 409 loop.
+
+### Fix
+- Capture the payload-determining fields of the failed request at first-failure time
+  (`lastSeenRevision`, `clientFinalSeq`, `serverAcceptedThroughSeq`, `finalClientSnapshotHash`)
+  as `FrozenSubmitPayload`, attach them to the thrown error, and persist them on
+  `PendingStudentSubmission.frozenPayload`.
+- Retries rebuild the serialized request from the frozen values, guaranteeing
+  `hash(retry) == hash(first request)` byte-for-byte.
+- Belt-and-braces: any 409 (non-`FINAL_FLUSH_REQUIRED`) during submit triggers a fetch of the
+  authoritative session; if the server confirms the submission (post-exam + submittedAt), the
+  client converges to confirmed instead of rethrowing into the loop.
+- The retry loop now hard-stops at the record's absolute `expiresAt` (it previously restarted a
+  fresh 1-hour window per reload).
+- Legacy records without `frozenPayload` are accepted (never silently dropped) and self-heal on
+  their next failed attempt.
+
+### Regression Protection
+- Tests: `src/services/__tests__/studentAttemptRepository.test.ts` (drift-freeze replay asserts
+  the retry body equals the first body; conflict-converge path),
+  `src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx` (drift scenario:
+  response lost, revision advances, retry sends the ORIGINAL frozen payload fields).
+- Diagnostics: `student_submit_conflict_converged_total` metric when a conflict converges.
+
+### Invariant
+The retry of an unconfirmed submission must be byte-identical to the original request: the frozen
+payload-determining fields (`revision`/`lastSeenRevision`, `serverAcceptedThroughSeq`,
+`clientFinalSeq`, `finalClientSnapshotHash`) plus the frozen final snapshot are the ONLY source
+for a retry payload — never the live attempt's current counters. An idempotency CONFLICT on retry
+must be treated as "already submitted" (converge), never as a retryable failure.

@@ -16,12 +16,13 @@ import {
   buildPendingStudentSubmission,
   compactSubmittedAttempt,
   ensureClientSessionIdForAttempt,
+  extractFrozenSubmitPayload,
   pruneStudentAttemptCache,
   resetStudentAttemptPendingMutationIndexedDbForTests,
   studentLocalCachePolicy,
   studentAttemptRepository,
 } from '../studentAttemptRepository';
-import { backendPost } from '../backendBridge';
+import { backendGet, backendPost } from '../backendBridge';
 
 function nowIso(): string {
   return new Date('2026-01-10T09:00:00.000Z').toISOString();
@@ -931,5 +932,115 @@ describe('studentAttemptRepository', () => {
     expect(result.purgedPendingSubmissions).toBe(1);
     const remaining = await studentAttemptRepository.getPendingSubmissions();
     expect(remaining.map((record) => record.attemptId)).toEqual(['attempt-fresh']);
+  });
+
+  it('attaches the frozen payload on failure and replays the ORIGINAL payload-determining fields on retry (I1 drift)', async () => {
+    const attempt = makeAttempt({
+      revision: 3,
+      answers: { q1: 'FINAL_ANSWER' },
+      writingAnswers: { task1: 'FINAL DRAFT' },
+      flags: { q1: true },
+      recovery: { ...makeAttempt().recovery, serverAcceptedThroughSeq: 5 },
+    });
+    storeAttemptCredential(attempt);
+
+    const post = vi.mocked(backendPost);
+    post.mockRejectedValueOnce(new Error('response lost'));
+
+    // First submit: request reaches the server but the response is lost.
+    let firstError: unknown = null;
+    try {
+      await studentAttemptRepository.submitAttempt(attempt);
+    } catch (error) {
+      firstError = error;
+    }
+    expect(firstError).toBeInstanceOf(Error);
+    expect((firstError as Error).message).toBe('response lost');
+    expect(post).toHaveBeenCalledTimes(1);
+
+    const frozen = extractFrozenSubmitPayload(firstError);
+    const firstBody = post.mock.calls[0]?.[1] as {
+      lastSeenRevision: number;
+      clientFinalSeq?: number;
+      serverAcceptedThroughSeq?: number;
+    };
+    expect(frozen).toBeDefined();
+    expect(frozen?.lastSeenRevision).toBe(3);
+    expect(frozen?.clientFinalSeq).toBe(firstBody.clientFinalSeq);
+    expect(frozen?.serverAcceptedThroughSeq).toBe(5);
+
+    // A later mutation-batch response advances revision/seq BEFORE the retry.
+    const advanced = {
+      ...attempt,
+      revision: 9,
+      recovery: { ...attempt.recovery, serverAcceptedThroughSeq: 8 },
+    };
+    // The retry candidate carries the ORIGINAL frozen snapshot (the provider
+    // overlays pending.finalSnapshot before calling submitAttempt).
+    const retryCandidate = {
+      ...advanced,
+      answers: attempt.answers,
+      writingAnswers: attempt.writingAnswers,
+      flags: attempt.flags,
+    };
+    post.mockRejectedValueOnce(new Error('still offline'));
+    await expect(studentAttemptRepository.submitAttempt(retryCandidate, frozen)).rejects.toThrow(
+      'still offline',
+    );
+    expect(post).toHaveBeenCalledTimes(2);
+
+    // hash(retry) === hash(first request): the serialized body is identical.
+    expect(post.mock.calls[1]?.[1]).toEqual(firstBody);
+  });
+
+  it('converges to the authoritative attempt on an idempotency CONFLICT instead of looping (I1)', async () => {
+    const attempt = makeAttempt({ answers: { q1: 'FINAL' } });
+    storeAttemptCredential(attempt);
+
+    const { ApiClientError } = await import('../../app/api/apiClient');
+    vi.mocked(backendPost).mockRejectedValueOnce(
+      new ApiClientError({
+        message: 'Idempotency-Key does not match the original request.',
+        statusCode: 409,
+        backendCode: 'CONFLICT',
+        backendDetails: undefined,
+        backendRequestId: 'req-1',
+      }),
+    );
+
+    const get = vi.mocked(backendGet);
+    get.mockResolvedValueOnce({
+      attempt: {
+        id: attempt.id,
+        scheduleId: attempt.scheduleId,
+        studentKey: attempt.studentKey,
+        examId: attempt.examId,
+        examTitle: attempt.examTitle,
+        candidateId: attempt.candidateId,
+        candidateName: attempt.candidateName,
+        candidateEmail: attempt.candidateEmail,
+        phase: 'post-exam',
+        currentModule: attempt.currentModule,
+        currentQuestionId: null,
+        answers: attempt.answers,
+        writingAnswers: attempt.writingAnswers,
+        flags: attempt.flags,
+        violationsSnapshot: [],
+        integrity: attempt.integrity,
+        recovery: attempt.recovery,
+        submittedAt: '2026-01-10T09:05:00.000Z',
+        createdAt: attempt.createdAt,
+        updatedAt: attempt.updatedAt,
+      },
+    });
+
+    const result = await studentAttemptRepository.submitAttempt(attempt);
+
+    // The client converges to the authoritative submitted attempt instead of
+    // rethrowing into the retry loop.
+    expect(result.phase).toBe('post-exam');
+    expect(result.submittedAt).toBe('2026-01-10T09:05:00.000Z');
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(String(get.mock.calls[0]?.[0])).toContain('/v1/student/sessions/schedule-1');
   });
 });

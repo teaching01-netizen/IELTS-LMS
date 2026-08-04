@@ -17,16 +17,24 @@ import {
   clearAttemptMutationWatermark,
   createStudentMutationOutbox,
   ensureClientSessionIdForAttempt,
+  extractFrozenSubmitPayload,
   hasAttemptCredential,
+  isAuthoritativelySubmittedAttempt,
   isPendingStudentSubmissionExpired,
   mapBackendStudentAttempt,
+  peekPendingSubmissionForAttempt,
+  PENDING_SUBMISSION_RETRY_WINDOW_MS,
   PendingMutationDurabilityMirror,
   readAnswerSyncCheckpoint,
   refreshAttemptCredentialForAttempt,
   saveStudentAuditEvent,
   studentAttemptRepository,
 } from '@student/application/studentAttemptFacade';
-import type { DurablePersistTriggerSource, PendingStudentSubmission } from '@student/application/studentAttemptFacade';
+import type {
+  DurablePersistTriggerSource,
+  FrozenSubmitPayload,
+  PendingStudentSubmission,
+} from '@student/application/studentAttemptFacade';
 import { queryClient } from '../../../app/data/queryClient';
 import {
   emitStudentObservabilityMetric,
@@ -227,23 +235,16 @@ function mergeAttempt(attempt: StudentAttempt, patch: AttemptPatch): StudentAtte
 }
 
 /**
- * A submission is authoritative only when the backend returned it: phase
- * post-exam plus a submittedAt timestamp. The provider never fabricates these
- * locally for a failed submit — it records a pending submission instead.
- */
-function isAuthoritativelySubmittedAttempt(attempt: StudentAttempt | null): boolean {
-  return Boolean(
-    attempt &&
-      attempt.phase === 'post-exam' &&
-      typeof attempt.submittedAt === 'string' &&
-      attempt.submittedAt.length > 0,
-  );
-}
-
-/**
- * Replay a retry against the ORIGINAL final snapshot that was submitted. The
- * attempt's identity fields (id, revision, recovery seq) stay current so the
- * idempotent backend replay matches the first submission's payload hash.
+ * Replay a retry against the ORIGINAL final snapshot that was submitted.
+ * The answer/writing/flag fields are overlaid from the frozen record so the
+ * retry's payload matches the first submission.
+ *
+ * NOTE (I1): the OTHER payload-determining fields (revision, clientFinalSeq,
+ * serverAcceptedThroughSeq, finalClientSnapshotHash) must NOT come from the
+ * live attempt — they are replayed from `PendingStudentSubmission.frozenPayload`
+ * (captured at first-failure time). Using current identity fields here would
+ * drift the serialized request, break the backend idempotency hash, and loop
+ * the retry on CONFLICT forever.
  */
 function applyPendingSubmissionSnapshot(
   attempt: StudentAttempt,
@@ -338,9 +339,17 @@ export function StudentAttemptProvider({
   const setRuntimeAttemptSyncState = runtimeActions.setAttemptSyncState;
   const [attempt, setAttempt] = useState<StudentAttempt | null>(attemptSnapshot);
   const [pendingMutationCount, setPendingMutationCount] = useState(0);
-  const [pendingSubmission, setPendingSubmission] = useState<PendingStudentSubmission | null>(null);
+  // M4: derive the pending lock synchronously from a localStorage peek so the
+  // first render (before async hydration completes) already locks editing and
+  // shows the pending panel. The async bootstrap effect below remains the
+  // authority for resuming the retry loop and purging expired records.
+  const [pendingSubmission, setPendingSubmission] = useState<PendingStudentSubmission | null>(() =>
+    persistenceEnabled && attemptSnapshot
+      ? peekPendingSubmissionForAttempt(attemptSnapshot.id)
+      : null,
+  );
   const attemptRef = useRef<StudentAttempt | null>(attemptSnapshot);
-  const pendingSubmissionRef = useRef<PendingStudentSubmission | null>(null);
+  const pendingSubmissionRef = useRef<PendingStudentSubmission | null>(pendingSubmission);
   const submitInFlightRef = useRef<Promise<boolean> | null>(null);
   const controlScheduleIdRef = useRef<string | undefined>(
     scheduleId ?? attemptSnapshot?.scheduleId,
@@ -1299,22 +1308,45 @@ export function StudentAttemptProvider({
   }, []);
 
   const persistPendingSubmissionState = useCallback(
-    async (attempt: StudentAttempt): Promise<PendingStudentSubmission> => {
+    async (attempt: StudentAttempt, frozenPayload?: FrozenSubmitPayload): Promise<PendingStudentSubmission> => {
       const existing = pendingSubmissionRef.current;
-      // Preserve the ORIGINAL submission identity and final snapshot across
-      // retries: a later, different payload must never reuse this identity.
+      // Preserve the ORIGINAL submission identity, final snapshot, and (I1)
+      // the frozen payload-determining fields across retries: a later,
+      // different payload must never reuse this identity. Legacy records
+      // (pre-I1, no frozenPayload) self-heal on their next failed attempt.
+      const nextFrozenPayload = existing ? (existing.frozenPayload ?? frozenPayload) : frozenPayload;
       const record: PendingStudentSubmission = existing
         ? {
             ...existing,
+            schemaVersion: existing.schemaVersion ?? 1,
             retryCount: existing.retryCount + 1,
+            ...(nextFrozenPayload !== undefined ? { frozenPayload: nextFrozenPayload } : {}),
           }
-        : buildPendingStudentSubmission(attempt);
+        : buildPendingStudentSubmission(attempt, undefined, frozenPayload);
       pendingSubmissionRef.current = record;
       setPendingSubmission(record);
-      await studentAttemptRepository.savePendingSubmission(record).catch(() => {});
+      try {
+        await studentAttemptRepository.savePendingSubmission(record);
+      } catch (error) {
+        // M7: a lost durable record would strand the student between "pending"
+        // and "confirmed" — surface the failure like the mutation path instead
+        // of swallowing it.
+        setStorageDurabilityBlocking(true);
+        emitStudentObservabilityMetric(
+          'student_pending_submission_persist_failed_total',
+          withStudentObservabilityDimensions({
+            scheduleId: attempt.scheduleId,
+            attemptId: attempt.id,
+            endpoint: '/v1/student/sessions/:scheduleId/submit',
+            statusCode: null,
+            reason: error instanceof Error ? error.message : 'pending_submission_persist_failed',
+            syncState: attempt.recovery.syncState,
+          }),
+        );
+      }
       return record;
     },
-    [],
+    [setStorageDurabilityBlocking],
   );
 
   /**
@@ -1354,14 +1386,20 @@ export function StudentAttemptProvider({
         ? applyPendingSubmissionSnapshot(currentAttempt, pending)
         : currentAttempt;
       try {
-        const submittedAttempt = await studentAttemptRepository.submitAttempt(candidate);
+        const submittedAttempt = await studentAttemptRepository.submitAttempt(
+          candidate,
+          pending?.frozenPayload,
+        );
         await clearPendingSubmissionState(submittedAttempt.id);
         runtimeActions.setPhase('post-exam');
         syncAttemptState(submittedAttempt);
         void queryClient.invalidateQueries();
         return true;
-      } catch {
-        await persistPendingSubmissionState(currentAttempt);
+      } catch (error) {
+        // I1: capture the payload-determining fields of the failed request so
+        // retries replay the identical serialized body (backend idempotency
+        // hash must match the original request).
+        await persistPendingSubmissionState(currentAttempt, extractFrozenSubmitPayload(error));
         return false;
       }
     })();
@@ -1397,8 +1435,14 @@ export function StudentAttemptProvider({
         return;
       }
 
-      const retryWindowMs = 60 * 60 * 1000;
-      const startedAtMs = Date.now();
+      // M2: the retry window is bounded by the durable record's ABSOLUTE
+      // expiry (hard stop). A per-reload restart of the window would retry
+      // past the record's expiry while the record itself is already expired.
+      // Fall back to a fresh window only when the stored expiry is unparsable.
+      const parsedExpiry = Date.parse(pendingAtStart.expiresAt);
+      const expiresAtMs = Number.isFinite(parsedExpiry)
+        ? parsedExpiry
+        : Date.now() + PENDING_SUBMISSION_RETRY_WINDOW_MS;
 
       const promise = (async () => {
         let retryDelayMs = 5_000;
@@ -1411,7 +1455,7 @@ export function StudentAttemptProvider({
           });
         }
 
-        while (Date.now() - startedAtMs <= retryWindowMs) {
+        while (Date.now() <= expiresAtMs) {
           const currentPending = pendingSubmissionRef.current;
           if (!currentPending || currentPending.attemptId !== pendingAtStart.attemptId) {
             // Pending record cleared — submission was confirmed elsewhere.
@@ -1500,6 +1544,19 @@ export function StudentAttemptProvider({
       }
       if (cancelled) {
         return;
+      }
+
+      // M3: purge expired durable records belonging to OTHER abandoned
+      // attempts so a stale record can never resurrect a fake "pending"
+      // state or leak retries. The current attempt's own record is handled
+      // below (expired → cleared; fresh → resumed).
+      for (const candidate of records) {
+        if (
+          candidate.attemptId !== attemptSnapshot.id &&
+          isPendingStudentSubmissionExpired(candidate)
+        ) {
+          await studentAttemptRepository.clearPendingSubmission(candidate.attemptId).catch(() => {});
+        }
       }
 
       const record =

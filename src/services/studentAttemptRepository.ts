@@ -79,12 +79,58 @@ export interface StudentAttemptReceipt {
 }
 
 /**
+ * The payload-determining fields of the FIRST failed submit request, captured
+ * at first-failure time. The backend's idempotency hash covers the ENTIRE
+ * serialized request (last_seen_revision, client_final_seq,
+ * server_accepted_through_seq, final answer patch, final_client_snapshot_hash),
+ * so a retry MUST replay these exact values — never the (possibly advanced)
+ * live attempt fields — or the backend rejects the replay with an idempotency
+ * CONFLICT and the client loops forever on a submission that is actually safe.
+ */
+export interface FrozenSubmitPayload {
+  lastSeenRevision: number;
+  clientFinalSeq: number;
+  serverAcceptedThroughSeq: number;
+  finalClientSnapshotHash?: string;
+}
+
+interface SubmitPayloadCarrier {
+  submitPayload?: FrozenSubmitPayload;
+}
+
+/**
+ * Read the frozen payload off a failed submit error. The repository attaches
+ * it to every error thrown from the submit POST so callers can persist it and
+ * replay the identical request on retry.
+ */
+export function extractFrozenSubmitPayload(error: unknown): FrozenSubmitPayload | undefined {
+  if (typeof error !== 'object' || error === null || !('submitPayload' in error)) {
+    return undefined;
+  }
+
+  const payload = (error as SubmitPayloadCarrier).submitPayload;
+  if (
+    !payload ||
+    typeof payload.lastSeenRevision !== 'number' ||
+    typeof payload.clientFinalSeq !== 'number' ||
+    typeof payload.serverAcceptedThroughSeq !== 'number'
+  ) {
+    return undefined;
+  }
+  return payload;
+}
+
+/**
  * A locally recorded, not-yet-confirmed submission. Created when the immediate
  * submit request fails: the exam is locked against further editing but the
  * student must NOT see a confirmed "Exam submitted" state until the backend
  * returns an authoritative submitted attempt. The record survives reload so the
  * retry loop can resume with the SAME submission identity and the ORIGINAL
  * final answer snapshot (a different payload must never reuse this identity).
+ *
+ * Schema: `schemaVersion` is 1 for records written by this build. Legacy
+ * records without the field are treated as v1 and are NEVER dropped silently —
+ * they self-heal (stamped) on the next durable write.
  */
 export interface PendingStudentSubmission {
   attemptId: string;
@@ -93,6 +139,13 @@ export interface PendingStudentSubmission {
   startedAt: string;
   expiresAt: string;
   retryCount: number;
+  schemaVersion?: number;
+  /**
+   * Captured on the first failed submit (I1). When present, retries rebuild
+   * the request from these frozen values so the backend idempotency hash of
+   * the retry matches the first request byte-for-byte.
+   */
+  frozenPayload?: FrozenSubmitPayload;
   finalSnapshot: {
     answers: StudentAttempt['answers'];
     writingAnswers: StudentAttempt['writingAnswers'];
@@ -105,6 +158,7 @@ export const PENDING_SUBMISSION_RETRY_WINDOW_MS = 60 * 60 * 1000;
 export function buildPendingStudentSubmission(
   attempt: StudentAttempt,
   now: Date = new Date(),
+  frozenPayload?: FrozenSubmitPayload,
 ): PendingStudentSubmission {
   return {
     attemptId: attempt.id,
@@ -113,6 +167,8 @@ export function buildPendingStudentSubmission(
     startedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + PENDING_SUBMISSION_RETRY_WINDOW_MS).toISOString(),
     retryCount: 0,
+    schemaVersion: 1,
+    ...(frozenPayload ? { frozenPayload } : {}),
     finalSnapshot: {
       answers: attempt.answers,
       writingAnswers: attempt.writingAnswers,
@@ -144,6 +200,15 @@ export function isPendingStudentSubmissionRecord(
     typeof record.startedAt === 'string' &&
     typeof record.expiresAt === 'string' &&
     typeof record.retryCount === 'number' &&
+    // Unknown future schema versions are rejected defensively; legacy records
+    // without the field (schemaVersion === undefined) are v1 and accepted.
+    (record.schemaVersion === undefined || record.schemaVersion === 1) &&
+    (record.frozenPayload === undefined ||
+      (typeof record.frozenPayload === 'object' &&
+        record.frozenPayload !== null &&
+        typeof record.frozenPayload.lastSeenRevision === 'number' &&
+        typeof record.frozenPayload.clientFinalSeq === 'number' &&
+        typeof record.frozenPayload.serverAcceptedThroughSeq === 'number')) &&
     !!record.finalSnapshot &&
     typeof record.finalSnapshot === 'object' &&
     !!record.finalSnapshot.answers &&
@@ -152,6 +217,38 @@ export function isPendingStudentSubmissionRecord(
     typeof record.finalSnapshot.writingAnswers === 'object' &&
     !!record.finalSnapshot.flags &&
     typeof record.finalSnapshot.flags === 'object'
+  );
+}
+
+/**
+ * Synchronous localStorage peek (M4): lets the provider derive the pending
+ * lock before async hydration completes. Expired records are filtered out
+ * (the async bootstrap purge still clears them from storage).
+ */
+export function peekPendingSubmissionForAttempt(
+  attemptId: string,
+  now: Date = new Date(),
+): PendingStudentSubmission | null {
+  const record =
+    getPendingSubmissionsFromStorage().find((candidate) => candidate.attemptId === attemptId) ??
+    null;
+  if (!record || isPendingStudentSubmissionExpired(record, now)) {
+    return null;
+  }
+  return record;
+}
+
+/**
+ * A submission is authoritative only when the backend returned it: phase
+ * post-exam plus a submittedAt timestamp. Nothing in the client fabricates
+ * these locally for a failed submit — it records a pending submission instead.
+ */
+export function isAuthoritativelySubmittedAttempt(attempt: StudentAttempt | null): boolean {
+  return Boolean(
+    attempt &&
+      attempt.phase === 'post-exam' &&
+      typeof attempt.submittedAt === 'string' &&
+      attempt.submittedAt.length > 0,
   );
 }
 
@@ -1566,7 +1663,16 @@ export interface IStudentAttemptRepository {
   getAllAttempts(): Promise<StudentAttempt[]>;
   getAttemptsByScheduleId(scheduleId: string): Promise<StudentAttempt[]>;
   saveAttempt(attempt: StudentAttempt, context?: SaveAttemptLifecycleContext): Promise<void>;
-  submitAttempt(attempt: StudentAttempt): Promise<StudentAttempt>;
+  /**
+   * Submit confirmation is BACKEND-AUTHORITATIVE ONLY. Implementations must
+   * resolve with an attempt the backend returned (phase post-exam +
+   * submittedAt) and must never fabricate a confirmed state locally.
+   *
+   * `frozenPayload` (when present) is the payload-determining fields of the
+   * original failed request: the retry must rebuild the serialized request
+   * from these exact values so the backend idempotency hash matches.
+   */
+  submitAttempt(attempt: StudentAttempt, frozenPayload?: FrozenSubmitPayload): Promise<StudentAttempt>;
   createAttempt(seed: StudentAttemptSeed): Promise<StudentAttempt>;
   savePendingMutations(attemptId: string, mutations: StudentAttemptMutation[]): Promise<void>;
   getPendingMutations(attemptId: string): Promise<StudentAttemptMutation[]>;
@@ -1580,7 +1686,7 @@ export interface IStudentAttemptRepository {
   flushHeartbeatEvents(attemptId: string): Promise<boolean>;
 }
 
-class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
+class LocalStorageStudentAttemptCache {
   private readonly pendingMutationFallbackMemory = new Map<string, StudentAttemptMutation[]>();
 
   private getItem<T>(key: string): T[] {
@@ -1647,39 +1753,6 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     }
 
     this.setItem(STORAGE_KEY_ATTEMPTS, attempts);
-  }
-
-  async submitAttempt(attempt: StudentAttempt): Promise<StudentAttempt> {
-    if ((attempt.recovery.pendingMutationCount ?? 0) > 0) {
-      emitStudentObservabilityMetric(
-        'student_answer_loss_risk_total',
-        withStudentObservabilityDimensions({
-          scheduleId: attempt.scheduleId,
-          attemptId: attempt.id,
-          endpoint: '/v1/student/sessions/:scheduleId/submit',
-          reason: 'submit_with_pending_mutations',
-          pendingMutationCount: attempt.recovery.pendingMutationCount,
-          syncState: attempt.recovery.syncState,
-        }),
-      );
-    }
-
-    const submittedAttempt = normalizeStudentAttempt({
-      ...attempt,
-      phase: 'post-exam',
-      currentQuestionId: null,
-      recovery: {
-        ...attempt.recovery,
-        lastPersistedAt: new Date().toISOString(),
-        pendingMutationCount: 0,
-        syncState: 'saved',
-      },
-    });
-
-    await this.saveAttempt(submittedAttempt);
-    await this.clearPendingMutations(attempt.id);
-    clearAttemptMutationWatermark(submittedAttempt);
-    return submittedAttempt;
   }
 
   async createAttempt(seed: StudentAttemptSeed): Promise<StudentAttempt> {
@@ -1833,6 +1906,18 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     const records = getPendingSubmissionsFromStorage();
     const next = [...records.filter((candidate) => candidate.attemptId !== record.attemptId), record];
     setPendingSubmissionsInStorage(next);
+    // M8: retryCount is otherwise write-only — surface it as a metric so retry
+    // pressure on the pending path is observable.
+    emitStudentObservabilityMetric(
+      'student_pending_submission_retry_total',
+      withStudentObservabilityDimensions({
+        scheduleId: record.scheduleId,
+        attemptId: record.attemptId,
+        endpoint: studentSessionTransport.paths.submit(record.scheduleId),
+        retryCount: record.retryCount,
+        syncState: 'pending_submission',
+      }),
+    );
   }
 
   async getPendingSubmissions(): Promise<PendingStudentSubmission[]> {
@@ -2486,12 +2571,22 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
   private async buildSubmitPayload(
     attempt: StudentAttempt,
     submissionId: string,
+    frozenPayload?: FrozenSubmitPayload,
   ): Promise<BackendSubmitRequest> {
     const clientSessionId = ensureClientSessionIdForAttempt(attempt);
-    const watermark = readOrPrimeMutationSequenceWatermark(attempt.id, clientSessionId);
-    const clientFinalSeq = Math.max(watermark, attempt.recovery.serverAcceptedThroughSeq ?? 0);
+    // I1: a frozen payload replays the EXACT fields of the original failed
+    // request. Deriving them from the (possibly advanced) live attempt would
+    // drift the serialized body and break the backend idempotency hash.
+    const clientFinalSeq =
+      frozenPayload?.clientFinalSeq ??
+      Math.max(
+        readOrPrimeMutationSequenceWatermark(attempt.id, clientSessionId),
+        attempt.recovery.serverAcceptedThroughSeq ?? 0,
+      );
     const finalAnswerPatch = buildFinalAnswerPatch(attempt);
-    const finalClientSnapshotHash = await sha256Hex(finalAnswerPatch);
+    const finalClientSnapshotHash =
+      frozenPayload?.finalClientSnapshotHash ??
+      ((await sha256Hex(finalAnswerPatch)) ?? undefined);
 
     emitStudentObservabilityMetric(
       'student_submit_final_patch_built_total',
@@ -2506,16 +2601,61 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 
     return {
       attemptId: attempt.id,
-      lastSeenRevision: Number(attempt.revision ?? 0),
+      lastSeenRevision: frozenPayload?.lastSeenRevision ?? Number(attempt.revision ?? 0),
       submissionId,
       clientFinalSeq,
-      serverAcceptedThroughSeq: attempt.recovery.serverAcceptedThroughSeq ?? 0,
+      serverAcceptedThroughSeq:
+        frozenPayload?.serverAcceptedThroughSeq ?? (attempt.recovery.serverAcceptedThroughSeq ?? 0),
       finalAnswerPatch,
       finalClientSnapshotHash: finalClientSnapshotHash ?? undefined,
     };
   }
 
-  async submitAttempt(attempt: StudentAttempt): Promise<StudentAttempt> {
+  /**
+   * Belt-and-braces for I1: an idempotency CONFLICT (409, non-flush reason)
+   * means the original request was already accepted by the server. Fetch the
+   * authoritative session; when the server confirms the submission, converge
+   * to it (clearing local pending mutation state) instead of rethrowing into
+   * the retry loop. Returns null when the server has NOT confirmed — the
+   * caller rethrows.
+   */
+  private async tryConvergeAlreadySubmitted(
+    error: unknown,
+    attempt: StudentAttempt,
+  ): Promise<StudentAttempt | null> {
+    const statusCode = (error as { statusCode?: number }).statusCode;
+    if (statusCode !== 409 || backendConflictReason(error) === 'FINAL_FLUSH_REQUIRED') {
+      return null;
+    }
+
+    const authoritative = await this.getAttemptByScheduleId(
+      attempt.scheduleId,
+      attempt.studentKey,
+    ).catch(() => null);
+    if (!authoritative || !isAuthoritativelySubmittedAttempt(authoritative)) {
+      return null;
+    }
+
+    await this.cache.clearPendingMutations(attempt.id);
+    clearAttemptMutationWatermark(authoritative);
+    emitStudentObservabilityMetric(
+      'student_submit_conflict_converged_total',
+      withStudentObservabilityDimensions({
+        scheduleId: attempt.scheduleId,
+        attemptId: attempt.id,
+        endpoint: studentSessionTransport.paths.submit(attempt.scheduleId),
+        statusCode,
+        reason: backendConflictReason(error),
+        syncState: attempt.recovery.syncState,
+      }),
+    );
+    return authoritative;
+  }
+
+  async submitAttempt(
+    attempt: StudentAttempt,
+    frozenPayload?: FrozenSubmitPayload,
+  ): Promise<StudentAttempt> {
     const pendingBeforeSubmit = await this.cache.getPendingMutations(attempt.id);
     if (pendingBeforeSubmit.length > 0 || (attempt.recovery.pendingMutationCount ?? 0) > 0) {
       emitStudentObservabilityMetric(
@@ -2543,21 +2683,39 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     const sampledSuccessLogs = shouldEmitStudentLifecycleSuccessLog(STUDENT_LIFECYCLE_LOG_SAMPLE_RATE);
     const endpoint = studentSessionTransport.paths.submit(attempt.scheduleId);
     const submitOnce = async (candidate: StudentAttempt): Promise<BackendSubmitResponse> => {
-      const payload = await this.buildSubmitPayload(candidate, submissionId);
-      return this.postWithAttemptAuth<BackendSubmitResponse>(
-        candidate,
-        endpoint,
-        payload,
-        {
-          headers: {
-            'Idempotency-Key': submissionId,
-            [STUDENT_SUBMIT_CYCLE_ID_HEADER]: submitCycleId,
-            [STUDENT_LIFECYCLE_SAMPLE_HEADER]: String(sampledSuccessLogs),
+      const payload = await this.buildSubmitPayload(candidate, submissionId, frozenPayload);
+      try {
+        return await this.postWithAttemptAuth<BackendSubmitResponse>(
+          candidate,
+          endpoint,
+          payload,
+          {
+            headers: {
+              'Idempotency-Key': submissionId,
+              [STUDENT_SUBMIT_CYCLE_ID_HEADER]: submitCycleId,
+              [STUDENT_LIFECYCLE_SAMPLE_HEADER]: String(sampledSuccessLogs),
+            },
+            timeout: 60_000,
+            retries: 0,
           },
-          timeout: 60_000,
-          retries: 0,
-        },
-      );
+        );
+      } catch (error) {
+        // I1: attach the exact payload-determining fields of THIS request so
+        // the caller can persist them and replay the identical serialized body
+        // (guaranteeing hash(retry) === hash(first request)).
+        const carrier = error as SubmitPayloadCarrier;
+        if (!carrier.submitPayload) {
+          carrier.submitPayload = {
+            lastSeenRevision: payload.lastSeenRevision,
+            clientFinalSeq: payload.clientFinalSeq ?? 0,
+            serverAcceptedThroughSeq: payload.serverAcceptedThroughSeq ?? 0,
+            ...(payload.finalClientSnapshotHash !== undefined
+              ? { finalClientSnapshotHash: payload.finalClientSnapshotHash }
+              : {}),
+          };
+        }
+        throw error;
+      }
     };
 
     let attemptForSubmit = attempt;
@@ -2566,29 +2724,44 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
       response = await submitOnce(attemptForSubmit);
     } catch (error) {
       const reason = backendConflictReason(error);
-      if (reason !== 'FINAL_FLUSH_REQUIRED') {
+      if (reason === 'FINAL_FLUSH_REQUIRED') {
+        emitStudentObservabilityMetric(
+          'student_submit_final_patch_retry_total',
+          withStudentObservabilityDimensions({
+            scheduleId: attempt.scheduleId,
+            attemptId: attempt.id,
+            endpoint,
+            reason,
+            syncState: attempt.recovery.syncState,
+          }),
+        );
+
+        await this.saveAttempt(attemptForSubmit, {
+          flushCycleId: generateUuid(),
+          sampledSuccessLogs,
+        });
+        attemptForSubmit =
+          (await this.cache.getAllAttempts()).find((candidate) => candidate.id === attempt.id) ??
+          attemptForSubmit;
+        try {
+          response = await submitOnce(attemptForSubmit);
+        } catch (flushError) {
+          const converged = await this.tryConvergeAlreadySubmitted(flushError, attempt);
+          if (converged) {
+            return converged;
+          }
+          throw flushError;
+        }
+      } else {
+        // I1 belt-and-braces: an idempotency CONFLICT means the original
+        // request already reached the server — converge to the authoritative
+        // attempt instead of looping on the same drifted payload forever.
+        const converged = await this.tryConvergeAlreadySubmitted(error, attempt);
+        if (converged) {
+          return converged;
+        }
         throw error;
       }
-
-      emitStudentObservabilityMetric(
-        'student_submit_final_patch_retry_total',
-        withStudentObservabilityDimensions({
-          scheduleId: attempt.scheduleId,
-          attemptId: attempt.id,
-          endpoint,
-          reason,
-          syncState: attempt.recovery.syncState,
-        }),
-      );
-
-      await this.saveAttempt(attemptForSubmit, {
-        flushCycleId: generateUuid(),
-        sampledSuccessLogs,
-      });
-      attemptForSubmit =
-        (await this.cache.getAllAttempts()).find((candidate) => candidate.id === attempt.id) ??
-        attemptForSubmit;
-      response = await submitOnce(attemptForSubmit);
     }
 
     const submittedAttempt = mapBackendStudentAttempt(response.attempt);

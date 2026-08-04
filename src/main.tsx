@@ -6,7 +6,12 @@ import {router} from './routes';
 import {ErrorBoundary} from './app/error/ErrorBoundary';
 import {queryClient} from './app/data/queryClient';
 import {AuthSessionProvider} from './features/auth/authSession';
+import {pruneStudentAttemptCache} from './services/studentAttemptRepository';
 import './index.css';
+
+// M3: purge expired/compacted attempt-cache records (including expired
+// pending submissions) at app bootstrap. Best-effort and non-blocking.
+void pruneStudentAttemptCache();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

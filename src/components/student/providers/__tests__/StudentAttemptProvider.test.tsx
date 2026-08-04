@@ -1982,6 +1982,95 @@ describe('StudentAttemptProvider pending submission contract (FEX-051)', () => {
     }
   });
 
+  it('retries with the ORIGINAL frozen payload fields when revision advances after a lost response (I1 drift)', async () => {
+    vi.useFakeTimers();
+    try {
+      // The repository attaches `submitPayload` (the payload-determining
+      // fields of the failed request) to the thrown error; the provider must
+      // persist and replay them so hash(retry) === hash(first request).
+      const submitSpy = vi.mocked(studentAttemptRepository.submitAttempt);
+      submitSpy.mockRejectedValue(
+        Object.assign(new Error('response lost'), {
+          submitPayload: {
+            lastSeenRevision: 3,
+            clientFinalSeq: 7,
+            serverAcceptedThroughSeq: 5,
+            finalClientSnapshotHash: 'sha-1',
+          },
+        }),
+      );
+      // Let the pending record actually persist so the bootstrap effect can
+      // restore it when the snapshot changes (the beforeEach spy swallows it).
+      vi.mocked(studentAttemptRepository.savePendingSubmission).mockRestore();
+
+      let attemptSnapshot = {
+        ...createAttemptSnapshot(),
+        revision: 3,
+        answers: { q1: 'FINAL_ANSWER' },
+        recovery: { ...createAttemptSnapshot().recovery, serverAcceptedThroughSeq: 5 },
+      };
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={createExamState()}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          <StudentAttemptProvider
+            scheduleId={attemptSnapshot.scheduleId}
+            attemptSnapshot={attemptSnapshot}
+          >
+            {children}
+          </StudentAttemptProvider>
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentAttempt(), { wrapper });
+
+      await flushAsyncState();
+
+      await act(async () => {
+        await result.current.actions.submitAttempt();
+      });
+      expect(submitSpy).toHaveBeenCalledTimes(1);
+      expect(result.current.state.pendingSubmission?.frozenPayload).toEqual({
+        lastSeenRevision: 3,
+        clientFinalSeq: 7,
+        serverAcceptedThroughSeq: 5,
+        finalClientSnapshotHash: 'sha-1',
+      });
+
+      // The first submit actually reached the server (response lost). A later
+      // mutation-batch response advances revision/seq BEFORE the first retry.
+      attemptSnapshot = {
+        ...attemptSnapshot,
+        revision: 9,
+        recovery: { ...attemptSnapshot.recovery, serverAcceptedThroughSeq: 8 },
+      };
+      rerender();
+      await flushAsyncState();
+
+      // First background retry after the 5s backoff must send the ORIGINAL
+      // payload-determining fields and the ORIGINAL final snapshot.
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(submitSpy).toHaveBeenCalledTimes(2);
+      const [retryCandidate, retryFrozenPayload] = submitSpy.mock.calls[1];
+      expect(retryCandidate.answers.q1).toBe('FINAL_ANSWER');
+      expect(retryFrozenPayload).toEqual({
+        lastSeenRevision: 3,
+        clientFinalSeq: 7,
+        serverAcceptedThroughSeq: 5,
+        finalClientSnapshotHash: 'sha-1',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('restores a durable pending submission on mount and resumes the retry loop before any confirmed success', async () => {
     vi.useFakeTimers();
     try {
