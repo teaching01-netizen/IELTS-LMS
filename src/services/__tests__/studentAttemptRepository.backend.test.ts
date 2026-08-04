@@ -1570,6 +1570,136 @@ describe('studentAttemptRepository backend mode', () => {
     expect(mutationBatchCalls).toHaveLength(1);
   });
 
+  it('rebases pending mutations onto the authoritative revision and requeues them when the batch flush returns 409 BASE_REVISION_MISMATCH (BEX-003)', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+
+    const baseRevisionConflict = () =>
+      new Response(
+        JSON.stringify({
+          success: false,
+          error: {
+            code: 'CONFLICT',
+            message: 'base revision mismatch',
+            details: {
+              reason: 'BASE_REVISION_MISMATCH',
+              latestRevision: 5,
+              serverAcceptedThroughSeq: 3,
+              activeSessionId: 'phone-client-1',
+            },
+          },
+          metadata: { requestId: 'req-test', timestamp: '2026-01-01T00:00:00.000Z' },
+        }),
+        {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          schedule: buildSchedule(),
+          version: buildVersion(),
+          runtime: null,
+          attempt: buildBackendAttempt(),
+          attemptCredential: buildAttemptCredential(),
+          degradedLiveMode: false,
+        }),
+      )
+      // First flush: the local revision (1) is stale — another client session
+      // already advanced the attempt to revision 5. The batch is rejected
+      // atomically with the authoritative revision in the conflict details.
+      .mockResolvedValueOnce(baseRevisionConflict())
+      // The repository converges by fetching the authoritative attempt.
+      .mockResolvedValueOnce(
+        jsonResponse({
+          schedule: buildSchedule(),
+          version: buildVersion(),
+          runtime: null,
+          attempt: buildBackendAttempt({
+            answers: { qOther: 'B' },
+            revision: 5,
+          }),
+          attemptCredential: buildAttemptCredential(),
+          degradedLiveMode: false,
+        }),
+      )
+      // The rebased mutation is accepted on the retry and merged into the
+      // authoritative attempt.
+      .mockResolvedValueOnce(
+        jsonResponse({
+          attempt: buildBackendAttempt({
+            answers: { qOther: 'B', q1: 'A' },
+            revision: 6,
+          }),
+          appliedMutationCount: 1,
+          serverAcceptedThroughSeq: 4,
+        }),
+      );
+    global.fetch = fetchMock as typeof fetch;
+
+    const attempt = await studentAttemptRepository.createAttempt({
+      scheduleId: 'sched-1',
+      studentKey: 'student-sched-1-alice',
+      examId: 'exam-1',
+      examTitle: 'Mock Exam',
+      candidateId: 'alice',
+      candidateName: 'Alice Roe',
+      candidateEmail: 'alice@example.com',
+      currentModule: 'reading',
+    });
+
+    await studentAttemptRepository.savePendingMutations(attempt.id, [
+      {
+        id: 'mutation-local-answer',
+        attemptId: attempt.id,
+        scheduleId: attempt.scheduleId,
+        timestamp: '2026-01-01T09:00:10.000Z',
+        type: 'answer',
+        payload: { questionId: 'q1', value: 'A', module: 'reading' },
+      },
+    ]);
+
+    await expect(studentAttemptRepository.saveAttempt(attempt)).resolves.toBeUndefined();
+
+    const batchCalls = fetchMock.mock.calls.filter(
+      ([url]) => String(url) === '/api/v1/student/sessions/sched-1/mutations:batch',
+    );
+    expect(batchCalls).toHaveLength(2);
+
+    // The first flush carried the stale local revision; the batch was rejected
+    // atomically, so nothing was accepted under the stale base.
+    const firstBody = JSON.parse(String(batchCalls[0]?.[1]?.body));
+    expect(firstBody.mutations).toEqual([
+      expect.objectContaining({
+        mutationId: 'mutation-local-answer',
+        baseRevision: 1,
+        value: 'A',
+      }),
+    ]);
+
+    // The retry is rebased onto the authoritative revision with a fresh
+    // mutation id — the local answer value is preserved, not dropped.
+    const secondBody = JSON.parse(String(batchCalls[1]?.[1]?.body));
+    expect(secondBody.mutations).toHaveLength(1);
+    expect(secondBody.mutations[0]).toMatchObject({
+      baseRevision: 5,
+      value: 'A',
+    });
+    expect(secondBody.mutations[0].mutationId).not.toBe('mutation-local-answer');
+
+    const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId('sched-1');
+    const cached = cachedAttempts.find((candidate) => candidate.id === attempt.id) ?? null;
+    // No answer is lost: the authoritative answer from the owning session and
+    // the local answer are both persisted.
+    expect(cached?.answers).toEqual({ qOther: 'B', q1: 'A' });
+    expect(cached?.revision).toBe(6);
+
+    // The rebased mutation was accepted; nothing remains in the durable queue.
+    expect(await studentAttemptRepository.getPendingMutations(attempt.id)).toEqual([]);
+  });
+
   it('marks the local attempt unsynced and preserves pending mutations on ACTIVE_SESSION_SUPERSEDED', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
 

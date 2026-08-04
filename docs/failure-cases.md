@@ -30,6 +30,57 @@ Purpose: turn incidents and bug fixes into durable memory for humans and AI agen
 
 ---
 
+## 2026-08-05: Second Client Session Can Silently Overwrite Accepted Answers (Missing Mutation Base-Revision Gate)
+
+### Symptom
+Two client sessions for the same student (e.g. phone + laptop) could race on one attempt. The
+second session's mutation batch carried a stale `baseRevision` relative to mutations the first
+session had already had accepted, yet the batch was applied unconditionally. The second session
+could therefore silently overwrite answers that the first session had already had accepted — the
+authoritative persisted state diverged from what each session believed it had saved.
+
+### Scope
+Backend mutation batch application (`backend/crates/application/src/delivery/`) and the student
+client's pending-mutation flush/recovery loop (`src/services/studentAttemptRepository.ts`,
+`src/components/student/providers/StudentAttemptProvider.tsx`). Earlier
+idempotency/seq-guard rails covered replay of the same session but not a stale *other* session.
+
+### Root Cause
+The mutation batch endpoint accepted any command whose `baseRevision` was not ahead of the attempt's
+current revision; it never enforced `baseRevision >= attempt.revision`. A session that booted from
+an older snapshot could keep submitting batches under an outdated base, and there was no
+authoritative path for the client to converge before retrying.
+
+### Fix
+- Backend now rejects a batch with `baseRevision < attempt.revision` atomically with
+  `409 CONFLICT` / reason `BASE_REVISION_MISMATCH`, carrying the authoritative `latestRevision`,
+  the requesting session's accepted watermark (`serverAcceptedThroughSeq`), and the owning
+  `activeSessionId` (commits `51efb97`, `67dffba`).
+- Revision-preserving metadata updates (position/progression/flag/navigation payloads) are exempt:
+  they apply without bumping the attempt revision, never triggering the gate.
+- Frontend already reconciles on the gate (no answer loss): `saveAttempt` (`studentAttemptRepository.ts`)
+  adopts the fetched authoritative attempt, rebases the rejected `remainingMutations` with fresh
+  mutation ids onto `latestRevision`, requeues them in the durable pending-mutation mirror, and
+  re-flushes. A focused test now proves this path end-to-end (before, only the submit-path
+  I1-residual variant was covered).
+
+### Regression Protection
+- Backend (BEX-003 contract): `backend/tests/contracts/student_contract.rs` — stale-batch rejection,
+  `latestRevision`/`serverAcceptedThroughSeq`/`activeSessionId` conflict shape, and
+  `submit_from_second_client_session_with_stale_revision_returns_base_revision_mismatch_conflict`.
+- Frontend: `src/services/__tests__/studentAttemptRepository.backend.test.ts` — "rebases pending
+  mutations onto the authoritative revision and requeues them when the batch flush returns
+  409 BASE_REVISION_MISMATCH (BEX-003)"; existing I1-residual submit-reconciliation test
+  (`studentAttemptRepository.test.ts`, `StudentAttemptProvider.test.tsx`).
+
+### Invariant
+Accepted answers are immutable against a stale writer: a mutation batch must base on
+`revision == attempt.revision` (or a superseding state) or be rejected atomically. A rejected batch
+must never be silently dropped or looped by the client — it is rebased and retried, so the
+student-visible saved/verified state always matches persisted reality.
+
+---
+
 ## 2026-07-18: Inferred Viewport Geometry Survived Browser Recovery
 
 ### Symptom
