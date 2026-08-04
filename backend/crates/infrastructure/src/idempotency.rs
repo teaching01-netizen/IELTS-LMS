@@ -160,7 +160,7 @@ impl IdempotencyRepository {
             return Ok((IdempotencyLookupStatus::Conflict, existing));
         }
 
-        let created = self
+        let created = match self
             .store_with_executor(
                 &self.pool,
                 actor_id,
@@ -170,7 +170,32 @@ impl IdempotencyRepository {
                 response_status,
                 &response_body,
             )
-            .await?;
+            .await
+        {
+            Ok(record) => record,
+            // Two concurrent requests with the same key can both pass the
+            // lookup above; the PRIMARY KEY (actor_id, route_key,
+            // idempotency_key) lets exactly one INSERT succeed. Re-read the
+            // winner's record and classify it by request hash instead of
+            // surfacing the duplicate-key error as a 500.
+            Err(err) if is_duplicate_key(&err) => {
+                if let Some(existing) = Self::lookup_with_executor(
+                    &self.pool,
+                    actor_id,
+                    route_key,
+                    idempotency_key,
+                )
+                .await?
+                {
+                    if existing.request_hash == request_hash {
+                        return Ok((IdempotencyLookupStatus::Replay, existing));
+                    }
+                    return Ok((IdempotencyLookupStatus::Conflict, existing));
+                }
+                return Err(err);
+            }
+            Err(err) => return Err(err),
+        };
 
         Ok((IdempotencyLookupStatus::Created, created))
     }
@@ -236,5 +261,16 @@ impl From<IdempotencyRow> for IdempotencyRecord {
             created_at: value.created_at,
             expires_at: value.expires_at,
         }
+    }
+}
+
+fn is_duplicate_key(err: &sqlx::Error) -> bool {
+    // sqlx reports the MySQL numeric code (1062) on older versions and the
+    // SQLSTATE (23000) on newer ones; accept both.
+    match err {
+        sqlx::Error::Database(db_err) => {
+            matches!(db_err.code().as_deref(), Some("1062") | Some("23000"))
+        }
+        _ => false,
     }
 }

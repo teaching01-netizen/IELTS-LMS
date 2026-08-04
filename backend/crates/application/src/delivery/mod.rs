@@ -361,26 +361,6 @@ impl DeliveryService {
             )
             .await?;
 
-        sqlx::query(
-            r#"
-            INSERT INTO session_audit_logs (
-                id, schedule_id, actor, action_type, target_student_id, payload, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, NOW())
-            "#,
-        )
-        .bind(Uuid::new_v4().to_string())
-        .bind(schedule_id.to_string())
-        .bind(&updated.candidate_name)
-        .bind("STUDENT_PRECHECK")
-        .bind(&updated.id)
-        .bind(json!({
-            "clientSessionId": req.client_session_id,
-            "hasDeviceFingerprint": has_device_fingerprint
-        }))
-        .execute(&self.pool)
-        .await?;
-
         if let Some(idempotency_key) = idempotency_key.as_deref() {
             let response_body = serde_json::to_value(&updated).map_err(|err| {
                 DeliveryError::Internal(format!(
@@ -406,9 +386,35 @@ impl DeliveryService {
                 ));
             }
             if status == IdempotencyLookupStatus::Replay {
+                // A concurrent identical request already persisted this
+                // precheck and recorded its audit event. Replay its stored
+                // response instead of recording a duplicate audit event.
                 return deserialize_idempotent_response(&record);
             }
         }
+
+        // The idempotency record is committed before the audit event so a
+        // concurrent replay of the same key can never double-record the
+        // audit (audit events are append-only and must stay singular).
+        sqlx::query(
+            r#"
+            INSERT INTO session_audit_logs (
+                id, schedule_id, actor, action_type, target_student_id, payload, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, NOW())
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(schedule_id.to_string())
+        .bind(&updated.candidate_name)
+        .bind("STUDENT_PRECHECK")
+        .bind(&updated.id)
+        .bind(json!({
+            "clientSessionId": req.client_session_id,
+            "hasDeviceFingerprint": has_device_fingerprint
+        }))
+        .execute(&self.pool)
+        .await?;
 
         Ok(updated)
     }
@@ -1563,7 +1569,7 @@ impl DeliveryService {
         let now = Utc::now();
 
         let attempt_id = Uuid::new_v4();
-        sqlx::query(
+        let insert_result = sqlx::query(
             r#"
             INSERT INTO student_attempts (
                 id, schedule_id, registration_id, wcode, student_key, organization_id, exam_id, published_version_id,
@@ -1609,7 +1615,22 @@ impl DeliveryService {
             "serverAcceptedThroughSeq": 0
         }))
         .execute(&self.pool)
-        .await?;
+        .await;
+
+        // Two concurrent prechecks can race the UNIQUE (schedule_id,
+        // student_key) constraint: one INSERT wins, the other must adopt the
+        // winner's row instead of surfacing a duplicate-key error as a 500.
+        if let Err(err) = insert_result {
+            if is_duplicate_key(&err) {
+                if let Some(existing) = self
+                    .load_attempt_by_student_key(schedule.id.clone(), student_key)
+                    .await?
+                {
+                    return Ok(existing);
+                }
+            }
+            return Err(err.into());
+        }
 
         sqlx::query(
             r#"
@@ -1978,6 +1999,17 @@ impl DeliveryService {
 
 fn derive_student_key(schedule_id: Uuid, candidate_id: &str) -> String {
     format!("student-{schedule_id}-{candidate_id}")
+}
+
+fn is_duplicate_key(err: &sqlx::Error) -> bool {
+    // sqlx reports the MySQL numeric code (1062) on older versions and the
+    // SQLSTATE (23000) on newer ones; accept both.
+    match err {
+        sqlx::Error::Database(db_err) => {
+            matches!(db_err.code().as_deref(), Some("1062") | Some("23000"))
+        }
+        _ => false,
+    }
 }
 
 fn mutation_batch_route_key(schedule_id: Uuid) -> String {

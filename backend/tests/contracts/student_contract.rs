@@ -308,6 +308,423 @@ async fn precheck_replays_same_idempotency_key_and_rejects_hash_mismatch() {
 }
 
 #[tokio::test]
+async fn precheck_derives_identity_from_enrollment_not_request_body() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    // The body claims a DIFFERENT candidate ("mallory") than the enrolled
+    // "alice" whose session is authenticated. Identity must come from the
+    // authorized enrollment, not from the request fields.
+    let response = app
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{}/precheck", schedule_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentPrecheckRequest {
+                        student_key: format!("student-{schedule_id}-mallory"),
+                        candidate_id: "mallory".to_owned(),
+                        candidate_name: "Mallory Q".to_owned(),
+                        candidate_email: "mallory@example.com".to_owned(),
+                        email: Some("mallory@example.com".to_owned()),
+                        wcode: Some("WMALLORY".to_owned()),
+                        client_session_id: Uuid::new_v4().to_string(),
+                        pre_check: json!({
+                            "completedAt": "2026-01-10T08:50:00Z",
+                            "browserFamily": "chrome",
+                            "checks": [{"id": "browser", "status": "pass"}]
+                        }),
+                        device_fingerprint_hash: Some("fp-mallory-device".to_owned()),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+
+    // The authoritative attempt reflects the ENROLLED identity (alice),
+    // not the "mallory" claims in the body.
+    assert_eq!(json["data"]["studentKey"], student_key);
+    assert_eq!(json["data"]["candidateId"], "alice");
+    assert_eq!(json["data"]["candidateName"], "alice Candidate");
+    assert_eq!(json["data"]["candidateEmail"], "alice@example.com");
+    assert_eq!(json["data"]["phase"], "lobby");
+
+    // The persisted attempt row carries the enrolled identity as well.
+    let (row_candidate_id, row_candidate_name, row_candidate_email, row_student_key): (
+        String,
+        String,
+        String,
+        String,
+    ) = sqlx::query_as(
+        "SELECT candidate_id, candidate_name, candidate_email, student_key FROM student_attempts WHERE schedule_id = ?",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(row_candidate_id, "alice");
+    assert_eq!(row_candidate_name, "alice Candidate");
+    assert_eq!(row_candidate_email, "alice@example.com");
+    assert_eq!(row_student_key, student_key);
+
+    // Exactly one audit event, attributed to the enrolled identity.
+    let precheck_audit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND action_type = 'STUDENT_PRECHECK'",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(precheck_audit_count, 1);
+    let audit_actor: String = sqlx::query_scalar(
+        "SELECT actor FROM session_audit_logs WHERE schedule_id = ? AND action_type = 'STUDENT_PRECHECK'",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audit_actor, "alice Candidate");
+
+    // Device fingerprint and check results are persisted, both in the
+    // response and at the DB level.
+    assert_eq!(
+        json["data"]["integrity"]["deviceFingerprintHash"],
+        "fp-mallory-device"
+    );
+    assert_eq!(
+        json["data"]["integrity"]["preCheck"]["completedAt"],
+        "2026-01-10T08:50:00Z"
+    );
+    let db_integrity: serde_json::Value = sqlx::query_scalar(
+        "SELECT integrity FROM student_attempts WHERE schedule_id = ?",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(db_integrity["deviceFingerprintHash"], "fp-mallory-device");
+    assert_eq!(db_integrity["preCheck"]["checks"][0]["id"], "browser");
+
+    // The response returns the authoritative attempt (same persisted row).
+    let row_id: String = sqlx::query_scalar("SELECT id FROM student_attempts WHERE schedule_id = ?")
+        .bind(schedule_id.to_string())
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(json["data"]["id"], row_id);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn precheck_retry_after_timeout_keeps_attempt_singular() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let request = StudentPrecheckRequest {
+        student_key: student_key.clone(),
+        candidate_id: "alice".to_owned(),
+        candidate_name: "Alice Roe".to_owned(),
+        candidate_email: "alice@example.com".to_owned(),
+        email: Some("alice@example.com".to_owned()),
+        wcode: Some("W123456".to_owned()),
+        client_session_id: Uuid::new_v4().to_string(),
+        pre_check: json!({
+            "completedAt": "2026-01-10T08:50:00Z",
+            "browserFamily": "chrome",
+            "checks": [{"id": "browser", "status": "pass"}]
+        }),
+        device_fingerprint_hash: Some("fp-alice".to_owned()),
+    };
+    let idempotency_key = "precheck-timeout-retry-1";
+
+    let first = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{}/precheck", schedule_id))
+                .header("content-type", "application/json")
+                .header("idempotency-key", idempotency_key)
+                .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_json = json_body(first).await;
+    let attempt_id = first_json["data"]["id"].as_str().unwrap().to_owned();
+
+    // Client timeout: the client never saw the first response and retries
+    // with the same key and payload. The attempt must remain valid and
+    // singular.
+    let retry = app
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{}/precheck", schedule_id))
+                .header("content-type", "application/json")
+                .header("idempotency-key", idempotency_key)
+                .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retry.status(), StatusCode::OK);
+    let retry_json = json_body(retry).await;
+    assert_eq!(retry_json["data"]["id"], attempt_id);
+    assert_eq!(retry_json["data"], first_json["data"]);
+
+    let attempt_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM student_attempts WHERE schedule_id = ?",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(attempt_count, 1, "retry must not create a second attempt");
+
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND action_type = 'STUDENT_PRECHECK'",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audit_count, 1, "retry must not duplicate the audit event");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn precheck_concurrent_identical_requests_yield_one_logical_result() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let request = StudentPrecheckRequest {
+        student_key: student_key.clone(),
+        candidate_id: "alice".to_owned(),
+        candidate_name: "Alice Roe".to_owned(),
+        candidate_email: "alice@example.com".to_owned(),
+        email: Some("alice@example.com".to_owned()),
+        wcode: Some("W123456".to_owned()),
+        client_session_id: Uuid::new_v4().to_string(),
+        pre_check: json!({
+            "completedAt": "2026-01-10T08:50:00Z",
+            "browserFamily": "chrome",
+            "checks": [{"id": "browser", "status": "pass"}]
+        }),
+        device_fingerprint_hash: Some("fp-alice".to_owned()),
+    };
+    let idempotency_key = "precheck-race-1";
+
+    // Two identical requests in flight at once: the UNIQUE constraints on
+    // student_attempts(schedule_id, student_key) and idempotency_keys
+    // (actor_id, route_key, idempotency_key) mean at most one of them can
+    // win the writes. The contract is one logical result: no duplicate
+    // attempt, no duplicate audit, no 500.
+    let first = app.clone().oneshot(
+        auth.with_csrf(Request::builder())
+            .method("POST")
+            .uri(format!("/api/v1/student/sessions/{}/precheck", schedule_id))
+            .header("content-type", "application/json")
+            .header("idempotency-key", idempotency_key)
+            .body(Body::from(serde_json::to_vec(&request).unwrap()))
+            .unwrap(),
+    );
+    let second = app.clone().oneshot(
+        auth.with_csrf(Request::builder())
+            .method("POST")
+            .uri(format!("/api/v1/student/sessions/{}/precheck", schedule_id))
+            .header("content-type", "application/json")
+            .header("idempotency-key", idempotency_key)
+            .body(Body::from(serde_json::to_vec(&request).unwrap()))
+            .unwrap(),
+    );
+    let (first, second) = tokio::join!(first, second);
+    let first = first.unwrap();
+    let second = second.unwrap();
+
+    let first_status = first.status();
+    let second_status = second.status();
+    let first_json = json_body(first).await;
+    let second_json = json_body(second).await;
+    assert_eq!(
+        first_status,
+        StatusCode::OK,
+        "concurrent precheck must not 500: {first_json}"
+    );
+    assert_eq!(
+        second_status,
+        StatusCode::OK,
+        "concurrent precheck must not 500: {second_json}"
+    );
+    assert_eq!(
+        first_json["data"]["id"], second_json["data"]["id"],
+        "both responses must reference the same attempt"
+    );
+    assert_eq!(first_json["data"], second_json["data"]);
+
+    let attempt_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM student_attempts WHERE schedule_id = ?",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(attempt_count, 1, "race must leave exactly one attempt row");
+
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND action_type = 'STUDENT_PRECHECK'",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audit_count, 1, "race must leave exactly one audit event");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn precheck_does_not_start_runtime_or_expose_section_state() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let response = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{}/precheck", schedule_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentPrecheckRequest {
+                        student_key: student_key.clone(),
+                        candidate_id: "alice".to_owned(),
+                        candidate_name: "Alice Roe".to_owned(),
+                        candidate_email: "alice@example.com".to_owned(),
+                        email: Some("alice@example.com".to_owned()),
+                        wcode: Some("W123456".to_owned()),
+                        client_session_id: Uuid::new_v4().to_string(),
+                        pre_check: json!({
+                            "completedAt": "2026-01-10T08:50:00Z",
+                            "browserFamily": "chrome",
+                            "checks": [{"id": "browser", "status": "pass"}]
+                        }),
+                        device_fingerprint_hash: Some("fp-alice".to_owned()),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+    assert_eq!(json["data"]["phase"], "lobby");
+
+    // Pre-check must not start the exam runtime: no runtime row exists at
+    // all (the runtime row is only created by the proctor's StartRuntime
+    // command; until then the API synthesizes a "not_started" runtime).
+    let runtime_row_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM exam_session_runtimes WHERE schedule_id = ?",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        runtime_row_count, 0,
+        "pre-check must not create or start the runtime row"
+    );
+
+    // Pre-check must not set section availability or deadlines: no runtime
+    // sections exist either.
+    let started_sections: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM exam_session_runtime_sections s
+        JOIN exam_session_runtimes r ON r.id = s.runtime_id
+        WHERE r.schedule_id = ?
+          AND (s.status <> 'locked' OR s.available_at IS NOT NULL OR s.actual_start_at IS NOT NULL)
+        "#,
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        started_sections, 0,
+        "pre-check must not set any section deadline"
+    );
+
+    // The live context — the only student endpoint that carries
+    // running-exam section state — must still report the waiting room:
+    // runtime not started, no deadline, attempt still in the lobby.
+    // (The API surface has no dedicated section-content route; section
+    // state is only reachable through the runtime in this context.)
+    let live = app
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/student/sessions/{schedule_id}/live?candidateId=alice"
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(live.status(), StatusCode::OK);
+    let live_json = json_body(live).await;
+    assert_eq!(live_json["data"]["runtime"]["status"], "not_started");
+    assert_eq!(live_json["data"]["attempt"]["phase"], "lobby");
+    assert_eq!(
+        live_json["data"]["runtime"]["activeSectionKey"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        live_json["data"]["runtime"]["currentSectionKey"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        live_json["data"]["runtime"]["currentSectionDeadlineAt"],
+        serde_json::Value::Null
+    );
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
 async fn bootstrap_creates_or_hydrates_the_attempt_context() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
