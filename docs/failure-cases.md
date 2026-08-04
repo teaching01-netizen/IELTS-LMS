@@ -61,7 +61,7 @@ authoritative path for the client to converge before retrying.
 - Position/progression/navigation payloads are not accepted by the public mutation batch route at
   all: they are rejected with `422 VALIDATION_ERROR` (the new-format `type` tag does not admit
   them, and the legacy allowlist excludes them). And every accepted batch — flags included — bumps
-  the attempt revision exactly once (`revision = revision + 1`, `delivery/mod.rs:933`); only
+  the attempt revision exactly once (`revision = revision + 1`, `delivery/mod.rs:931`); only
   heartbeats update the attempt without touching the revision.
 - Frontend already reconciles on the gate (no answer loss): `saveAttempt` (`studentAttemptRepository.ts`)
   adopts the fetched authoritative attempt, rebases the rejected `remainingMutations` with fresh
