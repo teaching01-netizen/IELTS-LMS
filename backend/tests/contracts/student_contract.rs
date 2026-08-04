@@ -24,6 +24,7 @@ use ielts_backend_domain::{
 };
 use ielts_backend_infrastructure::{
     actor_context::{ActorContext, ActorRole},
+    auth::{sign_attempt_token, AttemptTokenClaims},
     config::AppConfig,
 };
 
@@ -52,6 +53,12 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
     "0022_attempt_submission_ledger.sql",
     "0023_sort_memory_hotpath_indexes.sql",
     "0024_projection_sort_hardening.sql",
+    "0025_join_storm_admission_queue.sql",
+    "0026_relax_access_code_constraints.sql",
+    "0027_grading_objective_overrides.sql",
+    "0028_grading_objective_grading_source.sql",
+    "0029_release_events_timestamp_precision.sql",
+    "0030_outbox_retry_policy.sql",
 ];
 
 fn command(mutation_type: MutationType, payload: serde_json::Value) -> MutationCommand {
@@ -85,9 +92,9 @@ async fn get_student_session_returns_schedule_and_version_before_bootstrap() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let json = json_body(response).await;
-
+    assert_eq!(status, StatusCode::OK, "session response: {json}");
     assert_eq!(json["success"], true);
     assert_eq!(json["data"]["schedule"]["id"], schedule.id.to_string());
     assert_eq!(
@@ -469,7 +476,7 @@ async fn sentence_completion_student_answers_remain_array_backed_per_question() 
                         "mutations": [{
                             "mutationId": "sentence-array-1",
                             "baseRevision": base_revision,
-                            "type": "SetScalar",
+                            "type": "SetChoice",
                             "questionId": "r-sentence-q1",
                             "value": ["first", "second"]
                         }]
@@ -481,8 +488,9 @@ async fn sentence_completion_student_answers_remain_array_backed_per_question() 
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let json = json_body(response).await;
+    assert_eq!(status, StatusCode::OK, "sentence mutation response: {json}");
     assert_eq!(json["data"]["attempt"]["answers"]["r-sentence-q1"], json!(["first", "second"]));
 
     database.shutdown().await;
@@ -2450,6 +2458,681 @@ async fn attempt_token_rejects_schedule_mismatch() {
     database.shutdown().await;
 }
 
+// BEX-001 — Student opens an enrolled schedule.
+// The read-only session/static/live endpoints must return the schedule, the
+// published exam version, and the runtime status without creating an attempt,
+// and must never expose another candidate's attempt to the requesting student.
+#[tokio::test]
+async fn read_only_session_requests_do_not_create_an_attempt_nor_expose_another_candidates_attempt()
+{
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth_alice, _alice_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let (auth_bob, bob_key) =
+        create_student_auth_with_wcode(database.pool(), schedule_id, "bob", "W000002").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    // Bob's attempt exists (he already went through pre-check + bootstrap). Alice
+    // never bootstrapped.
+    let (bob_bootstrap, _) = bootstrap_attempt(&app, &auth_bob, schedule_id, "bob", &bob_key).await;
+    let bob_attempt_id = bob_bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let bob_student_key =
+        sqlx::query_scalar::<_, String>("SELECT student_key FROM student_attempts WHERE id = ?")
+            .bind(&bob_attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(bob_student_key, bob_key);
+
+    // Alice requests the session context while asking for candidateId=bob. The
+    // attempt lookup is driven by Alice's own enrollment (student key), so Bob's
+    // attempt must not come back.
+    let session_response = app
+        .clone()
+        .oneshot(
+            auth_alice.with_auth(Request::builder().uri(format!(
+                "/api/v1/student/sessions/{schedule_id}?candidateId=bob"
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_status = session_response.status();
+    let session_json = json_body(session_response).await;
+    assert_eq!(session_status, StatusCode::OK, "session: {session_json}");
+    assert_eq!(session_json["data"]["schedule"]["id"], schedule.id.to_string());
+    assert_eq!(
+        session_json["data"]["version"]["id"],
+        schedule.published_version_id.to_string()
+    );
+    assert_eq!(session_json["data"]["runtime"]["status"], "not_started");
+    assert_eq!(session_json["data"]["attempt"], serde_json::Value::Null);
+
+    // Static session context: schedule + published version, no attempt/runtime.
+    let static_response = app
+        .clone()
+        .oneshot(
+            auth_alice.with_auth(Request::builder().uri(format!(
+                "/api/v1/student/sessions/{schedule_id}/static"
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let static_status = static_response.status();
+    let static_json = json_body(static_response).await;
+    assert_eq!(static_status, StatusCode::OK, "static: {static_json}");
+    assert_eq!(static_json["data"]["schedule"]["id"], schedule.id.to_string());
+    assert_eq!(
+        static_json["data"]["version"]["id"],
+        schedule.published_version_id.to_string()
+    );
+    assert_eq!(static_json["data"]["runtime"], serde_json::Value::Null);
+    assert!(static_json["data"].get("attempt").is_none());
+
+    // Live session context: runtime status returned, attempt still null for Alice.
+    let live_response = app
+        .clone()
+        .oneshot(
+            auth_alice.with_auth(Request::builder().uri(format!(
+                "/api/v1/student/sessions/{schedule_id}/live?candidateId=bob"
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let live_status = live_response.status();
+    let live_json = json_body(live_response).await;
+    assert_eq!(live_status, StatusCode::OK, "live: {live_json}");
+    assert_eq!(live_json["data"]["runtime"]["status"], "not_started");
+    assert_eq!(live_json["data"]["attempt"], serde_json::Value::Null);
+
+    // None of the read-only requests created an attempt; Bob's is the only row.
+    let attempt_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT student_key FROM student_attempts WHERE schedule_id = ?",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        attempt_keys,
+        vec![bob_key],
+        "read-only requests must not create an attempt and must not expose Bob's attempt"
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-002 — Request body carries an attemptId that differs from the
+// route-authorized attempt → 422 VALIDATION_ERROR on the mutation batch and
+// submit endpoints that accept an attemptId in the body.
+#[tokio::test]
+async fn mutation_batch_rejects_request_body_with_another_attempt_id() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}/mutations:batch"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": Uuid::new_v4().to_string(),
+                        "mutations": [{
+                            "mutationId": "mutation-foreign-attempt-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let json = json_body(response).await;
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(json["success"], false);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn submit_rejects_request_body_with_another_attempt_id() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{schedule_id}/submit"))
+                .header("content-type", "application/json")
+                .header("idempotency-key", "submit-foreign-attempt-1")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": Uuid::new_v4().to_string(),
+                        "lastSeenRevision": base_revision,
+                        "submissionId": "submit-foreign-attempt-1",
+                        "clientFinalSeq": 0,
+                        "serverAcceptedThroughSeq": 0
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let json = json_body(response).await;
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(json["success"], false);
+
+    database.shutdown().await;
+}
+
+// BEX-002 — Expired attempt token → 401 UNAUTHORIZED.
+// Tokens are HMAC-signed `AttemptTokenClaims` carrying `exp`; an explicitly
+// past-dated signature is rejected by the `AttemptPrincipal` extractor before
+// the route logic runs.
+#[tokio::test]
+async fn expired_attempt_token_is_rejected_with_unauthorized() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let expired_token = sign_attempt_token(
+        &AppConfig::default(),
+        &AttemptTokenClaims {
+            token_id: "expired-token-id".to_owned(),
+            user_id: auth.user_id.to_string(),
+            schedule_id: schedule_id.to_string(),
+            attempt_id: attempt_id.clone(),
+            client_session_id: "expired-client-session-1".to_owned(),
+            exp: Utc::now() - Duration::seconds(60),
+        },
+    );
+
+    let response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &expired_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}/mutations:batch"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id,
+                        "mutations": [{
+                            "mutationId": "mutation-expired-token-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let json = json_body(response).await;
+    assert_eq!(json["error"]["code"], "UNAUTHORIZED");
+    assert_eq!(json["success"], false);
+
+    database.shutdown().await;
+}
+
+// BEX-002 — Student is not enrolled for the schedule → 403 FORBIDDEN. The
+// enrollment check happens before any delivery work: a student user with no
+// `schedule_registrations` row for the schedule is rejected by every student
+// session endpoint.
+#[tokio::test]
+async fn student_not_enrolled_for_schedule_receives_forbidden() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let unenrolled = mysql::create_authenticated_user(
+        database.pool(),
+        UserRole::Student,
+        "charlie@example.com",
+        "Charlie Candidate",
+    )
+    .await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let session_response = app
+        .clone()
+        .oneshot(
+            unenrolled.with_auth(Request::builder().uri(format!(
+                "/api/v1/student/sessions/{schedule_id}?candidateId=charlie"
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(session_response.status(), StatusCode::FORBIDDEN);
+    let session_json = json_body(session_response).await;
+    assert_eq!(session_json["error"]["code"], "FORBIDDEN");
+    assert_eq!(session_json["success"], false);
+
+    let live_response = app
+        .clone()
+        .oneshot(
+            unenrolled.with_auth(Request::builder().uri(format!(
+                "/api/v1/student/sessions/{schedule_id}/live?candidateId=charlie"
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(live_response.status(), StatusCode::FORBIDDEN);
+    let live_json = json_body(live_response).await;
+    assert_eq!(live_json["error"]["code"], "FORBIDDEN");
+
+    let static_response = app
+        .oneshot(
+            unenrolled.with_auth(Request::builder().uri(format!(
+                "/api/v1/student/sessions/{schedule_id}/static"
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(static_response.status(), StatusCode::FORBIDDEN);
+    let static_json = json_body(static_response).await;
+    assert_eq!(static_json["error"]["code"], "FORBIDDEN");
+
+    database.shutdown().await;
+}
+
+// BEX-003 — Active client-session ownership, mutation path.
+// Session A accepts q1="A"; Session B then writes the same question from an
+// OLDER base revision. Contract as implemented today: the mutation path does
+// NOT validate `baseRevision` (the envelope carries it but `apply_mutation`
+// never reads it), so Session B's stale write is accepted with 200, the global
+// attempt revision and per-session mutation watermark advance, and Session B's
+// value wins (last-writer-wins). The response never carries `activeSessionId`
+// because the delivery layer currently constructs every conflict detail with
+// `active_session_id: None`. This test pins that behavior so a future change
+// to enforce revision/ownership conflicts is caught deliberately.
+#[tokio::test]
+async fn mutation_batch_from_second_client_session_with_stale_base_revision_documents_last_writer_wins()
+{
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let (bootstrap_a, _session_a) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        "phone-client-1",
+    )
+    .await;
+    let (bootstrap_b, _session_b) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        "computer-client-1",
+    )
+    .await;
+    let attempt_id = bootstrap_a["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(bootstrap_b["data"]["attempt"]["id"], attempt_id);
+    let attempt_token_a = bootstrap_a["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token_b = bootstrap_b["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap_a["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // Session A accepts q1 = "A"; the server revision and watermark advance.
+    let session_a_response = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_a)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}/mutations:batch"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-session-a-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(session_a_response.status(), StatusCode::OK);
+    let session_a_json = json_body(session_a_response).await;
+    assert_eq!(session_a_json["data"]["appliedMutationCount"], 1);
+    assert_eq!(session_a_json["data"]["serverAcceptedThroughSeq"], 1);
+    let revision_after_a = session_a_json["data"]["revision"].as_i64().unwrap();
+    assert!(revision_after_a >= base_revision as i64 + 1);
+
+    // Session B writes the same question from the stale base revision.
+    let session_b_response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_b)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}/mutations:batch"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-session-b-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "B"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let session_b_status = session_b_response.status();
+    let session_b_json = json_body(session_b_response).await;
+    assert_eq!(
+        session_b_status,
+        StatusCode::OK,
+        "stale base revision batch: {session_b_json}"
+    );
+    assert_eq!(session_b_json["data"]["appliedMutationCount"], 1);
+    assert_eq!(session_b_json["data"]["serverAcceptedThroughSeq"], 1);
+    // The accepted server revision is returned and advanced by exactly one
+    // mutation batch (no other write happened in between).
+    let revision_after_b = session_b_json["data"]["revision"].as_i64().unwrap();
+    assert_eq!(revision_after_b, revision_after_a + 1);
+    assert!(
+        session_b_json["data"].get("activeSessionId").is_none(),
+        "mutation success responses currently do not carry activeSessionId"
+    );
+
+    let answers: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        answers["q1"], "B",
+        "last-writer-wins: the second session's value is authoritative today"
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-003 — Active client-session ownership, submit path.
+// After Session A's mutations advance the attempt revision, Session B submits
+// with a stale `lastSeenRevision`. The submit path DOES enforce revision
+// freshness and returns the documented conflict shape: 409 CONFLICT with
+// reason `BASE_REVISION_MISMATCH` and `latestRevision`. The conflict detail
+// currently never includes `activeSessionId` (the delivery layer always emits
+// `active_session_id: None`), which pins the deviation from the test-plan
+// expectation for the controller to review.
+#[tokio::test]
+async fn submit_from_second_client_session_with_stale_revision_returns_base_revision_mismatch_conflict()
+{
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    let (bootstrap_a, _session_a) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        "phone-client-1",
+    )
+    .await;
+    let (bootstrap_b, _session_b) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        "computer-client-1",
+    )
+    .await;
+    // The runtime gate row is created by the proctor-side StartRuntime
+    // command; a bare UPDATE on `exam_session_runtimes` is a silent no-op
+    // until that row exists (see SchedulingService::start_runtime).
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("contract runtime start (BEX-003)".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+    let attempt_id = bootstrap_a["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token_a = bootstrap_a["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token_b = bootstrap_b["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap_a["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let mutation_response = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_a)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}/mutations:batch"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-session-a-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(mutation_response.status(), StatusCode::OK);
+    let mutation_json = json_body(mutation_response).await;
+    let revision_after_a = mutation_json["data"]["revision"].as_i64().unwrap();
+    assert!(revision_after_a >= base_revision as i64 + 1);
+    assert_eq!(
+        mutation_json["data"]["attempt"]["phase"], "exam",
+        "session A mutation with a live runtime gate must persist phase `exam`"
+    );
+
+    // Session B submits with the pre-Session-A revision.
+    let submit_response = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_b)
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{schedule_id}/submit"))
+                .header("content-type", "application/json")
+                .header("idempotency-key", "submit-stale-session-b")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "lastSeenRevision": base_revision,
+                        "submissionId": "submit-stale-session-b",
+                        "clientFinalSeq": 0,
+                        "serverAcceptedThroughSeq": 1
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(submit_response.status(), StatusCode::CONFLICT);
+    let submit_json = json_body(submit_response).await;
+    assert_eq!(submit_json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        submit_json["error"]["details"]["reason"],
+        "BASE_REVISION_MISMATCH",
+        "stale submit response: {submit_json}"
+    );
+    assert_eq!(
+        submit_json["error"]["details"]["latestRevision"]
+            .as_i64()
+            .unwrap(),
+        revision_after_a
+    );
+    assert!(
+        submit_json["error"]["details"].get("activeSessionId").is_none(),
+        "conflict details currently never include activeSessionId"
+    );
+
+    // Session A's accepted answer is preserved and the attempt is not sealed.
+    let answers: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(answers["q1"], "A");
+    let submitted_at: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
+        "SELECT submitted_at FROM student_attempts WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(submitted_at.is_none(), "stale submit must not seal the attempt");
+
+    database.shutdown().await;
+}
+
 async fn bootstrap_attempt(
     app: &axum::Router,
     auth: &mysql::TestAuthContext,
@@ -2558,6 +3241,47 @@ async fn create_student_auth(
         &format!("{candidate_id}@example.com"),
     )
     .await;
+    (auth, student_key)
+}
+
+// `schedule_registrations` enforces UNIQUE(schedule_id, wcode), so a second
+// registration on the same schedule must be inserted with a distinct access
+// code (the shared helper always uses the empty default).
+async fn create_student_auth_with_wcode(
+    pool: &sqlx::MySqlPool,
+    schedule_id: Uuid,
+    candidate_id: &str,
+    wcode: &str,
+) -> (mysql::TestAuthContext, String) {
+    let auth = mysql::create_authenticated_user(
+        pool,
+        UserRole::Student,
+        &format!("{candidate_id}@example.com"),
+        &format!("{candidate_id} Candidate"),
+    )
+    .await;
+    let student_key = format!("student-{schedule_id}-{candidate_id}");
+    sqlx::query(
+        r#"
+        INSERT INTO schedule_registrations (
+            id, schedule_id, user_id, actor_id, student_key, student_id, student_name, student_email,
+            wcode, access_state, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'checked_in', NOW(), NOW())
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(schedule_id.to_string())
+    .bind(auth.user_id.to_string())
+    .bind(auth.user_id.to_string())
+    .bind(&student_key)
+    .bind(candidate_id)
+    .bind(format!("{candidate_id} Candidate"))
+    .bind(format!("{candidate_id}@example.com"))
+    .bind(wcode)
+    .execute(pool)
+    .await
+    .unwrap();
     (auth, student_key)
 }
 
@@ -2693,7 +3417,7 @@ fn delivery_block_matrix_content_snapshot() -> serde_json::Value {
                 "id": "listening-matrix-p1",
                 "title": "Listening Part Matrix",
                 "blocks": [
-                    { "id": "l-multi", "type": "MULTI_MCQ", "requiredSelections": 2, "options": [{ "id": "A", "text": "Option A", "isCorrect": true }, { "id": "B", "text": "Option B", "isCorrect": false }, { "id": "C", "text": "Option C", "isCorrect": true }] },
+                    { "id": "l-multi", "type": "MULTI_MCQ", "stem": "Select the correct answers.", "requiredSelections": 2, "options": [{ "id": "A", "text": "Option A", "isCorrect": true }, { "id": "B", "text": "Option B", "isCorrect": false }, { "id": "C", "text": "Option C", "isCorrect": true }] },
                     { "id": "l-single-question-set", "type": "SINGLE_MCQ", "questions": [{ "id": "l-single-q1", "stem": "Pick one", "options": [{ "id": "A", "text": "Option A", "isCorrect": false }, { "id": "B", "text": "Option B", "isCorrect": true }] }] },
                     { "id": "l-single-legacy", "type": "SINGLE_MCQ", "stem": "Pick one (legacy)", "options": [{ "id": "X", "text": "Option X", "isCorrect": false }, { "id": "Y", "text": "Option Y", "isCorrect": true }] },
                     { "id": "l-diagram", "type": "DIAGRAM_LABELING", "imageUrl": "https://example.com/diagram.png", "labels": [{ "id": "l1", "correctAnswer": "nose" }, { "id": "l2", "correctAnswer": "ear" }] },
