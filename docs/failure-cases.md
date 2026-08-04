@@ -800,8 +800,9 @@ attempt's live fields, not to rethrow the 409 into the loop.
 - On a 409 of the conflict class (`BASE_REVISION_MISMATCH` / `FINAL_PAYLOAD_HASH_MISMATCH`, i.e.
   not `FINAL_FLUSH_REQUIRED`) where the converge fetch disproves submission: emit
   `student_submit_conflict_not_converged_total` and resubmit ONCE with LIVE fields (fresh
-  revision/seq/hash from the current attempt state — the flushed keystrokes are preserved in the
-  rebuilt payload).
+  revision/seq/hash from the current attempt state — the server-accepted mutation state is
+  preserved, with no revision regression; note the final answer content still comes from the
+  snapshot locked at submit time, not from keystrokes typed after the submit capture).
 - If the live resubmit also fails, its error carries `invalidatesFrozenPayload: true`; the
   provider then REPLACES the stale `frozenPayload` on the durable record with the live carrier
   values (or drops it entirely) instead of keeping the dead frozen payload.
