@@ -37,3 +37,15 @@ if (typeof Element !== 'undefined') {
     value: () => {},
   });
 }
+
+// jsdom does not implement the <dialog> element's showModal/close methods.
+// Stub them so components using native dialogs (AccessibilitySettings) can
+// be tested; the open attribute still reflects the intended state.
+if (typeof HTMLDialogElement !== 'undefined') {
+  HTMLDialogElement.prototype.showModal = function showModal() {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close = function close() {
+    this.open = false;
+  };
+}
