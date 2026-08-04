@@ -1000,7 +1000,6 @@ export function StudentRuntimeProvider({
   const lastDisplayedTimerRef = useRef<{ identity: string | null; value: number | undefined } | null>(null);
   const localZeroTimerIdentityRef = useRef<string | null>(null);
   const runtimeContractEpisodeRef = useRef<string | null>(null);
-  const visibilityRecalculationRef = useRef<number | null>(null);
   const onRefreshRuntimeRef = useRef(onRefreshRuntime);
   onRefreshRuntimeRef.current = onRefreshRuntime;
 
@@ -1338,6 +1337,8 @@ export function StudentRuntimeProvider({
   // commits. Layout effect: runs synchronously at commit, before paint and
   // before any passive effect or subsequent render, so an abandoned render
   // can never leak its deadline into the ref or the committed tree.
+  // State drives render, the ref drives effects, and this layout effect
+  // reconciles both at commit.
   useLayoutEffect(() => {
     const nextAnchor = resolveRuntimeTimerAnchor({
       runtimeBacked,
@@ -1659,9 +1660,11 @@ export function StudentRuntimeProvider({
       runtimeContractIssue !== null ||
       displayTimeRemaining === 0 ||
       localZeroTimerIdentityRef.current === runtimeTimerIdentity);
-  displayTimeRemainingRef.current = displayTimeRemaining;
 
   useEffect(() => {
+    // Commit the displayed remaining time only after this render commits so
+    // observability consumers never observe a value from an abandoned render.
+    displayTimeRemainingRef.current = displayTimeRemaining;
     lastDisplayedTimerRef.current = {
       identity: runtimeTimerIdentity,
       value: displayTimeRemaining,
