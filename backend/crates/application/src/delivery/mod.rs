@@ -1130,8 +1130,13 @@ impl DeliveryService {
         .then_some(now);
         let reconnect_at = (req.event_type == HeartbeatEventType::Reconnect).then_some(now);
 
-        let updated = if req.event_type == HeartbeatEventType::Heartbeat {
-            self.update_attempt_preserving_revision(
+        // Heartbeats — including network transitions (Disconnect/Lost/Reconnect) —
+        // are presence/metadata updates: they must never increment the answer
+        // revision (BEX-050/BEX-051) or in-flight mutation batches composed
+        // against the current revision would be rejected as stale. All event
+        // types therefore go through update_attempt_preserving_revision.
+        let updated = self
+            .update_attempt_preserving_revision(
                 attempt.id,
                 attempt.phase.clone(),
                 attempt.current_module.clone(),
@@ -1145,24 +1150,7 @@ impl DeliveryService {
                 attempt.final_submission.clone(),
                 attempt.submitted_at,
             )
-            .await?
-        } else {
-            self.update_attempt(
-                attempt.id,
-                attempt.phase.clone(),
-                attempt.current_module.clone(),
-                attempt.current_question_id.clone(),
-                attempt.answers.clone().into(),
-                attempt.writing_answers.clone().into(),
-                attempt.flags.clone().into(),
-                attempt.violations_snapshot.clone().into(),
-                Value::Object(integrity),
-                attempt.recovery.clone().into(),
-                attempt.final_submission.clone(),
-                attempt.submitted_at,
-            )
-            .await?
-        };
+            .await?;
 
         sqlx::query(
             r#"
@@ -1648,64 +1636,6 @@ impl DeliveryService {
             "currentModule": current_module,
             "phase": phase
         }))
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
-            .bind(attempt_id.to_string())
-            .fetch_one(&self.pool)
-            .await
-            .map_err(DeliveryError::from)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn update_attempt(
-        &self,
-        attempt_id: String,
-        phase: AttemptPhase,
-        current_module: ModuleType,
-        current_question_id: Option<String>,
-        answers: Value,
-        writing_answers: Value,
-        flags: Value,
-        violations_snapshot: Value,
-        integrity: Value,
-        recovery: Value,
-        final_submission: Option<Value>,
-        submitted_at: Option<DateTime<Utc>>,
-    ) -> Result<StudentAttempt, DeliveryError> {
-        sqlx::query(
-            r#"
-            UPDATE student_attempts
-            SET
-                phase = ?,
-                current_module = ?,
-                current_question_id = ?,
-                answers = ?,
-                writing_answers = ?,
-                flags = ?,
-                violations_snapshot = ?,
-                integrity = ?,
-                recovery = ?,
-                final_submission = ?,
-                submitted_at = ?,
-                updated_at = NOW(),
-                revision = revision + 1
-            WHERE id = ?
-            "#,
-        )
-        .bind(phase)
-        .bind(current_module)
-        .bind(current_question_id)
-        .bind(answers)
-        .bind(writing_answers)
-        .bind(flags)
-        .bind(violations_snapshot)
-        .bind(integrity)
-        .bind(recovery)
-        .bind(final_submission)
-        .bind(submitted_at)
-        .bind(attempt_id.to_string())
         .execute(&self.pool)
         .await?;
 

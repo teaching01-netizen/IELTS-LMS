@@ -981,6 +981,7 @@ async fn heartbeat_records_disconnect_transitions() {
         .as_str()
         .unwrap()
         .to_owned();
+    let revision_at_bootstrap = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap();
 
     let response = app
         .oneshot(
@@ -1017,6 +1018,11 @@ async fn heartbeat_records_disconnect_transitions() {
     assert_ne!(
         json["data"]["attempt"]["integrity"]["lastDisconnectAt"],
         serde_json::Value::Null
+    );
+    assert_eq!(
+        json["data"]["attempt"]["revision"].as_i64(),
+        Some(revision_at_bootstrap),
+        "network-transition heartbeat must not bump the attempt revision (BEX-050)"
     );
 
     let event_count: i64 =
@@ -1060,6 +1066,7 @@ async fn heartbeat_records_lost_transitions() {
         .as_str()
         .unwrap()
         .to_owned();
+    let revision_at_bootstrap = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap();
 
     let response = app
         .oneshot(
@@ -1087,6 +1094,12 @@ async fn heartbeat_records_lost_transitions() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+    assert_eq!(
+        json["data"]["attempt"]["revision"].as_i64(),
+        Some(revision_at_bootstrap),
+        "network-transition heartbeat must not bump the attempt revision (BEX-050)"
+    );
 
     let audit_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND target_student_id = ? AND action_type = 'HEARTBEAT_LOST'",
