@@ -1019,7 +1019,11 @@ impl DeliveryService {
     /// Identifies the client session that most recently persisted a mutation
     /// for this attempt — the "active writer" whose accepted answers a stale
     /// batch/submit would otherwise silently overwrite. Returns `None` when
-    /// the attempt has no accepted mutations yet.
+    /// the attempt has no accepted mutations yet. Ordered by
+    /// `applied_revision` (the attempt revision after the batch applied,
+    /// strictly increasing because every accepted batch bumps the revision
+    /// exactly once) rather than wall-clock `applied_at`, so the "most
+    /// recent" writer is the one that owns the highest accepted revision.
     async fn load_active_mutation_session_id(
         &self,
         conn: &mut MySqlConnection,
@@ -1030,7 +1034,7 @@ impl DeliveryService {
             SELECT client_session_id
             FROM student_attempt_mutations
             WHERE attempt_id = ? AND applied_at IS NOT NULL
-            ORDER BY applied_at DESC, client_mutation_id DESC
+            ORDER BY applied_revision DESC
             LIMIT 1
             "#,
         )
@@ -1134,22 +1138,13 @@ impl DeliveryService {
         // are presence/metadata updates: they must never increment the answer
         // revision (BEX-050/BEX-051) or in-flight mutation batches composed
         // against the current revision would be rejected as stale. All event
-        // types therefore go through update_attempt_preserving_revision.
+        // types therefore go through update_attempt_heartbeat, which writes
+        // ONLY `integrity`/`updated_at`. A blind full-row UPDATE here could
+        // revert answers that a mutation batch committed between the read
+        // above and this write (BEX-003); the loaded attempt is only used for
+        // its integrity blob and the response is re-read from the row.
         let updated = self
-            .update_attempt_preserving_revision(
-                attempt.id,
-                attempt.phase.clone(),
-                attempt.current_module.clone(),
-                attempt.current_question_id.clone(),
-                attempt.answers.clone().into(),
-                attempt.writing_answers.clone().into(),
-                attempt.flags.clone().into(),
-                attempt.violations_snapshot.clone().into(),
-                Value::Object(integrity),
-                attempt.recovery.clone().into(),
-                attempt.final_submission.clone(),
-                attempt.submitted_at,
-            )
+            .update_attempt_heartbeat(attempt.id, Value::Object(integrity))
             .await?;
 
         sqlx::query(
@@ -1647,6 +1642,15 @@ impl DeliveryService {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Full-row pass-through UPDATE that preserves the attempt `revision`.
+    /// Callers must pass every column from a value freshly read off the row
+    /// (precheck/bootstrap pass through the just-loaded attempt). Known
+    /// limitation: if a mutation batch commits between the caller's read and
+    /// this write, the pass-through values would clobber the batch's accepted
+    /// answers (BEX-003). Acceptable for precheck/bootstrap, which run at
+    /// session start before concurrent mutation batches are in flight;
+    /// heartbeats must use `update_attempt_heartbeat` instead, which writes
+    /// only `integrity`/`updated_at`.
     async fn update_attempt_preserving_revision(
         &self,
         attempt_id: String,
@@ -1692,6 +1696,38 @@ impl DeliveryService {
         .bind(recovery)
         .bind(final_submission)
         .bind(submitted_at)
+        .bind(attempt_id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+            .bind(attempt_id.to_string())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(DeliveryError::from)
+    }
+
+    /// Heartbeat presence updates are metadata-only. Unlike
+    /// `update_attempt_preserving_revision`, this writes ONLY `integrity` and
+    /// `updated_at` — never answers/writing_answers/flags/violations/
+    /// recovery/revision — so a heartbeat that races a mutation-batch commit
+    /// cannot revert answers the batch just accepted (BEX-003). The row is
+    /// re-read for the response.
+    async fn update_attempt_heartbeat(
+        &self,
+        attempt_id: String,
+        integrity: Value,
+    ) -> Result<StudentAttempt, DeliveryError> {
+        sqlx::query(
+            r#"
+            UPDATE student_attempts
+            SET
+                integrity = ?,
+                updated_at = NOW()
+            WHERE id = ?
+            "#,
+        )
+        .bind(integrity)
         .bind(attempt_id.to_string())
         .execute(&self.pool)
         .await?;

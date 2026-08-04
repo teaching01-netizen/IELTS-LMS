@@ -55,9 +55,14 @@ authoritative path for the client to converge before retrying.
 - Backend now rejects a batch with `baseRevision < attempt.revision` atomically with
   `409 CONFLICT` / reason `BASE_REVISION_MISMATCH`, carrying the authoritative `latestRevision`,
   the requesting session's accepted watermark (`serverAcceptedThroughSeq`), and the owning
-  `activeSessionId` (commits `51efb97`, `67dffba`).
-- Revision-preserving metadata updates (position/progression/flag/navigation payloads) are exempt:
-  they apply without bumping the attempt revision, never triggering the gate.
+  `activeSessionId` (commits `51efb97`, `67dffba`). The submit-path variant
+  (`lastSeenRevision` mismatch) carries `latestRevision` and `activeSessionId` but sets
+  `serverAcceptedThroughSeq: None` (`delivery/mod.rs:1344`).
+- Position/progression/navigation payloads are not accepted by the public mutation batch route at
+  all: they are rejected with `422 VALIDATION_ERROR` (the new-format `type` tag does not admit
+  them, and the legacy allowlist excludes them). And every accepted batch — flags included — bumps
+  the attempt revision exactly once (`revision = revision + 1`, `delivery/mod.rs:933`); only
+  heartbeats update the attempt without touching the revision.
 - Frontend already reconciles on the gate (no answer loss): `saveAttempt` (`studentAttemptRepository.ts`)
   adopts the fetched authoritative attempt, rebases the rejected `remainingMutations` with fresh
   mutation ids onto `latestRevision`, requeues them in the durable pending-mutation mirror, and
@@ -66,7 +71,8 @@ authoritative path for the client to converge before retrying.
 
 ### Regression Protection
 - Backend (BEX-003 contract): `backend/tests/contracts/student_contract.rs` — stale-batch rejection,
-  `latestRevision`/`serverAcceptedThroughSeq`/`activeSessionId` conflict shape, and
+  mutation-batch conflict shape (`latestRevision`/`serverAcceptedThroughSeq`/`activeSessionId`; the
+  submit-path variant carries `serverAcceptedThroughSeq: None`), and
   `submit_from_second_client_session_with_stale_revision_returns_base_revision_mismatch_conflict`.
 - Frontend: `src/services/__tests__/studentAttemptRepository.backend.test.ts` — "rebases pending
   mutations onto the authoritative revision and requeues them when the batch flush returns

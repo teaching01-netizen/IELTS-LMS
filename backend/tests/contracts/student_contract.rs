@@ -2475,6 +2475,8 @@ async fn attempt_token_rejects_schedule_mismatch() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let json = json_body(response).await;
+    assert_eq!(json["error"]["code"], "FORBIDDEN");
 
     database.shutdown().await;
 }
@@ -2840,7 +2842,6 @@ async fn student_not_enrolled_for_schedule_receives_forbidden() {
 }
 
 // BEX-003 — Active client-session ownership, mutation path.
-// BEX-003 — Active client-session ownership, mutation path.
 // Session A accepts q1="A"; Session B then writes the same question from an
 // OLDER base revision. The mutation batch path enforces `baseRevision` against
 // the attempt's current revision: a batch based strictly below the current
@@ -2925,22 +2926,12 @@ async fn mutation_batch_from_second_client_session_with_stale_base_revision_retu
         .unwrap();
     let session_a_status = session_a_response.status();
     let session_a_body = json_body(session_a_response).await;
-    if session_a_status != StatusCode::OK {
-        eprintln!("DEBUG session_a_response body: {session_a_body}");
-        let db_revision: i64 =
-            sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
-                .bind(&attempt_id)
-                .fetch_one(database.pool())
-                .await
-                .unwrap();
-        eprintln!("DEBUG base_revision={base_revision} db_revision={db_revision}");
-    }
     assert_eq!(session_a_status, StatusCode::OK);
     let session_a_json = session_a_body;
     assert_eq!(session_a_json["data"]["appliedMutationCount"], 1);
     assert_eq!(session_a_json["data"]["serverAcceptedThroughSeq"], 1);
     let revision_after_a = session_a_json["data"]["revision"].as_i64().unwrap();
-    assert!(revision_after_a >= base_revision as i64 + 1);
+    assert_eq!(revision_after_a, base_revision as i64 + 1);
 
     // Session B writes the same question from the stale base revision.
     let session_b_response = app
@@ -3325,7 +3316,7 @@ async fn submit_from_second_client_session_with_stale_revision_returns_base_revi
     assert_eq!(mutation_response.status(), StatusCode::OK);
     let mutation_json = json_body(mutation_response).await;
     let revision_after_a = mutation_json["data"]["revision"].as_i64().unwrap();
-    assert!(revision_after_a >= base_revision as i64 + 1);
+    assert_eq!(revision_after_a, base_revision as i64 + 1);
     assert_eq!(
         mutation_json["data"]["attempt"]["phase"], "exam",
         "session A mutation with a live runtime gate must persist phase `exam`"
