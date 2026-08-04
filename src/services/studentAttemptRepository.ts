@@ -39,6 +39,7 @@ const STORAGE_KEY_ATTEMPTS = 'ielts_student_attempts_v1';
 const STORAGE_KEY_PENDING_MUTATIONS = 'ielts_student_attempt_pending_mutations_v1';
 const STORAGE_KEY_HEARTBEAT_EVENTS = 'ielts_student_attempt_heartbeat_events_v1';
 const STORAGE_KEY_ATTEMPT_RECEIPTS = 'ielts_student_attempt_receipts_v1';
+const STORAGE_KEY_PENDING_SUBMISSIONS = 'ielts_student_attempt_pending_submissions_v1';
 const STUDENT_ATTEMPT_IDB_NAME = 'ielts_student_attempt_cache_v1';
 const STUDENT_ATTEMPT_IDB_VERSION = 1;
 const STUDENT_ATTEMPT_IDB_PENDING_STORE = 'pending_mutations';
@@ -77,10 +78,88 @@ export interface StudentAttemptReceipt {
   compactedAt: string;
 }
 
+/**
+ * A locally recorded, not-yet-confirmed submission. Created when the immediate
+ * submit request fails: the exam is locked against further editing but the
+ * student must NOT see a confirmed "Exam submitted" state until the backend
+ * returns an authoritative submitted attempt. The record survives reload so the
+ * retry loop can resume with the SAME submission identity and the ORIGINAL
+ * final answer snapshot (a different payload must never reuse this identity).
+ */
+export interface PendingStudentSubmission {
+  attemptId: string;
+  scheduleId: string;
+  submissionId: string;
+  startedAt: string;
+  expiresAt: string;
+  retryCount: number;
+  finalSnapshot: {
+    answers: StudentAttempt['answers'];
+    writingAnswers: StudentAttempt['writingAnswers'];
+    flags: StudentAttempt['flags'];
+  };
+}
+
+export const PENDING_SUBMISSION_RETRY_WINDOW_MS = 60 * 60 * 1000;
+
+export function buildPendingStudentSubmission(
+  attempt: StudentAttempt,
+  now: Date = new Date(),
+): PendingStudentSubmission {
+  return {
+    attemptId: attempt.id,
+    scheduleId: attempt.scheduleId,
+    submissionId: `student-submit-${attempt.id}`,
+    startedAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + PENDING_SUBMISSION_RETRY_WINDOW_MS).toISOString(),
+    retryCount: 0,
+    finalSnapshot: {
+      answers: attempt.answers,
+      writingAnswers: attempt.writingAnswers,
+      flags: attempt.flags,
+    },
+  };
+}
+
+export function isPendingStudentSubmissionExpired(
+  record: PendingStudentSubmission,
+  now: Date = new Date(),
+): boolean {
+  const expiresAt = Date.parse(record.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt <= now.getTime();
+}
+
+export function isPendingStudentSubmissionRecord(
+  candidate: unknown,
+): candidate is PendingStudentSubmission {
+  if (!candidate || typeof candidate !== 'object') {
+    return false;
+  }
+
+  const record = candidate as Partial<PendingStudentSubmission>;
+  return (
+    typeof record.attemptId === 'string' &&
+    typeof record.scheduleId === 'string' &&
+    typeof record.submissionId === 'string' &&
+    typeof record.startedAt === 'string' &&
+    typeof record.expiresAt === 'string' &&
+    typeof record.retryCount === 'number' &&
+    !!record.finalSnapshot &&
+    typeof record.finalSnapshot === 'object' &&
+    !!record.finalSnapshot.answers &&
+    typeof record.finalSnapshot.answers === 'object' &&
+    !!record.finalSnapshot.writingAnswers &&
+    typeof record.finalSnapshot.writingAnswers === 'object' &&
+    !!record.finalSnapshot.flags &&
+    typeof record.finalSnapshot.flags === 'object'
+  );
+}
+
 export interface StudentAttemptCachePruneResult {
   compactedAttempts: number;
   purgedAttempts: number;
   purgedReceipts: number;
+  purgedPendingSubmissions: number;
 }
 
 export interface StudentAttemptLocalCacheStats {
@@ -463,6 +542,32 @@ function setJsonArrayInStorage<T>(key: string, data: T[]): void {
   local.setItem(key, JSON.stringify(data));
 }
 
+function getPendingSubmissionsFromStorage(): PendingStudentSubmission[] {
+  const local = getBrowserStorage('localStorage');
+  const raw = local?.getItem(STORAGE_KEY_PENDING_SUBMISSIONS);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter(isPendingStudentSubmissionRecord)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function setPendingSubmissionsInStorage(records: PendingStudentSubmission[]): void {
+  const local = getBrowserStorage('localStorage');
+  if (!local) {
+    return;
+  }
+
+  local.setItem(STORAGE_KEY_PENDING_SUBMISSIONS, JSON.stringify(records));
+}
+
 function submittedAtForAttempt(attempt: StudentAttempt): string | null {
   const finalSubmission = (attempt as {
     finalSubmission?: { submittedAt?: string | null | undefined } | null | undefined;
@@ -603,6 +708,15 @@ export async function pruneStudentAttemptCache(
   });
   const purgedReceipts = nextReceipts.length - freshReceipts.length;
 
+  const pendingSubmissions = getPendingSubmissionsFromStorage();
+  const freshPendingSubmissions = pendingSubmissions.filter(
+    (record) => !isPendingStudentSubmissionExpired(record, now),
+  );
+  const purgedPendingSubmissions = pendingSubmissions.length - freshPendingSubmissions.length;
+  if (purgedPendingSubmissions > 0) {
+    setPendingSubmissionsInStorage(freshPendingSubmissions);
+  }
+
   setJsonArrayInStorage(STORAGE_KEY_ATTEMPTS, nextAttempts);
   setJsonArrayInStorage(STORAGE_KEY_ATTEMPT_RECEIPTS, freshReceipts);
 
@@ -610,6 +724,7 @@ export async function pruneStudentAttemptCache(
     compactedAttempts,
     purgedAttempts,
     purgedReceipts,
+    purgedPendingSubmissions,
   };
 }
 
@@ -1456,6 +1571,9 @@ export interface IStudentAttemptRepository {
   savePendingMutations(attemptId: string, mutations: StudentAttemptMutation[]): Promise<void>;
   getPendingMutations(attemptId: string): Promise<StudentAttemptMutation[]>;
   clearPendingMutations(attemptId: string): Promise<void>;
+  savePendingSubmission(record: PendingStudentSubmission): Promise<void>;
+  getPendingSubmissions(): Promise<PendingStudentSubmission[]>;
+  clearPendingSubmission(attemptId: string): Promise<void>;
   saveHeartbeatEvent(event: StudentHeartbeatEvent): Promise<void>;
   getHeartbeatEvents(attemptId: string): Promise<StudentHeartbeatEvent[]>;
   deleteHeartbeatEvent(attemptId: string, eventId: string): Promise<void>;
@@ -1709,6 +1827,25 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
       // Storage write failure is tolerated because fallback memory is now cleared.
       return;
     }
+  }
+
+  async savePendingSubmission(record: PendingStudentSubmission): Promise<void> {
+    const records = getPendingSubmissionsFromStorage();
+    const next = [...records.filter((candidate) => candidate.attemptId !== record.attemptId), record];
+    setPendingSubmissionsInStorage(next);
+  }
+
+  async getPendingSubmissions(): Promise<PendingStudentSubmission[]> {
+    return getPendingSubmissionsFromStorage();
+  }
+
+  async clearPendingSubmission(attemptId: string): Promise<void> {
+    const records = getPendingSubmissionsFromStorage();
+    const next = records.filter((candidate) => candidate.attemptId !== attemptId);
+    if (next.length === records.length) {
+      return;
+    }
+    setPendingSubmissionsInStorage(next);
   }
 
   async saveHeartbeatEvent(event: StudentHeartbeatEvent): Promise<void> {
@@ -2493,6 +2630,18 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 
   async clearPendingMutations(attemptId: string): Promise<void> {
     await this.cache.clearPendingMutations(attemptId);
+  }
+
+  async savePendingSubmission(record: PendingStudentSubmission): Promise<void> {
+    await this.cache.savePendingSubmission(record);
+  }
+
+  async getPendingSubmissions(): Promise<PendingStudentSubmission[]> {
+    return this.cache.getPendingSubmissions();
+  }
+
+  async clearPendingSubmission(attemptId: string): Promise<void> {
+    await this.cache.clearPendingSubmission(attemptId);
   }
 
   async saveHeartbeatEvent(event: StudentHeartbeatEvent): Promise<void> {

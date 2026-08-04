@@ -7,6 +7,7 @@ import { PreCheck } from './PreCheck';
 import { StudentExamWorkspace } from './StudentExamWorkspace';
 import { StudentHeader } from './StudentHeader';
 import { StudentPostExamView } from './StudentPostExamView';
+import { StudentSubmissionPendingPanel } from './StudentSubmissionPendingPanel';
 import { SubmitConfirmation } from './SubmitConfirmation';
 import { WarningOverlay } from './WarningOverlay';
 import { useStudentAutoSubmitBoundary } from './useStudentAutoSubmitBoundary';
@@ -136,6 +137,10 @@ export function StudentApp({
   const studentTypography = getStudentTypographyScale(uiState.accessibilitySettings.fontSize);
   useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
+  // A failed submit locks the exam against further editing while the attempt
+  // layer retries with the same submission identity (FEX-051).
+  const submissionPending = attemptState.pendingSubmission != null;
+  const answerControlsLocked = runtimeState.answerControlsLocked || submissionPending;
   const { resetHighlightTool, setShowTimeExtensionRequest } = uiActions;
   const timeExtensionReason =
     typeof uiState.timeExtensionReason === 'string' ? uiState.timeExtensionReason : '';
@@ -391,6 +396,9 @@ export function StudentApp({
     unansweredSubmissionPolicy !== 'allow';
 
   const performModuleSubmit = async () => {
+    if (answerControlsLocked) {
+      return;
+    }
     if (runtimeState.runtimeBacked) {
       const fingerprint = `manual:${runtimeState.currentModule}`;
       await flushAndSubmitCurrentModuleWithRetry(fingerprint);
@@ -422,7 +430,7 @@ export function StudentApp({
     answer: StudentAnswerValue,
     meta?: StudentAnswerMutationMeta,
   ) => {
-    if (runtimeState.blocking.reason === 'storage_unavailable') {
+    if (answerControlsLocked || runtimeState.blocking.reason === 'storage_unavailable') {
       return;
     }
     const currentValue = latestAnswersRef.current[questionId];
@@ -447,7 +455,7 @@ export function StudentApp({
   };
 
   const handleFlagToggle = (questionId: string) => {
-    if (runtimeState.blocking.reason === 'storage_unavailable') {
+    if (answerControlsLocked || runtimeState.blocking.reason === 'storage_unavailable') {
       return;
     }
     const nextFlagged = !attemptFlags[questionId];
@@ -472,7 +480,7 @@ export function StudentApp({
   }, []);
 
   const handleWritingChange = (taskId: string, text: string) => {
-    if (runtimeState.blocking.reason === 'storage_unavailable') {
+    if (answerControlsLocked || runtimeState.blocking.reason === 'storage_unavailable') {
       return;
     }
     liveWritingAnswersRef.current = {
@@ -509,8 +517,13 @@ export function StudentApp({
       </div>
     ) : null;
 
-  const finalSubmitOverlay =
-    runtimeState.runtimeBacked &&
+  const finalSubmitOverlay = submissionPending ? (
+    <StudentSubmissionPendingPanel
+      onRetryNow={() => {
+        void attemptActions.submitAttempt();
+      }}
+    />
+  ) : runtimeState.runtimeBacked &&
     runtimeState.runtimeStatus === 'completed' &&
     runtimeCompletionVerified &&
     !shouldRenderPostExam &&
@@ -660,6 +673,7 @@ export function StudentApp({
           showSubmitControls={showSubmitControls}
           contentZoom={uiState.accessibilitySettings.zoom}
           displayTimeRemaining={runtimeState.displayTimeRemaining}
+          answerControlsLocked={answerControlsLocked}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
           passageReadabilityLabel={getStudentPassageReadabilityLabel(

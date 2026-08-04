@@ -72,6 +72,7 @@ function createAttemptSnapshot(): StudentAttempt {
     phase: 'exam',
     currentModule: 'reading',
     currentQuestionId: 'q1',
+    submittedAt: null,
     answers: {},
     writingAnswers: {},
     flags: {},
@@ -156,6 +157,25 @@ function createRuntimeSnapshot(currentSectionKey: 'listening' | 'reading' = 'rea
   };
 }
 
+function createWrapper(attemptSnapshot = createAttemptSnapshot()) {
+  const state = createExamState();
+
+  return ({ children }: { children: React.ReactNode }) => (
+    <StudentRuntimeProvider
+      state={state}
+      onExit={vi.fn()}
+      attemptSnapshot={attemptSnapshot}
+    >
+      <StudentAttemptProvider
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+      >
+        {children}
+      </StudentAttemptProvider>
+    </StudentRuntimeProvider>
+  );
+}
+
 describe('StudentAttemptProvider', () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -194,25 +214,6 @@ describe('StudentAttemptProvider', () => {
 
     window.localStorage.clear();
   });
-
-  function createWrapper(attemptSnapshot = createAttemptSnapshot()) {
-    const state = createExamState();
-
-    return ({ children }: { children: React.ReactNode }) => (
-      <StudentRuntimeProvider
-        state={state}
-        onExit={vi.fn()}
-        attemptSnapshot={attemptSnapshot}
-      >
-        <StudentAttemptProvider
-          scheduleId={attemptSnapshot.scheduleId}
-          attemptSnapshot={attemptSnapshot}
-        >
-          {children}
-        </StudentAttemptProvider>
-      </StudentRuntimeProvider>
-    );
-  }
 
   async function flushAnswerDurableDebounceWindow() {
     await act(async () => {
@@ -1804,5 +1805,330 @@ describe('StudentAttemptProvider', () => {
 
     expect(consoleSpy).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
+  });
+});
+
+describe('StudentAttemptProvider pending submission contract (FEX-051)', () => {
+  const PENDING_SUBMISSIONS_STORAGE_KEY = 'ielts_student_attempt_pending_submissions_v1';
+
+  beforeEach(() => {
+    // Self-contained spy setup: restore any spies left by earlier describes so
+    // mock call history never leaks between tests, then re-establish the full
+    // provider mock surface this block relies on.
+    vi.restoreAllMocks();
+
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem(
+      'ielts_student_attempt_credentials_v1',
+      JSON.stringify([
+        {
+          attemptId: 'attempt-1',
+          scheduleId: 'sched-1',
+          attemptToken: 'token-1',
+          expiresAt: '2026-01-02T00:00:00.000Z',
+        },
+      ]),
+    );
+    window.localStorage.clear();
+
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+
+    vi.spyOn(studentAttemptRepository, 'saveAttempt').mockResolvedValue();
+    vi.spyOn(studentAttemptRepository, 'savePendingMutations').mockResolvedValue();
+    vi.spyOn(studentAttemptRepository, 'clearPendingMutations').mockResolvedValue();
+    vi.spyOn(studentAttemptRepository, 'submitAttempt').mockResolvedValue({
+      ...createAttemptSnapshot(),
+      phase: 'post-exam',
+      submittedAt: '2026-01-01T01:00:01.000Z',
+    });
+    vi.spyOn(studentAttemptRepository, 'saveHeartbeatEvent').mockResolvedValue();
+    vi.spyOn(studentAttemptRepository, 'getHeartbeatEvents').mockResolvedValue([]);
+    vi.spyOn(studentAttemptRepository, 'getPendingMutations').mockResolvedValue([]);
+    vi.spyOn(studentAttemptRepository, 'getAttemptsByScheduleId').mockResolvedValue([]);
+    vi.spyOn(studentAttemptRepoModule, 'refreshAttemptCredentialForAttempt').mockResolvedValue(false);
+
+    vi.spyOn(studentAttemptRepository, 'savePendingSubmission').mockResolvedValue();
+    vi.spyOn(studentAttemptRepository, 'clearPendingSubmission').mockResolvedValue();
+  });
+
+  function seedPendingSubmission(
+    attempt: StudentAttempt,
+    overrides?: Partial<studentAttemptRepoModule.PendingStudentSubmission>,
+  ): studentAttemptRepoModule.PendingStudentSubmission {
+    const record = {
+      ...studentAttemptRepoModule.buildPendingStudentSubmission(attempt),
+      ...overrides,
+    };
+    window.localStorage.setItem(PENDING_SUBMISSIONS_STORAGE_KEY, JSON.stringify([record]));
+    return record;
+  }
+
+  async function flushAsyncState() {
+    await act(async () => {
+      for (let i = 0; i < 30; i += 1) {
+        await Promise.resolve();
+      }
+    });
+  }
+
+  it('records a pending submission and does not claim post-exam when the immediate submit fails', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(studentAttemptRepository.submitAttempt).mockRejectedValue(
+        new Error('network down'),
+      );
+
+      const { result } = renderHook(
+        () => ({
+          attempt: useStudentAttempt(),
+          runtime: useStudentRuntime(),
+        }),
+        { wrapper: createWrapper() },
+      );
+
+      await flushAsyncState();
+
+      await act(async () => {
+        result.current.attempt.actions.persistAnswer('q1', 'FINAL_ANSWER');
+      });
+
+      await act(async () => {
+        const submitted = await result.current.attempt.actions.submitAttempt();
+        expect(submitted).toBe(true);
+      });
+
+      // No false success: phase stays exam, no local submittedAt, no post-exam.
+      expect(result.current.attempt.state.attempt?.phase).toBe('exam');
+      expect(result.current.attempt.state.attempt?.submittedAt).toBeNull();
+      expect(result.current.runtime.state.phase).not.toBe('post-exam');
+
+      // The pending record carries the submission identity and the final snapshot.
+      expect(result.current.attempt.state.pendingSubmission).not.toBeNull();
+      expect(result.current.attempt.state.pendingSubmission?.submissionId).toBe(
+        'student-submit-attempt-1',
+      );
+      expect(result.current.attempt.state.pendingSubmission?.finalSnapshot.answers.q1).toBe(
+        'FINAL_ANSWER',
+      );
+      expect(studentAttemptRepository.savePendingSubmission).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attemptId: 'attempt-1',
+          submissionId: 'student-submit-attempt-1',
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries with the ORIGINAL frozen final snapshot and the same submission identity, then confirms', async () => {
+    vi.useFakeTimers();
+    try {
+      const submittedAttempt: StudentAttempt = {
+        ...createAttemptSnapshot(),
+        phase: 'post-exam',
+        submittedAt: '2026-01-01T01:00:01.000Z',
+      };
+      const submitSpy = vi.mocked(studentAttemptRepository.submitAttempt);
+      submitSpy.mockResolvedValue(submittedAttempt);
+      submitSpy.mockRejectedValueOnce(new Error('network down'));
+
+      const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+      await flushAsyncState();
+
+      await act(async () => {
+        result.current.actions.persistAnswer('q1', 'FINAL_ANSWER');
+      });
+
+      await act(async () => {
+        const submitted = await result.current.actions.submitAttempt();
+        expect(submitted).toBe(true);
+      });
+
+      expect(result.current.state.pendingSubmission).not.toBeNull();
+      expect(submitSpy).toHaveBeenCalledTimes(1);
+
+      // The student cannot edit while pending, but a stray mutation must not
+      // change what gets replayed.
+      await act(async () => {
+        result.current.actions.persistAnswer('q1', 'CHANGED_AFTER_SUBMIT');
+      });
+
+      // First background retry fires after the 5s backoff.
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(submitSpy).toHaveBeenCalledTimes(2);
+      const retryAttempt = submitSpy.mock.calls[1][0];
+      expect(retryAttempt.id).toBe('attempt-1');
+      expect(retryAttempt.answers.q1).toBe('FINAL_ANSWER');
+
+      // The receipt transitions the page to confirmed success and clears the
+      // pending record.
+      await flushAsyncState();
+      expect(result.current.state.pendingSubmission).toBeNull();
+      expect(result.current.state.attempt?.phase).toBe('post-exam');
+      expect(result.current.state.attempt?.submittedAt).toBe('2026-01-01T01:00:01.000Z');
+      expect(studentAttemptRepository.clearPendingSubmission).toHaveBeenCalledWith('attempt-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restores a durable pending submission on mount and resumes the retry loop before any confirmed success', async () => {
+    vi.useFakeTimers();
+    try {
+      const seededAttempt = {
+        ...createAttemptSnapshot(),
+        answers: { q1: 'SEEDED_FINAL' },
+      };
+      seedPendingSubmission(seededAttempt);
+
+      vi.mocked(studentAttemptRepository.submitAttempt).mockRejectedValue(
+        new Error('still down'),
+      );
+
+      const { result } = renderHook(() => useStudentAttempt(), {
+        wrapper: createWrapper(seededAttempt),
+      });
+
+      await flushAsyncState();
+
+      // Pending state is restored and the retry loop resumes with the SAME
+      // submission identity — no confirmed state in between.
+      expect(result.current.state.pendingSubmission).not.toBeNull();
+      expect(result.current.state.pendingSubmission?.submissionId).toBe(
+        'student-submit-attempt-1',
+      );
+      expect(result.current.state.attempt?.phase).toBe('exam');
+      expect(result.current.state.attempt?.submittedAt).toBeNull();
+
+      expect(studentAttemptRepository.submitAttempt).toHaveBeenCalledTimes(1);
+      const retryAttempt = vi.mocked(studentAttemptRepository.submitAttempt).mock.calls[0][0];
+      expect(retryAttempt.answers.q1).toBe('SEEDED_FINAL');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not resume an expired pending submission', async () => {
+    vi.useFakeTimers();
+    try {
+      const seededAttempt = {
+        ...createAttemptSnapshot(),
+        answers: { q1: 'OLD' },
+      };
+      seedPendingSubmission(seededAttempt, {
+        expiresAt: '2025-01-01T00:00:00.000Z',
+      });
+
+      const { result } = renderHook(() => useStudentAttempt(), {
+        wrapper: createWrapper(seededAttempt),
+      });
+
+      await flushAsyncState();
+
+      expect(result.current.state.pendingSubmission).toBeNull();
+      expect(studentAttemptRepository.submitAttempt).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the pending submission when an authoritative submitted snapshot arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const seededAttempt = {
+        ...createAttemptSnapshot(),
+        answers: { q1: 'SEEDED' },
+      };
+      seedPendingSubmission(seededAttempt);
+      vi.mocked(studentAttemptRepository.submitAttempt).mockRejectedValue(
+        new Error('still down'),
+      );
+
+      let attemptSnapshot = seededAttempt;
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider
+          state={createExamState()}
+          onExit={vi.fn()}
+          attemptSnapshot={attemptSnapshot}
+        >
+          <StudentAttemptProvider
+            scheduleId={attemptSnapshot.scheduleId}
+            attemptSnapshot={attemptSnapshot}
+          >
+            {children}
+          </StudentAttemptProvider>
+        </StudentRuntimeProvider>
+      );
+
+      const { result, rerender } = renderHook(() => useStudentAttempt(), { wrapper });
+
+      await flushAsyncState();
+      expect(result.current.state.pendingSubmission).not.toBeNull();
+
+      attemptSnapshot = {
+        ...seededAttempt,
+        phase: 'post-exam',
+        submittedAt: '2026-01-01T01:00:01.000Z',
+      };
+      rerender();
+
+      await flushAsyncState();
+
+      expect(result.current.state.pendingSubmission).toBeNull();
+      expect(studentAttemptRepository.clearPendingSubmission).toHaveBeenCalledWith('attempt-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('StrictMode double-mount resumes exactly one retry loop', async () => {
+    vi.useFakeTimers();
+    try {
+      const seededAttempt = {
+        ...createAttemptSnapshot(),
+        answers: { q1: 'SEEDED' },
+      };
+      seedPendingSubmission(seededAttempt);
+      vi.mocked(studentAttemptRepository.submitAttempt).mockRejectedValue(
+        new Error('still down'),
+      );
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <React.StrictMode>
+          <StudentRuntimeProvider
+            state={createExamState()}
+            onExit={vi.fn()}
+            attemptSnapshot={seededAttempt}
+          >
+            <StudentAttemptProvider
+              scheduleId={seededAttempt.scheduleId}
+              attemptSnapshot={seededAttempt}
+            >
+              {children}
+            </StudentAttemptProvider>
+          </StudentRuntimeProvider>
+        </React.StrictMode>
+      );
+
+      const { result } = renderHook(() => useStudentAttempt(), { wrapper });
+
+      await flushAsyncState();
+
+      expect(result.current.state.pendingSubmission).not.toBeNull();
+      // Exactly one resume → one loop → one submit attempt.
+      expect(studentAttemptRepository.submitAttempt).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,3 +1,4 @@
+import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useStudentSubmissionOrchestration } from '../useStudentSubmissionOrchestration';
@@ -96,5 +97,57 @@ describe('useStudentSubmissionOrchestration', () => {
     await waitFor(() => {
       expect(result.current.finalSubmitStatus).toBe('idle');
     });
+  });
+
+  it('does not duplicate the final submit under StrictMode double effects (FEX-052)', async () => {
+    const submitAttempt = vi.fn().mockResolvedValue(true);
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <React.StrictMode>{children}</React.StrictMode>
+    );
+
+    const { result } = renderHook(
+      () =>
+        useStudentSubmissionOrchestration({
+          runtimeState: {
+            runtimeBacked: true,
+            runtimeStatus: 'completed',
+            currentModule: 'reading',
+          },
+          runtimeStateRef: {
+            current: {
+              phase: 'exam',
+              currentModule: 'reading',
+            },
+          },
+          attemptId: 'attempt-1',
+          runtimeCompletionVerified: true,
+          shouldRenderPostExam: false,
+          flushDomAnswerControlsNow: vi.fn(),
+          reconcileLiveAnswerCacheNow: vi.fn(),
+          commitWritingDraft: vi.fn(),
+          attemptActions: {
+            flushPending: vi.fn().mockResolvedValue(true),
+            submitAttempt,
+          },
+          runtimeActions: {
+            transitionBlocking: vi.fn(),
+            submitModule: vi.fn(),
+          },
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(submitAttempt).toHaveBeenCalledTimes(1);
+    });
+
+    // Give any duplicate effect pass the chance to fire, then confirm there is
+    // exactly one submit call and the pipeline returns to idle.
+    await waitFor(() => {
+      expect(result.current.finalSubmitStatus).toBe('idle');
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(submitAttempt).toHaveBeenCalledTimes(1);
   });
 });

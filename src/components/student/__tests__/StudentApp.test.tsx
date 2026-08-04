@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StudentAppWrapper } from '../StudentAppWrapper';
 import { createDefaultConfig } from '../../../constants/examDefaults';
+import * as studentAttemptRepoModule from '../../../services/studentAttemptRepository';
 import { studentAttemptRepository } from '../../../services/studentAttemptRepository';
 import type { ExamState } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
@@ -3649,5 +3650,152 @@ describe('StudentApp runtime-backed mode', () => {
 
     expect(await screen.findByRole('button', { name: 'Finish' })).toBeInTheDocument();
     expect(screen.queryByText(/IELTS Examination Complete!/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the Submission pending panel instead of a success screen after a failed submit (FEX-051)', async () => {
+    vi.useFakeTimers();
+    try {
+      const PENDING_SUBMISSIONS_STORAGE_KEY =
+        'ielts_student_attempt_pending_submissions_v1';
+
+      const readingAttempt = createReadingAttemptSnapshot();
+      const seededAttempt = {
+        ...readingAttempt,
+        answers: { 'rq-1': 'SEEDED_FINAL' },
+      };
+      const pendingRecord = studentAttemptRepoModule.buildPendingStudentSubmission(seededAttempt);
+      window.localStorage.setItem(
+        PENDING_SUBMISSIONS_STORAGE_KEY,
+        JSON.stringify([pendingRecord]),
+      );
+
+      const submittedAttempt: StudentAttempt = {
+        ...readingAttempt,
+        phase: 'post-exam',
+        submittedAt: '2026-01-01T01:00:01.000Z',
+      };
+      const submitAttempt = vi
+        .spyOn(studentAttemptRepository as any, 'submitAttempt')
+        .mockRejectedValueOnce(new Error('network down'))
+        .mockResolvedValue(submittedAttempt);
+
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={readingAttempt.scheduleId}
+          attemptSnapshot={readingAttempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+
+      // Bootstrap resumes the durable pending record; the resume attempt fails,
+      // so the page must show the pending panel — never a success screen.
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByRole('heading', { name: 'Submission pending' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/IELTS Examination Complete!/i)).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry now' })).toBeInTheDocument();
+
+      // Pending locks the exam against further editing: the workspace fieldset
+      // is disabled (jsdom does not propagate fieldset disabled to descendant
+      // controls, so assert the fieldset itself).
+      const answerInput = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+      const workspaceFieldset = answerInput.closest('fieldset');
+      expect(workspaceFieldset).not.toBeNull();
+      expect((workspaceFieldset as HTMLFieldSetElement).disabled).toBe(true);
+      expect(workspaceFieldset).toHaveAttribute('aria-disabled', 'true');
+      expect(submitAttempt).toHaveBeenCalledTimes(1);
+
+      // Retry now reuses the same submission identity and the ORIGINAL frozen
+      // final snapshot, and the backend receipt transitions the page to
+      // confirmed success.
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Retry now' }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(submitAttempt).toHaveBeenCalledTimes(2);
+      expect(submitAttempt.mock.calls[1][0].answers).toEqual({ 'rq-1': 'SEEDED_FINAL' });
+      expect(submitAttempt.mock.calls[1][0].id).toBe('attempt-reading-1');
+
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+      });
+
+      expect(screen.queryByRole('heading', { name: 'Submission pending' })).not.toBeInTheDocument();
+      expect(screen.getByText(/IELTS Examination Complete!/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the Submission pending panel over the post-exam view while a completed runtime is unconfirmed (FEX-051)', async () => {
+    vi.useFakeTimers();
+    try {
+      const PENDING_SUBMISSIONS_STORAGE_KEY =
+        'ielts_student_attempt_pending_submissions_v1';
+
+      const writingAttempt = createWritingAttemptSnapshot();
+      const pendingRecord = studentAttemptRepoModule.buildPendingStudentSubmission(writingAttempt);
+      window.localStorage.setItem(
+        PENDING_SUBMISSIONS_STORAGE_KEY,
+        JSON.stringify([pendingRecord]),
+      );
+
+      vi.spyOn(studentAttemptRepository as any, 'submitAttempt').mockRejectedValue(
+        new Error('network down'),
+      );
+
+      const liveRuntimeSnapshot = createWritingRuntimeSnapshot();
+      const completedRuntimeSnapshot: ExamSessionRuntime = {
+        ...liveRuntimeSnapshot,
+        status: 'completed',
+        actualEndAt: '2026-01-01T01:00:00.000Z',
+        activeSectionKey: null,
+        currentSectionRemainingSeconds: 0,
+        sections: liveRuntimeSnapshot.sections.map((section) => ({
+          ...section,
+          status: 'completed' as const,
+          actualEndAt: '2026-01-01T01:00:00.000Z',
+          completionReason: 'auto_timeout' as const,
+        })),
+        updatedAt: '2026-01-01T01:00:00.000Z',
+      };
+
+      render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId={writingAttempt.scheduleId}
+          attemptSnapshot={writingAttempt}
+          runtimeSnapshot={completedRuntimeSnapshot}
+        />,
+      );
+
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // The runtime is structurally complete, but the backend has not confirmed
+      // the submission: the pending panel must overlay the post-exam view.
+      expect(screen.getByText(/IELTS Examination Complete!/i)).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Submission pending' }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry now' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

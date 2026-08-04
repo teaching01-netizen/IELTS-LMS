@@ -13,6 +13,7 @@ vi.mock('../backendBridge', () => ({
 import type { ExamSchedule } from '../../types/domain';
 import type { StudentAttempt, StudentAttemptMutation } from '../../types/studentAttempt';
 import {
+  buildPendingStudentSubmission,
   compactSubmittedAttempt,
   ensureClientSessionIdForAttempt,
   pruneStudentAttemptCache,
@@ -858,5 +859,77 @@ describe('studentAttemptRepository', () => {
     };
 
     expect(backendConflictReason(error)).toBe('FINAL_FLUSH_REQUIRED');
+  });
+
+  it('builds a pending submission with a deterministic identity and a frozen final snapshot', () => {
+    const attempt = makeAttempt({
+      answers: { q1: 'FINAL_ANSWER' },
+      writingAnswers: { task1: 'FINAL DRAFT' },
+      flags: { q1: true },
+    });
+    const startedAt = new Date('2026-01-10T09:00:00.000Z');
+    const record = buildPendingStudentSubmission(attempt, startedAt);
+
+    expect(record.attemptId).toBe('attempt-1');
+    expect(record.submissionId).toBe('student-submit-attempt-1');
+    expect(record.retryCount).toBe(0);
+    expect(record.finalSnapshot.answers).toEqual({ q1: 'FINAL_ANSWER' });
+    expect(record.finalSnapshot.writingAnswers).toEqual({ task1: 'FINAL DRAFT' });
+    expect(record.finalSnapshot.flags).toEqual({ q1: true });
+    expect(Date.parse(record.expiresAt) - Date.parse(record.startedAt)).toBe(
+      60 * 60 * 1000,
+    );
+  });
+
+  it('persists, replaces, and clears durable pending submissions per attempt', async () => {
+    const first = buildPendingStudentSubmission(
+      makeAttempt({ answers: { q1: 'V1' } }),
+      new Date('2026-01-10T09:00:00.000Z'),
+    );
+    const replacement = buildPendingStudentSubmission(
+      makeAttempt({ answers: { q1: 'V2' } }),
+      new Date('2026-01-10T09:01:00.000Z'),
+    );
+    const other = buildPendingStudentSubmission(
+      makeAttempt({ id: 'attempt-2', answers: { q2: 'OTHER' } }),
+      new Date('2026-01-10T09:00:00.000Z'),
+    );
+
+    await studentAttemptRepository.savePendingSubmission(first);
+    await studentAttemptRepository.savePendingSubmission(other);
+    expect(await studentAttemptRepository.getPendingSubmissions()).toHaveLength(2);
+
+    // Re-saving the same attempt replaces the record (keeps one per attempt).
+    await studentAttemptRepository.savePendingSubmission(replacement);
+    const records = await studentAttemptRepository.getPendingSubmissions();
+    expect(records).toHaveLength(2);
+    const forAttemptOne = records.find((record) => record.attemptId === 'attempt-1');
+    expect(forAttemptOne?.finalSnapshot.answers).toEqual({ q1: 'V2' });
+
+    await studentAttemptRepository.clearPendingSubmission('attempt-1');
+    const remaining = await studentAttemptRepository.getPendingSubmissions();
+    expect(remaining.map((record) => record.attemptId)).toEqual(['attempt-2']);
+  });
+
+  it('prunes expired pending submissions while keeping fresh ones', async () => {
+    const now = new Date('2026-01-10T09:00:00.000Z');
+    const expired = buildPendingStudentSubmission(
+      makeAttempt({ id: 'attempt-old', answers: { q1: 'OLD' } }),
+      new Date('2026-01-10T07:00:00.000Z'),
+    );
+    // Expire it by shifting expiresAt into the past.
+    expired.expiresAt = '2026-01-10T08:00:00.000Z';
+    const fresh = buildPendingStudentSubmission(
+      makeAttempt({ id: 'attempt-fresh', answers: { q1: 'FRESH' } }),
+      new Date('2026-01-10T08:59:00.000Z'),
+    );
+    await studentAttemptRepository.savePendingSubmission(expired);
+    await studentAttemptRepository.savePendingSubmission(fresh);
+
+    const result = await pruneStudentAttemptCache(now, () => null);
+
+    expect(result.purgedPendingSubmissions).toBe(1);
+    const remaining = await studentAttemptRepository.getPendingSubmissions();
+    expect(remaining.map((record) => record.attemptId)).toEqual(['attempt-fresh']);
   });
 });

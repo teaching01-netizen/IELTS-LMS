@@ -11,12 +11,14 @@ import React, {
 import {
   backendPost,
   backendConflictReason,
+  buildPendingStudentSubmission,
   buildQueuedMutationUpdate,
   buildStudentHeartbeatEvent,
   clearAttemptMutationWatermark,
   createStudentMutationOutbox,
   ensureClientSessionIdForAttempt,
   hasAttemptCredential,
+  isPendingStudentSubmissionExpired,
   mapBackendStudentAttempt,
   PendingMutationDurabilityMirror,
   readAnswerSyncCheckpoint,
@@ -24,7 +26,7 @@ import {
   saveStudentAuditEvent,
   studentAttemptRepository,
 } from '@student/application/studentAttemptFacade';
-import type { DurablePersistTriggerSource } from '@student/application/studentAttemptFacade';
+import type { DurablePersistTriggerSource, PendingStudentSubmission } from '@student/application/studentAttemptFacade';
 import { queryClient } from '../../../app/data/queryClient';
 import {
   emitStudentObservabilityMetric,
@@ -52,6 +54,7 @@ interface StudentAttemptState {
   lastLocalMutationAt: string | null;
   lastPersistedAt: string | null;
   pendingMutationCount: number;
+  pendingSubmission: PendingStudentSubmission | null;
 }
 
 interface StudentAttemptActions {
@@ -223,6 +226,37 @@ function mergeAttempt(attempt: StudentAttempt, patch: AttemptPatch): StudentAtte
   };
 }
 
+/**
+ * A submission is authoritative only when the backend returned it: phase
+ * post-exam plus a submittedAt timestamp. The provider never fabricates these
+ * locally for a failed submit — it records a pending submission instead.
+ */
+function isAuthoritativelySubmittedAttempt(attempt: StudentAttempt | null): boolean {
+  return Boolean(
+    attempt &&
+      attempt.phase === 'post-exam' &&
+      typeof attempt.submittedAt === 'string' &&
+      attempt.submittedAt.length > 0,
+  );
+}
+
+/**
+ * Replay a retry against the ORIGINAL final snapshot that was submitted. The
+ * attempt's identity fields (id, revision, recovery seq) stay current so the
+ * idempotent backend replay matches the first submission's payload hash.
+ */
+function applyPendingSubmissionSnapshot(
+  attempt: StudentAttempt,
+  pending: PendingStudentSubmission,
+): StudentAttempt {
+  return {
+    ...attempt,
+    answers: pending.finalSnapshot.answers,
+    writingAnswers: pending.finalSnapshot.writingAnswers,
+    flags: pending.finalSnapshot.flags,
+  };
+}
+
 function shouldPreferLocalAttemptState(
   localAttempt: StudentAttempt,
   incomingAttempt: StudentAttempt,
@@ -304,7 +338,10 @@ export function StudentAttemptProvider({
   const setRuntimeAttemptSyncState = runtimeActions.setAttemptSyncState;
   const [attempt, setAttempt] = useState<StudentAttempt | null>(attemptSnapshot);
   const [pendingMutationCount, setPendingMutationCount] = useState(0);
+  const [pendingSubmission, setPendingSubmission] = useState<PendingStudentSubmission | null>(null);
   const attemptRef = useRef<StudentAttempt | null>(attemptSnapshot);
+  const pendingSubmissionRef = useRef<PendingStudentSubmission | null>(null);
+  const submitInFlightRef = useRef<Promise<boolean> | null>(null);
   const controlScheduleIdRef = useRef<string | undefined>(
     scheduleId ?? attemptSnapshot?.scheduleId,
   );
@@ -1253,95 +1290,256 @@ export function StudentAttemptProvider({
     );
   }, [persistenceEnabled, scheduleId, syncAttemptState]);
 
-  const scheduleBackgroundSubmitRetry = useCallback((seedAttempt: StudentAttempt) => {
-    if (!persistenceEnabled) {
-      return;
+  const clearPendingSubmissionState = useCallback(async (attemptId: string) => {
+    if (pendingSubmissionRef.current?.attemptId === attemptId) {
+      pendingSubmissionRef.current = null;
+      setPendingSubmission(null);
     }
+    await studentAttemptRepository.clearPendingSubmission(attemptId).catch(() => {});
+  }, []);
 
-    if (backgroundSubmitInFlightRef.current) {
-      return;
-    }
+  const persistPendingSubmissionState = useCallback(
+    async (attempt: StudentAttempt): Promise<PendingStudentSubmission> => {
+      const existing = pendingSubmissionRef.current;
+      // Preserve the ORIGINAL submission identity and final snapshot across
+      // retries: a later, different payload must never reuse this identity.
+      const record: PendingStudentSubmission = existing
+        ? {
+            ...existing,
+            retryCount: existing.retryCount + 1,
+          }
+        : buildPendingStudentSubmission(attempt);
+      pendingSubmissionRef.current = record;
+      setPendingSubmission(record);
+      await studentAttemptRepository.savePendingSubmission(record).catch(() => {});
+      return record;
+    },
+    [],
+  );
 
-    const retryWindowMs = 60 * 60 * 1000;
-    const startedAtMs = Date.now();
-
-    const promise = (async () => {
-      let retryDelayMs = 5_000;
-
-      while (Date.now() - startedAtMs <= retryWindowMs) {
-        if (!navigator.onLine) {
-          await new Promise<void>((resolve) => {
-            window.setTimeout(resolve, retryDelayMs);
-          });
-          retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
-          continue;
-        }
-
-        const candidateAttempt = attemptRef.current ?? seedAttempt;
-        try {
-          const submittedAttempt = await studentAttemptRepository.submitAttempt(candidateAttempt);
-          syncAttemptState(submittedAttempt);
-          void queryClient.invalidateQueries();
-          return;
-        } catch {
-          await new Promise<void>((resolve) => {
-            window.setTimeout(resolve, retryDelayMs);
-          });
-          retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
-        }
-      }
-    })();
-
-    backgroundSubmitInFlightRef.current = promise;
-    void promise.finally(() => {
-      if (backgroundSubmitInFlightRef.current === promise) {
-        backgroundSubmitInFlightRef.current = null;
-      }
-    });
-  }, [persistenceEnabled, syncAttemptState]);
-
-  const submitAttempt = useCallback(async (): Promise<boolean> => {
+  /**
+   * Perform one submit attempt. Returns true only when the backend confirmed
+   * the submission (authoritative attempt); returns false when the attempt is
+   * now pending (recorded durably for retry). Single-flight: concurrent callers
+   * share the in-flight attempt and observe its outcome.
+   */
+  const performSubmitOnce = useCallback(async (): Promise<boolean> => {
     const currentAttempt = attemptRef.current;
     if (!currentAttempt) {
       return false;
     }
 
-    const latestAttempt = attemptRef.current ?? currentAttempt;
-    if (!persistenceEnabled) {
-      const submittedAttempt = mergeAttempt(latestAttempt, {
-        phase: 'post-exam',
-        submittedAt: new Date().toISOString(),
-        recovery: {
-          syncState: 'idle',
-          pendingMutationCount: 0,
-        },
-      });
-      runtimeActions.setPhase('post-exam');
-      syncAttemptState(submittedAttempt);
-      return true;
+    if (submitInFlightRef.current) {
+      const inFlight = submitInFlightRef.current;
+      return inFlight.then(() => !pendingSubmissionRef.current);
     }
 
+    const promise = (async (): Promise<boolean> => {
+      if (!persistenceEnabled) {
+        const submittedAttempt = mergeAttempt(currentAttempt, {
+          phase: 'post-exam',
+          submittedAt: new Date().toISOString(),
+          recovery: {
+            syncState: 'idle',
+            pendingMutationCount: 0,
+          },
+        });
+        runtimeActions.setPhase('post-exam');
+        syncAttemptState(submittedAttempt);
+        return true;
+      }
+
+      const pending = pendingSubmissionRef.current;
+      const candidate = pending
+        ? applyPendingSubmissionSnapshot(currentAttempt, pending)
+        : currentAttempt;
+      try {
+        const submittedAttempt = await studentAttemptRepository.submitAttempt(candidate);
+        await clearPendingSubmissionState(submittedAttempt.id);
+        runtimeActions.setPhase('post-exam');
+        syncAttemptState(submittedAttempt);
+        void queryClient.invalidateQueries();
+        return true;
+      } catch {
+        await persistPendingSubmissionState(currentAttempt);
+        return false;
+      }
+    })();
+
+    submitInFlightRef.current = promise;
     try {
-      const submittedAttempt = await studentAttemptRepository.submitAttempt(latestAttempt);
-      runtimeActions.setPhase('post-exam');
-      syncAttemptState(submittedAttempt);
-      void queryClient.invalidateQueries();
-      return true;
-    } catch {
-      const optimisticSubmittedAttempt = mergeAttempt(latestAttempt, {
-        phase: 'post-exam',
-        submittedAt: latestAttempt.submittedAt ?? new Date().toISOString(),
-        recovery: {
-          syncState: 'syncing_reconnect',
-        },
+      return await promise;
+    } finally {
+      if (submitInFlightRef.current === promise) {
+        submitInFlightRef.current = null;
+      }
+    }
+  }, [
+    clearPendingSubmissionState,
+    persistenceEnabled,
+    persistPendingSubmissionState,
+    runtimeActions,
+    syncAttemptState,
+  ]);
+
+  const scheduleBackgroundSubmitRetry = useCallback(
+    (options?: { immediate?: boolean }) => {
+      if (!persistenceEnabled) {
+        return;
+      }
+
+      if (backgroundSubmitInFlightRef.current) {
+        return;
+      }
+
+      const pendingAtStart = pendingSubmissionRef.current;
+      if (!pendingAtStart) {
+        return;
+      }
+
+      const retryWindowMs = 60 * 60 * 1000;
+      const startedAtMs = Date.now();
+
+      const promise = (async () => {
+        let retryDelayMs = 5_000;
+
+        // A freshly failed submit backs off before its first retry; a resume
+        // from a durable pending record (page reload) retries immediately.
+        if (!options?.immediate) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, retryDelayMs);
+          });
+        }
+
+        while (Date.now() - startedAtMs <= retryWindowMs) {
+          const currentPending = pendingSubmissionRef.current;
+          if (!currentPending || currentPending.attemptId !== pendingAtStart.attemptId) {
+            // Pending record cleared — submission was confirmed elsewhere.
+            return;
+          }
+
+          const currentAttempt = attemptRef.current;
+          if (!currentAttempt) {
+            return;
+          }
+
+          if (isAuthoritativelySubmittedAttempt(currentAttempt)) {
+            await clearPendingSubmissionState(currentAttempt.id);
+            return;
+          }
+
+          if (!navigator.onLine) {
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, retryDelayMs);
+            });
+            retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
+            continue;
+          }
+
+          try {
+            const confirmed = await performSubmitOnce();
+            if (confirmed) {
+              return;
+            }
+          } catch {
+            // keep retrying
+          }
+
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, retryDelayMs);
+          });
+          retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
+        }
+      })();
+
+      backgroundSubmitInFlightRef.current = promise;
+      void promise.finally(() => {
+        if (backgroundSubmitInFlightRef.current === promise) {
+          backgroundSubmitInFlightRef.current = null;
+        }
       });
-      runtimeActions.setPhase('post-exam');
-      syncAttemptState(optimisticSubmittedAttempt);
-      scheduleBackgroundSubmitRetry(optimisticSubmittedAttempt);
+    },
+    [clearPendingSubmissionState, performSubmitOnce, persistenceEnabled],
+  );
+
+  const submitAttempt = useCallback(async (): Promise<boolean> => {
+    if (!attemptRef.current) {
+      return false;
     }
 
+    const confirmed = await performSubmitOnce();
+    if (!confirmed) {
+      // Failure is not success: the attempt stays unconfirmed and the retry
+      // loop takes over with the same submission identity and frozen snapshot.
+      scheduleBackgroundSubmitRetry();
+    }
+
+    // True means "handled" — either confirmed by the backend, or recorded as
+    // pending with the retry loop running. The UI distinguishes via
+    // state.pendingSubmission; it must never treat this as confirmed.
     return true;
-  }, [persistenceEnabled, runtimeActions, scheduleBackgroundSubmitRetry, syncAttemptState]);
+  }, [performSubmitOnce, scheduleBackgroundSubmitRetry]);
+
+  useEffect(() => {
+    if (!attemptSnapshot || !persistenceEnabled) {
+      if (pendingSubmissionRef.current) {
+        pendingSubmissionRef.current = null;
+        setPendingSubmission(null);
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      let records: PendingStudentSubmission[] = [];
+      try {
+        records = await studentAttemptRepository.getPendingSubmissions();
+      } catch {
+        return;
+      }
+      if (cancelled) {
+        return;
+      }
+
+      const record =
+        records.find((candidate) => candidate.attemptId === attemptSnapshot.id) ?? null;
+      if (!record) {
+        if (pendingSubmissionRef.current) {
+          pendingSubmissionRef.current = null;
+          setPendingSubmission(null);
+        }
+        return;
+      }
+
+      if (isPendingStudentSubmissionExpired(record)) {
+        await clearPendingSubmissionState(record.attemptId).catch(() => {});
+        return;
+      }
+
+      // An authoritative submitted snapshot supersedes the local pending record.
+      if (isAuthoritativelySubmittedAttempt(attemptSnapshot)) {
+        await clearPendingSubmissionState(record.attemptId).catch(() => {});
+        return;
+      }
+
+      pendingSubmissionRef.current = record;
+      setPendingSubmission(record);
+      // Resume the retry loop with the same submission identity before any UI
+      // can claim confirmed success. The first resume attempt fires
+      // immediately; subsequent retries back off.
+      scheduleBackgroundSubmitRetry({ immediate: true });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    attemptSnapshot,
+    clearPendingSubmissionState,
+    persistenceEnabled,
+    scheduleBackgroundSubmitRetry,
+  ]);
 
   const flushAnswerDurabilityNow = useCallback(() => {
     if (!persistenceEnabled) {
@@ -1407,6 +1605,7 @@ export function StudentAttemptProvider({
       lastLocalMutationAt: attempt?.recovery.lastLocalMutationAt ?? null,
       lastPersistedAt: attempt?.recovery.lastPersistedAt ?? null,
       pendingMutationCount,
+      pendingSubmission,
     },
     actions: {
       persistAnswer,
@@ -1430,6 +1629,7 @@ export function StudentAttemptProvider({
     attempt,
     flushPending,
     pendingMutationCount,
+    pendingSubmission,
     persistAnswer,
     persistFlag,
     persistPosition,

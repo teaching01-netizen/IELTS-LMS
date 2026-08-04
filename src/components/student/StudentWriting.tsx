@@ -31,6 +31,7 @@ interface StudentWritingProps {
   studentId?: string | undefined;
   showSubmitButton?: boolean | undefined;
   tabletMode?: boolean | undefined;
+  answerControlsLocked?: boolean | undefined;
   registerLiveWritingAnswer?: ((taskId: string, text: string) => void) | undefined;
   highlightEnabled?: boolean | undefined;
   highlightColor?: StudentHighlightColor | undefined;
@@ -119,8 +120,9 @@ export function StudentWriting({
   security = { preventAutofill: false, preventAutocorrect: false },
   sessionId,
   studentId,
-  showSubmitButton = true,
   tabletMode = false,
+  showSubmitButton = true,
+  answerControlsLocked = false,
   registerLiveWritingAnswer,
   highlightEnabled = false,
   highlightColor,
@@ -468,6 +470,9 @@ export function StudentWriting({
   const isTimeWarning = resolvedTimeRemaining <= 600;
 
   const handleEditorInput = () => {
+    if (answerControlsLocked) {
+      return;
+    }
     if (editorRef.current) {
       const textContent = readEditorPlainText(editorRef.current);
       liveDraftsByTaskRef.current = {
@@ -669,6 +674,7 @@ export function StudentWriting({
               <textarea
                 ref={editorRef}
                 defaultValue={currentText}
+                disabled={answerControlsLocked}
                 onChange={handleEditorInput}
                 onCompositionEnd={() => {
                   if (editorRef.current) {

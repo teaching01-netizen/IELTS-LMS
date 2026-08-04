@@ -22,6 +22,7 @@ interface StudentExamWorkspaceProps {
   showSubmitControls: boolean;
   contentZoom: number;
   displayTimeRemaining: number | undefined;
+  answerControlsLocked?: boolean;
   highlightEnabled: boolean;
   highlightColor: StudentHighlightColor;
   highlightClassName?: string;
@@ -63,6 +64,7 @@ export function StudentExamWorkspace({
   showSubmitControls,
   contentZoom,
   displayTimeRemaining,
+  answerControlsLocked = false,
   highlightEnabled,
   highlightColor,
   highlightClassName,
@@ -86,6 +88,11 @@ export function StudentExamWorkspace({
 }: StudentExamWorkspaceProps) {
   return (
     <>
+      <fieldset
+        disabled={answerControlsLocked}
+        aria-disabled={answerControlsLocked}
+        className="contents"
+      >
       <main
         id="main-content"
         className="student-exam-main flex-1 overflow-hidden relative flex flex-col"
@@ -145,6 +152,7 @@ export function StudentExamWorkspace({
             writingAnswers={writingAnswers}
             onWritingChange={onWritingChange}
             onSubmit={onModuleSubmit}
+            answerControlsLocked={answerControlsLocked}
             currentQuestionId={currentQuestionId}
             onNavigate={onNavigate}
             timeRemaining={displayTimeRemaining}
@@ -196,6 +204,7 @@ export function StudentExamWorkspace({
           onClose={onCloseNavigator}
         />
       ) : null}
+      </fieldset>
     </>
   );
 }
