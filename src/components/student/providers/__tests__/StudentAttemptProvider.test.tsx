@@ -2220,4 +2220,212 @@ describe('StudentAttemptProvider pending submission contract (FEX-051)', () => {
       vi.useRealTimers();
     }
   });
+
+  it('clears the sticky storage_unavailable blocking flag once the pending save succeeds and after confirmation (M7)', async () => {
+    vi.useFakeTimers();
+    try {
+      const submittedAttempt: StudentAttempt = {
+        ...createAttemptSnapshot(),
+        phase: 'post-exam',
+        submittedAt: '2026-01-01T01:00:01.000Z',
+      };
+      const submitSpy = vi.mocked(studentAttemptRepository.submitAttempt);
+      submitSpy
+        .mockRejectedValueOnce(new Error('network down'))
+        .mockRejectedValueOnce(new Error('network down'))
+        .mockResolvedValue(submittedAttempt);
+      const saveSpy = vi.mocked(studentAttemptRepository.savePendingSubmission);
+      saveSpy.mockRejectedValueOnce(new Error('quota exceeded')).mockResolvedValue();
+
+      const { result } = renderHook(
+        () => ({
+          attempt: useStudentAttempt(),
+          runtime: useStudentRuntime(),
+        }),
+        { wrapper: createWrapper() },
+      );
+
+      await flushAsyncState();
+
+      await act(async () => {
+        const submitted = await result.current.attempt.actions.submitAttempt();
+        expect(submitted).toBe(true);
+      });
+
+      // The FIRST durable save failed: the blocking flag must be set so the
+      // student is not left between "pending" and "confirmed" silently.
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      expect(result.current.runtime.state.blocking.reason).toBe('storage_unavailable');
+
+      // First retry (5s backoff): submit fails again, but the durable save
+      // now SUCCEEDS — storage is evidently usable again, so the blocking
+      // flag must clear (M7: it must not stay sticky until reload).
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(submitSpy).toHaveBeenCalledTimes(2);
+      expect(saveSpy).toHaveBeenCalledTimes(2);
+      expect(result.current.runtime.state.blocking.reason).toBeNull();
+
+      // Second retry (10s backoff) confirms the submission: the confirmation
+      // clear must also release the flag.
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(submitSpy).toHaveBeenCalledTimes(3);
+      expect(result.current.attempt.state.pendingSubmission).toBeNull();
+      expect(studentAttemptRepository.clearPendingSubmission).toHaveBeenCalledWith('attempt-1');
+      expect(result.current.runtime.state.blocking.reason).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('replaces the stale frozen payload when the repository invalidates it after a 409-disproved conflict (I1-residual)', async () => {
+    vi.useFakeTimers();
+    try {
+      const submittedAttempt: StudentAttempt = {
+        ...createAttemptSnapshot(),
+        phase: 'post-exam',
+        submittedAt: '2026-01-01T01:00:01.000Z',
+      };
+      const submitSpy = vi.mocked(studentAttemptRepository.submitAttempt);
+      submitSpy
+        .mockRejectedValueOnce(
+          Object.assign(new Error('response lost'), {
+            submitPayload: {
+              lastSeenRevision: 3,
+              clientFinalSeq: 7,
+              serverAcceptedThroughSeq: 5,
+            },
+          }),
+        )
+        .mockRejectedValueOnce(
+          Object.assign(new Error('BASE_REVISION_MISMATCH'), {
+            // The repository's live-fields resubmit also failed: the carrier
+            // holds the LIVE values and the invalidation marker.
+            submitPayload: {
+              lastSeenRevision: 9,
+              clientFinalSeq: 12,
+              serverAcceptedThroughSeq: 8,
+            },
+            invalidatesFrozenPayload: true,
+          }),
+        )
+        .mockResolvedValue(submittedAttempt);
+
+      const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+      await flushAsyncState();
+
+      await act(async () => {
+        await result.current.actions.submitAttempt();
+      });
+      expect(result.current.state.pendingSubmission?.frozenPayload).toEqual({
+        lastSeenRevision: 3,
+        clientFinalSeq: 7,
+        serverAcceptedThroughSeq: 5,
+      });
+
+      // The frozen retry is rejected with a 409-disproved conflict: the old
+      // frozen payload is DEAD. The provider must abandon it and keep the
+      // live carrier values instead of replaying the stale payload forever.
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(submitSpy).toHaveBeenCalledTimes(2);
+      expect(submitSpy.mock.calls[1][1]).toEqual({
+        lastSeenRevision: 3,
+        clientFinalSeq: 7,
+        serverAcceptedThroughSeq: 5,
+      });
+      expect(result.current.state.pendingSubmission?.frozenPayload).toEqual({
+        lastSeenRevision: 9,
+        clientFinalSeq: 12,
+        serverAcceptedThroughSeq: 8,
+      });
+
+      // The next retry replays the replaced (live) values and confirms.
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(submitSpy).toHaveBeenCalledTimes(3);
+      expect(submitSpy.mock.calls[2][1]).toEqual({
+        lastSeenRevision: 9,
+        clientFinalSeq: 12,
+        serverAcceptedThroughSeq: 8,
+      });
+      expect(result.current.state.pendingSubmission).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hard-stops the retry loop at the record expiry and clears the pending state so the student can resubmit without a reload (M2)', async () => {
+    vi.useFakeTimers();
+    try {
+      const seededAttempt = {
+        ...createAttemptSnapshot(),
+        answers: { q1: 'SEEDED' },
+      };
+      seedPendingSubmission(seededAttempt, {
+        expiresAt: new Date(Date.now() + 6_000).toISOString(),
+      });
+      vi.mocked(studentAttemptRepository.submitAttempt).mockRejectedValue(
+        new Error('still down'),
+      );
+
+      const { result } = renderHook(() => useStudentAttempt(), {
+        wrapper: createWrapper(seededAttempt),
+      });
+
+      await flushAsyncState();
+
+      // Bootstrap resume attempt fires immediately at t=0 and fails.
+      expect(studentAttemptRepository.submitAttempt).toHaveBeenCalledTimes(1);
+      expect(result.current.state.pendingSubmission).not.toBeNull();
+
+      // One retry at t=5 (5s backoff); the next backoff (10s) wakes at t=15,
+      // past the 6s expiry — the loop must stop there.
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(studentAttemptRepository.submitAttempt).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Hard stop at expiresAt: no further attempts past the window.
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(studentAttemptRepository.submitAttempt).toHaveBeenCalledTimes(2);
+
+      // The pending state and the durable record are cleared so the student
+      // can resubmit without a reload. This is NOT a confirmation: the phase
+      // stays 'exam' and submittedAt stays null — the backend remains the
+      // only source of truth for confirmed success.
+      expect(result.current.state.pendingSubmission).toBeNull();
+      expect(studentAttemptRepository.clearPendingSubmission).toHaveBeenCalledWith('attempt-1');
+      expect(result.current.state.attempt?.phase).toBe('exam');
+      expect(result.current.state.attempt?.submittedAt).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

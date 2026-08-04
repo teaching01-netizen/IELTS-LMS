@@ -767,3 +767,59 @@ payload-determining fields (`revision`/`lastSeenRevision`, `serverAcceptedThroug
 `clientFinalSeq`, `finalClientSnapshotHash`) plus the frozen final snapshot are the ONLY source
 for a retry payload — never the live attempt's current counters. An idempotency CONFLICT on retry
 must be treated as "already submitted" (converge), never as a retryable failure.
+
+---
+
+## 2026-08-05: Flushed Mutations Accepted While Submit In Flight → Frozen-Payload BASE_REVISION_MISMATCH Loop → Converge-and-Resubmit-With-Live-Fields Recovery (I1 residual)
+
+### Symptom
+The original I1 fix froze the payload-determining fields of a failed submit and replaying them
+byte-for-byte was safe — UNLESS the server's state advanced past the frozen values while the
+submit request itself never reached the server. Concretely: the submit request fails before
+arriving (flaky network), but the mutation-batch flush that was in flight alongside it IS
+accepted, bumping the server's revision/`server_accepted_through_seq`. Every retry then replays
+the frozen (now stale) revision and the server rejects it with 409 `BASE_REVISION_MISMATCH`.
+`tryConvergeAlreadySubmitted` fetched the authoritative session, correctly found the attempt NOT
+submitted, and rethrew — so the retry loop burned the entire 60-minute window on a payload that
+could never be accepted, and the student sat on the pending panel until reload (which purged the
+record and recovered). The loop case was also unobservable: only the converged conflict path had
+a metric.
+
+### Scope
+`BackendStudentAttemptRepository.submitAttempt` (409-disproved branch),
+`PendingStudentSubmission.frozenPayload` lifecycle in `StudentAttemptProvider`, and the
+`submitPayload`/`invalidatesFrozenPayload` error carrier.
+
+### Root Cause
+"Frozen payload rejected" and "submission already accepted" were conflated. A 409 on a frozen
+replay with a converge fetch that DISPROVES submission means the frozen payload is DEAD, not the
+submission — the correct recovery is to abandon the frozen values and resubmit with the current
+attempt's live fields, not to rethrow the 409 into the loop.
+
+### Fix
+- On a 409 of the conflict class (`BASE_REVISION_MISMATCH` / `FINAL_PAYLOAD_HASH_MISMATCH`, i.e.
+  not `FINAL_FLUSH_REQUIRED`) where the converge fetch disproves submission: emit
+  `student_submit_conflict_not_converged_total` and resubmit ONCE with LIVE fields (fresh
+  revision/seq/hash from the current attempt state — the flushed keystrokes are preserved in the
+  rebuilt payload).
+- If the live resubmit also fails, its error carries `invalidatesFrozenPayload: true`; the
+  provider then REPLACES the stale `frozenPayload` on the durable record with the live carrier
+  values (or drops it entirely) instead of keeping the dead frozen payload.
+- The true-I1 path is unchanged: when the converge fetch confirms submission, the client still
+  converges; a live resubmit that itself 409s is converge-checked too.
+
+### Regression Protection
+- Tests: `src/services/__tests__/studentAttemptRepository.test.ts` (409-disproved → live-fields
+  resubmit asserts the third POST carries LIVE revision/seq + the not-converged metric;
+  live-resubmit failure marks `invalidatesFrozenPayload` with the live carrier),
+  `src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx` (provider replaces
+  the stale frozen payload after an invalidation-marked error and the next retry passes the live
+  values).
+- Diagnostics: `student_submit_conflict_not_converged_total` (per attempt, reason, statusCode).
+
+### Invariant
+A frozen replay 409 whose converge fetch DISPROVES submission is a dead-frozen-payload signal,
+never a retryable failure and never "already submitted". The durable record must abandon the
+stale frozen payload (replace with the fresh carrier values or drop it) so the next retry
+resubmits with live fields. Converge-on-conflict remains authoritative when the fetch CONFIRMS
+submission.

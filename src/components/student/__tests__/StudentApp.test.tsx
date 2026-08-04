@@ -3798,4 +3798,80 @@ describe('StudentApp runtime-backed mode', () => {
       vi.useRealTimers();
     }
   });
+
+  it('releases the storage-unavailable blocking overlay once the pending submission saves and confirms (M7)', async () => {
+    vi.useFakeTimers();
+    try {
+      const PENDING_SUBMISSIONS_STORAGE_KEY =
+        'ielts_student_attempt_pending_submissions_v1';
+
+      const readingAttempt = createReadingAttemptSnapshot();
+      const seededAttempt = {
+        ...readingAttempt,
+        answers: { 'rq-1': 'SEEDED_FINAL' },
+      };
+      const pendingRecord = studentAttemptRepoModule.buildPendingStudentSubmission(seededAttempt);
+      window.localStorage.setItem(
+        PENDING_SUBMISSIONS_STORAGE_KEY,
+        JSON.stringify([pendingRecord]),
+      );
+
+      const submittedAttempt: StudentAttempt = {
+        ...readingAttempt,
+        phase: 'post-exam',
+        submittedAt: '2026-01-01T01:00:01.000Z',
+      };
+      const submitAttempt = vi
+        .spyOn(studentAttemptRepository as any, 'submitAttempt')
+        .mockRejectedValueOnce(new Error('network down'))
+        .mockResolvedValue(submittedAttempt);
+      vi.spyOn(studentAttemptRepository as any, 'savePendingSubmission')
+        .mockRejectedValueOnce(new Error('storage blocked'))
+        .mockResolvedValue();
+
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={readingAttempt.scheduleId}
+          attemptSnapshot={readingAttempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+
+      // Bootstrap resumes the durable record; the resume attempt fails AND the
+      // durable save fails: the full-screen blocking overlay must appear.
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByText('Answer storage unavailable')).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Submission pending' }),
+      ).toBeInTheDocument();
+
+      // Retry now succeeds and the pending record clears: storage is usable
+      // again, so the blocking overlay must NOT remain until reload (M7).
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Retry now' }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+      });
+
+      expect(screen.queryByText('Answer storage unavailable')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('heading', { name: 'Submission pending' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/IELTS Examination Complete!/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

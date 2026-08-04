@@ -19,9 +19,11 @@ import {
   extractFrozenSubmitPayload,
   pruneStudentAttemptCache,
   resetStudentAttemptPendingMutationIndexedDbForTests,
+  shouldInvalidateFrozenPayload,
   studentLocalCachePolicy,
   studentAttemptRepository,
 } from '../studentAttemptRepository';
+import * as studentObservabilityModule from '../../utils/studentObservability';
 import { backendGet, backendPost } from '../backendBridge';
 
 function nowIso(): string {
@@ -106,7 +108,16 @@ describe('studentAttemptRepository', () => {
   beforeEach(async () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
-    vi.clearAllMocks();
+    // resetAllMocks (not clearAllMocks) also drains leftover
+    // mockResolvedValueOnce/mockRejectedValueOnce queues, so a failed test
+    // can never leak its queue entries into the next test.
+    vi.resetAllMocks();
+    vi.mocked(backendGet).mockImplementation(async () => {
+      throw new Error('backendGet not configured for this test');
+    });
+    vi.mocked(backendPost).mockImplementation(async () => {
+      throw new Error('backendPost not configured for this test');
+    });
     await resetStudentAttemptPendingMutationIndexedDbForTests();
   });
 
@@ -1042,5 +1053,203 @@ describe('studentAttemptRepository', () => {
     expect(result.submittedAt).toBe('2026-01-10T09:05:00.000Z');
     expect(get).toHaveBeenCalledTimes(1);
     expect(String(get.mock.calls[0]?.[0])).toContain('/v1/student/sessions/schedule-1');
+  });
+
+  it('abandons the frozen payload and resubmits with LIVE fields when a 409 disproves submission (I1-residual)', async () => {
+    const attempt = makeAttempt({
+      revision: 3,
+      answers: { q1: 'FINAL' },
+      recovery: { ...makeAttempt().recovery, serverAcceptedThroughSeq: 5 },
+    });
+    storeAttemptCredential(attempt);
+
+    // First submit: the request is lost before reaching the server, so the
+    // payload-determining fields are frozen for idempotent replay.
+    vi.mocked(backendPost).mockRejectedValueOnce(new Error('response lost'));
+    let firstError: unknown = null;
+    try {
+      await studentAttemptRepository.submitAttempt(attempt);
+    } catch (error) {
+      firstError = error;
+    }
+    const frozen = extractFrozenSubmitPayload(firstError);
+    expect(frozen).toBeDefined();
+    expect(frozen?.lastSeenRevision).toBe(3);
+
+    // While the submit was in flight, the server ACCEPTED flushed mutations:
+    // revision advanced on the live attempt.
+    const advanced = {
+      ...attempt,
+      revision: 9,
+      recovery: { ...attempt.recovery, serverAcceptedThroughSeq: 8 },
+    };
+
+    const metricSpy = vi.spyOn(studentObservabilityModule, 'emitStudentObservabilityMetric');
+    const { ApiClientError } = await import('../../app/api/apiClient');
+    const post = vi.mocked(backendPost);
+    // The frozen retry is rejected: its revision is stale relative to the
+    // server's accepted mutations.
+    post.mockRejectedValueOnce(
+      new ApiClientError({
+        message: 'base revision mismatch',
+        statusCode: 409,
+        backendCode: 'CONFLICT',
+        backendDetails: { reason: 'BASE_REVISION_MISMATCH' },
+        backendRequestId: 'req-2',
+      }),
+    );
+    // The converge fetch DISPROVES submission: the attempt is not submitted.
+    const get = vi.mocked(backendGet);
+    get.mockResolvedValueOnce({
+      attempt: { ...attempt, phase: 'exam', submittedAt: null },
+    });
+    // The live-fields resubmit is accepted by the server.
+    post.mockResolvedValueOnce({
+      attempt: {
+        ...attempt,
+        phase: 'post-exam',
+        submittedAt: '2026-01-10T09:05:00.000Z',
+      },
+    });
+
+    const result = await studentAttemptRepository.submitAttempt(advanced, frozen);
+
+    expect(result.phase).toBe('post-exam');
+    expect(result.submittedAt).toBe('2026-01-10T09:05:00.000Z');
+    // Original POST + frozen retry (409) + live resubmit (accepted).
+    expect(post).toHaveBeenCalledTimes(3);
+    const liveBody = post.mock.calls[2]?.[1] as {
+      lastSeenRevision: number;
+      serverAcceptedThroughSeq?: number;
+    };
+    // The frozen payload is abandoned: the resubmit carries LIVE fields
+    // (fresh revision/seq from the current attempt state).
+    expect(liveBody.lastSeenRevision).toBe(9);
+    expect(liveBody.serverAcceptedThroughSeq).toBe(8);
+    expect(metricSpy).toHaveBeenCalledWith(
+      'student_submit_conflict_not_converged_total',
+      expect.objectContaining({
+        attemptId: 'attempt-1',
+        statusCode: 409,
+        reason: 'BASE_REVISION_MISMATCH',
+      }),
+    );
+    metricSpy.mockRestore();
+  });
+
+  it('marks the error as invalidating the frozen payload when the live-fields resubmit also fails (I1-residual)', async () => {
+    const attempt = makeAttempt({
+      revision: 3,
+      answers: { q1: 'FINAL' },
+      recovery: { ...makeAttempt().recovery, serverAcceptedThroughSeq: 5 },
+    });
+    storeAttemptCredential(attempt);
+
+    vi.mocked(backendPost).mockRejectedValueOnce(new Error('response lost'));
+    let firstError: unknown = null;
+    try {
+      await studentAttemptRepository.submitAttempt(attempt);
+    } catch (error) {
+      firstError = error;
+    }
+    const frozen = extractFrozenSubmitPayload(firstError);
+    expect(frozen).toBeDefined();
+
+    const advanced = {
+      ...attempt,
+      revision: 9,
+      recovery: { ...attempt.recovery, serverAcceptedThroughSeq: 8 },
+    };
+
+    const metricSpy = vi.spyOn(studentObservabilityModule, 'emitStudentObservabilityMetric');
+    const { ApiClientError } = await import('../../app/api/apiClient');
+    const post = vi.mocked(backendPost);
+    post.mockRejectedValueOnce(
+      new ApiClientError({
+        message: 'base revision mismatch',
+        statusCode: 409,
+        backendCode: 'CONFLICT',
+        backendDetails: { reason: 'BASE_REVISION_MISMATCH' },
+        backendRequestId: 'req-2',
+      }),
+    );
+    vi.mocked(backendGet).mockResolvedValueOnce({
+      attempt: { ...attempt, phase: 'exam', submittedAt: null },
+    });
+    // The live-fields resubmit also fails (offline again).
+    post.mockRejectedValueOnce(new Error('still offline'));
+
+    let retryError: unknown = null;
+    try {
+      await studentAttemptRepository.submitAttempt(advanced, frozen);
+    } catch (error) {
+      retryError = error;
+    }
+
+    expect((retryError as Error).message).toBe('still offline');
+    // The stale frozen payload must be abandoned: the carrier carries LIVE
+    // values AND the invalidation marker for the durable record.
+    expect(shouldInvalidateFrozenPayload(retryError)).toBe(true);
+    const liveCarrier = extractFrozenSubmitPayload(retryError);
+    expect(liveCarrier?.lastSeenRevision).toBe(9);
+    expect(liveCarrier?.serverAcceptedThroughSeq).toBe(8);
+    expect(metricSpy).toHaveBeenCalledWith(
+      'student_submit_conflict_not_converged_total',
+      expect.objectContaining({ attemptId: 'attempt-1' }),
+    );
+    metricSpy.mockRestore();
+  });
+
+  it('accepts legacy and v1 pending submission records but rejects unknown future schema versions (M6)', async () => {
+    const legacy = buildPendingStudentSubmission(
+      makeAttempt({ id: 'attempt-legacy' }),
+      new Date('2026-01-10T08:00:00.000Z'),
+    );
+    delete (legacy as { schemaVersion?: number }).schemaVersion;
+    const v1 = buildPendingStudentSubmission(
+      makeAttempt({ id: 'attempt-v1' }),
+      new Date('2026-01-10T08:01:00.000Z'),
+    );
+    const future = {
+      ...buildPendingStudentSubmission(
+        makeAttempt({ id: 'attempt-future' }),
+        new Date('2026-01-10T08:02:00.000Z'),
+      ),
+      schemaVersion: 2,
+    };
+    window.localStorage.setItem(
+      'ielts_student_attempt_pending_submissions_v1',
+      JSON.stringify([legacy, v1, future]),
+    );
+
+    const records = await studentAttemptRepository.getPendingSubmissions();
+
+    // Legacy (no schemaVersion) and v1 records survive; a future schema
+    // version is rejected defensively instead of being replayed or purged.
+    expect(records.map((record) => record.attemptId)).toEqual(['attempt-legacy', 'attempt-v1']);
+  });
+
+  it('emits the pending-submission retry metric only for actual retries (retryCount > 0) (M8)', async () => {
+    const metricSpy = vi.spyOn(studentObservabilityModule, 'emitStudentObservabilityMetric');
+    const attempt = makeAttempt();
+
+    await studentAttemptRepository.savePendingSubmission(
+      buildPendingStudentSubmission(attempt, new Date('2026-01-10T08:00:00.000Z')),
+    );
+    const retried = {
+      ...buildPendingStudentSubmission(attempt, new Date('2026-01-10T08:05:00.000Z')),
+      retryCount: 2,
+    };
+    await studentAttemptRepository.savePendingSubmission(retried);
+
+    const retryMetricCalls = metricSpy.mock.calls.filter(
+      ([name]) => name === 'student_pending_submission_retry_total',
+    );
+    // The FIRST save (retryCount 0) is the initial failure, not a retry.
+    expect(retryMetricCalls).toHaveLength(1);
+    expect(retryMetricCalls[0]?.[1]).toEqual(
+      expect.objectContaining({ attemptId: 'attempt-1', retryCount: 2 }),
+    );
+    metricSpy.mockRestore();
   });
 });

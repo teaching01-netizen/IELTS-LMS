@@ -28,6 +28,7 @@ import {
   readAnswerSyncCheckpoint,
   refreshAttemptCredentialForAttempt,
   saveStudentAuditEvent,
+  shouldInvalidateFrozenPayload,
   studentAttemptRepository,
 } from '@student/application/studentAttemptFacade';
 import type {
@@ -383,18 +384,23 @@ export function StudentAttemptProvider({
     controlAttemptIdRef.current = attemptRef.current?.id;
   }, [attempt, scheduleId]);
 
+  // Mirrors the current blocking reason so the guard below reads the LATEST
+  // value even from a stale render's closure (the retry loop runs callbacks
+  // captured at mount; a render-captured reason would skip transitions).
+  const blockingReasonRef = useRef(runtimeState.blocking.reason);
+  blockingReasonRef.current = runtimeState.blocking.reason;
   const setStorageDurabilityBlocking = useCallback((active: boolean) => {
     if (active) {
-      if (runtimeState.blocking.reason !== 'storage_unavailable') {
+      if (blockingReasonRef.current !== 'storage_unavailable') {
         runtimeActions.transitionBlocking('storage_unavailable', true);
       }
       return;
     }
 
-    if (runtimeState.blocking.reason === 'storage_unavailable') {
+    if (blockingReasonRef.current === 'storage_unavailable') {
       runtimeActions.transitionBlocking('storage_unavailable', false);
     }
-  }, [runtimeActions, runtimeState.blocking.reason]);
+  }, [runtimeActions]);
 
   const recordPendingMutationPersistenceError = useCallback((
     error: unknown,
@@ -1304,29 +1310,65 @@ export function StudentAttemptProvider({
       pendingSubmissionRef.current = null;
       setPendingSubmission(null);
     }
-    await studentAttemptRepository.clearPendingSubmission(attemptId).catch(() => {});
-  }, []);
+    try {
+      await studentAttemptRepository.clearPendingSubmission(attemptId);
+      // M7: a successful durable clear proves storage is usable again —
+      // release the blocking flag so the student is not stuck behind the
+      // full-screen overlay until reload.
+      setStorageDurabilityBlocking(false);
+    } catch {
+      // The durable clear itself failed: keep the blocking flag — storage is
+      // still not usable.
+    }
+  }, [setStorageDurabilityBlocking]);
 
   const persistPendingSubmissionState = useCallback(
-    async (attempt: StudentAttempt, frozenPayload?: FrozenSubmitPayload): Promise<PendingStudentSubmission> => {
+    async (
+      attempt: StudentAttempt,
+      frozenPayload?: FrozenSubmitPayload,
+      options?: { invalidateFrozenPayload?: boolean },
+    ): Promise<PendingStudentSubmission> => {
       const existing = pendingSubmissionRef.current;
       // Preserve the ORIGINAL submission identity, final snapshot, and (I1)
       // the frozen payload-determining fields across retries: a later,
       // different payload must never reuse this identity. Legacy records
       // (pre-I1, no frozenPayload) self-heal on their next failed attempt.
-      const nextFrozenPayload = existing ? (existing.frozenPayload ?? frozenPayload) : frozenPayload;
-      const record: PendingStudentSubmission = existing
-        ? {
-            ...existing,
-            schemaVersion: existing.schemaVersion ?? 1,
-            retryCount: existing.retryCount + 1,
-            ...(nextFrozenPayload !== undefined ? { frozenPayload: nextFrozenPayload } : {}),
-          }
-        : buildPendingStudentSubmission(attempt, undefined, frozenPayload);
+      //
+      // I1-residual: when the repository proves the frozen payload is DEAD
+      // (409 + converge fetch disproving submission), abandon it — keep the
+      // fresh carrier values (or none) so the next retry resubmits with
+      // live fields instead of looping on the stale payload.
+      const nextFrozenPayload = existing
+        ? (options?.invalidateFrozenPayload
+            ? frozenPayload
+            : (existing.frozenPayload ?? frozenPayload))
+        : frozenPayload;
+      let record: PendingStudentSubmission;
+      if (existing) {
+        const base: PendingStudentSubmission = {
+          ...existing,
+          schemaVersion: existing.schemaVersion ?? 1,
+          retryCount: existing.retryCount + 1,
+        };
+        if (nextFrozenPayload !== undefined) {
+          record = { ...base, frozenPayload: nextFrozenPayload };
+        } else if (options?.invalidateFrozenPayload) {
+          // Drop the stale frozen payload field entirely.
+          record = { ...base };
+          delete record.frozenPayload;
+        } else {
+          record = base;
+        }
+      } else {
+        record = buildPendingStudentSubmission(attempt, undefined, frozenPayload);
+      }
       pendingSubmissionRef.current = record;
       setPendingSubmission(record);
       try {
         await studentAttemptRepository.savePendingSubmission(record);
+        // M7: a successful durable save proves storage is usable again —
+        // release the blocking flag.
+        setStorageDurabilityBlocking(false);
       } catch (error) {
         // M7: a lost durable record would strand the student between "pending"
         // and "confirmed" — surface the failure like the mutation path instead
@@ -1399,7 +1441,12 @@ export function StudentAttemptProvider({
         // I1: capture the payload-determining fields of the failed request so
         // retries replay the identical serialized body (backend idempotency
         // hash must match the original request).
-        await persistPendingSubmissionState(currentAttempt, extractFrozenSubmitPayload(error));
+        // I1-residual: when the repository proved the frozen payload dead (409
+        // + converge fetch disproving submission), abandon it — the next retry
+        // resubmits with LIVE fields instead of looping on the stale payload.
+        await persistPendingSubmissionState(currentAttempt, extractFrozenSubmitPayload(error), {
+          invalidateFrozenPayload: shouldInvalidateFrozenPayload(error),
+        });
         return false;
       }
     })();
@@ -1494,6 +1541,16 @@ export function StudentAttemptProvider({
           });
           retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
         }
+
+        // M2: the retry window (the durable record's ABSOLUTE expiry) is
+        // exhausted. Clear the pending state and the durable record so the
+        // student can resubmit from the exam view without a reload. This is
+        // NOT a confirmation: the attempt stays unconfirmed (phase and
+        // submittedAt are untouched) — the backend remains the only source
+        // of truth, and the panel must not reappear claiming pending forever.
+        if (pendingSubmissionRef.current?.attemptId === pendingAtStart.attemptId) {
+          await clearPendingSubmissionState(pendingAtStart.attemptId);
+        }
       })();
 
       backgroundSubmitInFlightRef.current = promise;
@@ -1562,6 +1619,14 @@ export function StudentAttemptProvider({
       const record =
         records.find((candidate) => candidate.attemptId === attemptSnapshot.id) ?? null;
       if (!record) {
+        // M7: a live in-memory pending submission for THIS attempt is newer
+        // than storage — the durable save may have failed mid-flight. Storage
+        // must never wipe it (the retry loop would die and the student would
+        // sit behind the blocking overlay with no recovery). Only clear when
+        // there is no in-memory pending state at all.
+        if (pendingSubmissionRef.current?.attemptId === attemptSnapshot.id) {
+          return;
+        }
         if (pendingSubmissionRef.current) {
           pendingSubmissionRef.current = null;
           setPendingSubmission(null);

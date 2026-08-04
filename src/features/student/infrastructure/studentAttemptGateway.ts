@@ -12,6 +12,7 @@ export {
   peekPendingSubmissionForAttempt,
   PENDING_SUBMISSION_RETRY_WINDOW_MS,
   refreshAttemptCredentialForAttempt,
+  shouldInvalidateFrozenPayload,
   studentAttemptRepository,
   backendConflictReason,
   clearAttemptMutationWatermark,

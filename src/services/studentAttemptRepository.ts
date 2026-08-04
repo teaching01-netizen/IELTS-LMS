@@ -96,6 +96,14 @@ export interface FrozenSubmitPayload {
 
 interface SubmitPayloadCarrier {
   submitPayload?: FrozenSubmitPayload;
+  /**
+   * I1-residual: set when the frozen payload that produced an idempotency
+   * CONFLICT is proven DEAD (the converge fetch disproved submission — the
+   * server rejected the frozen revision/seq, e.g. flushed mutations advanced
+   * them while the submit was in flight). The caller must abandon the stored
+   * frozen payload and resubmit with live fields instead of replaying it.
+   */
+  invalidatesFrozenPayload?: boolean;
 }
 
 /**
@@ -118,6 +126,20 @@ export function extractFrozenSubmitPayload(error: unknown): FrozenSubmitPayload 
     return undefined;
   }
   return payload;
+}
+
+/**
+ * True when a failed submit error carries the repository's invalidation
+ * marker: the frozen payload that produced the conflict is dead, so the
+ * durable pending record must drop/replace it — the next retry resubmits with
+ * live fields instead of looping on the stale payload.
+ */
+export function shouldInvalidateFrozenPayload(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as SubmitPayloadCarrier).invalidatesFrozenPayload === true
+  );
 }
 
 /**
@@ -641,12 +663,14 @@ function setJsonArrayInStorage<T>(key: string, data: T[]): void {
 
 function getPendingSubmissionsFromStorage(): PendingStudentSubmission[] {
   const local = getBrowserStorage('localStorage');
-  const raw = local?.getItem(STORAGE_KEY_PENDING_SUBMISSIONS);
-  if (!raw) {
-    return [];
-  }
-
   try {
+    // M4: the render-path initializer must never throw on exotic
+    // storage-blocked environments — getItem itself can throw.
+    const raw = local?.getItem(STORAGE_KEY_PENDING_SUBMISSIONS);
+    if (!raw) {
+      return [];
+    }
+
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed)
       ? parsed.filter(isPendingStudentSubmissionRecord)
@@ -1907,17 +1931,20 @@ class LocalStorageStudentAttemptCache {
     const next = [...records.filter((candidate) => candidate.attemptId !== record.attemptId), record];
     setPendingSubmissionsInStorage(next);
     // M8: retryCount is otherwise write-only — surface it as a metric so retry
-    // pressure on the pending path is observable.
-    emitStudentObservabilityMetric(
-      'student_pending_submission_retry_total',
-      withStudentObservabilityDimensions({
-        scheduleId: record.scheduleId,
-        attemptId: record.attemptId,
-        endpoint: studentSessionTransport.paths.submit(record.scheduleId),
-        retryCount: record.retryCount,
-        syncState: 'pending_submission',
-      }),
-    );
+    // pressure on the pending path is observable. The FIRST save
+    // (retryCount 0) is the initial failure, not a retry.
+    if (record.retryCount > 0) {
+      emitStudentObservabilityMetric(
+        'student_pending_submission_retry_total',
+        withStudentObservabilityDimensions({
+          scheduleId: record.scheduleId,
+          attemptId: record.attemptId,
+          endpoint: studentSessionTransport.paths.submit(record.scheduleId),
+          retryCount: record.retryCount,
+          syncState: 'pending_submission',
+        }),
+      );
+    }
   }
 
   async getPendingSubmissions(): Promise<PendingStudentSubmission[]> {
@@ -2682,8 +2709,18 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     const submitCycleId = generateUuid();
     const sampledSuccessLogs = shouldEmitStudentLifecycleSuccessLog(STUDENT_LIFECYCLE_LOG_SAMPLE_RATE);
     const endpoint = studentSessionTransport.paths.submit(attempt.scheduleId);
-    const submitOnce = async (candidate: StudentAttempt): Promise<BackendSubmitResponse> => {
-      const payload = await this.buildSubmitPayload(candidate, submissionId, frozenPayload);
+    const submitOnce = async (
+      candidate: StudentAttempt,
+      options?: { useLiveFields?: boolean },
+    ): Promise<BackendSubmitResponse> => {
+      // I1-residual: a live-fields resubmit deliberately bypasses the frozen
+      // payload — the frozen revision/seq are stale relative to the server's
+      // accepted mutations, so the payload is rebuilt from the current attempt.
+      const payload = await this.buildSubmitPayload(
+        candidate,
+        submissionId,
+        options?.useLiveFields ? undefined : frozenPayload,
+      );
       try {
         return await this.postWithAttemptAuth<BackendSubmitResponse>(
           candidate,
@@ -2756,11 +2793,51 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         // I1 belt-and-braces: an idempotency CONFLICT means the original
         // request already reached the server — converge to the authoritative
         // attempt instead of looping on the same drifted payload forever.
-        const converged = await this.tryConvergeAlreadySubmitted(error, attempt);
+        const statusCode = (error as { statusCode?: number }).statusCode;
+        const isConflictClass = statusCode === 409 && reason !== 'FINAL_FLUSH_REQUIRED';
+        const converged = isConflictClass
+          ? await this.tryConvergeAlreadySubmitted(error, attempt)
+          : null;
         if (converged) {
           return converged;
         }
-        throw error;
+        if (!isConflictClass || !frozenPayload) {
+          throw error;
+        }
+        // I1-residual: the converge fetch DISPROVED submission, so this 409
+        // is not "already submitted" — the frozen payload itself is rejected
+        // by the current server state (e.g. flushed mutations advanced the
+        // revision while the submit was in flight). Rethrowing would burn the
+        // retry window on a payload that can never be accepted. Abandon the
+        // frozen payload and resubmit with LIVE fields (fresh
+        // revision/seq/hash from the current attempt state); the flushed
+        // keystrokes are preserved in the rebuilt payload.
+        emitStudentObservabilityMetric(
+          'student_submit_conflict_not_converged_total',
+          withStudentObservabilityDimensions({
+            scheduleId: attempt.scheduleId,
+            attemptId: attempt.id,
+            endpoint,
+            statusCode,
+            reason,
+            syncState: attempt.recovery.syncState,
+          }),
+        );
+        try {
+          response = await submitOnce(attemptForSubmit, { useLiveFields: true });
+        } catch (liveError) {
+          const liveConverged = await this.tryConvergeAlreadySubmitted(liveError, attempt);
+          if (liveConverged) {
+            return liveConverged;
+          }
+          // The live resubmit failed too. Mark the error so the caller
+          // replaces the stale frozen payload in the durable record with the
+          // live carrier values (or drops it entirely) instead of replaying
+          // it on the next retry.
+          const carrier = liveError as SubmitPayloadCarrier;
+          carrier.invalidatesFrozenPayload = true;
+          throw liveError;
+        }
       }
     }
 

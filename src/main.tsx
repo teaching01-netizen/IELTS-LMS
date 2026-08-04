@@ -10,8 +10,9 @@ import {pruneStudentAttemptCache} from './services/studentAttemptRepository';
 import './index.css';
 
 // M3: purge expired/compacted attempt-cache records (including expired
-// pending submissions) at app bootstrap. Best-effort and non-blocking.
-void pruneStudentAttemptCache();
+// pending submissions) at app bootstrap. Best-effort and non-blocking; a
+// storage throw at startup must not produce an unhandled rejection.
+void pruneStudentAttemptCache().catch(() => {});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
