@@ -6583,7 +6583,10 @@ async fn bex035_question_type_round_trip_matrix() {
     assert_eq!(json["data"]["attempt"]["answers"]["l-short-2"].is_null(), true);
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
-    // Restore a wrong answer so the grading leg pins "wrong grades wrong".
+    // Restore a case-variant of the correct answer ("petrol") so the grading
+    // leg pins the plain-text case rule: "Petrol" is accepted and stored
+    // byte-exact (Text constraint is permissive), but plain-text grading is
+    // case-SENSITIVE (only the shared-answer path folds case) → grades wrong.
     let (status, json) = post_single_mutation_batch(
         &app,
         &attempt_token,
@@ -6591,10 +6594,10 @@ async fn bex035_question_type_round_trip_matrix() {
         &attempt_id,
         "bex035-short2-wrong",
         base_revision,
-        json!({"type": "SetScalar", "questionId": "l-short-2", "value": "diesel"}),
+        json!({"type": "SetScalar", "questionId": "l-short-2", "value": "Petrol"}),
     )
     .await;
-    expect_ok(status, &json, "SetScalar l-short-2 (wrong final)");
+    expect_ok(status, &json, "SetScalar l-short-2 (case-variant final)");
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     // TFNG legacy-minimal question (q1, no metadata): Text constraint; cleared
