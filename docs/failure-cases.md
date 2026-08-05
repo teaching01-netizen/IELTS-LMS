@@ -1242,3 +1242,82 @@ type must grade exact/incorrect/blank deterministically, free-text collapses whi
 case-sensitive), Enum/choice matches byte-exact at both the mutation layer and the grading layer
 (the submit patch path must not be able to turn a rejected variant into a correct grade), and the
 shared pool is consumed once per normalized value in blank order.
+
+## 2026-08-06: Concurrency and capacity under exam-start fan-out and submit storm (BEX-080/081, B-12)
+
+### Empirical findings (contract tests on remote TiDB, 5-connection test pool)
+
+- **Pool starvation surfaces as a raw 500 that leaks sqlx internals.** During development a true
+  10-concurrent submit storm on the 5-connection test pool against the remote TiDB Cloud endpoint
+  took ~33 s wall; the queued request that exceeded the pool acquire window (sqlx default 30 s)
+  returned
+  `500 {"code":"DATABASE_ERROR","message":"pool timed out while waiting for an open connection"}`
+  — a 500 that both misrepresents retryability and leaks pool internals. Fixed: pool-availability
+  failures (`sqlx::Error::PoolTimedOut` / `PoolClosed`) now map to a structured, retryable
+  `503 {"code":"SERVICE_UNAVAILABLE", ...}` with no internal text, via `db_error_api_error()`
+  in `backend/crates/api/src/routes/student.rs` (used by the `DeliveryError::Database`,
+  `StudentAccessRepositoryError::Database`, `AuthError::Database` mappers — the three paths
+  reachable from the submit route — plus the audit route's `map_db_error`). All other sqlx errors
+  keep the existing `500 DATABASE_ERROR` shape (existing DATABASE_ERROR contract tests still
+  pass). The committed storm test uses two sequential waves of 5 concurrent submits (each
+  in-flight submit can hold two connections: the submit transaction plus a version load on the
+  pool), so starvation is still reachable under remote latency but not deterministic; the 503
+  mapping itself is pinned deterministically by unit tests
+  (`db_error_pool_timeout_maps_to_structured_503`,
+  `db_error_pool_closed_maps_to_structured_503`,
+  `db_error_other_errors_keep_500_database_error_shape`).
+- **Per-submit hold time dominates under remote latency.** On the remote TiDB endpoint each
+  submit transaction holds its pool connection for several seconds (rate-limit INSERT+SELECT,
+  `SELECT ... FOR UPDATE`, idempotency lookups, finalization, commit). A 10-burst on 5
+  connections therefore queues beyond the acquire window whenever the remote is slow; how many
+  requests get served vs. return the structured 503 in a given run is environment-dependent.
+  Deterministic contract: served requests are always 200 with a receipt; starved requests are
+  always the structured 503; never a 500, never `pool`/`timeout` text in any body. Under a
+  catastrophically degraded remote even the first wave can starve; the test then falls back to
+  one serial submit, which must still be served with a receipt.
+- **Both live rate-limit scopes return structured retry information.** Schedule scope has no
+  burst: with `rate_limit_student_live_per_schedule = 2` the third rapid `/live` request is
+  `429 {"error":{"code":"RATE_LIMIT_EXCEEDED","details":{"scope":"schedule","retryAfterSeconds":N>=1}}}`.
+  The global scope hardcodes `.with_burst(50)` (route `get_student_live_session`), so its
+  effective capacity is `rate_limit_student_live_global + 50` per window: with `global = 1` the
+  first 51 requests are allowed and the 52nd is denied with `scope:"global"` (pinned exactly).
+- **Fan-out consistency.** With 8 students polling `/live` concurrently with StartRuntime, every
+  captured response is internally consistent: `not_started` ⇒ `actualStartAt`/
+  `currentSectionKey`/`currentSectionDeadlineAt` null; `live` ⇒ all three present,
+  `activeSectionKey == currentSectionKey == "listening"`, `revision == 1`, `sections[0]` live,
+  `sections[1]` locked; every poller eventually observes `live`; exactly 8 attempts exist in
+  `student_attempts` (no duplicates), ids distinct and matching the bootstraps.
+- **Submit storm integrity.** Every served storm submit seals the attempt exactly once: one
+  `STUDENT_SUBMIT` audit row, one `idempotency_keys` row (actor = student_key,
+  route = `POST:/api/v1/student/sessions/{id}/submit`), revision `base+1`, `submitted_at` set,
+  `final_submission.submissionId` equal to the receipt. A pool-starved 503 leaves the attempt
+  completely untouched (revision unchanged, zero audit rows). Concurrent same-key replays on a
+  served attempt return the identical cached receipt with no new rows. Clean storm (complete
+  seq metadata, no gaps) leaves `backend_submit_replay_incomplete_total 0` and
+  `student_answer_loss_risk_total` absent/zero in `/metrics` — no answer-loss telemetry.
+- **Timing pins (generous, non-flaky ceilings).** Single-exam fan-out join (StartRuntime + 8
+  pollers) ~2-3 s in the fast case; the committed storm (two waves of 5) ~120 s wall in the
+  observed runs (a true 10-burst was ~31-33 s wall during development); per-request latency
+  ceiling asserted at 60 s (30 s proved too tight: a starved request legitimately waits the full
+  30 s acquire window before its structured 503).
+
+### Regression Protection
+- Tests: `backend/tests/contracts/student_contract.rs`
+  (`bex080_exam_start_fan_out_keeps_runtime_consistent`,
+  `bex080_live_rate_limits_return_structured_retry_information`,
+  `bex081_submit_storm_exactly_one_receipt_no_answer_loss`); unit tests in
+  `backend/crates/api/src/routes/student.rs`
+  (`db_error_pool_timeout_maps_to_structured_503`,
+  `db_error_pool_closed_maps_to_structured_503`,
+  `db_error_other_errors_keep_500_database_error_shape`).
+- Production: `backend/crates/api/src/routes/student.rs` — `db_error_api_error()` maps
+  `sqlx::Error::PoolTimedOut | PoolClosed` to `503 SERVICE_UNAVAILABLE`; wired into
+  `From<DeliveryError> for ApiError`, `map_student_access_error`, `map_auth_error`, and the
+  audit route's `map_db_error`.
+
+### Invariant
+Under concurrency the API must never produce an inconsistent runtime snapshot, a missing
+deadline, a duplicate attempt, a duplicate submission receipt, a 500 from pool contention, or
+an error body leaking pool internals; schedule and global live rate limits must deny with
+structured `retryAfterSeconds`; submit retries must stay idempotent; answer-loss telemetry must
+stay at zero for clean submissions.

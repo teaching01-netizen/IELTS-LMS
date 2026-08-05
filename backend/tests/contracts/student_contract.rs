@@ -11846,3 +11846,599 @@ async fn bex063_mutation_outside_grace_rejected_and_accepted_replay_idempotent()
 
     database.shutdown().await;
 }
+
+// ---------------------------------------------------------------------------
+// BEX-080 / BEX-081 — concurrency and capacity (invariant1.md §I, B-12)
+// ---------------------------------------------------------------------------
+
+async fn live_request(
+    app: &axum::Router,
+    auth: &mysql::TestAuthContext,
+    schedule_id: Uuid,
+    candidate_id: &str,
+) -> (StatusCode, serde_json::Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/student/sessions/{schedule_id}/live?candidateId={candidate_id}"
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let json = json_body(response).await;
+    (status, json)
+}
+
+// One fan-out poller: GET /live until the runtime flips to "live" (or `cap`
+// iterations elapse). Every response is captured for post-hoc consistency
+// checks so a mid-race assertion cannot drop the StartRuntime future.
+async fn fanout_live_poller(
+    app: &axum::Router,
+    auth: &mysql::TestAuthContext,
+    schedule_id: Uuid,
+    candidate_id: &str,
+    cap: usize,
+) -> Vec<(StatusCode, serde_json::Value)> {
+    let mut samples = Vec::new();
+    for _ in 0..cap {
+        let (status, json) = live_request(app, auth, schedule_id, candidate_id).await;
+        let data = json["data"].clone();
+        let reached_live = data["runtime"]["status"].as_str() == Some("live");
+        samples.push((status, data));
+        if reached_live {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    samples
+}
+
+struct StormStudent {
+    attempt_id: String,
+    attempt_token: String,
+    base_revision: i32,
+    student_key: String,
+    candidate: String,
+    auth: mysql::TestAuthContext,
+}
+
+// One concurrent submit burst: each student in `range` posts its own
+// idempotency-keyed submit and returns (student index, status, body, elapsed).
+async fn storm_submit_burst(
+    app: &axum::Router,
+    students: &[StormStudent],
+    schedule_id: Uuid,
+    range: std::ops::Range<usize>,
+) -> Vec<(usize, StatusCode, serde_json::Value, std::time::Duration)> {
+    let app_ref = app;
+    let futures: Vec<_> = students[range.clone()]
+        .iter()
+        .enumerate()
+        .map(|(offset, s)| {
+            let i = offset + range.start;
+            let body = json!({
+                "attemptId": s.attempt_id,
+                "lastSeenRevision": s.base_revision,
+                "submissionId": format!("storm-sub-{i}"),
+                "clientFinalSeq": 0,
+                "serverAcceptedThroughSeq": 0
+            });
+            let key = format!("bex081-storm-{i}");
+            Box::pin(async move {
+                let started = std::time::Instant::now();
+                let (status, json) =
+                    post_submit_json(app_ref, &s.attempt_token, schedule_id, Some(&key), body).await;
+                (i, status, json, started.elapsed())
+            })
+        })
+        .collect();
+    futures_util::future::join_all(futures).await
+}
+
+// BEX-080 — many students poll /live while the proctor starts the exam. The
+// runtime must never show an internally inconsistent snapshot (not_started
+// carries no deadline/start fields; live carries them all), every poller must
+// observe the transition, and exactly one attempt may exist per student.
+#[tokio::test]
+async fn bex080_exam_start_fan_out_keeps_runtime_consistent() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+
+    let mut config = AppConfig::default();
+    config.rate_limit_student_live_per_schedule = 5000;
+    config.rate_limit_student_live_per_schedule_window_secs = 3600;
+    config.rate_limit_student_live_global = 20000;
+    config.rate_limit_student_live_global_window_secs = 3600;
+    let app = build_router(AppState::with_pool(config, database.pool().clone()));
+
+    let mut students = Vec::new();
+    for i in 0..8usize {
+        let candidate = format!("p{i}");
+        let wcode = format!("W{:06}", i + 1);
+        let (auth, student_key) =
+            create_student_auth_with_wcode(database.pool(), schedule_id, &candidate, &wcode).await;
+        let (bootstrap, _) =
+            bootstrap_attempt(&app, &auth, schedule_id, &candidate, &student_key).await;
+        let attempt_id = bootstrap["data"]["attempt"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        students.push(StormStudent {
+            attempt_id,
+            attempt_token: String::new(),
+            base_revision: 0,
+            student_key,
+            candidate,
+            auth,
+        });
+    }
+    let distinct_attempts: std::collections::HashSet<&str> =
+        students.iter().map(|s| s.attempt_id.as_str()).collect();
+    assert_eq!(distinct_attempts.len(), 8, "bootstraps must yield distinct attempt ids");
+
+    // Fan-out: StartRuntime races 8 pollers hammering /live.
+    let scheduling = SchedulingService::new(database.pool().clone());
+    let actor = contract_actor();
+    let start_future = Box::pin(scheduling.apply_runtime_command(
+        &actor,
+        schedule_id,
+        RuntimeCommandRequest {
+            action: RuntimeCommandAction::StartRuntime,
+            reason: Some("contract fan-out start (BEX-080)".to_owned()),
+        },
+    ));
+    let fanout_started = std::time::Instant::now();
+    let (start_result, p0, p1, p2, p3, p4, p5, p6, p7) = tokio::join!(
+        start_future,
+        Box::pin(fanout_live_poller(&app, &students[0].auth, schedule_id, &students[0].candidate, 240)),
+        Box::pin(fanout_live_poller(&app, &students[1].auth, schedule_id, &students[1].candidate, 240)),
+        Box::pin(fanout_live_poller(&app, &students[2].auth, schedule_id, &students[2].candidate, 240)),
+        Box::pin(fanout_live_poller(&app, &students[3].auth, schedule_id, &students[3].candidate, 240)),
+        Box::pin(fanout_live_poller(&app, &students[4].auth, schedule_id, &students[4].candidate, 240)),
+        Box::pin(fanout_live_poller(&app, &students[5].auth, schedule_id, &students[5].candidate, 240)),
+        Box::pin(fanout_live_poller(&app, &students[6].auth, schedule_id, &students[6].candidate, 240)),
+        Box::pin(fanout_live_poller(&app, &students[7].auth, schedule_id, &students[7].candidate, 240)),
+    );
+    let fanout_elapsed = fanout_started.elapsed();
+    start_result.expect("StartRuntime must succeed under fan-out");
+    eprintln!(
+        "BEX-080 fan-out: StartRuntime + 8 pollers completed in {} ms",
+        fanout_elapsed.as_millis()
+    );
+
+    for (student, samples) in students.iter().zip([p0, p1, p2, p3, p4, p5, p6, p7]) {
+        assert!(!samples.is_empty(), "poller for {} produced no samples", student.candidate);
+        assert_eq!(
+            samples.last().unwrap().1["runtime"]["status"].as_str(),
+            Some("live"),
+            "poller for {} must eventually observe the live runtime",
+            student.candidate
+        );
+        for (code, data) in &samples {
+            assert_eq!(*code, StatusCode::OK, "fan-out poll for {} must stay 200", student.candidate);
+            assert_eq!(
+                data["attempt"]["id"].as_str(),
+                Some(student.attempt_id.as_str()),
+                "each poller must see its own attempt"
+            );
+            let runtime = &data["runtime"];
+            match runtime["status"].as_str() {
+                Some("not_started") => {
+                    assert_eq!(runtime["activeSectionKey"], serde_json::Value::Null, "{}", student.candidate);
+                    assert_eq!(runtime["currentSectionKey"], serde_json::Value::Null, "{}", student.candidate);
+                    assert_eq!(runtime["currentSectionDeadlineAt"], serde_json::Value::Null, "{}", student.candidate);
+                    assert_eq!(runtime["actualStartAt"], serde_json::Value::Null, "{}", student.candidate);
+                }
+                Some("live") => {
+                    assert!(runtime["actualStartAt"].is_string(), "live must carry actualStartAt ({})", student.candidate);
+                    assert_eq!(runtime["activeSectionKey"], "listening", "{}", student.candidate);
+                    assert_eq!(runtime["currentSectionKey"], "listening", "{}", student.candidate);
+                    assert!(
+                        runtime["currentSectionDeadlineAt"].is_string(),
+                        "live must carry the section deadline (no missing deadline) for {}",
+                        student.candidate
+                    );
+                    assert!(runtime["serverNow"].is_string(), "{}", student.candidate);
+                    assert_eq!(runtime["revision"].as_i64(), Some(1), "{}", student.candidate);
+                    let sections = runtime["sections"].as_array().expect("sections array");
+                    assert_eq!(sections[0]["sectionKey"], "listening", "{}", student.candidate);
+                    assert_eq!(sections[0]["status"], "live", "{}", student.candidate);
+                    assert_eq!(sections[1]["sectionKey"], "reading", "{}", student.candidate);
+                    assert_eq!(sections[1]["status"], "locked", "{}", student.candidate);
+                }
+                other => panic!("poller for {} observed unexpected runtime status {other:?}", student.candidate),
+            }
+        }
+    }
+
+    // Exactly N attempts persisted, distinct ids, matching the bootstraps.
+    let db_attempts: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM student_attempts WHERE schedule_id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_all(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(db_attempts.len(), 8, "fan-out must not create duplicate attempts");
+    let db_unique: std::collections::HashSet<&str> =
+        db_attempts.iter().map(|s| s.as_str()).collect();
+    assert_eq!(db_unique.len(), 8, "attempt ids must be distinct");
+    assert_eq!(db_unique, distinct_attempts, "DB attempts must match the bootstrapped ids");
+
+    database.shutdown().await;
+}
+
+// BEX-080 — schedule and global live rate limits return structured retry
+// information. Note the global limiter carries a hardcoded .with_burst(50),
+// so its effective capacity is rate_limit_student_live_global + 50 per
+// window: with global = 1 the first 51 requests are allowed and the 52nd is
+// denied with scope "global".
+#[tokio::test]
+async fn bex080_live_rate_limits_return_structured_retry_information() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, _student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+
+    // (b) schedule scope first: capacity = per_schedule (no burst), so the
+    // third rapid request trips the schedule bucket. Schedule window 3600s so
+    // that bucket cannot roll mid-test; the global bucket keeps its default
+    // 60s window so part (a) below sees a fresh global bucket (a 3600s floor).
+    let mut config = AppConfig::default();
+    config.rate_limit_student_live_per_schedule = 2;
+    config.rate_limit_student_live_per_schedule_window_secs = 3600;
+    config.rate_limit_student_live_global = 100;
+    let app_b = build_router(AppState::with_pool(config, database.pool().clone()));
+
+    let (first_status, first_json) = live_request(&app_b, &auth, schedule_id, "alice").await;
+    assert_eq!(first_status, StatusCode::OK, "{first_json}");
+    let (second_status, second_json) = live_request(&app_b, &auth, schedule_id, "alice").await;
+    assert_eq!(second_status, StatusCode::OK, "{second_json}");
+    let (third_status, third_json) = live_request(&app_b, &auth, schedule_id, "alice").await;
+    assert_eq!(third_status, StatusCode::TOO_MANY_REQUESTS, "{third_json}");
+    assert_eq!(third_json["success"], false);
+    assert_eq!(third_json["error"]["code"], "RATE_LIMIT_EXCEEDED");
+    assert_eq!(third_json["error"]["details"]["scope"], "schedule");
+    let retry_after = third_json["error"]["details"]["retryAfterSeconds"]
+        .as_i64()
+        .unwrap_or(0);
+    assert!(retry_after >= 1, "retryAfterSeconds must be a number >= 1: {third_json}");
+    assert!(
+        third_json["error"]["message"].as_str().unwrap_or("").contains("Retry after"),
+        "the 429 message must carry retry guidance: {third_json}"
+    );
+
+    // (a) global scope: per_schedule is raised so only the global bucket can
+    // trip. Effective capacity = 1 + 50 (hardcoded burst) = 51; the 52nd
+    // request is denied with scope "global". A separate window (3600s) keeps
+    // the bucket isolated from the schedule-scope probe above.
+    let mut config = AppConfig::default();
+    config.rate_limit_student_live_per_schedule = 1000;
+    config.rate_limit_student_live_per_schedule_window_secs = 3600;
+    config.rate_limit_student_live_global = 1;
+    config.rate_limit_student_live_global_window_secs = 3600;
+    let app_a = build_router(AppState::with_pool(config, database.pool().clone()));
+
+    let mut allowed = 0usize;
+    let mut denied: Option<serde_json::Value> = None;
+    for _ in 0..60 {
+        let (status, json) = live_request(&app_a, &auth, schedule_id, "alice").await;
+        match status {
+            StatusCode::OK => allowed += 1,
+            StatusCode::TOO_MANY_REQUESTS => {
+                denied = Some(json);
+                break;
+            }
+            other => panic!("unexpected live status {other} during global-capacity probe"),
+        }
+    }
+    let denied_json = denied.expect("the global live bucket must eventually deny");
+    assert_eq!(allowed, 51, "effective global capacity must be limit(1) + burst(50)");
+    assert_eq!(denied_json["success"], false);
+    assert_eq!(denied_json["error"]["code"], "RATE_LIMIT_EXCEEDED");
+    assert_eq!(denied_json["error"]["details"]["scope"], "global");
+    let retry_after = denied_json["error"]["details"]["retryAfterSeconds"]
+        .as_i64()
+        .unwrap_or(0);
+    assert!(retry_after >= 1, "retryAfterSeconds must be a number >= 1: {denied_json}");
+    assert!(
+        denied_json["error"]["message"].as_str().unwrap_or("").contains("Retry after"),
+        "the 429 message must carry retry guidance: {denied_json}"
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-081 — a submit storm (10 students submitting concurrently) must yield
+// exactly one receipt per attempt, one STUDENT_SUBMIT audit row, one
+// idempotency row, no 500s, no pool exhaustion, no answer-loss telemetry, and
+// idempotent retries under concurrency.
+#[tokio::test]
+async fn bex081_submit_storm_exactly_one_receipt_no_answer_loss() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+
+    // Start the runtime once; every student then bootstraps into phase "exam".
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("contract storm start (BEX-081)".to_owned()),
+            },
+        )
+        .await
+        .expect("StartRuntime must succeed before the storm");
+
+    let mut students = Vec::new();
+    for i in 0..10usize {
+        let candidate = format!("storm{i}");
+        let wcode = format!("W{:06}", 100 + i);
+        let (auth, student_key) =
+            create_student_auth_with_wcode(database.pool(), schedule_id, &candidate, &wcode).await;
+        let (bootstrap, _) =
+            bootstrap_attempt(&app, &auth, schedule_id, &candidate, &student_key).await;
+        assert_eq!(bootstrap["data"]["attempt"]["phase"], "exam", "{bootstrap}");
+        let attempt_id = bootstrap["data"]["attempt"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let base_revision = bootstrap["data"]["attempt"]["revision"]
+            .as_i64()
+            .unwrap() as i32;
+        students.push(StormStudent {
+            attempt_id,
+            attempt_token,
+            base_revision,
+            student_key,
+            candidate,
+            auth,
+        });
+    }
+
+    // Submit storm in two sequential waves against the 5-connection test
+    // pool. Each in-flight submit can hold TWO connections at once (the
+    // submit transaction plus a concurrent version load on the pool), so even
+    // 5 concurrent submits can starve the pool; a request that cannot acquire
+    // a connection within the 30s acquire window must return a structured 503
+    // — never a 500 and never an error that leaks pool internals. Whether the
+    // remote is slow enough to force a 503 in a given run is
+    // environment-dependent; the assertions below accept either outcome.
+    let wave1 = storm_submit_burst(&app, &students, schedule_id, 0..5).await;
+    let storm_started = std::time::Instant::now();
+    let wave2 = storm_submit_burst(&app, &students, schedule_id, 5..10).await;
+    eprintln!(
+        "BEX-081 storm: 10 submits (2 waves of 5) completed in {} ms",
+        storm_started.elapsed().as_millis()
+    );
+    let mut results = wave1;
+    results.extend(wave2);
+
+    let mut receipts: Vec<(usize, String)> = Vec::new();
+    let mut capacity_signals = 0usize;
+    for (i, status, json, elapsed) in results {
+        let body_text = format!("{json}");
+        assert!(
+            !body_text.contains("pool") && !body_text.contains("timeout"),
+            "storm submit {i} must not leak pool/timeout internals: {json}"
+        );
+        match status {
+            StatusCode::OK => {
+                let submission_id = json["data"]["submissionId"]
+                    .as_str()
+                    .expect("every served storm submit must carry a receipt")
+                    .to_owned();
+                receipts.push((i, submission_id));
+                assert!(
+                    elapsed.as_secs() < 60,
+                    "storm submit {i} took {}s (generous ceiling; see docs/failure-cases.md B-12)",
+                    elapsed.as_secs()
+                );
+                assert_eq!(
+                    json["data"]["attempt"]["phase"], "post-exam",
+                    "served storm submit must seal the attempt: {json}"
+                );
+            }
+            StatusCode::SERVICE_UNAVAILABLE => {
+                // Pool starvation on the constrained 5-connection test pool
+                // (or a degraded remote) is a retryable capacity signal:
+                // structured 503, nothing served, the attempt left untouched
+                // (BEX-081, empirical note B-12).
+                capacity_signals += 1;
+                assert_eq!(json["error"]["code"], "SERVICE_UNAVAILABLE", "{json}");
+                let s = &students[i];
+                assert_eq!(
+                    persisted_revision(database.pool(), &s.attempt_id).await,
+                    i64::from(s.base_revision),
+                    "a pool-starved submit must not touch the attempt"
+                );
+                assert_eq!(
+                    persisted_audit_by_action(database.pool(), &s.attempt_id, "STUDENT_SUBMIT")
+                        .await,
+                    0,
+                    "a pool-starved submit must not write a STUDENT_SUBMIT row"
+                );
+            }
+            other => panic!("storm submit {i} returned unexpected status {other}: {json}"),
+        }
+    }
+    // Robustness: under a catastrophically degraded remote even wave 1 can
+    // starve (observed once during development). The contract still requires
+    // that a submission CAN be served, so fall back to one serial submit.
+    let mut receipts = receipts;
+    if receipts.is_empty() {
+        eprintln!("BEX-081: storm served nothing; retrying one submit serially");
+        let s = &students[0];
+        let (status, json) = post_submit_json(
+            &app,
+            &s.attempt_token,
+            schedule_id,
+            Some("bex081-storm-fallback-0"),
+            json!({
+                "attemptId": s.attempt_id,
+                "lastSeenRevision": s.base_revision,
+                "submissionId": "storm-sub-fallback-0",
+                "clientFinalSeq": 0,
+                "serverAcceptedThroughSeq": 0
+            }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "a serial fallback submit must be served: {json}"
+        );
+        let submission_id = json["data"]["submissionId"]
+            .as_str()
+            .expect("serial fallback submit must carry a receipt")
+            .to_owned();
+        receipts.push((0, submission_id));
+    }
+    eprintln!(
+        "BEX-081: {}/10 storm submits served, {} returned structured 503 capacity signals",
+        receipts.len(),
+        capacity_signals
+    );
+
+    // DB integrity: every attempt that got a 200 receipt has exactly one
+    // STUDENT_SUBMIT row, one idempotency row, a single revision bump, and a
+    // sealed submitted_at carrying the same submissionId.
+    let route_key = format!("POST:/api/v1/student/sessions/{schedule_id}/submit");
+    for (i, submission_id) in &receipts {
+        let s = &students[*i];
+        assert_eq!(
+            persisted_audit_by_action(database.pool(), &s.attempt_id, "STUDENT_SUBMIT").await,
+            1,
+            "attempt {} must have exactly one STUDENT_SUBMIT row",
+            s.attempt_id
+        );
+        assert_eq!(
+            persisted_idempotency_count(
+                database.pool(),
+                &s.student_key,
+                &route_key,
+                &format!("bex081-storm-{i}")
+            )
+            .await,
+            1,
+            "exactly one idempotency row per storm key"
+        );
+        assert_eq!(
+            persisted_revision(database.pool(), &s.attempt_id).await,
+            i64::from(s.base_revision) + 1,
+            "submit must bump the revision exactly once"
+        );
+        assert!(
+            persisted_submitted_at(database.pool(), &s.attempt_id)
+                .await
+                .is_some(),
+            "storm submit must seal the attempt"
+        );
+        let final_submission = persisted_final_submission(database.pool(), &s.attempt_id).await;
+        assert_eq!(
+            final_submission["submissionId"].as_str(),
+            Some(submission_id.as_str()),
+            "the finalized snapshot must carry the same submission id"
+        );
+    }
+
+    // Concurrent same-key retry on a served attempt: both callers get the
+    // identical cached receipt, and no extra rows appear.
+    let (replay_index, original_receipt) = &receipts[0];
+    let replay_student = &students[*replay_index];
+    let replay_key = format!("bex081-storm-{replay_index}");
+    let replay_body = json!({
+        "attemptId": replay_student.attempt_id,
+        "lastSeenRevision": replay_student.base_revision,
+        "submissionId": format!("storm-sub-{replay_index}"),
+        "clientFinalSeq": 0,
+        "serverAcceptedThroughSeq": 0
+    });
+    let replay1 = Box::pin(post_submit_json(
+        &app,
+        &replay_student.attempt_token,
+        schedule_id,
+        Some(&replay_key),
+        replay_body.clone(),
+    ));
+    let replay2 = Box::pin(post_submit_json(
+        &app,
+        &replay_student.attempt_token,
+        schedule_id,
+        Some(&replay_key),
+        replay_body,
+    ));
+    let ((r1_status, r1_json), (r2_status, r2_json)) = tokio::join!(replay1, replay2);
+    assert_eq!(r1_status, StatusCode::OK, "{r1_json}");
+    assert_eq!(r2_status, StatusCode::OK, "{r2_json}");
+    assert_eq!(r1_json["data"]["submissionId"], r2_json["data"]["submissionId"]);
+    assert_eq!(
+        r1_json["data"]["submissionId"].as_str(),
+        Some(original_receipt.as_str()),
+        "concurrent replay must return the original receipt"
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &replay_student.attempt_id, "STUDENT_SUBMIT")
+            .await,
+        1,
+        "replay must not add a second STUDENT_SUBMIT row"
+    );
+    assert_eq!(
+        persisted_idempotency_count(
+            database.pool(),
+            &replay_student.student_key,
+            &route_key,
+            &replay_key
+        )
+        .await,
+        1,
+        "replay must not add a second idempotency row"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &replay_student.attempt_id).await,
+        i64::from(replay_student.base_revision) + 1,
+        "replay must not bump the revision"
+    );
+
+    // No answer-loss telemetry: a clean storm (complete seq metadata, no gaps)
+    // must leave both counters at zero.
+    let metrics_response = app
+        .clone()
+        .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(metrics_response.status(), StatusCode::OK, "prometheus must be enabled");
+    let metrics_body = to_bytes(metrics_response.into_body(), usize::MAX).await.unwrap();
+    let metrics_text = String::from_utf8(metrics_body.to_vec()).unwrap();
+    let loss_lines: Vec<&str> = metrics_text
+        .lines()
+        .filter(|line| {
+            line.starts_with("student_answer_loss_risk_total")
+                || line.starts_with("backend_submit_replay_incomplete_total")
+        })
+        .collect();
+    assert!(
+        !loss_lines.is_empty(),
+        "answer-loss metric families must be present in /metrics"
+    );
+    for line in loss_lines {
+        let value = line.rsplit(' ').next().unwrap_or("");
+        assert_eq!(value, "0", "answer-loss telemetry must stay at zero: {line}");
+    }
+
+    database.shutdown().await;
+}

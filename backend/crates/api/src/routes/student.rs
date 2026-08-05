@@ -978,13 +978,9 @@ pub async fn record_audit(
     }
     let payload_value = Value::Object(payload_map);
 
-    let map_db_error = |err: sqlx::Error| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "DATABASE_ERROR",
-            &err.to_string(),
-        )
-    };
+    // Pool-starved audit requests surface as a structured retryable 503 rather
+    // than leaking sqlx pool internals (same policy as the submit path, BEX-081).
+    let map_db_error = db_error_api_error;
 
     let mut tx = state.db_pool().begin().await.map_err(map_db_error)?;
 
@@ -1315,11 +1311,7 @@ impl From<DeliveryError> for ApiError {
             DeliveryError::Internal(msg) => {
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", &msg)
             }
-            DeliveryError::Database(err) => ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "DATABASE_ERROR",
-                &err.to_string(),
-            ),
+            DeliveryError::Database(err) => db_error_api_error(err),
         }
     }
 }
@@ -1457,24 +1449,34 @@ async fn load_attempt_candidate_name(
 
 fn map_student_access_error(error: StudentAccessRepositoryError) -> ApiError {
     match error {
-        StudentAccessRepositoryError::Database(err) => ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "DATABASE_ERROR",
-            &err.to_string(),
-        ),
+        StudentAccessRepositoryError::Database(err) => db_error_api_error(err),
         StudentAccessRepositoryError::NotFound => {
             ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
         }
     }
 }
 
+// A pool-starved request (no connection within the acquire timeout) is a
+// retryable capacity signal, not an internal failure: it must surface as a
+// structured 503 without leaking sqlx pool internals (BEX-081).
+fn db_error_api_error(error: sqlx::Error) -> ApiError {
+    if matches!(&error, sqlx::Error::PoolTimedOut | sqlx::Error::PoolClosed) {
+        return ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "SERVICE_UNAVAILABLE",
+            "The service is temporarily overloaded; retry after a short delay.",
+        );
+    }
+    ApiError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "DATABASE_ERROR",
+        &error.to_string(),
+    )
+}
+
 fn map_auth_error(error: ielts_backend_application::auth::AuthError) -> ApiError {
     match error {
-        ielts_backend_application::auth::AuthError::Database(err) => ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "DATABASE_ERROR",
-            &err.to_string(),
-        ),
+        ielts_backend_application::auth::AuthError::Database(err) => db_error_api_error(err),
         ielts_backend_application::auth::AuthError::InvalidCredentials
         | ielts_backend_application::auth::AuthError::Unauthorized => ApiError::new(
             StatusCode::UNAUTHORIZED,
@@ -1823,5 +1825,36 @@ mod tests {
         });
         let id = violation_business_id_from_payload(&payload).unwrap();
         assert_eq!(id, "vio-123");
+    }
+
+    #[test]
+    fn db_error_pool_timeout_maps_to_structured_503() {
+        // BEX-081: a request starved of a pool connection is a retryable
+        // capacity signal, never a 500 leaking sqlx internals.
+        let err = db_error_api_error(sqlx::Error::PoolTimedOut);
+        assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(err.code, "SERVICE_UNAVAILABLE");
+        assert!(
+            !err.message.contains("pool") && !err.message.contains("timed out"),
+            "the 503 message must not leak sqlx internals: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn db_error_pool_closed_maps_to_structured_503() {
+        let err = db_error_api_error(sqlx::Error::PoolClosed);
+        assert_eq!(err.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(err.code, "SERVICE_UNAVAILABLE");
+    }
+
+    #[test]
+    fn db_error_other_errors_keep_500_database_error_shape() {
+        // Only pool-availability failures change shape; every other sqlx
+        // error keeps the pre-existing 500 DATABASE_ERROR with its message.
+        let err = db_error_api_error(sqlx::Error::RowNotFound);
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.code, "DATABASE_ERROR");
+        assert_eq!(err.message, sqlx::Error::RowNotFound.to_string());
     }
 }
