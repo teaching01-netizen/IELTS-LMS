@@ -5688,6 +5688,22 @@ async fn persisted_revision(pool: &sqlx::MySqlPool, attempt_id: &str) -> i64 {
         .unwrap()
 }
 
+async fn persisted_mutation_row_count(pool: &sqlx::MySqlPool, attempt_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn persisted_recovery(pool: &sqlx::MySqlPool, attempt_id: &str) -> serde_json::Value {
+    sqlx::query_scalar("SELECT recovery FROM student_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 // BEX-030 — every supported objective mutation command against its matching
 // block type in the active section, with DB round-trip, empty-vs-clear
 // semantics, and a full authoritative response per batch.
@@ -7138,6 +7154,803 @@ async fn mutation_batch_rejects_unknown_top_level_fields_and_malformed_commands(
             .await
             .unwrap();
     assert_eq!(answers, json!({}));
+
+    database.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// BEX-040 — reconnect replay: offline-composed mutations replayed in chunks
+// apply deterministically, advance the per-session watermark, and never lose
+// or duplicate an accepted mutation.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn bex040_reconnect_replay_chunked_batches_apply_in_order_without_loss() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    // Real runtime start (INSERTs the runtime row; the SQL-only helper cannot
+    // be used because it merely UPDATes and would silently leave the runtime
+    // absent, disabling the section/objective gates).
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("contract runtime start".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // The offline client composed 6 mutations (client order 1..6) while
+    // disconnected; on reconnect it replays them in 2 chunks of 3 under the
+    // SAME client_session_id. q1 is written three times and l-short-1 twice,
+    // so "latest seq wins" is observable both across chunks and within a
+    // chunk.
+    let chunk1 = json!([
+        {"mutationId": "reconnect-m1", "baseRevision": base_revision, "type": "SetChoice", "questionId": "q1", "value": "F"},
+        {"mutationId": "reconnect-m2", "baseRevision": base_revision, "type": "SetScalar", "questionId": "l-short-1", "value": "diagram"},
+        {"mutationId": "reconnect-m3", "baseRevision": base_revision, "type": "SetChoice", "questionId": "q1", "value": "T"}
+    ]);
+    let (status, chunk1_json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({ "attemptId": attempt_id.clone(), "mutations": chunk1.clone() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{chunk1_json}");
+    // (a)/(c) deterministic order within a chunk: the LAST mutation for q1
+    // wins even though an earlier one in the same batch wrote the same key.
+    assert_eq!(chunk1_json["data"]["appliedMutationCount"], 3);
+    assert_eq!(chunk1_json["data"]["serverAcceptedThroughSeq"], 3);
+    assert_eq!(
+        chunk1_json["data"]["attempt"]["answers"]["q1"],
+        "T",
+        "within-chunk latest wins (m3 after m1)"
+    );
+    assert_eq!(chunk1_json["data"]["attempt"]["answers"]["l-short-1"], "diagram");
+    assert_eq!(chunk1_json["data"]["revision"], base_revision + 1);
+
+    let revision_after_chunk1 = chunk1_json["data"]["revision"].as_i64().unwrap() as i32;
+    let chunk2 = json!([
+        {"mutationId": "reconnect-m4", "baseRevision": revision_after_chunk1, "type": "SetChoice", "questionId": "l-tfng-1", "value": "F"},
+        {"mutationId": "reconnect-m5", "baseRevision": revision_after_chunk1, "type": "SetChoice", "questionId": "q1", "value": "F"},
+        {"mutationId": "reconnect-m6", "baseRevision": revision_after_chunk1, "type": "SetScalar", "questionId": "l-short-1", "value": "petrol"}
+    ]);
+    let (status, chunk2_json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({ "attemptId": attempt_id.clone(), "mutations": chunk2.clone() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{chunk2_json}");
+    // (b) watermark advances 3 -> 6; (c) latest seq wins ACROSS chunks too.
+    assert_eq!(chunk2_json["data"]["appliedMutationCount"], 3);
+    assert_eq!(chunk2_json["data"]["serverAcceptedThroughSeq"], 6);
+    assert_eq!(chunk2_json["data"]["revision"], base_revision + 2);
+    assert_eq!(
+        chunk2_json["data"]["attempt"]["answers"]["q1"],
+        "F",
+        "cross-chunk latest wins (m5 seq 5 after m3 seq 3)"
+    );
+    assert_eq!(chunk2_json["data"]["attempt"]["answers"]["l-short-1"], "petrol");
+    assert_eq!(chunk2_json["data"]["attempt"]["answers"]["l-tfng-1"], "F");
+
+    // (b) the recovery watermark and pending count reflect the persisted
+    // state on the response AND in the DB.
+    assert_eq!(
+        chunk2_json["data"]["attempt"]["recovery"]["serverAcceptedThroughSeq"], 6
+    );
+    assert_eq!(chunk2_json["data"]["attempt"]["recovery"]["pendingMutationCount"], 0);
+    assert_eq!(chunk2_json["data"]["attempt"]["recovery"]["syncState"], "saved");
+    assert_eq!(
+        chunk2_json["data"]["attempt"]["recovery"]["clientSessionId"],
+        client_session_id
+    );
+    let db_recovery = persisted_recovery(database.pool(), &attempt_id).await;
+    assert_eq!(db_recovery["serverAcceptedThroughSeq"], 6);
+    assert_eq!(db_recovery["pendingMutationCount"], 0);
+    assert_eq!(db_recovery["syncState"], "saved");
+    assert_eq!(db_recovery["clientSessionId"], client_session_id);
+
+    // (d) no accepted mutation lost during chunking: exactly one row per
+    // client_mutation_id, seqs 1..6 contiguous, exactly two revision bumps.
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        6,
+        "all six accepted mutations persisted exactly once"
+    );
+    let distinct_ids: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT client_mutation_id) FROM student_attempt_mutations WHERE attempt_id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(distinct_ids, 6, "no duplicate client_mutation_id rows");
+    let seqs: String = sqlx::query_scalar(
+        "SELECT GROUP_CONCAT(mutation_seq ORDER BY mutation_seq) FROM student_attempt_mutations WHERE attempt_id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(seqs, "1,2,3,4,5,6", "watermark seqs are contiguous and in apply order");
+
+    // (d) partial replay: the client re-sends chunk 1 (identical ids/values)
+    // after chunk 2 already committed. Dedupe must short-circuit with a 200,
+    // zero applied mutations, the CURRENT watermark, and no extra rows.
+    let (status, replay_json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({ "attemptId": attempt_id.clone(), "mutations": chunk1.clone() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay_json}");
+    assert_eq!(replay_json["data"]["appliedMutationCount"], 0);
+    assert_eq!(replay_json["data"]["serverAcceptedThroughSeq"], 6);
+    assert_eq!(replay_json["data"]["revision"], base_revision + 2);
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        6,
+        "replayed chunk must not duplicate or lose rows"
+    );
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["q1"], "F");
+    assert_eq!(answers["l-short-1"], "petrol");
+    assert_eq!(answers["l-tfng-1"], "F");
+
+    database.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// BEX-041 — replay across section transition: pending mutations composed
+// before a transition are either accepted within the configured grace
+// boundary or rejected with a structured section-lock reason. Never a
+// generic failure, and never partial state on rejection.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn bex041_replay_across_section_transition_grace_or_structured_conflict() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let admin_auth = mysql::create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "admin@example.com",
+        "Admin",
+    )
+    .await;
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let start = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
+    assert_eq!(start.status(), StatusCode::OK);
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // ---- (a) TIMER EXPIRY ------------------------------------------------
+    // The client composes a listening mutation while the section is live,
+    // the section expires (timer path), and the client replays it after the
+    // transition.
+    let pending_timer_expiry = json!({
+        "mutationId": "pending-timer-expiry",
+        "baseRevision": revision,
+        "type": "SetChoice",
+        "questionId": "q1",
+        "value": "T"
+    });
+    transition_runtime_from_listening_to_reading(database.pool(), schedule_id).await;
+
+    // Within the 300s grace window the late listening answer is accepted.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({ "attemptId": attempt_id.clone(), "mutations": [pending_timer_expiry] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"]["appliedMutationCount"], 1);
+    assert_eq!(json["data"]["serverAcceptedThroughSeq"], 1);
+    revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    assert_eq!(json["data"]["attempt"]["answers"]["q1"], "T");
+
+    // Backdate the completed section beyond the grace boundary: the same
+    // kind of late replay must now surface a STRUCTURED section-lock.
+    sqlx::query(
+        r#"
+        UPDATE exam_session_runtime_sections
+        SET actual_end_at = NOW() - INTERVAL 360 SECOND
+        WHERE runtime_id = (SELECT id FROM exam_session_runtimes WHERE schedule_id = ?)
+          AND section_key = 'listening'
+        "#,
+    )
+    .bind(schedule_id.to_string())
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "pending-timer-expiry-past-grace",
+                "baseRevision": revision,
+                "type": "SetChoice",
+                "questionId": "q1",
+                "value": "F"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(json["error"]["details"]["reason"], "SECTION_MISMATCH");
+    assert!(
+        json["error"]["message"].as_str().unwrap().contains("q1"),
+        "conflict must name the offending question: {json}"
+    );
+    // No partial state on rejection.
+    assert_eq!(persisted_revision(database.pool(), &attempt_id).await, revision as i64);
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        1,
+        "rejected replay must not insert a mutation row"
+    );
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["q1"], "T", "rejected replay must not touch answers");
+
+    // ---- (b) PROCTOR SECTION ADVANCE --------------------------------------
+    // The proctor advances reading -> writing through the control surface;
+    // a reading mutation composed before the advance is replayed after the
+    // grace window has been pushed out (backdate) and must be rejected with
+    // the structured reason.
+    let advance = admin_end_section_now(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "expectedActiveSectionKey": "reading", "reason": "advance to writing" }),
+    )
+    .await;
+    assert_eq!(advance.status(), StatusCode::OK);
+    assert_eq!(json_body(advance).await["data"]["activeSectionKey"], "writing");
+    sqlx::query(
+        r#"
+        UPDATE exam_session_runtime_sections
+        SET actual_end_at = NOW() - INTERVAL 360 SECOND
+        WHERE runtime_id = (SELECT id FROM exam_session_runtimes WHERE schedule_id = ?)
+          AND section_key = 'reading'
+        "#,
+    )
+    .bind(schedule_id.to_string())
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "pending-proctor-advance",
+                "baseRevision": revision,
+                "type": "SetChoice",
+                "questionId": "r1",
+                "value": "T"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(json["error"]["details"]["reason"], "SECTION_MISMATCH");
+    assert_eq!(persisted_revision(database.pool(), &attempt_id).await, revision as i64);
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        1,
+        "proctor-advance rejection must not insert rows"
+    );
+
+    // ---- (c) RUNTIME PAUSE -------------------------------------------------
+    // (c1) Cohort pause: the runtime status flips to 'paused'; the mutation
+    // gate pins OBJECTIVE_LOCKED (objective_mutation_gate blocks any runtime
+    // status of paused/completed/cancelled).
+    let pause = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "pause_runtime" }),
+    )
+    .await;
+    assert_eq!(pause.status(), StatusCode::OK);
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "pending-runtime-pause",
+                "baseRevision": revision,
+                "type": "SetEssayText",
+                "taskId": "task1",
+                "value": "draft during pause"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["details"]["reason"], "OBJECTIVE_LOCKED",
+        "cohort runtime pause must reject with OBJECTIVE_LOCKED: {json}"
+    );
+    assert_eq!(persisted_revision(database.pool(), &attempt_id).await, revision as i64);
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        1,
+        "runtime-pause rejection must not insert rows"
+    );
+    let writing_answers = persisted_writing_answers(database.pool(), &attempt_id).await;
+    assert_eq!(writing_answers, json!({}), "runtime-pause rejection must not touch writing answers");
+
+    // (c2) Individual attempt pause: the attempt's proctor_status flips to
+    // 'paused' while the runtime stays live; the gate pins
+    // ATTEMPT_PROCTOR_BLOCKED.
+    let resume = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "resume_runtime" }),
+    )
+    .await;
+    assert_eq!(resume.status(), StatusCode::OK);
+    let individual = app
+        .clone()
+        .oneshot(
+            admin_auth
+                .with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/proctor/sessions/{schedule_id}/attempts/{attempt_id}/pause"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&AttemptCommandRequest {
+                        message: None,
+                        reason: Some("individual-check".to_owned()),
+                        expected_active_section_key: None,
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(individual.status(), StatusCode::OK);
+    // Pin (BEX-041): the individual pause bumps the attempt revision exactly
+    // once (update_attempt_status runs revision = revision + 1), so a client
+    // re-bases its pending mutation on the post-pause revision; otherwise the
+    // base-revision gate (which runs BEFORE the proctor gate) would fire
+    // BASE_REVISION_MISMATCH instead of the pause reason.
+    let revision_after_pause = persisted_revision(database.pool(), &attempt_id).await as i32;
+    assert_eq!(
+        revision_after_pause, revision + 1,
+        "individual attempt pause bumps the attempt revision once"
+    );
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "pending-attempt-pause",
+                "baseRevision": revision_after_pause,
+                "type": "SetEssayText",
+                "taskId": "task1",
+                "value": "draft while attempt paused"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["details"]["reason"], "ATTEMPT_PROCTOR_BLOCKED",
+        "individual attempt pause must reject with ATTEMPT_PROCTOR_BLOCKED: {json}"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_after_pause as i64,
+        "attempt-pause rejection must not bump the revision"
+    );
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        1,
+        "attempt-pause rejection must not insert rows"
+    );
+    let resume = app
+        .clone()
+        .oneshot(
+            admin_auth
+                .with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/proctor/sessions/{schedule_id}/attempts/{attempt_id}/resume"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&AttemptCommandRequest {
+                        message: None,
+                        reason: Some("resume-after-check".to_owned()),
+                        expected_active_section_key: None,
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resume.status(), StatusCode::OK);
+
+    // ---- (d) FINAL COMPLETION ----------------------------------------------
+    // end_runtime auto-submits the attempt (submitted_at = NOW, revision+1).
+    // Within the 300s post-submit grace the mutation gate is bypassed and the
+    // pending writing answer is accepted (acceptedInGrace = true).
+    // The individual resume above bumped the attempt revision once more, so
+    // pin the auto-submit bump relative to the pre-end state instead of the
+    // stale local variable.
+    let revision_before_end = persisted_revision(database.pool(), &attempt_id).await as i32;
+    let end = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "end_runtime" }),
+    )
+    .await;
+    assert_eq!(end.status(), StatusCode::OK);
+    let revision_after_end = persisted_revision(database.pool(), &attempt_id).await as i32;
+    assert_eq!(
+        revision_after_end, revision_before_end + 1,
+        "auto-submit on end_runtime bumps the attempt revision once"
+    );
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "pending-final-completion-in-grace",
+                "baseRevision": revision_after_end,
+                "type": "SetEssayText",
+                "taskId": "task1",
+                "value": "final draft within grace"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"]["appliedMutationCount"], 1);
+    assert_eq!(json["data"]["serverAcceptedThroughSeq"], 2);
+    assert_eq!(
+        json["data"]["acceptedInGrace"], true,
+        "post-submit grace must accept the pending writing mutation: {json}"
+    );
+    let revision_after_grace = json["data"]["revision"].as_i64().unwrap() as i32;
+    // The grace-accepted recovery fields (postSubmitGraceAcceptedAt,
+    // postSubmitGraceLastAppliedMutationCount) are persisted in the DB
+    // recovery JSON but NOT echoed in the response attempt: the typed
+    // StudentRecovery serialization drops unknown keys. Pin the persisted
+    // contract instead.
+    let db_recovery = persisted_recovery(database.pool(), &attempt_id).await;
+    assert_eq!(
+        db_recovery["postSubmitGraceAcceptedAt"].is_string(),
+        true,
+        "post-submit grace acceptance must persist postSubmitGraceAcceptedAt: {db_recovery}"
+    );
+    assert_eq!(db_recovery["postSubmitGraceLastAppliedMutationCount"], 1);
+    assert_eq!(db_recovery["serverAcceptedThroughSeq"], 2);
+
+    // After the grace window (backdate submitted_at) the same replay is a
+    // structured ATTEMPT_SUBMITTED conflict — never a generic failure.
+    sqlx::query("UPDATE student_attempts SET submitted_at = NOW() - INTERVAL 360 SECOND WHERE id = ?")
+        .bind(&attempt_id)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "pending-final-completion-past-grace",
+                "baseRevision": revision_after_grace,
+                "type": "SetEssayText",
+                "taskId": "task1",
+                "value": "too late"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["details"]["reason"], "ATTEMPT_SUBMITTED",
+        "post-grace replay after final completion must be ATTEMPT_SUBMITTED: {json}"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_after_grace as i64,
+        "post-grace rejection must not bump the revision"
+    );
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        2,
+        "post-grace rejection must not insert a mutation row"
+    );
+    let writing_answers = persisted_writing_answers(database.pool(), &attempt_id).await;
+    assert_eq!(
+        writing_answers["task1"], "final draft within grace",
+        "post-grace rejection must not touch writing answers"
+    );
+
+    database.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// BEX-042 — crash recovery: after a browser crash and re-bootstrap the
+// existing attempt is returned, the live runtime section is authoritative,
+// the server revision is returned, accepted mutations are never replayed
+// twice, and pending client mutations continue from the accepted watermark.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn bex042_crash_recovery_returns_attempt_and_continues_from_watermark() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    // Real runtime start (INSERTs the runtime row; see BEX-040 comment).
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("contract runtime start".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // Pre-crash: two accepted mutations under client_session_id.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [
+                {
+                    "mutationId": "crash-m1",
+                    "baseRevision": base_revision,
+                    "type": "SetChoice",
+                    "questionId": "q1",
+                    "value": "T"
+                },
+                {
+                    "mutationId": "crash-m2",
+                    "baseRevision": base_revision,
+                    "type": "SetScalar",
+                    "questionId": "l-short-1",
+                    "value": "diagram"
+                }
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"]["appliedMutationCount"], 2);
+    assert_eq!(json["data"]["serverAcceptedThroughSeq"], 2);
+    let revision_before_crash = json["data"]["revision"].as_i64().unwrap() as i32;
+    let recovery_before = persisted_recovery(database.pool(), &attempt_id).await;
+    assert_eq!(recovery_before["serverAcceptedThroughSeq"], 2);
+    assert_eq!(recovery_before["syncState"], "saved");
+    assert_eq!(recovery_before["clientSessionId"], client_session_id);
+
+    // Crash: the client bootstraps again with the SAME client_session_id.
+    let (rebootstrap, _) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        &client_session_id,
+    )
+    .await;
+    // (a) existing attempt returned (precheck/bootstrap idempotency).
+    assert_eq!(rebootstrap["data"]["attempt"]["id"], attempt_id);
+    assert_eq!(rebootstrap["data"]["attempt"]["answers"]["q1"], "T");
+    assert_eq!(rebootstrap["data"]["attempt"]["answers"]["l-short-1"], "diagram");
+    // (b) current runtime section is authoritative: the live runtime row
+    // drives the phase and the current section (exam/listening), not any
+    // pre-crash client snapshot.
+    assert_eq!(rebootstrap["data"]["attempt"]["phase"], "exam");
+    assert_eq!(rebootstrap["data"]["runtime"]["currentSectionKey"], "listening");
+    assert_eq!(rebootstrap["data"]["attempt"]["currentModule"], "listening");
+    let live_section: String = sqlx::query_scalar(
+        "SELECT current_section_key FROM exam_session_runtimes WHERE schedule_id = ?",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(live_section, "listening");
+    // (c) server revision returned matches persisted reality.
+    assert_eq!(
+        rebootstrap["data"]["attempt"]["revision"],
+        revision_before_crash,
+        "re-bootstrap returns the persisted server revision"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before_crash as i64
+    );
+    // The precheck step resets recovery on EVERY bootstrap (delivery
+    // persist_precheck writes serverAcceptedThroughSeq: 0, syncState: idle,
+    // pendingMutationCount: 0 while preserving clientSessionId). Pin that
+    // contract: after re-bootstrap the client must rely on the last batch
+    // RESPONSE watermark, not the recovery blob; persisted rows survive.
+    let recovery_after = persisted_recovery(database.pool(), &attempt_id).await;
+    assert_eq!(recovery_after["serverAcceptedThroughSeq"], 0);
+    assert_eq!(recovery_after["syncState"], "idle");
+    assert_eq!(recovery_after["pendingMutationCount"], 0);
+    assert_eq!(recovery_after["clientSessionId"], client_session_id);
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        2,
+        "persisted accepted mutations survive the crash"
+    );
+
+    let fresh_token = rebootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // (d) accepted mutations are NOT replayed twice: the identical two
+    // mutations re-sent after re-bootstrap dedupe to appliedMutationCount 0.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &fresh_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [
+                {
+                    "mutationId": "crash-m1",
+                    "baseRevision": base_revision,
+                    "type": "SetChoice",
+                    "questionId": "q1",
+                    "value": "T"
+                },
+                {
+                    "mutationId": "crash-m2",
+                    "baseRevision": base_revision,
+                    "type": "SetScalar",
+                    "questionId": "l-short-1",
+                    "value": "diagram"
+                }
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"]["appliedMutationCount"], 0);
+    assert_eq!(
+        json["data"]["serverAcceptedThroughSeq"], 2,
+        "dedupe returns the accepted watermark, not zero"
+    );
+    assert_eq!(json["data"]["revision"], revision_before_crash);
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        2,
+        "re-sent accepted mutations must not be applied twice"
+    );
+
+    // (e) pending client mutations continue from the accepted watermark:
+    // seq 3 (base = current revision) applies and advances the watermark.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &fresh_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "crash-m3",
+                "baseRevision": revision_before_crash,
+                "type": "SetChoice",
+                "questionId": "q1",
+                "value": "F"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"]["appliedMutationCount"], 1);
+    assert_eq!(json["data"]["serverAcceptedThroughSeq"], 3);
+    assert_eq!(json["data"]["revision"], revision_before_crash + 1);
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        3
+    );
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["q1"], "F", "latest seq wins after recovery");
+    assert_eq!(answers["l-short-1"], "diagram");
 
     database.shutdown().await;
 }

@@ -1064,3 +1064,25 @@ Full question-type round trip pins (all in `mutation_batch_*`/`bex035_question_t
 
 ### Invariant
 Round-trip semantic equality holds per type: persisted JSON == hydrated live attempt == `final_submission`; clears are explicit JSON nulls with keys retained (ClearSlot keeps array length); Enum answers are case-strict at mutation; slot values round-trip per blank/label through the block-level array.
+
+## 2026-08-05: Reconnect Replay, Transition Conflicts, Crash Recovery (BEX-040/041/042)
+
+### Behavior (documented contract, verified)
+All pinned in `bex040_reconnect_replay_chunked_batches_apply_in_order_without_loss`,
+`bex041_replay_across_section_transition_grace_or_structured_conflict`, and
+`bex042_crash_recovery_returns_attempt_and_continues_from_watermark`:
+
+1. **Attempt revision starts at 0 after bootstrap.** `get_or_create_attempt` + precheck/bootstrap use `update_attempt_preserving_revision`, so the first accepted batch moves the attempt from revision 0 to 1. Tests must compute bases/expected revisions relative to the bootstrap response (`base + n`), never assume 1.
+2. **Individual attempt pause AND resume each bump the attempt revision exactly once** (`update_attempt_status` in `crates/application/src/proctoring.rs` runs `revision = revision + 1`). Because the base-revision gate runs BEFORE the proctor gate in `apply_mutation_batch`, a pending mutation composed pre-pause with a stale base yields `409 BASE_REVISION_MISMATCH`, NOT `ATTEMPT_PROCTOR_BLOCKED` — the client must re-base on the post-pause revision to surface the pause reason. Cohort `pause_runtime` does NOT touch the attempt revision (runtime row only).
+3. **Pause rejection reasons (empirical, pinned):** runtime `status = 'paused'` (cohort pause) → `409 OBJECTIVE_LOCKED`; attempt `proctor_status = 'paused'` (individual pause) → `409 ATTEMPT_PROCTOR_BLOCKED`. Both carry `error.code == "CONFLICT"` and `error.details.reason`.
+4. **Final completion contract:** `end_runtime` auto-submits every pending attempt (`auto_submit_schedule_attempts_in_tx`): `submitted_at = NOW`, phase `post-exam`, `revision + 1`. Within the 300s post-submit grace (`final_submit_grace_seconds`, AppConfig default) new mutations are ACCEPTED with `acceptedInGrace: true` and the objective/section gates bypassed; after the grace window (backdate `student_attempts.submitted_at`) the same replay is `409 ATTEMPT_SUBMITTED` (the submitted-check in `apply_mutation_batch` fires before the objective gate). Never a generic failure.
+5. **Post-submit grace recovery fields are persisted but NOT echoed in the response.** `merge_recovery` writes `postSubmitGraceAcceptedAt` / `postSubmitGraceLastAppliedMutationCount` into the DB recovery JSON, but the typed `StudentRecovery` serialization drops unknown keys, so the response `attempt.recovery` never shows them — assert against the DB column.
+6. **Precheck resets the recovery watermark on EVERY bootstrap:** `persist_precheck` merges `{pendingMutationCount: 0, syncState: "idle", serverAcceptedThroughSeq: 0}` while preserving `clientSessionId`. After a crash re-bootstrap, `recovery.serverAcceptedThroughSeq` is 0 even though all accepted mutation rows survive (COUNT unchanged) — the client must continue from the last batch RESPONSE watermark, not the recovery blob. Dedupe (identical `client_mutation_id` + type + payload under the same `client_session_id`) short-circuits BEFORE the base-revision gate, so re-sending already-accepted mutations returns 200 with `appliedMutationCount: 0` and the CURRENT watermark, never a 409.
+7. **Transition grace = 300s from `actual_end_at` for completed sections** (`load_recently_completed_section_keys_for_grace`: `now <= actual_end_at + final_submit_grace_seconds`); backdating `exam_session_runtime_sections.actual_end_at` past the window makes the same late replay `409 SECTION_MISMATCH` (message names the question id). Works identically for timer-expiry (SQL transition) and proctor `end-section-now` paths.
+8. **Reconnect replay semantics:** server assigns `mutation_seq` per (attempt, client_session) in REQUEST order; within a chunk the last position wins, across chunks the later chunk wins; one revision increment per accepted chunk; a replayed identical chunk after commit returns the current watermark with 0 applied and inserts nothing.
+
+### Regression Protection
+- Tests: `backend/tests/contracts/student_contract.rs` (`bex040_*`, `bex041_*`, `bex042_*`).
+
+### Invariant
+Student-visible saved state (answers, revision, watermark) must match persisted reality; accepted mutations are never replayed twice nor lost across chunking/crash; expected transition conflicts always surface a structured 409 reason, never a generic failure, and never partial state.
