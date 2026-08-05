@@ -33,6 +33,7 @@ const SCHEDULING_MIGRATIONS: &[&str] = &[
     "0008_grading_results.sql",
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
+    "0020_schedule_role_display_names.sql",
 ];
 
 #[tokio::test]
@@ -286,6 +287,29 @@ async fn get_runtime_counts_down_from_section_start_instead_of_persisted_start_d
         remaining > 30 * 60 - 90,
         "remaining should not overcount elapsed time, got {remaining}"
     );
+    let actual_start_at = sqlx::query_scalar::<_, chrono::DateTime<Utc>>(
+        r#"
+        SELECT actual_start_at
+        FROM exam_session_runtime_sections
+        WHERE runtime_id = (
+            SELECT id FROM exam_session_runtimes WHERE schedule_id = ?
+        )
+          AND section_key = 'listening'
+        "#,
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .expect("active section start");
+    let deadline = runtime["data"]["currentSectionDeadlineAt"]
+        .as_str()
+        .and_then(|value| value.parse::<chrono::DateTime<Utc>>().ok())
+        .expect("stable section deadline");
+    let expected_deadline = actual_start_at + Duration::minutes(30);
+    assert!(
+        (deadline - expected_deadline).num_seconds().abs() <= 1,
+        "deadline should be anchored to section start, got {deadline} expected {expected_deadline}"
+    );
 
     database.shutdown().await;
 }
@@ -376,9 +400,9 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
-                    "reading": {"passages": [{"id": "reading-1"}]},
-                    "listening": {"parts": [{"id": "listening-1"}]},
-                    "writing": {"tasks": [{"id": "writing-1"}]},
+                    "reading": {"passages": [{"id": "reading-1", "title": "Reading Passage 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "questions": [{"id": "r1", "statement": "Statement 1", "correctAnswer": "T"}]}]}]},
+                    "listening": {"parts": [{"id": "listening-1", "title": "Listening Part 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "questions": [{"id": "q1", "statement": "Statement 1", "correctAnswer": "T"}]}]}]},
+                    "writing": {"task1Prompt": "Summarise the chart.", "task2Prompt": "Discuss both views.", "tasks": [{"id": "writing-1"}]},
                     "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
                 }),
                 config_snapshot: sample_schedule_config(),
@@ -431,20 +455,23 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
 
 fn sample_schedule_config() -> serde_json::Value {
     json!({
+        "progression": {"allowPause": true},
         "sections": {
             "listening": {
                 "enabled": true,
                 "label": "Listening",
                 "order": 1,
                 "duration": 30,
-                "gapAfterMinutes": 5
+                "gapAfterMinutes": 5,
+                "bandScoreTable": { "39": 9.0, "37": 8.5, "35": 8.0, "32": 7.5, "30": 7.0, "26": 6.5, "23": 6.0, "18": 5.5, "16": 5.0, "13": 4.5, "10": 4.0, "6": 3.5, "4": 3.0, "2": 2.5 }
             },
             "reading": {
                 "enabled": true,
                 "label": "Reading",
                 "order": 2,
                 "duration": 60,
-                "gapAfterMinutes": 0
+                "gapAfterMinutes": 0,
+                "bandScoreTable": { "39": 9.0, "37": 8.5, "35": 8.0, "33": 7.5, "30": 7.0, "27": 6.5, "23": 6.0, "19": 5.5, "15": 5.0, "13": 4.5, "10": 4.0, "8": 3.5, "6": 3.0, "4": 2.5 }
             },
             "writing": {
                 "enabled": true,

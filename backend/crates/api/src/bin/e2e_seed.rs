@@ -999,8 +999,8 @@ fn minimal_exam_state(
             ]
         },
         "writing": {
-            "task1Prompt": "",
-            "task2Prompt": "",
+            "task1Prompt": "Summarise the seeded chart.",
+            "task2Prompt": "Discuss the seeded topic and give your opinion.",
             "tasks": [
                 {
                     "taskId": "task1",

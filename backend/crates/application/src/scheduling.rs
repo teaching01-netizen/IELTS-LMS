@@ -888,19 +888,13 @@ impl SchedulingService {
         let current_section_deadline_at = runtime_row
             .current_section_key
             .as_deref()
+            .or(runtime_row.active_section_key.as_deref())
             .and_then(|section_key| {
                 sections
                     .iter()
                     .find(|section| section.section_key == section_key)
             })
-            .and_then(|section| {
-                if section.status != SectionRuntimeStatus::Live || section.paused_at.is_some() {
-                    return None;
-                }
-
-                let remaining = i64::from(current_section_remaining_seconds.max(0));
-                Some(server_now + Duration::seconds(remaining))
-            });
+            .and_then(compute_live_section_deadline);
 
         Ok(ExamSessionRuntime {
             id: runtime_row.id.to_string(),
@@ -1302,6 +1296,20 @@ struct RuntimeSectionRow {
 struct ComputedSectionTime {
     remaining_seconds: i32,
     is_overrun: bool,
+}
+
+fn compute_live_section_deadline(section: &RuntimeSectionRow) -> Option<DateTime<Utc>> {
+    if section.status != SectionRuntimeStatus::Live || section.paused_at.is_some() {
+        return None;
+    }
+
+    let actual_start_at = section.actual_start_at?;
+    let duration_minutes = i64::from(section.planned_duration_minutes.max(0))
+        .saturating_add(i64::from(section.extension_minutes.max(0)));
+    let duration_seconds = duration_minutes.saturating_mul(60);
+    let paused_seconds = i64::from(section.accumulated_paused_seconds.max(0));
+
+    Some(actual_start_at + Duration::seconds(duration_seconds.saturating_add(paused_seconds)))
 }
 
 fn compute_runtime_remaining_seconds(
