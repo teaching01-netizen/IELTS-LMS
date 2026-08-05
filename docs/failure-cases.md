@@ -908,8 +908,9 @@ Commit `777a3c2` added two helpers that accept both codes: `is_duplicate_key` in
 `delivery/mod.rs` (~line 2003) and `idempotency.rs` (~line 266).
 
 RESOLVED (B-3): commit `8658766` fixed the scheduling.rs helper to accept both
-`"23000"` and `"1062"`, so `start_runtime`/`register_student` duplicate-key races
-now resolve to a clean 409 Conflict. Regression test:
+`"23000"` and `"1062"`, so `start_runtime` duplicate-key races now resolve to a
+clean 409 Conflict and `register_student` races adopt the existing registration
+idempotently (200). Regression test:
 `repeated_start_returns_conflict_without_duplicate_sections`
 (`backend/tests/contracts/scheduling_contract.rs`). Centralizing the helper in
 infrastructure remains a future cleanup.
