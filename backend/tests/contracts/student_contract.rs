@@ -1132,8 +1132,175 @@ async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_an
     database.shutdown().await;
 }
 
+// BEX-033 contract: an idempotent mutation-batch replay must return the
+// cached stable response (200), a hash-mismatched batch with the same key must
+// conflict (409), and neither path may mutate persisted state.
 #[tokio::test]
-async fn mutation_batch_rejects_replayed_idempotency_key_and_hash_mismatch() {
+async fn mutation_batch_idempotency_replay_returns_stable_response_and_hash_mismatch_conflicts() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    let uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
+    let request = json!({
+        "attemptId": attempt_id.clone(),
+        "mutations": [
+            {
+                "mutationId": "mutation-1",
+                "baseRevision": base_revision,
+                "type": "SetScalar",
+                "questionId": "q1",
+                "value": "A"
+            },
+            {
+                "mutationId": "mutation-2",
+                "baseRevision": base_revision,
+                "type": "SetScalar",
+                "questionId": "q1",
+                "value": "B"
+            }
+        ]
+    });
+    let request_body = serde_json::to_vec(&request).unwrap();
+
+    let post = |body: Vec<u8>| {
+        let app = app.clone();
+        let attempt_token = attempt_token.clone();
+        let uri = uri.clone();
+        async move {
+            app.oneshot(
+                with_attempt_token(Request::builder(), &attempt_token)
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .header("idempotency-key", "mutation-replay-1")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // First request: fully applied.
+    let first = post(request_body.clone()).await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_json = json_body(first).await;
+    assert_eq!(first_json["data"]["appliedMutationCount"], 2);
+    assert_eq!(first_json["data"]["serverAcceptedThroughSeq"], 2);
+    assert_eq!(
+        first_json["data"]["revision"],
+        base_revision as i64 + 1,
+        "one accepted batch advances the revision exactly once"
+    );
+    let first_data = first_json["data"].clone();
+
+    // The idempotent response was persisted for the key, so the replay below
+    // is served from cache instead of being re-applied.
+    let stored_status: i32 = sqlx::query_scalar(
+        "SELECT response_status FROM idempotency_keys WHERE actor_id = ? AND route_key = ? AND idempotency_key = ?",
+    )
+    .bind(&student_key)
+    .bind(format!("POST:/api/v1/student/sessions/{schedule_id}/mutations:batch"))
+    .bind("mutation-replay-1")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(stored_status, 200);
+
+    // Byte-identical replay with the same key: stable 200, same body, and no
+    // database change.
+    let replay = post(request_body).await;
+    let replay_status = replay.status();
+    let replay_json = json_body(replay).await;
+    assert_eq!(
+        replay_status,
+        StatusCode::OK,
+        "identical replay must return the cached response, not a conflict: {replay_json}"
+    );
+    assert_eq!(replay_json["data"].clone(), first_data);
+    let mutation_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(mutation_rows, 2, "replay must not duplicate mutation rows");
+    let stored_revision: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(stored_revision, base_revision + 1);
+    let answers: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(answers["q1"], "B", "the batch applied both mutations in order");
+
+    // Same key with a DIFFERENT batch: 409 hash-mismatch conflict, and the
+    // rejected batch must not change any persisted state.
+    let conflict = post(
+        serde_json::to_vec(&json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "mutation-3",
+                "baseRevision": base_revision,
+                "type": "SetScalar",
+                "questionId": "q3",
+                "value": "C"
+            }]
+        }))
+        .unwrap(),
+    )
+    .await;
+    let conflict_status = conflict.status();
+    let conflict_json = json_body(conflict).await;
+    assert_eq!(conflict_status, StatusCode::CONFLICT);
+    assert_eq!(conflict_json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        conflict_json["error"]["message"],
+        "Idempotency-Key does not match the original request."
+    );
+    let mutation_rows_after_conflict: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(mutation_rows_after_conflict, 2);
+
+    database.shutdown().await;
+}
+
+// BEX-032: a mutation batch based on a stale revision is rejected atomically
+// with 409 CONFLICT / `BASE_REVISION_MISMATCH` carrying `latestRevision` and
+// the accepted mutation-sequence watermark (`serverAcceptedThroughSeq`), and
+// the server's persisted answers, revision, and mutation rows are preserved.
+#[tokio::test]
+async fn mutation_batch_revision_conflict_reports_latest_revision_and_watermark_and_preserves_server_answers() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -1156,86 +1323,25 @@ async fn mutation_batch_rejects_replayed_idempotency_key_and_hash_mismatch() {
     let base_revision = bootstrap["data"]["attempt"]["revision"]
         .as_i64()
         .unwrap() as i32;
-    let request = json!({
-        "attemptId": attempt_id.clone(),
-        "mutations": [
-            {
-                "mutationId": "mutation-1",
-                "baseRevision": base_revision,
-                "type": "SetScalar",
-                "questionId": "q1",
-                "value": "A"
-            },
-            {
-                "mutationId": "mutation-2",
-                "baseRevision": base_revision,
-                "type": "SetScalar",
-                "questionId": "q1",
-                "value": "B"
-            }
-        ]
-    });
+    let uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
 
-    let first = app
+    // Accepted batch: q1 = "A", revision N -> N+1, watermark -> 1.
+    let accepted = app
         .clone()
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
                 .method("POST")
-                .uri(format!(
-                    "/api/v1/student/sessions/{}/mutations:batch",
-                    schedule_id
-                ))
+                .uri(&uri)
                 .header("content-type", "application/json")
-                .header("idempotency-key", "mutation-replay-1")
-                .body(Body::from(serde_json::to_vec(&request).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(first.status(), StatusCode::OK);
-    let first_json = json_body(first).await;
-
-    let replay = app
-        .clone()
-        .oneshot(
-            with_attempt_token(Request::builder(), &attempt_token)
-                .method("POST")
-                .uri(format!(
-                    "/api/v1/student/sessions/{}/mutations:batch",
-                    schedule_id
-                ))
-                .header("content-type", "application/json")
-                .header("idempotency-key", "mutation-replay-1")
-                .body(Body::from(serde_json::to_vec(&request).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(replay.status(), StatusCode::CONFLICT);
-    let replay_json = json_body(replay).await;
-    assert_eq!(replay_json["error"]["code"], "CONFLICT");
-
-    let conflict = app
-        .oneshot(
-            with_attempt_token(Request::builder(), &attempt_token)
-                .method("POST")
-                .uri(format!(
-                    "/api/v1/student/sessions/{}/mutations:batch",
-                    schedule_id
-                ))
-                .header("content-type", "application/json")
-                .header("idempotency-key", "mutation-replay-1")
                 .body(Body::from(
                     serde_json::to_vec(&json!({
                         "attemptId": attempt_id.clone(),
                         "mutations": [{
-                            "mutationId": "mutation-3",
+                            "mutationId": "bex032-mut-1",
                             "baseRevision": base_revision,
                             "type": "SetScalar",
-                            "questionId": "q3",
-                            "value": "C"
+                            "questionId": "q1",
+                            "value": "A"
                         }]
                     }))
                     .unwrap(),
@@ -1244,10 +1350,653 @@ async fn mutation_batch_rejects_replayed_idempotency_key_and_hash_mismatch() {
         )
         .await
         .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+    let accepted_json = json_body(accepted).await;
+    assert_eq!(accepted_json["data"]["appliedMutationCount"], 1);
+    assert_eq!(accepted_json["data"]["serverAcceptedThroughSeq"], 1);
+    let revision_after = accepted_json["data"]["revision"].as_i64().unwrap();
+    assert_eq!(revision_after, base_revision as i64 + 1);
 
-    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    // Snapshot the authoritative persisted state after the accepted batch.
+    let answers_snapshot: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(answers_snapshot["q1"], "A");
+
+    // Stale batch from the same session: baseRevision = N is now below the
+    // current revision N+1.
+    let conflict = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(&uri)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "bex032-mut-2",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "B"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let conflict_status = conflict.status();
     let conflict_json = json_body(conflict).await;
+    assert_eq!(
+        conflict_status,
+        StatusCode::CONFLICT,
+        "stale batch must conflict: {conflict_json}"
+    );
     assert_eq!(conflict_json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        conflict_json["error"]["details"]["reason"],
+        "BASE_REVISION_MISMATCH"
+    );
+    assert_eq!(
+        conflict_json["error"]["details"]["latestRevision"]
+            .as_i64()
+            .unwrap(),
+        revision_after,
+        "conflict must report the attempt's current revision"
+    );
+    assert_eq!(
+        conflict_json["error"]["details"]["serverAcceptedThroughSeq"]
+            .as_i64()
+            .unwrap(),
+        1,
+        "conflict must report the accepted mutation-sequence watermark"
+    );
+    assert_eq!(
+        conflict_json["error"]["details"]["activeSessionId"],
+        client_session_id,
+        "conflict must identify the session that owns the accepted state"
+    );
+
+    // DB-level: the server's current answers are preserved byte-for-byte.
+    let answers_after: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        answers_after, answers_snapshot,
+        "a rejected stale batch must not change the persisted answers"
+    );
+    assert_eq!(answers_after["q1"], "A");
+    let stored_revision: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        stored_revision, revision_after as i32,
+        "a rejected stale batch must not advance the revision"
+    );
+    let mutation_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        mutation_rows, 1,
+        "a rejected stale batch must not persist any mutation row"
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-033: the same idempotency key with an identical batch applies exactly
+// once (one row per client mutation id, revision advanced once), and every
+// retry — including a retry after a simulated network timeout where the client
+// never saw the first response — returns the stable cached response and
+// changes nothing in the database.
+#[tokio::test]
+async fn mutation_batch_same_key_identical_batch_applies_once_and_retry_after_timeout_does_not_duplicate() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    let uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
+    let request = json!({
+        "attemptId": attempt_id.clone(),
+        "mutations": [{
+            "mutationId": "mutation-timeout-1",
+            "baseRevision": base_revision,
+            "type": "SetScalar",
+            "questionId": "q1",
+            "value": "A"
+        }]
+    });
+    let request_body = serde_json::to_vec(&request).unwrap();
+
+    let post = |body: Vec<u8>| {
+        let app = app.clone();
+        let attempt_token = attempt_token.clone();
+        let uri = uri.clone();
+        async move {
+            app.oneshot(
+                with_attempt_token(Request::builder(), &attempt_token)
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .header("idempotency-key", "mutation-timeout-key-1")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // First attempt — the client times out and never sees this response.
+    let first = post(request_body.clone()).await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_json = json_body(first).await;
+    assert_eq!(first_json["data"]["appliedMutationCount"], 1);
+    assert_eq!(first_json["data"]["serverAcceptedThroughSeq"], 1);
+    let first_data = first_json["data"].clone();
+
+    // Applied exactly once at the row level.
+    let per_id_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
+    )
+    .bind(&attempt_id)
+    .bind("mutation-timeout-1")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(per_id_rows, 1, "the same mutation id must be applied at most once");
+    let stored_revision: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(stored_revision, base_revision + 1, "revision advanced exactly once");
+
+    // Retry after the "timeout": identical body, same key — stable response,
+    // no duplicate answer write.
+    let retry = post(request_body).await;
+    let retry_status = retry.status();
+    let retry_json = json_body(retry).await;
+    assert_eq!(
+        retry_status,
+        StatusCode::OK,
+        "retry after timeout must succeed: {retry_json}"
+    );
+    assert_eq!(retry_json["data"].clone(), first_data);
+    let answers: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(answers["q1"], "A", "the retry must not duplicate the answer write");
+    let per_id_rows_after_retry: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
+    )
+    .bind(&attempt_id)
+    .bind("mutation-timeout-1")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(per_id_rows_after_retry, 1);
+    let stored_revision_after_retry: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(stored_revision_after_retry, base_revision + 1);
+
+    // A second retry is equally stable.
+    let retry_2 = post(serde_json::to_vec(&request).unwrap()).await;
+    assert_eq!(retry_2.status(), StatusCode::OK);
+    assert_eq!(json_body(retry_2).await["data"].clone(), first_data);
+
+    database.shutdown().await;
+}
+
+// BEX-033 cross-session: the in-batch dedupe is scoped per
+// (attempt_id, client_session_id, client_mutation_id), so a duplicate mutation
+// id arriving from ANOTHER client session is not deduped by id — ownership is
+// enforced by the base-revision gate (BEX-003): a second session composing its
+// batch from state older than the current revision is rejected atomically with
+// 409 BASE_REVISION_MISMATCH, so the mutation id is never applied twice. A
+// second session with a FRESH base is blocked by the physical unique index
+// (attempt_id, client_mutation_id) (migration 0017) with an atomic 500
+// DATABASE_ERROR instead of re-applying.
+#[tokio::test]
+async fn mutation_batch_duplicate_mutation_id_from_other_client_session_is_not_applied_twice() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap_a, _session_a) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        "phone-client-1",
+    )
+    .await;
+    let (bootstrap_b, _session_b) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        "computer-client-1",
+    )
+    .await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
+    let attempt_id = bootstrap_a["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(bootstrap_b["data"]["attempt"]["id"], attempt_id);
+    let attempt_token_a = bootstrap_a["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token_b = bootstrap_b["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap_a["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    let uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
+
+    // Session A accepts mutation id "shared-mut-1": revision N -> N+1.
+    let session_a = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_a)
+                .method("POST")
+                .uri(&uri)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "shared-mut-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(session_a.status(), StatusCode::OK);
+    let session_a_json = json_body(session_a).await;
+    let revision_after_a = session_a_json["data"]["revision"].as_i64().unwrap();
+    assert_eq!(revision_after_a, base_revision as i64 + 1);
+
+    // Session B (bootstrapped before A's write) sends the SAME mutation id
+    // from the stale base: rejected by the ownership gate, not applied twice.
+    let session_b = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_b)
+                .method("POST")
+                .uri(&uri)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "shared-mut-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_b_status = session_b.status();
+    let session_b_json = json_body(session_b).await;
+    assert_eq!(
+        session_b_status,
+        StatusCode::CONFLICT,
+        "stale cross-session duplicate must conflict: {session_b_json}"
+    );
+    assert_eq!(
+        session_b_json["error"]["details"]["reason"],
+        "BASE_REVISION_MISMATCH"
+    );
+
+    // DB-level: the mutation id exists exactly once; answers and revision are
+    // unchanged by session B's attempt.
+    let shared_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
+    )
+    .bind(&attempt_id)
+    .bind("shared-mut-1")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(shared_rows, 1, "the mutation id must not be applied twice");
+    let answers: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(answers["q1"], "A");
+    let stored_revision: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(stored_revision, revision_after_a as i32);
+
+    // A THIRD session bootstrapped AFTER A's write has a fresh base; the same
+    // mutation id is not deduped across sessions (different client_session_id)
+    // and the base gate does not fire — the physical unique index
+    // (attempt_id, client_mutation_id) blocks the duplicate row atomically.
+    let (bootstrap_c, _session_c) = bootstrap_attempt_with_client_session_id(
+        &app,
+        &auth,
+        schedule_id,
+        "alice",
+        &student_key,
+        "tablet-client-1",
+    )
+    .await;
+    let attempt_token_c = bootstrap_c["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let fresh_base_revision = bootstrap_c["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    assert_eq!(fresh_base_revision, revision_after_a as i32);
+    let session_c = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token_c)
+                .method("POST")
+                .uri(&uri)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "shared-mut-1",
+                            "baseRevision": fresh_base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let session_c_status = session_c.status();
+    let session_c_json = json_body(session_c).await;
+    assert_eq!(
+        session_c_status,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "fresh-base cross-session duplicate must be blocked by the unique index: {session_c_json}"
+    );
+    assert_eq!(session_c_json["error"]["code"], "DATABASE_ERROR");
+    let shared_rows_after_c: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
+    )
+    .bind(&attempt_id)
+    .bind("shared-mut-1")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(shared_rows_after_c, 1, "the unique index must reject the duplicate row");
+
+    database.shutdown().await;
+}
+
+// BEX-034: a database failure in the middle of a mutation batch aborts the
+// whole transaction — no partial answers, no partial revision increment, no
+// partial mutation rows, no cached idempotent response — and a retry of the
+// complete batch applies cleanly.
+#[tokio::test]
+async fn mutation_batch_mid_batch_database_failure_rolls_back_atomically_and_retry_applies_fully() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    let uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
+
+    let answers_before: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let revision_before: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+
+    // Mutation-2's client_mutation_id exceeds the VARCHAR(255) column width,
+    // so its INSERT fails after mutation-1's INSERT already executed inside
+    // the same transaction.
+    let oversized_mutation_id = "x".repeat(300);
+    let failed = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(&uri)
+                .header("content-type", "application/json")
+                .header("idempotency-key", "bex034-txn-key-1")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [
+                            {
+                                "mutationId": "txn-mut-1",
+                                "baseRevision": base_revision,
+                                "type": "SetScalar",
+                                "questionId": "q1",
+                                "value": "A"
+                            },
+                            {
+                                "mutationId": oversized_mutation_id,
+                                "baseRevision": base_revision,
+                                "type": "SetScalar",
+                                "questionId": "q1",
+                                "value": "B"
+                            }
+                        ]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let failed_status = failed.status();
+    let failed_json = json_body(failed).await;
+    assert_eq!(
+        failed_status,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "mid-batch DB failure must surface as 500: {failed_json}"
+    );
+    assert_eq!(failed_json["error"]["code"], "DATABASE_ERROR");
+
+    // No partial state leaked from the aborted transaction.
+    let answers_after_failure: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        answers_after_failure, answers_before,
+        "no partial answer snapshot may persist"
+    );
+    let revision_after_failure: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        revision_after_failure, revision_before,
+        "no partial revision increment may persist"
+    );
+    let rows_after_failure: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(rows_after_failure, 0, "no partial mutation row may persist");
+    let idempotency_rows_after_failure: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM idempotency_keys WHERE actor_id = ? AND idempotency_key = ?",
+    )
+    .bind(&student_key)
+    .bind("bex034-txn-key-1")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        idempotency_rows_after_failure, 0,
+        "no idempotent response may be cached for the failed batch"
+    );
+
+    // Retry the complete batch with the corrected mutation id and the same
+    // key: fully applied, revision advanced exactly once, watermark advanced.
+    let retried = app
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(&uri)
+                .header("content-type", "application/json")
+                .header("idempotency-key", "bex034-txn-key-1")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [
+                            {
+                                "mutationId": "txn-mut-1",
+                                "baseRevision": base_revision,
+                                "type": "SetScalar",
+                                "questionId": "q1",
+                                "value": "A"
+                            },
+                            {
+                                "mutationId": "txn-mut-2",
+                                "baseRevision": base_revision,
+                                "type": "SetScalar",
+                                "questionId": "q1",
+                                "value": "B"
+                            }
+                        ]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let retried_status = retried.status();
+    let retried_json = json_body(retried).await;
+    assert_eq!(retried_status, StatusCode::OK, "retry must apply: {retried_json}");
+    assert_eq!(retried_json["data"]["appliedMutationCount"], 2);
+    assert_eq!(retried_json["data"]["serverAcceptedThroughSeq"], 2);
+    assert_eq!(retried_json["data"]["revision"], base_revision as i64 + 1);
+    let answers_final: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(answers_final["q1"], "B", "the complete retried batch must be applied");
+    let rows_final: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(rows_final, 2);
+    let revision_final: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(revision_final, base_revision + 1, "revision advanced exactly once");
 
     database.shutdown().await;
 }

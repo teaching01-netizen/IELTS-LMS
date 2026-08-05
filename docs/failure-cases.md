@@ -989,3 +989,57 @@ old-section mutations must be rejected with SECTION_MISMATCH once the grace wind
 Student-visible "saved" state must match persisted reality byte-for-byte: clears
 round-trip as explicit JSON nulls, empty strings stay empty strings, and unknown
 top-level fields are rejected on every accepted batch path.
+
+## 2026-08-05: Mutation-Batch Idempotent Replay Returned 409 Hash-Mismatch for Identical Requests (BEX-033)
+
+### Symptom
+Retrying an identical mutation batch (same body bytes, same `Idempotency-Key`) after a timeout returned `409 CONFLICT` / "Idempotency-Key does not match the original request." instead of the cached 200 response, so clients could never confirm whether their batch had been applied. Pinned by the then-passing test `mutation_batch_rejects_replayed_idempotency_key_and_hash_mismatch` (asserting the buggy 409).
+
+### Scope
+`POST /api/v1/student/sessions/{schedule_id}/mutations:batch` idempotency path (`crates/application/src/delivery/mod.rs` `apply_mutation_batch`; `crates/api/src/routes/student.rs` `parse_mutation_batch_request`).
+
+### Root Cause
+The route stamps `timestamp: Utc::now()` onto every `MutationEnvelope` while parsing the HTTP payload (student.rs ~436). The idempotency request hash was computed by serializing the whole `StudentMutationBatchRequest` (`idempotency_request_hash`), so two byte-identical HTTP bodies produced different hashes; the replay lookup found the stored row, compared hashes, and misclassified the replay as a hash mismatch → 409. The base-revision gate and in-batch dedupe were never reached.
+
+### Fix
+`apply_mutation_batch` now hashes with `batch_idempotency_request_hash`: it serializes the request to a `Value` and strips the server-stamped `timestamp` from each envelope before hashing. serde_json maps are key-ordered, so the serialization is stable across replays. The timestamp is a server reception artifact (persisted as `client_timestamp`), not part of the client-authored idempotency identity; all client-authored fields (envelope id/seq/command/base_revision, request attempt/student/session) still feed the hash, so a same-key batch with different content still 409s. Hash-mismatch 409 and per-mutation dedupe scope are unchanged. Precheck/submit hashing is untouched (their requests carry no server-stamped volatile fields).
+
+Note: idempotency rows stored before this fix (timestamp-bearing hash) will not match the new hash until they expire (72h TTL); the previous behavior was that replays always 409'd, so this only improves matters.
+
+### Regression Protection
+- Tests: `backend/tests/contracts/student_contract.rs`
+  (`mutation_batch_idempotency_replay_returns_stable_response_and_hash_mismatch_conflicts`,
+  `mutation_batch_same_key_identical_batch_applies_once_and_retry_after_timeout_does_not_duplicate`).
+- The rewritten test replaces `mutation_batch_rejects_replayed_idempotency_key_and_hash_mismatch`, which pinned the buggy 409.
+
+### Invariant
+An identical retry of a mutation batch (same bytes, same idempotency key) must return the cached 200 response without re-applying; a same-key batch with different content must 409; per-session mutation dedupe scope `(attempt_id, client_session_id, client_mutation_id)` is contract-pinned and must not be widened.
+
+## 2026-08-05: Cross-Session Duplicate Mutation Ids Are Owned, Not Deduped (BEX-033 interpretation)
+
+### Behavior (documented contract, not a bug)
+The plan bullet "duplicate mutation in another client session → no duplicate application" is enforced by ownership, not by cross-session dedupe:
+1. In-batch dedupe is scoped per `(attempt_id, client_session_id, client_mutation_id)` — a duplicate id from another session is NOT skipped.
+2. A second session with a stale base revision is rejected atomically by the base-revision gate (BEX-003): `409 BASE_REVISION_MISMATCH` with `latestRevision` / `serverAcceptedThroughSeq` / `activeSessionId`; nothing is applied twice.
+3. A second session with a FRESH base is blocked by the physical unique index `(attempt_id, client_mutation_id)` (migration 0017): the INSERT fails with a duplicate-key error → atomic `500 DATABASE_ERROR`, no row, no partial state.
+
+Do not "fix" the 500 into a dedupe/skip: that would require widening dedupe scope (contract-pinned) or silently dropping a write the client believes is new.
+
+### Regression Protection
+- Tests: `backend/tests/contracts/student_contract.rs`
+  (`mutation_batch_duplicate_mutation_id_from_other_client_session_is_not_applied_twice`).
+
+### Invariant
+A mutation id may be applied at most once per attempt, cross-session included; the rejection mechanisms are the base-revision gate (stale base) and the unique index (fresh base); batch apply stays all-or-nothing.
+
+## 2026-08-05: Mutation Batch Is Fully Transactional (BEX-034)
+
+### Behavior (documented contract, verified)
+A database failure mid-batch (e.g. `client_mutation_id` exceeding the `VARCHAR(255)` column width → data-too-long on TiDB strict mode) aborts the whole transaction: no partial answers snapshot, no partial revision increment, no partial mutation row, and no cached idempotent response. The client can then retry the complete batch (same idempotency key) and it applies fully: both mutations present, revision advanced exactly once, watermark advanced to the full seq range.
+
+### Regression Protection
+- Tests: `backend/tests/contracts/student_contract.rs`
+  (`mutation_batch_mid_batch_database_failure_rolls_back_atomically_and_retry_applies_fully`).
+
+### Invariant
+`apply_mutation_batch` runs as one transaction (begin → per-mutation INSERTs → attempt UPDATE → audit log → idempotent-response store → commit); any failure must roll back everything, and a retry of the complete batch must be safe.
