@@ -2,6 +2,56 @@
 
 Purpose: turn incidents and bug fixes into durable memory for humans and AI agents.
 
+## 2026-08-06: FEX-021/022 — Slot-Scoped Questions and Writing Editor Draft Lifecycle (F-5)
+
+### Symptom
+No incident. The invariant test plan required pinning two student-side flows:
+**FEX-021 slot-scoped questions** (sentence-completion / diagram-style blanks) — a slot edit
+must change only that slot, fast typing coalesces per slot, slot id+index persist, clearing one
+answer must not shift the others, and hydration must not mint new mutations; and
+**FEX-022 writing editor** — draft committed before section submission, debounce keeps the latest
+value, blur/page-lifecycle persistence, reload restores the draft, large drafts stay responsive,
+and the paste policy is applied only where configured.
+
+### Scope
+Owning modules only: `StudentWriting.tsx` (editor draft lifecycle), `StudentAttemptProvider.tsx`
+and `studentMutationOutbox.ts` (per-slot coalescing + payload shape). Read-only: the FEX-020/F-4
+renderer matrix and the outbox coalescing suite. No production code changed; behavior unchanged.
+
+### Gap Matrix
+
+| Bullet | Verdict | Evidence (file:line) | Action |
+|---|---|---|---|
+| FEX-021: typing in slot 2 changes only slot 2 | Already pinned | `QuestionRenderer.matrix.test.tsx` user-edit cases: every slot arm emits the full array with only the edited slot changed (SENTENCE_COMPLETION ~:776-788, DIAGRAM ~:864-872, FLOW_CHART ~:944-958, TABLE ~:1027-1037, NOTE ~:1182-1198, CLASSIFICATION ~:1266-1275, MATCHING_FEATURES ~:1352-1362). Merge layer: `resolveObjectiveAnswerUpdate.slots.test.ts` "preserves existing slots when updating a different slot" (:96-100) | — |
+| FEX-021: fast typing coalesces per slot, not across slots | Already pinned | `studentMutationOutbox.coalescence.test.ts` (same question+slot replace key, different slots kept separate, order preserved); `StudentAttemptProvider.test.tsx` super-fast burst :570-612, per-slot coalescing :615-676, different slot indexes :678-713 | — |
+| FEX-021: slot ID and slot index persist | Already pinned | `StudentAttemptProvider.test.tsx` "persists slot identity metadata for slot-scoped answer mutations" :715-745 asserts `payload.slotIndex`/`slotId`/`slotCount` | — |
+| FEX-021: removing one answer does not shift others | **Partially pinned — persistence gap with an EMPTY slot value** | Renderer clear-behavior emits full array with cleared slot + intact siblings (e.g. SENTENCE ~:789-798); merge-layer no-shift `resolveObjectiveAnswerUpdate.slots.test.ts:96-100` | **ADDED** provider test: a clear mutation persists full-array `['', sibling]` under the cleared slot's coalescing key while the sibling slot's pending mutation keeps its value (no shift, no wipe) |
+| FEX-021: hydration generates no new mutations | Already pinned | `StudentAttemptProvider.test.tsx` :1523 "does not generate autosave mutations when hydrating existing answers" (no `savePendingMutations`, no `saveAttempt`) | — |
+| FEX-022: draft committed before section submission | Already pinned, both paths | `StudentWriting.lifecycle.test.tsx` commits the current draft before opening the submit-review modal; `StudentApp.test.tsx` :686 commits the mounted editor draft before runtime final submission; `useStudentSubmissionOrchestration.ts` calls `commitWritingDraft()` before `submitAttempt()` (:178); legacy manual submit flushes at `StudentApp.tsx:417` | No duplicate — flush-before-submit wiring is owned by FEX-040/F-8 |
+| FEX-022: debounced editing keeps the latest value | Already pinned | `StudentTypingPerformance.test.tsx` — 3 rapid changes, exactly one commit with the LAST value | — |
+| FEX-022: blur and page lifecycle persist editor content | Already pinned | `StudentWriting.lifecycle.test.tsx` commits on compositionend / pagehide / visibilitychange-hidden / freeze / beforeunload / blur / task switch, with exact whitespace preservation | — |
+| FEX-022: reload restores the draft | **GAP — only the null→blank case pinned** | `StudentWriting.a11y.test.tsx` pins blank editor for a null persisted answer; non-null persisted-draft restore unasserted | **ADDED** lifecycle test: fresh mount with a persisted non-null draft restores the editor text; remount same; hydration mints no `onWritingChange` |
+| FEX-022: large writing content stays responsive | **Partial gap — >5k-char path unpinned** | debounce pinned for short strings only | **ADDED** >5k-char test: a single debounced commit of the LATEST large value, then a pagehide flush preserving the full final text (no intermediate commits dropping content) |
+| FEX-022: paste policy applied only where configured | **Partial gap — positive side unpinned at event level** | clipboard tests pin the BLOCKED side (editor) plus keydown-level block/allow; no positive event-level assertion | **ADDED** positive test: paste/copy/drop on an objective answer control outside the writing editor stays unblocked and audit-free |
+
+### Fix
+Four regression tests added; no production code change; no contract violation demonstrated.
+- `src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx` — "clears one slot without shifting or wiping its sibling slot answers": clears a slot through the provider; asserts the cleared-slot mutation keeps `['', 'late']` and the sibling-slot pending mutation keeps `['daily', 'late']`.
+- `src/components/student/__tests__/StudentWriting.lifecycle.test.tsx` — "restores the persisted writing draft into a freshly mounted editor after reload".
+- `src/components/student/__tests__/StudentTypingPerformance.test.tsx` — "commits the latest large draft through the debounce without losing content or spamming commits" (>5k chars, single latest-value commit, pagehide flush with the full final string).
+- `src/components/student/__tests__/StudentWriting.clipboard.test.tsx` — "does not block paste, copy, or drop on controls outside the writing editor policy".
+
+Deliberately left uncovered: the flush-before-submit wiring itself (FEX-040/F-8 territory) — the editor-side `registerDraftCommit`/`commitWritingDraft` flush and its end-to-end runtime-submission test already exist; F-5 covered only the editor's own draft-lifecycle edges.
+
+### Regression Protection
+- Run (2026-08-06): `npx vitest run src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx src/components/student/__tests__/StudentWriting.lifecycle.test.tsx src/components/student/__tests__/StudentWriting.clipboard.test.tsx src/components/student/__tests__/StudentTypingPerformance.test.tsx` → **68 passing across 4 files** (49 + 11 + 3 + 5). All four new tests pass in isolation with zero `act()` warnings; no new module-level `vi.mock`s added.
+- One pre-existing `act()` warning surfaces in `StudentWriting.lifecycle.test.tsx` ("commits blur draft and allows a subsequent edit after refocus" — `vi.runAllTimers()` outside `act`); that test body was not modified (this task's diff to the file is add-only).
+
+### Invariant
+Per-slot mutations are coalescing-key-scoped and always persist the FULL answer array — clearing one slot (even to `''`) must never shift or drop sibling slot values. The writing draft reaches a durable commit at every exit point (blur, pagehide, freeze, beforeunload, task switch, review, section submit) with the LATEST content; reload restores it from persisted state; hydration never synthesizes a mutation; and the clipboard guard stays scoped to the writing editor surface.
+
+---
+
 ## 2026-08-06: FEX-020 — Uniform Per-Renderer Contract Matrix for QuestionRenderer (F-4)
 
 ### Symptom

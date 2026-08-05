@@ -744,6 +744,45 @@ describe('StudentAttemptProvider', () => {
     });
   });
 
+  it('clears one slot without shifting or wiping its sibling slot answers', async () => {
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+    const questionId = 'blk-af811567-c9aa-2a4d-8775-44b529b499fd';
+
+    await act(async () => {
+      result.current.actions.persistAnswer(
+        questionId,
+        ['daily', 'late'],
+        { slotIndex: 1 },
+      );
+      result.current.actions.persistAnswer(
+        questionId,
+        ['', 'late'],
+        { slotIndex: 0 },
+      );
+    });
+
+    await waitFor(() => {
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalled();
+    });
+
+    const pendingMutations = vi
+      .mocked(studentAttemptRepository.savePendingMutations)
+      .mock.calls.at(-1)?.[1] ?? [];
+    const bySlot = new Map(
+      pendingMutations
+        .filter((mutation) => mutation.type === 'answer')
+        .map((mutation) => [mutation.payload['slotIndex'], mutation]),
+    );
+
+    // The clear of slot 0 must be a distinct per-slot mutation that keeps the
+    // slot-1 value untouched; it must never shift the sibling into another
+    // position or drop it.
+    expect(pendingMutations).toHaveLength(2);
+    expect(bySlot.get(0)?.payload['value']).toEqual(['', 'late']);
+    expect(bySlot.get(1)?.payload['value']).toEqual(['daily', 'late']);
+    expect(result.current.state.attempt?.answers[questionId]).toEqual(['', 'late']);
+  });
+
   it('submits the attempt even when pending mutations are still queued', async () => {
     Object.defineProperty(window.navigator, 'onLine', {
       configurable: true,

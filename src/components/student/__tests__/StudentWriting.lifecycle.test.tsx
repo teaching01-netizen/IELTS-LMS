@@ -319,4 +319,35 @@ describe('StudentWriting lifecycle durability', () => {
       'Boundary draft',
     );
   });
+
+  it('restores the persisted writing draft into a freshly mounted editor after reload', () => {
+    const onWritingChange = vi.fn();
+
+    const renderFresh = () =>
+      render(
+        <StudentWriting
+          state={createExamState()}
+          writingAnswers={{ task1: 'Persisted draft' }}
+          onWritingChange={onWritingChange}
+          onSubmit={() => undefined}
+          currentQuestionId="task1"
+          onNavigate={() => undefined}
+        />,
+      );
+
+    const first = renderFresh();
+    expect(
+      (screen.getByRole('textbox', { name: /writing response/i }) as HTMLTextAreaElement).value,
+    ).toBe('Persisted draft');
+    first.unmount();
+
+    // A reload is a fresh mount reading the persisted attempt back in.
+    renderFresh();
+    expect(
+      (screen.getByRole('textbox', { name: /writing response/i }) as HTMLTextAreaElement).value,
+    ).toBe('Persisted draft');
+
+    // Hydration must not synthesize a new draft mutation.
+    expect(onWritingChange).not.toHaveBeenCalled();
+  });
 });

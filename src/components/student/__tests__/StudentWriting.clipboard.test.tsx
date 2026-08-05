@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { createDefaultConfig } from '../../../constants/examDefaults';
 import type { ExamState } from '../../../types';
+import { ProtectedInput } from '../ProtectedInput';
 import { StudentWriting } from '../StudentWriting';
 
 const saveStudentAuditEventMock = vi.fn();
@@ -108,5 +109,39 @@ describe('StudentWriting clipboard', () => {
       fireEvent(editor, event);
       expect(event.defaultPrevented).toBe(true);
     }
+  });
+
+  it('does not block paste, copy, or drop on controls outside the writing editor policy', () => {
+    const state = createExamState();
+    render(
+      <>
+        <StudentWriting
+          state={state}
+          writingAnswers={{}}
+          onWritingChange={vi.fn()}
+          onSubmit={vi.fn()}
+          currentQuestionId={null}
+          onNavigate={vi.fn()}
+          sessionId="sched-1"
+          studentId="attempt-1"
+        />
+        <ProtectedInput
+          security={{ preventAutofill: true, preventAutocorrect: true }}
+          aria-label="objective answer"
+        />
+      </>,
+    );
+
+    const objectiveInput = screen.getByRole('textbox', { name: 'objective answer' });
+
+    // The clipboard guard is scoped to the writing editor surface only: the
+    // same gestures on an objective answer control stay unblocked and emit
+    // no PASTE_BLOCKED audit event.
+    for (const eventName of ['paste', 'copy', 'drop']) {
+      const event = new Event(eventName, { bubbles: true, cancelable: true });
+      fireEvent(objectiveInput, event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(saveStudentAuditEventMock).not.toHaveBeenCalled();
   });
 });

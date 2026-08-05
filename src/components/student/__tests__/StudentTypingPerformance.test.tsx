@@ -206,6 +206,39 @@ describe('Student typing performance', () => {
     expect(onWritingChange).toHaveBeenLastCalledWith('task1', 'Latest visible draft');
   });
 
+  it('commits the latest large draft through the debounce without losing content or spamming commits', () => {
+    vi.useFakeTimers();
+    const { editor, onWritingChange } = renderWriting();
+
+    const largeDraft = 'The quick brown fox jumps over the lazy dog. '.repeat(120);
+    expect(largeDraft.length).toBeGreaterThan(5_000);
+
+    // A real typing burst keeps keydown timestamps fresh so the large-value
+    // replacement heuristic does not fire; the draft is still 5k+ characters.
+    fireEvent.keyDown(editor, { key: 'a' });
+    fireEvent.change(editor, { target: { value: largeDraft } });
+    fireEvent.change(editor, { target: { value: `${largeDraft} FINAL` } });
+
+    // DOM stays immediate, commit stays debounced to a single latest write.
+    expect(editor.value).toBe(`${largeDraft} FINAL`);
+    expect(onWritingChange).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(onWritingChange).toHaveBeenCalledTimes(1);
+    expect(onWritingChange).toHaveBeenLastCalledWith('task1', `${largeDraft} FINAL`);
+
+    // A subsequent large edit still survives a lifecycle flush intact.
+    onWritingChange.mockClear();
+    fireEvent.change(editor, { target: { value: `${largeDraft} FINAL 2` } });
+    fireEvent(window, new Event('pagehide'));
+
+    expect(onWritingChange).toHaveBeenCalledTimes(1);
+    expect(onWritingChange).toHaveBeenLastCalledWith('task1', `${largeDraft} FINAL 2`);
+  });
+
   function createAttemptSnapshot(): StudentAttempt {
     return {
       id: 'attempt-typing-perf',
