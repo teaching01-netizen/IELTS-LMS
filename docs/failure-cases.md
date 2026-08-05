@@ -1389,3 +1389,82 @@ persistence succeeds, failures keep the student on the briefing with automatic r
 retry/duplicate trigger must reuse the same `attempt.id:clientSessionId:completedAt` idempotency
 identity. While waiting, the 15s live poll must keep running, and a runtime that becomes
 `live` OR `paused` must open the workspace automatically.
+
+---
+
+## 2026-08-06: Authoritative phase mapping and stale runtime protection (FEX-010/012, F-2)
+
+### Symptom
+Three reachable phase regressions empowered a stale or out-of-order runtime response to move a
+student between screens incorrectly:
+1. A live student re-polled with an older `not_started` runtime was bounced back to the waiting
+   room (exam → lobby demotion at the provider).
+2. After verified terminal completion (runtime structurally complete, attempt not submitted), a
+   stale `live` runtime re-delivery flipped the student back into the exam workspace and could
+   re-arm the timer/auto-submit boundary.
+3. A student whose pre-check was still pending was pushed straight into the exam workspace when a
+   `live` runtime snapshot arrived, skipping the required briefing.
+
+### Scope
+`src/components/student/providers/StudentRuntimeProvider.tsx` (phase derivation in
+`getInitialPhase` + `hydrate_runtime` / `hydrate_attempt` / `hydrate_proctor` + `submit_module`)
+and `src/components/student/StudentApp.tsx` (`shouldRenderPostExam`). Route-data freshness
+handling (`useStudentSessionRouteData` + `studentSessionStateMachine`) already discarded
+older-revision runtime frames; the provider/App layers were the gap when the harness handed
+snapshots through directly.
+
+### Root Cause
+- `hydrate_runtime` picked `'lobby'` for any non-promotable non-terminal runtime status even when
+  `state.phase` was already `'exam'` — no phase monotonicity.
+- Terminal verification (`isRuntimeStructurallyCompleted(runtimeSnapshot)`,
+  `attempt.submittedAt`, `proctorStatus === 'terminated'`) was recomputed from the *incoming*
+  snapshot each hydration; a stale nonterminal snapshot silently unverified it. There was no
+  latch, so `StudentApp`'s `shouldRenderPostExam` fell back to the workspace (`effectivePhase`
+  degrades `post-exam` → `exam` when unverified).
+- `hydrate_attempt`'s `shouldPromoteToExamPhase` did not require `preCheck.completedAt`, so a
+  pending-pre-check attempt was promoted into the exam by a `live` runtime.
+
+### Fix
+- Phase monotonicity (FEX-012): in `hydrate_runtime` / `hydrate_attempt` / `hydrate_proctor`, a
+  non-terminal runtime may only promote the *lobby*; once `exam` or `post-exam` is reached it is
+  kept (stale `not_started` blocks the workspace, it never returns the student to the lobby).
+- Terminal latch: new `terminalVerified` boolean on `RuntimeReducerState` (init from
+  attempt/runtime, set by hydrate paths, set in runtime-backed `submit_module` terminal
+  branches and in `terminate_exam`). `StudentApp.shouldRenderPostExam` now also trusts
+  `runtimeBacked && terminalVerified`, making verified completion absorbing.
+- Pre-check gate (FEX-010 row "Missing → Briefing"): `hydrate_attempt` promotion to `exam`
+  requires `preCheck.completedAt`; `hydrate_runtime` promotion additionally requires
+  `phase === 'lobby'` (only a completed-pre-check student can wait there).
+
+### Deviation
+The "completed but structurally incomplete" runtime row renders the **waiting shell**
+(`Waiting for the exam to start`), not a dedicated unlocking screen — honest pinned behavior:
+the student never sees a success/completion screen and never enters the workspace.
+
+### Regression Protection
+- Tests:
+  - `student/__tests__/StudentApp.test.tsx` — "FEX-010 authoritative phase mapping" table
+    (7 rows: briefing / waiting room / exam workspace / paused overlay / no false success /
+    finalization / terminated view) + "keeps the finalization UI when a nonterminal runtime
+    is re-delivered after terminal completion (FEX-012)".
+  - `student/providers/__tests__/StudentRuntimeProvider.test.tsx` — "keeps a live student in the
+    exam phase when an older `not_started` runtime is re-delivered (FEX-012)", "keeps the
+    local module advance only while the runtime lags, and lets newer runtime revisions win
+    (FEX-012)", and "keeps a pending pre-check on the briefing while the runtime is already
+    live, and promotes only when the pre-check completes (FEX-010 hydrate_attempt gate)" —
+    the last pins the `hydrate_attempt` pre-check gate across re-hydration and the
+    no-deadlock convergence once the pre-check completes.
+  - Re-purposed spy-restore fix in the display-time test (leaked `window.setTimeout`/
+    `setInterval` spies) so later real-timer tests run clean.
+  - Route-level section regression was already pinned:
+    `useStudentSessionRouteData.backend.test.tsx` "discards a runtime_snapshot WS frame with an
+    older revision", "applies fresher attempt snapshots even when runtime freshness regresses".
+- Rules/Docs updated: this file; `StudentRuntimeProvider.tsx` comments.
+
+### Invariant
+The student-phase progression is monotonic for non-terminal runtimes: `pre-check → lobby → exam`,
+and once `exam`, only a verified terminal state (`post-exam`) may move the student out; stale
+`not_started` responses block the workspace in place. Verified terminal state is absorbing and
+survives stale nonterminal snapshots and attempt re-hydration. A pending pre-check permanently
+stays on the briefing regardless of how `live` the runtime is until `preCheck.completedAt` is
+authoritative. "Saved/verified" UI must never be shown off unverified runtime structure.

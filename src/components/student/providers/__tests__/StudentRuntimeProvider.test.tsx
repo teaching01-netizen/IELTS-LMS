@@ -521,52 +521,59 @@ describe('StudentRuntimeProvider', () => {
     const setIntervalSpy = vi.spyOn(window, 'setInterval');
     const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
 
-    function DisplayProbe() {
-      const { state } = useStudentRuntime();
-      return <div data-testid="remaining">{state.displayTimeRemaining}</div>;
+    try {
+      function DisplayProbe() {
+        const { state } = useStudentRuntime();
+        return <div data-testid="remaining">{state.displayTimeRemaining}</div>;
+      }
+
+      render(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={createRuntimeSnapshot('writing')}
+          attemptSnapshot={{
+            ...buildCompletedPreCheckAttempt(),
+            phase: 'exam',
+            currentModule: 'writing',
+            currentQuestionId: 'task1',
+          }}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+
+      expect(screen.getByTestId('remaining')).toHaveTextContent('120');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(setIntervalSpy).not.toHaveBeenCalledWith(expect.any(Function), 250);
+      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1_000);
+
+      const scheduledSecondTicks = setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1_000).length;
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+
+      expect(setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1_000)).toHaveLength(
+        scheduledSecondTicks,
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+      expect(
+        setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1_000).length,
+      ).toBeGreaterThan(scheduledSecondTicks);
+    } finally {
+      // Restore the timer spies: leaving them installed corrupts window.setTimeout
+      // for later tests in this file that rely on real timers.
+      setTimeoutSpy.mockRestore();
+      setIntervalSpy.mockRestore();
+      vi.useRealTimers();
     }
-
-    render(
-      <StudentRuntimeProvider
-        state={mockExamState}
-        onExit={() => undefined}
-        runtimeBacked
-        runtimeSnapshot={createRuntimeSnapshot('writing')}
-        attemptSnapshot={{
-          ...buildCompletedPreCheckAttempt(),
-          phase: 'exam',
-          currentModule: 'writing',
-          currentQuestionId: 'task1',
-        }}
-      >
-        <DisplayProbe />
-      </StudentRuntimeProvider>,
-    );
-
-    expect(screen.getByTestId('remaining')).toHaveTextContent('120');
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(setIntervalSpy).not.toHaveBeenCalledWith(expect.any(Function), 250);
-    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1_000);
-
-    const scheduledSecondTicks = setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1_000).length;
-    act(() => {
-      vi.advanceTimersByTime(250);
-    });
-
-    expect(setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1_000)).toHaveLength(
-      scheduledSecondTicks,
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(1_000);
-    });
-
-    expect(
-      setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1_000).length,
-    ).toBeGreaterThan(scheduledSecondTicks);
-    vi.useRealTimers();
   });
 
   it('counts down each visible second from the absolute deadline to zero', () => {
@@ -1724,5 +1731,244 @@ describe('StudentRuntimeProvider', () => {
       window.removeEventListener('student-observability-metric', metricListener as EventListener);
       vi.useRealTimers();
     }
+  });
+
+  it('keeps a live student in the exam phase when an older not_started runtime is re-delivered (FEX-012)', () => {
+    const attempt = buildCompletedPreCheckAttempt();
+    const notStartedRuntime: ExamSessionRuntime = {
+      ...createRuntimeSnapshot('listening'),
+      status: 'not_started',
+      activeSectionKey: null,
+      currentSectionKey: null,
+      currentSectionRemainingSeconds: 0,
+      waitingForNextSection: false,
+      sections: [],
+    };
+
+    function Probe() {
+      const runtime = useStudentRuntime();
+      return (
+        <>
+          <span data-testid="phase">{runtime.state.phase}</span>
+          <span data-testid="blocking">{runtime.state.blocking.reason ?? 'none'}</span>
+        </>
+      );
+    }
+
+    const { rerender } = render(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={attempt}
+        runtimeBacked
+        runtimeSnapshot={notStartedRuntime}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('lobby');
+
+    // The proctor starts the cohort: the waiting lobby promotes to the exam.
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={attempt}
+        runtimeBacked
+        runtimeSnapshot={createRuntimeSnapshot('listening')}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+
+    // An older out-of-order not_started response arrives after the live one:
+    // the student must NOT be bounced back to the lobby. The exam phase is
+    // monotonic; the stale status only locks the workspace (blocking overlay).
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={attempt}
+        runtimeBacked
+        runtimeSnapshot={notStartedRuntime}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+    expect(screen.getByTestId('blocking')).toHaveTextContent('not_started');
+  });
+
+  it('keeps the local module advance only while the runtime lags, and lets newer runtime revisions win (FEX-012)', () => {
+    const attempt = buildCompletedPreCheckAttempt();
+    const listeningRuntime = createRuntimeSnapshot('listening');
+    const readingRuntime = createRuntimeSnapshot('reading');
+    const writingRuntime = createRuntimeSnapshot('writing');
+    const completedRuntime: ExamSessionRuntime = {
+      ...createRuntimeSnapshot('writing'),
+      status: 'completed',
+      actualEndAt: '2026-01-01T01:00:00.000Z',
+    };
+
+    function Probe() {
+      const runtime = useStudentRuntime();
+      return (
+        <>
+          <span data-testid="phase">{runtime.state.phase}</span>
+          <span data-testid="module">{runtime.state.currentModule}</span>
+          <button type="button" onClick={() => runtime.actions.submitModule()}>
+            Submit section
+          </button>
+        </>
+      );
+    }
+
+    const { rerender } = render(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={attempt}
+        runtimeBacked
+        runtimeSnapshot={listeningRuntime}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+    expect(screen.getByTestId('module')).toHaveTextContent('listening');
+
+    // Local advance: the student submits the listening section and moves to
+    // reading locally while the runtime has not advanced yet.
+    fireEvent.click(screen.getByRole('button', { name: 'Submit section' }));
+    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+    expect(screen.getByTestId('module')).toHaveTextContent('reading');
+
+    // An older runtime revision still pointing at the submitted section must
+    // not yank the student back: the transient local advance is preserved.
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={attempt}
+        runtimeBacked
+        runtimeSnapshot={{ ...listeningRuntime, revision: 1 }}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+    expect(screen.getByTestId('module')).toHaveTextContent('reading');
+
+    // A newer revision that caught up to reading applies normally: the local
+    // advance converges with the runtime position.
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={attempt}
+        runtimeBacked
+        runtimeSnapshot={{ ...readingRuntime, revision: 2 }}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+    expect(screen.getByTestId('module')).toHaveTextContent('reading');
+
+    // A newer revision that jumped ahead (writing) wins over the transient
+    // local advance: the runtime position is authoritative.
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={attempt}
+        runtimeBacked
+        runtimeSnapshot={{ ...writingRuntime, revision: 3 }}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+    expect(screen.getByTestId('module')).toHaveTextContent('writing');
+
+    // A newer terminal revision wins unconditionally: the local advance can
+    // never override verified completion.
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={attempt}
+        runtimeBacked
+        runtimeSnapshot={{ ...completedRuntime, revision: 4 }}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('post-exam');
+  });
+
+  it('keeps a pending pre-check on the briefing while the runtime is already live, and promotes only when the pre-check completes (FEX-010 hydrate_attempt gate)', () => {
+    const pendingAttempt = { ...baseAttempt, phase: 'pre-check' };
+    const completedAttempt = buildCompletedPreCheckAttempt();
+
+    function Probe() {
+      const runtime = useStudentRuntime();
+      return (
+        <>
+          <span data-testid="phase">{runtime.state.phase}</span>
+          <span data-testid="module">{runtime.state.currentModule}</span>
+        </>
+      );
+    }
+
+    // Mount with a pending pre-check while the runtime is already live: the
+    // student must stay on the briefing — an active runtime never promotes a
+    // briefing that has not been completed (FEX-010).
+    const { rerender } = render(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={pendingAttempt}
+        runtimeBacked
+        runtimeSnapshot={createRuntimeSnapshot('listening')}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('pre-check');
+
+    // A fresh attempt revision (new updatedAt) re-fires the attempt hydration
+    // effect; the gate still holds: pending pre-check + live runtime stays on
+    // the briefing (FEX-010).
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={{ ...pendingAttempt, updatedAt: '2026-01-01T00:02:00.000Z' }}
+        runtimeBacked
+        runtimeSnapshot={createRuntimeSnapshot('listening')}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('pre-check');
+
+    // The pre-check completes and the next attempt revision arrives: the
+    // pending briefing now converges with the already-live runtime instead of
+    // deadlocking — promotion to the exam phase succeeds (FEX-012).
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={{ ...completedAttempt, updatedAt: '2026-01-01T00:03:00.000Z' }}
+        runtimeBacked
+        runtimeSnapshot={createRuntimeSnapshot('listening')}
+      >
+        <Probe />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+    expect(screen.getByTestId('module')).toHaveTextContent('listening');
   });
 });

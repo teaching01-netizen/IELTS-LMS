@@ -82,6 +82,14 @@ interface RuntimeReducerState {
   violations: Violation[];
   proctorStatus: StudentAttempt['proctorStatus'];
   proctorNote: string | null;
+  // Latch: once the student is verified terminal (attempt terminated /
+  // submitted, or runtime structurally complete), later stale nonterminal
+  // snapshots must not be able to unverify that state (FEX-012).
+  // NOTE: the latch is intentionally revision-blind — the provider trusts
+  // any structurally-completed snapshot it receives; correctness relies on
+  // the route-data layer (useStudentSessionRouteData) discarding stale
+  // out-of-order frames BEFORE they reach the provider.
+  terminalVerified: boolean;
   submittedAt: string | null;
   blockingReasonOverride: Exclude<
     BlockingReason,
@@ -568,6 +576,10 @@ function createInitialRuntimeState(
       ? attemptSnapshot?.currentQuestionId ?? null
       : null;
   const initialPhase = getInitialPhase(runtimeBacked, runtimeSnapshot, attemptSnapshot);
+  const terminalVerified =
+    attemptSnapshot?.proctorStatus === 'terminated' ||
+    Boolean(attemptSnapshot?.submittedAt) ||
+    isRuntimeStructurallyCompleted(runtimeSnapshot);
   const nonRuntimeSectionDurationMinutes = examState.config.sections[firstModule]?.duration ?? 0;
   const nonRuntimeSectionDurationSeconds = Number.isFinite(nonRuntimeSectionDurationMinutes)
     ? Math.max(0, nonRuntimeSectionDurationMinutes * 60)
@@ -594,6 +606,7 @@ function createInitialRuntimeState(
     violations: attemptSnapshot?.violations ?? [],
     proctorStatus: attemptSnapshot?.proctorStatus ?? 'active',
     proctorNote: attemptSnapshot?.proctorNote ?? null,
+    terminalVerified,
     submittedAt: attemptSnapshot?.submittedAt ?? null,
     blockingReasonOverride: blockingMachine.current,
     blockingMachine,
@@ -644,8 +657,13 @@ function runtimeReducer(
         Boolean(state.submittedAt) ||
         isRuntimeStructurallyCompleted(action.snapshot);
       const runtimeStatus = action.snapshot?.status ?? null;
+      // Only a waiting lobby (pre-check completed) may be promoted by an
+      // active runtime; a pending pre-check must stay on the briefing, and an
+      // already-advanced phase must never be demoted by a stale response.
       const shouldPromoteToExamPhase =
-        !terminalVerified && (runtimeStatus === 'live' || runtimeStatus === 'paused');
+        state.phase === 'lobby' &&
+        !terminalVerified &&
+        (runtimeStatus === 'live' || runtimeStatus === 'paused');
       if (action.preserveLocalAdvance && !terminalVerified) {
         return state;
       }
@@ -654,7 +672,12 @@ function runtimeReducer(
           ? 'post-exam'
           : shouldPromoteToExamPhase
             ? 'exam'
-            : state.phase === 'pre-check' ? 'pre-check' : 'lobby';
+            : state.phase === 'pre-check' || state.phase === 'lobby'
+              ? state.phase
+              : state.phase === 'exam' || state.phase === 'post-exam'
+                ? state.phase
+                : 'lobby';
+      const nextTerminalVerified = terminalVerified || state.terminalVerified;
       const nextQuestionId = moduleChanged ? action.nextQuestionId : state.currentQuestionId;
       const snapshotTimeRemaining = action.snapshot?.currentSectionRemainingSeconds;
       const nextTimeRemaining =
@@ -674,7 +697,8 @@ function runtimeReducer(
         state.currentQuestionId === nextQuestionId &&
         state.timeRemaining === nextTimeRemaining &&
         state.currentSectionExtensionMinutes === nextCurrentSectionExtensionMinutes &&
-        state.waitingForCohortAdvance === nextWaitingForCohortAdvance
+        state.waitingForCohortAdvance === nextWaitingForCohortAdvance &&
+        state.terminalVerified === nextTerminalVerified
       ) {
         return state;
       }
@@ -687,6 +711,7 @@ function runtimeReducer(
         timeRemaining: nextTimeRemaining,
         currentSectionExtensionMinutes: nextCurrentSectionExtensionMinutes,
         waitingForCohortAdvance: nextWaitingForCohortAdvance,
+        terminalVerified: nextTerminalVerified,
       };
     }
     case 'hydrate_proctor': {
@@ -707,14 +732,19 @@ function runtimeReducer(
         terminalVerified
           ? 'post-exam'
           : action.runtimeBacked && !runtimeIsActive && action.snapshot.integrity.preCheck?.completedAt
-            ? 'lobby'
-          : action.snapshot.phase === 'post-exam'
-            ? action.runtimeBacked
-              ? state.phase === 'pre-check'
-                ? 'pre-check'
-                : 'exam'
-              : 'post-exam'
-            : state.phase;
+            ? state.phase === 'exam' || state.phase === 'post-exam'
+              ? state.phase
+              : 'lobby'
+            : action.snapshot.phase === 'post-exam'
+              ? action.runtimeBacked
+                ? state.phase === 'pre-check'
+                  ? 'pre-check'
+                  : state.phase === 'post-exam'
+                    ? 'post-exam'
+                    : 'exam'
+                : 'post-exam'
+              : state.phase;
+      const nextTerminalVerified = terminalVerified || state.terminalVerified;
 
       if (
         state.phase === nextPhase &&
@@ -722,6 +752,7 @@ function runtimeReducer(
         state.proctorNote === nextProctorNote &&
         state.submittedAt === nextSubmittedAt &&
         state.blockingReasonOverride === nextBlockingMachine.current &&
+        state.terminalVerified === nextTerminalVerified &&
         JSON.stringify(state.violations) === JSON.stringify(mergedViolations)
       ) {
         return state;
@@ -734,6 +765,7 @@ function runtimeReducer(
         proctorStatus: nextProctorStatus,
         proctorNote: nextProctorNote,
         submittedAt: nextSubmittedAt,
+        terminalVerified: nextTerminalVerified,
         blockingMachine: nextBlockingMachine,
         blockingReasonOverride: nextBlockingMachine.current,
       };
@@ -755,9 +787,13 @@ function runtimeReducer(
         Boolean(nextSubmittedAt) ||
         isRuntimeStructurallyCompleted(action.runtimeSnapshot);
       const runtimeStatus = action.runtimeBacked ? action.runtimeSnapshot?.status ?? null : null;
+      // A student with a pending pre-check must stay on the briefing even when
+      // the runtime is already active: promotion to the exam requires the
+      // pre-check to be completed (FEX-010).
       const shouldPromoteToExamPhase =
         action.runtimeBacked &&
         !terminalVerified &&
+        Boolean(action.snapshot.integrity.preCheck?.completedAt) &&
         (runtimeStatus === 'live' || runtimeStatus === 'paused');
       const completedPreCheckInRuntimeBackedFlow =
         action.runtimeBacked && Boolean(action.snapshot.integrity.preCheck?.completedAt);
@@ -765,15 +801,20 @@ function runtimeReducer(
         ? 'post-exam'
         : shouldPromoteToExamPhase
           ? 'exam'
-        : completedPreCheckInRuntimeBackedFlow
-          ? 'lobby'
-        : action.snapshot.phase === 'post-exam'
-          ? action.runtimeBacked
-            ? state.phase === 'pre-check'
-              ? 'pre-check'
-              : 'exam'
-            : 'post-exam'
-          : action.snapshot.phase;
+          : completedPreCheckInRuntimeBackedFlow
+            ? state.phase === 'exam' || state.phase === 'post-exam'
+              ? state.phase
+              : 'lobby'
+            : action.snapshot.phase === 'post-exam'
+              ? action.runtimeBacked
+                ? state.phase === 'pre-check'
+                  ? 'pre-check'
+                  : state.phase === 'post-exam'
+                    ? 'post-exam'
+                    : 'exam'
+                : 'post-exam'
+              : action.snapshot.phase;
+      const nextTerminalVerified = terminalVerified || state.terminalVerified;
       const mergedViolations = mergeViolations(action.snapshot.violations, state.violations);
       const nextBlockingMachine = syncProctorBlockingMachine(
         state.blockingMachine,
@@ -789,6 +830,7 @@ function runtimeReducer(
         state.proctorNote === action.snapshot.proctorNote &&
         state.submittedAt === nextSubmittedAt &&
         state.blockingReasonOverride === nextBlockingMachine.current &&
+        state.terminalVerified === nextTerminalVerified &&
         state.attemptSyncState === action.snapshot.recovery.syncState
       ) {
         return state;
@@ -803,6 +845,7 @@ function runtimeReducer(
         proctorStatus: action.snapshot.proctorStatus,
         proctorNote: action.snapshot.proctorNote,
         submittedAt: nextSubmittedAt,
+        terminalVerified: nextTerminalVerified,
         blockingMachine: nextBlockingMachine,
         blockingReasonOverride: nextBlockingMachine.current,
         attemptSyncState: action.snapshot.recovery.syncState,
@@ -861,6 +904,7 @@ function runtimeReducer(
           return {
             ...state,
             phase: 'post-exam',
+            terminalVerified: true,
             currentSectionExtensionMinutes: null,
             waitingForCohortAdvance: false,
           };
@@ -870,6 +914,7 @@ function runtimeReducer(
           return {
             ...state,
             phase: 'post-exam',
+            terminalVerified: true,
             currentModule: state.currentModule,
             currentQuestionId: null,
             currentSectionExtensionMinutes: null,
@@ -932,6 +977,11 @@ function runtimeReducer(
       return {
         ...state,
         phase: 'post-exam',
+        // A client-side terminate is a genuinely terminal observation: latch
+        // it so a runtime-backed student is not bounced back into the
+        // workspace while the server attempt (proctorStatus: terminated)
+        // catches up (FEX-012).
+        terminalVerified: true,
       };
     case 'transition_blocking': {
       const nextBlockingMachine = transitionBlockingMachine(

@@ -225,6 +225,10 @@ export function StudentApp({
   );
   const shouldRenderPostExam =
     verifiedTerminalState !== 'not_terminal' ||
+    // Verified terminal state is absorbing: a stale nonterminal runtime
+    // delivered after completion must not bounce the student back into the
+    // workspace (FEX-012).
+    (runtimeState.runtimeBacked && runtimeState.terminalVerified) ||
     (!runtimeState.runtimeBacked && runtimeState.phase === 'post-exam');
   const effectivePhase =
     runtimeState.phase === 'post-exam' && !shouldRenderPostExam ? 'exam' : runtimeState.phase;

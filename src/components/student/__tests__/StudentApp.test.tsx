@@ -4148,4 +4148,181 @@ describe('StudentApp runtime-backed mode', () => {
       screen.queryByRole('heading', { name: 'Waiting for the exam to start' }),
     ).not.toBeInTheDocument();
   });
+
+  describe('FEX-010 authoritative phase mapping / FEX-012 stale runtime protection (F-2)', () => {
+    function buildStructurallyCompleteRuntime(key: 'writing' | 'reading'): ExamSessionRuntime {
+      const base = key === 'writing' ? createWritingRuntimeSnapshot() : createReadingRuntimeSnapshot();
+      return {
+        ...base,
+        status: 'completed',
+        actualEndAt: '2026-01-01T01:00:00.000Z',
+        activeSectionKey: null,
+        currentSectionRemainingSeconds: 0,
+        sections: base.sections.map((section) => ({
+          ...section,
+          status: 'completed',
+          actualEndAt: '2026-01-01T01:00:00.000Z',
+          completionReason: 'auto_timeout',
+        })),
+        updatedAt: '2026-01-01T01:00:00.000Z',
+      };
+    }
+
+    it.each([
+      {
+        name: 'pre-check missing + nonterminal runtime -> briefing (Preparing your connection…)',
+        installPreCheckGate: true,
+        assert: async () => {
+          expect(
+            screen.getByRole('heading', { name: 'Waiting for the exam to start' }),
+          ).toBeInTheDocument();
+          expect(screen.getByRole('status')).toHaveTextContent('Preparing your connection');
+          expect(screen.getByRole('status')).not.toHaveTextContent(
+            'Waiting for the proctor to start the exam',
+          );
+          expect(screen.queryByText('Read and answer.')).not.toBeInTheDocument();
+        },
+      },
+      {
+        name: 'pre-check complete + not_started runtime -> waiting room',
+        attempt: createWritingAttemptSnapshot,
+        runtime: createNotStartedRuntimeSnapshot,
+        assert: async () => {
+          expect(
+            screen.getByRole('heading', { name: 'Waiting for the exam to start' }),
+          ).toBeInTheDocument();
+          expect(screen.getByRole('status')).toHaveTextContent(
+            'Waiting for the proctor to start the exam',
+          );
+          expect(screen.queryAllByRole('button')).toHaveLength(0);
+        },
+      },
+      {
+        name: 'pre-check complete + live runtime -> exam workspace',
+        attempt: () => createReadingAttemptSnapshot(),
+        runtime: createReadingRuntimeSnapshot,
+        assert: async () => {
+          expect(await screen.findByText('Read and answer.')).toBeInTheDocument();
+          expect(screen.getByText('Type one word')).toBeInTheDocument();
+          expect(
+            screen.queryByRole('heading', { name: 'Waiting for the exam to start' }),
+          ).not.toBeInTheDocument();
+        },
+      },
+      {
+        name: 'pre-check complete + paused runtime -> exam workspace with blocking overlay',
+        attempt: () => createReadingAttemptSnapshot(),
+        runtime: () => ({ ...createReadingRuntimeSnapshot(), status: 'paused' as const }),
+        assert: async () => {
+          expect(await screen.findByText('Read and answer.')).toBeInTheDocument();
+          expect(screen.getByRole('heading', { name: 'Cohort paused' })).toBeInTheDocument();
+          expect(
+            screen.getByText(/your current section will resume when the cohort restarts/i),
+          ).toBeInTheDocument();
+        },
+      },
+      {
+        name: 'completed-but-structurally-incomplete runtime -> no false success, no workspace',
+        attempt: () => createWritingAttemptSnapshot(),
+        runtime: () => ({ ...createWritingRuntimeSnapshot(), status: 'completed' as const }),
+        assert: async () => {
+          expect(screen.queryByText(/examination complete/i)).not.toBeInTheDocument();
+          // The runtime claims completion but nothing verifies it: the student
+          // stays on the waiting shell, never a success screen and never the
+          // exam workspace.
+          expect(
+            screen.getByRole('heading', { name: 'Waiting for the exam to start' }),
+          ).toBeInTheDocument();
+          expect(screen.queryByRole('timer', { name: /time remaining/i })).not.toBeInTheDocument();
+        },
+      },
+      {
+        name: 'pre-check complete + structurally complete runtime -> finalization/post-exam',
+        attempt: () => createWritingAttemptSnapshot(),
+        runtime: () => buildStructurallyCompleteRuntime('writing'),
+        assert: async () => {
+          expect(
+            await screen.findByRole('heading', { name: /examination complete/i }),
+          ).toBeInTheDocument();
+          expect(
+            screen.queryByRole('heading', { name: /session terminated/i }),
+          ).not.toBeInTheDocument();
+        },
+      },
+      {
+        name: 'proctor-terminated attempt -> terminated view regardless of runtime state',
+        attempt: () => ({
+          ...createWritingAttemptSnapshot(),
+          proctorStatus: 'terminated' as const,
+          proctorNote: 'Session terminated due to integrity review',
+        }),
+        runtime: () => createWritingRuntimeSnapshot(),
+        assert: async () => {
+          expect(
+            await screen.findByRole('heading', { name: /session terminated/i }),
+          ).toBeInTheDocument();
+          expect(screen.queryByText(/examination complete/i)).not.toBeInTheDocument();
+          expect(screen.queryByRole('timer', { name: /time remaining/i })).not.toBeInTheDocument();
+        },
+      },
+    ] as Array<{
+      name: string;
+      attempt?: (() => StudentAttempt) | undefined;
+      runtime?: (() => ExamSessionRuntime) | undefined;
+      installPreCheckGate?: boolean;
+      assert: () => Promise<void>;
+    }>)('$name', async ({ attempt, runtime, installPreCheckGate, assert }) => {
+      if (installPreCheckGate) {
+        // Keep the silent pre-check persist pending so the briefing shell
+        // stays visible (the lobby must not appear before persistence).
+        const deferred = new Promise<Response>(() => undefined);
+        installPreCheckFetchMock(createPreCheckPendingAttemptSnapshot(), () => deferred);
+      }
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => undefined}
+          scheduleId="sched-1"
+          attemptSnapshot={attempt?.() ?? createPreCheckPendingAttemptSnapshot()}
+          runtimeSnapshot={runtime?.() ?? createReadingRuntimeSnapshot()}
+        />,
+      );
+      await assert();
+    });
+
+    it('keeps the finalization UI when a nonterminal runtime is re-delivered after terminal completion (FEX-012)', async () => {
+      const attempt = createWritingAttemptSnapshot();
+      const { rerender } = render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => undefined}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={buildStructurallyCompleteRuntime('writing')}
+        />,
+      );
+
+      expect(
+        await screen.findByRole('heading', { name: /examination complete/i }),
+      ).toBeInTheDocument();
+
+      // A stale out-of-order live runtime must not bounce the student back
+      // into the exam workspace: verified terminal state is absorbing.
+      rerender(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => undefined}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createWritingRuntimeSnapshot()}
+        />,
+      );
+
+      expect(
+        screen.getByRole('heading', { name: /examination complete/i }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('timer', { name: /time remaining/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Finish' })).not.toBeInTheDocument();
+    });
+  });
 });
