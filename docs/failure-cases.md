@@ -2,6 +2,74 @@
 
 Purpose: turn incidents and bug fixes into durable memory for humans and AI agents.
 
+## 2026-08-06: FEX-020 — Uniform Per-Renderer Contract Matrix for QuestionRenderer (F-4)
+
+### Symptom
+No incident. The renderer had grown to 14 `block.type` dispatch arms
+(`src/components/student/QuestionRenderer.tsx`) with a mix of plain radio/checkbox/select
+controls, `ProtectedInput` text paths, and slot-indexed `updateIndexedAnswer` paths. The
+invariant test plan (FEX-020, task F-4) required every question type to be pinned against
+9 uniform dimensions (accessible label, initial hydrated value, user edit, mutation metadata,
+clear behavior, keyboard navigation, flag behavior, rerender preservation, reload hydration).
+Many cells of that matrix were unpinned: TFNG, CLOZE, MAP, MATCHING, FLOW_CHART and
+NOTE_COMPLETION had no direct `QuestionRenderer` tests at all, and no renderer test asserted
+accessible labels, flag wiring, keyboard reachability, or reload hydration.
+
+### Scope
+Student objective question rendering module only: `QuestionRenderer.tsx`, `ProtectedInput.tsx`,
+`ProtectedSelect.tsx`, `ProtectedChoiceInput.tsx`, `TableCompletionSlotCell.tsx`,
+`resolveObjectiveAnswerUpdate.ts`, `resolveSharedStudentAnswerMeta.ts`. No production behavior
+changed.
+
+### Root Cause
+None (matrix pass). Every dispatch arm already emitted the expected value shape, meta shape
+(slot types: `UpdateIndexedAnswer` with `slotIndex/slotId/slotCount/slotValue/interactionType:
+'typing'`; MULTI_MCQ: `{ arrayUpdateMode: 'replace', interactionType: 'discrete' }`; scalar
+non-slot types: no meta), live-answer registration, and accessible labels. No production-code
+fix was required.
+
+### Fix
+- Added `src/components/student/__tests__/QuestionRenderer.matrix.test.tsx` (129 tests) —
+  13 `describe` blocks covering all 14 render arms, parameterized across CLOZE/MAP/SHORT_ANSWER
+  where the ProtectedInput text path is genuinely identical, plus a multi-slot
+  TABLE_COMPLETION describe for the inline-input cell variant.
+- The flag contract is asserted on BOTH sides: slot-based types render one
+  `aria-label="Flag question"`/`"Unflag question"` button per slot (invokes `onToggleFlag(slotId)`
+  and flips label with the `flags` prop), and TFNG/CLOZE/MATCHING/MULTI_MCQ/MAP/SINGLE_MCQ/
+  SHORT_ANSWER intentionally render none — flagging for those is owned by the parent
+  (`StudentQuestionBlockSection.FlagButton`). Note, not a violation: the parent `FlagButton`
+  (StudentQuestionBlockSection.tsx:40-80) exposes only a `title` and no `aria-label` or
+  `aria-pressed`; any fix belongs to the parent module, which is out of scope for this task.
+
+### Regression Protection
+- Tests: `src/components/student/__tests__/QuestionRenderer.matrix.test.tsx` (129 tests,
+  14×9 matrix with table-extra slot meta variants). Verified run (2026-08-06):
+  `npx vitest run QuestionRenderer.matrix.test.tsx StudentQuestionExperience.test.tsx
+  ProtectedInput.test.tsx ProtectedSelect.test.tsx ProtectedChoiceInput.test.tsx
+  TableCompletionSlotCell.test.tsx SubAnswerTreeQuestionList.test.tsx
+  resolveObjectiveAnswerUpdate.test.ts resolveObjectiveAnswerUpdate.slots.test.ts` →
+  241 passing across 9 files (matrix 129 + StudentQuestionExperience 45 + controls/resolvers 67);
+  zero `act()` warnings from the matrix file.
+- Note: the matrix run surfaced a pre-existing React key warning in `renderFlowChart`
+  (`QuestionRenderer.tsx` maps `steps` to slot fields without a `key`; the sibling
+  `renderDiagramFallbackFields` wraps in keyed Fragments). Not a contract violation — the
+  warning is invisible in production and out of this task's scope; tracked as a follow-up.
+- Diagnostics: none added beyond the matrix.
+
+### Invariant
+For every objective renderer arm: (1) every answer control exposes an accessible label and
+radios share one `name` group; (2) `onChange` always emits the real answer value (option id,
+heading roman, option-id array, or full slot array) plus the exact meta the dispatch arm
+declares; (3) slot edits always emit the FULL array so one slot can be cleared without
+touching its siblings; (4) scalar non-slot edits and the flag button never drop or invent
+meta; (5) reload hydration relies solely on the `answer` prop — the controls are fully
+controlled, so there is no internal state that could desync from persisted reality.
+Keep the matrix in sync whenever a new renderer arm is added to `QuestionRenderer.tsx`.
+
+---
+
+## 2026-08-05: Second Client Session Can Silently Overwrite Accepted Answers (Missing Mutation Base-Revision Gate)
+
 ## Entry Template
 
 ```
