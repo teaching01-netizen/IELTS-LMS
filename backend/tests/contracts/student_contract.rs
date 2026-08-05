@@ -2550,6 +2550,137 @@ async fn mutation_batch_surfaces_section_mismatch_with_reason() {
 }
 
 #[tokio::test]
+async fn late_mutation_from_old_section_accepted_in_grace_then_section_mismatch_after_backdate() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let admin_auth = mysql::create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "admin@example.com",
+        "Admin",
+    )
+    .await;
+    let (student_auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &student_auth, schedule_id, "alice", &student_key).await;
+    let start = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
+    assert_eq!(start.status(), StatusCode::OK);
+    let (bootstrap_after_start, _) =
+        bootstrap_attempt(&app, &student_auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap_after_start["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap_after_start["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_revision = bootstrap_after_start["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // BEX-022: the proctor advances listening -> reading through the control
+    // surface, not via a raw SQL transition.
+    let advance = admin_end_section_now(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "expectedActiveSectionKey": "listening", "reason": "advance to reading" }),
+    )
+    .await;
+    assert_eq!(advance.status(), StatusCode::OK);
+    assert_eq!(json_body(advance).await["data"]["activeSectionKey"], "reading");
+
+    let mutation_request = async |question_id: &str, mutation_id: &str, revision: i32| {
+        app.clone()
+            .oneshot(
+                with_attempt_token(Request::builder(), &attempt_token)
+                    .method("POST")
+                    .uri(format!(
+                        "/api/v1/student/sessions/{schedule_id}/mutations:batch"
+                    ))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({
+                            "attemptId": attempt_id.clone(),
+                            "mutations": [{
+                                "mutationId": mutation_id,
+                                "baseRevision": revision,
+                                "type": "SetChoice",
+                                "questionId": question_id,
+                                "value": "T"
+                            }]
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    };
+
+    // (a) IMMEDIATELY after the advance the just-completed section is still in
+    // the transition grace window: a late listening answer is accepted.
+    let in_grace = mutation_request("q1", "mutation-late-listening-in-grace", attempt_revision).await;
+    assert_eq!(in_grace.status(), StatusCode::OK);
+    let in_grace_json = json_body(in_grace).await;
+    assert_eq!(in_grace_json["data"]["appliedMutationCount"], 1);
+    let revision_after_grace = in_grace_json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // (b) Backdate the completed section beyond the grace window: the same late
+    // listening mutation must now surface the section-lock conflict.
+    sqlx::query(
+        r#"
+        UPDATE exam_session_runtime_sections
+        SET actual_end_at = NOW() - INTERVAL 360 SECOND
+        WHERE runtime_id = (SELECT id FROM exam_session_runtimes WHERE schedule_id = ?)
+          AND section_key = 'listening'
+        "#,
+    )
+    .bind(schedule_id.to_string())
+    .execute(database.pool())
+    .await
+    .expect("backdate listening actual end beyond grace");
+
+    let past_grace = mutation_request("q1", "mutation-late-listening-past-grace", revision_after_grace).await;
+    assert_eq!(past_grace.status(), StatusCode::CONFLICT);
+    let past_grace_json = json_body(past_grace).await;
+    assert_eq!(past_grace_json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        past_grace_json["error"]["details"]["reason"],
+        "SECTION_MISMATCH",
+        "past-grace conflict body: {past_grace_json}"
+    );
+    assert!(
+        past_grace_json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("q1"),
+        "the conflict must name the offending question: {past_grace_json}"
+    );
+
+    // (c) The ACTIVE section stays writable in the same state.
+    let active_section = mutation_request("r1", "mutation-live-reading", revision_after_grace).await;
+    assert_eq!(active_section.status(), StatusCode::OK);
+    let active_section_json = json_body(active_section).await;
+    assert_eq!(active_section_json["data"]["appliedMutationCount"], 1);
+    assert_eq!(active_section_json["data"]["attempt"]["answers"]["r1"], "T");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
 async fn mutation_batch_rejects_objective_mutations_when_proctor_paused_attempt() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
@@ -2950,6 +3081,148 @@ async fn submit_blocks_while_runtime_live_with_unanswered_policy_block_but_allow
         "completed submit body: {}",
         completed_json
     );
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn student_cannot_advance_runtime_and_submit_does_not_unlock_next_section() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let admin_auth = mysql::create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "admin@example.com",
+        "Admin",
+    )
+    .await;
+    let (student_auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (_bootstrap, _) = bootstrap_attempt(&app, &student_auth, schedule_id, "alice", &student_key).await;
+    let start = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
+    assert_eq!(start.status(), StatusCode::OK);
+    let (bootstrap_after_start, _) =
+        bootstrap_attempt(&app, &student_auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap_after_start["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap_after_start["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_revision = bootstrap_after_start["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // BEX-022: the student principal cannot authoritatively advance the cohort.
+    let forbidden = app
+        .clone()
+        .oneshot(
+            student_auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/proctor/sessions/{schedule_id}/control/end-section-now"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({ "reason": "student attempted to advance" }))
+                        .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+    let forbidden_json = json_body(forbidden).await;
+    assert_eq!(forbidden_json["error"]["code"], "FORBIDDEN");
+    assert_eq!(
+        forbidden_json["error"]["message"],
+        "The authenticated user is not allowed to access this route."
+    );
+
+    // BEX-022: alice's own submit seals HER attempt but must not advance or
+    // unlock anything on the runtime side.
+    let submit = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{schedule_id}/submit"))
+                .header("content-type", "application/json")
+                .header("idempotency-key", "submit-no-advance")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "lastSeenRevision": attempt_revision,
+                        "submissionId": "submit-no-advance",
+                        "clientFinalSeq": 0,
+                        "serverAcceptedThroughSeq": 0
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(submit.status(), StatusCode::OK);
+    let submit_json = json_body(submit).await;
+    assert_eq!(submit_json["data"]["attempt"]["phase"], "post-exam");
+
+    // The attempt is marked complete in the DB (submitted_at set)...
+    let (phase, submitted_at): (String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
+        "SELECT phase, submitted_at FROM student_attempts WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("attempt row");
+    assert_eq!(phase, "post-exam");
+    assert!(submitted_at.is_some(), "submit must seal the attempt");
+
+    // ...while the runtime stays live on the same section and the next section
+    // remains locked: student-visible state matches persisted reality.
+    let runtime = admin_runtime_projection(&app, &admin_auth, schedule_id).await;
+    let data = &runtime["data"];
+    assert_eq!(data["status"], "live");
+    assert_eq!(data["activeSectionKey"], "listening");
+    assert_eq!(data["currentSectionKey"], "listening");
+    let sections = data["sections"].as_array().expect("sections");
+    assert_eq!(sections[0]["sectionKey"], "listening");
+    assert_eq!(sections[0]["status"], "live");
+    assert_eq!(sections[1]["sectionKey"], "reading");
+    assert_eq!(sections[1]["status"], "locked", "submit must not unlock the next section");
+    assert_eq!(data["revision"], 1, "no student action may bump the runtime revision");
+
+    let (db_status, db_active, db_current): (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT status, active_section_key, current_section_key FROM exam_session_runtimes WHERE schedule_id = ?",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .expect("runtime row");
+    assert_eq!(db_status, "live");
+    assert_eq!(db_active.as_deref(), Some("listening"));
+    assert_eq!(db_current.as_deref(), Some("listening"));
+
+    let advance_events: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM cohort_control_events WHERE schedule_id = ? AND action = 'end_section_now'",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(advance_events, 0, "student actions must not append control events");
 
     database.shutdown().await;
 }
@@ -4425,6 +4698,27 @@ async fn admin_runtime_command(
             auth.with_csrf(Request::builder())
                 .method("POST")
                 .uri(format!("/api/v1/schedules/{schedule_id}/runtime/commands"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+async fn admin_end_section_now(
+    app: &axum::Router,
+    auth: &mysql::TestAuthContext,
+    schedule_id: Uuid,
+    payload: serde_json::Value,
+) -> axum::response::Response {
+    app.clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/proctor/sessions/{schedule_id}/control/end-section-now"
+                ))
                 .header("content-type", "application/json")
                 .body(Body::from(serde_json::to_vec(&payload).unwrap()))
                 .unwrap(),
