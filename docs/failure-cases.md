@@ -1139,3 +1139,103 @@ All pinned in `backend/tests/contracts/student_contract.rs` (`bex060_*`, `bex061
 
 ### Invariant
 The final snapshot is the single source of truth for grading and must always equal the reconciled final state (patch-merged); a submit must be accepted exactly once per attempt (one audit row, one revision bump, one idempotent receipt per key) with concurrent retries converging on the same receipt instead of 500ing; grace-accepted mutations must be reflected in the snapshot grading reads; submitted answers are immutable outside the grace window.
+
+---
+
+## 2026-08-05: Objective grading matrix + submission-to-grading consistency pinned (BEX-070/071)
+
+### Symptom
+No contract tests pinned the per-type objective grading rules end-to-end (exact/incorrect/blank/
+whitespace/case per question type), the shared-answer pool consumption semantics, or the
+submission-to-grading consistency guarantees (immutable snapshot, re-run stability, totals
+identity, writing-answer availability). Worse, a real gap existed: an Enum-constrained question
+(TFNG/MATCHING/SINGLE_MCQ) whose value reached the final snapshot through the submit
+`finalAnswerPatch` path (which is intentionally unvalidated — the patch is client-authoritative
+and hash-checked) was graded with whitespace collapse, so `" T "` graded CORRECT for `l-tfng-1`
+even though the mutation layer rejects it with 422.
+
+### Scope
+`backend/crates/application/src/grading/mod.rs` (objective scoring engine: spec building, exact
+matching, shared-pool consumption) and the grading leg of
+`backend/tests/contracts/student_contract.rs` (`bex070_*`, `bex071_*`).
+
+### Root Cause
+`ObjectiveExpectedAnswer::matches` normalized the student answer with `normalize_exact_text`
+(whitespace collapse + trim) for every `TextAnyOf` spec, regardless of whether the question is
+Enum-constrained at the mutation layer. The two layers disagreed: the delivery schema rejects
+whitespace variants for Enum questions (`validate_answer_value`, `AnswerConstraint::Enum` exact
+`allowed.contains(text)`), but grading silently accepted them when a value arrived via the submit
+patch path.
+
+### Fix
+- `ObjectiveAnswerSpec` gained `strict_text: bool`. Grading now matches **byte-exact** (no
+  whitespace collapse) for Enum-constrained types: TFNG, MATCHING, SINGLE_MCQ (both per-question
+  and legacy block-level), CLASSIFICATION, MATCHING_FEATURES. Free-text types (SHORT_ANSWER,
+  SENTENCE_COMPLETION/NOTE_COMPLETION blanks, DIAGRAM_LABELING/FLOW_CHART/TABLE_COMPLETION slots,
+  sub-answer trees) keep whitespace collapse. MULTI_MCQ was already byte-strict (`ExactSet`).
+  Override specs keep the base strictness of their question.
+- No change to the shared-answer path (already correct) and no change to the mutation layer.
+
+### Grading matrix as pinned (all through the real submit → projection worker path)
+- **SHORT_ANSWER / sentence blanks / diagram labels (free text):** exact → correct; incorrect →
+  wrong; blank/cleared/unanswered → wrong; whitespace variant (`"  diagram  "`, `"first "`) →
+  **correct** (collapse + trim, Unicode NBSP included); case variant (`"Petrol"`, `"SECOND"`,
+  `"Ear"`) → **wrong** (case-sensitive; the shared-answer path is the only case-folding path).
+- **TFNG / MATCHING / SINGLE_MCQ (Enum):** exact → correct; incorrect valid value (`"F"`, `"i"`,
+  `"A"`) → wrong; blank → wrong; whitespace variant (`" T "`, `"ii "`, `" B"`) → **rejected 422 at
+  mutation** and, if smuggled via `finalAnswerPatch`, **wrong at grading** (the BEX-070 fix);
+  case variant (`"t"`, `"b"`) → rejected 422 at mutation, wrong at grading via patch.
+- **MULTI_MCQ (set):** exact set any order → correct; wrong set → wrong; blank → wrong;
+  whitespace inside an element (`["A", "C "]`) or case variant (`["a","c"]`) → wrong (ExactSet is
+  byte-strict, no normalization anywhere).
+- **Legacy-minimal TFNG (`q1`, no answer metadata):** no grading row at all (spec not built).
+- **Shared-answer sentence:** pool value → correct; value outside pool → wrong; blank → wrong;
+  case-folded pool value (`"APPLE"`) → **correct** (punctuation/apostrophe/hyphen normalized too).
+
+### Shared-answer pool consumption semantics (exactly as pinned)
+Consumption is per question (group key `sentence:{question_id}:shared`), in **spec order = blank
+order**. `matches_shared_sentence_answer` normalizes the student value (case-fold + punctuation
+normalization) and: (a) a value already in `consumed` → wrong, never re-awarded; (b) a value in
+the pool → consumed (inserted into `consumed`) and correct; (c) a value outside the pool → wrong
+and **NOT consumed** (the pool stays available for later blanks). Consequences pinned:
+`["apple","apple"]` on a 1-answer/2-blank question → [correct, wrong] (duplicate consumption =
+"more blanks than valid answers": the excess blank can never be correct, even as `"APPLE"` — the
+case-folded repeat is still a consumed duplicate); `["cherry","apple"]` → [wrong, correct]
+(wrong values don't consume); `["banana","apple"]` on a 2-answer pool → both correct
+(order-independent).
+
+### Submission-to-grading consistency (as pinned)
+- **Data source:** the projection (`sync_submissions_from_attempts` →
+  `ensure_section_submissions_with_mode`) reads `student_attempts.final_submission.answers` /
+  `.writingAnswers` only — never the live `answers`/`writing_answers`/`flags` columns. Pinned:
+  after submit, SQL-tampering the live cache (`answers`, `writing_answers`, `flags`) and
+  re-running the projection leaves `auto_grading_results`, `section_submissions.answers`, the
+  writing task rows, and `final_submission` byte-identical.
+- **Re-run stability:** the no-watermark cycle re-processes every submitted attempt and
+  re-upserts identical values (`section_rows_synced >= 1` again), and the persisted JSON is
+  byte-identical run after run (`generatedAt` derives from the stable `submitted_at`).
+- **Totals identity:** `sum(questionResults[].awardedScore) == totalScore`,
+  `sum(questionResults[].maxScore) == maxScore`, `percentage == totalScore/maxScore*100` — pinned
+  on a 7-correct/4-wrong mix (total 7 of max 11).
+- **Writing answers availability:** the essay must be keyed by the **content-declared task id**
+  (`writing-1` for the seed; the delivery-side `SetEssayText` accepts legacy `task1`/`task2` from
+  the config fallback, but the projection materializes task rows only for content task ids).
+  Pinned: `final_submission.writingAnswers["writing-1"]` survives; the projection writes the
+  `writing` section row (`grading_status needs_review`, `answers.tasks[0].text`) and a
+  `writing_task_submissions` row (`student_text` byte-exact, `needs_review`) — all readable for
+  manual/AI grading and immune to later live-cache tampering.
+
+### Regression Protection
+- Tests: `backend/tests/contracts/student_contract.rs` (`bex070_objective_grading_matrix`,
+  `bex070_shared_answer_pool_matrix`, `bex071_submission_to_grading_consistency`); the existing
+  `bex035_question_type_round_trip_matrix` still passes unchanged.
+- Production: `backend/crates/application/src/grading/mod.rs` (`strict_text` on
+  `ObjectiveAnswerSpec`; unit tests `objective_text_matches_*` updated for the new `matches` arg).
+
+### Invariant
+Grading must read only the immutable `final_submission` snapshot; re-running the projection must
+be content-idempotent; section totals must equal the per-question sums; every objective question
+type must grade exact/incorrect/blank deterministically, free-text collapses whitespace (but stays
+case-sensitive), Enum/choice matches byte-exact at both the mutation layer and the grading layer
+(the submit patch path must not be able to turn a rejected variant into a correct grade), and the
+shared pool is consumed once per normalized value in blank order.

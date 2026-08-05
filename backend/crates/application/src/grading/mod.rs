@@ -3282,6 +3282,13 @@ struct ObjectiveAnswerSpec {
     max_score: i64,
     has_override: bool,
     shared_answer_group: Option<String>,
+    /// True for Enum-constrained question types (TFNG, MATCHING, SINGLE_MCQ,
+    /// CLASSIFICATION, MATCHING_FEATURES): the student answer must match a
+    /// pool value byte-exact (whitespace is NOT collapsed). The mutation
+    /// layer already rejects whitespace variants for these types, so the
+    /// grading layer must not silently accept them either (e.g. when an
+    /// answer reaches the final snapshot through the submit patch path).
+    strict_text: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -3291,7 +3298,7 @@ enum ObjectiveExpectedAnswer {
 }
 
 impl ObjectiveExpectedAnswer {
-    fn matches(&self, value: &Value, scoring_rule: &str) -> bool {
+    fn matches(&self, value: &Value, scoring_rule: &str, strict_text: bool) -> bool {
         let _ = scoring_rule;
         match self {
             Self::TextAnyOf(expected) => {
@@ -3299,7 +3306,13 @@ impl ObjectiveExpectedAnswer {
                 let Some(answer) = values.first() else {
                     return false;
                 };
-                expected.contains(&normalize_exact_text(answer))
+                if strict_text {
+                    // Enum-constrained answers match byte-exact: a whitespace
+                    // variant (" T ", "ii ", " B") is NOT the pool value.
+                    expected.contains(answer)
+                } else {
+                    expected.contains(&normalize_exact_text(answer))
+                }
             }
             Self::ExactSet(expected) => !expected.is_empty() && strict_text_set(value) == *expected,
         }
@@ -3350,7 +3363,8 @@ fn compute_objective_auto_grading_results(
             let consumed = consumed_shared_answers.entry(group.to_owned()).or_default();
             matches_shared_sentence_answer(&spec.expected, &student_answer, consumed)
         } else {
-            spec.expected.matches(&student_answer, &spec.scoring_rule)
+            spec.expected
+                .matches(&student_answer, &spec.scoring_rule, spec.strict_text)
         };
         if is_correct {
             total_score += question_max;
@@ -3764,12 +3778,18 @@ fn index_objective_block_scoring_specs(
                         .get("answerRule")
                         .and_then(Value::as_str)
                         .unwrap_or(fallback_rule);
+                    // TFNG and MATCHING are Enum-constrained at the mutation
+                    // layer: grading must match their pool values byte-exact
+                    // (whitespace variants are not accepted). CLOZE, MAP and
+                    // SHORT_ANSWER are free-text and keep whitespace collapse.
+                    let strict_text = matches!(block_type, "TFNG" | "MATCHING");
                     insert_text_answer_spec(
                         specs,
                         seen,
                         question_id,
                         accepted,
                         scoring_rule.to_owned(),
+                        strict_text,
                     );
                 }
             }
@@ -3821,6 +3841,7 @@ fn index_objective_block_scoring_specs(
                                 &format!("{question_id}:{blank_id}"),
                                 accepted,
                                 scoring_rule.clone(),
+                                false,
                             );
                         }
                     }
@@ -3873,12 +3894,15 @@ fn index_objective_block_scoring_specs(
                                     })
                                 });
                         if let Some(expected) = expected {
+                            // SINGLE_MCQ answers are Enum-constrained (option
+                            // ids): match byte-exact, no whitespace collapse.
                             insert_text_answer_spec(
                                 specs,
                                 seen,
                                 question_id,
                                 vec![expected],
                                 "single_choice".to_owned(),
+                                true,
                             );
                         }
                     }
@@ -3909,6 +3933,7 @@ fn index_objective_block_scoring_specs(
                     block_id,
                     vec![expected],
                     "single_choice".to_owned(),
+                    true,
                 );
             }
         }
@@ -3934,12 +3959,15 @@ fn index_objective_block_scoring_specs(
                     if accepted.is_empty() {
                         continue;
                     }
+                    // CLASSIFICATION item selections are Enum-constrained
+                    // (category ids): match byte-exact.
                     insert_text_answer_spec(
                         specs,
                         seen,
                         &format!("{block_id}:{item_id}"),
                         accepted,
                         "classification".to_owned(),
+                        true,
                     );
                 }
             }
@@ -3957,12 +3985,15 @@ fn index_objective_block_scoring_specs(
                     if accepted.is_empty() {
                         continue;
                     }
+                    // MATCHING_FEATURES selections are Enum-constrained
+                    // (option ids): match byte-exact.
                     insert_text_answer_spec(
                         specs,
                         seen,
                         &format!("{block_id}:{feature_id}"),
                         accepted,
                         "matching_features".to_owned(),
+                        true,
                     );
                 }
             }
@@ -4106,6 +4137,7 @@ fn insert_shared_sentence_answer_spec(
         max_score: 1,
         has_override: false,
         shared_answer_group: Some(format!("sentence:{shared_answer_question_id}:shared")),
+        strict_text: false,
     });
 }
 
@@ -4184,6 +4216,7 @@ fn register_sub_answer_tree_scoring_specs(
                     &format!("{block_id}::tree::{root_id}::{node_id}"),
                     accepted,
                     "sub_answer_tree".to_owned(),
+                    false,
                 );
                 continue;
             }
@@ -4226,6 +4259,7 @@ fn register_text_slot_specs(
                 &format!("{block_id}:{slot_id}"),
                 accepted,
                 scoring_rule.to_owned(),
+                false,
             );
         }
     }
@@ -4237,6 +4271,7 @@ fn insert_text_answer_spec(
     question_id: &str,
     accepted_answers: Vec<String>,
     scoring_rule: String,
+    strict_text: bool,
 ) {
     if seen.contains(question_id) {
         return;
@@ -4260,6 +4295,7 @@ fn insert_text_answer_spec(
         max_score: 1,
         has_override: false,
         shared_answer_group: None,
+        strict_text,
     });
 }
 
@@ -4294,6 +4330,7 @@ fn insert_exact_set_spec(
         max_score: 1,
         has_override: false,
         shared_answer_group: None,
+        strict_text: false,
     });
 }
 
@@ -4554,14 +4591,14 @@ mod tests {
                 .collect(),
         );
         let value = Value::String("crowd noise".to_owned());
-        assert!(expected.matches(&value, "ONE_WORD"));
+        assert!(expected.matches(&value, "ONE_WORD", false));
     }
 
     #[test]
     fn objective_text_matches_trims_student_answer_before_matching() {
         let expected = ObjectiveExpectedAnswer::TextAnyOf(["NOT GIVEN".to_owned()].into_iter().collect());
         let value = Value::String("NOT GIVEN   ".to_owned());
-        assert!(expected.matches(&value, "ONE_WORD"));
+        assert!(expected.matches(&value, "ONE_WORD", false));
     }
 
     fn shared_sentence_content_snapshot() -> Value {

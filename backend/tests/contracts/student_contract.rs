@@ -7297,6 +7297,1338 @@ async fn bex035_question_type_round_trip_matrix() {
     database.shutdown().await;
 }
 
+// ---- BEX-070/071 helpers (grading leg, mirrors the bex035 pattern) --------
+
+// Live-runtime bootstrap for a fresh candidate (the StartRuntime command must
+// already have been applied once for the schedule — it is not idempotent).
+// Each candidate needs a distinct registration wcode on the shared schedule.
+async fn bex070_bootstrap_attempt(
+    app: &axum::Router,
+    pool: &sqlx::MySqlPool,
+    schedule_id: Uuid,
+    candidate_id: &str,
+    wcode: &str,
+) -> (String, String, i32) {
+    let (auth, student_key) =
+        create_student_auth_with_wcode(pool, schedule_id, candidate_id, wcode).await;
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(app, &auth, schedule_id, candidate_id, &student_key).await;
+    assert_eq!(
+        bootstrap["data"]["attempt"]["phase"],
+        "exam",
+        "attempt for {candidate_id} must be phase=exam for submit"
+    );
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    (attempt_id, attempt_token, base_revision)
+}
+
+// Mutate with an OK expectation; returns the new revision.
+async fn bex070_mutate_ok(
+    app: &axum::Router,
+    attempt_token: &str,
+    schedule_id: Uuid,
+    attempt_id: &str,
+    mutation_id: &str,
+    base_revision: i32,
+    mutation_fields: serde_json::Value,
+) -> i32 {
+    let (status, json) = post_single_mutation_batch(
+        app,
+        attempt_token,
+        schedule_id,
+        attempt_id,
+        mutation_id,
+        base_revision,
+        mutation_fields,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mutation_id} failed: {json}");
+    json["data"]["revision"].as_i64().unwrap() as i32
+}
+
+// Mutate with a 422 VALIDATION_ERROR expectation; revision must not advance.
+async fn bex070_mutate_rejected(
+    app: &axum::Router,
+    pool: &sqlx::MySqlPool,
+    attempt_token: &str,
+    schedule_id: Uuid,
+    attempt_id: &str,
+    mutation_id: &str,
+    base_revision: i32,
+    mutation_fields: serde_json::Value,
+) {
+    let (status, json) = post_single_mutation_batch(
+        app,
+        attempt_token,
+        schedule_id,
+        attempt_id,
+        mutation_id,
+        base_revision,
+        mutation_fields,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{mutation_id}: {json}"
+    );
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR", "{mutation_id}: {json}");
+    assert_eq!(
+        persisted_revision(pool, attempt_id).await,
+        i64::from(base_revision),
+        "{mutation_id}: rejected batch must not advance the revision"
+    );
+}
+
+// Submit the attempt (answers already persisted via mutations; an optional
+// finalAnswerPatch carries patch-only values such as Enum whitespace/case
+// probes or the writing essay), run the worker-equivalent projection cycle,
+// and return (final_submission, listening auto_grading_results).
+async fn bex070_submit_and_project_listening(
+    app: &axum::Router,
+    pool: &sqlx::MySqlPool,
+    schedule_id: Uuid,
+    attempt_token: &str,
+    attempt_id: &str,
+    base_revision: i32,
+    idempotency_key: &str,
+    submission_id: &str,
+    final_answer_patch: Option<serde_json::Value>,
+) -> (serde_json::Value, serde_json::Value) {
+    let mut body = json!({
+        "attemptId": attempt_id,
+        "lastSeenRevision": base_revision,
+        "submissionId": submission_id,
+        "clientFinalSeq": 0,
+        "serverAcceptedThroughSeq": 0,
+    });
+    if let Some(patch) = final_answer_patch {
+        body["finalAnswerPatch"] = patch;
+    }
+    let (status, json) =
+        post_submit_json(app, attempt_token, schedule_id, Some(idempotency_key), body).await;
+    assert_eq!(status, StatusCode::OK, "submit conflict body: {json}");
+    assert_eq!(json["data"]["attempt"]["phase"], "post-exam");
+
+    let grading = GradingService::new(pool.clone());
+    let report = grading
+        .run_projection_cycle(GradingProjectionRequest {
+            watermark: None,
+            bootstrap_after: None,
+            batch_size: None,
+        })
+        .await
+        .unwrap();
+    assert!(
+        report.submission_rows_synced >= 1 && report.section_rows_synced >= 1,
+        "projection must materialize the submission: {report:?}"
+    );
+
+    let auto: serde_json::Value = sqlx::query_scalar(
+        "SELECT section_submissions.auto_grading_results FROM section_submissions JOIN student_submissions ON student_submissions.id = section_submissions.submission_id WHERE student_submissions.attempt_id = ? AND section_submissions.section = 'listening'",
+    )
+    .bind(attempt_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let final_submission = persisted_final_submission(pool, attempt_id).await;
+    (final_submission, auto)
+}
+
+fn bex070_result_for<'a>(
+    question_results: &'a [serde_json::Value],
+    question_id: &str,
+) -> &'a serde_json::Value {
+    question_results
+        .iter()
+        .find(|entry| entry["questionId"] == question_id)
+        .unwrap_or_else(|| panic!("missing grading row for {question_id}"))
+}
+
+async fn bex071_listening_auto_results(
+    pool: &sqlx::MySqlPool,
+    attempt_id: &str,
+) -> serde_json::Value {
+    sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT section_submissions.auto_grading_results FROM section_submissions JOIN student_submissions ON student_submissions.id = section_submissions.submission_id WHERE student_submissions.attempt_id = ? AND section_submissions.section = 'listening'",
+    )
+    .bind(attempt_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn bex071_listening_section_answers(
+    pool: &sqlx::MySqlPool,
+    attempt_id: &str,
+) -> serde_json::Value {
+    sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT section_submissions.answers FROM section_submissions JOIN student_submissions ON student_submissions.id = section_submissions.submission_id WHERE student_submissions.attempt_id = ? AND section_submissions.section = 'listening'",
+    )
+    .bind(attempt_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+// BEX-070 — per-type objective grading matrix. Every objective question type
+// in the seed snapshot is pinned for: exact correct, incorrect, blank, extra
+// whitespace, and case handling. The mutation layer is the first line of
+// enforcement for Enum-constrained types (whitespace/case variants are
+// rejected with 422); the grading layer is probed directly through the submit
+// finalAnswerPatch path (the only way a non-conforming value can reach the
+// final snapshot) and must still grade those variants wrong.
+#[tokio::test]
+async fn bex070_objective_grading_matrix() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("contract runtime start (BEX-070)".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+    // ---- Attempt A (alice): exact-answer cells -----------------------------
+    let (attempt_id, attempt_token, mut revision) =
+        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "alice", "w-bex070-alice").await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-a-short1",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "diagram"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-a-short2",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-short-2", "value": "petrol"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-a-tfng",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-tfng-1", "value": "T"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-a-match",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-match-q1", "value": "ii"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-a-multi",
+        revision,
+        json!({"type": "SetChoice", "questionId": "l-multi-1", "value": ["C", "A"]}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-a-choice",
+        revision,
+        json!({"type": "SetChoice", "questionId": "l-choice-1", "value": "B"}),
+    )
+    .await;
+    // Sentence blank 1 exact; blank 2 left cleared → blank cell.
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-a-blank-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-2", "slotIndex": 0, "value": "first"}),
+    )
+    .await;
+    // Diagram labels both exact.
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-a-map-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-map-1", "slotIndex": 0, "value": "nose"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-a-map-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-map-1", "slotIndex": 1, "value": "ear"}),
+    )
+    .await;
+    // Shared-answer sentence: exact pool value.
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-a-shared",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-1", "slotIndex": 0, "value": "apple"}),
+    )
+    .await;
+    let (final_submission, auto) = bex070_submit_and_project_listening(
+        &app,
+        database.pool(),
+        schedule_id,
+        &attempt_token,
+        &attempt_id,
+        revision,
+        "bex070-a-submit",
+        "bex070-a-submission",
+        None,
+    )
+    .await;
+    assert_eq!(
+        final_submission["answers"]["l-blank-2"],
+        json!(["first"]),
+        "final snapshot carries the persisted partial fill"
+    );
+    let results = auto["questionResults"].as_array().unwrap();
+    // All 11 seed objective questions grade; the legacy-minimal TFNG (q1) does not.
+    assert_eq!(results.len(), 11, "seed listening spec count: {auto}");
+    let result_for = |question_id: &str| bex070_result_for(results, question_id);
+    assert_eq!(result_for("l-short-1")["isCorrect"], true, "Text exact");
+    assert_eq!(result_for("l-short-2")["isCorrect"], true, "Text exact");
+    assert_eq!(result_for("l-tfng-1")["isCorrect"], true, "Enum exact");
+    assert_eq!(result_for("l-match-q1")["isCorrect"], true, "Enum exact");
+    assert_eq!(result_for("l-choice-1")["isCorrect"], true, "Enum exact");
+    assert_eq!(
+        result_for("l-multi-1")["isCorrect"], true,
+        "set exact, order-insensitive [\"C\",\"A\"]"
+    );
+    assert_eq!(result_for("l-blank-2:l-blank-2:b1")["isCorrect"], true, "sentence exact");
+    assert_eq!(
+        result_for("l-blank-2:l-blank-2:b2")["isCorrect"], false,
+        "sentence blank (cleared slot)"
+    );
+    assert_eq!(result_for("l-map-1:l1")["isCorrect"], true, "diagram exact");
+    assert_eq!(result_for("l-map-1:l2")["isCorrect"], true, "diagram exact");
+    assert_eq!(
+        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], true,
+        "shared pool exact"
+    );
+    assert!(
+        results.iter().all(|entry| entry["questionId"] != "q1"),
+        "legacy-minimal q1 has no grading row"
+    );
+
+    // ---- Attempt B (bob): whitespace, case, incorrect (mutation path) ------
+    let (attempt_id, attempt_token, mut revision) =
+        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "bob", "w-bex070-bob").await;
+    // Text: whitespace collapses → correct; case is sensitive → wrong.
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-short1",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "  diagram  "}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-short2",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-short-2", "value": "Petrol"}),
+    )
+    .await;
+    // Sentence: whitespace collapses per blank; case is sensitive.
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-blank-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-2", "slotIndex": 0, "value": "first "}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-blank-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-2", "slotIndex": 1, "value": "SECOND"}),
+    )
+    .await;
+    // Diagram: whitespace collapses per label; case is sensitive.
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-map-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-map-1", "slotIndex": 0, "value": " nose "}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-map-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-map-1", "slotIndex": 1, "value": "Ear"}),
+    )
+    .await;
+    // Enum/set incorrect answers (valid values, wrong picks).
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-tfng",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-tfng-1", "value": "F"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-match",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-match-q1", "value": "i"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-multi",
+        revision,
+        json!({"type": "SetChoice", "questionId": "l-multi-1", "value": ["A", "B"]}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-choice",
+        revision,
+        json!({"type": "SetChoice", "questionId": "l-choice-1", "value": "A"}),
+    )
+    .await;
+    // Shared sentence: value outside the pool.
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-b-shared",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-1", "slotIndex": 0, "value": "pear"}),
+    )
+    .await;
+    let (_, auto) = bex070_submit_and_project_listening(
+        &app,
+        database.pool(),
+        schedule_id,
+        &attempt_token,
+        &attempt_id,
+        revision,
+        "bex070-b-submit",
+        "bex070-b-submission",
+        None,
+    )
+    .await;
+    let results = auto["questionResults"].as_array().unwrap();
+    let result_for = |question_id: &str| bex070_result_for(results, question_id);
+    assert_eq!(result_for("l-short-1")["isCorrect"], true, "Text whitespace collapses");
+    assert_eq!(result_for("l-short-2")["isCorrect"], false, "Text case-sensitive");
+    assert_eq!(result_for("l-blank-2:l-blank-2:b1")["isCorrect"], true, "sentence whitespace collapses");
+    assert_eq!(result_for("l-blank-2:l-blank-2:b2")["isCorrect"], false, "sentence case-sensitive");
+    assert_eq!(result_for("l-map-1:l1")["isCorrect"], true, "diagram whitespace collapses");
+    assert_eq!(result_for("l-map-1:l2")["isCorrect"], false, "diagram case-sensitive");
+    assert_eq!(result_for("l-tfng-1")["isCorrect"], false, "Enum incorrect");
+    assert_eq!(result_for("l-match-q1")["isCorrect"], false, "Enum incorrect");
+    assert_eq!(result_for("l-multi-1")["isCorrect"], false, "set incorrect");
+    assert_eq!(result_for("l-choice-1")["isCorrect"], false, "Enum incorrect");
+    assert_eq!(
+        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], false,
+        "shared pool: value outside pool is wrong"
+    );
+
+    // ---- Attempt C (carol): patch-path whitespace probes + text wrong/blank -
+    // Enum/set whitespace variants are rejected at the mutation layer...
+    let (attempt_id, attempt_token, mut revision) =
+        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "carol", "w-bex070-carol").await;
+    bex070_mutate_rejected(
+        &app,
+        database.pool(),
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-c-tfng-ws",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-tfng-1", "value": " T "}),
+    )
+    .await;
+    bex070_mutate_rejected(
+        &app,
+        database.pool(),
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-c-match-ws",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-match-q1", "value": "ii "}),
+    )
+    .await;
+    bex070_mutate_rejected(
+        &app,
+        database.pool(),
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-c-choice-ws",
+        revision,
+        json!({"type": "SetChoice", "questionId": "l-choice-1", "value": " B"}),
+    )
+    .await;
+    bex070_mutate_rejected(
+        &app,
+        database.pool(),
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-c-multi-ws",
+        revision,
+        json!({"type": "SetChoice", "questionId": "l-multi-1", "value": ["A", "C "]}),
+    )
+    .await;
+    // ... so the finalAnswerPatch path is the only way they can reach the
+    // final snapshot; grading must still grade them wrong.
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-c-short1",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "bicycle"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-c-short2-clear",
+        revision,
+        json!({"type": "ClearScalar", "questionId": "l-short-2"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-c-blank-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-2", "slotIndex": 0, "value": "wrong"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-c-blank-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-2", "slotIndex": 1, "value": "wrong2"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-c-map-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-map-1", "slotIndex": 0, "value": "nose"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-c-map-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-map-1", "slotIndex": 1, "value": "leg"}),
+    )
+    .await;
+    let (final_submission, auto) = bex070_submit_and_project_listening(
+        &app,
+        database.pool(),
+        schedule_id,
+        &attempt_token,
+        &attempt_id,
+        revision,
+        "bex070-c-submit",
+        "bex070-c-submission",
+        Some(json!({
+            "answers": {
+                "l-tfng-1": " T ",
+                "l-match-q1": "ii ",
+                "l-choice-1": " B",
+                "l-multi-1": ["A", "C "]
+            },
+            "writingAnswers": {},
+            "flags": {}
+        })),
+    )
+    .await;
+    // The patch is merged into the snapshot byte-exact (no validation).
+    assert_eq!(final_submission["answers"]["l-tfng-1"], " T ");
+    let results = auto["questionResults"].as_array().unwrap();
+    let result_for = |question_id: &str| bex070_result_for(results, question_id);
+    assert_eq!(result_for("l-short-1")["isCorrect"], false, "Text incorrect");
+    assert_eq!(result_for("l-short-2")["isCorrect"], false, "Text blank (cleared)");
+    assert_eq!(result_for("l-blank-2:l-blank-2:b1")["isCorrect"], false, "sentence incorrect");
+    assert_eq!(result_for("l-blank-2:l-blank-2:b2")["isCorrect"], false, "sentence incorrect");
+    assert_eq!(result_for("l-map-1:l1")["isCorrect"], true);
+    assert_eq!(result_for("l-map-1:l2")["isCorrect"], false, "diagram incorrect");
+    assert_eq!(
+        result_for("l-tfng-1")["isCorrect"], false,
+        "Enum whitespace variant must grade wrong (patch path)"
+    );
+    assert_eq!(
+        result_for("l-match-q1")["isCorrect"], false,
+        "Enum whitespace variant must grade wrong (patch path)"
+    );
+    assert_eq!(
+        result_for("l-choice-1")["isCorrect"], false,
+        "Enum whitespace variant must grade wrong (patch path)"
+    );
+    assert_eq!(
+        result_for("l-multi-1")["isCorrect"], false,
+        "set whitespace variant must grade wrong (ExactSet is byte-strict)"
+    );
+    assert_eq!(
+        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], false,
+        "shared blank (unanswered)"
+    );
+
+    // ---- Attempt D (dave): blank matrix (nothing answered) -----------------
+    let (attempt_id, attempt_token, revision) =
+        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "dave", "w-bex070-dave").await;
+    let (_, auto) = bex070_submit_and_project_listening(
+        &app,
+        database.pool(),
+        schedule_id,
+        &attempt_token,
+        &attempt_id,
+        revision,
+        "bex070-d-submit",
+        "bex070-d-submission",
+        None,
+    )
+    .await;
+    let results = auto["questionResults"].as_array().unwrap();
+    assert_eq!(results.len(), 11);
+    for entry in results {
+        assert_eq!(
+            entry["isCorrect"], false,
+            "unanswered {} must grade wrong: {auto}",
+            entry["questionId"]
+        );
+        assert_eq!(entry["awardedScore"], 0);
+    }
+    assert_eq!(auto["totalScore"], 0, "blank matrix totals zero");
+    assert_eq!(auto["maxScore"], 11, "blank matrix keeps full max");
+
+    // ---- Attempt E (erin): patch-path case probes + shared case-fold -------
+    let (attempt_id, attempt_token, revision) =
+        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "erin", "w-bex070-erin").await;
+    let (_, auto) = bex070_submit_and_project_listening(
+        &app,
+        database.pool(),
+        schedule_id,
+        &attempt_token,
+        &attempt_id,
+        revision,
+        "bex070-e-submit",
+        "bex070-e-submission",
+        Some(json!({
+            "answers": {
+                "l-tfng-1": "t",
+                "l-choice-1": "b",
+                "l-multi-1": ["a", "c"],
+                "l-blank-shared-1": ["APPLE"]
+            },
+            "writingAnswers": {},
+            "flags": {}
+        })),
+    )
+    .await;
+    let results = auto["questionResults"].as_array().unwrap();
+    let result_for = |question_id: &str| bex070_result_for(results, question_id);
+    assert_eq!(
+        result_for("l-tfng-1")["isCorrect"], false,
+        "Enum case variant must grade wrong (patch path)"
+    );
+    assert_eq!(
+        result_for("l-choice-1")["isCorrect"], false,
+        "Enum case variant must grade wrong (patch path)"
+    );
+    assert_eq!(
+        result_for("l-multi-1")["isCorrect"], false,
+        "set case variant must grade wrong"
+    );
+    assert_eq!(
+        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], true,
+        "shared pool folds case: \"APPLE\" == \"apple\""
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-070 — shared-answer pool consumption semantics: a shared pool is
+// consumed in blank order; a repeated (already consumed) value grades wrong
+// even when case-folded; wrong values are NOT consumed; when blanks outnumber
+// the valid answers, the excess blanks must grade wrong.
+#[tokio::test]
+async fn bex070_shared_answer_pool_matrix() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    // Augment the seed snapshot locally with two shared-pool sentences:
+    // l-blank-shared-2 has a 2-answer pool and l-blank-shared-3 has a 1-answer
+    // pool with 2 blanks (blanks outnumber valid answers).
+    let mut snapshot = default_delivery_content_snapshot();
+    let blocks = snapshot["listening"]["parts"][0]["blocks"]
+        .as_array_mut()
+        .expect("listening blocks");
+    blocks.push(json!({
+        "id": "l-blank-shared-2",
+        "type": "SENTENCE_COMPLETION",
+        "questions": [{
+            "id": "l-blank-shared-2",
+            "sentence": "Shared pool of two: __ and __.",
+            "acceptAnyAnswerKey": true,
+            "sharedAcceptedAnswers": ["apple", "banana"],
+            "blanks": [{"id": "b1"}, {"id": "b2"}]
+        }]
+    }));
+    blocks.push(json!({
+        "id": "l-blank-shared-3",
+        "type": "SENTENCE_COMPLETION",
+        "questions": [{
+            "id": "l-blank-shared-3",
+            "sentence": "Shared pool of one: __ and __.",
+            "acceptAnyAnswerKey": true,
+            "sharedAcceptedAnswers": ["apple"],
+            "blanks": [{"id": "b1"}, {"id": "b2"}]
+        }]
+    }));
+    let schedule = seed_schedule_with_slug_content_and_config(
+        database.pool(),
+        "cambridge-19-academic-bex070-shared-pool",
+        snapshot,
+        sample_delivery_config(),
+    )
+    .await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("contract runtime start (BEX-070 shared pool)".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+    // ---- Attempt F1 (fiona): pool values (case-folded) + duplicate ---------
+    let (attempt_id, attempt_token, mut revision) =
+        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "fiona", "w-bex070-fiona").await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f1-s2-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-2", "slotIndex": 0, "value": "APPLE"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f1-s2-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-2", "slotIndex": 1, "value": "Banana"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f1-s3-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-3", "slotIndex": 0, "value": "apple"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f1-s3-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-3", "slotIndex": 1, "value": "apple"}),
+    )
+    .await;
+    let (_, auto) = bex070_submit_and_project_listening(
+        &app,
+        database.pool(),
+        schedule_id,
+        &attempt_token,
+        &attempt_id,
+        revision,
+        "bex070-f1-submit",
+        "bex070-f1-submission",
+        None,
+    )
+    .await;
+    let results = auto["questionResults"].as_array().unwrap();
+    assert_eq!(results.len(), 15, "augmented snapshot spec count: {auto}");
+    let result_for = |question_id: &str| bex070_result_for(results, question_id);
+    assert_eq!(
+        result_for("l-blank-shared-2:b1")["isCorrect"], true,
+        "shared pool: case-folded pool value is correct"
+    );
+    assert_eq!(
+        result_for("l-blank-shared-2:b2")["isCorrect"], true,
+        "shared pool: second distinct pool value is correct"
+    );
+    assert_eq!(
+        result_for("l-blank-shared-3:b1")["isCorrect"], true,
+        "first blank consumes the only valid answer"
+    );
+    assert_eq!(
+        result_for("l-blank-shared-3:b2")["isCorrect"], false,
+        "duplicate consumption: repeated value must grade wrong"
+    );
+    // 2 (pool-2 sentence) + 1 (pool-1 first blank) — the consumed duplicate
+    // and every unanswered seed question grade wrong.
+    assert_eq!(auto["totalScore"], 3, "consumption-aware totals: {auto}");
+
+    // ---- Attempt F2 (george): order independence + wrong-not-consumed ------
+    let (attempt_id, attempt_token, mut revision) =
+        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "george", "w-bex070-george").await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f2-s2-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-2", "slotIndex": 0, "value": "banana"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f2-s2-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-2", "slotIndex": 1, "value": "apple"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f2-s3-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-3", "slotIndex": 0, "value": "cherry"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f2-s3-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-3", "slotIndex": 1, "value": "apple"}),
+    )
+    .await;
+    let (_, auto) = bex070_submit_and_project_listening(
+        &app,
+        database.pool(),
+        schedule_id,
+        &attempt_token,
+        &attempt_id,
+        revision,
+        "bex070-f2-submit",
+        "bex070-f2-submission",
+        None,
+    )
+    .await;
+    let results = auto["questionResults"].as_array().unwrap();
+    let result_for = |question_id: &str| bex070_result_for(results, question_id);
+    assert_eq!(
+        result_for("l-blank-shared-2:b1")["isCorrect"], true,
+        "shared pool is order-independent (banana first)"
+    );
+    assert_eq!(
+        result_for("l-blank-shared-2:b2")["isCorrect"], true,
+        "shared pool is order-independent (apple second)"
+    );
+    assert_eq!(
+        result_for("l-blank-shared-3:b1")["isCorrect"], false,
+        "value outside the pool is wrong"
+    );
+    assert_eq!(
+        result_for("l-blank-shared-3:b2")["isCorrect"], true,
+        "a wrong value is NOT consumed; the valid answer remains available"
+    );
+
+    // ---- Attempt F3 (hannah): case-folded duplicate consumption ------------
+    let (attempt_id, attempt_token, mut revision) =
+        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "hannah", "w-bex070-hannah").await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f3-s2-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-2", "slotIndex": 0, "value": "apple"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f3-s2-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-2", "slotIndex": 1, "value": "banana"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f3-s3-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-3", "slotIndex": 0, "value": "apple"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex070-f3-s3-slot1",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-3", "slotIndex": 1, "value": "APPLE"}),
+    )
+    .await;
+    let (_, auto) = bex070_submit_and_project_listening(
+        &app,
+        database.pool(),
+        schedule_id,
+        &attempt_token,
+        &attempt_id,
+        revision,
+        "bex070-f3-submit",
+        "bex070-f3-submission",
+        None,
+    )
+    .await;
+    let results = auto["questionResults"].as_array().unwrap();
+    let result_for = |question_id: &str| bex070_result_for(results, question_id);
+    assert_eq!(
+        result_for("l-blank-shared-3:b1")["isCorrect"], true,
+        "first blank consumes \"apple\""
+    );
+    assert_eq!(
+        result_for("l-blank-shared-3:b2")["isCorrect"], false,
+        "case-folded repeat is still a consumed duplicate"
+    );
+    assert_eq!(
+        result_for("l-blank-shared-3:b2")["correctAnswer"], "apple",
+        "the pool is the correctAnswer display"
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-071 — submission-to-grading consistency: grading reads the immutable
+// final_submission snapshot (not the live answers cache), later attempt-cache
+// changes cannot affect results, re-running the projection produces the same
+// result, objective totals equal the per-question sums, and writing answers
+// remain available for manual/AI grading.
+#[tokio::test]
+async fn bex071_submission_to_grading_consistency() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("contract runtime start (BEX-071)".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+    let (attempt_id, attempt_token, mut revision) =
+        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "iris", "w-bex071-iris").await;
+
+    // 7 correct + 4 wrong on purpose (mix of exact, case, blank cells).
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex071-short1",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "diagram"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex071-short2",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-short-2", "value": "Petrol"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex071-tfng",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-tfng-1", "value": "T"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex071-match",
+        revision,
+        json!({"type": "SetScalar", "questionId": "l-match-q1", "value": "ii"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex071-multi",
+        revision,
+        json!({"type": "SetChoice", "questionId": "l-multi-1", "value": ["A", "C"]}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex071-choice",
+        revision,
+        json!({"type": "SetChoice", "questionId": "l-choice-1", "value": "A"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex071-blank-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-2", "slotIndex": 0, "value": "first"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex071-map-slot0",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-map-1", "slotIndex": 0, "value": "nose"}),
+    )
+    .await;
+    revision = bex070_mutate_ok(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex071-shared",
+        revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-1", "slotIndex": 0, "value": "apple"}),
+    )
+    .await;
+
+    // The writing essay rides the final patch (SetEssayText is section-gated
+    // while listening is the active runtime). The key must be the content-
+    // declared task id ("writing-1"): the projection materializes per-task
+    // rows only for content task ids, while the delivery-side mutation set
+    // falls back to the legacy "task1"/"task2" keys.
+    let essay = "The chart shows a steady increase in online sales.";
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("bex071-submit"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": revision,
+            "submissionId": "bex071-submission-1",
+            "clientFinalSeq": 0,
+            "serverAcceptedThroughSeq": 0,
+            "finalAnswerPatch": {
+                "answers": {},
+                "writingAnswers": { "writing-1": essay },
+                "flags": {}
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "submit conflict body: {json}");
+    assert_eq!(json["data"]["attempt"]["phase"], "post-exam");
+
+    let final_submission = persisted_final_submission(database.pool(), &attempt_id).await;
+    assert_eq!(final_submission["writingAnswers"]["writing-1"], essay);
+    assert_eq!(final_submission["answers"]["l-short-1"], "diagram");
+
+    // ---- First projection run ----------------------------------------------
+    let grading = GradingService::new(database.pool().clone());
+    let report1 = grading
+        .run_projection_cycle(GradingProjectionRequest {
+            watermark: None,
+            bootstrap_after: None,
+            batch_size: None,
+        })
+        .await
+        .unwrap();
+    assert!(
+        report1.submission_rows_synced >= 1 && report1.section_rows_synced >= 1,
+        "projection must materialize the submission: {report1:?}"
+    );
+
+    let auto1 = bex071_listening_auto_results(database.pool(), &attempt_id).await;
+    let section_answers1 = bex071_listening_section_answers(database.pool(), &attempt_id).await;
+
+    // Totals identity: sum of per-question marks equals the section totals.
+    let results = auto1["questionResults"].as_array().unwrap();
+    assert_eq!(results.len(), 11);
+    let awarded_sum: i64 = results.iter().map(|entry| entry["awardedScore"].as_i64().unwrap()).sum();
+    let max_sum: i64 = results.iter().map(|entry| entry["maxScore"].as_i64().unwrap()).sum();
+    assert_eq!(auto1["totalScore"], awarded_sum, "sum(awardedScore) == totalScore");
+    assert_eq!(auto1["maxScore"], max_sum, "sum(maxScore) == maxScore");
+    assert_eq!(awarded_sum, 7, "designed mix: 7 correct of 11");
+    assert_eq!(max_sum, 11);
+    assert!(
+        (auto1["percentage"].as_f64().unwrap() - (7.0 / 11.0 * 100.0)).abs() < 1e-9,
+        "percentage must be totalScore/maxScore*100: {auto1}"
+    );
+    // Per-question mix (also re-pins the totals' building blocks).
+    let result_for = |question_id: &str| bex070_result_for(results, question_id);
+    for (question_id, expected) in [
+        ("l-short-1", true),
+        ("l-tfng-1", true),
+        ("l-match-q1", true),
+        ("l-multi-1", true),
+        ("l-blank-2:l-blank-2:b1", true),
+        ("l-map-1:l1", true),
+        ("l-blank-shared-1:l-blank-shared-1:b1", true),
+        ("l-short-2", false),
+        ("l-choice-1", false),
+        ("l-blank-2:l-blank-2:b2", false),
+        ("l-map-1:l2", false),
+    ] {
+        assert_eq!(result_for(question_id)["isCorrect"], expected, "{question_id}");
+    }
+
+    // Writing answers remain available for manual/AI grading: the immutable
+    // snapshot keeps writingAnswers and the projection materializes per-task
+    // rows (needs_review) plus the writing section payload.
+    let writing_task: (String, String, String) = sqlx::query_as(
+        "SELECT task_id, student_text, grading_status FROM writing_task_submissions WHERE submission_id = (SELECT id FROM student_submissions WHERE attempt_id = ?)",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(writing_task.0, "writing-1");
+    assert_eq!(writing_task.1, essay, "writing answer must survive the projection");
+    assert_eq!(writing_task.2, "needs_review");
+    let writing_section: (String, serde_json::Value) = sqlx::query_as(
+        "SELECT grading_status, answers FROM section_submissions WHERE submission_id = (SELECT id FROM student_submissions WHERE attempt_id = ?) AND section = 'writing'",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(writing_section.0, "needs_review");
+    assert_eq!(writing_section.1["tasks"][0]["taskId"], "writing-1");
+    assert_eq!(writing_section.1["tasks"][0]["text"], essay);
+
+    // ---- Tamper with the LIVE attempt cache (post-submit) ------------------
+    // The attempt-cache columns are mutable after submit; grading must keep
+    // reading the immutable final_submission snapshot.
+    sqlx::query(
+        "UPDATE student_attempts SET answers = ?, writing_answers = ?, flags = ? WHERE id = ?",
+    )
+    .bind(json!({"l-short-1": "tampered", "q1": "T"}).to_string())
+    .bind(json!({"task1": "tampered essay"}).to_string())
+    .bind(json!({"l-short-1": true}).to_string())
+    .bind(&attempt_id)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        persisted_answers(database.pool(), &attempt_id).await["l-short-1"],
+        "tampered",
+        "precondition: the live cache really changed"
+    );
+
+    // ---- Second projection run: results must be unchanged ------------------
+    let report2 = grading
+        .run_projection_cycle(GradingProjectionRequest {
+            watermark: None,
+            bootstrap_after: None,
+            batch_size: None,
+        })
+        .await
+        .unwrap();
+    // The no-watermark cycle re-processes every submitted attempt and
+    // re-writes identical values (idempotent content), so the counts are >= 1
+    // again while the persisted JSON must be byte-identical.
+    assert!(
+        report2.submission_rows_synced >= 1 && report2.section_rows_synced >= 1,
+        "re-run must re-sync the same attempt: {report2:?}"
+    );
+    let auto2 = bex071_listening_auto_results(database.pool(), &attempt_id).await;
+    let section_answers2 = bex071_listening_section_answers(database.pool(), &attempt_id).await;
+    assert_eq!(
+        auto1, auto2,
+        "grading must read final_submission, not the live answers cache"
+    );
+    assert_eq!(
+        section_answers1, section_answers2,
+        "section payload must stay the submitted snapshot"
+    );
+    let final_submission_after = persisted_final_submission(database.pool(), &attempt_id).await;
+    assert_eq!(final_submission, final_submission_after, "final snapshot is immutable");
+    let writing_task_after: (String, String, String) = sqlx::query_as(
+        "SELECT task_id, student_text, grading_status FROM writing_task_submissions WHERE submission_id = (SELECT id FROM student_submissions WHERE attempt_id = ?)",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        writing_task_after.1, essay,
+        "tampered live writing_answers must not reach the writing rows"
+    );
+
+    // ---- Third projection run: re-running grading produces the same result --
+    let report3 = grading
+        .run_projection_cycle(GradingProjectionRequest {
+            watermark: None,
+            bootstrap_after: None,
+            batch_size: None,
+        })
+        .await
+        .unwrap();
+    assert!(report3.submission_rows_synced >= 1);
+    let auto3 = bex071_listening_auto_results(database.pool(), &attempt_id).await;
+    assert_eq!(auto1, auto3, "re-running grading must produce the same result");
+
+    database.shutdown().await;
+}
+
 // BEX-030 — the allowlisted legacy payload path: legacy envelopes (attemptId +
 // id/seq/timestamp/baseRevision + mutationType/payload) apply the same
 // commands, while non-allowlisted legacy types are rejected with the exact
