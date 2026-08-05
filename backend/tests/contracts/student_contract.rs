@@ -1461,9 +1461,9 @@ async fn mutation_batch_revision_conflict_reports_latest_revision_and_watermark_
 
 // BEX-033: the same idempotency key with an identical batch applies exactly
 // once (one row per client mutation id, revision advanced once), and every
-// retry — including a retry after a simulated network timeout where the client
-// never saw the first response — returns the stable cached response and
-// changes nothing in the database.
+// retry — including a retry framed as a network timeout, where the client
+// re-sends the same batch after (possibly) never seeing the response —
+// returns the stable cached response and changes nothing in the database.
 #[tokio::test]
 async fn mutation_batch_same_key_identical_batch_applies_once_and_retry_after_timeout_does_not_duplicate() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
@@ -1895,6 +1895,8 @@ async fn mutation_batch_mid_batch_database_failure_rolls_back_atomically_and_ret
     assert_eq!(failed_json["error"]["code"], "DATABASE_ERROR");
 
     // No partial state leaked from the aborted transaction.
+    // serverAcceptedThroughSeq is derived from MAX(mutation_seq) inside the
+    // same transaction, so rows == 0 implies the watermark is unchanged too.
     let answers_after_failure: serde_json::Value =
         sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
             .bind(&attempt_id)

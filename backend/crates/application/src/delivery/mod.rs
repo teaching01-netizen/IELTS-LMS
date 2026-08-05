@@ -1914,25 +1914,20 @@ impl DeliveryService {
     /// Deterministic request hash for mutation batches (BEX-033).
     ///
     /// The route stamps `timestamp: Utc::now()` onto every `MutationEnvelope`
-    /// while parsing the HTTP payload, so serializing the
-    /// request directly would yield a different hash for two byte-identical
-    /// bodies and every replay would be misclassified as a hash mismatch
-    /// (409 "Idempotency-Key does not match the original request."). The
-    /// timestamp is a server-side reception artifact (persisted as
-    /// `client_timestamp`, not part of the client-authored idempotency
-    /// identity), so it is stripped before hashing. All client-authored
+    /// while parsing the HTTP payload (see the call site), so serializing the
+    /// request as-is would yield a different hash for two byte-identical
+    /// bodies and every replay would be misclassified as a hash mismatch.
+    /// Only that server-stamped root-level key is stripped; all client-authored
     /// fields — envelope id/seq/command/base_revision and the request-level
-    /// attempt/student/session — are covered, so the same key with a
-    /// genuinely different batch still hashes differently and conflicts.
+    /// attempt/student/session — still feed the hash, so the same key with a
+    /// genuinely different batch still hashes differently and conflicts. The
+    /// command payload nests under the `payload` field (adjacently tagged), so
+    /// no client payload key can ever collide with the root-level `timestamp`.
     fn batch_idempotency_request_hash(
         &self,
         request: &StudentMutationBatchRequest,
         idempotency_key: Option<&String>,
     ) -> Result<Option<String>, DeliveryError> {
-        if idempotency_key.is_none() {
-            return Ok(None);
-        }
-
         let mut value = serde_json::to_value(request).map_err(|err| {
             DeliveryError::Internal(format!("Failed to serialize request: {err}"))
         })?;
@@ -1943,12 +1938,10 @@ impl DeliveryService {
                 }
             }
         }
-        // serde_json::Map is a BTreeMap, so `to_string` is key-ordered and the
-        // serialization is stable across processes and replays.
-        let serialized = serde_json::to_string(&value).map_err(|err| {
-            DeliveryError::Internal(format!("Failed to serialize request: {err}"))
-        })?;
-        Ok(Some(sha256_hex(&serialized)))
+        // serde_json::Map is a BTreeMap, so serialization is key-ordered and
+        // stable across processes and replays. Delegating to the generic tail
+        // keeps the None-key short-circuit and sha256 step from drifting.
+        self.idempotency_request_hash(&value, idempotency_key)
     }
 
     async fn lookup_idempotent_response<T>(
