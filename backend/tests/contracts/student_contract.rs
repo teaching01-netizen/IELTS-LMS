@@ -4963,6 +4963,21 @@ async fn mutation_batch_supported_command_matrix_objective_questions() {
         json["error"]["message"],
         "Answer value is not valid for this question."
     );
+    // Explicit pin: the rejected batch must not advance revision or persist answers.
+    let answers_after_reject: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let revision_after_reject: i64 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(revision_after_reject, i64::from(base_revision));
+    assert_eq!(answers_after_reject["l-choice-1"], "B");
 
     // --- SetSlot: array-backed 2-blank question ------------------------------
     let (status, json) = post_mutation_batch_json(
@@ -5395,6 +5410,11 @@ async fn mutation_batch_legacy_envelope_allowlist_and_rejects() {
     );
 
     // --- Legacy SetEssayText applies once the writing section is active ------
+    // NOTE: seq is intentionally reused (1) after seqs 1-3 were already accepted
+    // for this client session. Uniqueness is keyed on the client mutation id, and
+    // the seq gate rejects only within-batch duplicates. If a future schema adds a
+    // unique index on (attempt_id, client_session_id, mutation_seq), this batch
+    // would fail — extend the assertion accordingly rather than reusing seq.
     start_runtime(database.pool(), schedule_id, "writing").await;
     let (status, json) = post_mutation_batch_json(
         &app,
