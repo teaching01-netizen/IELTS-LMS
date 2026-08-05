@@ -2,6 +2,84 @@
 
 Purpose: turn incidents and bug fixes into durable memory for humans and AI agents.
 
+## 2026-08-06: Immediate Local Feedback and Durable Mirror Contracts for Student Answers (FEX-030/031, F-6)
+
+### Symptom
+No incident. The invariant test plan required pinning two student-side answer contracts end to
+end: **FEX-030 immediate local feedback** — an answer edit is reflected in the UI
+synchronously, pending-save state appears without blocking typing, and an older backend poll
+can never erase the local answer; and **FEX-031 durable mirror** — typing mutations debit
+through the configured short debounce, discrete choices persist immediately, answers near the
+final-time boundary persist immediately, blur / pagehide / beforeunload / visibilitychange /
+freeze / window-blur all flush durability, and failed browser storage activates the
+`storage_unavailable` block.
+
+### Scope
+Owning module only: `src/components/student/providers/StudentAttemptProvider.tsx` (durable mirror
+wiring, `forceImmediateDurability` at the 20-second boundary, lifecycle flush listeners) with its
+suite `src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx`. Read-only
+context used for citations: `studentMutationOutbox.ts` (`buildQueuedMutationUpdate` durability
+branch) and `QuestionRenderer.matrix.test.tsx` (renderer input-value binding). No production code
+changed; behavior unchanged — the new tests pin behavior that already existed.
+
+### Gap Matrix
+
+| Bullet | Verdict | Evidence (file:line) | Action |
+|---|---|---|---|
+| FEX-030: UI reflects the answer synchronously | Already pinned | RAM-immediate test `StudentAttemptProvider.test.tsx:1197` asserts `state.attempt?.answers.q1 === 'ABC'` before any durable flush (:1212); renderer matrix `QuestionRenderer.matrix.test.tsx:440-443` (text input) and :329-333 (radios) pin `answer prop → rendered input value`. The provider state is the single source the renderers bind to | — |
+| FEX-030: pending-save state appears without blocking typing | Already pinned | `:844` types a second answer while a flush is still in flight; `:897` keeps `pendingMutationCount` visible (1) while typing mid-clear; `:953` preserves the final answer across a latency overlap | — |
+| FEX-030: a backend poll with an older snapshot cannot erase the local answer | Already pinned | stale-snapshot quartet: `:1870` (keeps local answers after a successful flush), `:1936` (a fresher snapshot wins), `:2007` (equal freshness + local mutation signals keep local), `:2084` (preview mode preserved) | — |
+| FEX-031: typing mutations use the configured short debounce | Already pinned | `:1197` (exactly 100ms, no write before it), `:1418`/`:1446` (focusout rescue), writing coalescing `:498`/`:521` | — |
+| FEX-031: discrete choices persist durably immediately | Already pinned | `:1232` — discrete selection writes without waiting for the debounce window; a second save is never issued | — |
+| FEX-031: answers near the final time boundary persist immediately | **GAP — boundary exists, unpinned** | `StudentAttemptProvider.tsx:125` (`BOUNDARY_IMMEDIATE_DURABILITY_THRESHOLD_SECONDS = 20`), `:548-553` (`forceImmediateDurability` when exam phase + `currentSectionRemainingSeconds ∈ [0,20]`) → `studentMutationOutbox.ts:694-699` (`durableWriteMode: 'immediate'`) + `:705` (`delayMs: 0` under the boundary). No test asserted durable-persistence timing with `remaining ≤ 20` (a pre-existing test at `:521` already drives the value) | **ADDED** 3 tests: inside-boundary typed answer persists durably immediately (:1265), 21s stays debounced (:1310), boundary skips the durable debounce for writing answers too (:1355) |
+| FEX-031 life-cycle flush: blur / focusout | Already pinned | `:1418` (input blur), `:1446` (DOM-rescue focusout pins the raw typed value) | — |
+| FEX-031 life-cycle flush: pagehide + beforeunload | Already pinned | `:1579` `window.pagehide`/`window.beforeunload` | — |
+| FEX-031 life-cycle flush: freeze + window blur | Already pinned | `:1613` `window.blur` + `document.freeze` | — |
+| FEX-031 life-cycle flush: visibilitychange (hidden) | **GAP — listener exists, unpinned** | `StudentAttemptProvider.tsx:674-679` flushes on `document.visibilityState === 'hidden'`; no test dispatched `visibilitychange` | **ADDED** hidden → immediate durable flush; a visible transition with the guard must stay silent (:1647) |
+| FEX-031: failed storage activates `storage_unavailable` | Already pinned | `:1493` persist failure → RAM kept, syncState `error`, `blocking.reason === 'storage_unavailable'` (:1530); `:2594` sticky-clear after a confirmed save (M7) | — |
+
+### Fix
+Four regression tests added in `StudentAttemptProvider.test.tsx`; no production code change; no
+contract violation demonstrated (the new tests confirm the behavior the provider already
+implements):
+- "persists a typed answer durably immediately once remaining time is inside the 20-second
+  boundary" (:1265) — runtime-backed exam with `currentSectionRemainingSeconds: 10`; a
+  plain typed `persistAnswer` hits `savePendingMutations` straight away (no 100ms debounce),
+  RAM is immediate, and no second write follows the debounce window.
+- "keeps the 100ms durable debounce once remaining time moves above the immediate-durability
+  boundary" (:1310) — `currentSectionRemainingSeconds: 21`: RAM immediate, but the durable
+  write is withheld until the 100ms window (pin-points the boundary direction).
+- "applies the final-time boundary to writing answers, skipping the durable debounce"
+  (:1355) — the writing_answer mutation reaches the durable mirror with zero timer
+  advancement (the writing path's 1500ms figure governs the outbound network flush, which
+  is offline in this test; the durable-mirror debounce it skips is the 100ms budget).
+- "forces an immediate durable answer flush when the document becomes hidden
+  (visibilitychange)" (:1647) — a hidden-transition flushes pending answers at once, a
+  still-visible transition must not flush a fresh unsaved answer, and a later hidden
+  transition flushes it — using the repo's `Object.defineProperty(document,
+  'visibilityState', …)` idiom with descriptor restore in `finally`.
+
+### Regression Protection
+- Run (2026-08-06): `npx vitest run src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx`
+  → **53 passing** (49 pre-existing + 4 new). The four new tests also pass in isolation
+  (`-t "boundary"` → 3 tests, `-t "visibilitychange"` → 1 test).
+- Zero `act()` warnings: the full-file run and the isolated runs both emit no "not wrapped in
+  act" diagnostics. New tests use `vi.useFakeTimers()` + `finally { vi.useRealTimers(); }`, and
+  the `visibilitychange` test additionally restores the `document.visibilityState` descriptor
+  in `finally`. No module-level `vi.mock`s added.
+
+### Invariant
+`StudentAttemptProvider` persists the LAST typed value durably without mind-reading the editor:
+typing is RAM-immediate and durable at 100ms; discrete choices skip the debounce; inside the
+final 0–20-second boundary of the exam phase Landed objective AND writing answers skip their
+debounce and persist immediately (a failed boundary write when the window is still debounced is
+a contract breach); blurrings and every leaving-signal — focusout, visibilitychange-to-hidden,
+pagehide, beforeunload, freeze, window blur — flush the durable mirror while non-hidden
+visibility transitions never do; and a failed storage write must reach the
+`storage_unavailable` blocking state while keeping the RAM answer intact.
+
+---
+
 ## 2026-08-06: FEX-021/022 — Slot-Scoped Questions and Writing Editor Draft Lifecycle (F-5)
 
 ### Symptom

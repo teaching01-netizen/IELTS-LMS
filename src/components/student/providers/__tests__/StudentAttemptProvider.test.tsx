@@ -243,6 +243,31 @@ describe('StudentAttemptProvider', () => {
     );
   }
 
+  // A runtime-backed attempt with a completed pre-check: the runtime provider
+  // only maps to the 'exam' phase (the phase required for the final-time
+  // immediate-durability boundary) once the pre-check is complete.
+  function createBoundaryAttemptSnapshot(
+    overrides: Partial<StudentAttempt> = {},
+  ): StudentAttempt {
+    return {
+      ...createAttemptSnapshot(),
+      ...overrides,
+      integrity: {
+        ...createAttemptSnapshot().integrity,
+        ...overrides.integrity,
+        preCheck: {
+          completedAt: '2026-01-01T00:00:00.000Z',
+          browserFamily: 'chrome',
+          browserVersion: 120,
+          screenDetailsSupported: true,
+          heartbeatReady: true,
+          acknowledgedSafariLimitation: false,
+          checks: [],
+        },
+      },
+    };
+  }
+
   it('flushes durable queued mutations when connectivity returns', async () => {
     vi.mocked(studentAttemptRepository.getPendingMutations).mockResolvedValue([]);
     Object.defineProperty(window.navigator, 'onLine', {
@@ -1237,6 +1262,159 @@ describe('StudentAttemptProvider', () => {
     vi.useRealTimers();
   });
 
+  it('persists a typed answer durably immediately once remaining time is inside the 20-second boundary', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const runtimeSnapshot: ExamSessionRuntime = {
+      ...createRuntimeSnapshot('reading'),
+      currentSectionRemainingSeconds: 10,
+    };
+
+    const { result } = renderHook(() => useStudentAttempt(), {
+      wrapper: createRuntimeBackedWrapper(createBoundaryAttemptSnapshot(), runtimeSnapshot),
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'FINAL_TYPED');
+      await Promise.resolve();
+    });
+
+    // FEX-030: RAM reflects the answer synchronously…
+    expect(result.current.state.attempt?.answers.q1).toBe('FINAL_TYPED');
+    // FEX-031: …and the durable write skips the 100ms typing debounce entirely.
+    expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(studentAttemptRepository.savePendingMutations).mock.calls[0]?.[1]?.[0]?.payload,
+    ).toMatchObject({
+      questionId: 'q1',
+      value: 'FINAL_TYPED',
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(ANSWER_DURABLE_WRITE_DEBOUNCE_MS + 10);
+      await Promise.resolve();
+    });
+
+    expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('keeps the 100ms durable debounce once remaining time moves above the immediate-durability boundary', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const runtimeSnapshot: ExamSessionRuntime = {
+      ...createRuntimeSnapshot('reading'),
+      currentSectionRemainingSeconds: 21,
+    };
+
+    const { result } = renderHook(() => useStudentAttempt(), {
+      wrapper: createRuntimeBackedWrapper(createBoundaryAttemptSnapshot(), runtimeSnapshot),
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.actions.persistAnswer('q1', 'EARLY_TYPED');
+    });
+
+    // RAM stays immediate; durability remains debounced outside the boundary.
+    expect(result.current.state.attempt?.answers.q1).toBe('EARLY_TYPED');
+    expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(ANSWER_DURABLE_WRITE_DEBOUNCE_MS - 1);
+    });
+    expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+    await flushAnswerDurableDebounceWindow();
+
+    expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(studentAttemptRepository.savePendingMutations).mock.calls[0]?.[1]?.[0]?.payload,
+    ).toMatchObject({
+      questionId: 'q1',
+      value: 'EARLY_TYPED',
+    });
+    vi.useRealTimers();
+  });
+
+  it('applies the final-time boundary to writing answers, skipping the durable debounce', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const runtimeSnapshot: ExamSessionRuntime = {
+      ...createRuntimeSnapshot('reading'),
+      currentSectionRemainingSeconds: 10,
+    };
+
+    const { result } = renderHook(() => useStudentAttempt(), {
+      wrapper: createRuntimeBackedWrapper(
+        createBoundaryAttemptSnapshot({
+          currentModule: 'writing',
+          currentQuestionId: 'task1',
+        }),
+        runtimeSnapshot,
+      ),
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      result.current.actions.persistWritingAnswer('task1', '<p>FINAL</p>');
+      await Promise.resolve();
+    });
+
+    expect(result.current.state.attempt?.writingAnswers.task1).toBe('<p>FINAL</p>');
+
+    // FEX-031: the writing mutation must reach the durable mirror without ANY
+    // timer advancement — the durable debounce is skipped entirely (the 1500ms
+    // writing delay only governs the outbound network flush, offline here).
+    const writingMutationsDurablyPersisted = vi
+      .mocked(studentAttemptRepository.savePendingMutations)
+      .mock.calls.map((call) => call[1] ?? [])
+      .flat()
+      .filter((mutation) => mutation.type === 'writing_answer');
+    expect(writingMutationsDurablyPersisted).toHaveLength(1);
+    expect(writingMutationsDurablyPersisted[0]?.payload).toMatchObject({
+      taskId: 'task1',
+      value: '<p>FINAL</p>',
+    });
+
+    // And an untouched debounce window far beyond the 100ms durable budget adds
+    // no further writes — the value is already durably persisted by the boundary path.
+    const callsAfterImmediatePersist = vi.mocked(
+      studentAttemptRepository.savePendingMutations,
+    ).mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(ANSWER_DURABLE_WRITE_DEBOUNCE_MS + 10);
+      await Promise.resolve();
+    });
+
+    expect(
+      vi.mocked(studentAttemptRepository.savePendingMutations).mock.calls.length,
+    ).toBe(callsAfterImmediatePersist);
+    vi.useRealTimers();
+  });
+
   it('forces an immediate durable answer flush on input blur before the debounce window elapses', async () => {
     vi.useFakeTimers();
     Object.defineProperty(window.navigator, 'onLine', {
@@ -1464,6 +1642,80 @@ describe('StudentAttemptProvider', () => {
     });
     expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+
+  it('forces an immediate durable answer flush when the document becomes hidden (visibilitychange)', async () => {
+    vi.useFakeTimers();
+    const originalVisibilityStateDescriptor = Object.getOwnPropertyDescriptor(
+      document,
+      'visibilityState',
+    );
+    try {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: false,
+      });
+
+      const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        result.current.actions.persistAnswer('q1', 'A');
+      });
+      expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+      });
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+
+      // The visibility guard only flushes on `hidden`: a fresh unsaved answer
+      // must stay debounced while the document is visible again.
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      vi.mocked(studentAttemptRepository.savePendingMutations).mockClear();
+      await act(async () => {
+        result.current.actions.persistAnswer('q1', 'AB');
+      });
+      expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+      });
+      expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+      });
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+      expect(
+        vi
+          .mocked(studentAttemptRepository.savePendingMutations)
+          .mock.calls.at(-1)?.[1]?.[0]?.payload,
+      ).toMatchObject({
+        questionId: 'q1',
+        value: 'AB',
+      });
+    } finally {
+      if (originalVisibilityStateDescriptor) {
+        Object.defineProperty(document, 'visibilityState', originalVisibilityStateDescriptor);
+      } else {
+        Reflect.deleteProperty(document, 'visibilityState');
+      }
+      vi.useRealTimers();
+    }
   });
 
   it('keeps non-answer mutation durability immediate (no debounce)', async () => {
