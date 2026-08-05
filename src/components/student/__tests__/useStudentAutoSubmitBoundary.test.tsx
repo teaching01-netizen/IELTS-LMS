@@ -100,6 +100,8 @@ describe('useStudentAutoSubmitBoundary', () => {
 
   it('does not submit in runtime mode when boundary is not confirmed by server', async () => {
     const flushAndSubmitCurrentModuleWithRetry = vi.fn().mockResolvedValue(undefined);
+    const flushPendingAnswers = vi.fn().mockResolvedValue(true);
+    const requestRuntimeRefresh = vi.fn().mockResolvedValue(undefined);
 
     const { rerender } = renderHook(
       ({ displayTimeRemaining }: { displayTimeRemaining: number }) =>
@@ -118,6 +120,8 @@ describe('useStudentAutoSubmitBoundary', () => {
             }),
           },
           flushAndSubmitCurrentModuleWithRetry,
+          flushPendingAnswers,
+          requestRuntimeRefresh,
         }),
       {
         initialProps: { displayTimeRemaining: 1 },
@@ -131,5 +135,7 @@ describe('useStudentAutoSubmitBoundary', () => {
     });
 
     expect(flushAndSubmitCurrentModuleWithRetry).not.toHaveBeenCalled();
+    expect(flushPendingAnswers).toHaveBeenCalledTimes(1);
+    expect(requestRuntimeRefresh).toHaveBeenCalledTimes(1);
   });
 });

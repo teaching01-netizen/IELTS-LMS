@@ -931,8 +931,11 @@ describe('StudentApp runtime-backed mode', () => {
                   {
                     id: 'q-slots',
                     sentence: 'The ____ fox jumped over the ____ dog.',
-                    blanks: ['blank-1', 'blank-2'],
-                    correctAnswers: [['quick'], ['lazy']],
+                    blanks: [
+                      { id: 'blank-1', correctAnswer: 'quick', position: 0 },
+                      { id: 'blank-2', correctAnswer: 'lazy', position: 1 },
+                    ],
+                    answerRule: 'ONE_WORD',
                   },
                 ],
               },
@@ -1042,7 +1045,6 @@ describe('StudentApp runtime-backed mode', () => {
         runtimeSnapshot={runtimeSnapshot}
       />,
     );
-
     const slotOne = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
     const slotTwo = screen.getByLabelText('Answer for question 2') as HTMLInputElement;
 
@@ -1071,6 +1073,7 @@ describe('StudentApp runtime-backed mode', () => {
       });
       expect(mergedSlotMutation).toBeDefined();
     });
+
   });
 
   it('keeps local writing editor content stable during same-attempt refresh', async () => {

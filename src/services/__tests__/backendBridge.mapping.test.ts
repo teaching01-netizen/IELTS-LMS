@@ -127,6 +127,63 @@ describe('backendBridge contract mappings', () => {
     expect(mapped.sections[0]?.order).toBe(2);
   });
 
+  it('preserves the runtime revision through mapping', () => {
+    const mapped = mapBackendRuntime(
+      {
+        id: 'runtime-1',
+        scheduleId: 'sched-1',
+        examId: 'exam-1',
+        status: 'live',
+        revision: 12,
+        currentSectionRemainingSeconds: 1800,
+        waitingForNextSection: false,
+        isOverrun: false,
+        totalPausedSeconds: 0,
+        createdAt: '2026-01-01T09:00:00.000Z',
+        updatedAt: '2026-01-01T09:10:00.000Z',
+        sections: [],
+      },
+      {
+        examTitle: 'Exam',
+        cohortName: 'Cohort A',
+        deliveryMode: 'proctor_start',
+      },
+    );
+
+    expect(mapped.revision).toBe(12);
+  });
+
+  it('maps a missing or non-finite runtime revision to null', () => {
+    const basePayload = {
+      id: 'runtime-1',
+      scheduleId: 'sched-1',
+      examId: 'exam-1',
+      status: 'live',
+      currentSectionRemainingSeconds: 1800,
+      waitingForNextSection: false,
+      isOverrun: false,
+      totalPausedSeconds: 0,
+      createdAt: '2026-01-01T09:00:00.000Z',
+      updatedAt: '2026-01-01T09:10:00.000Z',
+      sections: [],
+    };
+    const schedule = {
+      examTitle: 'Exam',
+      cohortName: 'Cohort A',
+      deliveryMode: 'proctor_start' as const,
+    };
+
+    expect(mapBackendRuntime(basePayload, schedule).revision).toBeNull();
+
+    expect(
+      mapBackendRuntime({ ...basePayload, revision: Number.NaN }, schedule).revision,
+    ).toBeNull();
+
+    expect(
+      mapBackendRuntime({ ...basePayload, revision: Infinity }, schedule).revision,
+    ).toBeNull();
+  });
+
   it('throws when backend envelope is successful but missing data', async () => {
     get.mockResolvedValueOnce({ data: { success: true } });
     await expect(backendGet('/v1/example')).rejects.toThrow('missing data payload');

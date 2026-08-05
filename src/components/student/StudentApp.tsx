@@ -251,6 +251,7 @@ export function StudentApp({
   const {
     finalSubmitStatus,
     flushAndSubmitCurrentModuleWithRetry,
+    flushPendingAnswers,
   } = useStudentSubmissionOrchestration({
     runtimeState: {
       runtimeBacked: runtimeState.runtimeBacked,
@@ -346,6 +347,8 @@ export function StudentApp({
       runtimeSnapshot: runtimeState.runtimeSnapshot,
     },
     flushAndSubmitCurrentModuleWithRetry,
+    flushPendingAnswers,
+    requestRuntimeRefresh: runtimeActions.refreshRuntime,
   });
 
   const shouldShowTimeExtension = shouldOfferTimeExtension({

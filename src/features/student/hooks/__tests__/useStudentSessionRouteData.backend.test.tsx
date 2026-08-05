@@ -12,6 +12,37 @@ import { useStudentSessionRouteData } from '../useStudentSessionRouteData';
 
 const originalFetch = global.fetch;
 
+const originalWebSocket = globalThis.WebSocket;
+
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+
+  url: string;
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+
+  constructor(url: string) {
+    this.url = url;
+    MockWebSocket.instances.push(this);
+  }
+
+  open() {
+    this.onopen?.(new Event('open'));
+  }
+
+  emitMessage(data: unknown) {
+    this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(data) }));
+  }
+
+  close() {
+    this.onclose?.(new CloseEvent('close'));
+  }
+
+  send() {}
+}
+
 function createWrapper() {
   return function Wrapper({ children }: { children: ReactNode }) {
     return <AuthSessionProvider>{children}</AuthSessionProvider>;
@@ -301,12 +332,16 @@ describe('useStudentSessionRouteData backend mode', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+    MockWebSocket.instances = [];
+    // @ts-expect-error test shim: replace browser WebSocket with deterministic mock implementation.
+    globalThis.WebSocket = MockWebSocket;
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     global.fetch = originalFetch;
+    globalThis.WebSocket = originalWebSocket;
   });
 
   it('hydrates static exam payload once, then uses live session payload for runtime and attempt', async () => {
@@ -1122,5 +1157,370 @@ describe('useStudentSessionRouteData backend mode', () => {
         missingUsableImageCount: 1,
       }),
     );
+  });
+
+  it('skips equal-revision poll duplicates: no state update, no applied regression', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    const metricEvents: Record<string, unknown>[] = [];
+    const metricListener = (event: Event) => {
+      const customEvent = event as CustomEvent<Record<string, unknown>>;
+      metricEvents.push(customEvent.detail);
+    };
+    let cachedAttempt: Record<string, unknown> | null = null;
+    vi.spyOn(studentAttemptRepository as any, 'saveAttempt').mockImplementation(async (attempt) => {
+      cachedAttempt = attempt as Record<string, unknown>;
+    });
+    vi.spyOn(studentAttemptRepository as any, 'getAttemptsByScheduleId').mockImplementation(async () => {
+      return cachedAttempt ? [cachedAttempt] : [];
+    });
+
+    const runtime = buildRuntime();
+    let liveCallCount = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        liveCallCount += 1;
+        return Promise.resolve(jsonResponse(buildLiveSessionContext(buildAttempt(), 'ver-1', runtime)));
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    window.addEventListener('student-observability-metric', metricListener as EventListener);
+    try {
+      const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+        expect(result.current.runtimeSnapshot?.revision).toBe(1);
+        expect(result.current.runtimeSnapshot?.currentSectionRemainingSeconds).toBe(1200);
+      });
+
+      const appliedBefore = result.current.runtimeSnapshot;
+      const churnCountBefore = metricEvents.filter(
+        (metric) => metric.name === 'student_timer_snapshot_churn_total',
+      ).length;
+
+      await act(async () => {
+        await result.current.refreshRuntime();
+      });
+      await act(async () => {
+        await result.current.refreshRuntime();
+      });
+
+      // Fresh object identity with identical authoritative timer values: the
+      // applied snapshot must not be replaced and must not regress.
+      expect(result.current.runtimeSnapshot).toBe(appliedBefore);
+      expect(result.current.runtimeSnapshot?.currentSectionRemainingSeconds).toBe(1200);
+      expect(result.current.runtimeSnapshot?.revision).toBe(1);
+
+      const churnMetrics = metricEvents.filter(
+        (metric) => metric.name === 'student_timer_snapshot_churn_total',
+      );
+      expect(churnMetrics.length).toBeGreaterThan(churnCountBefore);
+      expect(churnMetrics[churnMetrics.length - 1]).toMatchObject({
+        scheduleId: 'sched-1',
+        attemptId: 'attempt-1',
+        endpoint: '/v1/student/sessions/sched-1/live',
+        statusCode: 200,
+        reason: 'equal_revision_duplicate',
+        syncState: 'idle',
+        source: 'refresh',
+        runtimeRevision: 1,
+      });
+      expect(churnMetrics[churnMetrics.length - 1]?.snapshotRemainingSeconds).toBe(1200);
+      expect(churnMetrics[churnMetrics.length - 1]?.documentVisibilityState).toBe('visible');
+    } finally {
+      window.removeEventListener('student-observability-metric', metricListener as EventListener);
+    }
+  });
+
+  it('applies changed timer values at equal revision from a poll response', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    let cachedAttempt: Record<string, unknown> | null = null;
+    vi.spyOn(studentAttemptRepository as any, 'saveAttempt').mockImplementation(async (attempt) => {
+      cachedAttempt = attempt as Record<string, unknown>;
+    });
+    vi.spyOn(studentAttemptRepository as any, 'getAttemptsByScheduleId').mockImplementation(async () => {
+      return cachedAttempt ? [cachedAttempt] : [];
+    });
+
+    const initialRuntime = buildRuntime();
+    const progressedRuntime = {
+      ...initialRuntime,
+      currentSectionRemainingSeconds: 1198,
+      currentSectionDeadlineAt: '2026-01-01T09:20:02.000Z',
+      serverNow: '2026-01-01T09:20:02.000Z',
+    };
+    // The immediate poll (useAsyncPolling runImmediately) races with the
+    // mount load; only the final refreshRuntime() must observe the progressed
+    // runtime so the "equal revision, changed values" path is exercised
+    // exactly once.
+    let sawProgressed = false;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        if (sawProgressed) {
+          return Promise.resolve(jsonResponse(buildLiveSessionContext(buildAttempt(), 'ver-1', progressedRuntime)));
+        }
+        return Promise.resolve(jsonResponse(buildLiveSessionContext(buildAttempt(), 'ver-1', initialRuntime)));
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.runtimeSnapshot?.currentSectionRemainingSeconds).toBe(1200);
+    });
+
+    sawProgressed = true;
+    await act(async () => {
+      await result.current.refreshRuntime();
+    });
+
+    // Equal revision, changed authoritative timer values: newest runtime wins.
+    expect(result.current.runtimeSnapshot?.revision).toBe(1);
+    expect(result.current.runtimeSnapshot?.currentSectionRemainingSeconds).toBe(1198);
+  });
+
+  it('discards a runtime_snapshot WS frame with an older revision than applied', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    const metricEvents: Record<string, unknown>[] = [];
+    const metricListener = (event: Event) => {
+      const customEvent = event as CustomEvent<Record<string, unknown>>;
+      metricEvents.push(customEvent.detail);
+    };
+
+    const initialRuntime = buildRuntime();
+    let liveCallCount = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        liveCallCount += 1;
+        if (liveCallCount === 1) {
+          const currentRuntime = {
+            ...initialRuntime,
+            revision: 5,
+            currentSectionKey: 'reading',
+            activeSectionKey: 'reading',
+            currentSectionRemainingSeconds: 1100,
+          };
+          return Promise.resolve(jsonResponse(buildLiveSessionContext(buildAttempt(), 'ver-1', currentRuntime)));
+        }
+        return Promise.resolve(jsonResponse(buildLiveSessionContext(buildAttempt(), 'ver-1', initialRuntime)));
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    window.addEventListener('student-observability-metric', metricListener as EventListener);
+    try {
+      const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+        expect(result.current.runtimeSnapshot?.revision).toBe(5);
+        expect(result.current.runtimeSnapshot?.currentSectionKey).toBe('reading');
+      });
+
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      // Older revision (4) than the applied revision (5).
+      socket.emitMessage({
+        type: 'runtime_snapshot',
+        scheduleId: 'sched-1',
+        runtime: {
+          ...initialRuntime,
+          revision: 4,
+          currentSectionKey: 'writing',
+          activeSectionKey: 'writing',
+          currentSectionRemainingSeconds: 90,
+        },
+      });
+
+      await waitFor(() => {
+        expect(
+          metricEvents.some(
+            (metric) =>
+              metric.name === 'student_refresh_stale_discard_total' &&
+              metric.reason === 'runtime_regressed' &&
+              metric.source === 'websocket',
+          ),
+        ).toBe(true);
+      });
+
+      const staleDiscard = metricEvents.find(
+        (metric) =>
+          metric.name === 'student_refresh_stale_discard_total' &&
+          metric.reason === 'runtime_regressed' &&
+          metric.source === 'websocket',
+      );
+      expect(staleDiscard).toMatchObject({
+        scheduleId: 'sched-1',
+        attemptId: 'attempt-1',
+        endpoint: '/v1/student/sessions/sched-1/live',
+        statusCode: 200,
+        reason: 'runtime_regressed',
+        source: 'websocket',
+      });
+      expect(staleDiscard?.runtimeRevision).toBe(4);
+      // State must not regress: the applied revision 5 snapshot is retained.
+      expect(result.current.runtimeSnapshot?.revision).toBe(5);
+      expect(result.current.runtimeSnapshot?.currentSectionKey).toBe('reading');
+      expect(result.current.runtimeSnapshot?.currentSectionRemainingSeconds).toBe(1100);
+    } finally {
+      window.removeEventListener('student-observability-metric', metricListener as EventListener);
+    }
+  });
+
+  it('applies a runtime_snapshot WS frame with a newer revision', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+
+    const initialRuntime = buildRuntime();
+    let liveCallCount = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        liveCallCount += 1;
+        return Promise.resolve(jsonResponse(buildLiveSessionContext(buildAttempt(), 'ver-1', initialRuntime)));
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.runtimeSnapshot?.revision).toBe(1);
+    });
+
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    socket.emitMessage({
+      type: 'runtime_snapshot',
+      scheduleId: 'sched-1',
+      runtime: {
+        ...initialRuntime,
+        revision: 6,
+        currentSectionKey: 'writing',
+        activeSectionKey: 'writing',
+        currentSectionRemainingSeconds: 60,
+        currentSectionDeadlineAt: '2026-01-01T09:01:00.000Z',
+        serverNow: '2026-01-01T09:00:00.000Z',
+      },
+    });
+
+    await waitFor(() => {
+      expect(result.current.runtimeSnapshot?.revision).toBe(6);
+      expect(result.current.runtimeSnapshot?.currentSectionKey).toBe('writing');
+      expect(result.current.runtimeSnapshot?.currentSectionRemainingSeconds).toBe(60);
+    });
+  });
+
+  it('ignores equal-revision runtime_snapshot WS duplicates after polling applied them', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    const metricEvents: Record<string, unknown>[] = [];
+    const metricListener = (event: Event) => {
+      const customEvent = event as CustomEvent<Record<string, unknown>>;
+      metricEvents.push(customEvent.detail);
+    };
+    let cachedAttempt: Record<string, unknown> | null = null;
+    vi.spyOn(studentAttemptRepository as any, 'saveAttempt').mockImplementation(async (attempt) => {
+      cachedAttempt = attempt as Record<string, unknown>;
+    });
+    vi.spyOn(studentAttemptRepository as any, 'getAttemptsByScheduleId').mockImplementation(async () => {
+      return cachedAttempt ? [cachedAttempt] : [];
+    });
+
+    const initialRuntime = buildRuntime();
+    let liveCallCount = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        liveCallCount += 1;
+        return Promise.resolve(jsonResponse(buildLiveSessionContext(buildAttempt(), 'ver-1', initialRuntime)));
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    window.addEventListener('student-observability-metric', metricListener as EventListener);
+    try {
+      const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+        expect(result.current.runtimeSnapshot?.revision).toBe(1);
+      });
+
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      socket.emitMessage({
+        type: 'runtime_snapshot',
+        scheduleId: 'sched-1',
+        runtime: initialRuntime,
+      });
+
+      await waitFor(() => {
+        expect(
+          metricEvents.some(
+            (metric) =>
+              metric.name === 'student_timer_snapshot_churn_total' &&
+              metric.reason === 'equal_revision_duplicate' &&
+              metric.source === 'websocket',
+          ),
+        ).toBe(true);
+      });
+
+      const churnMetric = metricEvents.find(
+        (metric) =>
+          metric.name === 'student_timer_snapshot_churn_total' &&
+          metric.reason === 'equal_revision_duplicate' &&
+          metric.source === 'websocket',
+      );
+      expect(churnMetric).toMatchObject({
+        scheduleId: 'sched-1',
+        attemptId: 'attempt-1',
+        endpoint: '/v1/student/sessions/sched-1/live',
+        statusCode: 200,
+        reason: 'equal_revision_duplicate',
+        syncState: 'idle',
+        source: 'websocket',
+        runtimeRevision: 1,
+      });
+      expect(result.current.runtimeSnapshot?.revision).toBe(1);
+      expect(result.current.runtimeSnapshot?.currentSectionRemainingSeconds).toBe(1200);
+    } finally {
+      window.removeEventListener('student-observability-metric', metricListener as EventListener);
+    }
   });
 });

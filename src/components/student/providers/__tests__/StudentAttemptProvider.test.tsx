@@ -493,6 +493,85 @@ describe('StudentAttemptProvider', () => {
     });
   });
 
+  it('keeps the deadline countdown moving during continuous writing persistence', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    try {
+      const attemptSnapshot: StudentAttempt = {
+        ...createAttemptSnapshot(),
+        currentModule: 'writing',
+        currentQuestionId: 'task1',
+        integrity: {
+          ...createAttemptSnapshot().integrity,
+          preCheck: {
+            completedAt: '2026-01-01T00:00:00.000Z',
+            browserFamily: 'chrome',
+            browserVersion: 120,
+            screenDetailsSupported: true,
+            heartbeatReady: true,
+            acknowledgedSafariLimitation: false,
+            checks: [],
+          },
+        },
+      };
+      const runtimeSnapshot: ExamSessionRuntime = {
+        ...createRuntimeSnapshot('reading'),
+        currentSectionRemainingSeconds: 10,
+        currentSectionDeadlineAt: '2026-01-01T00:00:10.000Z',
+        serverNow: '2026-01-01T00:00:00.000Z',
+      };
+
+      const { result } = renderHook(
+        () => ({
+          attempt: useStudentAttempt(),
+          runtime: useStudentRuntime(),
+        }),
+        { wrapper: createRuntimeBackedWrapper(attemptSnapshot, runtimeSnapshot) },
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      for (let expected = 9; expected >= 0; expected -= 1) {
+        await act(async () => {
+          for (let event = 0; event < 20; event += 1) {
+            result.current.attempt.actions.persistWritingAnswer(
+              'task1',
+              `draft-${expected}-${event}`,
+            );
+            vi.advanceTimersByTime(50);
+          }
+          await Promise.resolve();
+        });
+
+        expect(result.current.runtime.state.displayTimeRemaining).toBe(expected);
+      }
+
+      await act(async () => {
+        vi.advanceTimersByTime(100);
+        await Promise.resolve();
+      });
+
+      expect(result.current.attempt.state.attempt?.writingAnswers.task1).toBe('draft-0-19');
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledWith(
+        'attempt-1',
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'writing_answer',
+            payload: expect.objectContaining({
+              taskId: 'task1',
+              value: 'draft-0-19',
+            }),
+          }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps only the latest objective answer mutation during super-fast typing bursts', async () => {
     Object.defineProperty(window.navigator, 'onLine', {
       configurable: true,

@@ -14,6 +14,8 @@ interface UseStudentAutoSubmitBoundaryOptions {
     runtimeSnapshot: ExamSessionRuntime | null;
   };
   flushAndSubmitCurrentModuleWithRetry: (fingerprint: string) => Promise<void>;
+  flushPendingAnswers?: (() => Promise<boolean>) | undefined;
+  requestRuntimeRefresh?: (() => Promise<void>) | undefined;
 }
 
 export function useStudentAutoSubmitBoundary({
@@ -21,9 +23,12 @@ export function useStudentAutoSubmitBoundary({
   autoSubmitEnabled,
   runtimeState,
   flushAndSubmitCurrentModuleWithRetry,
+  flushPendingAnswers,
+  requestRuntimeRefresh,
 }: UseStudentAutoSubmitBoundaryOptions) {
   const autoSubmitFingerprintRef = useRef<string | null>(null);
   const priorTimeRemainingRef = useRef<number | null>(null);
+  const boundaryPreparationFingerprintRef = useRef<string | null>(null);
 
   useEffect(() => {
     const priorTimeRemaining = priorTimeRemainingRef.current;
@@ -34,19 +39,39 @@ export function useStudentAutoSubmitBoundary({
 
     if (!autoSubmitEnabled) {
       autoSubmitFingerprintRef.current = null;
+      boundaryPreparationFingerprintRef.current = null;
       return;
     }
 
     if (effectivePhase !== 'exam') {
       autoSubmitFingerprintRef.current = null;
-      return;
-    }
-
-    if (runtimeState.blockingActive) {
+      boundaryPreparationFingerprintRef.current = null;
       return;
     }
 
     if (typeof runtimeState.displayTimeRemaining !== 'number') {
+      return;
+    }
+
+    const fingerprint = `${runtimeState.runtimeBacked ? 'runtime' : 'self'}:${runtimeState.currentModule}`;
+    const priorWasPositive =
+      typeof priorTimeRemaining === 'number' && priorTimeRemaining > 0;
+    const reachedZero = runtimeState.displayTimeRemaining === 0;
+    const transitionedToZero = reachedZero && priorWasPositive;
+    const firstObservedZero = reachedZero && priorTimeRemaining === null;
+
+    if (
+      runtimeState.runtimeBacked &&
+      runtimeState.runtimeStatus === 'live' &&
+      (transitionedToZero || firstObservedZero) &&
+      boundaryPreparationFingerprintRef.current !== fingerprint
+    ) {
+      boundaryPreparationFingerprintRef.current = fingerprint;
+      void flushPendingAnswers?.().catch(() => {});
+      void requestRuntimeRefresh?.().catch(() => {});
+    }
+
+    if (runtimeState.blockingActive) {
       return;
     }
 
@@ -55,9 +80,6 @@ export function useStudentAutoSubmitBoundary({
         return;
       }
 
-      const reachedZero = runtimeState.displayTimeRemaining === 0;
-      const transitionedToZero =
-        reachedZero && typeof priorTimeRemaining === 'number' && priorTimeRemaining > 0;
 
       const serverSectionKey = runtimeState.runtimeSnapshot?.currentSectionKey ?? null;
       const serverRemaining = runtimeState.runtimeSnapshot?.currentSectionRemainingSeconds;
@@ -75,7 +97,6 @@ export function useStudentAutoSubmitBoundary({
       return;
     }
 
-    const fingerprint = `${runtimeState.runtimeBacked ? 'runtime' : 'self'}:${runtimeState.currentModule}`;
     if (autoSubmitFingerprintRef.current === fingerprint) {
       return;
     }
@@ -89,6 +110,8 @@ export function useStudentAutoSubmitBoundary({
     runtimeState.blockingActive,
     runtimeState.currentModule,
     runtimeState.displayTimeRemaining,
+    flushPendingAnswers,
+    requestRuntimeRefresh,
     runtimeState.runtimeBacked,
     runtimeState.runtimeSnapshot,
     runtimeState.runtimeStatus,

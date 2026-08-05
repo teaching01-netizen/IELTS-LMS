@@ -15,7 +15,9 @@ import {
   withStudentObservabilityDimensions,
 } from '../../../utils/studentObservability';
 import {
+  compareFreshnessDimension,
   extractLiveSnapshotFreshness,
+  isRuntimeValueUnchanged,
   mergeLiveSnapshotFreshness,
   type LiveSnapshotFreshness,
 } from '../liveSnapshotFreshness';
@@ -555,9 +557,63 @@ export function useStudentSessionRouteData(
     }
 
     setAnswerInvariantRollout(rollout);
-    if (applyDecision.applyRuntime && nextRuntimeSnapshot !== previousRuntimeSnapshot) {
+    const runtimeValueUnchanged =
+      applyDecision.applyRuntime &&
+      nextRuntimeSnapshot !== null &&
+      isRuntimeValueUnchanged(runtimeSnapshotRef.current, nextRuntimeSnapshot);
+    if (applyDecision.applyRuntime && !runtimeValueUnchanged) {
       runtimeSnapshotRef.current = nextRuntimeSnapshot;
       setRuntimeSnapshot(nextRuntimeSnapshot);
+    } else if (runtimeValueUnchanged) {
+      // Equal-revision duplicate frame: keep the applied snapshot (no state
+      // churn, no timer restart) and only refresh the freshness bookkeeping.
+      const runtimeRecord = asRecord(live?.['runtime']);
+      const sectionKey =
+        typeof runtimeRecord?.['currentSectionKey'] === 'string'
+          ? (runtimeRecord?.['currentSectionKey'] as string)
+          : null;
+      const runtimeSections = runtimeRecord?.['sections'];
+      const currentSection = (
+        Array.isArray(runtimeSections) ? runtimeSections : []
+      ).find((candidate) => asRecord(candidate)?.['sectionKey'] === sectionKey);
+      const sectionStatusRecord = asRecord(currentSection);
+      emitStudentObservabilityMetric(
+        'student_timer_snapshot_churn_total',
+        withStudentObservabilityDimensions({
+          scheduleId: scheduleId ?? null,
+          attemptId: live.attempt?.id ?? null,
+          endpoint: scheduleId ? buildLiveMetricEndpoint(scheduleId) : null,
+          statusCode: LIVE_SESSION_STATUS_CODE,
+          reason: 'equal_revision_duplicate',
+          syncState: extractAttemptSyncState(live),
+          source: 'refresh',
+          runtimeRevision: parseFiniteNumber(runtimeRecord?.['revision']),
+          attemptRevision: parseFiniteNumber(live.attempt?.revision),
+          currentSectionKey: sectionKey,
+          runtimeStatus:
+            typeof runtimeRecord?.['status'] === 'string'
+              ? (runtimeRecord?.['status'] as string)
+              : null,
+          sectionStatus:
+            typeof sectionStatusRecord?.['status'] === 'string'
+              ? (sectionStatusRecord?.['status'] as string)
+              : null,
+          snapshotRemainingSeconds: parseFiniteNumber(runtimeRecord?.['currentSectionRemainingSeconds']),
+          deadlineAt:
+            typeof runtimeRecord?.['currentSectionDeadlineAt'] === 'string'
+              ? (runtimeRecord?.['currentSectionDeadlineAt'] as string)
+              : null,
+          serverNow:
+            typeof runtimeRecord?.['serverNow'] === 'string'
+              ? (runtimeRecord?.['serverNow'] as string)
+              : null,
+          documentVisibilityState:
+            typeof document === 'undefined' || typeof document.visibilityState !== 'string'
+              ? null
+              : document.visibilityState,
+          navigatorOnline: typeof navigator === 'undefined' ? null : navigator.onLine,
+        }),
+      );
     }
     if (reconciledAttempt) {
       setAttemptSnapshot(reconciledAttempt);
@@ -609,20 +665,83 @@ export function useStudentSessionRouteData(
       }
 
       try {
-        const mappedRuntime = studentSessionFacade.mapRuntime(payload.runtime, schedule);
-        runtimeSnapshotRef.current = mappedRuntime;
-        setRuntimeSnapshot(mappedRuntime);
-
         const runtimeRecord = payload.runtime as Record<string, unknown>;
+        const incomingRuntimeFreshness = {
+          revision: parseFiniteNumber(runtimeRecord['revision']),
+          updatedAtMs: parseIsoTimestampMs(runtimeRecord['updatedAt']),
+        };
+        const freshnessOrder = compareFreshnessDimension(
+          incomingRuntimeFreshness,
+          appliedFreshnessRef.current?.runtime ?? { revision: null, updatedAtMs: null },
+        );
+
+        if (freshnessOrder < 0) {
+          // Strictly older frame: the newest authoritative runtime already won.
+          emitStudentObservabilityMetric(
+            'student_refresh_stale_discard_total',
+            withStudentObservabilityDimensions({
+              scheduleId: scheduleId ?? null,
+              attemptId: attemptSnapshot?.id ?? null,
+              endpoint: buildLiveMetricEndpoint(scheduleId),
+              statusCode: LIVE_SESSION_STATUS_CODE,
+              reason: 'runtime_regressed',
+              syncState: extractAttemptSyncState(payload.runtime),
+              source: 'websocket',
+              runtimeRevision: incomingRuntimeFreshness.revision,
+            }),
+          );
+          return;
+        }
+
+        const mappedRuntime = studentSessionFacade.mapRuntime(payload.runtime, schedule);
+        const runtimeValueUnchanged =
+          mappedRuntime !== null &&
+          isRuntimeValueUnchanged(runtimeSnapshotRef.current, mappedRuntime);
+
+        if (freshnessOrder === 0 && runtimeValueUnchanged) {
+          // Equal-revision duplicate frame: skip the state update but still
+          // refresh the freshness bookkeeping so the applied window advances.
+          emitStudentObservabilityMetric(
+            'student_timer_snapshot_churn_total',
+            withStudentObservabilityDimensions({
+              scheduleId: scheduleId ?? null,
+              attemptId: attemptSnapshot?.id ?? null,
+              endpoint: buildLiveMetricEndpoint(scheduleId),
+              statusCode: LIVE_SESSION_STATUS_CODE,
+              reason: 'equal_revision_duplicate',
+              syncState: extractAttemptSyncState(payload.runtime),
+              source: 'websocket',
+              runtimeRevision: incomingRuntimeFreshness.revision,
+              attemptRevision: parseFiniteNumber(attemptSnapshot?.revision),
+              currentSectionKey: mappedRuntime.currentSectionKey ?? null,
+              runtimeStatus: mappedRuntime.status,
+              sectionStatus:
+                mappedRuntime.sections.find(
+                  (section) => section.sectionKey === mappedRuntime.currentSectionKey,
+                )?.status ?? null,
+              snapshotRemainingSeconds: mappedRuntime.currentSectionRemainingSeconds,
+              deadlineAt: mappedRuntime.currentSectionDeadlineAt ?? null,
+              serverNow: mappedRuntime.serverNow ?? null,
+              documentVisibilityState:
+                typeof document === 'undefined' || typeof document.visibilityState !== 'string'
+                  ? null
+                  : document.visibilityState,
+              navigatorOnline: typeof navigator === 'undefined' ? null : navigator.onLine,
+            }),
+          );
+        } else {
+          // Strictly newer, or equal freshness with changed timer values
+          // (e.g. the first WS frame while polling already applied a snapshot).
+          runtimeSnapshotRef.current = mappedRuntime;
+          setRuntimeSnapshot(mappedRuntime);
+        }
+
         const runtimeFreshness: LiveSnapshotFreshness = {
           attempt: {
             revision: appliedFreshnessRef.current?.attempt.revision ?? null,
             updatedAtMs: appliedFreshnessRef.current?.attempt.updatedAtMs ?? null,
           },
-          runtime: {
-            revision: parseFiniteNumber(runtimeRecord['revision']),
-            updatedAtMs: parseIsoTimestampMs(runtimeRecord['updatedAt']),
-          },
+          runtime: incomingRuntimeFreshness,
         };
         appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
           appliedFreshnessRef.current,
@@ -636,7 +755,7 @@ export function useStudentSessionRouteData(
         // Ignore malformed snapshots and continue with pull-based refresh.
       }
     },
-    [schedule, scheduleId],
+    [attemptSnapshot?.id, attemptSnapshot?.revision, schedule, scheduleId],
   );
 
   useLiveUpdates({

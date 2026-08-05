@@ -52,6 +52,29 @@ export function useStudentSubmissionOrchestration({
     'idle' | 'submitting' | 'retrying' | 'failed'
   >('idle');
 
+  const flushPendingAnswers = useCallback(async () => {
+    flushDomAnswerControlsNow();
+    reconcileLiveAnswerCacheNow();
+    commitWritingDraft();
+
+    const flushed = await attemptActions.flushPending();
+    if (flushed) {
+      runtimeActions.transitionBlocking('syncing_reconnect', false);
+      runtimeActions.transitionBlocking('offline', false);
+    } else if (!navigator.onLine) {
+      runtimeActions.transitionBlocking('offline', true);
+    } else {
+      runtimeActions.transitionBlocking('syncing_reconnect', true);
+    }
+    return flushed;
+  }, [
+    attemptActions,
+    commitWritingDraft,
+    flushDomAnswerControlsNow,
+    reconcileLiveAnswerCacheNow,
+    runtimeActions,
+  ]);
+
   const flushAndSubmitCurrentModuleWithRetry = useCallback(
     async (fingerprint: string) => {
       if (
@@ -78,21 +101,10 @@ export function useStudentSubmissionOrchestration({
             return;
           }
 
-          flushDomAnswerControlsNow();
-          reconcileLiveAnswerCacheNow();
-          commitWritingDraft();
-          const flushed = await attemptActions.flushPending();
+          const flushed = await flushPendingAnswers();
           if (flushed) {
-            runtimeActions.transitionBlocking('syncing_reconnect', false);
-            runtimeActions.transitionBlocking('offline', false);
             runtimeActions.submitModule();
             return;
-          }
-
-          if (!navigator.onLine) {
-            runtimeActions.transitionBlocking('offline', true);
-          } else {
-            runtimeActions.transitionBlocking('syncing_reconnect', true);
           }
 
           const backoffMs = Math.min(30_000, 1_000 * 2 ** attemptIndex);
@@ -117,6 +129,7 @@ export function useStudentSubmissionOrchestration({
       attemptActions,
       commitWritingDraft,
       flushDomAnswerControlsNow,
+      flushPendingAnswers,
       reconcileLiveAnswerCacheNow,
       runtimeActions,
       runtimeStateRef,
@@ -200,5 +213,6 @@ export function useStudentSubmissionOrchestration({
   return {
     finalSubmitStatus,
     flushAndSubmitCurrentModuleWithRetry,
+    flushPendingAnswers,
   };
 }

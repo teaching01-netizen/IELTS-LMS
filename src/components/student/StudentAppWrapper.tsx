@@ -78,6 +78,7 @@ export function StudentAppWrapper({
       }
       runtimeBacked={Boolean(runtimeSnapshot)}
       runtimeSnapshot={runtimeSnapshot}
+      onRefreshRuntime={onRuntimeRefresh}
     >
       <StudentAttemptProvider
         scheduleId={scheduleId}

@@ -580,6 +580,7 @@ export function mapBackendRuntime(
     waitingForNextSection: payload.waitingForNextSection,
     isOverrun: payload.isOverrun,
     totalPausedSeconds: payload.totalPausedSeconds,
+    revision: typeof payload.revision === 'number' && Number.isFinite(payload.revision) ? payload.revision : null,
     sections: payload.sections.map((section) => ({
       sectionKey: section.sectionKey,
       label: section.label,
