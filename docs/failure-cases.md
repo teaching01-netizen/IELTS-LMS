@@ -907,7 +907,7 @@ only `"1062"`, so its duplicate branch never fires and its two call sites (`star
 Commit `777a3c2` added two helpers that accept both codes: `is_duplicate_key` in
 `delivery/mod.rs` (~line 2003) and `idempotency.rs` (~line 266).
 
-RESOLVED (B-3): commit `b7cb803` fixed the scheduling.rs helper to accept both
+RESOLVED (B-3): commit `8658766` fixed the scheduling.rs helper to accept both
 `"23000"` and `"1062"`, so `start_runtime`/`register_student` duplicate-key races
 now resolve to a clean 409 Conflict. Regression test:
 `repeated_start_returns_conflict_without_duplicate_sections`
