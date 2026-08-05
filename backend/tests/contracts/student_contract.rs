@@ -2840,8 +2840,11 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
     database.shutdown().await;
 }
 
+// BEX-060 — a final answer patch reconciles a stale `lastSeenRevision`:
+// the client's authoritative final state is merged over the persisted
+// answers, so the submit succeeds instead of returning BASE_REVISION_MISMATCH.
 #[tokio::test]
-async fn submit_applies_final_patch_even_if_last_seen_revision_is_behind() {
+async fn bex060_final_patch_reconciles_stale_last_seen_revision() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -2850,9 +2853,18 @@ async fn submit_applies_final_patch_even_if_last_seen_revision_is_behind() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, client_session_id) =
-        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
-    start_runtime(database.pool(), schedule_id, "listening").await;
+    // The runtime row only exists after the real StartRuntime command (a bare
+    // UPDATE on exam_session_runtimes is a silent no-op); bootstrapping after
+    // the start creates the attempt with phase `exam` so the submit phase
+    // gate passes.
+    let (bootstrap, _client_session_id) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -2861,7 +2873,12 @@ async fn submit_applies_final_patch_even_if_last_seen_revision_is_behind() {
         .as_str()
         .unwrap()
         .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    assert_eq!(bootstrap["data"]["attempt"]["phase"], "exam");
 
+    // Session A accepts one mutation: the attempt advances to revision + 1.
     let mutation_response = app
         .clone()
         .oneshot(
@@ -2877,7 +2894,7 @@ async fn submit_applies_final_patch_even_if_last_seen_revision_is_behind() {
                         "attemptId": attempt_id.clone(),
                         "mutations": [{
                             "mutationId": "mutation-submit-stale-1",
-                            "baseRevision": 1,
+                            "baseRevision": base_revision,
                             "type": "SetScalar",
                             "questionId": "q1",
                             "value": "A"
@@ -2890,7 +2907,12 @@ async fn submit_applies_final_patch_even_if_last_seen_revision_is_behind() {
         .await
         .unwrap();
     assert_eq!(mutation_response.status(), StatusCode::OK);
+    let mutation_json = json_body(mutation_response).await;
+    let revision_after_mutation = mutation_json["data"]["revision"].as_i64().unwrap();
+    assert_eq!(revision_after_mutation, base_revision as i64 + 1);
 
+    // The client fell behind (lastSeenRevision 0) but carries the final
+    // patch: the patch reconciles the stale revision instead of conflicting.
     let response = app
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
@@ -2918,9 +2940,374 @@ async fn submit_applies_final_patch_even_if_last_seen_revision_is_behind() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "final patch must reconcile the stale lastSeenRevision: {}",
+        json_body(response).await
+    );
     let json = json_body(response).await;
+    assert_eq!(json["data"]["attempt"]["phase"], "post-exam");
+
+    // The patched value is what the final snapshot (grading input) carries,
+    // and the persisted answers are reconciled to the same patched state so
+    // the response attempt and any in-grace merge never see stale answers.
+    let final_submission: serde_json::Value =
+        sqlx::query_scalar("SELECT final_submission FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        final_submission["answers"]["q1"], "B",
+        "final snapshot must carry the patched answer"
+    );
+    assert_eq!(
+        final_submission["finalFlush"]["finalPatchApplied"], true,
+        "finalFlush must record that the patch was applied"
+    );
+    assert_eq!(final_submission["finalFlush"]["replayIncomplete"], false);
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["q1"], "B");
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_after_mutation + 1,
+        "submit bumps the revision exactly once"
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        1,
+        "exactly one STUDENT_SUBMIT audit row"
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-060 — a stale `lastSeenRevision` WITHOUT a final patch is still a
+// structured BASE_REVISION_MISMATCH conflict and must not seal the attempt.
+#[tokio::test]
+async fn bex060_stale_last_seen_revision_without_patch_returns_base_revision_mismatch() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let mutation_response = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/mutations:batch",
+                    schedule_id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "mutations": [{
+                            "mutationId": "mutation-stale-no-patch-1",
+                            "baseRevision": base_revision,
+                            "type": "SetScalar",
+                            "questionId": "q1",
+                            "value": "A"
+                        }]
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(mutation_response.status(), StatusCode::OK);
+    let revision_after_mutation = persisted_revision(database.pool(), &attempt_id).await;
+
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-stale-no-patch"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": base_revision,
+            "submissionId": "submit-stale-no-patch",
+            "clientFinalSeq": 1,
+            "serverAcceptedThroughSeq": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
     assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["details"]["reason"], "BASE_REVISION_MISMATCH",
+        "stale revision without a patch must conflict: {json}"
+    );
+    assert_eq!(json["error"]["details"]["latestRevision"].as_i64().unwrap(), revision_after_mutation);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_after_mutation,
+        "conflict must not bump the revision"
+    );
+    let submitted_at: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
+        "SELECT submitted_at FROM student_attempts WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(submitted_at.is_none(), "conflict must not seal the attempt");
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        0
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-060 — a sequence gap (client has mutations the server has not accepted)
+// without a final patch returns FINAL_FLUSH_REQUIRED; nothing is persisted.
+#[tokio::test]
+async fn bex060_sequence_gap_without_patch_returns_final_flush_required() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // clientFinalSeq 2 > serverAcceptedThroughSeq 1: a pending gap.
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-gap-no-patch"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": attempt_revision,
+            "submissionId": "submit-gap-no-patch",
+            "clientFinalSeq": 2,
+            "serverAcceptedThroughSeq": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["details"]["reason"], "FINAL_FLUSH_REQUIRED",
+        "a sequence gap without a final patch must demand a final flush: {json}"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        attempt_revision as i64,
+        "rejection must not bump the revision"
+    );
+    let submitted_at: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
+        "SELECT submitted_at FROM student_attempts WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(submitted_at.is_none(), "rejection must not seal the attempt");
+    let final_submission: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT final_submission FROM student_attempts WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(final_submission.is_none());
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        0
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-060 — a submit with no flush metadata at all (no seq values, no patch)
+// returns FINAL_FLUSH_REQUIRED once the runtime is live.
+#[tokio::test]
+async fn bex060_missing_flush_metadata_returns_final_flush_required() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-no-flush-metadata"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": attempt_revision,
+            "submissionId": "submit-no-flush-metadata"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["details"]["reason"], "FINAL_FLUSH_REQUIRED",
+        "no flush metadata must demand a final flush: {json}"
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        0
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-060 — a sequence gap IS accepted when a final patch reconciles it: the
+// final snapshot carries the patched state and finalFlush records
+// replayIncomplete: true (only persistable when a patch is present).
+#[tokio::test]
+async fn bex060_sequence_gap_reconciled_by_patch_persists_replay_incomplete() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-gap-with-patch"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": attempt_revision,
+            "submissionId": "submit-gap-with-patch",
+            "clientFinalSeq": 2,
+            "serverAcceptedThroughSeq": 1,
+            "finalAnswerPatch": {
+                "answers": { "q1": "reconciled" },
+                "writingAnswers": {},
+                "flags": {}
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"]["attempt"]["phase"], "post-exam");
+
+    let final_submission: serde_json::Value =
+        sqlx::query_scalar("SELECT final_submission FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        final_submission["answers"]["q1"], "reconciled",
+        "the patch reconciles the gap in the final snapshot"
+    );
+    assert_eq!(final_submission["finalFlush"]["clientFinalSeq"], 2);
+    assert_eq!(final_submission["finalFlush"]["serverAcceptedThroughSeq"], 1);
+    assert_eq!(
+        final_submission["finalFlush"]["replayIncomplete"], true,
+        "replayIncomplete records the reconciled gap"
+    );
+    assert_eq!(final_submission["finalFlush"]["finalPatchApplied"], true);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        attempt_revision as i64 + 1,
+        "submit bumps the revision exactly once"
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        1
+    );
 
     database.shutdown().await;
 }
@@ -8878,6 +9265,1202 @@ async fn bex052_student_cannot_forge_another_attempt_violation() {
     assert_eq!(attributed, alice_attempt_id, "violation must land on the caller's attempt");
     assert_eq!(persisted_violation_count(database.pool(), &bob_attempt_id).await, 0);
     assert_eq!(persisted_violation_count(database.pool(), &alice_attempt_id).await, 1);
+
+    database.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// BEX-060/061/062/063 — section/final submission gates (contract tests)
+// ---------------------------------------------------------------------------
+
+// Real StartRuntime (INSERTs the exam_session_runtimes row; a bare UPDATE on
+// that table is a silent no-op until the row exists) followed by a fresh
+// bootstrap. Bootstrapping after the start creates/refreshes the attempt with
+// phase `exam`, which the submit phase gate requires.
+async fn start_runtime_and_rebootstrap(
+    app: &axum::Router,
+    pool: &sqlx::MySqlPool,
+    auth: &mysql::TestAuthContext,
+    schedule_id: Uuid,
+    student_key: &str,
+) -> (serde_json::Value, String) {
+    SchedulingService::new(pool.clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("contract runtime start (BEX-060)".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+    bootstrap_attempt(app, auth, schedule_id, "alice", student_key).await
+}
+
+async fn post_submit_json(
+    app: &axum::Router,
+    attempt_token: &str,
+    schedule_id: Uuid,
+    idempotency_key: Option<&str>,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let mut builder = Request::builder();
+    if let Some(key) = idempotency_key {
+        builder = builder.header("idempotency-key", key);
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            with_attempt_token(builder, attempt_token)
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{schedule_id}/submit"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let json = json_body(response).await;
+    (status, json)
+}
+
+async fn persisted_final_submission(
+    pool: &sqlx::MySqlPool,
+    attempt_id: &str,
+) -> serde_json::Value {
+    sqlx::query_scalar("SELECT final_submission FROM student_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn persisted_submitted_at(
+    pool: &sqlx::MySqlPool,
+    attempt_id: &str,
+) -> Option<chrono::DateTime<Utc>> {
+    sqlx::query_scalar("SELECT submitted_at FROM student_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn persisted_idempotency_count(
+    pool: &sqlx::MySqlPool,
+    actor_id: &str,
+    route_key: &str,
+    idempotency_key: &str,
+) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM idempotency_keys WHERE actor_id = ? AND route_key = ? AND idempotency_key = ?",
+    )
+    .bind(actor_id)
+    .bind(route_key)
+    .bind(idempotency_key)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+// The canonical final-snapshot hash exactly as the server computes it:
+// sha256 over the 3-key canonical JSON. serde_json (default features) sorts
+// object keys alphabetically, so key insertion order never changes the hash.
+fn final_snapshot_sha256(
+    answers: &serde_json::Value,
+    writing_answers: &serde_json::Value,
+    flags: &serde_json::Value,
+) -> String {
+    let canonical = serde_json::to_string(&json!({
+        "answers": answers,
+        "writingAnswers": writing_answers,
+        "flags": flags
+    }))
+    .unwrap();
+    ielts_backend_infrastructure::auth::sha256_hex(&canonical)
+}
+
+// BEX-061 — a matching finalClientSnapshotHash is accepted; the snapshot is
+// hashed as raw bytes (unicode and HTML essay text are not normalized).
+#[tokio::test]
+async fn bex061_matching_final_snapshot_hash_accepted() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex061-scalar-unicode",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "café ☕"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // The raw-HTML essay rides in the final patch (a pre-submit SetEssayText
+    // would be section-gated while listening is active). The hash therefore
+    // covers the patch-merged final state, exactly as the server computes it:
+    // persisted answers + patch writing answers + persisted flags.
+    let html_essay = "<p>Hello &amp; welcome</p>";
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    let flags = persisted_flags(database.pool(), &attempt_id).await;
+    let hash = final_snapshot_sha256(
+        &answers,
+        &json!({ "task1": html_essay }),
+        &flags,
+    );
+
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-hash-match"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": revision,
+            "submissionId": "submit-hash-match",
+            "clientFinalSeq": 2,
+            "serverAcceptedThroughSeq": 2,
+            "finalAnswerPatch": {
+                "answers": {},
+                "writingAnswers": { "task1": html_essay },
+                "flags": {}
+            },
+            "finalClientSnapshotHash": hash
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "matching hash must be accepted: {json}");
+    assert_eq!(json["data"]["attempt"]["phase"], "post-exam");
+
+    let final_submission = persisted_final_submission(database.pool(), &attempt_id).await;
+    assert_eq!(
+        final_submission["answers"]["l-short-1"], "café ☕",
+        "unicode answer must be preserved byte-exact in the final snapshot"
+    );
+    assert_eq!(
+        final_submission["writingAnswers"]["task1"], "<p>Hello &amp; welcome</p>",
+        "raw HTML essay must be hashed and stored without normalization"
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        1
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-061 — a mismatching finalClientSnapshotHash is a structured
+// FINAL_PAYLOAD_HASH_MISMATCH conflict and nothing is persisted.
+#[tokio::test]
+async fn bex061_mismatching_final_snapshot_hash_returns_structured_conflict() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex061-mismatch-setup",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "café ☕"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    let writing_answers = persisted_writing_answers(database.pool(), &attempt_id).await;
+    let flags = persisted_flags(database.pool(), &attempt_id).await;
+    let correct_hash = final_snapshot_sha256(&answers, &writing_answers, &flags);
+    // Flip one character: the hash must not match.
+    let wrong_hash = format!("{}0", &correct_hash[..63]);
+
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-hash-mismatch"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": revision,
+            "submissionId": "submit-hash-mismatch",
+            "clientFinalSeq": 1,
+            "serverAcceptedThroughSeq": 1,
+            "finalClientSnapshotHash": wrong_hash
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["details"]["reason"], "FINAL_PAYLOAD_HASH_MISMATCH",
+        "hash mismatch must be a structured conflict: {json}"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision as i64,
+        "hash-mismatch rejection must not bump the revision"
+    );
+    assert!(persisted_submitted_at(database.pool(), &attempt_id).await.is_none());
+    let final_submission: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT final_submission FROM student_attempts WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(final_submission.is_none(), "no final_submission write on hash mismatch");
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        0
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-061 — the same logical final JSON hashes identically regardless of key
+// insertion order, and unicode/HTML content hashes as raw bytes. Two attempts
+// submit patches built with different key orders and the SAME hash: both are
+// accepted.
+#[tokio::test]
+async fn bex061_canonical_hash_key_order_unicode_and_html_stable() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth_alice, student_key_alice) =
+        create_student_auth(database.pool(), schedule_id, "alice").await;
+    // schedule_registrations enforces UNIQUE(schedule_id, wcode): bob must
+    // register with a distinct access code.
+    let (auth_bob, student_key_bob) =
+        create_student_auth_with_wcode(database.pool(), schedule_id, "bob", "W654321").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    // Start the runtime once (a second StartRuntime command would collide on
+    // the UNIQUE runtime row), then bootstrap both attempts with phase `exam`.
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("contract runtime start (BEX-061)".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+    let (bootstrap_alice, _) = bootstrap_attempt(
+        &app,
+        &auth_alice,
+        schedule_id,
+        "alice",
+        &student_key_alice,
+    )
+    .await;
+    let (bootstrap_bob, _) =
+        bootstrap_attempt(&app, &auth_bob, schedule_id, "bob", &student_key_bob).await;
+    let alice_attempt_id = bootstrap_alice["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let alice_token = bootstrap_alice["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let bob_attempt_id = bootstrap_bob["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let bob_token = bootstrap_bob["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let alice_revision = bootstrap_alice["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    let bob_revision = bootstrap_bob["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // The patches carry the full final state (fresh attempts start empty), so
+    // the hash is computed over the patch content alone — the same logical
+    // JSON in both key orders.
+    let answers_value = json!({"l-short-1": "café ☕"});
+    let writing_value = json!({"task1": "<p>Hello &amp; welcome</p>"});
+    let flags_value = json!({"l-short-1": true});
+
+    // Canonical strings built with DIFFERENT top-level key insertion orders
+    // must be byte-identical (serde_json serializes keys alphabetically).
+    let canonical_order_a = serde_json::to_string(&json!({
+        "answers": answers_value.clone(),
+        "writingAnswers": writing_value.clone(),
+        "flags": flags_value.clone()
+    }))
+    .unwrap();
+    let mut map_order_b = serde_json::Map::new();
+    map_order_b.insert("flags".to_owned(), flags_value.clone());
+    map_order_b.insert("writingAnswers".to_owned(), writing_value.clone());
+    map_order_b.insert("answers".to_owned(), answers_value.clone());
+    let canonical_order_b =
+        serde_json::to_string(&serde_json::Value::Object(map_order_b)).unwrap();
+    assert_eq!(
+        canonical_order_a, canonical_order_b,
+        "same logical JSON must canonicalize to the same string"
+    );
+    let hash = final_snapshot_sha256(&answers_value, &writing_value, &flags_value);
+
+    // Patch A: json! macro insertion order (answers, writingAnswers, flags).
+    let patch_a = json!({
+        "answers": answers_value.clone(),
+        "writingAnswers": writing_value.clone(),
+        "flags": flags_value.clone()
+    });
+    // Patch B: serde_json::Map insertion order (flags, writingAnswers, answers).
+    let mut patch_map_b = serde_json::Map::new();
+    patch_map_b.insert("flags".to_owned(), flags_value.clone());
+    patch_map_b.insert("writingAnswers".to_owned(), writing_value.clone());
+    patch_map_b.insert("answers".to_owned(), answers_value.clone());
+    let patch_b = serde_json::Value::Object(patch_map_b);
+
+    let (status_a, json_a) = post_submit_json(
+        &app,
+        &alice_token,
+        schedule_id,
+        Some("submit-hash-order-a"),
+        json!({
+            "attemptId": alice_attempt_id.clone(),
+            "lastSeenRevision": alice_revision,
+            "submissionId": "submit-hash-order-a",
+            "clientFinalSeq": 0,
+            "serverAcceptedThroughSeq": 0,
+            "finalAnswerPatch": patch_a,
+            "finalClientSnapshotHash": hash.clone()
+        }),
+    )
+    .await;
+    assert_eq!(status_a, StatusCode::OK, "{json_a}");
+    let (status_b, json_b) = post_submit_json(
+        &app,
+        &bob_token,
+        schedule_id,
+        Some("submit-hash-order-b"),
+        json!({
+            "attemptId": bob_attempt_id.clone(),
+            "lastSeenRevision": bob_revision,
+            "submissionId": "submit-hash-order-b",
+            "clientFinalSeq": 0,
+            "serverAcceptedThroughSeq": 0,
+            "finalAnswerPatch": patch_b,
+            "finalClientSnapshotHash": hash
+        }),
+    )
+    .await;
+    assert_eq!(status_b, StatusCode::OK, "{json_b}");
+
+    let alice_final = persisted_final_submission(database.pool(), &alice_attempt_id).await;
+    assert_eq!(alice_final["answers"]["l-short-1"], "café ☕");
+    assert_eq!(
+        alice_final["writingAnswers"]["task1"], "<p>Hello &amp; welcome</p>",
+        "HTML essay must be stored raw (no normalization)"
+    );
+    let bob_final = persisted_final_submission(database.pool(), &bob_attempt_id).await;
+    assert_eq!(bob_final["answers"]["l-short-1"], "café ☕");
+    assert_eq!(bob_final["writingAnswers"]["task1"], "<p>Hello &amp; welcome</p>");
+
+    database.shutdown().await;
+}
+
+// BEX-062 — the submit API requires a non-empty Idempotency-Key header;
+// missing, empty, and whitespace-only keys are 422 VALIDATION_ERROR with no
+// persisted effect.
+#[tokio::test]
+async fn bex062_submit_requires_non_empty_idempotency_key() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    let body = json!({
+        "attemptId": attempt_id.clone(),
+        "lastSeenRevision": attempt_revision,
+        "submissionId": "submit-no-key"
+    });
+
+    let (status, json) = post_submit_json(&app, &attempt_token, schedule_id, None, body.clone())
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(
+        json["error"]["message"],
+        "Idempotency-Key header is required for submit requests."
+    );
+
+    for (label, key) in [("empty", Some("")), ("whitespace", Some("   "))] {
+        let (status, json) = post_submit_json(&app, &attempt_token, schedule_id, key, body.clone())
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{label}: {json}");
+        assert_eq!(json["error"]["code"], "VALIDATION_ERROR", "{label}");
+        assert_eq!(
+            json["error"]["message"], "Idempotency-Key header cannot be empty.",
+            "{label}"
+        );
+    }
+
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        attempt_revision as i64,
+        "key rejections must not bump the revision"
+    );
+    assert!(persisted_submitted_at(database.pool(), &attempt_id).await.is_none());
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        0
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-062 — the same idempotency key with the same payload replays the cached
+// receipt: identical submissionId AND submittedAt, one STUDENT_SUBMIT row.
+#[tokio::test]
+async fn bex062_same_key_same_payload_replays_cached_receipt() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    let body = json!({
+        "attemptId": attempt_id.clone(),
+        "lastSeenRevision": attempt_revision,
+        "submissionId": "submit-cached-receipt",
+        "clientFinalSeq": 0,
+        "serverAcceptedThroughSeq": 0
+    });
+
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-cached-receipt"),
+        body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let submission_id = json["data"]["submissionId"].as_str().unwrap().to_owned();
+    let submitted_at = json["data"]["submittedAt"].as_str().unwrap().to_owned();
+
+    let (status, replay) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-cached-receipt"),
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(
+        replay["data"]["submissionId"].as_str().unwrap(),
+        submission_id,
+        "same key + same payload must return the same receipt"
+    );
+    assert_eq!(
+        replay["data"]["submittedAt"].as_str().unwrap(),
+        submitted_at,
+        "same key + same payload must return the same submittedAt"
+    );
+    assert_eq!(replay["data"]["attempt"]["phase"], "post-exam");
+
+    let route_key = format!("POST:/api/v1/student/sessions/{schedule_id}/submit");
+    assert_eq!(
+        persisted_idempotency_count(database.pool(), &student_key, &route_key, "submit-cached-receipt").await,
+        1,
+        "exactly one idempotency row for the key"
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        1,
+        "replay must not add a second STUDENT_SUBMIT row"
+    );
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        0
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-062 — the same idempotency key with a DIFFERENT payload is a structured
+// conflict and never mutates the sealed attempt.
+#[tokio::test]
+async fn bex062_same_key_different_payload_returns_idempotency_conflict() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-key-p1"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": attempt_revision,
+            "submissionId": "submit-key-p1",
+            "clientFinalSeq": 0,
+            "serverAcceptedThroughSeq": 0
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let submission_id = json["data"]["submissionId"].as_str().unwrap().to_owned();
+    let revision_after_submit = persisted_revision(database.pool(), &attempt_id).await;
+
+    // Same key, different payload (clientFinalSeq differs): the cached
+    // response belongs to the original request, so this must conflict.
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-key-p1"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": attempt_revision,
+            "submissionId": "submit-key-p1",
+            "clientFinalSeq": 1,
+            "serverAcceptedThroughSeq": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["message"], "Idempotency-Key does not match the original request.",
+        "{json}"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_after_submit,
+        "idempotency conflict must not bump the revision"
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        1,
+        "idempotency conflict must not add a second STUDENT_SUBMIT row"
+    );
+    let final_submission = persisted_final_submission(database.pool(), &attempt_id).await;
+    assert_eq!(
+        final_submission["submissionId"], submission_id,
+        "the sealed final_submission must stay untouched"
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-062 — a NEW idempotency key after a successful submission returns the
+// same terminal attempt without duplicate grading: identical submissionId and
+// submittedAt, revision unchanged, no new STUDENT_SUBMIT row, final_submission
+// untouched.
+#[tokio::test]
+async fn bex062_new_key_after_submission_returns_terminal_attempt() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-new-key-first"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": attempt_revision,
+            "submissionId": "submit-new-key-first",
+            "clientFinalSeq": 0,
+            "serverAcceptedThroughSeq": 0
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let submission_id = json["data"]["submissionId"].as_str().unwrap().to_owned();
+    let submitted_at = json["data"]["submittedAt"].as_str().unwrap().to_owned();
+    let revision_after_submit = persisted_revision(database.pool(), &attempt_id).await;
+    let final_submission_before =
+        persisted_final_submission(database.pool(), &attempt_id).await;
+
+    // A fresh key replays the terminal attempt: same receipt, no re-grading.
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-new-key-second"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": attempt_revision + 1,
+            "submissionId": "submit-new-key-second",
+            "clientFinalSeq": 0,
+            "serverAcceptedThroughSeq": 0
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        json["data"]["submissionId"].as_str().unwrap(),
+        submission_id,
+        "a new key after submission must return the same terminal submission"
+    );
+    assert_eq!(json["data"]["submittedAt"].as_str().unwrap(), submitted_at);
+    assert_eq!(json["data"]["attempt"]["phase"], "post-exam");
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_after_submit,
+        "new-key submit must NOT bump the revision (no duplicate grading)"
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        1,
+        "exactly one STUDENT_SUBMIT row total"
+    );
+    assert_eq!(
+        persisted_final_submission(database.pool(), &attempt_id).await,
+        final_submission_before,
+        "final_submission must be unchanged"
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-062 — two concurrent submits with the same idempotency key produce
+// exactly one submission ledger entry: both callers receive the same valid
+// receipt, one STUDENT_SUBMIT audit row, one idempotency row.
+#[tokio::test]
+async fn bex062_concurrent_same_key_submits_produce_single_ledger_entry() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+    let body = json!({
+        "attemptId": attempt_id.clone(),
+        "lastSeenRevision": attempt_revision,
+        "submissionId": "submit-concurrent-1",
+        "clientFinalSeq": 0,
+        "serverAcceptedThroughSeq": 0
+    });
+
+    let first = app.clone().oneshot(
+        with_attempt_token(Request::builder(), &attempt_token)
+            .method("POST")
+            .uri(format!("/api/v1/student/sessions/{schedule_id}/submit"))
+            .header("content-type", "application/json")
+            .header("idempotency-key", "submit-concurrent-1")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap(),
+    );
+    let second = app.clone().oneshot(
+        with_attempt_token(Request::builder(), &attempt_token)
+            .method("POST")
+            .uri(format!("/api/v1/student/sessions/{schedule_id}/submit"))
+            .header("content-type", "application/json")
+            .header("idempotency-key", "submit-concurrent-1")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap(),
+    );
+    let (first, second) = tokio::join!(first, second);
+
+    let first = first.unwrap();
+    let second = second.unwrap();
+    let first_status = first.status();
+    let first_json = json_body(first).await;
+    let second_status = second.status();
+    let second_json = json_body(second).await;
+    assert_eq!(first_status, StatusCode::OK, "first concurrent submit: {first_json}");
+    assert_eq!(second_status, StatusCode::OK, "second concurrent submit: {second_json}");
+    assert_eq!(
+        first_json["data"]["submissionId"],
+        second_json["data"]["submissionId"],
+        "both concurrent callers must receive the same receipt"
+    );
+    assert_eq!(
+        first_json["data"]["submittedAt"],
+        second_json["data"]["submittedAt"]
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        1,
+        "concurrent submits must produce exactly ONE STUDENT_SUBMIT ledger entry"
+    );
+    let route_key = format!("POST:/api/v1/student/sessions/{schedule_id}/submit");
+    assert_eq!(
+        persisted_idempotency_count(database.pool(), &student_key, &route_key, "submit-concurrent-1").await,
+        1,
+        "exactly one idempotency row for the shared key"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        attempt_revision as i64 + 1,
+        "the submit bumps the revision exactly once"
+    );
+    // The vestigial attempt_submission_ledger table is not populated by the
+    // student submit path; the submission ledger is the STUDENT_SUBMIT audit
+    // row + the idempotency row (see docs/failure-cases.md BEX-062).
+    let ledger_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM attempt_submission_ledger WHERE attempt_id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(ledger_count, 0);
+
+    database.shutdown().await;
+}
+
+// BEX-063 — a mutation arriving just INSIDE the post-submit grace window is
+// accepted and merged into the final snapshot that grading reads.
+#[tokio::test]
+async fn bex063_mutation_inside_grace_merged_into_final_snapshot() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex063-pre-submit",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "pre-submit"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let revision_before_submit = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-grace-1"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": revision_before_submit,
+            "submissionId": "submit-grace-1",
+            "clientFinalSeq": 1,
+            "serverAcceptedThroughSeq": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let revision_after_submit = persisted_revision(database.pool(), &attempt_id).await;
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
+        1
+    );
+
+    // Default grace window is 300s; a submit made moments ago is inside it.
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex063-grace-1",
+        revision_after_submit as i32,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "grace-value"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"]["appliedMutationCount"], 1);
+    assert_eq!(
+        json["data"]["acceptedInGrace"], true,
+        "a mutation inside the grace window must be accepted in grace: {json}"
+    );
+    let revision_after_grace = json["data"]["revision"].as_i64().unwrap() as i32;
+    assert_eq!(revision_after_grace, revision_after_submit as i32 + 1);
+
+    // The persisted answers AND the final snapshot (grading input) both carry
+    // the grace-accepted value.
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-short-1"], "grace-value");
+    let final_submission = persisted_final_submission(database.pool(), &attempt_id).await;
+    assert_eq!(
+        final_submission["answers"]["l-short-1"], "grace-value",
+        "grading must never start from a snapshot older than the finalized submission"
+    );
+    assert_eq!(
+        final_submission["graceMerge"]["acceptedInGrace"], true,
+        "grace merge must be recorded in the final snapshot"
+    );
+    assert_eq!(final_submission["graceMerge"]["lastAppliedMutationCount"], 1);
+    assert_eq!(final_submission["graceMerge"]["mergeCount"], 1);
+    assert_eq!(final_submission["graceMerge"]["appliedMutationTotal"], 1);
+    assert_eq!(final_submission["graceMerge"]["graceWindowSeconds"], 300);
+    assert!(
+        final_submission["graceMerge"]["firstAcceptedAt"].is_string(),
+        "{final_submission}"
+    );
+    assert_eq!(
+        final_submission["finalFlush"]["serverAcceptedThroughSeq"], 2,
+        "the grace merge extends the accepted watermark in the snapshot"
+    );
+
+    let recovery = persisted_recovery(database.pool(), &attempt_id).await;
+    assert!(
+        recovery["postSubmitGraceAcceptedAt"].is_string(),
+        "grace acceptance must persist postSubmitGraceAcceptedAt: {recovery}"
+    );
+    assert_eq!(recovery["postSubmitGraceLastAppliedMutationCount"], 1);
+
+    database.shutdown().await;
+}
+
+// BEX-063 — a mutation arriving just OUTSIDE the grace window is rejected
+// with ATTEMPT_SUBMITTED; replaying an already accepted in-grace mutation
+// stays idempotent (200, applied 0), and the finalized snapshot is untouched.
+#[tokio::test]
+async fn bex063_mutation_outside_grace_rejected_and_accepted_replay_idempotent() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = start_runtime_and_rebootstrap(
+        &app,
+        database.pool(),
+        &auth,
+        schedule_id,
+        &student_key,
+    )
+    .await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex063-pre-submit",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "pre-submit"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let revision_before_submit = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-grace-2"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": revision_before_submit,
+            "submissionId": "submit-grace-2",
+            "clientFinalSeq": 1,
+            "serverAcceptedThroughSeq": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let revision_after_submit = persisted_revision(database.pool(), &attempt_id).await as i32;
+
+    // In-grace acceptance (the replay target for later).
+    let grace_body = json!({
+        "attemptId": attempt_id.clone(),
+        "mutations": [{
+            "mutationId": "bex063-grace-accepted",
+            "baseRevision": revision_after_submit,
+            "type": "SetScalar",
+            "questionId": "l-short-1",
+            "value": "grace-value"
+        }]
+    });
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        grace_body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"]["acceptedInGrace"], true);
+    let revision_after_grace = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // Backdate submitted_at 360s: the 300s grace window has closed.
+    sqlx::query("UPDATE student_attempts SET submitted_at = NOW() - INTERVAL 360 SECOND WHERE id = ?")
+        .bind(&attempt_id)
+        .execute(database.pool())
+        .await
+        .unwrap();
+
+    // A NEW mutation just outside the grace boundary is a structured
+    // ATTEMPT_SUBMITTED conflict — never a generic failure.
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex063-past-grace-new",
+        revision_after_grace,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "too-late"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["details"]["reason"], "ATTEMPT_SUBMITTED",
+        "out-of-grace mutation must be ATTEMPT_SUBMITTED: {json}"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_after_grace as i64,
+        "rejection must not bump the revision"
+    );
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        2,
+        "rejection must not insert a mutation row"
+    );
+
+    // Replaying the already accepted in-grace mutation stays idempotent: the
+    // dedupe short-circuit runs before the submitted gate → 200 applied 0.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        grace_body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(json["data"]["appliedMutationCount"], 0);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_after_grace as i64,
+        "post-submit replay must not bump the revision"
+    );
+    assert_eq!(
+        persisted_mutation_row_count(database.pool(), &attempt_id).await,
+        2
+    );
+
+    // The finalized snapshot still carries the grace-accepted value — grading
+    // never starts from an older snapshot than the finalized submission.
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-short-1"], "grace-value");
+    let final_submission = persisted_final_submission(database.pool(), &attempt_id).await;
+    assert_eq!(
+        final_submission["answers"]["l-short-1"], "grace-value",
+        "the final snapshot must retain the grace-accepted answer"
+    );
+    assert_eq!(final_submission["graceMerge"]["acceptedInGrace"], true);
 
     database.shutdown().await;
 }

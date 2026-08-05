@@ -1370,8 +1370,16 @@ impl DeliveryService {
             return Ok(response);
         }
 
+        // BEX-060: a stale `last_seen_revision` is only a conflict when the
+        // client does NOT carry a final answer patch. The patch is the
+        // client's authoritative final state for the keys it contains (it is
+        // merged over the persisted answers, so it cannot silently lose
+        // newer server-side state), which is exactly the reconciliation the
+        // final flush needs: a client that fell behind can still submit its
+        // final answers via the patch instead of being locked out with
+        // BASE_REVISION_MISMATCH.
         if let Some(last_seen_revision) = req.last_seen_revision {
-            if attempt.revision != last_seen_revision {
+            if attempt.revision != last_seen_revision && req.final_answer_patch.is_none() {
                 let active_session_id = self
                     .load_active_mutation_session_id(tx.as_mut(), &attempt.id)
                     .await?;
@@ -1385,10 +1393,24 @@ impl DeliveryService {
             }
         }
 
-        if req.client_final_seq.is_none()
+        // BEX-060: the final flush metadata must let the server reconstruct
+        // the client's final state. A sequence gap (the client has mutations
+        // the server has not accepted) without a final patch would persist an
+        // incomplete snapshot, so it is rejected with FINAL_FLUSH_REQUIRED
+        // exactly like a submit with no flush metadata at all. Only a final
+        // patch can reconcile the gap (`replayIncomplete: true` is therefore
+        // only ever persisted when a patch is present).
+        let seq_gap = match (req.client_final_seq, req.server_accepted_through_seq) {
+            (Some(client_final_seq), Some(server_accepted_through_seq)) => {
+                server_accepted_through_seq < client_final_seq
+            }
+            (Some(client_final_seq), None) => client_final_seq > 0,
+            _ => false,
+        };
+        let missing_all_flush_metadata = req.client_final_seq.is_none()
             && req.server_accepted_through_seq.is_none()
-            && req.final_answer_patch.is_none()
-        {
+            && req.final_answer_patch.is_none();
+        if missing_all_flush_metadata || (seq_gap && req.final_answer_patch.is_none()) {
             return Err(DeliveryError::conflict_reason(
                 DeliveryConflictReason::FinalFlushRequired,
                 "Submit requires final flush metadata (seq values or final patch).",
@@ -1477,9 +1499,9 @@ impl DeliveryService {
         let final_submission = json!({
             "submissionId": submission_id,
             "submittedAt": now,
-            "answers": final_answers,
-            "writingAnswers": final_writing_answers,
-            "flags": final_flags,
+            "answers": final_answers.clone(),
+            "writingAnswers": final_writing_answers.clone(),
+            "flags": final_flags.clone(),
             "finalFlush": {
                 "clientFinalSeq": req.client_final_seq,
                 "serverAcceptedThroughSeq": req.server_accepted_through_seq,
@@ -1502,6 +1524,9 @@ impl DeliveryService {
             SET
                 phase = ?,
                 recovery = ?,
+                answers = ?,
+                writing_answers = ?,
+                flags = ?,
                 final_submission = ?,
                 submitted_at = ?,
                 updated_at = NOW(),
@@ -1511,6 +1536,9 @@ impl DeliveryService {
         )
         .bind(AttemptPhase::PostExam)
         .bind(recovery)
+        .bind(&final_answers)
+        .bind(&final_writing_answers)
+        .bind(&final_flags)
         .bind(&final_submission)
         .bind(now)
         .bind(&req.attempt_id)
@@ -2017,7 +2045,7 @@ impl DeliveryService {
         let response_body = serde_json::to_value(response).map_err(|err| {
             DeliveryError::Internal(format!("Failed to serialize idempotent response: {err}"))
         })?;
-        repository
+        match repository
             .store_with_executor(
                 connection,
                 actor_id,
@@ -2027,8 +2055,39 @@ impl DeliveryService {
                 200,
                 &response_body,
             )
-            .await?;
-        Ok(())
+            .await
+        {
+            Ok(_) => Ok(()),
+            // BEX-062: two concurrent requests with the same idempotency key
+            // can both pass the pre-tx and in-tx lookups (TiDB snapshot
+            // isolation: the loser's read view predates the winner's commit),
+            // so exactly one INSERT wins and the loser hits the PRIMARY KEY.
+            // Re-read the winner's record on a FRESH connection (the in-tx
+            // connection still sees the stale snapshot) and classify by
+            // request hash instead of surfacing a duplicate-key 500: same
+            // hash → the caller's response is the cached-equivalent receipt
+            // (the already-submitted gate already rebuilt the terminal
+            // attempt); different hash → the same-key/different-payload
+            // contract conflict.
+            Err(err) if is_duplicate_key(&err) => {
+                let existing = repository
+                    .lookup(actor_id, route_key, idempotency_key)
+                    .await?
+                    .ok_or_else(|| {
+                        DeliveryError::Internal(
+                            "Idempotent response insert collided but no record is readable."
+                                .to_owned(),
+                        )
+                    })?;
+                if existing.request_hash != request_hash {
+                    return Err(DeliveryError::conflict(
+                        "Idempotency-Key does not match the original request.".to_owned(),
+                    ));
+                }
+                Ok(())
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 
     async fn lookup_idempotent_response_on_connection<T>(
