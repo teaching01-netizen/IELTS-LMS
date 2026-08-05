@@ -1489,13 +1489,11 @@ impl DeliveryService {
             .filter(|value| !value.trim().is_empty())
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| format!("submission-{}", Uuid::new_v4().simple()));
-        let replay_incomplete = match (req.client_final_seq, req.server_accepted_through_seq) {
-            (Some(client_final_seq), Some(server_accepted_through_seq)) => {
-                server_accepted_through_seq < client_final_seq
-            }
-            (Some(client_final_seq), None) => client_final_seq > 0,
-            _ => false,
-        };
+        // Same predicate as the flush gate above (BEX-060): a sequence gap is
+        // only ever reconciled — and recorded as `replayIncomplete` — when a
+        // final patch is present. Kept as one definition so the gate and the
+        // persisted flag cannot drift apart.
+        let replay_incomplete = seq_gap;
         let final_submission = json!({
             "submissionId": submission_id,
             "submittedAt": now,

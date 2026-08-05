@@ -2948,6 +2948,10 @@ async fn bex060_final_patch_reconciles_stale_last_seen_revision() {
     );
     let json = json_body(response).await;
     assert_eq!(json["data"]["attempt"]["phase"], "post-exam");
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["q1"], "B",
+        "the response attempt must reflect the patched answers"
+    );
 
     // The patched value is what the final snapshot (grading input) carries,
     // and the persisted answers are reconciled to the same patched state so
@@ -3164,6 +3168,52 @@ async fn bex060_sequence_gap_without_patch_returns_final_flush_required() {
     assert_eq!(
         persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
         0
+    );
+
+    // Same gap with clientFinalSeq present but serverAcceptedThroughSeq
+    // absent (client_final_seq > 0): also a gap, also FINAL_FLUSH_REQUIRED.
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-gap-no-server-seq"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": attempt_revision,
+            "submissionId": "submit-gap-no-server-seq",
+            "clientFinalSeq": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["details"]["reason"], "FINAL_FLUSH_REQUIRED",
+        "a client-only seq gap without a final patch must demand a final flush: {json}"
+    );
+
+    // Gate precedence: with BOTH a stale lastSeenRevision and a sequence gap
+    // (no patch), the revision gate fires first -> BASE_REVISION_MISMATCH,
+    // not FINAL_FLUSH_REQUIRED.
+    let (status, json) = post_submit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        Some("submit-gap-stale-revision"),
+        json!({
+            "attemptId": attempt_id.clone(),
+            "lastSeenRevision": attempt_revision + 1,
+            "submissionId": "submit-gap-stale-revision",
+            "clientFinalSeq": 2,
+            "serverAcceptedThroughSeq": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        json["error"]["details"]["reason"], "BASE_REVISION_MISMATCH",
+        "the revision gate must precede the flush gate: {json}"
     );
 
     database.shutdown().await;
