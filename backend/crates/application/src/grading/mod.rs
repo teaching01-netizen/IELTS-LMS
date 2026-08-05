@@ -4601,6 +4601,91 @@ mod tests {
         assert!(expected.matches(&value, "ONE_WORD", false));
     }
 
+    fn enum_constrained_content_snapshot() -> Value {
+        json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [
+                        {
+                            "id": "classify-block",
+                            "type": "CLASSIFICATION",
+                            "items": [{"id": "item-1", "correctCategory": "A"}]
+                        },
+                        {
+                            "id": "matchfeat-block",
+                            "type": "MATCHING_FEATURES",
+                            "features": [{"id": "feature-1", "correctMatch": "B"}]
+                        }
+                    ]
+                }]
+            }
+        })
+    }
+
+    #[test]
+    fn enum_constrained_types_grade_byte_exact_without_whitespace_collapse_or_case_folding() {
+        let content_snapshot = enum_constrained_content_snapshot();
+
+        // CLASSIFICATION and MATCHING_FEATURES are Enum-constrained (option /
+        // category ids) and must match byte-exact (BEX-070 extra-whitespace
+        // and case cells): neither whitespace variants nor case variants may
+        // grade correct.
+        let variant_answers = json!({
+            "classify-block:item-1": " A ",
+            "matchfeat-block:feature-1": "B "
+        });
+        let case_answers = json!({
+            "classify-block:item-1": "a",
+            "matchfeat-block:feature-1": "b"
+        });
+        for answers in [variant_answers, case_answers] {
+            let results = compute_objective_auto_grading_results(
+                "reading",
+                &answers,
+                &content_snapshot,
+                Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+                None,
+            );
+            assert_eq!(results["totalScore"], 0, "{answers}");
+            assert_eq!(results["questionResults"][0]["isCorrect"], false);
+            assert_eq!(results["questionResults"][1]["isCorrect"], false);
+        }
+
+        // Exact values grade correct with full marks.
+        let exact = compute_objective_auto_grading_results(
+            "reading",
+            &json!({
+                "classify-block:item-1": "A",
+                "matchfeat-block:feature-1": "B"
+            }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+        assert_eq!(exact["totalScore"], 2);
+        assert_eq!(exact["maxScore"], 2);
+        assert_eq!(exact["questionResults"][0]["isCorrect"], true);
+        assert_eq!(exact["questionResults"][1]["isCorrect"], true);
+    }
+
+    #[test]
+    fn shared_sentence_grading_collapses_whitespace_before_pool_matching() {
+        // The shared-answer path keeps whitespace collapse: "  alpha  "
+        // matches the pool value "alpha" (BEX-070 extra-whitespace cell for
+        // shared sentences), unlike the byte-exact Enum-constrained types.
+        let content_snapshot = shared_sentence_content_snapshot();
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "sentence-1:blank-1": "  alpha  " }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+        assert_eq!(results["questionResults"][0]["questionId"], "sentence-1:blank-1");
+        assert_eq!(results["questionResults"][0]["isCorrect"], true);
+        assert_eq!(results["questionResults"][1]["isCorrect"], false, "absent blank");
+    }
+
     fn shared_sentence_content_snapshot() -> Value {
         json!({
             "reading": {

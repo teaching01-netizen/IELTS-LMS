@@ -1210,16 +1210,19 @@ case-folded repeat is still a consumed duplicate); `["cherry","apple"]` → [wro
   `.writingAnswers` only — never the live `answers`/`writing_answers`/`flags` columns. Pinned:
   after submit, SQL-tampering the live cache (`answers`, `writing_answers`, `flags`) and
   re-running the projection leaves `auto_grading_results`, `section_submissions.answers`, the
-  writing task rows, and `final_submission` byte-identical.
+  writing task rows, and `final_submission` semantically identical (JSON Value equality; content
+  is stable because `generatedAt` derives from the immutable `submitted_at`).
 - **Re-run stability:** the no-watermark cycle re-processes every submitted attempt and
   re-upserts identical values (`section_rows_synced >= 1` again), and the persisted JSON is
-  byte-identical run after run (`generatedAt` derives from the stable `submitted_at`).
+  identical run after run (Value equality; `generatedAt` derives from the stable `submitted_at`).
 - **Totals identity:** `sum(questionResults[].awardedScore) == totalScore`,
   `sum(questionResults[].maxScore) == maxScore`, `percentage == totalScore/maxScore*100` — pinned
   on a 7-correct/4-wrong mix (total 7 of max 11).
 - **Writing answers availability:** the essay must be keyed by the **content-declared task id**
-  (`writing-1` for the seed; the delivery-side `SetEssayText` accepts legacy `task1`/`task2` from
-  the config fallback, but the projection materializes task rows only for content task ids).
+  (`writing-1` for the seed). The delivery-side `SetEssayText` accepts legacy `task1`/`task2`
+  from the config fallback, but the projection materializes a task row for ANY key present in
+  `final_submission.writingAnswers` (passthrough in `build_writing_task_descriptors`) — so only
+  content-declared ids materialize rows end-to-end; the pinned path uses the content id.
   Pinned: `final_submission.writingAnswers["writing-1"]` survives; the projection writes the
   `writing` section row (`grading_status needs_review`, `answers.tasks[0].text`) and a
   `writing_task_submissions` row (`student_text` byte-exact, `needs_review`) — all readable for
