@@ -7177,7 +7177,8 @@ async fn bex040_reconnect_replay_chunked_batches_apply_in_order_without_loss() {
         bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
     // Real runtime start (INSERTs the runtime row; the SQL-only helper cannot
     // be used because it merely UPDATes and would silently leave the runtime
-    // absent, disabling the section/objective gates).
+    // absent, disabling the section/objective gates). bex041 instead drives
+    // the admin HTTP start_runtime command — both are equivalent real starts.
     SchedulingService::new(database.pool().clone())
         .apply_runtime_command(
             &contract_actor(),
@@ -7256,6 +7257,11 @@ async fn bex040_reconnect_replay_chunked_batches_apply_in_order_without_loss() {
     );
     assert_eq!(chunk2_json["data"]["attempt"]["answers"]["l-short-1"], "petrol");
     assert_eq!(chunk2_json["data"]["attempt"]["answers"]["l-tfng-1"], "F");
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        i64::from(base_revision + 2),
+        "persisted revision matches the student-visible revision"
+    );
 
     // (b) the recovery watermark and pending count reflect the persisted
     // state on the response AND in the DB.
@@ -7300,7 +7306,10 @@ async fn bex040_reconnect_replay_chunked_batches_apply_in_order_without_loss() {
 
     // (d) partial replay: the client re-sends chunk 1 (identical ids/values)
     // after chunk 2 already committed. Dedupe must short-circuit with a 200,
-    // zero applied mutations, the CURRENT watermark, and no extra rows.
+    // zero applied mutations, the CURRENT watermark, and no extra rows. The
+    // replayed base is deliberately stale (bootstrap revision): a 200 — not
+    // 409 BASE_REVISION_MISMATCH — proves the dedupe fires BEFORE the
+    // base-revision gate.
     let (status, replay_json) = post_mutation_batch_json(
         &app,
         &attempt_token,
@@ -7884,6 +7893,9 @@ async fn bex042_crash_recovery_returns_attempt_and_continues_from_watermark() {
 
     // (d) accepted mutations are NOT replayed twice: the identical two
     // mutations re-sent after re-bootstrap dedupe to appliedMutationCount 0.
+    // The re-sent base is the stale pre-crash bootstrap revision — the 200
+    // (not 409 BASE_REVISION_MISMATCH) proves dedupe fires before the
+    // base-revision gate.
     let (status, json) = post_mutation_batch_json(
         &app,
         &fresh_token,
