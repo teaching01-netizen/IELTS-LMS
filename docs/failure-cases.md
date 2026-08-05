@@ -1043,3 +1043,24 @@ A database failure mid-batch (e.g. `client_mutation_id` exceeding the `VARCHAR(2
 
 ### Invariant
 `apply_mutation_batch` runs as one transaction (begin → per-mutation INSERTs → attempt UPDATE → audit log → idempotent-response store → commit); any failure must roll back everything, and a retry of the complete batch must be safe.
+
+## 2026-08-05: Per-Slot Sub-Ids and Question-Type Round Trip Shapes (BEX-035)
+
+### Behavior (documented contract, verified)
+Full question-type round trip pins (all in `mutation_batch_*`/`bex035_question_type_round_trip_matrix`):
+
+1. **Slots/labels are block-level arrays, sub-ids are section-only.** `SENTENCE_COMPLETION`, `NOTE_COMPLETION`, `DIAGRAM_LABELING`, `FLOW_CHART`, `TABLE_COMPLETION` register the VALUE constraint (`ArrayText`/`EnumArray`) at the BLOCK id and register each child key as `"{parent_id}:{child_id}"` (raw string concat) in the section map only. So the only supported write is `SetSlot`/`ClearSlot` against the block id with `slotIndex`; `SetScalar` against a child sub-id is accepted-but-ignored (200, `appliedMutationCount: 0`, answers unchanged — the mutation row is still stored, so **the revision still advances +1**). The seeded `l-blank-2` blank ids already include the question prefix (`"l-blank-2:b1"`), so the REGISTERED child key is the double-prefixed `"l-blank-2:l-blank-2:b1"`; the grading `questionId` for per-blank results uses the same double-prefixed key.
+2. **MULTI_MCQ array values ride `SetChoice`**, not `SetSlot`: the new-style API restricts `SetScalar.value` to `String` (`ApiMutationCommandPayload::SetScalar { value: String }`), while `SetChoice.value` is `serde_json::Value`, and `validate_answer_value`'s `MultiChoice` arm accepts arrays. Stored as sent (order preserved); grading compares as an order-insensitive set (`ExactSet`).
+3. **`q1`/`r1` in the default seed are legacy-minimal TFNG questions** (`{"id": ...}` only) → constraint is `Text`, NOT the strict `{T,F,NG}` Enum. Strict TFNG validation only applies when the question object carries metadata (statement/mode) — the BEX-035 seed adds `l-tfng-1` for the strict pin. `"True"`/`"t"` are rejected at mutation with `422 VALIDATION_ERROR` "Answer value is not valid for this question."; they never reach grading.
+4. **Auto-grading is NOT projected synchronously at submit.** `submit_attempt` only writes `final_submission`; `section_submissions.auto_grading_results` rows appear only after the projection cycle (`GradingService::run_projection_cycle`, the worker path) runs. Tests invoking grading must run that cycle themselves.
+5. **Text grading is whitespace-insensitive but case-SENSITIVE.** `normalize_exact_text` collapses/trims whitespace only; a value `"  diagram  "` grades correct against answer key `"diagram"`, while `"Diagram"` does not. The only case-fold in grading is the shared-sentence path: a `SENTENCE_COMPLETION` question with `acceptAnyAnswerKey: true` + `sharedAcceptedAnswers` normalizes with case-fold + punctuation collapse, so `"Apple"` grades correct against `"apple"`.
+6. **Attempt phase pins**: the attempt phase is computed at creation from runtime status; `submit` requires phase `exam`. The runtime gate row only exists after the proctor-side `StartRuntime` command (a bare `UPDATE exam_session_runtimes` is a silent no-op until that row exists), so tests that submit must start the runtime first and only then bootstrap.
+
+### Regression Protection
+- Tests: `backend/tests/contracts/student_contract.rs` (`bex035_question_type_round_trip_matrix`).
+- Grading normalization source: `backend/crates/application/src/grading/mod.rs`
+  (`normalize_exact_text` ~3309, `normalize_shared_sentence_answer_with_case` ~3982,
+  `index_block` sub-id registration in `backend/crates/application/src/delivery/mod.rs` ~2687).
+
+### Invariant
+Round-trip semantic equality holds per type: persisted JSON == hydrated live attempt == `final_submission`; clears are explicit JSON nulls with keys retained (ClearSlot keeps array length); Enum answers are case-strict at mutation; slot values round-trip per blank/label through the block-level array.

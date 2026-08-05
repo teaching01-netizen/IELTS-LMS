@@ -11,7 +11,11 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use ielts_backend_api::{router::build_router, state::AppState};
-use ielts_backend_application::{builder::BuilderService, scheduling::SchedulingService};
+use ielts_backend_application::{
+    builder::BuilderService,
+    grading::{GradingProjectionRequest, GradingService},
+    scheduling::SchedulingService,
+};
 use ielts_backend_domain::{
     attempt::{
         HeartbeatEventType, MutationCommand, MutationType, StudentAuditLogRequest,
@@ -5376,7 +5380,14 @@ fn default_delivery_content_snapshot() -> serde_json::Value {
         "listening": {"parts": [{"id": "listening-1", "title": "Listening Part 1", "blocks": [
             {"type": "TFNG", "mode": "TFNG", "questions": [{"id": "q1"}]},
             {"id": "l-choice-1", "type": "SINGLE_MCQ", "questions": [{"id": "l-choice-1", "stem": "Pick one", "options": [{"id": "A", "text": "Option A", "isCorrect": false}, {"id": "B", "text": "Option B", "isCorrect": true}, {"id": "C", "text": "Option C", "isCorrect": false}]}]},
-            {"id": "l-blank-2", "type": "SENTENCE_COMPLETION", "questions": [{"id": "l-blank-2", "sentence": "Fill __ then __.", "blanks": [{"id": "l-blank-2:b1", "correctAnswer": "first"}, {"id": "l-blank-2:b2", "correctAnswer": "second"}]}]}
+            {"id": "l-blank-2", "type": "SENTENCE_COMPLETION", "questions": [{"id": "l-blank-2", "sentence": "Fill __ then __.", "blanks": [{"id": "l-blank-2:b1", "correctAnswer": "first"}, {"id": "l-blank-2:b2", "correctAnswer": "second"}]}]},
+            {"id": "l-tfng-1", "type": "TFNG", "mode": "TFNG", "questions": [{"id": "l-tfng-1", "statement": "The sky is blue.", "correctAnswer": "T"}]},
+            {"id": "l-short-1", "type": "SHORT_ANSWER", "questions": [{"id": "l-short-1", "prompt": "Name the diagram", "correctAnswer": "diagram"}]},
+            {"id": "l-short-2", "type": "SHORT_ANSWER", "questions": [{"id": "l-short-2", "prompt": "Name the fuel", "correctAnswer": "petrol"}]},
+            {"id": "l-multi-1", "type": "MULTI_MCQ", "stem": "Select two answers.", "requiredSelections": 2, "options": [{"id": "A", "text": "Option A", "isCorrect": true}, {"id": "B", "text": "Option B", "isCorrect": false}, {"id": "C", "text": "Option C", "isCorrect": true}, {"id": "D", "text": "Option D", "isCorrect": false}]},
+            {"id": "l-match-1", "type": "MATCHING", "headings": [{"id": "h1", "text": "Heading I"}, {"id": "h2", "text": "Heading II"}, {"id": "h3", "text": "Heading III"}], "questions": [{"id": "l-match-q1", "statement": "Match this to a heading.", "correctAnswer": "ii"}]},
+            {"id": "l-map-1", "type": "DIAGRAM_LABELING", "imageUrl": "https://example.com/diagram.png", "labels": [{"id": "l1", "correctAnswer": "nose"}, {"id": "l2", "correctAnswer": "ear"}]},
+            {"id": "l-blank-shared-1", "type": "SENTENCE_COMPLETION", "questions": [{"id": "l-blank-shared-1", "sentence": "Complete: __", "acceptAnyAnswerKey": true, "sharedAcceptedAnswers": ["apple"], "blanks": [{"id": "l-blank-shared-1:b1"}]}]}
         ]}]},
         "writing": {"task1Prompt": "Summarise the chart.", "task2Prompt": "Discuss both views.", "tasks": [{"id": "writing-1"}]},
         "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
@@ -5608,6 +5619,73 @@ async fn post_mutation_batch_json(
     let status = response.status();
     let json = json_body(response).await;
     (status, json)
+}
+
+// Single-mutation batch in the new-style flat shape: `mutation_fields` carries
+// the command's own fields (e.g. {"type": "SetScalar", "questionId": "q1",
+// "value": "A"}); mutationId/baseRevision are merged in.
+async fn post_single_mutation_batch(
+    app: &axum::Router,
+    attempt_token: &str,
+    schedule_id: Uuid,
+    attempt_id: &str,
+    mutation_id: &str,
+    base_revision: i32,
+    mutation_fields: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let mut mutation = mutation_fields.as_object().cloned().unwrap_or_default();
+    mutation.insert("mutationId".to_owned(), json!(mutation_id));
+    mutation.insert("baseRevision".to_owned(), json!(base_revision));
+    post_mutation_batch_json(
+        app,
+        attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id,
+            "mutations": [serde_json::Value::Object(mutation)]
+        }),
+    )
+    .await
+}
+
+// A single keyed value from the persisted `answers` JSON column (or the whole
+// object when `key` is None).
+async fn persisted_answers(
+    pool: &sqlx::MySqlPool,
+    attempt_id: &str,
+) -> serde_json::Value {
+    sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn persisted_writing_answers(
+    pool: &sqlx::MySqlPool,
+    attempt_id: &str,
+) -> serde_json::Value {
+    sqlx::query_scalar("SELECT writing_answers FROM student_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn persisted_flags(pool: &sqlx::MySqlPool, attempt_id: &str) -> serde_json::Value {
+    sqlx::query_scalar("SELECT flags FROM student_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn persisted_revision(pool: &sqlx::MySqlPool, attempt_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 // BEX-030 — every supported objective mutation command against its matching
@@ -6047,6 +6125,698 @@ async fn mutation_batch_supported_command_matrix_writing_unicode() {
         .as_object()
         .unwrap()
         .contains_key("task1"));
+
+    database.shutdown().await;
+}
+
+// BEX-035 — full question-type round trip. For every supported IELTS question
+// type the plan pins: mutation command → persisted `answers`/`writing_answers`
+// (exact JSON shape) → hydrated live attempt (response == persisted) →
+// submitted `final_submission` (grading input) == persisted. Auto-grading
+// results are then produced through the same projection cycle the worker runs
+// (`GradingService::run_projection_cycle`) so that "correct grades correct,
+// wrong/absent grades wrong" (plus case/whitespace-aware rules) are pinned
+// end-to-end for the types whose block metadata carries answer keys.
+#[tokio::test]
+async fn bex035_question_type_round_trip_matrix() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _client_session_id) = {
+        // The attempt phase is computed at creation from the runtime status;
+        // submit requires phase `exam`, so the runtime must be live FIRST
+        // (the gate row only exists after the proctor-side StartRuntime
+        // command; a bare UPDATE on exam_session_runtimes is a silent no-op).
+        SchedulingService::new(database.pool().clone())
+            .apply_runtime_command(
+                &contract_actor(),
+                schedule_id,
+                RuntimeCommandRequest {
+                    action: RuntimeCommandAction::StartRuntime,
+                    reason: Some("contract runtime start (BEX-035)".to_owned()),
+                },
+            )
+            .await
+            .unwrap();
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await
+    };
+    assert_eq!(
+        bootstrap["data"]["attempt"]["phase"],
+        "exam",
+        "attempt must be phase=exam for submit"
+    );
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let expect_ok = |status: StatusCode, json: &serde_json::Value, label: &str| {
+        assert_eq!(status, StatusCode::OK, "{label} failed: {json}");
+    };
+    let expect_422 = |status: StatusCode, json: &serde_json::Value, label: &str| {
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{label}: {json}");
+        assert_eq!(json["error"]["code"], "VALIDATION_ERROR", "{label}: {json}");
+    };
+
+    // ---- 1. Single answer (SHORT_ANSWER Text): value stored byte-exact ----
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-short-set",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "Diagram"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetScalar l-short-1");
+    assert_eq!(json["data"]["attempt"]["answers"]["l-short-1"], "Diagram");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-short-1"], "Diagram", "case preserved in DB");
+
+    // Whitespace variant is stored as typed (no normalization at mutation).
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-short-whitespace",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-short-1", "value": "  diagram  "}),
+    )
+    .await;
+    expect_ok(status, &json, "SetScalar whitespace variant");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-short-1"], "  diagram  ");
+
+    // ---- 2. Multi-select (MULTI_MCQ): SetChoice carries the array value ----
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-multi-set",
+        base_revision,
+        json!({"type": "SetChoice", "questionId": "l-multi-1", "value": ["A", "C"]}),
+    )
+    .await;
+    expect_ok(status, &json, "SetChoice l-multi-1 array");
+    assert_eq!(json["data"]["attempt"]["answers"]["l-multi-1"], json!(["A", "C"]));
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-multi-1"], json!(["A", "C"]));
+
+    // Order is preserved in storage; grading compares sets (order-insensitive).
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-multi-reorder",
+        base_revision,
+        json!({"type": "SetChoice", "questionId": "l-multi-1", "value": ["C", "A"]}),
+    )
+    .await;
+    expect_ok(status, &json, "SetChoice l-multi-1 reorder");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-multi-1"], json!(["C", "A"]));
+
+    // Wrong selection count (max = correct count = 2) is rejected atomically.
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-multi-too-many",
+        base_revision,
+        json!({"type": "SetChoice", "questionId": "l-multi-1", "value": ["A", "B", "C"]}),
+    )
+    .await;
+    expect_422(status, &json, "l-multi-1 too many selections");
+    assert_eq!(json["error"]["message"], "Too many selections for this question.");
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-multi-1"], json!(["C", "A"]), "rejected batch must not persist");
+    assert_eq!(persisted_revision(database.pool(), &attempt_id).await, i64::from(base_revision));
+
+    // ---- 3. True/False/Not Given (full-metadata TFNG → strict Enum) --------
+    for (idx, value) in ["T", "NG"].iter().enumerate() {
+        let (status, json) = post_single_mutation_batch(
+            &app,
+            &attempt_token,
+            schedule_id,
+            &attempt_id,
+            &format!("bex035-tfng-set-{idx}"),
+            base_revision,
+            json!({"type": "SetScalar", "questionId": "l-tfng-1", "value": value}),
+        )
+        .await;
+        expect_ok(status, &json, &format!("SetScalar l-tfng-1 = {value}"));
+        base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    }
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-tfng-1"], "NG");
+
+    // Outside the {T,F,NG} set — including the "True" spelling and lowercase —
+    // is rejected at mutation (Enum strictness; never reaches grading).
+    for (idx, value) in ["True", "t"].iter().enumerate() {
+        let (status, json) = post_single_mutation_batch(
+            &app,
+            &attempt_token,
+            schedule_id,
+            &attempt_id,
+            &format!("bex035-tfng-reject-{idx}"),
+            base_revision,
+            json!({"type": "SetScalar", "questionId": "l-tfng-1", "value": value}),
+        )
+        .await;
+        expect_422(status, &json, &format!("SetScalar l-tfng-1 = {value}"));
+        assert_eq!(
+            json["error"]["message"],
+            "Answer value is not valid for this question."
+        );
+    }
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-tfng-1"], "NG", "rejected TFNG variant must not persist");
+
+    // Final TFNG answer for the grading leg.
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-tfng-final",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-tfng-1", "value": "T"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetScalar l-tfng-1 = T");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // ---- 4. Matching (MATCHING → per-question Enum of roman headings) ------
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-match-set",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-match-q1", "value": "ii"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetScalar l-match-q1 = ii");
+    assert_eq!(json["data"]["attempt"]["answers"]["l-match-q1"], "ii");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-match-q1"], "ii");
+
+    // The heading value set is strict: "1" is not a valid roman numeral.
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-match-reject",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-match-q1", "value": "1"}),
+    )
+    .await;
+    expect_422(status, &json, "SetScalar l-match-q1 = 1");
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-match-q1"], "ii");
+
+    // ---- 5. Sentence completion with several slots (ArrayText) -------------
+    // Partial fill pins the exact persisted shape: ["first"].
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-slot0-set",
+        base_revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-2", "slotIndex": 0, "value": "first"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetSlot l-blank-2[0]");
+    assert_eq!(json["data"]["attempt"]["answers"]["l-blank-2"], json!(["first"]));
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-blank-2"], json!(["first"]), "partial fill shape");
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-slot1-set",
+        base_revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-2", "slotIndex": 1, "value": "second"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetSlot l-blank-2[1]");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-blank-2"], json!(["first", "second"]));
+
+    // ClearSlot writes an explicit JSON null at the slot (array length kept).
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-slot0-clear",
+        base_revision,
+        json!({"type": "ClearSlot", "questionId": "l-blank-2", "slotIndex": 0}),
+    )
+    .await;
+    expect_ok(status, &json, "ClearSlot l-blank-2[0]");
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-blank-2"],
+        json!([null, "second"])
+    );
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // Per-blank sub-ids are section-registered: flags accept the sub-id. The
+    // seed spells blank ids as "{question_id}:{blank_id}" already, so the
+    // registered key is the raw concat "{question_id}:{blank_id}" = the
+    // double-prefixed "l-blank-2:l-blank-2:b1".
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-flag-subid",
+        base_revision,
+        json!({"type": "SetFlag", "questionId": "l-blank-2:l-blank-2:b1", "value": true}),
+    )
+    .await;
+    expect_ok(status, &json, "SetFlag on per-blank sub-id");
+    assert_eq!(json["data"]["attempt"]["flags"]["l-blank-2:l-blank-2:b1"], true);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // ---- 6. Diagram labels (DIAGRAM_LABELING → block-level ArrayText) ------
+    // Labels have per-label ids, but they are section-registered only; the
+    // value lives at the block id as a slot array.
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-map-slot0",
+        base_revision,
+        json!({"type": "SetSlot", "questionId": "l-map-1", "slotIndex": 0, "value": "nose"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetSlot l-map-1[0]");
+    assert_eq!(json["data"]["attempt"]["answers"]["l-map-1"], json!(["nose"]));
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-map-slot1",
+        base_revision,
+        json!({"type": "SetSlot", "questionId": "l-map-1", "slotIndex": 1, "value": "ear"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetSlot l-map-1[1]");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-map-slot1-clear",
+        base_revision,
+        json!({"type": "ClearSlot", "questionId": "l-map-1", "slotIndex": 1}),
+    )
+    .await;
+    expect_ok(status, &json, "ClearSlot l-map-1[1]");
+    assert_eq!(json["data"]["attempt"]["answers"]["l-map-1"], json!(["nose", null]));
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // A SetScalar against the per-label sub-id is accepted-but-ignored (the
+    // sub-id has section registration only, no value constraint).
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-map-subid-ignored",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-map-1:l1", "value": "x"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetScalar on per-label sub-id");
+    // The no-op still persists as a stored mutation, so the revision advances;
+    // only the applied count is 0 and the answers byte-unchanged.
+    assert_eq!(json["data"]["appliedMutationCount"], 0);
+    assert_eq!(json["data"]["revision"].as_i64().unwrap(), i64::from(base_revision) + 1);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-map-1"], json!(["nose", null]));
+
+    // ---- Shared-answer sentence (case-folded grading variant) --------------
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-shared-set",
+        base_revision,
+        json!({"type": "SetSlot", "questionId": "l-blank-shared-1", "slotIndex": 0, "value": "Apple"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetSlot l-blank-shared-1[0]");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["l-blank-shared-1"], json!(["Apple"]), "case preserved in DB");
+
+    // ---- 7. Cleared answers (explicit JSON null shapes, keys retained) -----
+    // SINGLE_MCQ: set, then clear via ClearChoice.
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-choice-set",
+        base_revision,
+        json!({"type": "SetChoice", "questionId": "l-choice-1", "value": "B"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetChoice l-choice-1");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // Enum case variant: lowercase option id is outside the allowed set.
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-choice-case-reject",
+        base_revision,
+        json!({"type": "SetChoice", "questionId": "l-choice-1", "value": "b"}),
+    )
+    .await;
+    expect_422(status, &json, "SetChoice l-choice-1 = b");
+    assert_eq!(
+        json["error"]["message"],
+        "Answer value is not valid for this question."
+    );
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-choice-clear",
+        base_revision,
+        json!({"type": "ClearChoice", "questionId": "l-choice-1"}),
+    )
+    .await;
+    expect_ok(status, &json, "ClearChoice l-choice-1");
+    assert_eq!(json["data"]["attempt"]["answers"]["l-choice-1"].is_null(), true);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // Text: SetScalar then ClearScalar → explicit null, key retained.
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-short2-set",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-short-2", "value": "diesel"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetScalar l-short-2");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-short2-clear",
+        base_revision,
+        json!({"type": "ClearScalar", "questionId": "l-short-2"}),
+    )
+    .await;
+    expect_ok(status, &json, "ClearScalar l-short-2");
+    assert_eq!(json["data"]["attempt"]["answers"]["l-short-2"].is_null(), true);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // Restore a wrong answer so the grading leg pins "wrong grades wrong".
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-short2-wrong",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "l-short-2", "value": "diesel"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetScalar l-short-2 (wrong final)");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // TFNG legacy-minimal question (q1, no metadata): Text constraint; cleared
+    // to pin "unanswered" in the final submission.
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-q1-set",
+        base_revision,
+        json!({"type": "SetScalar", "questionId": "q1", "value": "T"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetScalar q1");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-q1-clear",
+        base_revision,
+        json!({"type": "ClearScalar", "questionId": "q1"}),
+    )
+    .await;
+    expect_ok(status, &json, "ClearScalar q1");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    assert_eq!(answers["q1"], serde_json::Value::Null);
+    assert!(answers.as_object().unwrap().contains_key("q1"), "clear keeps the key");
+
+    // ---- 8. Writing tasks: separate writingAnswers map ---------------------
+    start_runtime(database.pool(), schedule_id, "writing").await;
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-essay-set",
+        base_revision,
+        json!({"type": "SetEssayText", "taskId": "task1", "value": "Draft 1"}),
+    )
+    .await;
+    expect_ok(status, &json, "SetEssayText task1");
+    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"], "Draft 1");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let unicode_draft = "第一段 引言\nsecond line 🎯\tTAB\nfinal line with emoji 🚀";
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-essay-unicode",
+        base_revision,
+        json!({"type": "SetEssayText", "taskId": "task2", "value": unicode_draft}),
+    )
+    .await;
+    expect_ok(status, &json, "SetEssayText task2 unicode");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let writing_answers = persisted_writing_answers(database.pool(), &attempt_id).await;
+    assert_eq!(writing_answers["task2"], unicode_draft, "byte-exact unicode/multiline");
+
+    let (status, json) = post_single_mutation_batch(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &attempt_id,
+        "bex035-essay-clear",
+        base_revision,
+        json!({"type": "ClearEssayText", "taskId": "task1"}),
+    )
+    .await;
+    expect_ok(status, &json, "ClearEssayText task1");
+    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"].is_null(), true);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+    let writing_answers = persisted_writing_answers(database.pool(), &attempt_id).await;
+    assert_eq!(writing_answers["task1"], serde_json::Value::Null);
+    assert!(writing_answers.as_object().unwrap().contains_key("task1"));
+
+    // ---- 9. Hydration: the live attempt mirrors persisted state ------------
+    let live = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/student/sessions/{schedule_id}/live?candidateId=alice"
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(live.status(), StatusCode::OK);
+    let live_json = json_body(live).await;
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    let writing_answers = persisted_writing_answers(database.pool(), &attempt_id).await;
+    let flags = persisted_flags(database.pool(), &attempt_id).await;
+    assert_eq!(
+        live_json["data"]["attempt"]["answers"], answers,
+        "hydrated answers must equal persisted answers"
+    );
+    assert_eq!(
+        live_json["data"]["attempt"]["writingAnswers"], writing_answers,
+        "hydrated writingAnswers must equal persisted writingAnswers"
+    );
+    assert_eq!(
+        live_json["data"]["attempt"]["flags"], flags,
+        "hydrated flags must equal persisted flags"
+    );
+
+    // ---- 10. Submission: final_submission carries the persisted snapshot ---
+    let submit = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{schedule_id}/submit"))
+                .header("idempotency-key", "bex035-submit-1")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "attemptId": attempt_id.clone(),
+                        "lastSeenRevision": base_revision,
+                        "submissionId": "bex035-submission-1",
+                        "clientFinalSeq": 0,
+                        "serverAcceptedThroughSeq": 0
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let submit_status = submit.status();
+    let submit_json = json_body(submit).await;
+    assert_eq!(submit_status, StatusCode::OK, "submit conflict body: {submit_json}");
+    assert_eq!(submit_json["data"]["attempt"]["phase"], "post-exam");
+
+    let final_submission: serde_json::Value =
+        sqlx::query_scalar("SELECT final_submission FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let answers = persisted_answers(database.pool(), &attempt_id).await;
+    let writing_answers = persisted_writing_answers(database.pool(), &attempt_id).await;
+    assert_eq!(
+        final_submission["answers"], answers,
+        "grading input (final_submission.answers) must equal persisted answers"
+    );
+    assert_eq!(
+        final_submission["writingAnswers"], writing_answers,
+        "grading input (final_submission.writingAnswers) must equal persisted writingAnswers"
+    );
+
+    // ---- 11. Grading leg ----------------------------------------------------
+    // Empirical pin: submit alone does NOT project auto-grading rows; the
+    // projection cycle (worker-equivalent) produces them synchronously.
+    let sections_before: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM section_submissions WHERE submission_id IN (SELECT id FROM student_submissions WHERE attempt_id = ?)",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(sections_before, 0, "submit must not project grading synchronously");
+
+    let grading = GradingService::new(database.pool().clone());
+    let report = grading
+        .run_projection_cycle(GradingProjectionRequest {
+            watermark: None,
+            bootstrap_after: None,
+            batch_size: None,
+        })
+        .await
+        .unwrap();
+    assert!(
+        report.submission_rows_synced >= 1 && report.section_rows_synced >= 1,
+        "projection must materialize the submission: {report:?}"
+    );
+
+    let auto: serde_json::Value = sqlx::query_scalar(
+        "SELECT section_submissions.auto_grading_results FROM section_submissions JOIN student_submissions ON student_submissions.id = section_submissions.submission_id WHERE student_submissions.attempt_id = ? AND section_submissions.section = 'listening'",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let question_results = auto["questionResults"].as_array().unwrap();
+    let result_for = |question_id: &str| -> &serde_json::Value {
+        question_results
+            .iter()
+            .find(|entry| entry["questionId"] == question_id)
+            .unwrap_or_else(|| panic!("missing grading row for {question_id}"))
+    };
+
+    // Correct answers grade correct (TextAnyOf with whitespace collapse).
+    assert_eq!(result_for("l-short-1")["isCorrect"], true, "  diagram   == diagram");
+    assert_eq!(result_for("l-tfng-1")["isCorrect"], true);
+    assert_eq!(result_for("l-match-q1")["isCorrect"], true);
+    // Multi-select grades as an order-insensitive set.
+    assert_eq!(result_for("l-multi-1")["isCorrect"], true, "[\"C\",\"A\"] equals set A,C");
+    // Sentence slots grade per blank; cleared slots are absent → wrong. The
+    // grading questionId is the same raw "{question_id}:{blank_id}" concat.
+    assert_eq!(result_for("l-blank-2:l-blank-2:b1")["isCorrect"], false, "cleared blank");
+    assert_eq!(result_for("l-blank-2:l-blank-2:b2")["isCorrect"], true);
+    // Diagram labels grade per label; the cleared label is wrong.
+    assert_eq!(result_for("l-map-1:l1")["isCorrect"], true);
+    assert_eq!(result_for("l-map-1:l2")["isCorrect"], false, "cleared label");
+    // Shared-answer sentence folds case: "Apple" matches "apple".
+    assert_eq!(result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], true);
+    // Wrong and cleared answers grade wrong.
+    assert_eq!(result_for("l-short-2")["isCorrect"], false, "diesel != petrol");
+    assert_eq!(result_for("l-choice-1")["isCorrect"], false, "cleared choice");
+    // The legacy-minimal TFNG question (q1, no answer key) has no grading spec.
+    assert!(
+        question_results.iter().all(|entry| entry["questionId"] != "q1"),
+        "q1 has no correctAnswer metadata, so no grading row may exist"
+    );
 
     database.shutdown().await;
 }
