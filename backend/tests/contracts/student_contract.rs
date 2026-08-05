@@ -4622,7 +4622,11 @@ async fn seed_schedule_with_slug_content_and_config(
 fn default_delivery_content_snapshot() -> serde_json::Value {
     json!({
         "reading": {"passages": [{"id": "reading-1", "title": "Reading Passage 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "questions": [{"id": "r1"}]}]}]},
-        "listening": {"parts": [{"id": "listening-1", "title": "Listening Part 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "questions": [{"id": "q1"}]}]}]},
+        "listening": {"parts": [{"id": "listening-1", "title": "Listening Part 1", "blocks": [
+            {"type": "TFNG", "mode": "TFNG", "questions": [{"id": "q1"}]},
+            {"id": "l-choice-1", "type": "SINGLE_MCQ", "questions": [{"id": "l-choice-1", "stem": "Pick one", "options": [{"id": "A", "text": "Option A", "isCorrect": false}, {"id": "B", "text": "Option B", "isCorrect": true}, {"id": "C", "text": "Option C", "isCorrect": false}]}]},
+            {"id": "l-blank-2", "type": "SENTENCE_COMPLETION", "questions": [{"id": "l-blank-2", "sentence": "Fill __ then __.", "blanks": [{"id": "l-blank-2:b1", "correctAnswer": "first"}, {"id": "l-blank-2:b2", "correctAnswer": "second"}]}]}
+        ]}]},
         "writing": {"task1Prompt": "Summarise the chart.", "task2Prompt": "Discuss both views.", "tasks": [{"id": "writing-1"}]},
         "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
     })
@@ -4824,4 +4828,753 @@ async fn transition_runtime_from_listening_to_reading(pool: &sqlx::MySqlPool, sc
     .execute(pool)
     .await
     .unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// BEX-030 / BEX-031 — supported mutation command matrix and validation rejects
+// ---------------------------------------------------------------------------
+
+async fn post_mutation_batch_json(
+    app: &axum::Router,
+    attempt_token: &str,
+    schedule_id: Uuid,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}/mutations:batch"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let json = json_body(response).await;
+    (status, json)
+}
+
+// BEX-030 — every supported objective mutation command against its matching
+// block type in the active section, with DB round-trip, empty-vs-clear
+// semantics, and a full authoritative response per batch.
+#[tokio::test]
+async fn mutation_batch_supported_command_matrix_objective_questions() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // --- SetScalar: persisted in answers + authoritative response -----------
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-scalar-set",
+                "baseRevision": base_revision,
+                "type": "SetScalar",
+                "questionId": "q1",
+                "value": "A"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["appliedMutationCount"], 1);
+    assert_eq!(json["data"]["serverAcceptedThroughSeq"], 1);
+    assert_eq!(json["data"]["attempt"]["answers"]["q1"], "A");
+    assert_eq!(json["data"]["attempt"]["revision"], base_revision + 1);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let answers: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(answers["q1"], "A");
+
+    // --- SetChoice: valid option persisted; invalid option rejected ---------
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-choice-set",
+                "baseRevision": base_revision,
+                "type": "SetChoice",
+                "questionId": "l-choice-1",
+                "value": "B"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["attempt"]["answers"]["l-choice-1"], "B");
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // Invalid option value -> 422 VALIDATION_ERROR, revision untouched.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-choice-invalid",
+                "baseRevision": base_revision,
+                "type": "SetChoice",
+                "questionId": "l-choice-1",
+                "value": "Z"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(
+        json["error"]["message"],
+        "Answer value is not valid for this question."
+    );
+
+    // --- SetSlot: array-backed 2-blank question ------------------------------
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-slot-set-0",
+                "baseRevision": base_revision,
+                "type": "SetSlot",
+                "questionId": "l-blank-2",
+                "slotIndex": 0,
+                "value": "alpha"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["attempt"]["answers"]["l-blank-2"], json!(["alpha"]));
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-slot-set-1",
+                "baseRevision": base_revision,
+                "type": "SetSlot",
+                "questionId": "l-blank-2",
+                "slotIndex": 1,
+                "value": ""
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Empty string in a slot is present, not cleared.
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-blank-2"],
+        json!(["alpha", ""])
+    );
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // --- ClearSlot: slot becomes explicit JSON null (not removed, not "") ----
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-slot-clear-0",
+                "baseRevision": base_revision,
+                "type": "ClearSlot",
+                "questionId": "l-blank-2",
+                "slotIndex": 0
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-blank-2"],
+        json!([null, ""])
+    );
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // --- SetFlag: flags[questionId] = boolean --------------------------------
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-flag-set",
+                "baseRevision": base_revision,
+                "type": "SetFlag",
+                "questionId": "q1",
+                "value": true
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["attempt"]["flags"]["q1"], true);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // --- Empty value vs explicit clear on a Text question --------------------
+    // SetScalar "" stores an empty string (key present, not null).
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-scalar-empty",
+                "baseRevision": base_revision,
+                "type": "SetScalar",
+                "questionId": "q1",
+                "value": ""
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["attempt"]["answers"]["q1"], "");
+    assert_eq!(json["data"]["attempt"]["answers"]["q1"].is_null(), false);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // ClearScalar writes an explicit JSON null (distinct from "").
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-scalar-clear",
+                "baseRevision": base_revision,
+                "type": "ClearScalar",
+                "questionId": "q1"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["attempt"]["answers"]["q1"].is_null(), true);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // --- ClearChoice: removed from persisted answers as explicit null --------
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-choice-clear",
+                "baseRevision": base_revision,
+                "type": "ClearChoice",
+                "questionId": "l-choice-1"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["attempt"]["answers"]["l-choice-1"].is_null(), true);
+    assert_eq!(json["data"]["attempt"]["answers"]["q1"].is_null(), true);
+
+    // Final DB round-trip: clears persist as explicit JSON nulls.
+    let answers: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(answers["q1"], serde_json::Value::Null);
+    assert_eq!(answers["l-choice-1"], serde_json::Value::Null);
+    assert_eq!(answers["l-blank-2"], json!([null, ""]));
+    assert!(answers.as_object().unwrap().contains_key("q1"));
+    assert!(answers.as_object().unwrap().contains_key("l-choice-1"));
+
+    let flags: serde_json::Value =
+        sqlx::query_scalar("SELECT flags FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(flags["q1"], true);
+
+    database.shutdown().await;
+}
+
+// BEX-030 — writing commands (SetEssayText / ClearEssayText) with unicode and
+// multiline values round-tripped byte-exactly through the DB and the response.
+#[tokio::test]
+async fn mutation_batch_supported_command_matrix_writing_unicode() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "writing").await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // --- SetEssayText: persisted in writingAnswers + authoritative response --
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-essay-set",
+                "baseRevision": base_revision,
+                "type": "SetEssayText",
+                "taskId": "task1",
+                "value": "Draft 1"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"], "Draft 1");
+    assert_eq!(json["data"]["attempt"]["answers"], json!({}));
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let writing_answers: serde_json::Value =
+        sqlx::query_scalar("SELECT writing_answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(writing_answers["task1"], "Draft 1");
+
+    // --- Unicode + multiline: byte-exact round trip --------------------------
+    let unicode_draft = "第一段 引言\nsecond line 🎯\tTAB\nfinal line with emoji 🚀";
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-essay-unicode",
+                "baseRevision": base_revision,
+                "type": "SetEssayText",
+                "taskId": "task1",
+                "value": unicode_draft
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"], unicode_draft);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let writing_answers: serde_json::Value =
+        sqlx::query_scalar("SELECT writing_answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(writing_answers["task1"], unicode_draft);
+
+    // --- Empty value vs explicit clear ---------------------------------------
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-essay-empty",
+                "baseRevision": base_revision,
+                "type": "SetEssayText",
+                "taskId": "task1",
+                "value": ""
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"], "");
+    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"].is_null(), false);
+    base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex030-essay-clear",
+                "baseRevision": base_revision,
+                "type": "ClearEssayText",
+                "taskId": "task1"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"].is_null(), true);
+
+    let writing_answers: serde_json::Value =
+        sqlx::query_scalar("SELECT writing_answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(writing_answers["task1"], serde_json::Value::Null);
+    assert!(writing_answers
+        .as_object()
+        .unwrap()
+        .contains_key("task1"));
+
+    database.shutdown().await;
+}
+
+// BEX-030 — the allowlisted legacy payload path: legacy envelopes (attemptId +
+// id/seq/timestamp/baseRevision + mutationType/payload) apply the same
+// commands, while non-allowlisted legacy types are rejected with the exact
+// allowlist message.
+#[tokio::test]
+async fn mutation_batch_legacy_envelope_allowlist_and_rejects() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    start_runtime(database.pool(), schedule_id, "listening").await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    let mut current_revision = base_revision;
+    let legacy_envelope = |id: &str, seq: i64, base_rev: i32, mutation_type: &str, payload: serde_json::Value| {
+        json!({
+            "id": id,
+            "seq": seq,
+            "timestamp": "2026-01-10T09:05:00Z",
+            "baseRevision": base_rev,
+            "mutationType": mutation_type,
+            "payload": payload
+        })
+    };
+
+    // --- Allowlisted legacy commands apply (SetScalar, SetChoice, SetSlot) ---
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "studentKey": student_key.clone(),
+            "clientSessionId": client_session_id.clone(),
+            "mutations": [
+                legacy_envelope("legacy-scalar-1", 1, current_revision, "SetScalar", json!({"questionId": "q1", "value": "A"})),
+                legacy_envelope("legacy-choice-1", 2, current_revision, "SetChoice", json!({"questionId": "l-choice-1", "value": "C"})),
+                legacy_envelope("legacy-slot-1", 3, current_revision, "SetSlot", json!({"questionId": "l-blank-2", "slotIndex": 0, "value": "legacy"}))
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["data"]["appliedMutationCount"], 3);
+    assert_eq!(json["data"]["serverAcceptedThroughSeq"], 3);
+    assert_eq!(json["data"]["attempt"]["answers"]["q1"], "A");
+    assert_eq!(json["data"]["attempt"]["answers"]["l-choice-1"], "C");
+    assert_eq!(json["data"]["attempt"]["answers"]["l-blank-2"], json!(["legacy"]));
+    current_revision = json["data"]["revision"].as_i64().unwrap() as i32;
+
+    // --- Non-allowlisted legacy types are rejected with the exact message ----
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "studentKey": student_key.clone(),
+            "clientSessionId": client_session_id.clone(),
+            "mutations": [
+                legacy_envelope("legacy-position-1", 1, current_revision, "position", json!({"phase": "exam", "currentModule": "listening"}))
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(
+        json["error"]["message"],
+        "Legacy mutation type `position` is not allowed for mutation batch."
+    );
+
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "studentKey": student_key.clone(),
+            "clientSessionId": client_session_id.clone(),
+            "mutations": [
+                legacy_envelope("legacy-answer-1", 1, current_revision, "answer", json!({"questionId": "q1", "value": "A"}))
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(
+        json["error"]["message"],
+        "Legacy mutation type `answer` is not allowed for mutation batch."
+    );
+
+    // --- Legacy SetEssayText applies once the writing section is active ------
+    start_runtime(database.pool(), schedule_id, "writing").await;
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "studentKey": student_key.clone(),
+            "clientSessionId": client_session_id.clone(),
+            "mutations": [
+                legacy_envelope("legacy-essay-1", 1, current_revision, "SetEssayText", json!({"taskId": "task1", "value": "legacy draft"}))
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json["data"]["attempt"]["writingAnswers"]["task1"],
+        "legacy draft"
+    );
+
+    database.shutdown().await;
+}
+
+// BEX-031 — validation rejects: unknown top-level fields (strict-only and
+// mixed legacy payloads), unknown mutation types, and missing question/task
+// identifiers all yield 422 VALIDATION_ERROR before any state is touched.
+#[tokio::test]
+async fn mutation_batch_rejects_unknown_top_level_fields_and_malformed_commands() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let base_revision = bootstrap["data"]["attempt"]["revision"]
+        .as_i64()
+        .unwrap() as i32;
+
+    // (a) Strict-only payload with an unknown top-level field -> 422.
+    //     The strict parse rejects it (deny_unknown_fields) and the legacy
+    //     fallback must reject it too (it also denies unknown fields), so the
+    //     batch is never accepted.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex031-a",
+                "baseRevision": base_revision,
+                "type": "SetScalar",
+                "questionId": "q1",
+                "value": "A"
+            }],
+            "unexpectedTopLevelField": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid mutation batch payload"),
+        "expected the dual-parse failure message, got {:?}",
+        json["error"]["message"]
+    );
+
+    // (b) Payload carrying BOTH strict markers and legacy keys plus an unknown
+    //     top-level field -> 422. The strict parse rejects the legacy keys, and
+    //     the legacy parse must NOT silently accept the unknown field.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "studentKey": student_key.clone(),
+            "clientSessionId": client_session_id.clone(),
+            "mutations": [{
+                "id": "bex031-b",
+                "seq": 1,
+                "mutationType": "SetScalar",
+                "payload": {"questionId": "q1", "value": "A"}
+            }],
+            "unexpectedTopLevelField": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid mutation batch payload"),
+        "expected the dual-parse failure message, got {:?}",
+        json["error"]["message"]
+    );
+
+    // (c) Unknown mutation type -> 422.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex031-c",
+                "baseRevision": base_revision,
+                "type": "teleport",
+                "payload": {}
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+
+    // (d) SetScalar missing questionId -> 422.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex031-d",
+                "baseRevision": base_revision,
+                "type": "SetScalar",
+                "value": "A"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+
+    // (e) SetEssayText missing taskId -> 422.
+    let (status, json) = post_mutation_batch_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        json!({
+            "attemptId": attempt_id.clone(),
+            "mutations": [{
+                "mutationId": "bex031-e",
+                "baseRevision": base_revision,
+                "type": "SetEssayText",
+                "value": "orphan essay"
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+
+    // No state was touched by any rejected batch.
+    let answers: serde_json::Value =
+        sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(answers, json!({}));
+
+    database.shutdown().await;
 }

@@ -950,3 +950,42 @@ Unique-constraint races must resolve to the idempotent replay/Conflict outcome, 
 ### Invariant
 A pending attempt must never be finalized by an incomplete (transient) `completed` runtime state;
 old-section mutations must be rejected with SECTION_MISMATCH once the grace window closes.
+
+## 2026-08-05: Mutation Clear Commands Persist Explicit JSON Nulls; Legacy Batch Denies Unknown Top-Level Fields (BEX-030/031)
+
+### Behavior (documented contract, not a bug)
+1. **Clear == JSON null, not key removal.** Every clear command
+   (`ClearScalar`, `ClearChoice`, `ClearSlot`, `ClearEssayText`) writes an explicit
+   `null` into the persisted JSON (`set_value` / `set_array_slot_answer`,
+   `backend/crates/application/src/delivery/mod.rs` ~3511-3545): e.g. after
+   `ClearScalar q1`, `student_attempts.answers` is `{"q1": null}` — the key stays
+   present. The apply arms validate `Value::Null` against the question constraint
+   before persisting. This is distinct from an empty string: `SetScalar ""` stores
+   `""`. Do not "fix" clears to remove keys: replays and idempotent dedupe
+   (`student_attempt_mutations`) and the base-revision gate assume clears are
+   null-writes like any other value.
+2. **Legacy batch requests deny unknown top-level fields.** Both the strict
+   (`ApiMutationBatchRequest`) and the legacy fallback
+   (`ApiLegacyMutationBatchRequest`, `backend/crates/api/src/routes/student.rs`
+   ~272-288) carry `deny_unknown_fields`. A payload with an unknown top-level
+   field fails both parses and returns `422 VALIDATION_ERROR` /
+   "Invalid mutation batch payload: ..." — the legacy path must never silently
+   accept unknown top-level fields even though it also carries legacy keys
+   (`studentKey`, `clientSessionId`). Legacy per-command allowlist unchanged:
+   only SetSlot/ClearSlot/SetScalar/ClearScalar/SetChoice/ClearChoice/
+   SetEssayText/ClearEssayText; anything else (e.g. `position`, `answer`, `flag`)
+   → 422 "Legacy mutation type `<type>` is not allowed for mutation batch."
+   (The deny_unknown_fields attribute shipped earlier in 3f33626; B-5 pinned it
+   with route-level regression tests.)
+
+### Regression Protection
+- Tests: `backend/tests/contracts/student_contract.rs`
+  (`mutation_batch_supported_command_matrix_objective_questions`,
+  `mutation_batch_supported_command_matrix_writing_unicode`,
+  `mutation_batch_legacy_envelope_allowlist_and_rejects`,
+  `mutation_batch_rejects_unknown_top_level_fields_and_malformed_commands`).
+
+### Invariant
+Student-visible "saved" state must match persisted reality byte-for-byte: clears
+round-trip as explicit JSON nulls, empty strings stay empty strings, and unknown
+top-level fields are rejected on every accepted batch path.
