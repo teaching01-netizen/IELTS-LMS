@@ -1971,4 +1971,598 @@ describe('StudentRuntimeProvider', () => {
     expect(screen.getByTestId('phase')).toHaveTextContent('exam');
     expect(screen.getByTestId('module')).toHaveTextContent('listening');
   });
+
+  it('continues the countdown from the server deadline after a fresh mid-exam mount (reload)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    try {
+      // Mid-section reload: the server is 10 seconds into the section with 15
+      // seconds until the deadline. The displayed remaining must be derived
+      // from the absolute deadline (deadline - serverNow = 5), NOT from the
+      // snapshot's currentSectionRemainingSeconds (10), and the countdown must
+      // continue from that deadline.
+      const runtimeSnapshot = {
+        ...createRuntimeSnapshot('writing'),
+        currentSectionRemainingSeconds: 10,
+        currentSectionDeadlineAt: '2026-01-01T00:00:15.000Z',
+        serverNow: '2026-01-01T00:00:10.000Z',
+      };
+
+      function DisplayProbe() {
+        const { state } = useStudentRuntime();
+        return <div data-testid="remaining">{state.displayTimeRemaining}</div>;
+      }
+
+      render(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={{
+            ...buildCompletedPreCheckAttempt(),
+            phase: 'exam',
+            currentModule: 'writing',
+            currentQuestionId: 'task1',
+          }}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+
+      expect(screen.getByTestId('remaining')).toHaveTextContent('5');
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('3');
+      act(() => {
+        vi.advanceTimersByTime(3_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('0');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds the countdown steady during a proctor pause while the runtime stays live', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    try {
+      const runtimeSnapshot = {
+        ...createRuntimeSnapshot('writing'),
+        currentSectionRemainingSeconds: 10,
+        currentSectionDeadlineAt: '2026-01-01T00:00:10.000Z',
+        serverNow: '2026-01-01T00:00:00.000Z',
+      };
+
+      function DisplayProbe() {
+        const { state } = useStudentRuntime();
+        return (
+          <div>
+            <span data-testid="remaining">{state.displayTimeRemaining}</span>
+            <span data-testid="blocking">{state.blocking.reason ?? 'none'}</span>
+          </div>
+        );
+      }
+
+      render(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={{
+            ...buildCompletedPreCheckAttempt(),
+            phase: 'exam',
+            currentModule: 'writing',
+            currentQuestionId: 'task1',
+            proctorStatus: 'paused',
+          }}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+
+      expect(screen.getByTestId('blocking')).toHaveTextContent('proctor_paused');
+      expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+
+      // The pause freezes the deadline server-side (BEX-021): the local
+      // countdown must not drain toward the old deadline while paused, even
+      // though the cohort runtime snapshot still reports live.
+      for (let elapsed = 0; elapsed < 10; elapsed += 1) {
+        act(() => {
+          vi.advanceTimersByTime(1_000);
+        });
+        expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('freezes the countdown at the pause-instant value across a live→paused transition and a snapshot refresh during the pause (FEX-011)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    try {
+      const runtimeSnapshot = {
+        ...createRuntimeSnapshot('writing'),
+        currentSectionRemainingSeconds: 10,
+        currentSectionDeadlineAt: '2026-01-01T00:00:10.000Z',
+        serverNow: '2026-01-01T00:00:00.000Z',
+      };
+      const activeAttempt = {
+        ...buildCompletedPreCheckAttempt(),
+        phase: 'exam',
+        currentModule: 'writing',
+        currentQuestionId: 'task1',
+      };
+      const pausedAttempt = { ...activeAttempt, proctorStatus: 'paused' };
+
+      function DisplayProbe() {
+        const { state } = useStudentRuntime();
+        return (
+          <div>
+            <span data-testid="remaining">{state.displayTimeRemaining}</span>
+            <span data-testid="blocking">{state.blocking.reason ?? 'none'}</span>
+          </div>
+        );
+      }
+
+      const { rerender } = render(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={activeAttempt}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+      expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+
+      // Count down to the pause instant: two visible seconds elapse.
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('8');
+
+      // The proctor pauses the student: the countdown must freeze at the
+      // pause-instant value (8) — not jump back to the snapshot's 10 and not
+      // keep draining toward the old deadline.
+      rerender(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={pausedAttempt}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+      expect(screen.getByTestId('blocking')).toHaveTextContent('proctor_paused');
+      expect(screen.getByTestId('remaining')).toHaveTextContent('8');
+
+      // Wall-clock time passes while paused: no drift.
+      for (let elapsed = 0; elapsed < 2; elapsed += 1) {
+        act(() => {
+          vi.advanceTimersByTime(1_000);
+        });
+        expect(screen.getByTestId('remaining')).toHaveTextContent('8');
+      }
+
+      // A snapshot refresh mid-pause (same fields, newer revision) must not
+      // move the frozen display either.
+      rerender(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={{ ...runtimeSnapshot, revision: 1 }}
+          attemptSnapshot={pausedAttempt}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+      expect(screen.getByTestId('remaining')).toHaveTextContent('8');
+
+      // Resume: an individual proctor pause never froze the deadline
+      // server-side, so the display catches down to the true remaining
+      // (10 − 4 elapsed = 6), then keeps counting.
+      rerender(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={activeAttempt}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+      expect(screen.getByTestId('remaining')).toHaveTextContent('6');
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('4');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds the countdown steady while the runtime itself is paused', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    try {
+      // The paused projection has no live deadline (BEX-021) and a frozen
+      // remaining value; the countdown must hold it across wall-clock time.
+      const pausedRuntime = {
+        ...createRuntimeSnapshot('writing'),
+        status: 'paused' as const,
+        currentSectionRemainingSeconds: 10,
+        currentSectionDeadlineAt: null,
+        serverNow: '2026-01-01T00:00:00.000Z',
+        sections: [
+          {
+            ...createRuntimeSnapshot('writing').sections[0],
+            status: 'paused' as const,
+            pausedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      };
+
+      function DisplayProbe() {
+        const { state } = useStudentRuntime();
+        return (
+          <div>
+            <span data-testid="remaining">{state.displayTimeRemaining}</span>
+            <span data-testid="blocking">{state.blocking.reason ?? 'none'}</span>
+          </div>
+        );
+      }
+
+      render(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={pausedRuntime}
+          attemptSnapshot={{
+            ...buildCompletedPreCheckAttempt(),
+            phase: 'exam',
+            currentModule: 'writing',
+            currentQuestionId: 'task1',
+          }}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+
+      expect(screen.getByTestId('blocking')).toHaveTextContent('cohort_paused');
+      expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+
+      for (let elapsed = 0; elapsed < 10; elapsed += 1) {
+        act(() => {
+          vi.advanceTimersByTime(1_000);
+        });
+        expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-anchors the countdown to the new authoritative deadline after a cohort pause and resume', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    try {
+      const attemptSnapshot = {
+        ...buildCompletedPreCheckAttempt(),
+        phase: 'exam' as const,
+        currentModule: 'writing' as const,
+        currentQuestionId: 'task1',
+      };
+      const pausedRuntime = {
+        ...createRuntimeSnapshot('writing'),
+        status: 'paused' as const,
+        currentSectionRemainingSeconds: 10,
+        currentSectionDeadlineAt: null,
+        serverNow: '2026-01-01T00:00:00.000Z',
+        sections: [
+          {
+            ...createRuntimeSnapshot('writing').sections[0],
+            status: 'paused' as const,
+            pausedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      };
+      // Resume after a 5-second pause: the server extends the deadline by the
+      // accumulated paused time (BEX-021) and delivers a fresh serverNow.
+      const resumedRuntime = {
+        ...createRuntimeSnapshot('writing'),
+        currentSectionRemainingSeconds: 10,
+        currentSectionDeadlineAt: '2026-01-01T00:00:15.000Z',
+        serverNow: '2026-01-01T00:00:05.000Z',
+        totalPausedSeconds: 5,
+        sections: [
+          {
+            ...createRuntimeSnapshot('writing').sections[0],
+            accumulatedPausedSeconds: 5,
+          },
+        ],
+      };
+
+      function DisplayProbe() {
+        const { state } = useStudentRuntime();
+        return <div data-testid="remaining">{state.displayTimeRemaining}</div>;
+      }
+
+      const { rerender } = render(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={pausedRuntime}
+          attemptSnapshot={attemptSnapshot}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+
+      expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+
+      act(() => {
+        rerender(
+          <StudentRuntimeProvider
+            state={mockExamState}
+            onExit={() => undefined}
+            runtimeBacked
+            runtimeSnapshot={resumedRuntime}
+            attemptSnapshot={attemptSnapshot}
+          >
+            <DisplayProbe />
+          </StudentRuntimeProvider>,
+        );
+      });
+
+      // The countdown re-anchors to the new 15s deadline and ticks from it.
+      expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('9');
+      act(() => {
+        vi.advanceTimersByTime(4_000);
+      });
+      // t=10: 5 seconds left — only the new deadline can produce this; the old
+      // 10s deadline would already be exhausted.
+      expect(screen.getByTestId('remaining')).toHaveTextContent('5');
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('0');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('unlocks the timer and ticks again from the extended deadline when a resume follows a pause that froze the countdown at zero', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    try {
+      const attemptSnapshot = {
+        ...buildCompletedPreCheckAttempt(),
+        phase: 'exam' as const,
+        currentModule: 'writing' as const,
+        currentQuestionId: 'task1',
+      };
+      const liveRuntime = {
+        ...createRuntimeSnapshot('writing'),
+        currentSectionRemainingSeconds: 2,
+        currentSectionDeadlineAt: '2026-01-01T00:00:02.000Z',
+        serverNow: '2026-01-01T00:00:00.000Z',
+      };
+      // The runtime pauses at the moment the deadline expires: the frozen
+      // remaining is 0 and the display latches at zero.
+      const pausedRuntime = {
+        ...liveRuntime,
+        status: 'paused' as const,
+        currentSectionRemainingSeconds: 0,
+        currentSectionDeadlineAt: null,
+        serverNow: '2026-01-01T00:00:02.000Z',
+        sections: [
+          {
+            ...liveRuntime.sections[0],
+            status: 'paused' as const,
+            pausedAt: '2026-01-01T00:00:02.000Z',
+          },
+        ],
+      };
+      // Resume after a 3-second pause: the deadline is extended by the paused
+      // time, so there is real time left again.
+      const resumedRuntime = {
+        ...createRuntimeSnapshot('writing'),
+        currentSectionRemainingSeconds: 5,
+        currentSectionDeadlineAt: '2026-01-01T00:00:10.000Z',
+        serverNow: '2026-01-01T00:00:05.000Z',
+        totalPausedSeconds: 3,
+        sections: [
+          {
+            ...createRuntimeSnapshot('writing').sections[0],
+            accumulatedPausedSeconds: 3,
+          },
+        ],
+      };
+
+      function TimerProbe() {
+        const { state } = useStudentRuntime();
+        return (
+          <div>
+            <span data-testid="remaining">{state.displayTimeRemaining}</span>
+            <span data-testid="locked">{String(state.answerControlsLocked)}</span>
+          </div>
+        );
+      }
+
+      const { rerender } = render(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={liveRuntime}
+          attemptSnapshot={attemptSnapshot}
+        >
+          <TimerProbe />
+        </StudentRuntimeProvider>,
+      );
+
+      expect(screen.getByTestId('remaining')).toHaveTextContent('2');
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('0');
+      expect(screen.getByTestId('locked')).toHaveTextContent('true');
+
+      // The zero latch must survive the pause: still 0 and locked while paused.
+      act(() => {
+        rerender(
+          <StudentRuntimeProvider
+            state={mockExamState}
+            onExit={() => undefined}
+            runtimeBacked
+            runtimeSnapshot={pausedRuntime}
+            attemptSnapshot={attemptSnapshot}
+          >
+            <TimerProbe />
+          </StudentRuntimeProvider>,
+        );
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('0');
+      act(() => {
+        vi.advanceTimersByTime(3_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('0');
+
+      // Resume delivers a verified new authoritative deadline: the timer must
+      // unlock, the zero latch must clear, and the countdown must tick again.
+      act(() => {
+        rerender(
+          <StudentRuntimeProvider
+            state={mockExamState}
+            onExit={() => undefined}
+            runtimeBacked
+            runtimeSnapshot={resumedRuntime}
+            attemptSnapshot={attemptSnapshot}
+          >
+            <TimerProbe />
+          </StudentRuntimeProvider>,
+        );
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('5');
+      expect(screen.getByTestId('locked')).toHaveTextContent('false');
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('4');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects an unverified later deadline after a proctor pause resumes (release gate holds)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    try {
+      const runtimeSnapshot = {
+        ...createRuntimeSnapshot('writing'),
+        currentSectionRemainingSeconds: 10,
+        currentSectionDeadlineAt: '2026-01-01T00:00:10.000Z',
+        serverNow: '2026-01-01T00:00:00.000Z',
+      };
+      const pausedAttempt = {
+        ...buildCompletedPreCheckAttempt(),
+        phase: 'exam' as const,
+        currentModule: 'writing' as const,
+        currentQuestionId: 'task1',
+        proctorStatus: 'paused' as const,
+      };
+      // The individual proctor pause does not move the cohort deadline: the
+      // resume snapshot's later deadline is unverified (same section, same
+      // extension, same paused accumulation) and must not apply.
+      const laterDeadlineRuntime = {
+        ...runtimeSnapshot,
+        currentSectionRemainingSeconds: 20,
+        currentSectionDeadlineAt: '2026-01-01T00:00:20.000Z',
+        serverNow: '2026-01-01T00:00:05.000Z',
+      };
+
+      function DisplayProbe() {
+        const { state } = useStudentRuntime();
+        return <div data-testid="remaining">{state.displayTimeRemaining}</div>;
+      }
+
+      const { rerender } = render(
+        <StudentRuntimeProvider
+          state={mockExamState}
+          onExit={() => undefined}
+          runtimeBacked
+          runtimeSnapshot={runtimeSnapshot}
+          attemptSnapshot={pausedAttempt}
+        >
+          <DisplayProbe />
+        </StudentRuntimeProvider>,
+      );
+
+      expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(screen.getByTestId('remaining')).toHaveTextContent('10');
+
+      act(() => {
+        rerender(
+          <StudentRuntimeProvider
+            state={mockExamState}
+            onExit={() => undefined}
+            runtimeBacked
+            runtimeSnapshot={laterDeadlineRuntime}
+            attemptSnapshot={{
+              ...pausedAttempt,
+              proctorStatus: 'active',
+            }}
+          >
+            <DisplayProbe />
+          </StudentRuntimeProvider>,
+        );
+      });
+
+      // Still anchored to the verified 10s deadline: 5s left at t=5, not 15.
+      expect(screen.getByTestId('remaining')).toHaveTextContent('5');
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+      // The countdown follows the OLD deadline and exhausts at t=10.
+      expect(screen.getByTestId('remaining')).toHaveTextContent('0');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -42,7 +42,25 @@ const attempt = {
   proctorUpdatedBy: null,
   lastWarningId: null,
   lastAcknowledgedWarningId: null,
-  integrity: { preCheck: null, deviceFingerprintHash: null, lastDisconnectAt: null, lastReconnectAt: null, lastHeartbeatAt: null, lastHeartbeatStatus: 'idle' },
+  // The pre-check must be completed for a runtime-backed attempt to boot
+  // straight into the exam phase (FEX-010); without it the provider stays on
+  // the briefing and the timer display never renders.
+  integrity: {
+    preCheck: {
+      completedAt: '2026-01-01T00:00:00.000Z',
+      browserFamily: 'chrome',
+      browserVersion: 124,
+      screenDetailsSupported: true,
+      heartbeatReady: true,
+      acknowledgedSafariLimitation: false,
+      checks: [],
+    },
+    deviceFingerprintHash: null,
+    lastDisconnectAt: null,
+    lastReconnectAt: null,
+    lastHeartbeatAt: null,
+    lastHeartbeatStatus: 'idle',
+  },
   recovery: { lastRecoveredAt: null, lastLocalMutationAt: null, lastPersistedAt: null, lastDroppedMutations: null, pendingMutationCount: 0, serverAcceptedThroughSeq: 0, clientSessionId: null, syncState: 'saved' },
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',

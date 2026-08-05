@@ -1468,3 +1468,85 @@ and once `exam`, only a verified terminal state (`post-exam`) may move the stude
 survives stale nonterminal snapshots and attempt re-hydration. A pending pre-check permanently
 stays on the briefing regardless of how `live` the runtime is until `preCheck.completedAt` is
 authoritative. "Saved/verified" UI must never be shown off unverified runtime structure.
+
+---
+
+## 2026-08-06: Paused Exam Countdown Kept Draining and the Zero Latch Survived a Verified Deadline (FEX-011, F-3)
+
+### Symptom
+While a student's exam was paused, the visible countdown kept decreasing toward the old
+deadline (local drift). For a proctor pause — the attempt reports `proctorStatus: 'paused'`
+while the cohort runtime snapshot still reports `live` — the display drained to 0
+mid-pause and latched at 0. After a resume whose new authoritative deadline was verified by
+the paused-time accumulation (cohort pause, BEX-021), the display stayed at 0 and answers
+stayed locked: the new deadline never reached the UI. A student whose exam was paused at the
+moment the deadline expired permanently lost the extended time on resume.
+
+### Scope
+`src/components/student/providers/StudentRuntimeProvider.tsx` — the runtime-backed display
+derivation (`resolveRuntimeDisplayRemainingSeconds`), the timer identity
+(`buildRuntimeTimerIdentity`), and the monotonic display guard / zero latch that key off that
+identity. No other modules were affected.
+
+### Root Cause
+1. The deadline-derived countdown had no pause gate: `resolveRuntimeDisplayRemainingSeconds`
+   computed `deadline − now` whenever the runtime snapshot was `live` and the section was
+   `live`/unpaused, even while a proctor pause was in effect (the cohort runtime stays `live`
+   during an individual proctor pause, so no runtime signal flagged it). A runtime-status
+   pause already froze correctly (the paused projection has no live deadline and the function
+   falls back to the frozen server remaining) — only the proctor-pause signal was missing.
+2. The timer identity (`sectionKey:extensionMinutes`) does not change across a pause → resume
+   (the backend never touches `extensionMinutes` for a pause; it extends the deadline via
+   `accumulatedPausedSeconds`/`totalPausedSeconds`). So after a verified resume the monotonic
+   `Math.min` guard clamped the display to the pre-resume value (0) and the zero latch
+   (`localZeroTimerIdentityRef`) never cleared — the timer stayed locked even though the
+   server had legitimately extended the deadline.
+
+### Fix
+- `resolveRuntimeDisplayRemainingSeconds` accepts a `paused` flag; while a pause is in effect
+  (`proctor_paused` or `cohort_paused` blocking reason) it returns the frozen server remaining
+  instead of draining toward the old deadline. The flag is derived from the single source of
+  truth for pause state (`blocking.reason`), so individual proctor pauses, cohort pauses, and
+  blocking-machine-driven pauses all freeze the countdown.
+- `buildRuntimeTimerIdentity` now includes the active section's `accumulatedPausedSeconds`.
+  Resume bumps it server-side (BEX-021), so the identity changes exactly when a verified new
+  authoritative deadline re-anchors the timer: the monotonic display guard resets and the
+  zero latch clears, letting the countdown unlock and tick from the extended deadline. The
+  release gate is untouched: an unverified later deadline (same section, same extension, same
+  paused accumulation) still cannot apply.
+- Metrics note: during a proctor pause the display holds while the observability loop keeps
+  re-baselining the draining deadline math, so `student_timer_tick_expected_total` is
+  suppressed for the pause duration — a metrics-contract nuance for SLO owners. The stall
+  detector never fires off the frozen display (it compares observations to expectations, both
+  of which stay aligned during the pause).
+
+### Regression Protection
+- Tests: `src/components/student/providers/__tests__/StudentRuntimeProvider.test.tsx`:
+  - "holds the countdown steady during a proctor pause while the runtime stays live"
+  - "holds the countdown steady while the runtime itself is paused"
+  - "re-anchors the countdown to the new authoritative deadline after a cohort pause and resume"
+  - "unlocks the timer and ticks again from the extended deadline when a resume follows a
+    pause that froze the countdown at zero"
+  - "rejects an unverified later deadline after a proctor pause resumes (release gate holds)"
+  - "freezes the countdown at the pause-instant value across a live→paused transition (and
+    across a snapshot refresh during the pause)"
+  - "continues the countdown from the server deadline after a fresh mid-exam mount (reload)"
+  - Fixture fix in `timerReleaseGate.test.tsx` (synthetic attempt now completes its pre-check):
+    before it the tests booted to the pre-check phase and rendered an empty timer, so their
+    text assertions failed on the clean tree (`''.includes('8')` is false in jest-dom, it
+    does not pass vacuously). With the repair they boot into the exam phase and genuinely
+    pin the release gate (pre-existing defect, failing at HEAD).
+- Rules/Docs updated: this file; `StudentRuntimeProvider.tsx` comments.
+
+### Invariant
+While a pause is in effect the client countdown must never drain toward the old deadline.
+Two pause kinds are intentional and distinct: a **cohort** pause freezes the deadline
+server-side (BEX-021 — deadline null, remaining frozen, resume bumps the section's
+`accumulatedPausedSeconds` and re-issues a later deadline), so the display holds the frozen
+server value until the new authoritative deadline; an **individual proctor** pause does NOT
+freeze the deadline server-side, so the client holds the pause-instant value (answers locked
+throughout) and the display catches down on resume — no extra time ever accrues, and an
+unverified later deadline is still rejected by the release gate. Only a verified new
+authoritative deadline (a resume re-anchor, or a granted extension) may move the displayed
+remaining time. The zero latch and monotonic display guard must never survive a verified
+resume.

@@ -312,7 +312,13 @@ function buildRuntimeTimerIdentity(runtime: ExamSessionRuntime | null): string |
     return null;
   }
 
-  return `${runtime.currentSectionKey}:${getRuntimeExtensionMinutes(runtime)}`;
+  // The active section's paused-time accumulation is part of the identity:
+  // resume bumps it server-side (BEX-021), so the monotonic display guard and
+  // the zero latch reset exactly when a verified new authoritative deadline
+  // re-anchors the timer (FEX-011).
+  const activeSection = getActiveRuntimeSection(runtime);
+  const accumulatedPausedSeconds = activeSection?.accumulatedPausedSeconds;
+  return `${runtime.currentSectionKey}:${getRuntimeExtensionMinutes(runtime)}:${Number.isFinite(accumulatedPausedSeconds) ? accumulatedPausedSeconds : 0}`;
 }
 
 function parseRuntimeDeadlineMs(runtime: ExamSessionRuntime | null): number | null {
@@ -398,6 +404,7 @@ function resolveRuntimeDisplayRemainingSeconds(options: {
   clockOffsetMs: number;
   nowMs: number;
   authoritativeDeadlineMs: number | null;
+  paused: boolean;
 }): number | null {
   if (!options.runtimeBacked || options.phase !== 'exam') {
     return null;
@@ -410,6 +417,14 @@ function resolveRuntimeDisplayRemainingSeconds(options: {
 
   const activeSection = getActiveRuntimeSection(runtime);
   if (!activeSection || activeSection.status !== 'live' || activeSection.pausedAt) {
+    return options.fallbackSeconds;
+  }
+
+  // FEX-011: while a pause is in effect the deadline is frozen server-side
+  // (BEX-021). The local countdown must not keep draining toward the old
+  // deadline: hold the frozen server remaining until resume delivers a new
+  // authoritative deadline.
+  if (options.paused) {
     return options.fallbackSeconds;
   }
 
@@ -1677,6 +1692,8 @@ export function StudentRuntimeProvider({
     ],
   );
   const runtimeStatus = runtimeBacked ? runtimeSnapshot?.status ?? 'not_started' : null;
+  const timerFrozenByPause =
+    blocking.reason === 'proctor_paused' || blocking.reason === 'cohort_paused';
   const resolvedDisplayTimeRemaining = runtimeState.phase === 'exam'
     ? runtimeBacked
       ? resolveRuntimeDisplayRemainingSeconds({
@@ -1687,6 +1704,7 @@ export function StudentRuntimeProvider({
           clockOffsetMs,
           nowMs: derivedClockNowMs,
           authoritativeDeadlineMs: runtimeTimerDeadlineMs,
+          paused: timerFrozenByPause,
         }) ?? runtimeState.timeRemaining
       : runtimeState.timeRemaining
     : undefined;
