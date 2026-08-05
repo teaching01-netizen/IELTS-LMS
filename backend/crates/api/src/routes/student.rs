@@ -872,7 +872,7 @@ pub async fn record_heartbeat(
     let event_type = req.event_type.clone();
     let ack_only = event_type == HeartbeatEventType::Heartbeat
         && query.response_mode != Some(HeartbeatResponseMode::Full);
-    let attempt = service.record_heartbeat(schedule_id, req).await?;
+    let (attempt, network_event_recorded) = service.record_heartbeat(schedule_id, req).await?;
     let runtime = if query.response_mode == Some(HeartbeatResponseMode::Full) {
         service
             .get_live_session_context(schedule_id, None, None, None)
@@ -885,7 +885,7 @@ pub async fn record_heartbeat(
     state
         .telemetry
         .observe_db_operation("delivery.record_heartbeat", started.elapsed());
-    if event_type != HeartbeatEventType::Heartbeat {
+    if event_type != HeartbeatEventType::Heartbeat && network_event_recorded {
         let event = match event_type {
             HeartbeatEventType::Disconnect => "network_disconnected",
             HeartbeatEventType::Reconnect => "network_reconnected",
@@ -956,6 +956,8 @@ pub async fn record_audit(
 
     let candidate_name = load_attempt_candidate_name(&state, &attempt_id).await?;
 
+    let is_violation_detected = matches!(req.action_type, AuditActionType::ViolationDetected);
+
     let client_timestamp = req.client_timestamp.clone();
 
     let mut payload_map = serde_json::Map::new();
@@ -1004,7 +1006,8 @@ pub async fn record_audit(
     .await
     .map_err(map_db_error)?;
 
-    if matches!(req.action_type, AuditActionType::ViolationDetected) {
+    let mut violation_recorded = false;
+    if is_violation_detected {
         let violation_id = violation_business_id_from_payload(&payload_value)?;
         let violation_type = payload_value
             .get("violationType")
@@ -1027,11 +1030,10 @@ pub async fn record_audit(
                 let event_id = Uuid::new_v4();
                 let insert_result = sqlx::query(
                     r#"
-                    INSERT INTO student_violation_events (
+                    INSERT IGNORE INTO student_violation_events (
                         id, schedule_id, attempt_id, violation_id, violation_type, severity, description, payload, created_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
-                    ON DUPLICATE KEY UPDATE id = id
                     "#,
                 )
                 .bind(event_id.to_string())
@@ -1047,6 +1049,7 @@ pub async fn record_audit(
                 .map_err(map_db_error)?;
 
                 if insert_result.rows_affected() == 1 {
+                    violation_recorded = true;
                     let violation_json = json!({
                         "id": violation_id,
                         "type": violation_type,
@@ -1088,7 +1091,16 @@ pub async fn record_audit(
             | "STUDENT_TERMINATE"
             | "VIOLATION_DETECTED"
     );
-    if publish_alert {
+    // VIOLATION_DETECTED alerts announce a newly recorded violation row: a
+    // retried delivery carrying the same violationId must not re-alert
+    // proctors, and an unrecorded violation (invalid or absent severity) must
+    // not alert at all (BEX-052).
+    let publish = if is_violation_detected {
+        violation_recorded
+    } else {
+        publish_alert
+    };
+    if publish {
         state.publish_live_update(ielts_backend_domain::schedule::LiveUpdateEvent {
             kind: "schedule_alert".to_owned(),
             id: schedule_id.to_string(),

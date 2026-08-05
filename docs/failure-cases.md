@@ -1086,3 +1086,30 @@ All pinned in `bex040_reconnect_replay_chunked_batches_apply_in_order_without_lo
 
 ### Invariant
 Student-visible saved state (answers, revision, watermark) must match persisted reality; accepted mutations are never replayed twice nor lost across chunking/crash; expected transition conflicts always surface a structured 409 reason, never a generic failure, and never partial state.
+
+## 2026-08-05: Heartbeat Acknowledgement, Network Transition Idempotency, Violation Identity (BEX-050/051/052)
+
+### Behavior (documented contract, verified)
+All pinned in `bex050_ack_heartbeat_returns_no_attempt_and_preserves_revision_and_answers`,
+`bex050_full_heartbeat_returns_attempt_and_runtime_hydration`,
+`bex050_heartbeat_returns_refreshed_credential_when_near_expiry`,
+`bex051_network_transitions_update_integrity_and_are_idempotent_under_retry`,
+`bex052_violation_delivery_is_idempotent_with_single_alert`,
+`bex052_invalid_severity_is_ignored_and_blank_violation_id_is_rejected`, and
+`bex052_student_cannot_forge_another_attempt_violation`:
+
+1. **Heartbeats never touch revision or answers.** `update_attempt_heartbeat` writes ONLY integrity fields (`lastHeartbeatAt`, `lastHeartbeatStatus`, `lastDisconnectAt` for Disconnect|Lost, `lastReconnectAt` for Reconnect, `clientSessionId`) + `updated_at`, and the presence row UPSERT (COALESCE keeps the FIRST disconnect/reconnect timestamp). Plain Heartbeat events produce no audit row, no event row, no live alert; the `student_attempt_presence.last_heartbeat_status` still goes `ok`.
+2. **Ack vs full response shape.** `?responseMode` absent (or `ack`) on a Heartbeat → both `attempt` and `runtime` fields are OMITTED from the response (`skip_serializing_if`, so assert with `.get(...).is_none()`, not `is_null()`). `?responseMode=full` → `attempt` hydrated + `runtime` hydrated via `get_live_session_context` (runtime.currentSectionKey equals the persisted `exam_session_runtimes.current_section_key`; requires a real runtime row — `SchedulingService::apply_runtime_command(StartRuntime)` as in bex041). Disconnect/Reconnect/Lost ALWAYS return the attempt (never ack), but still omit `runtime` unless `?responseMode=full`.
+3. **Credential refresh keys on the signed claims `exp`, not the DB row.** `maybe_refresh_attempt_token` refreshes when claims exp is <= 5 minutes out; the refreshed token rotates (`refreshedAttemptCredential.attemptToken != old`), authorizes follow-up requests, and a fresh token yields `refreshedAttemptCredential: null`. Craft near-expiry tokens by re-signing the bootstrap session's `token_id`/`user_id` with a short `exp` (attempt_sessions row keeps its original `expires_at`).
+4. **Network transitions produce exactly one logical event.** Each Disconnect/Reconnect/Lost: one `session_audit_logs` row (NETWORK_DISCONNECTED/NETWORK_RECONNECTED/HEARTBEAT_LOST; payload `{eventType, clientTimestamp, payload}`), one `student_heartbeat_events` row, and one `schedule_alert` live update (`network_disconnected`/`network_reconnected`/`heartbeat_lost`). Retry with the identical `(event_type, client_timestamp)` creates NO second row and NO second alert — the route-level publish is gated on the delivery being newly recorded.
+5. **Production fix (BEX-051 idempotency):** `student_heartbeat_events` now has a unique index `uq_student_heartbeat_attempt_event_client_ts (attempt_id, event_type, client_timestamp)` (migration `0031_heartbeat_events_idempotency.sql`, which also widens `client_timestamp` to `TIMESTAMP(6) NOT NULL` — safe because the request type makes it non-optional). The insert uses `INSERT IGNORE` and the audit row + live alert fire only when `rows_affected == 1`. **TiDB quirk:** `ON DUPLICATE KEY UPDATE id = id` reports `rows_affected = 1` for a no-change duplicate update, which would defeat gating; `INSERT IGNORE` reports 0 for an ignored duplicate. **Caveat:** `INSERT IGNORE` also swallows non-duplicate insert errors (e.g., an out-of-range timestamp) — the event row, audit row, and alert are all skipped silently while integrity/presence still update; no failure is surfaced anywhere.
+6. **Violation identity (BEX-052).** Same `violationId` delivered twice → one `student_violation_events` row, one `violations_snapshot` entry, `revision + 1` total, ONE `schedule_alert` live update; the append-only audit log records each delivery (2 rows — a retry is itself an auditable event). A distinct `violationId` → second record, second snapshot entry, `revision + 1` again, second alert.
+7. **Production fix (BEX-052 duplicate alert):** violation insert switched to `INSERT IGNORE` (same TiDB quirk as above); the snapshot merge + revision bump were already gated on `rows_affected == 1`, and the `VIOLATION_DETECTED` alert is now gated on the violation being newly recorded. Side effect pinned by test: a VIOLATION_DETECTED with invalid severity no longer publishes an alert at all (an unrecorded violation must not alert).
+8. **Invalid severity is silently ignored:** response 200, audit row appended, but no violation record, no snapshot change, no revision bump, no alert. **Blank/missing `violationId` → 422 `VALIDATION_ERROR` and the whole audit write rolls back** (transaction).
+9. **Anti-forgery:** the violation `attempt_id` comes from the attempt-token claims, never the body. A credential for schedule A posting to schedule B's `/audit` path → 403 `FORBIDDEN`; a body claiming another attempt's id is ignored and the violation lands on the caller's attempt.
+
+### Regression Protection
+- Tests: `backend/tests/contracts/student_contract.rs` (`bex050_*`, `bex051_*`, `bex052_*`); migrations `0031_heartbeat_events_idempotency.sql`.
+
+### Invariant
+One logical audit/live event per network transition and per newly recorded violation — retries must never duplicate rows, snapshot entries, revision bumps, or proctor alerts; heartbeat traffic must never advance the answer revision; violation identity and attribution come from the authenticated principal, not the payload.

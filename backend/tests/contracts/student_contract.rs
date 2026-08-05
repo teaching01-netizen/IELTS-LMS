@@ -65,6 +65,7 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
     "0028_grading_objective_grading_source.sql",
     "0029_release_events_timestamp_precision.sql",
     "0030_outbox_retry_policy.sql",
+    "0031_heartbeat_events_idempotency.sql",
 ];
 
 fn command(mutation_type: MutationType, payload: serde_json::Value) -> MutationCommand {
@@ -7963,6 +7964,920 @@ async fn bex042_crash_recovery_returns_attempt_and_continues_from_watermark() {
     let answers = persisted_answers(database.pool(), &attempt_id).await;
     assert_eq!(answers["q1"], "F", "latest seq wins after recovery");
     assert_eq!(answers["l-short-1"], "diagram");
+
+    database.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// BEX-050 / BEX-051 / BEX-052 — heartbeat acknowledgement, network
+// transition idempotency, violation identity (contract tests)
+// ---------------------------------------------------------------------------
+
+async fn post_heartbeat_json(
+    app: &axum::Router,
+    attempt_token: &str,
+    schedule_id: Uuid,
+    query: &str,
+    req: &StudentHeartbeatRequest,
+) -> (StatusCode, serde_json::Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{}/heartbeat{}",
+                    schedule_id, query
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(req).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let json = json_body(response).await;
+    (status, json)
+}
+
+async fn post_audit_json(
+    app: &axum::Router,
+    attempt_token: &str,
+    schedule_id: Uuid,
+    req: &StudentAuditLogRequest,
+) -> (StatusCode, serde_json::Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), attempt_token)
+                .method("POST")
+                .uri(format!("/api/v1/student/sessions/{}/audit", schedule_id))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(req).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let json = json_body(response).await;
+    (status, json)
+}
+
+// Drains the live-update channel and returns how many schedule_alert events
+// with the given schedule id and event name are queued. The test subscribes
+// before the request, so every matching event must have been published by
+// that request.
+fn live_alert_count(
+    rx: &mut tokio::sync::broadcast::Receiver<ielts_backend_domain::schedule::LiveUpdateEvent>,
+    schedule_id: &str,
+    event: &str,
+) -> i64 {
+    let mut count = 0i64;
+    loop {
+        match rx.try_recv() {
+            Ok(update) => {
+                if update.kind == "schedule_alert"
+                    && update.id == schedule_id
+                    && update.event == event
+                {
+                    count += 1;
+                }
+            }
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+            | Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
+                panic!("live update channel lagged; alert assertions are unreliable")
+            }
+        }
+    }
+    count
+}
+
+async fn persisted_integrity(pool: &sqlx::MySqlPool, attempt_id: &str) -> serde_json::Value {
+    sqlx::query_scalar("SELECT integrity FROM student_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn persisted_audit_count(pool: &sqlx::MySqlPool, attempt_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM session_audit_logs WHERE target_student_id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn persisted_audit_by_action(
+    pool: &sqlx::MySqlPool,
+    attempt_id: &str,
+    action: &str,
+) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE target_student_id = ? AND action_type = ?",
+    )
+    .bind(attempt_id)
+    .bind(action)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn persisted_heartbeat_event_count(pool: &sqlx::MySqlPool, attempt_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM student_heartbeat_events WHERE attempt_id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn persisted_violation_count(pool: &sqlx::MySqlPool, attempt_id: &str) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM student_violation_events WHERE attempt_id = ?")
+        .bind(attempt_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn persisted_violation_snapshot_length(pool: &sqlx::MySqlPool, attempt_id: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT JSON_LENGTH(COALESCE(violations_snapshot, JSON_ARRAY())) FROM student_attempts WHERE id = ?",
+    )
+    .bind(attempt_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn persisted_violations_snapshot(
+    pool: &sqlx::MySqlPool,
+    attempt_id: &str,
+) -> serde_json::Value {
+    sqlx::query_scalar(
+        "SELECT COALESCE(violations_snapshot, JSON_ARRAY()) FROM student_attempts WHERE id = ?",
+    )
+    .bind(attempt_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn persisted_presence_status(pool: &sqlx::MySqlPool, attempt_id: &str) -> String {
+    sqlx::query_scalar(
+        "SELECT last_heartbeat_status FROM student_attempt_presence WHERE attempt_id = ?",
+    )
+    .bind(attempt_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+// (last_disconnect_at, last_reconnect_at) as strings; NULL stays NULL.
+async fn persisted_presence_transition_times(
+    pool: &sqlx::MySqlPool,
+    attempt_id: &str,
+) -> (Option<String>, Option<String>) {
+    sqlx::query_as(
+        "SELECT DATE_FORMAT(last_disconnect_at, '%Y-%m-%dT%H:%i:%sZ'), DATE_FORMAT(last_reconnect_at, '%Y-%m-%dT%H:%i:%sZ') FROM student_attempt_presence WHERE attempt_id = ?",
+    )
+    .bind(attempt_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn persisted_current_section_key(pool: &sqlx::MySqlPool, schedule_id: Uuid) -> String {
+    sqlx::query_scalar(
+        "SELECT current_section_key FROM exam_session_runtimes WHERE schedule_id = ?",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn bex050_ack_heartbeat_returns_no_attempt_and_preserves_revision_and_answers() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let state = AppState::with_pool(AppConfig::default(), database.pool().clone());
+    let mut live_rx = state.live_updates.subscribe_all();
+    let app = build_router(state);
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let revision_before = persisted_revision(database.pool(), &attempt_id).await;
+    let answers_before = persisted_answers(database.pool(), &attempt_id).await;
+    let audit_before = persisted_audit_count(database.pool(), &attempt_id).await;
+    let events_before = persisted_heartbeat_event_count(database.pool(), &attempt_id).await;
+
+    // No responseMode: acknowledgement-only heartbeat.
+    let (status, json) = post_heartbeat_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        "",
+        &StudentHeartbeatRequest {
+            attempt_id: Some(attempt_id.clone()),
+            student_key: student_key.clone(),
+            client_session_id: client_session_id.clone(),
+            event_type: HeartbeatEventType::Heartbeat,
+            payload: Some(json!({"seq": 1})),
+            client_timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 10, 0).unwrap(),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    // Acknowledgement-only: neither attempt nor runtime hydration.
+    assert!(json["data"].get("attempt").is_none(), "{json}");
+    assert!(json["data"].get("runtime").is_none(), "{json}");
+    // Fresh credential: the bootstrap token is not near expiry.
+    assert!(json["data"]["refreshedAttemptCredential"].is_null(), "{json}");
+
+    // Revision, answers, audit trail and event log are untouched.
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before
+    );
+    assert_eq!(persisted_answers(database.pool(), &attempt_id).await, answers_before);
+    assert_eq!(persisted_audit_count(database.pool(), &attempt_id).await, audit_before);
+    assert_eq!(
+        persisted_heartbeat_event_count(database.pool(), &attempt_id).await,
+        events_before
+    );
+    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "student_network"), 0);
+
+    // Integrity still records the liveness signal.
+    let integrity = persisted_integrity(database.pool(), &attempt_id).await;
+    assert_eq!(integrity["lastHeartbeatStatus"], "ok");
+    assert_ne!(integrity["lastHeartbeatAt"], serde_json::Value::Null);
+    assert_eq!(persisted_presence_status(database.pool(), &attempt_id).await, "ok");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn bex050_full_heartbeat_returns_attempt_and_runtime_hydration() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let revision_before = persisted_revision(database.pool(), &attempt_id).await;
+    let answers_before = persisted_answers(database.pool(), &attempt_id).await;
+
+    // A real runtime row (SchedulingService, as in bex041) is required for
+    // the runtime hydration branch.
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &contract_actor(),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("bex050 runtime start".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+    let (status, json) = post_heartbeat_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        "?responseMode=full",
+        &StudentHeartbeatRequest {
+            attempt_id: Some(attempt_id.clone()),
+            student_key: student_key.clone(),
+            client_session_id,
+            event_type: HeartbeatEventType::Heartbeat,
+            payload: None,
+            client_timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 10, 5).unwrap(),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let data = &json["data"];
+    assert!(data["attempt"].is_object(), "full mode hydrates the attempt: {json}");
+    assert_eq!(data["attempt"]["revision"].as_i64(), Some(revision_before));
+    assert!(data["runtime"].is_object(), "full mode hydrates the runtime: {json}");
+    let db_section = persisted_current_section_key(database.pool(), schedule_id).await;
+    assert_eq!(
+        data["runtime"]["currentSectionKey"].as_str(),
+        Some(db_section.as_str()),
+        "runtime hydration must reflect the persisted runtime: {json}"
+    );
+    assert_eq!(data["runtime"]["status"], "live");
+
+    // Full mode still never touches revision or answers.
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before
+    );
+    assert_eq!(persisted_answers(database.pool(), &attempt_id).await, answers_before);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn bex050_heartbeat_returns_refreshed_credential_when_near_expiry() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // The refresh decision keys on the SIGNED claims exp (<= 5 minutes to
+    // expiry), not on the DB row. Craft a token over the bootstrap attempt
+    // session that expires in 3 minutes; the session row keeps its original
+    // unexpired expires_at so authorization still passes.
+    let (token_id, user_id): (String, String) = sqlx::query_as(
+        "SELECT token_id, user_id FROM attempt_sessions WHERE attempt_id = ? AND client_session_id = ?",
+    )
+    .bind(&attempt_id)
+    .bind(&client_session_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let near_expiry_token = sign_attempt_token(
+        &AppConfig::default(),
+        &AttemptTokenClaims {
+            token_id,
+            user_id,
+            schedule_id: schedule_id.to_string(),
+            attempt_id: attempt_id.clone(),
+            client_session_id: client_session_id.clone(),
+            exp: Utc::now() + Duration::minutes(3),
+        },
+    );
+
+    let (status, json) = post_heartbeat_json(
+        &app,
+        &near_expiry_token,
+        schedule_id,
+        "",
+        &StudentHeartbeatRequest {
+            attempt_id: Some(attempt_id.clone()),
+            student_key: student_key.clone(),
+            client_session_id: client_session_id.clone(),
+            event_type: HeartbeatEventType::Heartbeat,
+            payload: None,
+            client_timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 11, 0).unwrap(),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let refreshed = json["data"]["refreshedAttemptCredential"].clone();
+    assert!(refreshed.is_object(), "near-expiry token must be refreshed: {json}");
+    let refreshed_token = refreshed["attemptToken"].as_str().unwrap().to_owned();
+    assert_ne!(refreshed_token, near_expiry_token, "refresh must rotate the token");
+
+    // The refreshed credential authorizes a follow-up request...
+    let (status, json) = post_heartbeat_json(
+        &app,
+        &refreshed_token,
+        schedule_id,
+        "",
+        &StudentHeartbeatRequest {
+            attempt_id: Some(attempt_id.clone()),
+            student_key: student_key.clone(),
+            client_session_id: client_session_id.clone(),
+            event_type: HeartbeatEventType::Heartbeat,
+            payload: None,
+            client_timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 11, 5).unwrap(),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    // ...and is not immediately refreshed again (fresh exp).
+    assert!(json["data"]["refreshedAttemptCredential"].is_null(), "{json}");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn bex051_network_transitions_update_integrity_and_are_idempotent_under_retry() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let state = AppState::with_pool(AppConfig::default(), database.pool().clone());
+    let mut live_rx = state.live_updates.subscribe_all();
+    let app = build_router(state);
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let revision_before = persisted_revision(database.pool(), &attempt_id).await;
+    let answers_before = persisted_answers(database.pool(), &attempt_id).await;
+    let audit_before = persisted_audit_count(database.pool(), &attempt_id).await;
+
+    let disconnect_ts = Utc.with_ymd_and_hms(2026, 1, 10, 9, 12, 0).unwrap();
+    let reconnect_ts = Utc.with_ymd_and_hms(2026, 1, 10, 9, 12, 30).unwrap();
+    let lost_ts = Utc.with_ymd_and_hms(2026, 1, 10, 9, 13, 0).unwrap();
+    let payload = json!({"source": "browser"});
+
+    // ---- Disconnect: integrity lost + audit + event + alert, no revision ----
+    let disconnect_request = StudentHeartbeatRequest {
+        attempt_id: Some(attempt_id.clone()),
+        student_key: student_key.clone(),
+        client_session_id: client_session_id.clone(),
+        event_type: HeartbeatEventType::Disconnect,
+        payload: Some(payload.clone()),
+        client_timestamp: disconnect_ts,
+    };
+    let (status, json) =
+        post_heartbeat_json(&app, &attempt_token, schedule_id, "", &disconnect_request).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        json["data"]["attempt"]["integrity"]["lastHeartbeatStatus"],
+        "lost"
+    );
+    assert_ne!(
+        json["data"]["attempt"]["integrity"]["lastDisconnectAt"],
+        serde_json::Value::Null
+    );
+    assert!(json["data"].get("runtime").is_none(), "{json}");
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before
+    );
+    assert_eq!(persisted_answers(database.pool(), &attempt_id).await, answers_before);
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "NETWORK_DISCONNECTED").await,
+        1
+    );
+    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 1);
+    assert_eq!(persisted_presence_status(database.pool(), &attempt_id).await, "lost");
+    let (last_disconnect_at, last_reconnect_at) =
+        persisted_presence_transition_times(database.pool(), &attempt_id).await;
+    assert!(last_disconnect_at.is_some());
+    assert!(last_reconnect_at.is_none());
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "network_disconnected"),
+        1
+    );
+
+    // ---- Disconnect retry (identical clientTimestamp): one logical event ----
+    let (status, json) =
+        post_heartbeat_json(&app, &attempt_token, schedule_id, "", &disconnect_request).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "NETWORK_DISCONNECTED").await,
+        1,
+        "retry must not create a second audit row"
+    );
+    assert_eq!(
+        persisted_heartbeat_event_count(database.pool(), &attempt_id).await,
+        1,
+        "retry must not create a second heartbeat event row"
+    );
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "network_disconnected"),
+        0,
+        "retry must not re-alert proctors"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before
+    );
+    assert_eq!(persisted_answers(database.pool(), &attempt_id).await, answers_before);
+
+    // ---- Reconnect: status ok, lastReconnectAt set, disconnect preserved ----
+    let reconnect_request = StudentHeartbeatRequest {
+        attempt_id: Some(attempt_id.clone()),
+        student_key: student_key.clone(),
+        client_session_id: client_session_id.clone(),
+        event_type: HeartbeatEventType::Reconnect,
+        payload: Some(payload.clone()),
+        client_timestamp: reconnect_ts,
+    };
+    let (status, json) =
+        post_heartbeat_json(&app, &attempt_token, schedule_id, "", &reconnect_request).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        json["data"]["attempt"]["integrity"]["lastHeartbeatStatus"],
+        "ok"
+    );
+    assert_ne!(
+        json["data"]["attempt"]["integrity"]["lastReconnectAt"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "NETWORK_RECONNECTED").await,
+        1
+    );
+    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 2);
+    assert_eq!(persisted_presence_status(database.pool(), &attempt_id).await, "ok");
+    let (last_disconnect_at, last_reconnect_at) =
+        persisted_presence_transition_times(database.pool(), &attempt_id).await;
+    assert!(
+        last_disconnect_at.is_some(),
+        "reconnect must not clobber lastDisconnectAt (COALESCE first-wins)"
+    );
+    assert!(last_reconnect_at.is_some());
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "network_reconnected"),
+        1
+    );
+
+    // ---- Reconnect retry: still one logical event ----
+    let (status, json) =
+        post_heartbeat_json(&app, &attempt_token, schedule_id, "", &reconnect_request).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "NETWORK_RECONNECTED").await,
+        1
+    );
+    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 2);
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "network_reconnected"),
+        0
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before
+    );
+
+    // ---- Lost: status lost + lastDisconnectAt, HEARTBEAT_LOST audit ----
+    let lost_request = StudentHeartbeatRequest {
+        attempt_id: Some(attempt_id.clone()),
+        student_key: student_key.clone(),
+        client_session_id: client_session_id.clone(),
+        event_type: HeartbeatEventType::Lost,
+        payload: Some(payload.clone()),
+        client_timestamp: lost_ts,
+    };
+    let (status, json) =
+        post_heartbeat_json(&app, &attempt_token, schedule_id, "", &lost_request).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        json["data"]["attempt"]["integrity"]["lastHeartbeatStatus"],
+        "lost"
+    );
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "HEARTBEAT_LOST").await,
+        1
+    );
+    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 3);
+    assert_eq!(persisted_presence_status(database.pool(), &attempt_id).await, "lost");
+    let (last_disconnect_at, _) =
+        persisted_presence_transition_times(database.pool(), &attempt_id).await;
+    assert!(last_disconnect_at.is_some());
+    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "heartbeat_lost"), 1);
+
+    // ---- Lost retry: still one logical event ----
+    let (status, json) =
+        post_heartbeat_json(&app, &attempt_token, schedule_id, "", &lost_request).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        persisted_audit_by_action(database.pool(), &attempt_id, "HEARTBEAT_LOST").await,
+        1
+    );
+    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 3);
+    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "heartbeat_lost"), 0);
+
+    // Totals: exactly one audit row and one event row per transition, and the
+    // attempt revision/answers were never touched.
+    assert_eq!(
+        persisted_audit_count(database.pool(), &attempt_id).await,
+        audit_before + 3
+    );
+    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 3);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before
+    );
+    assert_eq!(persisted_answers(database.pool(), &attempt_id).await, answers_before);
+
+    // The single NETWORK_DISCONNECTED audit row carries the transition metadata.
+    let audit_payload: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload FROM session_audit_logs WHERE target_student_id = ? AND action_type = 'NETWORK_DISCONNECTED' LIMIT 1",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audit_payload["eventType"], "disconnect");
+    assert_eq!(audit_payload["payload"]["source"], "browser");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn bex052_violation_delivery_is_idempotent_with_single_alert() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let state = AppState::with_pool(AppConfig::default(), database.pool().clone());
+    let mut live_rx = state.live_updates.subscribe_all();
+    let app = build_router(state);
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let revision_before = persisted_revision(database.pool(), &attempt_id).await;
+    let audit_before = persisted_audit_count(database.pool(), &attempt_id).await;
+    let ts = Utc.with_ymd_and_hms(2026, 1, 10, 9, 14, 0).unwrap();
+
+    let violation_request = StudentAuditLogRequest {
+        action_type: ielts_backend_domain::schedule::AuditActionType::ViolationDetected,
+        payload: Some(json!({
+            "event": "VIOLATION_DETECTED",
+            "violationId": "vio-bex052-1",
+            "violationType": "TAB_SWITCH",
+            "severity": "high",
+            "message": "Tab switching detected."
+        })),
+        client_timestamp: Some(ts),
+    };
+
+    // First delivery: one violation record, one snapshot entry, revision +1,
+    // one append-only audit row, one proctor alert.
+    let (status, json) = post_audit_json(&app, &attempt_token, schedule_id, &violation_request).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(persisted_violation_count(database.pool(), &attempt_id).await, 1);
+    assert_eq!(persisted_violation_snapshot_length(database.pool(), &attempt_id).await, 1);
+    let snapshot = persisted_violations_snapshot(database.pool(), &attempt_id).await;
+    assert_eq!(snapshot[0]["id"], "vio-bex052-1");
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before + 1
+    );
+    assert_eq!(
+        persisted_audit_count(database.pool(), &attempt_id).await,
+        audit_before + 1
+    );
+    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "alert_changed"), 1);
+
+    // Retry with the same violationId: no second violation record, no second
+    // snapshot entry, no revision bump, no second proctor alert. The audit
+    // log remains append-only (the retry is itself an auditable event).
+    let (status, json) = post_audit_json(&app, &attempt_token, schedule_id, &violation_request).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(persisted_violation_count(database.pool(), &attempt_id).await, 1);
+    assert_eq!(persisted_violation_snapshot_length(database.pool(), &attempt_id).await, 1);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before + 1,
+        "duplicate delivery must not bump the revision"
+    );
+    assert_eq!(
+        persisted_audit_count(database.pool(), &attempt_id).await,
+        audit_before + 2,
+        "audit trail is append-only per delivery"
+    );
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "alert_changed"),
+        0,
+        "duplicate delivery must not re-alert proctors"
+    );
+
+    // A distinct violationId creates a second record, a second snapshot
+    // entry, bumps the revision again and alerts once more.
+    let (status, json) = post_audit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &StudentAuditLogRequest {
+            action_type: ielts_backend_domain::schedule::AuditActionType::ViolationDetected,
+            payload: Some(json!({
+                "event": "VIOLATION_DETECTED",
+                "violationId": "vio-bex052-2",
+                "violationType": "FACE_LOOKAWAY",
+                "severity": "medium",
+                "message": "Face lookaway."
+            })),
+            client_timestamp: Some(ts),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(persisted_violation_count(database.pool(), &attempt_id).await, 2);
+    assert_eq!(persisted_violation_snapshot_length(database.pool(), &attempt_id).await, 2);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before + 2
+    );
+    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "alert_changed"), 1);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn bex052_invalid_severity_is_ignored_and_blank_violation_id_is_rejected() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let state = AppState::with_pool(AppConfig::default(), database.pool().clone());
+    let mut live_rx = state.live_updates.subscribe_all();
+    let app = build_router(state);
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let revision_before = persisted_revision(database.pool(), &attempt_id).await;
+    let audit_before = persisted_audit_count(database.pool(), &attempt_id).await;
+    let ts = Utc.with_ymd_and_hms(2026, 1, 10, 9, 14, 30).unwrap();
+
+    // Invalid severity: 200, audit row appended, but no violation record, no
+    // snapshot change, no revision bump, no alert.
+    let (status, json) = post_audit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &StudentAuditLogRequest {
+            action_type: ielts_backend_domain::schedule::AuditActionType::ViolationDetected,
+            payload: Some(json!({
+                "violationId": "vio-invalid-severity",
+                "violationType": "TAB_SWITCH",
+                "severity": "extreme",
+                "message": "Not in the allowlist."
+            })),
+            client_timestamp: Some(ts),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(persisted_violation_count(database.pool(), &attempt_id).await, 0);
+    assert_eq!(persisted_violation_snapshot_length(database.pool(), &attempt_id).await, 0);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before
+    );
+    assert_eq!(
+        persisted_audit_count(database.pool(), &attempt_id).await,
+        audit_before + 1,
+        "audit log records the delivery even when the violation is ignored"
+    );
+    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "alert_changed"), 0);
+
+    // Blank/missing violationId: 422, and the entire audit write rolls back.
+    let (status, json) = post_audit_json(
+        &app,
+        &attempt_token,
+        schedule_id,
+        &StudentAuditLogRequest {
+            action_type: ielts_backend_domain::schedule::AuditActionType::ViolationDetected,
+            payload: Some(json!({
+                "violationType": "TAB_SWITCH",
+                "severity": "high"
+            })),
+            client_timestamp: Some(ts),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
+    assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
+    assert_eq!(
+        persisted_audit_count(database.pool(), &attempt_id).await,
+        audit_before + 1,
+        "422 must roll back the audit append"
+    );
+    assert_eq!(persisted_violation_count(database.pool(), &attempt_id).await, 0);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision_before
+    );
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn bex052_student_cannot_forge_another_attempt_violation() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let other_schedule = seed_schedule_with_slug(
+        database.pool(),
+        "cambridge-19-academic-delivery-forgery",
+    )
+    .await;
+    let other_schedule_id = Uuid::parse_str(&other_schedule.id).unwrap();
+    let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let (bob_auth, bob_student_key) =
+        create_student_auth_with_wcode(database.pool(), schedule_id, "bob", "W000002").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _) = bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
+    let (bob_bootstrap, _) =
+        bootstrap_attempt(&app, &bob_auth, schedule_id, "bob", &bob_student_key).await;
+    let alice_attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let bob_attempt_id = bob_bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let alice_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let ts = Utc.with_ymd_and_hms(2026, 1, 10, 9, 15, 0).unwrap();
+
+    // Alice's credential cannot post to another schedule's audit path: the
+    // claims schedule_id must match the path.
+    let (status, json) = post_audit_json(
+        &app,
+        &alice_token,
+        other_schedule_id,
+        &StudentAuditLogRequest {
+            action_type: ielts_backend_domain::schedule::AuditActionType::ViolationDetected,
+            payload: Some(json!({
+                "violationId": "vio-cross-schedule",
+                "violationType": "TAB_SWITCH",
+                "severity": "high"
+            })),
+            client_timestamp: Some(ts),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{json}");
+    assert_eq!(json["error"]["code"], "FORBIDDEN");
+
+    // A body that claims Bob's attempt id is ignored: the violation is
+    // attributed to the caller's own attempt from the token claims.
+    let (status, json) = post_audit_json(
+        &app,
+        &alice_token,
+        schedule_id,
+        &StudentAuditLogRequest {
+            action_type: ielts_backend_domain::schedule::AuditActionType::ViolationDetected,
+            payload: Some(json!({
+                "violationId": "vio-forged",
+                "violationType": "TAB_SWITCH",
+                "severity": "high",
+                "attemptId": bob_attempt_id.clone()
+            })),
+            client_timestamp: Some(ts),
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    let attributed: String = sqlx::query_scalar(
+        "SELECT attempt_id FROM student_violation_events WHERE violation_id = 'vio-forged'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(attributed, alice_attempt_id, "violation must land on the caller's attempt");
+    assert_eq!(persisted_violation_count(database.pool(), &bob_attempt_id).await, 0);
+    assert_eq!(persisted_violation_count(database.pool(), &alice_attempt_id).await, 1);
 
     database.shutdown().await;
 }

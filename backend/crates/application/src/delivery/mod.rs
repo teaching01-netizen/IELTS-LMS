@@ -1091,7 +1091,7 @@ impl DeliveryService {
         &self,
         schedule_id: Uuid,
         req: StudentHeartbeatRequest,
-    ) -> Result<StudentAttempt, DeliveryError> {
+    ) -> Result<(StudentAttempt, bool), DeliveryError> {
         let attempt = if let Some(attempt_id) = req.attempt_id {
             self.load_attempt_by_id(attempt_id).await?
         } else {
@@ -1189,39 +1189,26 @@ impl DeliveryService {
         .execute(&self.pool)
         .await?;
 
-        if req.event_type != HeartbeatEventType::Heartbeat {
-            let action_type = match req.event_type {
-                HeartbeatEventType::Disconnect => "NETWORK_DISCONNECTED",
-                HeartbeatEventType::Reconnect => "NETWORK_RECONNECTED",
-                HeartbeatEventType::Lost => "HEARTBEAT_LOST",
-                HeartbeatEventType::Heartbeat => "STUDENT_NETWORK",
-            };
-            sqlx::query(
+        // Network-transition heartbeats are written with a business
+        // idempotency key of (attempt_id, event_type, client_timestamp). A
+        // client retry of the same logical event must not produce a second
+        // event row, a second audit row, or a second live alert (BEX-051).
+        // INSERT IGNORE reports rows_affected = 1 for a newly inserted row
+        // and 0 for a retry that collides with the unique index
+        // (uq_student_heartbeat_attempt_event_client_ts); that flag gates
+        // both the append-only audit row here and the proctor alert in the
+        // route. (ON DUPLICATE KEY UPDATE cannot be used for gating: TiDB
+        // reports rows_affected = 1 for a no-change duplicate update.)
+        //
+        // The event row and its audit row are written in one transaction:
+        // without it, a failure between the two inserts would leave the
+        // event row committed without its audit row, and the dedupe would
+        // then permanently block the retry from backfilling the audit.
+        let network_event_recorded = if req.event_type != HeartbeatEventType::Heartbeat {
+            let mut tx = self.pool.begin().await?;
+            let inserted = sqlx::query(
                 r#"
-                INSERT INTO session_audit_logs (
-                    id, schedule_id, actor, action_type, target_student_id, payload, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, NOW())
-                "#,
-            )
-            .bind(Uuid::new_v4().to_string())
-            .bind(schedule_id.to_string())
-            .bind(&updated.candidate_name)
-            .bind(action_type)
-            .bind(&updated.id)
-            .bind(json!({
-                "eventType": req.event_type,
-                "clientTimestamp": req.client_timestamp,
-                "payload": req.payload
-            }))
-            .execute(&self.pool)
-            .await?;
-        }
-
-        if req.event_type != HeartbeatEventType::Heartbeat {
-            sqlx::query(
-                r#"
-                INSERT INTO student_heartbeat_events (
+                INSERT IGNORE INTO student_heartbeat_events (
                     id, attempt_id, schedule_id, event_type, payload, client_timestamp, server_received_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, NOW())
@@ -1233,11 +1220,46 @@ impl DeliveryService {
             .bind(req.event_type)
             .bind(&req.payload)
             .bind(req.client_timestamp)
-            .execute(&self.pool)
-            .await?;
-        }
+            .execute(tx.as_mut())
+            .await?
+            .rows_affected()
+                == 1;
 
-        Ok(updated)
+            if inserted {
+                let action_type = match req.event_type {
+                    HeartbeatEventType::Disconnect => "NETWORK_DISCONNECTED",
+                    HeartbeatEventType::Reconnect => "NETWORK_RECONNECTED",
+                    HeartbeatEventType::Lost => "HEARTBEAT_LOST",
+                    HeartbeatEventType::Heartbeat => "STUDENT_NETWORK",
+                };
+                sqlx::query(
+                    r#"
+                    INSERT INTO session_audit_logs (
+                        id, schedule_id, actor, action_type, target_student_id, payload, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, NOW())
+                    "#,
+                )
+                .bind(Uuid::new_v4().to_string())
+                .bind(schedule_id.to_string())
+                .bind(&updated.candidate_name)
+                .bind(action_type)
+                .bind(&updated.id)
+                .bind(json!({
+                    "eventType": req.event_type,
+                    "clientTimestamp": req.client_timestamp,
+                    "payload": req.payload
+                }))
+                .execute(tx.as_mut())
+                .await?;
+            }
+            tx.commit().await?;
+            inserted
+        } else {
+            false
+        };
+
+        Ok((updated, network_event_recorded))
     }
 
     #[tracing::instrument(
