@@ -1321,3 +1321,71 @@ deadline, a duplicate attempt, a duplicate submission receipt, a 500 from pool c
 an error body leaking pool internals; schedule and global live rate limits must deny with
 structured `retryAfterSeconds`; submit retries must stay idempotent; answer-loss telemetry must
 stay at zero for clean submissions.
+
+---
+
+## 2026-08-06: Frontend exam entry (FEX-001/002/003, F-1)
+
+### Symptom
+Behavior-test pass F-1 pinned the student exam-entry flow (briefing → waiting room →
+workspace). One real contract violation surfaced: under React StrictMode's dev double-mount
+(mount → cleanup → mount), `PreCheck` started a SECOND silent persist with a SECOND
+device-check result (`runPreCheckChecks` computes a fresh `completedAt` per call), so the two
+POSTs carried DIFFERENT `Idempotency-Key` values (`attempt.id:clientSessionId:completedAt`).
+That defeats the single-flight/idempotency-identity guarantee that makes duplicate triggers
+safe.
+
+### Scope
+Frontend only: `src/components/student/PreCheck.tsx` (briefing silent persist) and its
+tests. The backend-side dedupe of the precheck key is pinned elsewhere (B-2 contract).
+
+### Root Cause
+The persist effect captured `const result = runPreCheckChecks(config)` inside the effect body.
+StrictMode re-runs the effect after a simulated cleanup; each run produced a new result (new
+`completedAt`) and fired a new `onComplete`, i.e. two requests with two identities.
+
+### Fix
+`PreCheck` now keeps a single-flight ref (`persistStateRef`, keyed by `config` REFERENCE — an
+equal-but-new config object identity starts a fresh check, matching the pre-fix effect-dep
+semantics) holding the first device-check result plus `inFlight`/`succeeded` flags. A
+duplicate effect run reuses the in-flight persist or the already-succeeded outcome instead of
+starting a second one; automatic retries after a failure keep reusing the SAME result (same
+`completedAt`), so the idempotency identity is stable across retries and duplicate triggers. A
+genuinely new `config` still starts a fresh check. `src/components/student/PreCheck.tsx:25-90`.
+
+Edge (dev-only, pinned): if the first persist REJECTS after StrictMode's simulated cleanup, the
+superseded effect run hands retry responsibility to the live run via an effect-generation
+counter (a real unmount still bails); the characterization test
+"still retries with the same result when the first persist fails under a StrictMode double-mount
+(FEX-002)" pins this.
+
+### Regression Protection
+- Tests:
+  - `src/components/student/__tests__/PreCheck.test.tsx` — "persists exactly once under a
+    StrictMode double-mount, reusing the first result (FEX-002)"; "still retries with the same
+    result when the first persist fails under a StrictMode double-mount (FEX-002)"; "reuses the
+    same device-check result across automatic retries (FEX-002)"; "never surfaces the technical
+    compatibility checklist while the five silent checks still run (FEX-001)"; "shows only
+    enabled sections with their configured durations in the briefing (FEX-001)".
+  - `src/components/student/__tests__/StudentApp.test.tsx` — pending persist keeps the
+    briefing (FEX-002); failure keeps the briefing + automatic retry with the SAME
+    `Idempotency-Key` (FEX-002); lobby has no answer inputs/section content/start action
+    (FEX-003); live runtime auto-opens the workspace (FEX-003).
+  - `src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx` — same
+    result re-recorded ⇒ identical idempotency key + identical body; new `completedAt` ⇒
+    distinct key (FEX-002).
+  - `src/components/student/providers/__tests__/StudentRuntimeProvider.test.tsx` — paused
+    runtime promotes lobby → exam (FEX-003).
+  - `src/features/student/hooks/__tests__/useStudentSessionRouteData.backend.test.tsx` —
+    poll loop keeps firing every 15s while runtime is not started (lobby) (FEX-003).
+
+### Invariant
+The exam entry is a SINGLE silent flow: there is deliberately NO "Continue to waiting room"
+button (`PreCheck.test.tsx` pins its absence) and NO student start action in the lobby unless
+preview capability is explicitly supplied. The briefing shell (exam title, candidate name/ID,
+enabled sections with durations, total duration, timer/reconnection guidance) is the only
+visible UI; the five device checks run invisibly. The lobby must never render before precheck
+persistence succeeds, failures keep the student on the briefing with automatic retry, and every
+retry/duplicate trigger must reuse the same `attempt.id:clientSessionId:completedAt` idempotency
+identity. While waiting, the 15s live poll must keep running, and a runtime that becomes
+`live` OR `paused` must open the workspace automatically.

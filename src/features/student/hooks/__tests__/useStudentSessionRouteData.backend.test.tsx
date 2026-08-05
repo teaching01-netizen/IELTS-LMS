@@ -338,6 +338,7 @@ describe('useStudentSessionRouteData backend mode', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     global.fetch = originalFetch;
@@ -1522,5 +1523,69 @@ describe('useStudentSessionRouteData backend mode', () => {
     } finally {
       window.removeEventListener('student-observability-metric', metricListener as EventListener);
     }
+  });
+
+  it('keeps polling the live endpoint while the runtime is not started (lobby) (FEX-003)', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    let cachedAttempt: Record<string, unknown> | null = null;
+    vi.spyOn(studentAttemptRepository as any, 'saveAttempt').mockImplementation(async (attempt) => {
+      cachedAttempt = attempt as Record<string, unknown>;
+    });
+    vi.spyOn(studentAttemptRepository as any, 'getAttemptsByScheduleId').mockImplementation(async () => {
+      return cachedAttempt ? [cachedAttempt] : [];
+    });
+
+    // The proctor has not started the cohort: the student waits in the lobby
+    // and the poll loop must keep refreshing the live session.
+    const notStartedRuntime = {
+      ...buildRuntime(),
+      status: 'not_started',
+      activeSectionKey: null,
+      currentSectionKey: null,
+      currentSectionRemainingSeconds: 0,
+      sections: [],
+    };
+    let liveCallCount = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/student/sessions/sched-1/static?candidateId=W250334') {
+        return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+      }
+      if (url === '/api/v1/student/sessions/sched-1/live?candidateId=W250334') {
+        liveCallCount += 1;
+        return Promise.resolve(
+          jsonResponse(buildLiveSessionContext(buildAttempt(), 'ver-1', notStartedRuntime)),
+        );
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapper(),
+    });
+
+    // Flush the mount load + the immediate poll (microtasks only).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.runtimeSnapshot?.status).toBe('not_started');
+    const callsAfterLoad = liveCallCount;
+    expect(callsAfterLoad).toBeGreaterThanOrEqual(1);
+
+    // Lobby poll interval is 15s (not live, no live socket): each 15s window
+    // must fire another live refresh while the student waits.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(liveCallCount).toBeGreaterThan(callsAfterLoad);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(liveCallCount).toBeGreaterThan(callsAfterLoad + 1);
+    expect(result.current.runtimeSnapshot?.status).toBe('not_started');
   });
 });

@@ -452,6 +452,28 @@ describe('StudentRuntimeProvider', () => {
     expect(screen.getByTestId('phase')).toHaveTextContent('exam');
   });
 
+  it('automatically promotes the waiting lobby when runtime hydration becomes paused (FEX-003)', () => {
+    const inactive = { ...createRuntimeSnapshot('listening'), status: 'not_started' as const, currentSectionKey: null, activeSectionKey: null, sections: [] };
+    const attempt = buildCompletedPreCheckAttempt();
+    function Phase() { return <span data-testid="phase">{useStudentRuntime().state.phase}</span>; }
+    const { rerender } = render(<StudentRuntimeProvider state={mockExamState} onExit={vi.fn()} attemptSnapshot={attempt} runtimeBacked runtimeSnapshot={inactive}><Phase /></StudentRuntimeProvider>);
+    expect(screen.getByTestId('phase')).toHaveTextContent('lobby');
+    // A paused runtime is still an active runtime: the student leaves the
+    // lobby automatically (the paused overlay itself is pinned elsewhere).
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={attempt}
+        runtimeBacked
+        runtimeSnapshot={{ ...createRuntimeSnapshot('listening'), status: 'paused' }}
+      >
+        <Phase />
+      </StudentRuntimeProvider>,
+    );
+    expect(screen.getByTestId('phase')).toHaveTextContent('exam');
+  });
+
   it('locks the exam while a live runtime is missing its active section', () => {
     const runtimeSnapshot = {
       ...createRuntimeSnapshot('reading'),

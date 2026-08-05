@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StudentAppWrapper } from '../StudentAppWrapper';
 import { createDefaultConfig } from '../../../constants/examDefaults';
+import * as errorLogger from '../../../app/error/errorLogger';
 import * as studentAttemptRepoModule from '../../../services/studentAttemptRepository';
 import { studentAttemptRepository } from '../../../services/studentAttemptRepository';
 import type { ExamState } from '../../../types';
@@ -168,6 +169,93 @@ function createReadingAttemptSnapshot(): StudentAttempt {
     answers: {},
     writingAnswers: {},
   };
+}
+
+// A runtime-backed attempt whose pre-check has NOT completed yet: the student
+// is on the briefing (phase 'pre-check') and the silent persist is pending.
+function createPreCheckPendingAttemptSnapshot(): StudentAttempt {
+  const attempt = createWritingAttemptSnapshot();
+  return {
+    ...attempt,
+    integrity: {
+      ...attempt.integrity,
+      preCheck: null,
+    },
+  };
+}
+
+// The runtime the proctor has not started yet: waiting in the lobby.
+function createNotStartedRuntimeSnapshot(): ExamSessionRuntime {
+  return {
+    ...createWritingRuntimeSnapshot(),
+    status: 'not_started',
+    activeSectionKey: null,
+    currentSectionKey: null,
+    currentSectionRemainingSeconds: 0,
+    sections: [],
+  };
+}
+
+function buildBackendAttemptFromPreCheck(attempt: StudentAttempt, preCheck: unknown) {
+  return {
+    id: attempt.id,
+    scheduleId: attempt.scheduleId,
+    studentKey: attempt.studentKey,
+    examId: attempt.examId,
+    examTitle: attempt.examTitle,
+    candidateId: attempt.candidateId,
+    candidateName: attempt.candidateName,
+    candidateEmail: attempt.candidateEmail,
+    phase: attempt.phase,
+    currentModule: attempt.currentModule,
+    currentQuestionId: attempt.currentQuestionId,
+    answers: attempt.answers,
+    writingAnswers: attempt.writingAnswers,
+    flags: attempt.flags,
+    violationsSnapshot: attempt.violations,
+    integrity: { preCheck, deviceFingerprintHash: attempt.integrity.deviceFingerprintHash },
+    recovery: { syncState: 'saved' },
+    createdAt: attempt.createdAt,
+    updatedAt: attempt.updatedAt,
+  };
+}
+
+// Mocks the precheck POST while keeping the generic credential-refresh
+// envelope used by the other StudentApp tests for every other endpoint.
+function installPreCheckFetchMock(
+  attempt: StudentAttempt,
+  responder?: (init: RequestInit) => Response | Promise<Response>,
+): Array<{ init: RequestInit }> {
+  const precheckRequests: Array<{ init: RequestInit }> = [];
+  const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url) === `/api/v1/student/sessions/${attempt.scheduleId}/precheck`) {
+      precheckRequests.push({ init: init ?? {} });
+      if (responder) {
+        return responder(init ?? {});
+      }
+      const body = JSON.parse(String(init?.body ?? '{}')) as { preCheck?: unknown };
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: buildBackendAttemptFromPreCheck(attempt, body.preCheck),
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        data: {
+          attempt: {
+            attemptToken: 'test-token',
+            expiresAt: '2099-01-01T00:00:00.000Z',
+          },
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  });
+  global.fetch = fetchMock as typeof fetch;
+  return precheckRequests;
 }
 
 function installVisualViewportMock(initialHeight: number, initialOffsetTop = 0) {
@@ -3876,5 +3964,188 @@ describe('StudentApp runtime-backed mode', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('stays on the briefing while pre-check persistence is pending, then enters the lobby (FEX-002)', async () => {
+    let resolvePreCheck: ((response: Response) => void) | null = null;
+    const deferred = new Promise<Response>((resolve) => {
+      resolvePreCheck = resolve;
+    });
+    const attempt = createPreCheckPendingAttemptSnapshot();
+    installPreCheckFetchMock(attempt, (init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { preCheck?: unknown };
+      return deferred.then(
+        () =>
+          new Response(
+            JSON.stringify({
+              success: true,
+              data: buildBackendAttemptFromPreCheck(attempt, body.preCheck),
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+      );
+    });
+
+    render(
+      <StudentAppWrapper
+        state={state}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={attempt}
+        runtimeSnapshot={createNotStartedRuntimeSnapshot()}
+      />,
+    );
+
+    // The lobby must NOT render before the silent persist resolves: the
+    // student stays on the briefing shell with its "Preparing your
+    // connection…" status, never the lobby waiting message.
+    expect(screen.getByRole('heading', { name: 'Waiting for the exam to start' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing your connection');
+    expect(screen.getByRole('status')).not.toHaveTextContent(
+      'Waiting for the proctor to start the exam',
+    );
+
+    await act(async () => {
+      resolvePreCheck?.(new Response(null, { status: 200 }));
+    });
+
+    // Persistence succeeded -> the same shell now shows the waiting status.
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Waiting for the proctor to start the exam',
+      ),
+    );
+    expect(screen.queryByRole('button', { name: /start exam/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps the briefing and retries automatically when pre-check persistence fails (FEX-002)', async () => {
+    // The failed precheck POST is expected; silence the apiClient error log.
+    const logErrorSpy = vi
+      .spyOn(errorLogger, 'logError')
+      .mockImplementation(() => {});
+    const attempt = createPreCheckPendingAttemptSnapshot();
+    let precheckCallCount = 0;
+    const precheckRequests = installPreCheckFetchMock(attempt, (init) => {
+      precheckCallCount += 1;
+      if (precheckCallCount === 1) {
+        return new Response(
+          JSON.stringify({ success: false, error: { message: 'server down' } }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      const body = JSON.parse(String(init?.body ?? '{}')) as { preCheck?: unknown };
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: buildBackendAttemptFromPreCheck(attempt, body.preCheck),
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+
+    render(
+      <StudentAppWrapper
+        state={state}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={attempt}
+        runtimeSnapshot={createNotStartedRuntimeSnapshot()}
+      />,
+    );
+
+    // Failure keeps the student on the briefing; the lobby never appears.
+    await waitFor(() => expect(precheckRequests).toHaveLength(1));
+    expect(screen.getByRole('heading', { name: 'Waiting for the exam to start' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing your connection');
+    expect(screen.getByText(/having trouble reaching the server/i)).toBeInTheDocument();
+    expect(screen.getByRole('status')).not.toHaveTextContent(
+      'Waiting for the proctor to start the exam',
+    );
+
+    // The automatic retry (same silent flow) succeeds -> lobby.
+    await waitFor(
+      () =>
+        expect(screen.getByRole('status')).toHaveTextContent(
+          'Waiting for the proctor to start the exam',
+        ),
+      { timeout: 4_000 },
+    );
+    expect(precheckRequests).toHaveLength(2);
+    // The retry preserves the same idempotency identity.
+    const keys = precheckRequests.map(
+      (request) => (request.init.headers as Record<string, string>)?.['Idempotency-Key'],
+    );
+    expect(keys[0]).toMatch(/^attempt-[\w-]+:/);
+    expect(keys[0]).toBe(keys[1]);
+    logErrorSpy.mockRestore();
+  });
+
+  it('renders the lobby without answer inputs, section content, or a student start action (FEX-003)', async () => {
+    render(
+      <StudentAppWrapper
+        state={readingState}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={createWritingAttemptSnapshot()}
+        runtimeSnapshot={createNotStartedRuntimeSnapshot()}
+      />,
+    );
+
+    // Flush the mount-time hydration microtasks inside act().
+    await act(async () => {});
+
+    // The waiting shell is visible.
+    expect(screen.getByRole('heading', { name: 'Waiting for the exam to start' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for the proctor to start the exam');
+    expect(
+      screen.getByText("You're checked in and waiting for the exam to start. Please keep this page open."),
+    ).toBeInTheDocument();
+
+    // No answer inputs are mounted.
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(document.querySelector('input, select, textarea')).toBeNull();
+
+    // No section content (passage or question text) is present in the DOM.
+    expect(screen.queryByText('Read and answer.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Type one word')).not.toBeInTheDocument();
+    expect(screen.queryByText('Passage 1')).not.toBeInTheDocument();
+
+    // No student start action exists.
+    expect(screen.queryByRole('button', { name: /start exam/i })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('automatically opens the workspace when the runtime goes live while the student waits (FEX-003)', async () => {
+    const attempt = createWritingAttemptSnapshot();
+    const { rerender } = render(
+      <StudentAppWrapper
+        state={readingState}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={attempt}
+        runtimeSnapshot={createNotStartedRuntimeSnapshot()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Waiting for the exam to start' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for the proctor to start the exam');
+
+    // The proctor starts the cohort: the next poll delivers a live runtime.
+    rerender(
+      <StudentAppWrapper
+        state={readingState}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={attempt}
+        runtimeSnapshot={createReadingRuntimeSnapshot()}
+      />,
+    );
+
+    // The workspace opens automatically — no student action needed.
+    expect(await screen.findByText('Read and answer.')).toBeInTheDocument();
+    expect(screen.getByText('Type one word')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Waiting for the exam to start' }),
+    ).not.toBeInTheDocument();
   });
 });

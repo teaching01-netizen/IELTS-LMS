@@ -2508,3 +2508,157 @@ describe('StudentAttemptProvider pending submission contract (FEX-051)', () => {
     }
   });
 });
+
+describe('StudentAttemptProvider pre-check persistence identity (FEX-002)', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
+    vi.spyOn(studentAttemptRepository, 'saveAttempt').mockResolvedValue();
+    vi.spyOn(studentAttemptRepository, 'savePendingMutations').mockResolvedValue();
+    vi.spyOn(studentAttemptRepository, 'clearPendingMutations').mockResolvedValue();
+    vi.spyOn(studentAttemptRepository, 'getPendingMutations').mockResolvedValue([]);
+    vi.spyOn(studentAttemptRepository, 'getAttemptsByScheduleId').mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  function installPreCheckFetchMock(attempt: StudentAttempt) {
+    const precheckRequests: Array<{ init: RequestInit }> = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url) === '/api/v1/student/sessions/sched-1/precheck') {
+        precheckRequests.push({ init: init ?? {} });
+        const body = JSON.parse(String(init?.body ?? '{}')) as { preCheck?: unknown };
+        const backendAttempt = {
+          id: attempt.id,
+          scheduleId: attempt.scheduleId,
+          studentKey: attempt.studentKey,
+          examId: attempt.examId,
+          examTitle: attempt.examTitle,
+          candidateId: attempt.candidateId,
+          candidateName: attempt.candidateName,
+          candidateEmail: attempt.candidateEmail,
+          phase: attempt.phase,
+          currentModule: attempt.currentModule,
+          currentQuestionId: attempt.currentQuestionId,
+          answers: attempt.answers,
+          writingAnswers: attempt.writingAnswers,
+          flags: attempt.flags,
+          violationsSnapshot: attempt.violations,
+          integrity: {
+            preCheck: body.preCheck,
+            deviceFingerprintHash: attempt.integrity.deviceFingerprintHash,
+          },
+          recovery: { syncState: 'idle' },
+          createdAt: attempt.createdAt,
+          updatedAt: attempt.updatedAt,
+        };
+        return new Response(JSON.stringify({ success: true, data: backendAttempt }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      // Credential-refresh fallback; not expected in this flow.
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: { attempt: { attemptToken: 'token-1', expiresAt: '2099-01-01T00:00:00.000Z' } },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    global.fetch = fetchMock as typeof fetch;
+    return precheckRequests;
+  }
+
+  function createPreCheckResult(completedAt: string) {
+    return {
+      completedAt,
+      browserFamily: 'chrome',
+      browserVersion: 124,
+      screenDetailsSupported: true,
+      heartbeatReady: true,
+      acknowledgedSafariLimitation: false,
+      checks: [],
+    };
+  }
+
+  it('re-records the same pre-check result under the identical idempotency key (FEX-002)', async () => {
+    const attempt = createAttemptSnapshot();
+    const precheckRequests = installPreCheckFetchMock(attempt);
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper(attempt) });
+
+    const preCheck = createPreCheckResult('2026-01-01T00:01:00.000Z');
+    await act(async () => {
+      await result.current.actions.recordPreCheckResult(preCheck);
+    });
+    await act(async () => {
+      await result.current.actions.recordPreCheckResult(preCheck);
+    });
+
+    expect(precheckRequests).toHaveLength(2);
+    const idempotencyKeys = precheckRequests.map((request) =>
+      (request.init.headers as Record<string, string> | undefined)?.['Idempotency-Key'],
+    );
+    // Idempotency identity = attempt.id : clientSessionId : completedAt.
+    expect(idempotencyKeys[0]).toBe(idempotencyKeys[1]);
+    expect(idempotencyKeys[0]).toMatch(/^attempt-1:[^:]+:2026-01-01T00:01:00\.000Z$/);
+
+    // The serialized bodies are identical too: same client session, same result.
+    const body0 = JSON.parse(String(precheckRequests[0].init.body)) as {
+      clientSessionId: string;
+      preCheck: { completedAt: string };
+    };
+    const body1 = JSON.parse(String(precheckRequests[1].init.body)) as {
+      clientSessionId: string;
+      preCheck: { completedAt: string };
+    };
+    expect(body0.clientSessionId).toBe(body1.clientSessionId);
+    expect(body0.preCheck.completedAt).toBe(body1.preCheck.completedAt);
+  });
+
+  it('uses a distinct idempotency key when the pre-check result changes (new completedAt)', async () => {
+    const attempt = createAttemptSnapshot();
+    const precheckRequests = installPreCheckFetchMock(attempt);
+    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper(attempt) });
+
+    await act(async () => {
+      await result.current.actions.recordPreCheckResult(
+        createPreCheckResult('2026-01-01T00:01:00.000Z'),
+      );
+    });
+    await act(async () => {
+      await result.current.actions.recordPreCheckResult(
+        createPreCheckResult('2026-01-01T00:02:00.000Z'),
+      );
+    });
+
+    expect(precheckRequests).toHaveLength(2);
+    const idempotencyKeys = precheckRequests.map((request) =>
+      (request.init.headers as Record<string, string> | undefined)?.['Idempotency-Key'] ?? '',
+    );
+    // Idempotency identity = attempt.id : clientSessionId : completedAt
+    // (completedAt itself contains colons, so parse the key segments carefully).
+    const parseKey = (key: string) => {
+      const match = /^([^:]+):([^:]+):(.+)$/.exec(key);
+      if (!match) {
+        throw new Error(`Unexpected idempotency key: ${key}`);
+      }
+      return { attemptId: match[1], clientSessionId: match[2], completedAt: match[3] };
+    };
+    const first = parseKey(idempotencyKeys[0]);
+    const second = parseKey(idempotencyKeys[1]);
+    // Same attempt identity and same client session…
+    expect(first.attemptId).toBe(second.attemptId);
+    expect(first.clientSessionId).toBe(second.clientSessionId);
+    // …but a different completedAt must produce a different key.
+    expect(first.completedAt).not.toBe(second.completedAt);
+    expect(first.completedAt).toBe('2026-01-01T00:01:00.000Z');
+    expect(second.completedAt).toBe('2026-01-01T00:02:00.000Z');
+  });
+});
