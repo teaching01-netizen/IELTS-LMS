@@ -639,6 +639,12 @@ impl SchedulingService {
         .await?
         .ok_or(SchedulingError::NotFound)?;
 
+        if runtime.status == RuntimeStatus::Paused {
+            // Repeated pause is idempotent (BEX-021): return the current paused
+            // projection without mutating rows or appending a second control event.
+            return self.get_runtime(ctx, schedule_id).await;
+        }
+
         if runtime.status != RuntimeStatus::Live {
             return Err(SchedulingError::Conflict("Runtime is not live.".to_owned()));
         }
@@ -1179,8 +1185,13 @@ fn merge_registration_metadata(
 }
 
 fn is_mysql_duplicate_key(err: &sqlx::Error) -> bool {
+    // sqlx-mysql 0.7.4 reports the SQLSTATE ("23000") from DatabaseError::code(),
+    // not the legacy numeric code ("1062"); accept both so unique-constraint races
+    // resolve to Conflict instead of a 500 (see docs/failure-cases.md).
     match err {
-        sqlx::Error::Database(db_err) => db_err.code().as_deref() == Some("1062"),
+        sqlx::Error::Database(db_err) => {
+            matches!(db_err.code().as_deref(), Some("23000") | Some("1062"))
+        }
         _ => false,
     }
 }

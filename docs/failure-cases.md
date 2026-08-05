@@ -905,10 +905,14 @@ only `"1062"`, so its duplicate branch never fires and its two call sites (`star
 
 ### Fix
 Commit `777a3c2` added two helpers that accept both codes: `is_duplicate_key` in
-`delivery/mod.rs` (~line 2003) and `idempotency.rs` (~line 266). The scheduling.rs helper is
-NOT fixed yet — that file carries unrelated uncommitted work; the fix is deferred until that
-work lands (tracked with the B-3 proctor-start task). Centralizing the helper in
-infrastructure would be a future cleanup.
+`delivery/mod.rs` (~line 2003) and `idempotency.rs` (~line 266).
+
+RESOLVED (B-3): commit `b7cb803` fixed the scheduling.rs helper to accept both
+`"23000"` and `"1062"`, so `start_runtime`/`register_student` duplicate-key races
+now resolve to a clean 409 Conflict. Regression test:
+`repeated_start_returns_conflict_without_duplicate_sections`
+(`backend/tests/contracts/scheduling_contract.rs`). Centralizing the helper in
+infrastructure remains a future cleanup.
 
 ### Regression Protection
 - Tests: `backend/tests/contracts/student_contract.rs`

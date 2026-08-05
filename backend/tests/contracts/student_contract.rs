@@ -20,7 +20,9 @@ use ielts_backend_domain::{
     },
     auth::UserRole,
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
-    schedule::{CreateScheduleRequest, RuntimeCommandAction, RuntimeCommandRequest},
+    schedule::{
+        AttemptCommandRequest, CreateScheduleRequest, RuntimeCommandAction, RuntimeCommandRequest,
+    },
 };
 use ielts_backend_infrastructure::{
     actor_context::{ActorContext, ActorRole},
@@ -1543,6 +1545,279 @@ async fn heartbeat_records_lost_transitions() {
     .await
     .unwrap();
     assert_eq!(audit_count, 1);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn student_heartbeat_does_not_resume_a_paused_runtime() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let admin_auth = mysql::create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "admin@example.com",
+        "Admin",
+    )
+    .await;
+    let (student_auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, client_session_id) =
+        bootstrap_attempt(&app, &student_auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let attempt_token = bootstrap["data"]["attemptCredential"]["attemptToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (phase_before, proctor_status_before): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT phase, proctor_status FROM student_attempts WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let attempt_revision_before: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+
+    // Proctor starts the runtime and pauses it.
+    let start = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
+    assert_eq!(start.status(), StatusCode::OK);
+    let pause = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "pause_runtime" }),
+    )
+    .await;
+    assert_eq!(pause.status(), StatusCode::OK);
+    let paused_projection = admin_runtime_projection(&app, &admin_auth, schedule_id).await;
+    assert_eq!(paused_projection["data"]["status"], "paused");
+    let paused_runtime_revision = paused_projection["data"]["revision"].as_i64().unwrap();
+
+    // A student heartbeat while the runtime is paused must succeed, must NOT
+    // resume the runtime, and must leave the attempt untouched.
+    let heartbeat = app
+        .clone()
+        .oneshot(
+            with_attempt_token(Request::builder(), &attempt_token)
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}/heartbeat",
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&StudentHeartbeatRequest {
+                        attempt_id: Some(attempt_id.clone()),
+                        student_key: student_key.clone(),
+                        client_session_id,
+                        event_type: HeartbeatEventType::Heartbeat,
+                        payload: None,
+                        client_timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 6, 0).unwrap(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(heartbeat.status(), StatusCode::OK);
+
+    let after_heartbeat = admin_runtime_projection(&app, &admin_auth, schedule_id).await;
+    assert_eq!(
+        after_heartbeat["data"]["status"],
+        "paused",
+        "a student heartbeat must not resume the runtime"
+    );
+    assert_eq!(
+        after_heartbeat["data"]["revision"].as_i64().unwrap(),
+        paused_runtime_revision,
+        "a student heartbeat must not bump the runtime revision"
+    );
+
+    let (phase_after, proctor_status_after): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT phase, proctor_status FROM student_attempts WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(phase_after, phase_before, "heartbeat must not change the attempt phase");
+    assert_eq!(
+        proctor_status_after, proctor_status_before,
+        "a cohort pause must not pause the attempt"
+    );
+    let attempt_revision_after: i32 =
+        sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(attempt_revision_after, attempt_revision_before);
+
+    // The proctor can still resume afterwards.
+    let resume = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "resume_runtime" }),
+    )
+    .await;
+    assert_eq!(resume.status(), StatusCode::OK);
+    let resume_json = json_body(resume).await;
+    assert_eq!(resume_json["data"]["status"], "live");
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn cohort_pause_and_individual_pause_leave_distinct_append_only_trails() {
+    let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
+    let schedule = seed_schedule(database.pool()).await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let admin_auth = mysql::create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "admin@example.com",
+        "Admin",
+    )
+    .await;
+    let (student_auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let app = build_router(AppState::with_pool(
+        AppConfig::default(),
+        database.pool().clone(),
+    ));
+    let (bootstrap, _client_session_id) =
+        bootstrap_attempt(&app, &student_auth, schedule_id, "alice", &student_key).await;
+    let attempt_id = bootstrap["data"]["attempt"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // (a) Cohort pause: the running runtime pauses, alice's attempt stays untouched.
+    let start = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
+    assert_eq!(start.status(), StatusCode::OK);
+    let pause = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "pause_runtime" }),
+    )
+    .await;
+    assert_eq!(pause.status(), StatusCode::OK);
+    let paused_projection = admin_runtime_projection(&app, &admin_auth, schedule_id).await;
+    assert_eq!(paused_projection["data"]["status"], "paused");
+    let proctor_status: Option<String> =
+        sqlx::query_scalar("SELECT proctor_status FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_ne!(
+        proctor_status.as_deref(),
+        Some("paused"),
+        "a cohort pause must not pause the attempt itself"
+    );
+
+    // (b) Resume the cohort runtime before pausing the individual attempt.
+    let resume = admin_runtime_command(
+        &app,
+        &admin_auth,
+        schedule_id,
+        json!({ "action": "resume_runtime" }),
+    )
+    .await;
+    assert_eq!(resume.status(), StatusCode::OK);
+
+    // (c) Individual pause: the attempt pauses while the runtime stays live.
+    let individual = app
+        .clone()
+        .oneshot(
+            admin_auth
+                .with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/proctor/sessions/{schedule_id}/attempts/{attempt_id}/pause"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&AttemptCommandRequest {
+                        message: None,
+                        reason: Some("individual-check".to_owned()),
+                        expected_active_section_key: None,
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(individual.status(), StatusCode::OK);
+    let individual_json = json_body(individual).await;
+    assert_eq!(individual_json["data"]["status"], "paused");
+    let proctor_status: String =
+        sqlx::query_scalar("SELECT proctor_status FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(proctor_status, "paused");
+    let runtime_after_individual = admin_runtime_projection(&app, &admin_auth, schedule_id).await;
+    assert_eq!(
+        runtime_after_individual["data"]["status"],
+        "live",
+        "an individual pause must not pause the cohort runtime"
+    );
+
+    // (d) Two separate append-only trails, both attributed to the proctor actor:
+    // session_audit_logs carries the STUDENT_PAUSE audit; cohort_control_events
+    // carries exactly one PauseRuntime control event.
+    let student_audits: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND action_type = 'STUDENT_PAUSE'",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(student_audits, 1, "individual pause appends one STUDENT_PAUSE audit");
+    let control_events: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM cohort_control_events WHERE schedule_id = ? AND action = 'pause_runtime'",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(control_events, 1, "cohort pause appends one pause_runtime control event");
+    let control_actor: String = sqlx::query_scalar(
+        "SELECT actor_id FROM cohort_control_events WHERE schedule_id = ? AND action = 'pause_runtime'",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(control_actor, admin_auth.user_id.to_string());
 
     database.shutdown().await;
 }
@@ -4124,6 +4399,7 @@ fn delivery_block_matrix_content_snapshot() -> serde_json::Value {
 
 fn sample_delivery_config() -> serde_json::Value {
     json!({
+        "progression": {"allowPause": true},
         "sections": {
             "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5, "bandScoreTable": { "39": 9.0, "37": 8.5, "35": 8.0, "32": 7.5, "30": 7.0, "26": 6.5, "23": 6.0, "18": 5.5, "16": 5.0, "13": 4.5, "10": 4.0, "6": 3.5, "4": 3.0, "2": 2.5 }},
             "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0, "bandScoreTable": { "39": 9.0, "37": 8.5, "35": 8.0, "33": 7.5, "30": 7.0, "27": 6.5, "23": 6.0, "19": 5.5, "15": 5.0, "13": 4.5, "10": 4.0, "8": 3.5, "6": 3.0, "4": 2.5 }},
@@ -4136,6 +4412,45 @@ fn sample_delivery_config() -> serde_json::Value {
 async fn json_body(response: axum::response::Response) -> serde_json::Value {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&body).unwrap()
+}
+
+async fn admin_runtime_command(
+    app: &axum::Router,
+    auth: &mysql::TestAuthContext,
+    schedule_id: Uuid,
+    payload: serde_json::Value,
+) -> axum::response::Response {
+    app.clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!("/api/v1/schedules/{schedule_id}/runtime/commands"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+async fn admin_runtime_projection(
+    app: &axum::Router,
+    auth: &mysql::TestAuthContext,
+    schedule_id: Uuid,
+) -> serde_json::Value {
+    let response = app
+        .clone()
+        .oneshot(
+            auth.with_auth(
+                Request::builder().uri(format!("/api/v1/schedules/{schedule_id}/runtime")),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    json_body(response).await
 }
 
 fn student_key(schedule_id: Uuid, candidate_id: &str) -> String {
