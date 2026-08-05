@@ -6312,6 +6312,11 @@ async fn bex035_question_type_round_trip_matrix() {
     }
     let answers = persisted_answers(database.pool(), &attempt_id).await;
     assert_eq!(answers["l-tfng-1"], "NG", "rejected TFNG variant must not persist");
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        i64::from(base_revision),
+        "rejected batch must not advance the revision"
+    );
 
     // Final TFNG answer for the grading leg.
     let (status, json) = post_single_mutation_batch(
@@ -6358,6 +6363,11 @@ async fn bex035_question_type_round_trip_matrix() {
     expect_422(status, &json, "SetScalar l-match-q1 = 1");
     let answers = persisted_answers(database.pool(), &attempt_id).await;
     assert_eq!(answers["l-match-q1"], "ii");
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        i64::from(base_revision),
+        "rejected batch must not advance the revision"
+    );
 
     // ---- 5. Sentence completion with several slots (ArrayText) -------------
     // Partial fill pins the exact persisted shape: ["first"].
@@ -6539,6 +6549,11 @@ async fn bex035_question_type_round_trip_matrix() {
     assert_eq!(
         json["error"]["message"],
         "Answer value is not valid for this question."
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        i64::from(base_revision),
+        "rejected batch must not advance the revision"
     );
 
     let (status, json) = post_single_mutation_batch(
@@ -6798,7 +6813,7 @@ async fn bex035_question_type_round_trip_matrix() {
     };
 
     // Correct answers grade correct (TextAnyOf with whitespace collapse).
-    assert_eq!(result_for("l-short-1")["isCorrect"], true, "  diagram   == diagram");
+    assert_eq!(result_for("l-short-1")["isCorrect"], true, "  diagram  == diagram");
     assert_eq!(result_for("l-tfng-1")["isCorrect"], true);
     assert_eq!(result_for("l-match-q1")["isCorrect"], true);
     // Multi-select grades as an order-insensitive set.
@@ -6812,8 +6827,12 @@ async fn bex035_question_type_round_trip_matrix() {
     assert_eq!(result_for("l-map-1:l2")["isCorrect"], false, "cleared label");
     // Shared-answer sentence folds case: "Apple" matches "apple".
     assert_eq!(result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], true);
-    // Wrong and cleared answers grade wrong.
-    assert_eq!(result_for("l-short-2")["isCorrect"], false, "diesel != petrol");
+    // Wrong, case-variant, and cleared answers grade wrong.
+    assert_eq!(
+        result_for("l-short-2")["isCorrect"],
+        false,
+        "\"Petrol\" != \"petrol\" (plain-text grading is case-sensitive)"
+    );
     assert_eq!(result_for("l-choice-1")["isCorrect"], false, "cleared choice");
     // The legacy-minimal TFNG question (q1, no answer key) has no grading spec.
     assert!(
