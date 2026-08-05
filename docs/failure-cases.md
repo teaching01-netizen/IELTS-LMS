@@ -921,3 +921,32 @@ infrastructure remains a future cleanup.
 
 ### Invariant
 Unique-constraint races must resolve to the idempotent replay/Conflict outcome, never a 500.
+
+---
+
+## 2026-08-05: Section Transition Grace and Structural-Completion Finalization (BEX-022/023)
+
+### Behavior (not a bug — documented contract)
+1. **Section-transition grace:** after a proctor `end-section-now` advance, mutations for the
+   just-completed section stay accepted for `final_submit_grace_seconds` (default 300s, config
+   `FINAL_SUBMIT_GRACE_SECONDS`) after the section's `actual_end_at`. Beyond the window the batch
+   route rejects them with `409 CONFLICT` / `details.reason SECTION_MISMATCH`
+   (`enforce_section_membership`, `backend/crates/application/src/delivery/mod.rs` ~3547).
+   Rationale: a student's in-flight answer flush must not hard-fail on the last seconds of a
+   section, but an open-ended window would let stale answers leak into later sections.
+2. **Structural completion:** student attempts are auto-finalized (auto-submit) ONLY inside the
+   same transaction that completes the runtime AND all section rows (`end-section-now` last
+   section, `end_runtime`, `complete_exam`). A `completed` runtime row whose sections are still
+   incomplete must never finalize pending attempts; the `complete-exam`/`end_runtime` early-return
+   on already-completed status performs no finalization.
+
+### Regression Protection
+- `backend/tests/contracts/student_contract.rs`
+  (`late_mutation_from_old_section_accepted_in_grace_then_section_mismatch_after_backdate`).
+- `backend/tests/contracts/scheduling_contract.rs`
+  (`proctor_end_section_now_on_last_section_auto_submits_pending_attempts`,
+  `transient_completed_runtime_does_not_finalize_pending_attempts`).
+
+### Invariant
+A pending attempt must never be finalized by an incomplete (transient) `completed` runtime state;
+old-section mutations must be rejected with SECTION_MISMATCH once the grace window closes.

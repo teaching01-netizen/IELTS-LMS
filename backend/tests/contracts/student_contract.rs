@@ -2566,7 +2566,7 @@ async fn late_mutation_from_old_section_accepted_in_grace_then_section_mismatch_
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _client_session_id) =
+    let (_bootstrap, _client_session_id) =
         bootstrap_attempt(&app, &student_auth, schedule_id, "alice", &student_key).await;
     let start = admin_runtime_command(
         &app,
