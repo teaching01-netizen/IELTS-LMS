@@ -6109,4 +6109,194 @@ describe('StudentApp runtime-backed mode', () => {
       }
     });
   });
+
+  describe('FEX-070 keyboard/screen-reader flow and FEX-072 readability controls (F-11)', () => {
+    it('announced the blocking overlay text in a polite live region that never contained the countdown chip or the badge (FEX-070)', async () => {
+      const attempt = createReadingAttemptSnapshot();
+      const pausedRuntime: ExamSessionRuntime = {
+        ...createReadingRuntimeSnapshot(),
+        status: 'paused' as const,
+        updatedAt: '2026-01-01T00:00:01.000Z',
+      };
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={pausedRuntime}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const heading = screen.getByRole('heading', { name: 'Cohort paused' });
+      const liveRegion = heading.closest('[role="status"]');
+      expect(liveRegion).not.toBeNull();
+      expect(liveRegion).toHaveAttribute('aria-live', 'polite');
+      // The context label, title, and message are inside the live region.
+      expect(liveRegion?.textContent).toContain('Cohort Runtime');
+      expect(liveRegion?.textContent).toContain('Cohort paused');
+      expect(liveRegion?.textContent).toContain(
+        'The proctor has paused delivery',
+      );
+      // The per-second countdown and the static badge must stay outside it.
+      expect(liveRegion?.textContent).not.toContain('Remaining');
+      expect(liveRegion?.textContent).not.toContain('05:00');
+      const chip = screen.getByText('Remaining 05:00');
+      expect(chip.closest('[role="status"]')).toBeNull();
+      const badge = screen.getByText('Paused');
+      expect(badge.closest('[role="status"]')).toBeNull();
+    });
+
+    it('kept the countdown timer outside every live region so it is never announced every second (FEX-070)', async () => {
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createReadingAttemptSnapshot()}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      const timer = await screen.findByRole('timer', { name: /time remaining/i });
+      // role="timer" is a non-live region role, and neither the timer nor any
+      // ancestor up to and including the banner carries aria-live: the
+      // ticking countdown is never announced every second.
+      expect(timer).toHaveAttribute('role', 'timer');
+      expect(timer.closest('[aria-live]')).toBeNull();
+      const banner = timer.closest('[role="banner"]');
+      expect(banner).not.toBeNull();
+      let node: HTMLElement | null = timer;
+      while (node) {
+        expect(node).not.toHaveAttribute('aria-live');
+        if (node === banner) break;
+        node = node.parentElement;
+      }
+    });
+
+    it('applied the high-contrast class to the exam shell only after the accessibility toggle was switched on (FEX-072)', async () => {
+      const user = userEvent.setup();
+      const { container } = render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createReadingAttemptSnapshot()}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await screen.findByRole('timer', { name: /time remaining/i });
+      const shell = container.querySelector<HTMLElement>('.student-exam-shell');
+      expect(shell).not.toBeNull();
+      // Off by default.
+      expect(shell).not.toHaveClass('high-contrast');
+
+      // Toggling the setting through the accessibility panel applies the class.
+      await user.click(screen.getByRole('button', { name: 'Open accessibility settings' }));
+      await user.click(screen.getByRole('switch', { name: 'Toggle high contrast mode' }));
+      expect(shell).toHaveClass('high-contrast');
+
+      // Toggling it back removes the class.
+      await user.click(screen.getByRole('switch', { name: 'Toggle high contrast mode' }));
+      expect(shell).not.toHaveClass('high-contrast');
+    });
+
+    it('opened the submission confirmation as a labelled modal dialog from Finish and closed it with Escape (FEX-070)', async () => {
+      const user = userEvent.setup();
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createReadingAttemptSnapshot()}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await screen.findByRole('timer', { name: /time remaining/i });
+      await user.click(screen.getByRole('button', { name: 'Finish' }));
+      const dialog = screen.getByRole('dialog', { name: 'Confirm Submission' });
+      expect(dialog).toHaveAttribute('aria-modal', 'true');
+      // Keyboard-only dismissal: Escape closes the confirmation.
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+      expect(
+        screen.queryByRole('dialog', { name: 'Confirm Submission' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('kept a focusable skip-link target on the briefing shell and the lobby shell (FEX-070)', async () => {
+      let resolvePreCheck: ((response: Response) => void) | null = null;
+      const deferred = new Promise<Response>((resolve) => {
+        resolvePreCheck = resolve;
+      });
+      const attempt = createPreCheckPendingAttemptSnapshot();
+      installPreCheckFetchMock(attempt, (init) => {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { preCheck?: unknown };
+        return deferred.then(
+          () =>
+            new Response(
+              JSON.stringify({
+                success: true,
+                data: buildBackendAttemptFromPreCheck(attempt, body.preCheck),
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            ),
+        );
+      });
+
+      render(
+        <StudentAppWrapper
+          state={state}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createNotStartedRuntimeSnapshot()}
+        />,
+      );
+
+      // Briefing shell: the skip link targets a focusable main (tabIndex=-1)
+      // so fragment navigation moves focus in real browsers (WCAG 2.4.1).
+      const briefingLink = screen.getByRole('link', { name: 'Skip to main content' });
+      expect(briefingLink).toHaveAttribute('href', '#main-content');
+      expect(document.getElementById('main-content')).toHaveAttribute('tabindex', '-1');
+
+      await act(async () => {
+        resolvePreCheck?.(new Response(null, { status: 200 }));
+      });
+      await waitFor(() =>
+        expect(screen.getByRole('status')).toHaveTextContent(
+          'Waiting for the proctor to start the exam',
+        ),
+      );
+
+      // Lobby shell: the same skip-link contract holds after the phase change.
+      expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute(
+        'href',
+        '#main-content',
+      );
+      expect(document.getElementById('main-content')).toHaveAttribute('tabindex', '-1');
+    });
+
+    it('kept a focusable skip-link target on the exam shell main content (FEX-070)', async () => {
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId="sched-1"
+          attemptSnapshot={createReadingAttemptSnapshot()}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await screen.findByRole('timer', { name: /time remaining/i });
+      expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute(
+        'href',
+        '#main-content',
+      );
+      expect(document.getElementById('main-content')).toHaveAttribute('tabindex', '-1');
+    });
+  });
 });

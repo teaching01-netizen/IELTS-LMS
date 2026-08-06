@@ -281,6 +281,96 @@ an acknowledgement persists against duplicate live updates (locally, and durably
 `lastAcknowledgedWarningId`), the screenshot blackout dismisses only through 'Continue Exam',
 and warning overlays never steal focus.
 
+## 2026-08-06: Keyboard/Screen-Reader Flow, Modal Confirmation, and Readability Pins (FEX-070/071/072, F-11)
+
+### Symptom
+Plan-driven. No production incident. Three FEX-070 rows were violated by production code:
+(1) `SubmitConfirmation` was not a dialog at all — no `role="dialog"`, no `aria-modal`, no
+accessible name, no focus management (no move-in, no trap, no restore), and its icon-only
+X close button had no label (pre-fix `SubmitConfirmation.tsx:41-155`). The e2e "submit
+confirmation dialog is accessible" test (`e2e/student-accessibility.spec.ts:105-144`) passed
+VACUOUSLY: `page.getByRole('dialog')` matched nothing, so the whole block was skipped.
+(2) The blocking/waiting overlay (`StudentApp.tsx:453-475` pre-fix) had no live region:
+waiting/blocking changes were never announced to screen readers. (3) All four
+`#main-content` skip-link targets (`StudentApp.tsx:520` pre-check, `:543` lobby,
+`StudentExamWorkspace.tsx:97`, `StudentPostExamView.tsx:24`) lacked `tabIndex`, so fragment
+navigation does not move focus in real browsers (WCAG 2.4.1 needs a focusable target).
+Two FEX-070/072 rows were unpinned: the countdown timer's non-live semantics ("not announced
+every second") and the `high-contrast` shell class application.
+
+### Scope
+- `src/components/student/SubmitConfirmation.tsx` — dialog semantics + focus management.
+- `src/components/student/StudentApp.tsx` — blocking overlay polite live region (countdown
+  chip and badge stay outside), `tabIndex={-1}` on the two `main` targets.
+- `src/components/student/StudentExamWorkspace.tsx`, `src/components/student/StudentPostExamView.tsx`
+  — `tabIndex={-1}` on `main`.
+- `src/components/student/__tests__/SubmitConfirmation.test.tsx`, `StudentApp.test.tsx` — new
+  pins (existing tests untouched).
+- `docs/failure-cases.md` (this entry) + `docs/e2e-audit-accessibility-viewport.md` (NEW
+  FEX-070/071/072 coverage matrix). Nothing under `e2e/` was modified — the e2e specs cannot
+  run in this environment (MySQL/TiDB infra) and their gaps are listed in the audit doc.
+
+### Fix
+1. **SubmitConfirmation** (`SubmitConfirmation.tsx:43-87`): an effect gated on `isOpen`
+   (the component still early-returns `null` when closed) stores
+   `document.activeElement`, moves focus into the dialog container (`tabIndex={-1}`),
+   traps Tab/Shift+Tab (wraps at first/last, pulls stray focus back in, and wraps
+   Shift+Tab from the container itself, which is the initial focus target), maps Escape
+   to `onClose`, and restores the previously focused element in its cleanup. The effect
+   is keyed on `[isOpen]` only and reads the latest `onClose` through a ref
+   (`onCloseRef`, `:31-32`): the parent passes an inline `onClose`
+   (`StudentApp.tsx:759`) whose identity changes on every render, and StudentApp
+   re-renders once per second while the dialog is open (runtime clock tick), so an
+   `onClose`-keyed effect would restore focus to the trigger and reset the tab position
+   every second — found by both F-11 reviewers (focus churn), fixed before commit.
+   `:106-109`: `role="dialog"` + `aria-modal="true"` + `aria-labelledby="submit-confirmation-title"`
+   (stable id on the h2 at `:124`) and `aria-label="Close"` on the X button (`:130`). No new
+   user-visible dismissal paths (no backdrop-click close, no autofocus attributes on the
+   action buttons).
+2. **Blocking overlay** (`StudentApp.tsx:462-470`): the TEXT portion (contextLabel + title
+   + message) is wrapped in `<div role="status" aria-live="polite">`; the "Remaining mm:ss"
+   countdown chip and the badge stay OUTSIDE it (`:471-478`) so the per-second countdown is
+   never announced. The countdown format and overlay structure are otherwise unchanged.
+3. **Skip links**: `tabIndex={-1}` added to the four `main#main-content` elements
+   (`StudentApp.tsx:526`, `:549`, `StudentExamWorkspace.tsx:96-101`, `StudentPostExamView.tsx:24`)
+   so fragment navigation moves focus; `tabIndex=-1` keeps them out of the tab order, so the
+   F-10 focus contracts (warning overlays never steal focus) are unaffected.
+
+### Regression Protection
+`SubmitConfirmation.test.tsx` (21 passed; the 13 pre-existing tests unchanged): new FEX-070
+pins — dialog role/`aria-modal`/accessible name via `aria-labelledby`, close-button label,
+initial focus lands on the dialog, Tab/Shift+Tab trap (wrap at both ends, stray focus pulled
+back in, middle controls not intercepted, Shift+Tab from the container wraps to the last
+control), Escape calls `onClose`, focus restored to the previously focused element on close,
+and focus stays trapped when the parent re-renders with a new `onClose` identity while the
+dialog is open (regression for the review-found focus-churn defect).
+
+`StudentApp.test.tsx` (71 passed; act warnings still 18 from the same 6 pre-existing tests;
+all F-10 pins untouched):
+- `:6114` blocking overlay live region — `role="status"` + `aria-live="polite"` contains
+  contextLabel/title/message; its text never contains 'Remaining' or '05:00'; the countdown
+  chip and badge elements are outside any `[role="status"]`.
+- `:6154` timer — `role="timer"` (non-live role), `closest('[aria-live]')` is null, and no
+  ancestor up to and including the banner carries `aria-live`: never announced every second.
+- `:6180` high contrast — `.student-exam-shell` lacks `high-contrast` by default, gains it
+  via the accessibility panel switch, and loses it when toggled back (FEX-072).
+- `:6207` in-app dialog — Finish opens `getByRole('dialog', { name: 'Confirm Submission' })`
+  with `aria-modal="true"`; Escape closes it.
+- skip-link enabler pins — briefing shell and lobby shell both render the skip link with
+  `href="#main-content"` and a `tabindex="-1"` main target (F-11 describe), the exam-shell
+  main (StudentExamWorkspace) carries the same contract, and `StudentPostExamView.test.tsx`
+  pins it for the post-exam view (3 tests, +1).
+
+Full student suite re-verified after the changes: 77 files / 836 tests pass.
+
+### Invariant
+The submission confirmation is a labelled modal dialog: focus moves in on open, is trapped
+while open, Escape closes it, and focus returns to the element that opened it. The blocking
+overlay announces only static text changes (never the ticking countdown). Every skip-link
+target is programmatically focusable. The countdown timer is never inside a live region.
+Readability preferences (font scale, zoom, high contrast, passage readability, highlight
+mode) change only presentation, never persisted answer content.
+
 ## 2026-08-06: Section Submission — Unanswered Confirmation, Flush-Before-Submit, and Submission Races (FEX-040/041/042, F-8)
 
 ### Symptom

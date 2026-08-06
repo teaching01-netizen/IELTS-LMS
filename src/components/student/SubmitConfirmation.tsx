@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AlertTriangle, CheckCircle, X } from 'lucide-react';
 import { Button } from '../ui/Button';
+
+const FOCUSABLE_SELECTOR =
+  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 interface SubmitConfirmationProps {
   isOpen: boolean;
@@ -23,6 +26,66 @@ export function SubmitConfirmation({
   timeRemaining,
   unansweredSubmissionPolicy = 'confirm',
 }: SubmitConfirmationProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // FEX-070: the confirmation is a modal dialog — while open it owns focus
+  // (initial focus moves in, Tab/Shift+Tab are trapped, Escape closes) and
+  // focus is restored to the previously focused element on close. The effect
+  // only runs while isOpen; the component body still early-returns null when
+  // closed so the dialog never exists in the DOM in that state. The effect
+  // deliberately depends on isOpen only: the parent passes an inline onClose
+  // that changes identity on every render, and re-running the effect while
+  // open would restore focus to the trigger and reset the tab position on
+  // each tick, so the latest onClose is read through a ref instead.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    previouslyFocusedRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    dialog?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ).filter((element) => !element.hasAttribute('disabled'));
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) return;
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        // The container itself is the initial focus target (tabIndex=-1), so
+        // Shift+Tab from it must wrap to the last control like Shift+Tab from
+        // the first control; otherwise focus would escape into the page.
+        if (active === dialog || active === first || !dialog.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialog.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previouslyFocusedRef.current?.focus();
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const unansweredCount = totalQuestions - answeredCount;
@@ -38,7 +101,14 @@ export function SubmitConfirmation({
   };
 
   return (
-    <div className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="submit-confirmation-title"
+      tabIndex={-1}
+      className="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6"
+    >
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200">
           <div className="flex items-center gap-2 md:gap-3">
@@ -51,11 +121,15 @@ export function SubmitConfirmation({
                 <CheckCircle size={20} className="text-green-600" />
               </div>
             )}
-            <h2 className="text-lg md:text-xl font-bold text-gray-900">
+            <h2 id="submit-confirmation-title" className="text-lg md:text-xl font-bold text-gray-900">
               {hasUnanswered ? 'Confirm Submission' : 'Ready to Submit?'}
             </h2>
           </div>
-          <button onClick={onClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors">
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors"
+          >
             <X size={18} />
           </button>
         </div>

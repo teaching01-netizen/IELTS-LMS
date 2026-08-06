@@ -21,7 +21,7 @@ export function StudentPostExamView({
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
-      <main id="main-content" role="main" className="flex flex-col items-center justify-center">
+      <main id="main-content" role="main" tabIndex={-1} className="flex flex-col items-center justify-center">
         <div className="bg-white p-6 md:p-8 rounded-lg shadow-md max-w-2xl w-full text-center">
           <h1 className="text-3xl font-bold mb-4">
             {isProctorTerminated ? 'Session terminated' : 'IELTS Examination Complete!'}

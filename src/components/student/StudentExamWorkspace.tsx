@@ -97,6 +97,7 @@ export function StudentExamWorkspace({
         id="main-content"
         className="student-exam-main flex-1 overflow-hidden relative flex flex-col"
         role="main"
+        tabIndex={-1}
       >
         {currentModule === 'reading' ? (
           <StudentReading

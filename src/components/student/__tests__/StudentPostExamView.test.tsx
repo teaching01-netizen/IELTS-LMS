@@ -45,4 +45,22 @@ describe('StudentPostExamView', () => {
     expect(screen.getByText(/terminated by the proctor/i)).toBeInTheDocument();
     expect(screen.getByText('Policy violation')).toBeInTheDocument();
   });
+
+  it('kept a focusable skip-link target on the post-exam main content (FEX-070)', () => {
+    render(
+      <StudentPostExamView
+        isProctorTerminated={false}
+        proctorNote={null}
+        studentInfo={[]}
+        onExit={() => {}}
+        finalSubmitOverlay={null}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute(
+      'href',
+      '#main-content',
+    );
+    expect(document.getElementById('main-content')).toHaveAttribute('tabindex', '-1');
+  });
 });

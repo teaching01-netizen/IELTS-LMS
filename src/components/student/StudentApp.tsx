@@ -455,13 +455,19 @@ export function StudentApp({
     runtimeState.blocking.active && blockingCopy ? (
       <div className="fixed inset-0 z-40 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
         <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8 text-center">
-          <p className="text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-[0.3em] text-gray-500 mb-3">
-            {blockingCopy.contextLabel}
-          </p>
-          <h2 className="text-2xl font-black text-gray-900 mb-3">{blockingCopy.title}</h2>
-          <p className="text-sm text-gray-700 leading-6">
-            {runtimeState.proctorNote ?? blockingCopy.message}
-          </p>
+          {/* FEX-070: the text portion is a polite live region so waiting and
+              blocking changes are announced. The countdown chip and the badge
+              stay OUTSIDE it — the countdown ticks every second and must not
+              be announced. */}
+          <div role="status" aria-live="polite">
+            <p className="text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-[0.3em] text-gray-500 mb-3">
+              {blockingCopy.contextLabel}
+            </p>
+            <h2 className="text-2xl font-black text-gray-900 mb-3">{blockingCopy.title}</h2>
+            <p className="text-sm text-gray-700 leading-6">
+              {runtimeState.proctorNote ?? blockingCopy.message}
+            </p>
+          </div>
           <div className="mt-6 flex items-center justify-center gap-3">
             <div className="px-3 py-1 rounded-sm bg-gray-50 border border-gray-100 text-xs font-bold uppercase tracking-widest text-gray-700">
               Remaining {formatRuntimeTime(runtimeState.blocking.timeRemaining)}
@@ -517,7 +523,7 @@ export function StudentApp({
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
-        <main id="main-content" role="main">
+        <main id="main-content" role="main" tabIndex={-1}>
           <PreCheck
             config={examState.config}
             examTitle={attemptState.attempt?.examTitle ?? examState.title}
@@ -540,7 +546,7 @@ export function StudentApp({
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
-        <main id="main-content" role="main">
+        <main id="main-content" role="main" tabIndex={-1}>
           <Lobby
             state={examState}
             candidateName={attemptState.attempt?.candidateName}
