@@ -34,7 +34,14 @@ export default defineConfig(({mode}) => {
       proxy: {
         '/api': {
           target: backendApiUrl,
-          changeOrigin: true,
+          // Keep the browser's Host header (localhost:3000) instead of
+          // rewriting it to the backend origin: the backend's CSRF check
+          // rejects requests whose Origin does not contain Host, and
+          // changeOrigin:true made every CSRF-protected POST fail with
+          // "Origin validation failed" in dev/e2e. With the original Host
+          // preserved the proxy behaves like the production same-origin
+          // topology (backend serves the built frontend).
+          changeOrigin: false,
           ws: true,
         },
       },

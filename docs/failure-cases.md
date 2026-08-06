@@ -2285,3 +2285,48 @@ unverified later deadline is still rejected by the release gate. Only a verified
 authoritative deadline (a resume re-anchor, or a granted extension) may move the displayed
 remaining time. The zero latch and monotonic display guard must never survive a verified
 resume.
+
+## 2026-08-06: Dev/E2E Proxy Rewrote Host, Breaking CSRF Origin Validation (e2e infra, E2E-01 prep)
+
+### Symptom
+First-ever e2e run against a real test database (Railway MySQL, repointed from TiDB Cloud
+in `backend/.env`) failed the student flow: `POST /api/v1/student/sessions/:id/bootstrap`
+returned 403 `CSRF_REJECTED "Origin validation failed."` and the session route rendered
+"Loading Error". Instrumented replay (`page.on('response')`) showed the exact failing
+request: bootstrap 403 while `GET .../static` and `GET .../live` were 200. The check-in POST
+(`/api/v1/auth/student/entry`) passed because it has no `VerifiedCsrf` extractor.
+
+### Root cause
+`vite.config.ts` proxied `/api` with `changeOrigin: true`, which rewrites the Host header to
+the backend origin (`localhost:4000`) while the browser's `Origin: http://localhost:3000`
+header is forwarded unchanged. The backend's same-origin CSRF heuristic
+(`backend/crates/api/src/http/auth.rs:180-194`, `same_origin_allowed`:
+Origin/Referer must contain Host) then rejects every CSRF-protected POST in dev. Only
+`auth.rs` reads the Host header (`backend/crates/api/src/http/auth.rs:116`), so rewriting it
+was safe to disable. Production is unaffected: the built frontend is served same-origin by
+the backend, so Host/Origin already agree.
+
+### Fix
+`vite.config.ts` `/api` proxy: `changeOrigin: false` (+ comment). The proxy now preserves
+the browser's Host, matching the production same-origin topology. Verified: bootstrap and
+precheck POSTs return 200, the full student flow reaches the exam, and
+`e2e/smoke.spec.ts` passes 10/10 (chromium).
+
+### Environment note (second failure in the same session)
+Seed-written storage states (`e2e/.generated/*.storage-state.json`) contain cookies named
+`session`/`csrf` because `e2e/global-setup.ts:47-50` forces
+`AUTH_SESSION_COOKIE_NAME=session`, `AUTH_CSRF_COOKIE_NAME=csrf`, `AUTH_COOKIE_SECURE=false`
+into the seed's env. Playwright's `webServer` env applies the same overrides to the backend
+it starts (`playwright.config.ts:4-8`), so the pairs match — but a backend started manually
+(plain `./target/debug/ielts-backend-api` with only `backend/.env`) uses the config.rs
+defaults `__Host-session`/`__Host-csrf` and rejects the storage-state sessions with 401
+"Authentication is required for this route." Symptom: admin/builder/proctor tests pass
+(they do not assert authenticated data), but `startLobbyIfPresent`'s runtime-commands POST
+401s. Always run e2e with Playwright's webServer-managed backend (or export the same
+AUTH_* overrides); never mix a manually started backend with e2e storage states.
+
+### Regression Protection
+`e2e/smoke.spec.ts` "student exam interface loads with proper accessibility" now exercises
+the CSRF-protected bootstrap POST through the proxy and fails on any origin-validation
+regression. `git diff` of `vite.config.ts` is one line of behavior (`changeOrigin`) plus
+comment.
