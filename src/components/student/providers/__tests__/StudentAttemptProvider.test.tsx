@@ -2101,6 +2101,243 @@ describe('StudentAttemptProvider', () => {
     });
   });
 
+  it('acknowledges a proctor warning durably and demotes warned to active (FEX-061)', async () => {
+    const auditEventSpy = vi
+      .spyOn(studentAttemptFacadeModule, 'saveStudentAuditEvent')
+      .mockResolvedValue(undefined);
+    try {
+      const warnedAttempt: StudentAttempt = {
+        ...createAttemptSnapshot(),
+        violations: [
+          {
+            id: 'warning-1',
+            type: 'PROCTOR_WARNING',
+            severity: 'high',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            description: 'Please focus on your exam',
+          },
+        ],
+        lastWarningId: 'warning-1',
+        proctorStatus: 'warned',
+        proctorUpdatedAt: '2026-01-01T00:00:01.000Z',
+        proctorUpdatedBy: 'Proctor',
+      };
+      const { result } = renderHook(() => useStudentAttempt(), {
+        wrapper: createWrapper(warnedAttempt),
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      vi.mocked(studentAttemptRepository.saveAttempt).mockClear();
+
+      await act(async () => {
+        await result.current.actions.acknowledgeProctorWarning('warning-1');
+      });
+
+      // The durable mutation carries the acknowledged id and the demotion.
+      const savedAttempt = vi.mocked(studentAttemptRepository.saveAttempt).mock.calls.at(-1)?.[0];
+      expect(savedAttempt?.lastAcknowledgedWarningId).toBe('warning-1');
+      expect(savedAttempt?.proctorStatus).toBe('active');
+      expect(savedAttempt?.proctorUpdatedBy).toBe('Candidate');
+      expect(result.current.state.attempt?.lastAcknowledgedWarningId).toBe('warning-1');
+      expect(result.current.state.attempt?.proctorStatus).toBe('active');
+
+      // The acknowledgement is audited exactly once with the warning id.
+      const ackAuditCalls = auditEventSpy.mock.calls.filter(
+        (call) => call[1] === 'ALERT_ACKNOWLEDGED',
+      );
+      expect(ackAuditCalls).toHaveLength(1);
+      expect(ackAuditCalls[0][2]).toEqual({ warningId: 'warning-1' });
+    } finally {
+      auditEventSpy.mockRestore();
+    }
+  });
+
+  it('does not re-save or re-audit when the same proctor warning id is acknowledged again (FEX-061)', async () => {
+    const auditEventSpy = vi
+      .spyOn(studentAttemptFacadeModule, 'saveStudentAuditEvent')
+      .mockResolvedValue(undefined);
+    try {
+      const warnedAttempt: StudentAttempt = {
+        ...createAttemptSnapshot(),
+        violations: [
+          {
+            id: 'warning-1',
+            type: 'PROCTOR_WARNING',
+            severity: 'high',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            description: 'Please focus on your exam',
+          },
+        ],
+        lastWarningId: 'warning-1',
+        proctorStatus: 'warned',
+        proctorUpdatedAt: '2026-01-01T00:00:01.000Z',
+        proctorUpdatedBy: 'Proctor',
+      };
+      const { result } = renderHook(() => useStudentAttempt(), {
+        wrapper: createWrapper(warnedAttempt),
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      vi.mocked(studentAttemptRepository.saveAttempt).mockClear();
+
+      await act(async () => {
+        await result.current.actions.acknowledgeProctorWarning('warning-1');
+      });
+      const saveCallsAfterFirstAck =
+        vi.mocked(studentAttemptRepository.saveAttempt).mock.calls.length;
+      const auditCallsAfterFirstAck = auditEventSpy.mock.calls.length;
+
+      await act(async () => {
+        await result.current.actions.acknowledgeProctorWarning('warning-1');
+      });
+
+      expect(vi.mocked(studentAttemptRepository.saveAttempt).mock.calls.length).toBe(
+        saveCallsAfterFirstAck,
+      );
+      expect(auditEventSpy.mock.calls.length).toBe(auditCallsAfterFirstAck);
+    } finally {
+      auditEventSpy.mockRestore();
+    }
+  });
+
+  it('records the acknowledgement without changing a non-warned proctor status (FEX-061)', async () => {
+    const auditEventSpy = vi
+      .spyOn(studentAttemptFacadeModule, 'saveStudentAuditEvent')
+      .mockResolvedValue(undefined);
+    try {
+      const activeAttempt: StudentAttempt = {
+        ...createAttemptSnapshot(),
+        violations: [
+          {
+            id: 'warning-1',
+            type: 'PROCTOR_WARNING',
+            severity: 'medium',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            description: 'Please focus on your exam',
+          },
+        ],
+        lastWarningId: 'warning-1',
+      };
+      const { result } = renderHook(() => useStudentAttempt(), {
+        wrapper: createWrapper(activeAttempt),
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      vi.mocked(studentAttemptRepository.saveAttempt).mockClear();
+
+      await act(async () => {
+        await result.current.actions.acknowledgeProctorWarning('warning-1');
+      });
+
+      const savedAttempt = vi.mocked(studentAttemptRepository.saveAttempt).mock.calls.at(-1)?.[0];
+      expect(savedAttempt?.lastAcknowledgedWarningId).toBe('warning-1');
+      expect(savedAttempt?.proctorStatus).toBe('active');
+    } finally {
+      auditEventSpy.mockRestore();
+    }
+  });
+
+  it('does nothing when no attempt is mounted (FEX-061)', async () => {
+    const auditEventSpy = vi
+      .spyOn(studentAttemptFacadeModule, 'saveStudentAuditEvent')
+      .mockResolvedValue(undefined);
+    try {
+      const state = createExamState();
+      const Wrapper = ({ children }: { children: React.ReactNode }) => (
+        <StudentRuntimeProvider state={state} onExit={vi.fn()} attemptSnapshot={null}>
+          <StudentAttemptProvider scheduleId="sched-1" attemptSnapshot={null}>
+            {children}
+          </StudentAttemptProvider>
+        </StudentRuntimeProvider>
+      );
+
+      const { result } = renderHook(() => useStudentAttempt(), {
+        wrapper: Wrapper,
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      vi.mocked(studentAttemptRepository.saveAttempt).mockClear();
+
+      await act(async () => {
+        await result.current.actions.acknowledgeProctorWarning('warning-1');
+      });
+
+      expect(studentAttemptRepository.saveAttempt).not.toHaveBeenCalled();
+      expect(
+        auditEventSpy.mock.calls.filter((call) => call[1] === 'ALERT_ACKNOWLEDGED'),
+      ).toHaveLength(0);
+    } finally {
+      auditEventSpy.mockRestore();
+    }
+  });
+
+  it('keeps the locally acknowledged warning id when a duplicate attempt frame without it arrives (FEX-061)', async () => {
+    const auditEventSpy = vi
+      .spyOn(studentAttemptFacadeModule, 'saveStudentAuditEvent')
+      .mockResolvedValue(undefined);
+    try {
+      const state = createExamState();
+      const initialAttempt = createAttemptSnapshot();
+      let updateAttemptSnapshot: ((next: StudentAttempt) => void) | null = null;
+
+      const Wrapper = ({ children }: { children: React.ReactNode }) => {
+        const [attemptSnapshot, setAttemptSnapshot] = React.useState(initialAttempt);
+
+        React.useEffect(() => {
+          updateAttemptSnapshot = setAttemptSnapshot;
+          return () => {
+            updateAttemptSnapshot = null;
+          };
+        }, []);
+
+        return (
+          <StudentRuntimeProvider state={state} onExit={vi.fn()} attemptSnapshot={attemptSnapshot}>
+            <StudentAttemptProvider
+              scheduleId={attemptSnapshot.scheduleId}
+              attemptSnapshot={attemptSnapshot}
+            >
+              {children}
+            </StudentAttemptProvider>
+          </StudentRuntimeProvider>
+        );
+      };
+
+      const { result } = renderHook(() => useStudentAttempt(), { wrapper: Wrapper });
+
+      await waitFor(() => {
+        expect(result.current.state.attemptId).toBe('attempt-1');
+      });
+
+      await act(async () => {
+        await result.current.actions.acknowledgeProctorWarning('warning-1');
+      });
+      expect(result.current.state.attempt?.lastAcknowledgedWarningId).toBe('warning-1');
+
+      // The server delivers a duplicate frame (fresh object, identical
+      // id/updatedAt, acknowledgement not yet reflected): the local ack must
+      // not be regressed — the warning must not reopen.
+      await act(async () => {
+        updateAttemptSnapshot?.({ ...initialAttempt });
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(result.current.state.attempt?.lastAcknowledgedWarningId).toBe('warning-1');
+    } finally {
+      auditEventSpy.mockRestore();
+    }
+  });
+
   it('keeps local answers when a stale backend snapshot arrives after a successful flush', async () => {
     const state = createExamState();
     const initialAttempt = createAttemptSnapshot();

@@ -74,4 +74,142 @@ describe('useStudentWarningVisibility', () => {
     expect(result.current.shouldShowTranslationWarning).toBe(false);
     expect(result.current.shouldShowSecondaryScreenWarning).toBe(false);
   });
+
+  it('shows each warning type once per violation id: duplicates and older ids never reopen after acknowledgement (FEX-061)', () => {
+    const { result, rerender } = renderHook(
+      ({ violations }: { violations: Violation[] }) =>
+        useStudentWarningVisibility({
+          effectivePhase: 'exam',
+          violations,
+          security: {
+            tabSwitchRule: 'warn',
+            detectSecondaryScreen: false,
+            antiScreenshotGuardEnabled: false,
+            preventTranslation: false,
+          },
+        }),
+      {
+        initialProps: {
+          violations: [
+            violation({ id: 'tab-1', type: 'TAB_SWITCH' }),
+            violation({ id: 'tab-2', type: 'TAB_SWITCH' }),
+          ],
+        },
+      },
+    );
+
+    // Only the latest violation of the type drives the warning.
+    expect(result.current.latestTabSwitchViolation?.id).toBe('tab-2');
+    expect(result.current.shouldShowTabSwitchWarning).toBe(true);
+
+    act(() => {
+      result.current.acknowledgeTabSwitch();
+    });
+    expect(result.current.shouldShowTabSwitchWarning).toBe(false);
+
+    // Duplicate live update: the same violations re-delivered stay closed.
+    rerender({
+      violations: [
+        violation({ id: 'tab-1', type: 'TAB_SWITCH' }),
+        violation({ id: 'tab-2', type: 'TAB_SWITCH' }),
+      ],
+    });
+    expect(result.current.shouldShowTabSwitchWarning).toBe(false);
+
+    // A new violation id reopens the warning.
+    rerender({
+      violations: [
+        violation({ id: 'tab-1', type: 'TAB_SWITCH' }),
+        violation({ id: 'tab-2', type: 'TAB_SWITCH' }),
+        violation({ id: 'tab-3', type: 'TAB_SWITCH' }),
+      ],
+    });
+    expect(result.current.latestTabSwitchViolation?.id).toBe('tab-3');
+    expect(result.current.shouldShowTabSwitchWarning).toBe(true);
+
+    act(() => {
+      result.current.acknowledgeTabSwitch();
+    });
+    expect(result.current.shouldShowTabSwitchWarning).toBe(false);
+
+    // Re-delivering the full history (including the acknowledged latest id)
+    // never reopens the warning: older ids never re-trigger.
+    rerender({
+      violations: [
+        violation({ id: 'tab-1', type: 'TAB_SWITCH' }),
+        violation({ id: 'tab-2', type: 'TAB_SWITCH' }),
+        violation({ id: 'tab-3', type: 'TAB_SWITCH' }),
+      ],
+    });
+    expect(result.current.shouldShowTabSwitchWarning).toBe(false);
+
+    // The same holds when the acknowledged id remains the latest.
+    rerender({
+      violations: [
+        violation({ id: 'tab-2', type: 'TAB_SWITCH' }),
+        violation({ id: 'tab-3', type: 'TAB_SWITCH' }),
+      ],
+    });
+    expect(result.current.shouldShowTabSwitchWarning).toBe(false);
+  });
+
+  it('keeps acknowledgements isolated per warning type (FEX-061)', () => {
+    const { result, rerender } = renderHook(
+      ({ violations }: { violations: Violation[] }) =>
+        useStudentWarningVisibility({
+          effectivePhase: 'exam',
+          violations,
+          security: {
+            tabSwitchRule: 'warn',
+            detectSecondaryScreen: false,
+            antiScreenshotGuardEnabled: true,
+            preventTranslation: false,
+          },
+        }),
+      {
+        initialProps: {
+          violations: [
+            violation({ id: 'shot-1', type: 'SCREENSHOT_ATTEMPT' }),
+            violation({ id: 'tab-1', type: 'TAB_SWITCH' }),
+          ],
+        },
+      },
+    );
+
+    expect(result.current.shouldShowScreenshotWarning).toBe(true);
+    expect(result.current.shouldShowTabSwitchWarning).toBe(true);
+
+    // Acknowledging the screenshot must not acknowledge the tab-switch type.
+    act(() => {
+      result.current.acknowledgeScreenshot();
+    });
+    expect(result.current.shouldShowScreenshotWarning).toBe(false);
+    expect(result.current.shouldShowTabSwitchWarning).toBe(true);
+
+    // Duplicate screenshot re-delivery stays closed; a NEW screenshot id
+    // reopens only the screenshot warning.
+    rerender({
+      violations: [
+        violation({ id: 'shot-1', type: 'SCREENSHOT_ATTEMPT' }),
+        violation({ id: 'shot-2', type: 'SCREENSHOT_ATTEMPT' }),
+        violation({ id: 'tab-1', type: 'TAB_SWITCH' }),
+      ],
+    });
+    expect(result.current.latestScreenshotViolation?.id).toBe('shot-2');
+    expect(result.current.shouldShowScreenshotWarning).toBe(true);
+    expect(result.current.shouldShowTabSwitchWarning).toBe(true);
+
+    act(() => {
+      result.current.acknowledgeScreenshot();
+    });
+    expect(result.current.shouldShowScreenshotWarning).toBe(false);
+    // The tab-switch warning is untouched by the screenshot acknowledgement.
+    expect(result.current.shouldShowTabSwitchWarning).toBe(true);
+
+    act(() => {
+      result.current.acknowledgeTabSwitch();
+    });
+    expect(result.current.shouldShowTabSwitchWarning).toBe(false);
+    expect(result.current.shouldShowScreenshotWarning).toBe(false);
+  });
 });

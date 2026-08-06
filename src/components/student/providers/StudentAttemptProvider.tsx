@@ -819,15 +819,28 @@ export function StudentAttemptProvider({
       return;
     }
 
-    attemptRef.current = attemptSnapshot;
-    setAttempt(attemptSnapshot);
+    // FEX-061: an acknowledgement is a local durable mutation. A duplicate
+    // server frame (same attempt id, acknowledgement not yet reflected on the
+    // frame) must not regress it — the keep-local branch above already
+    // preserves the acknowledged id (`lastAcknowledgedWarningId: current ...
+    // ?? snapshot ...`); mirror that here so the warning never reopens on a
+    // duplicate live update.
+    const nextAttempt =
+      sameAttempt && currentAttempt && currentAttempt.lastAcknowledgedWarningId
+        ? {
+            ...attemptSnapshot,
+            lastAcknowledgedWarningId: currentAttempt.lastAcknowledgedWarningId,
+          }
+        : attemptSnapshot;
+    attemptRef.current = nextAttempt;
+    setAttempt(nextAttempt);
     observedPositionRef.current = JSON.stringify({
-      phase: attemptSnapshot.phase,
-      currentModule: attemptSnapshot.currentModule,
-      currentQuestionId: attemptSnapshot.currentQuestionId,
+      phase: nextAttempt.phase,
+      currentModule: nextAttempt.currentModule,
+      currentQuestionId: nextAttempt.currentQuestionId,
     });
-    observedViolationsRef.current = JSON.stringify(attemptSnapshot.violations ?? []);
-    setRuntimeAttemptSyncState(attemptSnapshot.recovery.syncState);
+    observedViolationsRef.current = JSON.stringify(nextAttempt.violations ?? []);
+    setRuntimeAttemptSyncState(nextAttempt.recovery.syncState);
 
     void (async () => {
       let pendingMutations = await studentAttemptRepository.getPendingMutations(

@@ -7,7 +7,7 @@ import { createDefaultConfig } from '../../../constants/examDefaults';
 import * as errorLogger from '../../../app/error/errorLogger';
 import * as studentAttemptRepoModule from '../../../services/studentAttemptRepository';
 import { studentAttemptRepository } from '../../../services/studentAttemptRepository';
-import type { ExamState } from '../../../types';
+import type { ExamState, Violation } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 import { EXAM_VIEWPORT_CONTENT } from '../examPageZoomGuard';
@@ -541,7 +541,7 @@ describe('StudentApp runtime-backed mode', () => {
       visualViewport.restore();
     }
   });
-  it('shows the waiting overlay when the runtime locks the student between sections', () => {
+  it('shows the waiting overlay when the runtime locks the student between sections', async () => {
     const runtimeSnapshot: ExamSessionRuntime = {
       id: 'runtime-1',
       scheduleId: 'sched-1',
@@ -581,11 +581,68 @@ describe('StudentApp runtime-backed mode', () => {
       updatedAt: '2026-01-01T01:00:00.000Z',
     };
 
-    const { container } = render(
-      <StudentAppWrapper state={state} onExit={() => {}} runtimeSnapshot={runtimeSnapshot} />,
+    const { rerender } = render(
+      <StudentAppWrapper
+        state={state}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={createWritingAttemptSnapshot()}
+        runtimeSnapshot={runtimeSnapshot}
+      />,
     );
 
-    expect(container).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // F-10: the old assertion (container only) was vacuous — without an
+    // attempt snapshot the phase is pre-check and the blocking overlay never
+    // renders. With a completed pre-check the overlay must actually show the
+    // waiting-for-advance copy and lock the answers.
+    expect(
+      screen.getByRole('heading', { name: 'Waiting for cohort advance' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/The proctor is preparing the next section/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Waiting')).toBeInTheDocument();
+    expect(screen.getByText('Cohort Runtime')).toBeInTheDocument();
+
+    const editor = screen.getByRole('textbox', { name: 'Writing response' });
+    expect((editor.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+
+    // The overlay disappears only when the next section actually starts.
+    rerender(
+      <StudentAppWrapper
+        state={state}
+        onExit={() => {}}
+        scheduleId="sched-1"
+        attemptSnapshot={createWritingAttemptSnapshot()}
+        runtimeSnapshot={{
+          ...runtimeSnapshot,
+          updatedAt: '2026-01-01T01:00:01.000Z',
+          activeSectionKey: 'writing',
+          waitingForNextSection: false,
+          sections: [
+            {
+              ...runtimeSnapshot.sections[0],
+              status: 'live' as const,
+              actualEndAt: null,
+              completionReason: undefined,
+            },
+          ],
+        }}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.queryByRole('heading', { name: 'Waiting for cohort advance' }),
+    ).not.toBeInTheDocument();
   });
 
   it('passes exam security settings into the Writing editor', async () => {
@@ -4473,6 +4530,11 @@ describe('StudentApp runtime-backed mode', () => {
       expect(
         screen.getByText(/Your browser cannot safely store new answers/i),
       ).toBeInTheDocument();
+      // F-10: the storage overlay also parameterizes the badge, context
+      // label, and remaining-time chip.
+      expect(screen.getByText('Blocked')).toBeInTheDocument();
+      expect(screen.getByText('Session Recovery')).toBeInTheDocument();
+      expect(screen.getByText('Remaining 05:00')).toBeInTheDocument();
 
       // FEX-033: input mutation is blocked once safe durability is unavailable
       // — the workspace controls are locked and further edits are refused.
@@ -5218,6 +5280,833 @@ describe('StudentApp runtime-backed mode', () => {
 
       expect(screen.getAllByRole('heading', { name: 'Submitting your exam' })).toHaveLength(1);
       expect(submitAttempt).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('FEX-060 parameterized pause overlays / FEX-061 warning acknowledgement (F-10)', () => {
+    it('showed the cohort-pause overlay with full copy, remaining time, locked answers, and released it only on runtime resume (FEX-060)', async () => {
+      const attempt = createReadingAttemptSnapshot();
+      const pausedRuntime: ExamSessionRuntime = {
+        ...createReadingRuntimeSnapshot(),
+        status: 'paused' as const,
+        updatedAt: '2026-01-01T00:00:01.000Z',
+      };
+      const { rerender } = render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={pausedRuntime}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Correct title, message, context label, badge, and remaining time.
+      expect(screen.getByRole('heading', { name: 'Cohort paused' })).toBeInTheDocument();
+      expect(screen.getByText(/The proctor has paused delivery/i)).toBeInTheDocument();
+      expect(screen.getByText('Cohort Runtime')).toBeInTheDocument();
+      expect(screen.getByText('Paused')).toBeInTheDocument();
+      expect(screen.getByText('Remaining 05:00')).toBeInTheDocument();
+
+      // Answers cannot be changed while paused: the workspace fieldset is
+      // disabled and a change event is refused.
+      const input = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+      const fieldset = input.closest('fieldset');
+      expect(fieldset).not.toBeNull();
+      expect((fieldset as HTMLFieldSetElement).disabled).toBe(true);
+      expect((fieldset as HTMLFieldSetElement)).toHaveAttribute('aria-disabled', 'true');
+      await act(async () => {
+        fireEvent.change(input, { target: { value: 'X' } });
+      });
+      expect(input.value).toBe('');
+
+      // The overlay disappears only when the runtime resumes live.
+      rerender(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.queryByRole('heading', { name: 'Cohort paused' }),
+      ).not.toBeInTheDocument();
+      const resumedInput = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+      expect((resumedInput.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(false);
+    });
+
+    it('showed the individual proctor-pause overlay from the attempt snapshot with the proctor note overriding the message, and released it when the proctor resumed (FEX-060)', async () => {
+      const pausedAttempt: StudentAttempt = {
+        ...createReadingAttemptSnapshot(),
+        updatedAt: '2026-01-01T00:00:01.000Z',
+        proctorStatus: 'paused',
+        proctorNote: 'Keep your hands visible on the desk.',
+        proctorUpdatedAt: '2026-01-01T00:00:01.000Z',
+        proctorUpdatedBy: 'Proctor',
+      };
+      const { rerender } = render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={pausedAttempt.scheduleId}
+          attemptSnapshot={pausedAttempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByRole('heading', { name: 'Individual session paused' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Proctor Review')).toBeInTheDocument();
+      expect(screen.getByText('Paused')).toBeInTheDocument();
+      // The proctor note overrides the default message copy.
+      expect(screen.getByText('Keep your hands visible on the desk.')).toBeInTheDocument();
+      expect(
+        screen.queryByText(/This session is paused for review/i),
+      ).not.toBeInTheDocument();
+
+      // Answers cannot be changed while the individual pause is active.
+      const input = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+      expect((input.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+
+      // Recovery: the proctor status returns to active.
+      rerender(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={pausedAttempt.scheduleId}
+          attemptSnapshot={{
+            ...pausedAttempt,
+            updatedAt: '2026-01-01T00:00:02.000Z',
+            proctorStatus: 'active',
+            proctorNote: null,
+          }}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.queryByRole('heading', { name: 'Individual session paused' }),
+      ).not.toBeInTheDocument();
+      const resumedInput = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+      expect((resumedInput.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(false);
+    });
+
+    it('showed the individual proctor-pause overlay from the blocking-machine override when high-severity violations hit the pause threshold (FEX-060)', async () => {
+      vi.useFakeTimers();
+      try {
+        const config = createDefaultConfig('Academic', 'Academic');
+        config.progression.allowPause = true;
+        config.security.detectSecondaryScreen = true;
+        config.security.tabSwitchRule = 'none';
+        const examState: ExamState = { ...readingState, config };
+        Object.defineProperty(window, 'getScreenDetails', {
+          configurable: true,
+          value: vi.fn().mockResolvedValue({ screens: [{}, {}] }),
+        });
+
+        const attempt = createReadingAttemptSnapshot();
+        render(
+          <StudentAppWrapper
+            state={examState}
+            onExit={() => {}}
+            scheduleId={attempt.scheduleId}
+            attemptSnapshot={attempt}
+            runtimeSnapshot={createReadingRuntimeSnapshot()}
+          />,
+        );
+
+        // First secondary-screen check (3s): one high violation, below the
+        // configured pause threshold (highLimit 2) — no pause yet.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(3_000);
+        });
+        expect(
+          screen.queryByRole('heading', { name: 'Individual session paused' }),
+        ).not.toBeInTheDocument();
+
+        // Second check after the per-type cooldown (15s): the threshold is
+        // hit and pauseExam drives the machine override — the overlay appears
+        // even though the attempt snapshot's proctorStatus is 'active'.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(15_000);
+        });
+        expect(
+          screen.getByRole('heading', { name: 'Individual session paused' }),
+        ).toBeInTheDocument();
+      } finally {
+        Reflect.deleteProperty(window, 'getScreenDetails');
+        vi.useRealTimers();
+      }
+    });
+
+    it('showed the waiting-for-runtime overlay when the live runtime was missing its active section and released it once the contract was repaired (FEX-060)', async () => {
+      const attempt = createReadingAttemptSnapshot();
+      const brokenRuntime: ExamSessionRuntime = {
+        ...createReadingRuntimeSnapshot(),
+        updatedAt: '2026-01-01T00:00:01.000Z',
+        sections: [],
+      };
+      const { rerender } = render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={brokenRuntime}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByRole('heading', { name: 'Waiting for runtime' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/The exam runtime is synchronizing/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Session Runtime')).toBeInTheDocument();
+      expect(screen.getByText('Waiting')).toBeInTheDocument();
+
+      // Answers cannot be changed while the runtime contract is broken.
+      const input = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+      expect((input.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+
+      // The next healthy frame releases the overlay.
+      rerender(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.queryByRole('heading', { name: 'Waiting for runtime' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('showed the waiting-for-start overlay when a stale not_started runtime frame arrived mid-exam, and cleared it on the next live frame (FEX-060)', async () => {
+      const attempt = createReadingAttemptSnapshot();
+      const { rerender } = render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByText('Read and answer.')).toBeInTheDocument();
+
+      rerender(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={{
+            ...createNotStartedRuntimeSnapshot(),
+            updatedAt: '2026-01-01T00:00:01.000Z',
+          }}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // The exam phase is preserved (FEX-012 absorbs only terminal
+      // regressions), so the blocking overlay surfaces the not-started copy.
+      expect(screen.getByRole('heading', { name: 'Waiting for start' })).toBeInTheDocument();
+      expect(
+        screen.getByText(/The proctor has not started this cohort yet/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Locked')).toBeInTheDocument();
+      expect(screen.getByText('Cohort Runtime')).toBeInTheDocument();
+
+      // The next live frame clears it.
+      rerender(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.queryByRole('heading', { name: 'Waiting for start' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('kept the higher-priority individual proctor pause when the lower-priority cohort pause cleared (FEX-060)', async () => {
+      const pausedAttempt: StudentAttempt = {
+        ...createReadingAttemptSnapshot(),
+        updatedAt: '2026-01-01T00:00:01.000Z',
+        proctorStatus: 'paused',
+      };
+      const pausedRuntime: ExamSessionRuntime = {
+        ...createReadingRuntimeSnapshot(),
+        status: 'paused' as const,
+        updatedAt: '2026-01-01T00:00:01.000Z',
+      };
+      const { rerender } = render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={pausedAttempt.scheduleId}
+          attemptSnapshot={pausedAttempt}
+          runtimeSnapshot={pausedRuntime}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Both pauses are active, but the individual proctor pause wins.
+      expect(
+        screen.getByRole('heading', { name: 'Individual session paused' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Cohort paused' })).not.toBeInTheDocument();
+
+      // The cohort resumes (runtime live) while the proctor pause persists:
+      // clearing the lower-priority reason must not clear the higher one.
+      rerender(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={pausedAttempt.scheduleId}
+          attemptSnapshot={pausedAttempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(
+        screen.getByRole('heading', { name: 'Individual session paused' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Cohort paused' })).not.toBeInTheDocument();
+
+      // The proctor resumes: only now does the overlay release.
+      rerender(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={pausedAttempt.scheduleId}
+          attemptSnapshot={{
+            ...pausedAttempt,
+            updatedAt: '2026-01-01T00:00:02.000Z',
+            proctorStatus: 'active',
+          }}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.queryByRole('heading', { name: 'Individual session paused' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('opened the proctor-warning overlay once per violation id, acknowledged it durably, and never reopened it on a duplicate live update (FEX-061)', async () => {
+      const config = createDefaultConfig('Academic', 'Academic');
+      config.security.detectSecondaryScreen = false;
+      config.security.tabSwitchRule = 'none';
+      config.security.preventTranslation = false;
+      config.security.antiScreenshotGuardEnabled = false;
+      const examState: ExamState = { ...readingState, config };
+
+      const w1: Violation = {
+        id: 'w-1',
+        type: 'PROCTOR_WARNING',
+        severity: 'high',
+        timestamp: '2026-01-01T00:00:01.000Z',
+        description: 'Please keep your eyes on the screen.',
+      };
+      const attempt: StudentAttempt = {
+        ...createReadingAttemptSnapshot(),
+        updatedAt: '2026-01-01T00:00:01.000Z',
+        violations: [w1],
+        lastWarningId: 'w-1',
+        proctorStatus: 'warned',
+        proctorUpdatedAt: '2026-01-01T00:00:01.000Z',
+        proctorUpdatedBy: 'Proctor',
+      };
+      const saveAttemptSpy = vi
+        .spyOn(studentAttemptRepository as any, 'saveAttempt')
+        .mockResolvedValue();
+
+      const { rerender } = render(
+        <StudentAppWrapper
+          state={examState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // high severity -> WARNING — FINAL NOTICE, with the violation description.
+      expect(
+        screen.getByRole('heading', { name: 'WARNING — FINAL NOTICE' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Please keep your eyes on the screen.')).toBeInTheDocument();
+
+      saveAttemptSpy.mockClear();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /I Understand/i }));
+      });
+      await waitFor(() => {
+        expect(saveAttemptSpy).toHaveBeenCalledTimes(1);
+      });
+      const savedAttempt = saveAttemptSpy.mock.calls.at(-1)?.[0] as StudentAttempt;
+      expect(savedAttempt.lastAcknowledgedWarningId).toBe('w-1');
+      expect(savedAttempt.proctorStatus).toBe('active');
+      expect(savedAttempt.proctorUpdatedBy).toBe('Candidate');
+      expect(
+        screen.queryByRole('heading', { name: 'WARNING — FINAL NOTICE' }),
+      ).not.toBeInTheDocument();
+
+      // A duplicate live update (fresh object, identical id/updatedAt/
+      // violations, ack not yet reflected on the server frame) must not
+      // reopen the acknowledged warning.
+      rerender(
+        <StudentAppWrapper
+          state={examState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={{ ...attempt }}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(
+        screen.queryByRole('heading', { name: 'WARNING — FINAL NOTICE' }),
+      ).not.toBeInTheDocument();
+
+      // A NEW proctor warning id reopens the overlay at critical severity:
+      // EXAM PAUSED, no acknowledge button, proctor-resume copy only.
+      const w2: Violation = {
+        id: 'w-2',
+        type: 'PROCTOR_WARNING',
+        severity: 'critical',
+        timestamp: '2026-01-01T00:00:02.000Z',
+        description: 'Final warning: stop looking away.',
+      };
+      rerender(
+        <StudentAppWrapper
+          state={examState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={{
+            ...attempt,
+            updatedAt: '2026-01-01T00:00:02.000Z',
+            violations: [w1, w2],
+            lastWarningId: 'w-2',
+          }}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByRole('heading', { name: 'EXAM PAUSED' })).toBeInTheDocument();
+      expect(screen.getByText('Final warning: stop looking away.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /I Understand/i })).not.toBeInTheDocument();
+      expect(screen.getByText('Waiting for proctor to resume...')).toBeInTheDocument();
+    });
+
+    it('used only the latest proctor warning to drive the overlay and acknowledged exactly that id (FEX-061)', async () => {
+      const config = createDefaultConfig('Academic', 'Academic');
+      config.security.detectSecondaryScreen = false;
+      config.security.tabSwitchRule = 'none';
+      config.security.preventTranslation = false;
+      config.security.antiScreenshotGuardEnabled = false;
+      const examState: ExamState = { ...readingState, config };
+
+      const w1: Violation = {
+        id: 'w-1',
+        type: 'PROCTOR_WARNING',
+        severity: 'high',
+        timestamp: '2026-01-01T00:00:01.000Z',
+        description: 'First: please keep your eyes on the screen.',
+      };
+      const w2: Violation = {
+        id: 'w-2',
+        type: 'PROCTOR_WARNING',
+        severity: 'low',
+        timestamp: '2026-01-01T00:00:02.000Z',
+        description: 'Second: stop looking at other devices.',
+      };
+      const attempt: StudentAttempt = {
+        ...createReadingAttemptSnapshot(),
+        updatedAt: '2026-01-01T00:00:02.000Z',
+        violations: [w1, w2],
+        lastWarningId: 'w-2',
+      };
+      const saveAttemptSpy = vi
+        .spyOn(studentAttemptRepository as any, 'saveAttempt')
+        .mockResolvedValue();
+
+      render(
+        <StudentAppWrapper
+          state={examState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Only the LATEST warning drives the overlay: its description and the
+      // low->medium severity mapping (ATTENTION), never the older one.
+      expect(screen.getByRole('heading', { name: 'ATTENTION' })).toBeInTheDocument();
+      expect(screen.getByText('Second: stop looking at other devices.')).toBeInTheDocument();
+      expect(
+        screen.queryByText('First: please keep your eyes on the screen.'),
+      ).not.toBeInTheDocument();
+
+      saveAttemptSpy.mockClear();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /I Understand/i }));
+      });
+      await waitFor(() => {
+        expect(saveAttemptSpy).toHaveBeenCalledTimes(1);
+      });
+      const savedAttempt = saveAttemptSpy.mock.calls.at(-1)?.[0] as StudentAttempt;
+      expect(savedAttempt.lastAcknowledgedWarningId).toBe('w-2');
+    });
+
+    it('kept the screenshot blackout dismissible only through Continue Exam, never through Escape, backdrop clicks, or unrelated acknowledgements (FEX-061)', async () => {
+      const config = createDefaultConfig('Academic', 'Academic');
+      config.security.tabSwitchRule = 'warn';
+      config.security.detectSecondaryScreen = false;
+      config.security.preventTranslation = false;
+      const examState: ExamState = { ...readingState, config };
+
+      const attempt: StudentAttempt = {
+        ...createReadingAttemptSnapshot(),
+        updatedAt: '2026-01-01T00:00:01.000Z',
+        violations: [
+          {
+            id: 'shot-1',
+            type: 'SCREENSHOT_ATTEMPT',
+            severity: 'high',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            description: 'Screenshot shortcut detected. The exam screen has been hidden.',
+          },
+          {
+            id: 'tab-1',
+            type: 'TAB_SWITCH',
+            severity: 'medium',
+            timestamp: '2026-01-01T00:00:02.000Z',
+            description:
+              'Tab switching detected via visibilitychange. You must remain on the examination page at all times.',
+          },
+        ],
+      };
+
+      render(
+        <StudentAppWrapper
+          state={examState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByRole('heading', { name: 'Screen Capture Blocked' }),
+      ).toBeInTheDocument();
+
+      // Escape must not dismiss the blackout.
+      await act(async () => {
+        fireEvent.keyDown(document, { key: 'Escape' });
+      });
+      expect(
+        screen.getByRole('heading', { name: 'Screen Capture Blocked' }),
+      ).toBeInTheDocument();
+
+      // A click on the blackout backdrop must not dismiss it.
+      await act(async () => {
+        fireEvent.click(screen.getByRole('dialog'));
+      });
+      expect(
+        screen.getByRole('heading', { name: 'Screen Capture Blocked' }),
+      ).toBeInTheDocument();
+
+      // Acknowledging an unrelated warning (tab switch) must not dismiss the
+      // blackout.
+      expect(
+        screen.getByText(/Tab switching detected via visibilitychange/i),
+      ).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /I Understand/i }));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        screen.queryByText(/Tab switching detected via visibilitychange/i),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Screen Capture Blocked' }),
+      ).toBeInTheDocument();
+
+      // Only Continue Exam dismisses the blackout.
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Continue Exam/i }));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        screen.queryByRole('heading', { name: 'Screen Capture Blocked' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('showed the translation warning with the fallback message and acknowledged it (FEX-061)', async () => {
+      const config = createDefaultConfig('Academic', 'Academic');
+      config.security.detectSecondaryScreen = false;
+      config.security.tabSwitchRule = 'none';
+      config.security.antiScreenshotGuardEnabled = false;
+      const examState: ExamState = { ...readingState, config };
+
+      const attempt: StudentAttempt = {
+        ...createReadingAttemptSnapshot(),
+        updatedAt: '2026-01-01T00:00:01.000Z',
+        violations: [
+          {
+            id: 'tr-1',
+            type: 'TRANSLATION_DETECTED',
+            severity: 'medium',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            description: '',
+          },
+        ],
+      };
+
+      render(
+        <StudentAppWrapper
+          state={examState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // The fallback copy is shown when the violation carries no description.
+      expect(screen.getByRole('heading', { name: 'ATTENTION' })).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'Translation tools detected. Please disable translation and continue in the original language.',
+        ),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /I Understand/i }));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        screen.queryByText(
+          'Translation tools detected. Please disable translation and continue in the original language.',
+        ),
+      ).not.toBeInTheDocument();
+    });
+
+    it('showed the secondary-screen warning with the fallback message and acknowledged it (FEX-061)', async () => {
+      const config = createDefaultConfig('Academic', 'Academic');
+      config.security.tabSwitchRule = 'none';
+      config.security.preventTranslation = false;
+      config.security.antiScreenshotGuardEnabled = false;
+      const examState: ExamState = { ...readingState, config };
+
+      const attempt: StudentAttempt = {
+        ...createReadingAttemptSnapshot(),
+        updatedAt: '2026-01-01T00:00:01.000Z',
+        violations: [
+          {
+            id: 'sec-1',
+            type: 'SECONDARY_SCREEN',
+            severity: 'high',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            description: '',
+          },
+        ],
+      };
+
+      render(
+        <StudentAppWrapper
+          state={examState}
+          onExit={() => {}}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(
+        screen.getByRole('heading', { name: 'WARNING — FINAL NOTICE' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('Multiple screens detected. Please disconnect additional displays to continue.'),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /I Understand/i }));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        screen.queryByText('Multiple screens detected. Please disconnect additional displays to continue.'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('never moved focus while warning overlays opened and closed repeatedly (FEX-061)', async () => {
+      const config = createDefaultConfig('Academic', 'Academic');
+      config.security.detectSecondaryScreen = false;
+      config.security.preventTranslation = false;
+      const examState: ExamState = { ...readingState, config };
+
+      const attemptBase = createReadingAttemptSnapshot();
+      const { rerender } = render(
+        <StudentAppWrapper
+          state={examState}
+          onExit={() => {}}
+          scheduleId={attemptBase.scheduleId}
+          attemptSnapshot={attemptBase}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const input = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+      input.focus();
+      expect(document.activeElement).toBe(input);
+
+      for (const [index, violationId] of ['tab-1', 'tab-2', 'tab-3'].entries()) {
+        // Deliver the full violation history each cycle so the latest
+        // violation is always the new id (older ids are already acknowledged
+        // and must never re-trigger the overlay).
+        const violations: Violation[] = ['tab-1', 'tab-2', 'tab-3']
+          .slice(0, index + 1)
+          .map((id, idIndex) => ({
+            id,
+            type: 'TAB_SWITCH',
+            severity: 'medium',
+            timestamp: `2026-01-01T00:00:0${idIndex + 1}.000Z`,
+            description: `Tab switching detected ${id}. You must remain on the examination page at all times.`,
+          }));
+        const attempt: StudentAttempt = {
+          ...attemptBase,
+          updatedAt: `2026-01-01T00:00:0${index + 1}.000Z`,
+          violations,
+        };
+        rerender(
+          <StudentAppWrapper
+            state={examState}
+            onExit={() => {}}
+            scheduleId={attempt.scheduleId}
+            attemptSnapshot={attempt}
+            runtimeSnapshot={createReadingRuntimeSnapshot()}
+          />,
+        );
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        const expectedMessage = `Tab switching detected ${violationId}. You must remain on the examination page at all times.`;
+        expect(screen.getByText(expectedMessage)).toBeInTheDocument();
+        // Opening the warning must not move focus away from the student's control.
+        expect(document.activeElement).toBe(input);
+
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: /I Understand/i }));
+        });
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(screen.queryByText(expectedMessage)).not.toBeInTheDocument();
+        // Dismissing the warning must not move focus either.
+        expect(document.activeElement).toBe(input);
+      }
     });
   });
 });

@@ -132,6 +132,155 @@ during the submit and claims "IELTS Examination Complete!" only after the backen
 the pending panel when the backend cannot confirm — the completion claim, the submit call,
 and the retry loop all remain single-instance and receipt-gated.
 
+## 2026-08-06: Parameterized Pause Overlays and Warning Acknowledgement (FEX-060/061, F-10)
+
+### Symptom
+Plan-driven. No production incident. FEX-060 (pause overlays) and FEX-061 (warning
+acknowledgement) were largely unpinned: `getBlockingCopy` was inline in `StudentApp.tsx`
+with ZERO tests for any reason's title/message/badge/contextLabel; `proctor_paused` had no
+positive app test; the waiting-for-advance app test (old `StudentApp.test.tsx:523`) was
+vacuous — it rendered without an attempt snapshot, so the phase stayed `pre-check` and
+the blocking overlay never rendered (it asserted only that `container` was in the document);
+`waiting_for_runtime`, the remaining-time chip, the proctorNote override, priority
+reconciliation at app level, the whole proctor-warning flow (provider + app), screenshot
+blackout dismissal isolation, and translation/secondary-screen app behavior had zero
+coverage. Characterization testing then exposed TWO real (minor) violations, both fixed
+minimally (below).
+
+### Scope
+- `src/components/student/blockingCopy.ts` (NEW) — pure `getBlockingCopy` module, the only
+  intended production extraction; `StudentApp.tsx:34` imports it, `:65` calls it.
+- `src/components/student/StudentApp.tsx` — extraction import + the empty-description
+  fallback fix (4 one-character changes `??` → `||`).
+- `src/components/student/providers/StudentAttemptProvider.tsx` — duplicate-frame
+  acknowledgement-preservation fix (`:821-845`).
+- `src/components/student/__tests__/blockingCopy.test.ts` (NEW), `StudentApp.test.tsx`,
+  `useStudentWarningVisibility.test.tsx`, `StudentAttemptProvider.test.tsx` — new/rewritten
+  tests.
+- `docs/failure-cases.md` (this entry). Backend/admin/builder and the F-9 finalization flow
+  untouched.
+
+### Root Cause (finding 1 — FEX-061 "duplicate live updates do not reopen an acknowledged warning")
+`StudentAttemptProvider`'s attempt-snapshot sync effect has a keep-local branch (pending
+mutations or local-state preference) that preserves a locally acknowledged
+`lastAcknowledgedWarningId` (`currentAttempt.lastAcknowledgedWarningId ?? attemptSnapshot.lastAcknowledgedWarningId`,
+`:804-808`), but the REPLACE branch (no local signals — the normal case for a live-update
+frame) overwrote the attempt with the raw snapshot: `attemptRef.current = attemptSnapshot`.
+A server frame that is identical except that the acknowledgement is not yet reflected on it
+would therefore regress the acked id, reopening an already-acknowledged proctor warning —
+exactly the "duplicate live updates do not reopen an acknowledged warning" clause of
+FEX-061. Reproduced red with a provider characterization test (ack → re-deliver same frame
+→ acked id was `null` again).
+
+### Root Cause (finding 2 — empty-description violations render an empty warning dialog)
+The four warning overlays in `StudentApp.tsx` used `latestXViolation?.description ?? 'fallback'`.
+Nullish coalescing keeps an EMPTY string, so a violation with `description: ''` rendered the
+warning dialog with no message text at all (characterization test: overlay opened with
+heading "ATTENTION" and empty body). The fallback copy is the correct surface for an empty
+description.
+
+### Fix
+1. **Finding 1** (`StudentAttemptProvider.tsx:821-835`): the replace branch now preserves the
+   locally acknowledged id when a same-id attempt frame arrives without it:
+   `sameAttempt && currentAttempt && currentAttempt.lastAcknowledgedWarningId
+   ? { ...attemptSnapshot, lastAcknowledgedWarningId: currentAttempt.lastAcknowledgedWarningId }
+   : attemptSnapshot`. Mirrors the keep-local branch's intent; no other behavior changes.
+2. **Finding 2** (`StudentApp.tsx:693-696` screenshot, `:708-712` tab-switch, `:723-727`
+   translation, `:738-742` secondary screen): `??` → `||` so the parameterized fallback
+   message renders when the violation description is empty. This is also what makes the
+   FEX-061 fallback-message app tests (empty-description violations) meaningful.
+3. **Extraction (A)**: `getBlockingCopy` moved verbatim (identical strings, identical
+   `default: null`) from `StudentApp.tsx` (old `:36-109`) to `blockingCopy.ts:13-84`; the
+   overlay render (`StudentApp.tsx:454-474`) is unchanged and still gates on
+   `runtimeState.blocking.active && blockingCopy`.
+
+### Accepted Reconciliation (offline / heartbeat_lost / device_mismatch)
+These three reasons have copy entries in `getBlockingCopy` (`blockingCopy.ts:51-83`) but are
+NON-BLOCKING by design (FEX-032: answer entry continues offline; the header
+`autoSaveStatus` badge is the offline surface — `StudentApp.tsx:72-81`). The blocking
+machine ignores transitions for them (`blockingStateMachine.ts:79-81`
+`NON_BLOCKING_INTEGRITY_REASONS`); production dispatches them only as non-blocking signals,
+which the machine ignores (`StudentKeyboardProvider.tsx:277-285`,
+`useStudentSubmissionOrchestration.ts:75-80`), and the F-7 app suite pins 'Offline' as a
+header badge while answer entry continues (`StudentApp.test.tsx:4303-4461`). The
+`blockingCopy` entries are DEFENSIVE parameterization — now pinned by the
+`blockingCopy.test.ts` unit table
+so a future change that makes them blocking must consciously update both. `syncing_reconnect`
+has no copy entry → `null` → no overlay, pinned by `blockingCopy.test.ts:92`.
+
+### Regression Protection
+`blockingCopy.test.ts` (NEW, 10 passed): `:10-89` `it.each` table — exact title/message/
+badge/contextLabel for cohort_paused, proctor_paused, not_started, waiting_for_advance,
+waiting_for_runtime, offline, heartbeat_lost, device_mismatch, storage_unavailable; `:92`
+null for syncing_reconnect and unknown reasons.
+
+`useStudentWarningVisibility.test.tsx` (4 passed): `:78` once-per-violation-ID (v1,v2 → only
+v2 shows; ack v2 → closed; duplicate re-delivery of the same array stays closed; v3 reopens;
+ack v3 → full [v1,v2,v3] re-delivery never reopens any — older ids never re-trigger);
+`:156` per-type isolation (acknowledging SCREENSHOT_ATTEMPT does not acknowledge TAB_SWITCH;
+a new screenshot id reopens only the screenshot warning).
+
+`StudentAttemptProvider.test.tsx` (61 passed): `:2104` durable ack — `saveAttempt` payload
+carries `lastAcknowledgedWarningId`, proctorStatus demoted `warned` → `active`, `proctorUpdatedBy
+'Candidate'`, ALERT_ACKNOWLEDGED audit with `{warningId}`; `:2157` idempotent — same id acked
+again → no second save/audit; `:2207` non-warned statuses untouched; `:2246` no-op without an
+attempt; `:2282` the finding-1 red→green — ack then re-deliver the same frame without the
+acked id keeps it (duplicate live update never reopens the warning).
+
+`StudentApp.test.tsx` (65 passed; act warnings 18, at/below the 19 baseline):
+- `:544` WEAK-TEST FIX — the old vacuous waiting-overlay test rewritten: completed
+  pre-check + `waitingForNextSection: true` → heading 'Waiting for cohort advance', message
+  /The proctor is preparing the next section/i, badge 'Waiting', contextLabel 'Cohort
+  Runtime', writing fieldset disabled; release rerender (`waitingForNextSection: false`,
+  section `live`) → overlay gone.
+- `:5287` cohort pause full contract — heading/message/badge 'Paused'/'Cohort Runtime'/
+  'Remaining 05:00' (300s → zero-padded MM:SS), fieldset disabled + aria-disabled + change
+  event refused, released only when the runtime resumes live.
+- `:5349` proctor pause via attempt snapshot — 'Individual session paused' copy,
+  `proctorNote` OVERRIDES the message, released when proctorStatus → 'active'.
+- `:5414` proctor pause via blocking-machine override — high-severity violations with
+  `allowPause` hit the 15s-cooldown pause threshold (`transition_blocking('proctor_paused')`)
+  → same overlay from the machine path.
+- `:5462` waiting_for_runtime — `sections: []` contract issue → 'Waiting for runtime' copy +
+  locked fieldset; repaired frame releases.
+- `:5516` not_started mid-exam — stale `not_started` frame → 'Waiting for start' + 'Locked'
+  badge; next live frame clears.
+- `:5579` priority reconciliation — cohort-paused runtime + attempt proctorStatus 'paused' →
+  'Individual session paused' wins; runtime resumes while proctor still paused → STILL the
+  proctor overlay (lower reason clearing never clears the higher); proctor active → gone.
+- `:5654` proctor-warning flow — overlay opens with the violation description, 'I Understand'
+  calls `acknowledgeProctorWarning(id)` (durable `saveAttempt` payload asserted), same
+  violation id re-delivered on a duplicate frame stays closed, a NEW id reopens.
+- `:5771` latest-only — two PROCTOR_WARNING ids, only the latest drives the overlay and the
+  ack targets exactly that id.
+- `:5836` blackout isolation — Escape keydown, backdrop/dialog-area click, and
+  acknowledging an unrelated tab-switch warning do NOT dismiss; only 'Continue Exam' does.
+- `:5929` / `:5985` translation + secondary-screen — fallback messages
+  ('Translation tools detected...', 'Multiple screens detected...') with empty-description
+  violations (finding-2 red→green), 'I Understand' acks and closes.
+- `:6038` focus characterization — three open/ack cycles with cumulative violation
+  histories; `document.activeElement` never moves off the student's answer input (the
+  absence of focus code in `WarningOverlay.tsx` IS the contract — no autofocus/trap/restore
+  exists, and repeated cycles confirm nothing steals focus).
+- `:4534-4537` storage_unavailable extended — FEX-033 block test now also pins badge
+  'Blocked', contextLabel 'Session Recovery', 'Remaining 05:00' (M7 recovery release remains
+  at `:4623`).
+
+Unmodified pinning coverage re-verified: machine priority + non-blocking semantics
+(`blockingStateMachine.test.ts`, `blockingStateMachine.priority.test.ts`,
+`StudentRuntimeProvider.test.tsx:274-303`, `:492-515`); `answerControlsLocked` derivation
+(`StudentRuntimeProvider.tsx:1724-1730`); WarningOverlay component suite (14 tests,
+untouched).
+
+### Invariant
+The blocking overlay is copy-parameterized per reason and disappears ONLY on the matching
+recovery transition, with priority reconciliation (proctor pause > cohort pause > ...) such
+that clearing a lower-priority reason never clears a higher one, and answers are locked
+while any blocking reason is active. Each warning type shows at most once per violation id,
+an acknowledgement persists against duplicate live updates (locally, and durably through
+`lastAcknowledgedWarningId`), the screenshot blackout dismisses only through 'Continue Exam',
+and warning overlays never steal focus.
+
 ## 2026-08-06: Section Submission — Unanswered Confirmation, Flush-Before-Submit, and Submission Races (FEX-040/041/042, F-8)
 
 ### Symptom
