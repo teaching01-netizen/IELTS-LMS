@@ -10,6 +10,8 @@ import type {
   StudentAttempt,
   StudentAttemptMutation,
 } from '../../../../types/studentAttempt';
+import * as studentObservabilityUtilsModule from '../../../../utils/studentObservability';
+import * as studentAttemptFacadeModule from '@student/application/studentAttemptFacade';
 import { ProtectedInput } from '../../ProtectedInput';
 import { StudentAttemptProvider, useStudentAttempt } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
@@ -300,6 +302,88 @@ describe('StudentAttemptProvider', () => {
     });
 
     expect(result.current.state.lastPersistedAt).not.toBeNull();
+  });
+
+  it('kept the offline answer queued across a runtime question navigation and replayed it exactly once after reconnection (FEX-032)', async () => {
+    vi.useFakeTimers();
+    try {
+      const runtimeSnapshot: ExamSessionRuntime = createRuntimeSnapshot('reading');
+
+      const { result } = renderHook(
+        () => ({
+          attempt: useStudentAttempt(),
+          runtime: useStudentRuntime(),
+        }),
+        {
+          wrapper: createRuntimeBackedWrapper(
+            createBoundaryAttemptSnapshot(),
+            runtimeSnapshot,
+          ),
+        },
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(result.current.attempt.state.pendingMutationCount).toBe(0);
+
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: false,
+      });
+
+      await act(async () => {
+        result.current.attempt.actions.persistAnswer('q1', 'OFFLINE_NAV');
+        await Promise.resolve();
+      });
+      expect(result.current.attempt.state.pendingMutationCount).toBe(1);
+      expect(result.current.attempt.state.attempt?.answers.q1).toBe('OFFLINE_NAV');
+
+      // Navigate the runtime to a later question while offline: the durable
+      // mirror persists the navigation as its own coalesced position mutation,
+      // so the pending queue is NOT discarded — it keeps the offline answer
+      // alongside the recorded position.
+      await act(async () => {
+        result.current.runtime.actions.setCurrentQuestionId('q2');
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(result.current.attempt.state.pendingMutationCount).toBeGreaterThanOrEqual(1);
+      expect(result.current.attempt.state.attempt?.answers.q1).toBe('OFFLINE_NAV');
+      expect(result.current.attempt.state.attempt?.currentQuestionId).toBe('q2');
+
+      // Reconnect: the durable replay carries the offline answer to the
+      // persistence layer exactly once.
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: true,
+      });
+      await act(async () => {
+        await result.current.attempt.actions.flushPending();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const offlineNavAnswerCalls = vi
+        .mocked(studentAttemptRepository.savePendingMutations)
+        .mock.calls.filter((call) =>
+          (call[1] ?? []).some(
+            (mutation) =>
+              mutation.type === 'answer' &&
+              mutation.payload?.questionId === 'q1' &&
+              mutation.payload?.value === 'OFFLINE_NAV',
+          ),
+        );
+      expect(offlineNavAnswerCalls).toHaveLength(1);
+      expect(result.current.attempt.state.pendingMutationCount).toBe(0);
+    } finally {
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: true,
+      });
+      vi.useRealTimers();
+    }
   });
 
   it('replays pending writing drafts into the runtime state on mount', async () => {
@@ -1529,6 +1613,93 @@ describe('StudentAttemptProvider', () => {
     expect(result.current.attempt.state.attempt?.answers.q1).toBe('LOCAL_TYPED');
     expect(result.current.runtime.state.blocking.reason).toBe('storage_unavailable');
     vi.useRealTimers();
+  });
+
+  it('emitted the pending-persist-failure observability metric and storage-error audit event exactly once across a durable failure and a later success (FEX-033)', async () => {
+    vi.useFakeTimers();
+    const observabilityMetricSpy = vi.spyOn(
+      studentObservabilityUtilsModule,
+      'emitStudentObservabilityMetric',
+    );
+    const auditEventSpy = vi
+      .spyOn(studentAttemptFacadeModule, 'saveStudentAuditEvent')
+      .mockResolvedValue(undefined);
+    try {
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: true,
+      });
+      vi.mocked(studentAttemptRepository.savePendingMutations).mockRejectedValue(
+        new Error('quota exceeded'),
+      );
+
+      const { result } = renderHook(
+        () => ({
+          attempt: useStudentAttempt(),
+          runtime: useStudentRuntime(),
+        }),
+        { wrapper: createWrapper() },
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        result.current.attempt.actions.persistAnswer('q1', 'LOCAL_TYPED');
+      });
+
+      await flushAnswerDurableDebounceWindow();
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const pendingPersistFailureCalls = observabilityMetricSpy.mock.calls.filter(
+        (call) => call[0] === 'student_pending_persist_failure_total',
+      );
+      const storageErrorAuditCalls = auditEventSpy.mock.calls.filter(
+        (call) => call[1] === 'PERSISTENCE_STORAGE_ERROR',
+      );
+      expect(pendingPersistFailureCalls).toHaveLength(1);
+      expect(storageErrorAuditCalls).toHaveLength(1);
+      expect(result.current.attempt.state.attempt?.recovery.syncState).toBe('error');
+
+      // Snapshot the total spy call counts so the subsequent successful save
+      // can prove it fires NO additional metric/audit calls at all.
+      const metricCallCountAfterFailure = observabilityMetricSpy.mock.calls.length;
+      const auditCallCountAfterFailure = auditEventSpy.mock.calls.length;
+
+      await act(async () => {
+        // mockResolvedValue restores the durable-write path: the next durable
+        // save succeeds.
+        vi.mocked(studentAttemptRepository.savePendingMutations).mockResolvedValue();
+      });
+      await act(async () => {
+        result.current.attempt.actions.persistAnswer('q1', 'LOCAL_TYPED_2');
+      });
+      await flushAnswerDurableDebounceWindow();
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // The successful save fires no additional metric or audit calls.
+      expect(observabilityMetricSpy.mock.calls.length).toBe(metricCallCountAfterFailure);
+      expect(auditEventSpy.mock.calls.length).toBe(auditCallCountAfterFailure);
+      expect(
+        observabilityMetricSpy.mock.calls.filter(
+          (call) => call[0] === 'student_pending_persist_failure_total',
+        ),
+      ).toHaveLength(1);
+      expect(
+        auditEventSpy.mock.calls.filter(
+          (call) => call[1] === 'PERSISTENCE_STORAGE_ERROR',
+        ),
+      ).toHaveLength(1);
+    } finally {
+      observabilityMetricSpy.mockRestore();
+      auditEventSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('recovers answer mutations from the sync checkpoint when repository pending mutations are empty', async () => {

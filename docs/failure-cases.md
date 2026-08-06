@@ -2,6 +2,90 @@
 
 Purpose: turn incidents and bug fixes into durable memory for humans and AI agents.
 
+## 2026-08-06: Offline Answer Flow and Browser Storage Failure Contracts (FEX-032/033, F-7)
+
+### Symptom
+Plan-driven — one production gap found: **no visible offline status**. While offline with
+working browser storage the blocking machine stays disengaged (`blocking.reason` remains
+`null`), so before this change the student had no offline indicator at all: the header
+received no `autoSaveStatus` even though `StudentAttemptProvider` already surfaced
+`attemptSyncState` (`'offline' | 'syncing_reconnect' | 'saving' | 'saved'`, plus a
+runtime-emitted `'error'`). Every
+other FEX-032/033 behavior already existed (offline typing reaches the durable queue, the
+queue replays on reconnect, storage failure blocks input and surfaces the
+`storage_unavailable` overlay) but was unverified at the app surface.
+
+### Scope
+Owning module only — the student module:
+- `src/components/student/StudentApp.tsx` (composition root; the one place that passes the
+  header badge, `autoSaveStatus={autoSaveStatus}`).
+- `src/components/student/__tests__/StudentApp.test.tsx`
+- `src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx`
+
+Read-only context used for citations: `src/services/studentMutationOutbox.ts`,
+`src/utils/studentObservability.ts` (`emitStudentObservabilityMetric`),
+`src/features/student/infrastructure/studentAttemptGateway.ts` (re-exports
+`saveStudentAuditEvent` from `@services/studentAuditService`).
+
+### Gap Matrix
+
+| Bullet | Verdict | Evidence (file:line) | Action |
+|---|---|---|---|
+| FEX-032: answer entry continues while durable local storage works | NEWLY-PINNED (app level) | `StudentApp.test.tsx:3869-3871` types while offline; `:3880-3892` the durable mirror queues the `answer` mutation with `OFFLINE_TYPED` | — |
+| FEX-032: pending mutation count increases | NEWLY-PINNED | `StudentAttemptProvider.test.tsx:336-339` — offline `persistAnswer` takes `pendingMutationCount` 0→1 | — |
+| FEX-032: offline status is visible | **FIXED-PRODUCTION-GAP** | Before fix: no header wiring. After fix: `StudentApp.tsx:146-154` derives `autoSaveStatus` from `attemptSyncState` (comment `:140-145`), applied `:670`; pinned by `StudentApp.test.tsx:3865`, `:3901`, `:3955` | **ADDED** GAP-1 wiring (one-way derivation) |
+| FEX-032: navigation does not discard answers | NEWLY-PINNED | `StudentAttemptProvider.test.tsx:307-386` — runtime navigation keeps the queue (the navigation itself enqueues its own position mutation, so `pendingMutationCount` only grows, `:352-354`), answers survive (`:353`), and the replay carries `OFFLINE_NAV` to `savePendingMutations` exactly once (filter `:369-377`, assert `:378`, drain `:379`) | — |
+| FEX-032: queue replays on reconnect | PINNED-ALREADY + NEWLY-PINNED (app level) | provider `:273-306` pins the provider replay; `StudentApp.test.tsx:3976-3992` dispatches `online` and `clearPendingMutations` follows | — |
+| FEX-032: successful acknowledgements remove only accepted mutations | PINNED-ALREADY | `StudentAttemptProvider.test.tsx:273` (queue drains only after the durable flush ack) and `:981` (new answers queued mid-clear not lost) | — |
+| FEX-032: latest answers remain visible | NEWLY-PINNED | `StudentApp.test.tsx:3902-3903` (`OFFLINE_TYPED`), `:4001-4002` (`RECONNECT_TYPED` still in the workspace input) | — |
+| FEX-032: offline surface clears only after the flush succeeds | NEWLY-PINNED | `StudentApp.test.tsx:3990-3992` — `'Offline'` gone and `'Saved'` shown only after `advanceTimersByTime` has driven the flush to `clearPendingMutations` (`:3976-3992`) | — |
+| FEX-033: input mutation is blocked once it is unavailable | NEWLY-PINNED (app) | `StudentApp.test.tsx:4065-4067` locks the disabled fieldset and `:4070-4078` refuses edits + flag; provider keeps RAM `:1613-1614` | — |
+| FEX-033: existing visible answer is not cleared | NEWLY-PINNED (app) | `StudentApp.test.tsx:4076-4078` (`FIRST` untouched, `'Unflag'` absent) | — |
+| FEX-033: warning explains new answers cannot be safely stored | NEWLY-PINNED | `StudentApp.test.tsx:4058-4061` — `Answer storage unavailable` heading + `/Your browser cannot safely store new answers/i` copy | — |
+| FEX-033: recovery removes the block only after storage is usable | PINNED-ALREADY | `StudentAttemptProvider.test.tsx:2765` — sticky `storage_unavailable` clears only after the pending save succeeds + confirmation (M7) | — |
+| FEX-033: audit and observability hooks are invoked once | NEWLY-PINNED | `StudentAttemptProvider.test.tsx:1618-1701` — a durable persist failure fires the `student_pending_persist_failure_total` metric and one `PERSISTENCE_STORAGE_ERROR` audit (`:1662-1664`), a later successful save fires neither (`:1686-1696`) | — |
+
+### Fix
+One production change and five regression tests, no behavior removed:
+- `StudentApp.tsx:146-154` — the only production fix: the header badge is derived one-way
+  from `attemptSyncState` (`offline → 'offline'`, `syncing_reconnect → 'syncing'`,
+  `saving → 'saving'`, `saved → 'saved'`, everything else — including `error`, which owns
+  the full-screen `storage_unavailable` overlay, and `idle` — silently null). Applied at
+  `:670`.
+- `StudentApp.test.tsx:3832` pins offline status visible + offline typing reaching the
+  durable queue; `:3913` pins the live transition: `'Offline'` remains until the replay
+  flush actually syncs, then `'Saved'` appears and the latest `RECONNECT_TYPED` answer is
+  both persisted and visible in the workspace. The tail drives the recovery loop
+  deterministically with explicit `act` + `vi.advanceTimersByTime` rounds (`:3976-3992`)
+  because `waitFor` makes no auto-advance under Vitest fake timers. `:4012` pins FEX-033
+  blocking.
+- `StudentAttemptProvider.test.tsx:307` pins navigation-does-not-discard + replay-exactly-once;
+  `:1618` pins metric/audit-exactly-once with `vi.spyOn` on the same module
+  instances the provider imports (`studentObservabilityUtilsModule`/`studentAttemptFacadeModule`,
+  `:13-14`), restored in `finally`.
+
+### Regression Protection
+- `npx vitest run src/components/student/__tests__/StudentApp.test.tsx` → **Tests 46 passed (46)**;
+  the 19 "not wrapped in act" occurrences match the pre-existing baseline (zero new),
+- `npx vitest run src/components/student/__tests__/StudentApp.test.tsx -t "FEX-032|FEX-033"` → **3 passed** | 43 skipped, zero act warnings.
+- `npx vitest run src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx` → **Tests 55 passed (55)**, zero `act()` warnings (the provider file's zero-warning bar is kept).
+- All new tests use `vi.useFakeTimers()` + `finally { vi.useRealTimers(); }` and restore every descriptor/spy in `finally`; no module-level `vi.mock`s added.
+
+### Invariant
+The student's offline answer flow is a durable outbox that the UI never misrepresents: while
+the network is down, typing must keep working into RAM and into the durable mutation queue
+(pending count rises, `offline` badge visible), runtime navigation must never discard queued
+answers; when `online` fires the queue replays and the header leaves `offline` only once the
+flush actually synchronizes (the intermediate `syncing` badge is produced by the mapping but
+not separately pinned by a test), at which point only accepted
+mutations leave the queue and the latest answer remains visible in the workspace; and when
+browser storage fails instead, the `storage_unavailable` overlay blocks further input, never
+clears the visible answer, explains the failure, its blocking flag stays until storage is
+usable again, and the failure is reported on exactly once per durable persist failure —
+a single `student_pending_persist_failure_total` metric and a single
+`PERSISTENCE_STORAGE_ERROR` audit on the very first failure, with later successful saves never
+firing additional hook calls.
+
 ## 2026-08-06: Immediate Local Feedback and Durable Mirror Contracts for Student Answers (FEX-030/031, F-6)
 
 ### Symptom
@@ -26,35 +110,35 @@ changed; behavior unchanged — the new tests pin behavior that already existed.
 
 | Bullet | Verdict | Evidence (file:line) | Action |
 |---|---|---|---|
-| FEX-030: UI reflects the answer synchronously | Already pinned | RAM-immediate test `StudentAttemptProvider.test.tsx:1197` asserts `state.attempt?.answers.q1 === 'ABC'` before any durable flush (:1212); renderer matrix `QuestionRenderer.matrix.test.tsx:440-443` (text input) and :329-333 (radios) pin `answer prop → rendered input value`. The provider state is the single source the renderers bind to | — |
-| FEX-030: pending-save state appears without blocking typing | Already pinned | `:844` types a second answer while a flush is still in flight; `:897` keeps `pendingMutationCount` visible (1) while typing mid-clear; `:953` preserves the final answer across a latency overlap | — |
-| FEX-030: a backend poll with an older snapshot cannot erase the local answer | Already pinned | stale-snapshot quartet: `:1870` (keeps local answers after a successful flush), `:1936` (a fresher snapshot wins), `:2007` (equal freshness + local mutation signals keep local), `:2084` (preview mode preserved) | — |
-| FEX-031: typing mutations use the configured short debounce | Already pinned | `:1197` (exactly 100ms, no write before it), `:1418`/`:1446` (focusout rescue), writing coalescing `:498`/`:521` | — |
-| FEX-031: discrete choices persist durably immediately | Already pinned | `:1232` — discrete selection writes without waiting for the debounce window; a second save is never issued | — |
-| FEX-031: answers near the final time boundary persist immediately | **GAP — boundary exists, unpinned** | `StudentAttemptProvider.tsx:125` (`BOUNDARY_IMMEDIATE_DURABILITY_THRESHOLD_SECONDS = 20`), `:548-553` (`forceImmediateDurability` when exam phase + `currentSectionRemainingSeconds ∈ [0,20]`) → `studentMutationOutbox.ts:694-699` (`durableWriteMode: 'immediate'`) + `:705` (`delayMs: 0` under the boundary). No test asserted durable-persistence timing with `remaining ≤ 20` (a pre-existing test at `:521` already drives the value) | **ADDED** 3 tests: inside-boundary typed answer persists durably immediately (:1265), 21s stays debounced (:1310), boundary skips the durable debounce for writing answers too (:1355) |
-| FEX-031 life-cycle flush: blur / focusout | Already pinned | `:1418` (input blur), `:1446` (DOM-rescue focusout pins the raw typed value) | — |
-| FEX-031 life-cycle flush: pagehide + beforeunload | Already pinned | `:1579` `window.pagehide`/`window.beforeunload` | — |
-| FEX-031 life-cycle flush: freeze + window blur | Already pinned | `:1613` `window.blur` + `document.freeze` | — |
-| FEX-031 life-cycle flush: visibilitychange (hidden) | **GAP — listener exists, unpinned** | `StudentAttemptProvider.tsx:674-679` flushes on `document.visibilityState === 'hidden'`; no test dispatched `visibilitychange` | **ADDED** hidden → immediate durable flush; a visible transition with the guard must stay silent (:1647) |
-| FEX-031: failed storage activates `storage_unavailable` | Already pinned | `:1493` persist failure → RAM kept, syncState `error`, `blocking.reason === 'storage_unavailable'` (:1530); `:2594` sticky-clear after a confirmed save (M7) | — |
+| FEX-030: UI reflects the answer synchronously | Already pinned | RAM-immediate test `StudentAttemptProvider.test.tsx:1281` asserts `state.attempt?.answers.q1 === 'ABC'` before any durable flush (:1296); renderer matrix `QuestionRenderer.matrix.test.tsx:440-443` (text input) and :329-333 (radios) pin `answer prop → rendered input value`. The provider state is the single source the renderers bind to | — |
+| FEX-030: pending-save state appears without blocking typing | Already pinned | `:928` types a second answer while a flush is still in flight; `:981` keeps `pendingMutationCount` visible (1) while typing mid-clear; `:1037` preserves the final answer across a latency overlap | — |
+| FEX-030: a backend poll with an older snapshot cannot erase the local answer | Already pinned | stale-snapshot quartet: `:2041` (keeps local answers after a successful flush), `:2107` (a fresher snapshot wins), `:2178` (equal freshness + local mutation signals keep local), `:2255` (preview mode preserved) | — |
+| FEX-031: typing mutations use the configured short debounce | Already pinned | `:1281` (exactly 100ms, no write before it), `:1502`/`:1530` (focusout rescue), writing coalescing `:582`/`:605` | — |
+| FEX-031: discrete choices persist durably immediately | Already pinned | `:1316` — discrete selection writes without waiting for the debounce window; a second save is never issued | — |
+| FEX-031: answers near the final time boundary persist immediately | **GAP — boundary exists, unpinned** | `StudentAttemptProvider.tsx:125` (`BOUNDARY_IMMEDIATE_DURABILITY_THRESHOLD_SECONDS = 20`), `:548-553` (`forceImmediateDurability` when exam phase + `currentSectionRemainingSeconds ∈ [0,20]`) → `studentMutationOutbox.ts:694-699` (`durableWriteMode: 'immediate'`) + `:705` (`delayMs: 0` under the boundary). No test asserted durable-persistence timing with `remaining ≤ 20` (a pre-existing test at `:605` already drives the value) | **ADDED** 3 tests: inside-boundary typed answer persists durably immediately (:1349), 21s stays debounced (:1394), boundary skips the durable debounce for writing answers too (:1439) |
+| FEX-031 life-cycle flush: blur / focusout | Already pinned | `:1502` (input blur), `:1530` (DOM-rescue focusout pins the raw typed value) | — |
+| FEX-031 life-cycle flush: pagehide + beforeunload | Already pinned | `:1750` `window.pagehide`/`window.beforeunload` | — |
+| FEX-031 life-cycle flush: freeze + window blur | Already pinned | `:1784` `window.blur` + `document.freeze` | — |
+| FEX-031 life-cycle flush: visibilitychange (hidden) | **GAP — listener exists, unpinned** | `StudentAttemptProvider.tsx:674-679` flushes on `document.visibilityState === 'hidden'`; no test dispatched `visibilitychange` | **ADDED** hidden → immediate durable flush; a visible transition with the guard must stay silent (:1818) |
+| FEX-031: failed storage activates `storage_unavailable` | Already pinned | `:1577` persist failure → RAM kept, syncState `error`, `blocking.reason === 'storage_unavailable'` (:1614); `:2765` sticky-clear after a confirmed save (M7) | — |
 
 ### Fix
 Four regression tests added in `StudentAttemptProvider.test.tsx`; no production code change; no
 contract violation demonstrated (the new tests confirm the behavior the provider already
 implements):
 - "persists a typed answer durably immediately once remaining time is inside the 20-second
-  boundary" (:1265) — runtime-backed exam with `currentSectionRemainingSeconds: 10`; a
+  boundary" (:1349) — runtime-backed exam with `currentSectionRemainingSeconds: 10`; a
   plain typed `persistAnswer` hits `savePendingMutations` straight away (no 100ms debounce),
   RAM is immediate, and no second write follows the debounce window.
 - "keeps the 100ms durable debounce once remaining time moves above the immediate-durability
-  boundary" (:1310) — `currentSectionRemainingSeconds: 21`: RAM immediate, but the durable
+  boundary" (:1394) — `currentSectionRemainingSeconds: 21`: RAM immediate, but the durable
   write is withheld until the 100ms window (pin-points the boundary direction).
 - "applies the final-time boundary to writing answers, skipping the durable debounce"
-  (:1355) — the writing_answer mutation reaches the durable mirror with zero timer
+  (:1439) — the writing_answer mutation reaches the durable mirror with zero timer
   advancement (the writing path's 1500ms figure governs the outbound network flush, which
   is offline in this test; the durable-mirror debounce it skips is the 100ms budget).
 - "forces an immediate durable answer flush when the document becomes hidden
-  (visibilitychange)" (:1647) — a hidden-transition flushes pending answers at once, a
+  (visibilitychange)" (:1818) — a hidden-transition flushes pending answers at once, a
   still-visible transition must not flush a fresh unsaved answer, and a later hidden
   transition flushes it — using the repo's `Object.defineProperty(document,
   'visibilityState', …)` idiom with descriptor restore in `finally`.
@@ -101,10 +185,10 @@ renderer matrix and the outbox coalescing suite. No production code changed; beh
 | Bullet | Verdict | Evidence (file:line) | Action |
 |---|---|---|---|
 | FEX-021: typing in slot 2 changes only slot 2 | Already pinned | `QuestionRenderer.matrix.test.tsx` user-edit cases: every slot arm emits the full array with only the edited slot changed (SENTENCE_COMPLETION ~:776-788, DIAGRAM ~:864-872, FLOW_CHART ~:944-958, TABLE ~:1027-1037, NOTE ~:1182-1198, CLASSIFICATION ~:1266-1275, MATCHING_FEATURES ~:1352-1362). Merge layer: `resolveObjectiveAnswerUpdate.slots.test.ts` "preserves existing slots when updating a different slot" (:96-100) | — |
-| FEX-021: fast typing coalesces per slot, not across slots | Already pinned | `studentMutationOutbox.coalescence.test.ts` (same question+slot replace key, different slots kept separate, order preserved); `StudentAttemptProvider.test.tsx` super-fast burst :570-612, per-slot coalescing :615-676, different slot indexes :678-713 | — |
-| FEX-021: slot ID and slot index persist | Already pinned | `StudentAttemptProvider.test.tsx` "persists slot identity metadata for slot-scoped answer mutations" :715-745 asserts `payload.slotIndex`/`slotId`/`slotCount` | — |
+| FEX-021: fast typing coalesces per slot, not across slots | Already pinned | `studentMutationOutbox.coalescence.test.ts` (same question+slot replace key, different slots kept separate, order preserved); `StudentAttemptProvider.test.tsx` super-fast burst :684, per-slot coalescing :722, different slot indexes :785 | — |
+| FEX-021: slot ID and slot index persist | Already pinned | `StudentAttemptProvider.test.tsx` "persists slot identity metadata for slot-scoped answer mutations" :824 asserts `payload.slotIndex`/`slotId`/`slotCount` | — |
 | FEX-021: removing one answer does not shift others | **Partially pinned — persistence gap with an EMPTY slot value** | Renderer clear-behavior emits full array with cleared slot + intact siblings (e.g. SENTENCE ~:789-798); merge-layer no-shift `resolveObjectiveAnswerUpdate.slots.test.ts:96-100` | **ADDED** provider test: a clear mutation persists full-array `['', sibling]` under the cleared slot's coalescing key while the sibling slot's pending mutation keeps its value (no shift, no wipe) |
-| FEX-021: hydration generates no new mutations | Already pinned | `StudentAttemptProvider.test.tsx` :1523 "does not generate autosave mutations when hydrating existing answers" (no `savePendingMutations`, no `saveAttempt`) | — |
+| FEX-021: hydration generates no new mutations | Already pinned | `StudentAttemptProvider.test.tsx` :1946 "does not generate autosave mutations when hydrating existing answers" (no `savePendingMutations`, no `saveAttempt`) | — |
 | FEX-022: draft committed before section submission | Already pinned, both paths | `StudentWriting.lifecycle.test.tsx` commits the current draft before opening the submit-review modal; `StudentApp.test.tsx` :686 commits the mounted editor draft before runtime final submission; `useStudentSubmissionOrchestration.ts` calls `commitWritingDraft()` before `submitAttempt()` (:178); legacy manual submit flushes at `StudentApp.tsx:417` | No duplicate — flush-before-submit wiring is owned by FEX-040/F-8 |
 | FEX-022: debounced editing keeps the latest value | Already pinned | `StudentTypingPerformance.test.tsx` — 3 rapid changes, exactly one commit with the LAST value | — |
 | FEX-022: blur and page lifecycle persist editor content | Already pinned | `StudentWriting.lifecycle.test.tsx` commits on compositionend / pagehide / visibilitychange-hidden / freeze / beforeunload / blur / task switch, with exact whitespace preservation | — |

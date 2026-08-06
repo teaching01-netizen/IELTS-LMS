@@ -137,6 +137,22 @@ export function StudentApp({
   const studentTypography = getStudentTypographyScale(uiState.accessibilitySettings.fontSize);
   useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
+  // FEX-032: surface the attempt-layer sync state in the header. During normal
+  // offline typing the blocking machine stays disengaged (blocking.reason
+  // remains null), so the autoSaveStatus badge is the ONLY visible offline
+  // surface. One-way mapping: StudentApp is the only place that passes the
+  // prop. 'error' deliberately maps to null — the storage_unavailable
+  // full-screen overlay IS the error surface; 'idle' means nothing is pending.
+  const autoSaveStatus =
+    runtimeState.attemptSyncState === 'offline'
+      ? 'offline'
+      : runtimeState.attemptSyncState === 'syncing_reconnect'
+        ? 'syncing'
+        : runtimeState.attemptSyncState === 'saving'
+          ? 'saving'
+          : runtimeState.attemptSyncState === 'saved'
+            ? 'saved'
+            : null;
   // A failed submit locks the exam against further editing while the attempt
   // layer retries with the same submission identity (FEX-051).
   const submissionPending = attemptState.pendingSubmission != null;
@@ -651,6 +667,7 @@ export function StudentApp({
       <StudentHeader
         testTakerId={attemptState.attempt?.candidateId ?? undefined}
         timeRemaining={runtimeState.displayTimeRemaining}
+        autoSaveStatus={autoSaveStatus}
         highlightEnabled={highlightEnabled}
         highlightToolMode={uiState.accessibilitySettings.highlightToolMode}
         highlightColor={highlightColor}

@@ -3829,6 +3829,260 @@ describe('StudentApp runtime-backed mode', () => {
     }
   });
 
+  it('showed the Offline status in the header and kept answer entry working while offline (FEX-032)', async () => {
+    vi.useFakeTimers();
+    try {
+      const offlineAttempt: StudentAttempt = {
+        ...createReadingAttemptSnapshot(),
+        recovery: {
+          ...createReadingAttemptSnapshot().recovery,
+          syncState: 'offline',
+        },
+      };
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: false,
+      });
+
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={offlineAttempt.scheduleId}
+          attemptSnapshot={offlineAttempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // FEX-032: while offline typing, the blocking machine stays disengaged
+      // (blocking.reason is null) — the header autoSaveStatus badge is the
+      // ONLY visible offline surface.
+      expect(screen.getByText('Offline')).toBeInTheDocument();
+
+      const input = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+      await act(async () => {
+        fireEvent.change(input, { target: { value: 'OFFLINE_TYPED' } });
+      });
+      expect(input.value).toBe('OFFLINE_TYPED');
+
+      // The typed answer reaches the durable queue even while offline
+      // (pendingMutationCount 0→1 is pinned at the provider level; here the
+      // durable mirror write is the app-level observable).
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+        await Promise.resolve();
+      });
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalled();
+      const queuedMutations = vi
+        .mocked(studentAttemptRepository.savePendingMutations)
+        .mock.calls.flatMap((call) => call[1] ?? []);
+      expect(queuedMutations).toContainEqual(
+        expect.objectContaining({
+          type: 'answer',
+          payload: expect.objectContaining({
+            questionId: 'rq-1',
+            value: 'OFFLINE_TYPED',
+          }),
+        }),
+      );
+
+      // The Offline indicator survives the durable write and the queued
+      // (offline) flush cycle.
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByText('Offline')).toBeInTheDocument();
+      expect((screen.getByLabelText('Answer for question 1') as HTMLInputElement).value)
+        .toBe('OFFLINE_TYPED');
+    } finally {
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: true,
+      });
+      vi.useRealTimers();
+    }
+  });
+
+  it('released the Offline header status only after the reconnect flush synchronized (FEX-032)', async () => {
+    vi.useFakeTimers();
+    try {
+      window.sessionStorage.clear();
+      window.sessionStorage.setItem(
+        'ielts_student_attempt_credentials_v1',
+        JSON.stringify([
+          {
+            attemptId: 'attempt-reading-1',
+            scheduleId: 'sched-1',
+            attemptToken: 'token-1',
+            expiresAt: '2026-01-02T00:00:00.000Z',
+          },
+        ]),
+      );
+
+      const offlineAttempt: StudentAttempt = {
+        ...createReadingAttemptSnapshot(),
+        recovery: {
+          ...createReadingAttemptSnapshot().recovery,
+          syncState: 'offline',
+        },
+      };
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: false,
+      });
+
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={offlineAttempt.scheduleId}
+          attemptSnapshot={offlineAttempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByText('Offline')).toBeInTheDocument();
+
+      const input = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+      await act(async () => {
+        fireEvent.change(input, { target: { value: 'RECONNECT_TYPED' } });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+        await Promise.resolve();
+      });
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalled();
+
+      // Connection returns: the queue replays and only a successful flush
+      // releases the Offline state (Offline → Syncing… → Saved). Drive the
+      // recovery loop's microtask chain and its 0ms/backoff timers explicitly
+      // (waitFor does not auto-advance Vitest fake timers here).
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: true,
+      });
+      await act(async () => {
+        window.dispatchEvent(new Event('online'));
+        for (let i = 0; i < 12; i++) {
+          await Promise.resolve();
+        }
+      });
+      for (let round = 0; round < 5; round++) {
+        await act(async () => {
+          vi.advanceTimersByTime(100);
+          for (let i = 0; i < 8; i++) {
+            await Promise.resolve();
+          }
+        });
+      }
+
+      expect(screen.queryByText('Offline')).not.toBeInTheDocument();
+      expect(screen.getByText('Saved')).toBeInTheDocument();
+      expect(studentAttemptRepository.clearPendingMutations).toHaveBeenCalled();
+
+      // The replay pushed the latest offline answer into the persisted
+      // attempt, and the latest answer stayed visible in the workspace.
+      expect(
+        vi
+          .mocked(studentAttemptRepository.saveAttempt)
+          .mock.calls.some((call) => (call[0] as StudentAttempt).answers?.['rq-1'] === 'RECONNECT_TYPED'),
+      ).toBe(true);
+      expect((screen.getByLabelText('Answer for question 1') as HTMLInputElement).value)
+        .toBe('RECONNECT_TYPED');
+    } finally {
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: true,
+      });
+      vi.useRealTimers();
+    }
+  });
+
+  it('blocked new answer and flag input with a storage warning while keeping the visible answer (FEX-033)', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(studentAttemptRepository as any, 'savePendingMutations').mockRejectedValue(
+        new Error('quota exceeded'),
+      );
+      // Seed a device fingerprint so the mount-time continuity check does not
+      // produce the first (failing) durable write before the typed answer.
+      const readingAttempt: StudentAttempt = {
+        ...createReadingAttemptSnapshot(),
+        integrity: {
+          ...createReadingAttemptSnapshot().integrity,
+          deviceFingerprintHash: 'fp-1',
+        },
+      };
+
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => {}}
+          scheduleId={readingAttempt.scheduleId}
+          attemptSnapshot={readingAttempt}
+          runtimeSnapshot={createReadingRuntimeSnapshot()}
+        />,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const input = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
+      await act(async () => {
+        fireEvent.change(input, { target: { value: 'FIRST' } });
+      });
+      expect(input.value).toBe('FIRST');
+
+      // The durable write fails: the storage_unavailable overlay appears with
+      // the title and the explanation copy.
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(
+        screen.getByRole('heading', { name: 'Answer storage unavailable' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/Your browser cannot safely store new answers/i),
+      ).toBeInTheDocument();
+
+      // FEX-033: input mutation is blocked once safe durability is unavailable
+      // — the workspace controls are locked and further edits are refused.
+      const workspaceFieldset = input.closest('fieldset');
+      expect(workspaceFieldset).not.toBeNull();
+      expect((workspaceFieldset as HTMLFieldSetElement).disabled).toBe(true);
+
+      await act(async () => {
+        fireEvent.change(input, { target: { value: 'SECOND' } });
+        fireEvent.click(screen.getByTitle('Flag question'));
+        await Promise.resolve();
+      });
+
+      // The existing visible answer is NOT cleared and does NOT change, and
+      // the flag toggle is refused too.
+      expect(input.value).toBe('FIRST');
+      expect(screen.queryByTitle('Unflag question')).not.toBeInTheDocument();
+      expect(screen.getByTitle('Flag question')).toBeInTheDocument();
+    } finally {
+      vi.mocked(studentAttemptRepository.savePendingMutations).mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps the Submission pending panel over the post-exam view while a completed runtime is unconfirmed (FEX-051)', async () => {
     vi.useFakeTimers();
     try {
