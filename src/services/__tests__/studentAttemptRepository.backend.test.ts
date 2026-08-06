@@ -252,6 +252,30 @@ describe('studentAttemptRepository backend mode', () => {
     expect(mapped.flags).toEqual({ q1: true });
   });
 
+  it('passes server proctor state through the mapper (E2E-02 pause contract)', () => {
+    const mapped = mapBackendStudentAttempt(
+      buildBackendAttempt({
+        proctorStatus: 'paused',
+        proctorNote: 'Individual session paused by proctor',
+        proctorUpdatedAt: '2026-01-01T09:30:00.000Z',
+        proctorUpdatedBy: 'proctor-1',
+      }),
+    );
+
+    expect(mapped.proctorStatus).toBe('paused');
+    expect(mapped.proctorNote).toBe('Individual session paused by proctor');
+    expect(mapped.proctorUpdatedAt).toBe('2026-01-01T09:30:00.000Z');
+    expect(mapped.proctorUpdatedBy).toBe('proctor-1');
+  });
+
+  it('defaults to active proctor state when the backend payload omits it', () => {
+    const mapped = mapBackendStudentAttempt(buildBackendAttempt({}));
+    expect(mapped.proctorStatus).toBe('active');
+    expect(mapped.proctorNote).toBeNull();
+    expect(mapped.proctorUpdatedAt).toBeNull();
+    expect(mapped.proctorUpdatedBy).toBeNull();
+  });
+
   it('builds submit payload with finalAnswerPatch and sequence metadata', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
     const fetchMock = vi.fn()

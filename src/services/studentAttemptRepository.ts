@@ -333,6 +333,10 @@ interface BackendStudentAttempt {
     | null
     | undefined;
   submittedAt?: string | null | undefined;
+  proctorStatus?: StudentAttempt['proctorStatus'] | null | undefined;
+  proctorNote?: string | null | undefined;
+  proctorUpdatedAt?: string | null | undefined;
+  proctorUpdatedBy?: string | null | undefined;
   integrity?: Partial<StudentAttempt['integrity']> | null | undefined;
   recovery?: Partial<StudentAttempt['recovery']> | null | undefined;
   createdAt: string;
@@ -1613,10 +1617,15 @@ export function mapBackendStudentAttempt(payload: BackendStudentAttempt): Studen
     flags,
     violations: payload.violationsSnapshot ?? [],
     submittedAt: payload.submittedAt ?? null,
-    proctorStatus: 'active',
-    proctorNote: null,
-    proctorUpdatedAt: null,
-    proctorUpdatedBy: null,
+    // Pass the server's proctor state through (E2E-02: the mapper previously
+    // hardcoded 'active', so per-attempt proctor pause/notes never reached the
+    // UI — the blocking overlay machinery existed but could never fire).
+    // Defaults preserve the historical behavior for payloads that omit the
+    // fields (pre-pause backend builds, unit fixtures).
+    proctorStatus: payload.proctorStatus ?? 'active',
+    proctorNote: payload.proctorNote ?? null,
+    proctorUpdatedAt: payload.proctorUpdatedAt ?? null,
+    proctorUpdatedBy: payload.proctorUpdatedBy ?? null,
     lastWarningId: null,
     lastAcknowledgedWarningId: null,
     integrity: {

@@ -2330,3 +2330,18 @@ AUTH_* overrides); never mix a manually started backend with e2e storage states.
 the CSRF-protected bootstrap POST through the proxy and fails on any origin-validation
 regression. `git diff` of `vite.config.ts` is one line of behavior (`changeOrigin`) plus
 comment.
+
+## Student UI blind to per-attempt proctor pause (E2E-02)
+
+### Failure
+A proctor pauses an individual student attempt (`POST /api/v1/proctor/sessions/:scheduleId/attempts/:attemptId/pause` → 200, `student_attempts.proctor_status` set to `paused`). The student session keeps polling `/live` (every response carries `attempt.proctorStatus: "paused"`) and receives a WS `attempt` event, but the UI never shows the "Individual session paused" blocking overlay and the workspace stays fully interactive — including after a reload.
+
+### Root cause
+`mapBackendStudentAttempt` (`src/services/studentAttemptRepository.ts`) hardcoded `proctorStatus: 'active'`, `proctorNote: null`, `proctorUpdatedAt: null`, `proctorUpdatedBy: null`; the `BackendStudentAttempt` interface did not even model the fields, and no code path read `payload.proctorStatus`. The blocking-overlay machinery (`StudentRuntimeProvider.tsx:603` — `attemptSnapshot?.proctorStatus === 'paused' ? 'proctor_paused' : null`, blocking state machine, FEX-060/061 unit tests) existed but could never fire from the API path. Server-side integrity held regardless: answer mutations are gated with `DeliveryConflictReason::AttemptProctorBlocked`, so persisted data honored the pause while the UI contradicted it — violating "Student-visible 'saved/verified' state must match persisted reality."
+
+### Fix
+`BackendStudentAttempt` gained optional `proctorStatus`/`proctorNote`/`proctorUpdatedAt`/`proctorUpdatedBy`; the mapper passes them through, defaulting to the historical `'active'`/`null` values when the payload omits them (no behavior change for older payloads or unit fixtures). Unit tests pin both directions: paused-state pass-through and active default.
+
+### Regression Protection
+- Unit: `src/services/__tests__/studentAttemptRepository.backend.test.ts` — mapper pass-through + default tests.
+- E2E: `e2e/e2e-02-reload-every-phase.spec.ts` pause phase asserts the overlay renders while paused, the answer field is disabled, and the overlay is restored after a mid-pause reload (these were characterization pins pre-fix).
