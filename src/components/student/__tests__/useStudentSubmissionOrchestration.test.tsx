@@ -1,7 +1,10 @@
 import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { useStudentSubmissionOrchestration } from '../useStudentSubmissionOrchestration';
+import {
+  useStudentSubmissionOrchestration,
+  type UseStudentSubmissionOrchestrationOptions,
+} from '../useStudentSubmissionOrchestration';
 
 describe('useStudentSubmissionOrchestration', () => {
   it('flushes and submits current module when pending mutations are persisted', async () => {
@@ -29,7 +32,8 @@ describe('useStudentSubmissionOrchestration', () => {
         runtimeStateRef,
         attemptId: null,
         runtimeCompletionVerified: false,
-        shouldRenderPostExam: false,
+        attemptFinalized: false,
+        pendingSubmissionActive: false,
         flushDomAnswerControlsNow,
         reconcileLiveAnswerCacheNow,
         commitWritingDraft,
@@ -75,7 +79,8 @@ describe('useStudentSubmissionOrchestration', () => {
         },
         attemptId: 'attempt-1',
         runtimeCompletionVerified: true,
-        shouldRenderPostExam: false,
+        attemptFinalized: false,
+        pendingSubmissionActive: false,
         flushDomAnswerControlsNow: vi.fn(),
         reconcileLiveAnswerCacheNow: vi.fn(),
         commitWritingDraft: vi.fn(),
@@ -122,7 +127,8 @@ describe('useStudentSubmissionOrchestration', () => {
           },
           attemptId: 'attempt-1',
           runtimeCompletionVerified: true,
-          shouldRenderPostExam: false,
+          attemptFinalized: false,
+          pendingSubmissionActive: false,
           flushDomAnswerControlsNow: vi.fn(),
           reconcileLiveAnswerCacheNow: vi.fn(),
           commitWritingDraft: vi.fn(),
@@ -186,7 +192,8 @@ describe('useStudentSubmissionOrchestration', () => {
         runtimeStateRef,
         attemptId: null,
         runtimeCompletionVerified: false,
-        shouldRenderPostExam: false,
+        attemptFinalized: false,
+        pendingSubmissionActive: false,
         flushDomAnswerControlsNow,
         reconcileLiveAnswerCacheNow,
         commitWritingDraft,
@@ -242,7 +249,8 @@ describe('useStudentSubmissionOrchestration', () => {
           runtimeStateRef,
           attemptId: null,
           runtimeCompletionVerified: false,
-          shouldRenderPostExam: false,
+          attemptFinalized: false,
+          pendingSubmissionActive: false,
           flushDomAnswerControlsNow: vi.fn(),
           reconcileLiveAnswerCacheNow: vi.fn(),
           commitWritingDraft: vi.fn(),
@@ -324,7 +332,8 @@ describe('useStudentSubmissionOrchestration', () => {
           runtimeStateRef,
           attemptId: null,
           runtimeCompletionVerified: false,
-          shouldRenderPostExam: false,
+          attemptFinalized: false,
+          pendingSubmissionActive: false,
           flushDomAnswerControlsNow: vi.fn(),
           reconcileLiveAnswerCacheNow: vi.fn(),
           commitWritingDraft: vi.fn(),
@@ -399,7 +408,8 @@ describe('useStudentSubmissionOrchestration', () => {
           runtimeStateRef,
           attemptId: null,
           runtimeCompletionVerified: false,
-          shouldRenderPostExam: false,
+          attemptFinalized: false,
+          pendingSubmissionActive: false,
           flushDomAnswerControlsNow: vi.fn(),
           reconcileLiveAnswerCacheNow: vi.fn(),
           commitWritingDraft: vi.fn(),
@@ -471,7 +481,8 @@ describe('useStudentSubmissionOrchestration', () => {
           runtimeStateRef,
           attemptId: null,
           runtimeCompletionVerified: false,
-          shouldRenderPostExam: false,
+          attemptFinalized: false,
+          pendingSubmissionActive: false,
           flushDomAnswerControlsNow: vi.fn(),
           reconcileLiveAnswerCacheNow: vi.fn(),
           commitWritingDraft: vi.fn(),
@@ -544,7 +555,8 @@ describe('useStudentSubmissionOrchestration', () => {
         runtimeStateRef,
         attemptId: null,
         runtimeCompletionVerified: false,
-        shouldRenderPostExam: false,
+        attemptFinalized: false,
+        pendingSubmissionActive: false,
         flushDomAnswerControlsNow: vi.fn(),
         reconcileLiveAnswerCacheNow: vi.fn(),
         commitWritingDraft: vi.fn(),
@@ -583,5 +595,374 @@ describe('useStudentSubmissionOrchestration', () => {
     expect(submitModule).toHaveBeenCalledTimes(1);
     expect(transitionBlocking).toHaveBeenCalledWith('syncing_reconnect', false);
     expect(transitionBlocking).toHaveBeenCalledWith('offline', false);
+  });
+
+  it('did not fire the final-submit pipeline when the attempt was already finalized (FEX-050 gate)', async () => {
+    const submitAttempt = vi.fn();
+
+    const { result } = renderHook(() =>
+      useStudentSubmissionOrchestration({
+        runtimeState: {
+          runtimeBacked: true,
+          runtimeStatus: 'completed',
+          currentModule: 'reading',
+        },
+        runtimeStateRef: {
+          current: {
+            phase: 'exam',
+            currentModule: 'reading',
+          },
+        },
+        attemptId: 'attempt-1',
+        runtimeCompletionVerified: true,
+        // The app derives this from attempt.submittedAt != null OR
+        // attempt.proctorStatus === 'terminated' — both are authoritative end
+        // states that must never fire the pipeline.
+        attemptFinalized: true,
+        pendingSubmissionActive: false,
+        flushDomAnswerControlsNow: vi.fn(),
+        reconcileLiveAnswerCacheNow: vi.fn(),
+        commitWritingDraft: vi.fn(),
+        attemptActions: {
+          flushPending: vi.fn().mockResolvedValue(true),
+          submitAttempt,
+        },
+        runtimeActions: {
+          transitionBlocking: vi.fn(),
+          submitModule: vi.fn(),
+        },
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(submitAttempt).not.toHaveBeenCalled();
+    expect(result.current.finalSubmitStatus).toBe('idle');
+  });
+
+  it('did not fire the final-submit pipeline while a durable pending submission owned the retry loop (FEX-050/FEX-051 gate)', async () => {
+    const submitAttempt = vi.fn();
+
+    const { result } = renderHook(() =>
+      useStudentSubmissionOrchestration({
+        runtimeState: {
+          runtimeBacked: true,
+          runtimeStatus: 'completed',
+          currentModule: 'reading',
+        },
+        runtimeStateRef: {
+          current: {
+            phase: 'exam',
+            currentModule: 'reading',
+          },
+        },
+        attemptId: 'attempt-1',
+        runtimeCompletionVerified: true,
+        attemptFinalized: false,
+        // A durable pending record exists (e.g. restored after reload): the
+        // provider's background retry loop owns the submission identity, so
+        // the pipeline must not double-drive it.
+        pendingSubmissionActive: true,
+        flushDomAnswerControlsNow: vi.fn(),
+        reconcileLiveAnswerCacheNow: vi.fn(),
+        commitWritingDraft: vi.fn(),
+        attemptActions: {
+          flushPending: vi.fn().mockResolvedValue(true),
+          submitAttempt,
+        },
+        runtimeActions: {
+          transitionBlocking: vi.fn(),
+          submitModule: vi.fn(),
+        },
+      }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(submitAttempt).not.toHaveBeenCalled();
+    expect(result.current.finalSubmitStatus).toBe('idle');
+  });
+
+  it('advanced the final-submit retry status from submitting through retrying to idle when the provider recovered (FEX-050 retry status)', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveSecondAttempt: ((confirmed: boolean) => void) | null = null;
+      const submitAttempt = vi
+        .fn()
+        .mockResolvedValueOnce(false)
+        .mockImplementationOnce(
+          () =>
+            new Promise<boolean>((resolve) => {
+              resolveSecondAttempt = resolve;
+            }),
+        );
+
+      const { result } = renderHook(() =>
+        useStudentSubmissionOrchestration({
+          runtimeState: {
+            runtimeBacked: true,
+            runtimeStatus: 'completed',
+            currentModule: 'reading',
+          },
+          runtimeStateRef: {
+            current: {
+              phase: 'exam',
+              currentModule: 'reading',
+            },
+          },
+          attemptId: 'attempt-1',
+          runtimeCompletionVerified: true,
+          attemptFinalized: false,
+          pendingSubmissionActive: false,
+          flushDomAnswerControlsNow: vi.fn(),
+          reconcileLiveAnswerCacheNow: vi.fn(),
+          commitWritingDraft: vi.fn(),
+          attemptActions: {
+            flushPending: vi.fn().mockResolvedValue(true),
+            submitAttempt,
+          },
+          runtimeActions: {
+            transitionBlocking: vi.fn(),
+            submitModule: vi.fn(),
+          },
+        }),
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(submitAttempt).toHaveBeenCalledTimes(1);
+      expect(result.current.finalSubmitStatus).toBe('submitting');
+
+      // The first attempt reported failure: after the 1_000ms backoff the
+      // second attempt starts and the visible status becomes 'retrying'.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(submitAttempt).toHaveBeenCalledTimes(2);
+      expect(result.current.finalSubmitStatus).toBe('retrying');
+
+      await act(async () => {
+        resolveSecondAttempt?.(true);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(result.current.finalSubmitStatus).toBe('idle');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reached the failed final-submit status after six unanswered attempts with capped exponential backoff (FEX-050 retry status)', async () => {
+    vi.useFakeTimers();
+    try {
+      const submitAttempt = vi.fn().mockResolvedValue(false);
+
+      const { result } = renderHook(() =>
+        useStudentSubmissionOrchestration({
+          runtimeState: {
+            runtimeBacked: true,
+            runtimeStatus: 'completed',
+            currentModule: 'reading',
+          },
+          runtimeStateRef: {
+            current: {
+              phase: 'exam',
+              currentModule: 'reading',
+            },
+          },
+          attemptId: 'attempt-1',
+          runtimeCompletionVerified: true,
+          attemptFinalized: false,
+          pendingSubmissionActive: false,
+          flushDomAnswerControlsNow: vi.fn(),
+          reconcileLiveAnswerCacheNow: vi.fn(),
+          commitWritingDraft: vi.fn(),
+          attemptActions: {
+            flushPending: vi.fn().mockResolvedValue(true),
+            submitAttempt,
+          },
+          runtimeActions: {
+            transitionBlocking: vi.fn(),
+            submitModule: vi.fn(),
+          },
+        }),
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(result.current.finalSubmitStatus).toBe('submitting');
+
+      // Backoffs between the six attempts: 1_000, 2_000, 4_000, 8_000, 16_000
+      // and the capped 30_000 (Math.min(30_000, 1_000 * 2 ** attemptIndex)),
+      // then the status settles on 'failed'.
+      for (const backoffMs of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000]) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(backoffMs);
+        });
+      }
+      expect(submitAttempt).toHaveBeenCalledTimes(6);
+      expect(result.current.finalSubmitStatus).toBe('failed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('kept exactly one final submit across repeated runtime hydration with fresh runtime state objects (FEX-052)', async () => {
+    const submitAttempt = vi.fn().mockResolvedValue(true);
+
+    const options: UseStudentSubmissionOrchestrationOptions = {
+      runtimeState: {
+        runtimeBacked: true,
+        runtimeStatus: 'completed',
+        currentModule: 'reading',
+      },
+      runtimeStateRef: {
+        current: {
+          phase: 'exam',
+          currentModule: 'reading',
+        },
+      },
+      attemptId: 'attempt-1',
+      runtimeCompletionVerified: true,
+      attemptFinalized: false,
+      pendingSubmissionActive: false,
+      flushDomAnswerControlsNow: vi.fn(),
+      reconcileLiveAnswerCacheNow: vi.fn(),
+      commitWritingDraft: vi.fn(),
+      attemptActions: {
+        flushPending: vi.fn().mockResolvedValue(true),
+        submitAttempt,
+      },
+      runtimeActions: {
+        transitionBlocking: vi.fn(),
+        submitModule: vi.fn(),
+      },
+    };
+
+    const { result, rerender } = renderHook(() =>
+      useStudentSubmissionOrchestration(options),
+    );
+
+    await waitFor(() => {
+      expect(submitAttempt).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(result.current.finalSubmitStatus).toBe('idle');
+    });
+
+    // A fresh completed runtime object with identical values (re-hydration)
+    // must not re-fire the pipeline.
+    options.runtimeState = {
+      runtimeBacked: true,
+      runtimeStatus: 'completed',
+      currentModule: 'reading',
+    };
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(submitAttempt).toHaveBeenCalledTimes(1);
+
+    // After the authoritative receipt the attempt is finalized: even a
+    // live -> completed round trip must not fire a second submit.
+    options.attemptFinalized = true;
+    options.runtimeState = {
+      runtimeBacked: true,
+      runtimeStatus: 'live',
+      currentModule: 'reading',
+    };
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    options.runtimeState = {
+      runtimeBacked: true,
+      runtimeStatus: 'completed',
+      currentModule: 'reading',
+    };
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(submitAttempt).toHaveBeenCalledTimes(1);
+    expect(result.current.finalSubmitStatus).toBe('idle');
+  });
+
+  it('did not start a second final submit when a stale live runtime was re-delivered mid-flight and completion returned (FEX-052)', async () => {
+    const submitAttempt = vi.fn().mockReturnValue(new Promise<boolean>(() => undefined));
+
+    const options: UseStudentSubmissionOrchestrationOptions = {
+      runtimeState: {
+        runtimeBacked: true,
+        runtimeStatus: 'completed',
+        currentModule: 'reading',
+      },
+      runtimeStateRef: {
+        current: {
+          phase: 'exam',
+          currentModule: 'reading',
+        },
+      },
+      attemptId: 'attempt-1',
+      runtimeCompletionVerified: true,
+      attemptFinalized: false,
+      pendingSubmissionActive: false,
+      flushDomAnswerControlsNow: vi.fn(),
+      reconcileLiveAnswerCacheNow: vi.fn(),
+      commitWritingDraft: vi.fn(),
+      attemptActions: {
+        flushPending: vi.fn().mockResolvedValue(true),
+        submitAttempt,
+      },
+      runtimeActions: {
+        transitionBlocking: vi.fn(),
+        submitModule: vi.fn(),
+      },
+    };
+
+    const { rerender } = renderHook(() => useStudentSubmissionOrchestration(options));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(submitAttempt).toHaveBeenCalledTimes(1);
+
+    // A stale out-of-order live runtime arrives while the first submit is
+    // still in flight (FEX-012 re-delivery, mid-pipeline).
+    options.runtimeState = {
+      runtimeBacked: true,
+      runtimeStatus: 'live',
+      currentModule: 'reading',
+    };
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Completion is re-delivered: the still-running pipeline must not be
+    // duplicated by a second submit.
+    options.runtimeState = {
+      runtimeBacked: true,
+      runtimeStatus: 'completed',
+      currentModule: 'reading',
+    };
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(submitAttempt).toHaveBeenCalledTimes(1);
   });
 });

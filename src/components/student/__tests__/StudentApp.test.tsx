@@ -196,6 +196,27 @@ function createNotStartedRuntimeSnapshot(): ExamSessionRuntime {
   };
 }
 
+// A runtime whose structure is fully complete: every section finished with an
+// actual end time. isRuntimeStructurallyCompleted() verifies this shape, so a
+// structurally complete runtime drives the verified terminal state.
+function buildStructurallyCompleteRuntime(key: 'writing' | 'reading'): ExamSessionRuntime {
+  const base = key === 'writing' ? createWritingRuntimeSnapshot() : createReadingRuntimeSnapshot();
+  return {
+    ...base,
+    status: 'completed',
+    actualEndAt: '2026-01-01T01:00:00.000Z',
+    activeSectionKey: null,
+    currentSectionRemainingSeconds: 0,
+    sections: base.sections.map((section) => ({
+      ...section,
+      status: 'completed',
+      actualEndAt: '2026-01-01T01:00:00.000Z',
+      completionReason: 'auto_timeout',
+    })),
+    updatedAt: '2026-01-01T01:00:00.000Z',
+  };
+}
+
 function buildBackendAttemptFromPreCheck(attempt: StudentAttempt, preCheck: unknown) {
   return {
     id: attempt.id,
@@ -4797,24 +4818,6 @@ describe('StudentApp runtime-backed mode', () => {
   });
 
   describe('FEX-010 authoritative phase mapping / FEX-012 stale runtime protection (F-2)', () => {
-    function buildStructurallyCompleteRuntime(key: 'writing' | 'reading'): ExamSessionRuntime {
-      const base = key === 'writing' ? createWritingRuntimeSnapshot() : createReadingRuntimeSnapshot();
-      return {
-        ...base,
-        status: 'completed',
-        actualEndAt: '2026-01-01T01:00:00.000Z',
-        activeSectionKey: null,
-        currentSectionRemainingSeconds: 0,
-        sections: base.sections.map((section) => ({
-          ...section,
-          status: 'completed',
-          actualEndAt: '2026-01-01T01:00:00.000Z',
-          completionReason: 'auto_timeout',
-        })),
-        updatedAt: '2026-01-01T01:00:00.000Z',
-      };
-    }
-
     it.each([
       {
         name: 'pre-check missing + nonterminal runtime -> briefing (Preparing your connection…)',
@@ -4884,19 +4887,6 @@ describe('StudentApp runtime-backed mode', () => {
         },
       },
       {
-        name: 'pre-check complete + structurally complete runtime -> finalization/post-exam',
-        attempt: () => createWritingAttemptSnapshot(),
-        runtime: () => buildStructurallyCompleteRuntime('writing'),
-        assert: async () => {
-          expect(
-            await screen.findByRole('heading', { name: /examination complete/i }),
-          ).toBeInTheDocument();
-          expect(
-            screen.queryByRole('heading', { name: /session terminated/i }),
-          ).not.toBeInTheDocument();
-        },
-      },
-      {
         name: 'proctor-terminated attempt -> terminated view regardless of runtime state',
         attempt: () => ({
           ...createWritingAttemptSnapshot(),
@@ -4937,8 +4927,72 @@ describe('StudentApp runtime-backed mode', () => {
       await assert();
     });
 
+    it('showed the finalization overlay during the pending submit and the completion screen only after the backend receipt for a structurally complete runtime (FEX-010 corrected contract)', async () => {
+      const attempt = createWritingAttemptSnapshot();
+      const submittedAttempt: StudentAttempt = {
+        ...attempt,
+        phase: 'post-exam',
+        submittedAt: '2026-01-01T01:00:01.000Z',
+      };
+      let resolveSubmit: ((value: StudentAttempt) => void) | null = null;
+      const submitAttempt = vi
+        .spyOn(studentAttemptRepository as any, 'submitAttempt')
+        .mockImplementation(
+          () =>
+            new Promise<StudentAttempt>((resolve) => {
+              resolveSubmit = resolve;
+            }),
+        );
+
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => undefined}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={buildStructurallyCompleteRuntime('writing')}
+        />,
+      );
+
+      // While the backend receipt is outstanding the app must show the
+      // finalization overlay — never the raw completion screen.
+      expect(
+        await screen.findByRole('heading', { name: 'Submitting your exam' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('heading', { name: /examination complete/i }),
+      ).not.toBeInTheDocument();
+      expect(submitAttempt).toHaveBeenCalledTimes(1);
+
+      // The backend receipt transitions the page to confirmed success.
+      await act(async () => {
+        resolveSubmit?.(submittedAttempt);
+        for (let i = 0; i < 8; i++) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(
+        screen.queryByRole('heading', { name: 'Submitting your exam' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: /examination complete/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('heading', { name: /session terminated/i }),
+      ).not.toBeInTheDocument();
+    });
+
     it('keeps the finalization UI when a nonterminal runtime is re-delivered after terminal completion (FEX-012)', async () => {
       const attempt = createWritingAttemptSnapshot();
+      const submittedAttempt: StudentAttempt = {
+        ...attempt,
+        phase: 'post-exam',
+        submittedAt: '2026-01-01T01:00:01.000Z',
+      };
+      const submitAttempt = vi
+        .spyOn(studentAttemptRepository as any, 'submitAttempt')
+        .mockResolvedValue(submittedAttempt);
       const { rerender } = render(
         <StudentAppWrapper
           state={state}
@@ -4949,9 +5003,12 @@ describe('StudentApp runtime-backed mode', () => {
         />,
       );
 
+      // The automatic finalization submits exactly once and the backend
+      // receipt confirms the completion screen.
       expect(
         await screen.findByRole('heading', { name: /examination complete/i }),
       ).toBeInTheDocument();
+      expect(submitAttempt).toHaveBeenCalledTimes(1);
 
       // A stale out-of-order live runtime must not bounce the student back
       // into the exam workspace: verified terminal state is absorbing.
@@ -4970,6 +5027,197 @@ describe('StudentApp runtime-backed mode', () => {
       ).toBeInTheDocument();
       expect(screen.queryByRole('timer', { name: /time remaining/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Finish' })).not.toBeInTheDocument();
+      // No second submit was issued for the re-delivered runtime.
+      expect(submitAttempt).toHaveBeenCalledTimes(1);
+    });
+
+    it('showed exactly one finalization overlay blocking exit while the automatic final submit was in flight, without any false success (FEX-050)', async () => {
+      const onExit = vi.fn();
+      const attempt = createWritingAttemptSnapshot();
+      vi.spyOn(studentAttemptRepository as any, 'submitAttempt').mockReturnValue(
+        new Promise<StudentAttempt>(() => undefined),
+      );
+
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={onExit}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={buildStructurallyCompleteRuntime('writing')}
+        />,
+      );
+
+      expect(
+        await screen.findByRole('heading', { name: 'Submitting your exam' }),
+      ).toBeInTheDocument();
+      // Exactly one overlay instance (FEX-052 multiple overlays).
+      expect(screen.getAllByRole('heading', { name: 'Submitting your exam' })).toHaveLength(1);
+      expect(screen.getByText('Submitting')).toBeInTheDocument();
+      expect(screen.getByText('Do not close')).toBeInTheDocument();
+      expect(
+        screen.getByText(/Please keep this page open while we finalize your submission\./),
+      ).toBeInTheDocument();
+
+      // No false success while the backend receipt is outstanding: the
+      // completion claim is not in the document at all.
+      expect(screen.queryByText(/IELTS Examination Complete!/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/Congratulations! You have completed all modules/i),
+      ).not.toBeInTheDocument();
+
+      // FEX-050 blocks closing and editing: the completion view (and its
+      // Exit action) is not rendered while finalizing, so no interactive
+      // element is reachable behind the overlay.
+      expect(
+        screen.queryByRole('button', { name: 'Exit Exam Platform' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Submitting your exam' }),
+      ).toBeInTheDocument();
+    });
+
+    it('released the finalization overlay and showed the completion screen only after the backend receipt, without opening the confirmation dialog (FEX-050)', async () => {
+      const attempt = createWritingAttemptSnapshot();
+      const submittedAttempt: StudentAttempt = {
+        ...attempt,
+        phase: 'post-exam',
+        submittedAt: '2026-01-01T01:00:01.000Z',
+      };
+      const submitAttempt = vi
+        .spyOn(studentAttemptRepository as any, 'submitAttempt')
+        .mockResolvedValue(submittedAttempt);
+
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => undefined}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={buildStructurallyCompleteRuntime('writing')}
+        />,
+      );
+
+      expect(
+        await screen.findByRole('heading', { name: /examination complete/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('heading', { name: 'Submitting your exam' }),
+      ).not.toBeInTheDocument();
+      // The chosen confirmation contract for automatic finalization is
+      // no-confirm: the module-submit confirmation dialog must never open.
+      expect(
+        screen.queryByRole('heading', { name: 'Confirm Submission' }),
+      ).not.toBeInTheDocument();
+      expect(submitAttempt).toHaveBeenCalledTimes(1);
+    });
+
+    it('replaced the finalization overlay with the Submission pending panel over the completion view after a failed submit, and retried with the same submission identity (FEX-051)', async () => {
+      const attempt = createWritingAttemptSnapshot();
+      const submittedAttempt: StudentAttempt = {
+        ...attempt,
+        phase: 'post-exam',
+        submittedAt: '2026-01-01T01:00:01.000Z',
+      };
+      let rejectSubmit: ((error: Error) => void) | null = null;
+      const submitAttempt = vi
+        .spyOn(studentAttemptRepository as any, 'submitAttempt')
+        .mockImplementationOnce(
+          () =>
+            new Promise<StudentAttempt>((_resolve, reject) => {
+              rejectSubmit = reject;
+            }),
+        )
+        .mockResolvedValue(submittedAttempt);
+
+      render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => undefined}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={buildStructurallyCompleteRuntime('writing')}
+        />,
+      );
+
+      // The finalization overlay is up while the first submit is outstanding.
+      expect(
+        await screen.findByRole('heading', { name: 'Submitting your exam' }),
+      ).toBeInTheDocument();
+
+      // Network failure: no false success — the pending panel replaces the
+      // overlay while the completion view stays behind it.
+      await act(async () => {
+        rejectSubmit?.(new Error('network down'));
+        for (let i = 0; i < 10; i++) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(
+        screen.queryByRole('heading', { name: 'Submitting your exam' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Submission pending' })).toBeInTheDocument();
+      expect(screen.getByText(/IELTS Examination Complete!/i)).toBeInTheDocument();
+
+      // Retry now resubmits with the same submission identity and the
+      // backend receipt releases the pending state.
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Retry now' }));
+        for (let i = 0; i < 10; i++) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(submitAttempt).toHaveBeenCalledTimes(2);
+      expect(submitAttempt.mock.calls[1][0].id).toBe(attempt.id);
+      expect(
+        screen.queryByRole('heading', { name: 'Submission pending' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: /examination complete/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('kept exactly one finalization overlay and one submit call when a fresh completed runtime object was re-delivered mid-submit (FEX-052)', async () => {
+      const attempt = createWritingAttemptSnapshot();
+      const submitAttempt = vi
+        .spyOn(studentAttemptRepository as any, 'submitAttempt')
+        .mockReturnValue(new Promise<StudentAttempt>(() => undefined));
+
+      const { rerender } = render(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => undefined}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={buildStructurallyCompleteRuntime('writing')}
+        />,
+      );
+
+      expect(
+        await screen.findByRole('heading', { name: 'Submitting your exam' }),
+      ).toBeInTheDocument();
+
+      // A fresh completed runtime object with identical values (repeated
+      // hydration) must not duplicate the overlay or the submit.
+      rerender(
+        <StudentAppWrapper
+          state={readingState}
+          onExit={() => undefined}
+          scheduleId={attempt.scheduleId}
+          attemptSnapshot={attempt}
+          runtimeSnapshot={buildStructurallyCompleteRuntime('writing')}
+        />,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getAllByRole('heading', { name: 'Submitting your exam' })).toHaveLength(1);
+      expect(submitAttempt).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -2,6 +2,136 @@
 
 Purpose: turn incidents and bug fixes into durable memory for humans and AI agents.
 
+## 2026-08-06: Final-Submit Pipeline Was Gated Off by Verified-Terminal Absorption (FEX-050/051/052, F-9)
+
+### Symptom
+Production contract violation (verified from code, then fixed): in runtime-backed mode the
+final attempt submission was NEVER issued, and the app claimed success without a backend
+receipt. On a structurally complete runtime, `shouldRenderPostExam` became true from RUNTIME
+STRUCTURE ALONE — `isRuntimeStructurallyCompleted` drives both `verifiedTerminalState`
+(`'completed'` without any `submittedAt`) and `runtimeCompletionVerified`, so the
+orchestration gate `if (shouldRenderPostExam) { return; }` was true on every condition in
+which the pipeline could fire, and the finalization overlay had an unreachable
+`!shouldRenderPostExam` clause: the student saw **"IELTS Examination Complete!"** with
+`submittedAt: null` and no submission ever issued (false success, Agents.md critical
+invariant "student-visible saved/verified state must match persisted reality"). The bug was
+PINNED by `StudentApp.test.tsx` FEX-010 row (old `:4887-4898`, submittedAt-null fixture
+`createWritingAttemptSnapshot` at `:106-129`) and the old FEX-012 `:4940-4976`.
+
+### Scope
+- `src/components/student/useStudentSubmissionOrchestration.ts` — pipeline gate + reset-branch
+  hardening.
+- `src/components/student/StudentApp.tsx` — finalization overlay condition, post-exam phase
+  gate, orchestration prop wiring, `attemptFinalized` derivation.
+- `src/components/student/__tests__/useStudentSubmissionOrchestration.test.tsx` and
+  `src/components/student/__tests__/StudentApp.test.tsx` — rewritten violative tests + new
+  contract tests.
+- `docs/failure-cases.md` (this entry). Backend untouched.
+
+### Root Cause
+`useStudentSubmissionOrchestration.ts` gated the final-submit pipeline on
+`shouldRenderPostExam`, and `StudentApp.tsx` derives that flag from
+`isRuntimeStructurallyCompleted(runtimeSnapshot)` (via `verifiedTerminalState.ts`,
+`isRuntimeStructurallyCompleted` `:7-25` and `isVerifiedTerminalStudentState` `:28-46`). The
+runtime-status `'completed'` + `runtimeCompletionVerified` pipeline condition implies the same
+structural completion, so `shouldRenderPostExam` was always true exactly when the pipeline
+condition held: the pipeline (per-attempt flush → `submitAttempt()`) could never run. The only
+effectively reachable `submitAttempt` call was the pending-panel "Retry now"
+(`StudentApp.tsx:546` original), which requires a pending record that nothing ever created.
+
+### Fix
+1. **Unblock the pipeline** (`useStudentSubmissionOrchestration.ts`): removed
+   `shouldRenderPostExam` from the options; added `attemptFinalized: boolean`
+   (`attempt.submittedAt != null || attempt.proctorStatus === 'terminated'`) and
+   `pendingSubmissionActive: boolean` (`attemptState.pendingSubmission != null`). Gate now:
+   `if (attemptFinalized || pendingSubmissionActive || finalSubmitStatus === 'failed') return;`
+   (`:178-198`). A structurally-complete runtime with an un-finalized, non-pending attempt
+   fires the pipeline exactly once; finalized attempts and durable pending submissions never
+   fire it (the provider's `submitAttempt` claims "handled" — `StudentAttemptProvider.tsx
+   :1566-1582` — and its retry loop owns the submission identity).
+2. **Harden against stale re-delivery (FEX-052)** (`:151-176`): the reset branches
+   (`!runtimeBacked` or `runtimeStatus !== 'completed' || !runtimeCompletionVerified`) no
+   longer clear `finalSubmitInFlightRef`/status while a pipeline is in flight; a stale
+   nonterminal snapshot re-delivered mid-submit cannot start a second submit when completion
+   returns. The `finalSubmitStatus === 'failed'` guard also prevents a re-render right after
+   the sixth failed attempt from starting a SECOND six-attempt pipeline (the app passes fresh
+   action objects each render); only a later re-completed runtime (reset branch clears the
+   status) may legitimately retry.
+3. **Overlay over the completion phase** (`StudentApp.tsx:550-563`): dropped
+   `!shouldRenderPostExam` from the finalization-overlay condition so it renders while
+   `runtimeStatus === 'completed' && runtimeCompletionVerified && finalSubmitStatus !== 'idle'`;
+   `submissionPending → Panel` precedence unchanged. The post-exam phase
+   (`StudentApp.tsx:630-663`) renders ONLY the overlay while the submit is in flight and
+   `!submissionPending`: the completion claim is not in the DOM before the backend receipt
+   (no false success). `attemptFinalized` is derived at `StudentApp.tsx:158-165`.
+
+### Regression Protection
+`useStudentSubmissionOrchestration.test.tsx` (suite: 15 passed, zero act() warnings):
+- `:600` — pipeline did NOT fire when `isAttemptFinalized` true (submittedAt/terminated gate).
+- `:646` — pipeline did NOT fire while a durable pending submission owned the retry loop.
+- `:692` — retry-status machine `submitting → retrying → idle` when the provider recovered.
+- `:762` — `failed` after six unanswered (1s,2s,4s,8s,16s,30s capped) backoffs.
+- `:818` — one submit across fresh runtime-state hydration; after success the `attemptFinalized`
+  gate blocks a live→completed round trip.
+- `:901` — the fix-B (in-flight hardening) red→green: stale `live` re-delivery mid-pipeline
+  then `completed` → still exactly one submit (was red at 2 calls without the hardening).
+- `:64`/`:107` updated to the new props (mirror + StrictMode double-effect still one submit).
+
+`StudentApp.test.tsx` (all 53 passed; act-warning count identical to baseline at 19):
+- `:4930` rewritten FEX-010 row — structurally complete runtime + unsubmitted attempt →
+  finalization overlay while the (deferred) submit is outstanding, COMPLETION VISIBLE ONLY
+  after the backend receipt.
+- `:4986` rewritten FEX-012 — completed → submit → receipt → completion → stale live runtime
+  re-delivered → stays on completion, exactly one submit.
+- `:5034` FEX-050 — one overlay ("Submitting your exam" / "Submitting" / "Do not close" /
+  keep-this-page-open copy) with submit in flight; completion claim and Exit action absent.
+- `:5080` FEX-050 — receipt releases the overlay, completion appears, no Confirm Submission
+  dialog (the auto-finalization contract is no-confirm).
+- `:5115` FEX-051 — failed submit: overlay replaced by the "Submission pending" panel over the
+  completion view; Retry now re-uses the same submission identity and the receipt releases it.
+- `:5182` FEX-052 — a fresh completed runtime object re-delivered mid-submit keeps one overlay
+  instance and one submit call.
+
+Unmodified pinning coverage for FEX-051 (verified only): provider `:2481` (no pseudo
+post-exam on failed submit), `:2531` (same submission identity + ORIGINAL frozen snapshot on
+retry), `:2589` (I1 drift), `:2678` (reload restores durable pending + resumes retry loop),
+`:2787` (StrictMode double-mount, one retry loop), `:2892` (I1-residual — a dead frozen
+payload is abandoned); app `:4160` (panel, same id + original answers on retry), `:4500`
+(panel over completed runtime), `:4561` (M7 release); panel unit tests
+`StudentSubmissionPendingPanel.test.tsx` (4 tests; the pre-mapping counted 5 — the file has
+four).
+
+### Accepted Deviation
+The app-level "Retrying" badge and the `retrying`/`failed` overlay copy are unreachable in the
+real app because the provider returns TRUE ("handled") on failure — it records a pending
+submission and the background loop owns retries. The `submitting / retrying / failed` status
+machine is pinned at the orchestration level instead. Also, E1's click-interception
+(replicating the F-8 pattern at `StudentApp.test.tsx:3803`) is inapplicable to the
+finalization overlay: while the submit is in flight the completion view (and its Exit button)
+is not rendered at all, so "blocks closing/editing" is pinned by asserting the Exit action is
+unreachable and the overlay is the sole surface.
+
+### Follow-up (non-blocking)
+A stale nonterminal runtime re-delivered WHILE the final submit is in flight keeps
+`finalSubmitStatus` non-idle (FEX-052 hardening) while the overlay's `runtimeStatus ===
+'completed'` precondition fails — in isolation that could briefly re-expose the workspace or
+render an empty container. This is unreachable in the real app: the F-2 terminal latch
+(`runtimeState.terminalVerified`, `StudentApp.tsx:250-254`) plus runtime-provider phase
+monotonicity (FEX-012) absorb stale nonterminal frames before they reach `StudentApp`. If a
+future change weakens those guards, the overlay condition (`StudentApp.tsx:557-561`) should
+be reduced to `finalSubmitStatus !== 'idle' && !submissionPending` and pinned with an
+app-level mid-flight stale-live test.
+
+### Invariant
+Automatic finalization is single-fire: for a structurally completed runtime with
+an un-finalized, non-pending attempt, the pipeline emits the final DOM answer state, flushes
+pending mutations, and calls `submitAttempt` exactly once — never before a stale runtime
+snapshot, a re-render, or repeated hydration, and never at all for submitted/terminated
+attempts or attempts with a durable pending submission. The UI shows the finalization overlay
+during the submit and claims "IELTS Examination Complete!" only after the backend receipt, or
+the pending panel when the backend cannot confirm — the completion claim, the submit call,
+and the retry loop all remain single-instance and receipt-gated.
+
 ## 2026-08-06: Section Submission — Unanswered Confirmation, Flush-Before-Submit, and Submission Races (FEX-040/041/042, F-8)
 
 ### Symptom

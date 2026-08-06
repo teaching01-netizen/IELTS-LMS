@@ -18,7 +18,19 @@ interface UseStudentSubmissionOrchestrationOptions {
   runtimeStateRef: { current: RuntimeStateRefValue };
   attemptId: string | null;
   runtimeCompletionVerified: boolean;
-  shouldRenderPostExam: boolean;
+  /**
+   * FEX-050: the attempt is already authoritatively finalized
+   * (attempt.submittedAt != null || attempt.proctorStatus === 'terminated').
+   * A structurally-complete runtime with an un-finalized attempt MUST fire
+   * the final-submit pipeline; a finalized attempt must never fire it again.
+   */
+  attemptFinalized: boolean;
+  /**
+   * FEX-051: a durable pending submission exists, so the provider's
+   * background retry loop owns the submission identity (same frozen
+   * snapshot). The pipeline must not double-drive it.
+   */
+  pendingSubmissionActive: boolean;
   flushDomAnswerControlsNow: () => void;
   reconcileLiveAnswerCacheNow: () => void;
   commitWritingDraft: () => void;
@@ -37,7 +49,8 @@ export function useStudentSubmissionOrchestration({
   runtimeStateRef,
   attemptId,
   runtimeCompletionVerified,
-  shouldRenderPostExam,
+  attemptFinalized,
+  pendingSubmissionActive,
   flushDomAnswerControlsNow,
   reconcileLiveAnswerCacheNow,
   commitWritingDraft,
@@ -137,21 +150,44 @@ export function useStudentSubmissionOrchestration({
   );
 
   useEffect(() => {
+    // FEX-052: a running pipeline must never be torn down by a stale runtime
+    // re-delivery (e.g. a nonterminal snapshot arriving mid-flight). While
+    // finalSubmitInFlightRef is set, leave the refs and the visible status
+    // untouched so the running pipeline finishes: its success sets
+    // runtimeFinalSubmitRef (blocking future pipelines), its failure leaves
+    // 'failed' (a later re-completed runtime may legitimately retry — that is
+    // the retry contract, not a duplicate).
+    const finalSubmitInFlight = finalSubmitInFlightRef.current != null;
+
     if (!runtimeState.runtimeBacked) {
-      runtimeFinalSubmitRef.current = null;
-      finalSubmitInFlightRef.current = null;
-      setFinalSubmitStatus('idle');
+      if (!finalSubmitInFlight) {
+        runtimeFinalSubmitRef.current = null;
+        setFinalSubmitStatus('idle');
+      }
       return;
     }
 
     if (runtimeState.runtimeStatus !== 'completed' || !runtimeCompletionVerified) {
-      runtimeFinalSubmitRef.current = null;
-      finalSubmitInFlightRef.current = null;
-      setFinalSubmitStatus('idle');
+      if (!finalSubmitInFlight) {
+        runtimeFinalSubmitRef.current = null;
+        setFinalSubmitStatus('idle');
+      }
       return;
     }
 
-    if (shouldRenderPostExam) {
+    // FEX-050: a structurally-complete runtime with an un-finalized attempt
+    // must fire the pipeline. Authoritative end states (submittedAt,
+    // proctor-terminated) and an active durable pending submission (whose
+    // retry loop owns the submission identity) must not.
+    //
+    // 'failed' is terminal for the current completion episode: the effect
+    // re-runs on every re-render (the app passes fresh action objects), so
+    // without this guard a re-render right after the sixth failed attempt
+    // would start a SECOND six-attempt pipeline (FEX-052 duplicate retry
+    // loops). Only the reset branches (runtime leaving 'completed' or
+    // un-verified, i.e. a later re-completed runtime) clear the status and
+    // legitimately allow a fresh retry.
+    if (attemptFinalized || pendingSubmissionActive || finalSubmitStatus === 'failed') {
       return;
     }
 
@@ -200,14 +236,16 @@ export function useStudentSubmissionOrchestration({
     });
   }, [
     attemptActions,
+    attemptFinalized,
     attemptId,
     commitWritingDraft,
+    finalSubmitStatus,
     flushDomAnswerControlsNow,
+    pendingSubmissionActive,
     reconcileLiveAnswerCacheNow,
     runtimeCompletionVerified,
     runtimeState.runtimeBacked,
     runtimeState.runtimeStatus,
-    shouldRenderPostExam,
   ]);
 
   return {

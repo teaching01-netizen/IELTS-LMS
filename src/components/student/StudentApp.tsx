@@ -156,6 +156,13 @@ export function StudentApp({
   // A failed submit locks the exam against further editing while the attempt
   // layer retries with the same submission identity (FEX-051).
   const submissionPending = attemptState.pendingSubmission != null;
+  // FEX-050: the final-submit pipeline must fire exactly once for a
+  // structurally completed runtime with an un-finalized attempt. submittedAt
+  // and proctor-terminated are authoritative end states; a durable pending
+  // submission means the provider's retry loop owns the submission identity.
+  const attemptFinalized =
+    attemptState.attempt?.submittedAt != null ||
+    attemptState.attempt?.proctorStatus === 'terminated';
   const answerControlsLocked = runtimeState.answerControlsLocked || submissionPending;
   const { resetHighlightTool, setShowTimeExtensionRequest } = uiActions;
   const timeExtensionReason =
@@ -281,7 +288,8 @@ export function StudentApp({
     runtimeStateRef,
     attemptId: attemptState.attemptId,
     runtimeCompletionVerified,
-    shouldRenderPostExam,
+    attemptFinalized,
+    pendingSubmissionActive: submissionPending,
     flushDomAnswerControlsNow,
     reconcileLiveAnswerCacheNow,
     commitWritingDraft,
@@ -549,7 +557,6 @@ export function StudentApp({
   ) : runtimeState.runtimeBacked &&
     runtimeState.runtimeStatus === 'completed' &&
     runtimeCompletionVerified &&
-    !shouldRenderPostExam &&
     finalSubmitStatus !== 'idle' ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
         <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8 text-center">
@@ -628,6 +635,21 @@ export function StudentApp({
       { label: 'Email', value: attemptState.attempt?.candidateEmail },
       { label: 'Exam', value: attemptState.attempt?.examTitle ?? examState.title },
     ].filter((item): item is { label: string; value: string } => Boolean(item.value));
+
+    // FEX-050: while the automatic final submit is in flight the completion
+    // claim must not appear at all — the full-screen finalization overlay is
+    // the only surface (no false success before the backend receipt; closing
+    // and editing are blocked because no action is reachable). The receipt
+    // flips the status to 'idle', which renders the completion view; when a
+    // durable pending submission exists (FEX-051), the pending panel takes
+    // precedence over the completion view behind it.
+    if (finalSubmitStatus !== 'idle' && !submissionPending) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full w-full bg-gray-50 p-4 font-sans text-gray-900">
+          {finalSubmitOverlay}
+        </div>
+      );
+    }
 
     return (
       <StudentPostExamView
