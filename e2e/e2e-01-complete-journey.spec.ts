@@ -1,8 +1,8 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { ADMIN_STORAGE_STATE_PATH, readBackendE2EManifest } from './support/backendE2e';
+import { expect, test, type Page } from '@playwright/test';
+import { readBackendE2EManifest } from './support/backendE2e';
 import {
   completePreCheckIfPresent,
   deterministicWcode,
@@ -12,6 +12,11 @@ import {
   stubScreenDetails,
 } from './support/studentUi';
 import { closeDb, queryDb, type SqlParam } from './support/db';
+import {
+  newAdminControlContext,
+  proctorEndSection,
+  proctorStartExam,
+} from './support/proctorControls';
 
 /**
  * E2E-01 — Complete successful exam journey with database verification.
@@ -205,82 +210,6 @@ async function pollDb<T extends object>(
     )
     .toBe(true);
   return lastRows;
-}
-
-async function currentRuntimeSection(scheduleId: string): Promise<string | null> {
-  const rows = await queryDb<{ current_section_key: string | null }>(
-    'SELECT current_section_key FROM exam_session_runtimes WHERE schedule_id = ?',
-    [scheduleId],
-  );
-  return rows[0]?.current_section_key ?? null;
-}
-
-/** Admin-storage-state context used to drive proctor runtime commands. */
-async function newAdminControlContext(browser: Browser): Promise<BrowserContext> {
-  return browser.newContext({
-    storageState: process.env['ADMIN_STORAGE_STATE'] || ADMIN_STORAGE_STATE_PATH,
-  });
-}
-
-async function postProctorApi(
-  adminContext: BrowserContext,
-  url: string,
-  data: Record<string, unknown>,
-): Promise<{ status: number; body: string }> {
-  const cookies = await adminContext.cookies();
-  const csrfNames = [process.env['AUTH_CSRF_COOKIE_NAME'], '__Host-csrf', 'csrf'].filter(
-    (value): value is string => Boolean(value),
-  );
-  const csrfToken = cookies.find((cookie) => csrfNames.includes(cookie.name))?.value;
-  if (!csrfToken) {
-    throw new Error('Admin E2E storage state is missing its CSRF cookie.');
-  }
-  const response = await adminContext.request.post(url, {
-    headers: { 'x-csrf-token': csrfToken },
-    data,
-  });
-  return { status: response.status(), body: await response.text() };
-}
-
-/** "Proctor starts exam": start_runtime; already-started (409) is fine. */
-async function proctorStartExam(adminContext: BrowserContext, scheduleId: string) {
-  const { status, body } = await postProctorApi(adminContext, `/api/v1/schedules/${scheduleId}/runtime/commands`, {
-    action: 'start_runtime',
-    reason: 'e2e-01 proctor starts exam',
-  });
-  if (status !== 200 && status !== 409) {
-    throw new Error(`start_runtime failed: ${status} ${body.slice(0, 300)}`);
-  }
-}
-
-/** "Proctor advances": end the active section; next section goes live (or runtime completes). */
-async function proctorEndSection(
-  adminContext: BrowserContext,
-  scheduleId: string,
-  expectedActiveSectionKey: string,
-  description: string,
-) {
-  const url = `/api/v1/proctor/sessions/${scheduleId}/control/end-section-now`;
-  let { status, body } = await postProctorApi(adminContext, url, {
-    reason: `e2e-01 ${description}`,
-    expectedActiveSectionKey,
-  });
-  if (status === 409) {
-    // Runtime advanced concurrently — refresh the authoritative section key and retry once.
-    const current = await currentRuntimeSection(scheduleId);
-    if (current === null || current === expectedActiveSectionKey) {
-      throw new Error(`end-section-now conflict without section change: ${body.slice(0, 300)}`);
-    }
-    ({ status, body } = await postProctorApi(adminContext, url, {
-      reason: `e2e-01 ${description}`,
-      expectedActiveSectionKey: current,
-    }));
-  }
-  if (status !== 200) {
-    throw new Error(
-      `end-section-now(${description}) failed: ${status} ${body.slice(0, 300)}`,
-    );
-  }
 }
 
 /** Wait for the student's autosave banner to report "Saved". */
