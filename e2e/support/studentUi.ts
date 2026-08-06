@@ -219,7 +219,11 @@ export async function completePreCheckIfPresent(page: Page) {
   const answerField = page.getByLabel(/Answer for question/i).first();
   const writingEditor = page.locator('[contenteditable="true"]').first();
 
-  const timeoutMs = Number(process.env['E2E_PROD_PRECHECK_SAVE_TIMEOUT_MS'] ?? '120000');
+  // Default raised from 120s after a measured E2E-04 flake: under shared-DB
+  // load the pre-check save exceeded 120s and the journey failed before any
+  // exam logic ran (retries are doomed by the identity-lock property, so the
+  // flake must not happen in the first place). Overridable per environment.
+  const timeoutMs = Number(process.env['E2E_PROD_PRECHECK_SAVE_TIMEOUT_MS'] ?? '180000');
 
   await expect
     .poll(

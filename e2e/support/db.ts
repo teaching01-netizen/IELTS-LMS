@@ -54,6 +54,18 @@ export async function queryDb<T extends object>(
   return rows as T[];
 }
 
+/**
+ * Execute a non-SELECT statement (UPDATE/DELETE/INSERT) and return the number
+ * of affected rows. mysql2 resolves UPDATE/DELETE with a ResultSetHeader
+ * object instead of a rows array, which queryDb's SELECT-oriented typing
+ * cannot surface (e.g. E2E-04's deadline manipulation).
+ */
+export async function executeUpdate(sql: string, params: SqlParam[] = []): Promise<number> {
+  const [result] = await getPool().execute(sql, params);
+  const affected = (result as mysql.ResultSetHeader).affectedRows;
+  return Number(affected);
+}
+
 export async function closeDb(): Promise<void> {
   if (pool) {
     await pool.end();
