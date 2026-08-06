@@ -1313,6 +1313,69 @@ describe('StudentAttemptProvider', () => {
     vi.useRealTimers();
   });
 
+  it('forced the durable mirror write immediately with the latest typed value when flushPending ran while the typing debounce was still pending (FEX-042 final keystroke)', async () => {
+    vi.useFakeTimers();
+    try {
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: true,
+      });
+
+      const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        result.current.actions.persistAnswer('q1', 'A');
+        result.current.actions.persistAnswer('q1', 'AB');
+        result.current.actions.persistAnswer('q1', 'FINAL_TYPED');
+      });
+
+      // RAM is current but the 100ms durable write has NOT fired yet (zero
+      // timer advancement): the final keystroke is still inside the debounce
+      // window when the section submission flush arrives.
+      expect(result.current.state.attempt?.answers.q1).toBe('FINAL_TYPED');
+      expect(result.current.state.pendingMutationCount).toBe(1);
+      expect(studentAttemptRepository.savePendingMutations).not.toHaveBeenCalled();
+
+      let flushed = false;
+      await act(async () => {
+        flushed = await result.current.actions.flushPending();
+      });
+
+      // flushNow forces the durable mirror write immediately (persistNow
+      // because isDurableMirrorUpToDate() is false, before the batch send)
+      // with the LATEST typed value — no timer advancement required.
+      expect(flushed).toBe(true);
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+      expect(
+        vi.mocked(studentAttemptRepository.savePendingMutations).mock.calls[0]?.[1]?.[0]?.payload,
+      ).toMatchObject({
+        questionId: 'q1',
+        value: 'FINAL_TYPED',
+      });
+
+      // The queue drains so the section can transition.
+      expect(result.current.state.pendingMutationCount).toBe(0);
+      expect(result.current.state.attempt?.recovery.syncState).toBe('saved');
+
+      // The still-scheduled debounce tick must not duplicate the durable write.
+      await act(async () => {
+        vi.advanceTimersByTime(ANSWER_DURABLE_WRITE_DEBOUNCE_MS + 10);
+        await Promise.resolve();
+      });
+      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window.navigator, 'onLine', {
+        configurable: true,
+        value: true,
+      });
+      vi.useRealTimers();
+    }
+  });
+
   it('persists discrete objective selections durably without waiting for the debounce window', async () => {
     vi.useFakeTimers();
     Object.defineProperty(window.navigator, 'onLine', {

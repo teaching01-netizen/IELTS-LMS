@@ -2,6 +2,92 @@
 
 Purpose: turn incidents and bug fixes into durable memory for humans and AI agents.
 
+## 2026-08-06: Section Submission — Unanswered Confirmation, Flush-Before-Submit, and Submission Races (FEX-040/041/042, F-8)
+
+### Symptom
+Plan-driven. No production incident. The F-8 test pass had to pin the section-submission
+contracts end to end: **FEX-040 unanswered confirmation** (confirm dialog on unanswered +
+`confirm` policy with correct counts, cancel returns to the same question, confirm does not
+duplicate the submission, `allow` skips the dialog), **FEX-041 flush-before-submit** (DOM
+controls → live cache → writing draft → pending flush, section transition only after a
+successful flush, exponential-backoff retry with offline/reconnect blocking), and **FEX-042
+section submission races** (another flush in flight, final keystroke still debounced, proctor
+advance, runtime pause, connection drop, timer zero). One hardening finding was surfaced but
+NOT changed (see Fix): a `fireEvent` click-through reaches `handleModuleSubmit`'s confirmation
+branch before the `answerControlsLocked` gate while paused; userEvent (and real browsers, via
+the z-40 blocking overlay) never reach it.
+
+### Scope
+Test-only changes inside the student module, plus this memory artifact:
+- `src/components/student/__tests__/useStudentSubmissionOrchestration.test.tsx`
+- `src/components/student/__tests__/StudentApp.test.tsx`
+- `src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx`
+
+Read-only context used for citations: `src/components/student/useStudentSubmissionOrchestration.ts`
+(the retry loop re-reads `runtimeStateRef.current` each iteration; backoff is
+`Math.min(30_000, 1_000 * 2 ** attemptIndex)` via `window.setTimeout`; the same-fingerprint
+in-flight dedupe uses `moduleSubmitInFlightRef` + `moduleSubmitFingerprintRef`),
+`src/services/studentMutationOutbox.ts` (`flushNow` forces `persistNow` when
+`isDurableMirrorUpToDate()` is false), `src/components/student/StudentApp.tsx`
+(`performModuleSubmit` early-returns on `answerControlsLocked`; the pause overlay is
+`fixed inset-0 z-40`).
+
+### Gap Matrix
+
+| Bullet | Verdict | Evidence (file:line) | Action |
+|---|---|---|---|
+| FEX-040: confirmation appears when unanswered and policy is `confirm` | PINNED-ALREADY | component suite `SubmitConfirmation.test.tsx` (title/unanswered/flagged counts/block/allow/time); app `StudentApp.test.tsx:3415` | — |
+| FEX-040: counts for answered, total, and flagged are correct | NEWLY-PINNED (app-level wiring) | `StudentApp.test.tsx:3649` — 2 seeded questions, 1 typed answer, 1 flag → dialog shows `You have 1 unanswered question`, `Answered:` row `1/2`, `You have 1 flagged question` (component-level counts already pinned in `SubmitConfirmation.test.tsx`) | — |
+| FEX-040: cancel returns to the same question | NEWLY-PINNED | `StudentApp.test.tsx:3528` — `Review Answers` closes the dialog, no `Examination Complete!`, the student stays on q1 (`Answer for question 1` still present/enabled), and re-clicking Finish re-opens the dialog | — |
+| FEX-040: confirm does not duplicate the submission | PINNED-ALREADY + NEWLY-PINNED | app `StudentApp.test.tsx:2633` (rapid Finish clicks during an in-flight runtime-backed flush → one `saveAttempt`); orchestration `useStudentSubmissionOrchestration.test.tsx:519` (same-fingerprint call while first flush in flight → exactly one `flushPending` + one `submitModule`) | — |
+| FEX-040: policy `allow` skips confirmation | PINNED-ALREADY | `StudentApp.test.tsx:3921` — `allow` submits immediately with unanswered questions | — |
+| FEX-041: current DOM controls emit their latest values | NEWLY-PINNED (order) | `useStudentSubmissionOrchestration.test.tsx:154` — `flushDomAnswerControlsNow` is the first pipeline call | — |
+| FEX-041: writing draft is committed | PINNED-ALREADY + NEWLY-PINNED (order) | `StudentApp.test.tsx:686` (mounted editor draft committed before runtime final submission, F-5); `useStudentSubmissionOrchestration.test.tsx:154` (`commitWritingDraft` before `flushPending`) | — |
+| FEX-041: live answer cache is reconciled | NEWLY-PINNED (order) | `useStudentSubmissionOrchestration.test.tsx:154` — `reconcileLiveAnswerCacheNow` second, before the flush. Accepted deviation from spec numbering 1-2-3-4: the pinned order is DOM-controls → cache-reconcile → writing-draft (steps 1-3-2-4); steps 2/3 operate on independent domains (writing draft vs objective cache) and both strictly precede the flush, so the swap is semantically inert | — |
+| FEX-041: pending mutations are flushed | NEWLY-PINNED (order) | `useStudentSubmissionOrchestration.test.tsx:154` — `flushPending` last; full order `[flushDom, reconcile, commit, flushPending]` | — |
+| FEX-041: section transition only after successful flush | NEWLY-PINNED | `useStudentSubmissionOrchestration.test.tsx:215` — no `submitModule` while the flush fails; exactly one `submitModule` after the retry succeeds; happy path pinned at `:7` | — |
+| FEX-041: retry with exponential backoff + offline/reconnect blocking | NEWLY-PINNED | `useStudentSubmissionOrchestration.test.tsx:215` (1_000ms then 2_000ms backoffs, `transitionBlocking('syncing_reconnect', true)` while online, both blockings cleared on success), `:301` (`transitionBlocking('offline', true)` when `navigator.onLine === false`, cleared after success) | — |
+| FEX-042: another flush is in flight | PINNED-ALREADY + NEWLY-PINNED | provider `StudentAttemptProvider.test.tsx:928`/`:981`/`:1037` (answer-level races: new answers queued mid-flush are persisted with the latest value); orchestration `:519` (submit-level dedupe); app `StudentApp.test.tsx:2633` | — |
+| FEX-042: final keystroke still debounced | NEWLY-PINNED | `StudentAttemptProvider.test.tsx:1316` — online typing inside the 100ms debounce then `flushPending()` with ZERO timer advancement: `flushNow` forces the durable mirror write (`persistNow` via `isDurableMirrorUpToDate()` false) with the LATEST typed value, queue drains (`pendingMutationCount` 0, `syncState 'saved'`), and the later debounce tick does not duplicate the write | — |
+| FEX-042: proctor advances the section | NEWLY-PINNED | `useStudentSubmissionOrchestration.test.tsx:376` — `currentModule` changed mid-retry → the loop re-reads `runtimeStateRef.current` and abandons WITHOUT a second flush or submit; `:448` — same for `phase` leaving `'exam'` | — |
+| FEX-042: runtime pauses | NEWLY-PINNED | `StudentApp.test.tsx:3782` — paused runtime (`status: 'paused'`): the blocking overlay intercepts Finish (userEvent hit-testing matches the browser), no confirmation dialog opens, no submission/completion, overlay stays, student remains on q1 | — |
+| FEX-042: connection drops | PINNED-ALREADY + NEWLY-PINNED | provider `StudentAttemptProvider.test.tsx:1109` (pending mutations kept when the connection drops mid-flush, recovered on retry); orchestration `:301` (offline blocking state + retry until the flush succeeds, then submit once) | — |
+| FEX-042: timer reaches zero | PINNED-ALREADY | `StudentApp.test.tsx:2363` (auto-submit at 00:00 + UI lock), `:2492` (server-confirmed 00:00 on load), `:2853` (no duplicate while the first zero-timer flush is in flight), `:3080` (auto-submit retried when the flush fails) | — |
+
+### Fix
+No production code changes. Ten regression tests added (6 orchestration, 1 provider, 3 app) —
+see the Gap Matrix for citations. One hardening finding REPORTED, not changed:
+`StudentApp.tsx` `handleModuleSubmit` (`:437-444`) evaluates `submitRequiresConfirmation`
+before the `answerControlsLocked` gate that protects `performModuleSubmit` (`:421-424`). A
+`fireEvent` click on Finish while paused reaches the confirmation branch and opens the dialog;
+confirming is still a no-op (the gate early-returns), and real browsers cannot reach the
+button at all because the pause overlay (`fixed inset-0 z-40`, `:522`) intercepts the
+pointer — verified by userEvent hit-testing in `StudentApp.test.tsx:3782`. Recommendation for
+the controller: move the lock check ahead of the confirmation branch in `handleModuleSubmit`
+for defense in depth; no integrity invariant is currently violated.
+
+### Regression Protection
+- `npx vitest run src/components/student/__tests__/useStudentSubmissionOrchestration.test.tsx` → **Tests 9 passed (9)**, zero `act()` warnings.
+- `npx vitest run src/components/student/__tests__/StudentApp.test.tsx` → **Tests 49 passed (49)**; the 19 "not wrapped in act" occurrences match the pre-existing baseline exactly (zero new).
+- `npx vitest run src/components/student/providers/__tests__/StudentAttemptProvider.test.tsx` → **Tests 56 passed (56)**, zero `act()` warnings (the provider file's zero-warning bar is kept).
+- All new tests use fake timers with `finally { vi.useRealTimers(); }` where timers are involved, restore the `navigator.onLine` descriptor in `finally`, and add no module-level `vi.mock`s; no `.only`/`.skip`.
+
+### Invariant
+Section submission is a single, idempotent, retried transaction that never runs ahead of
+persistence and never fires twice: the pipeline always emits the current DOM controls,
+reconciles the live answer cache, commits the writing draft, and then flushes pending
+mutations in that exact order; the section transitions only after the flush succeeds, while a
+failed flush retries with exponential backoff (1_000, 2_000, 4_000… capped at 30_000ms)
+showing `offline` blocking when the connection is down and `syncing_reconnect` otherwise, and
+clears both blockings only on success; concurrent submit requests with the same fingerprint
+await the in-flight attempt instead of duplicating it, and the retry loop re-reads the
+runtime state on every iteration so a proctor advance, a phase exit, or a runtime pause
+abandons the loop without submitting; the final debounced keystroke is forced into the
+durable mirror by the flush itself (no timer wait), so the latest value always reaches the
+submission snapshot; and the unanswered-question confirmation shows accurate answered/total/
+flagged counts, returns the student to the same question on cancel, and never double-submits
+on confirm, while `allow` skips the dialog entirely.
+
 ## 2026-08-06: Offline Answer Flow and Browser Storage Failure Contracts (FEX-032/033, F-7)
 
 ### Symptom
