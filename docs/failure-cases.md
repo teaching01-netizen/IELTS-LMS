@@ -712,3 +712,48 @@ For `MULTI_MCQ`, `options[].isCorrect` is authoritative. At least one option mus
 A multi-select answer array is an unordered replacement set of option IDs, not a positional slot
 array. Shorter set updates must replace the prior value; only explicitly slot-scoped mutations may
 preserve sibling array positions.
+
+---
+
+## 2026-08-08: Multi-Select Grading Required Every Correct Option
+
+### Symptom
+
+The grading review treated a `MULTI_MCQ` block as a single all-or-nothing point. A student who
+selected two correct options out of five received `0/1`, even though the block occupied five
+question slots.
+
+### Scope
+
+Backend objective auto-grading and the admin grading review/export fallback for `MULTI_MCQ`.
+Answer persistence, option-ID storage, student selection limits, and exact correctness status are
+unchanged.
+
+### Root Cause
+
+The backend represented the marked option IDs as an exact set with a hard-coded `max_score: 1`.
+The review fallback mirrored that shape by converting correctness to `1/0`, so both paths discarded
+the number of individually selected correct options.
+
+### Fix
+
+- Derive the multi-select maximum from the number of unique marked-correct option IDs.
+- Award one point for each selected ID in the marked-correct set; duplicate or incorrect IDs never
+  earn extra points.
+- Keep `isCorrect` as exact-set correctness, so a partial answer remains visibly `Incorrect` while
+  showing its earned score (for example, `2/5`).
+- Keep malformed empty answer keys unscored and non-passing.
+- Make admin review/export fallback scoring use the same intersection-count rule when persisted
+  backend results are unavailable.
+
+### Regression Protection
+
+- `backend/crates/application/src/grading/mod.rs`
+- `src/components/admin/__tests__/gradingAnswerUtils.test.ts`
+- `src/components/admin/__tests__/gradingReviewUtils.test.ts`
+
+### Invariant
+
+For a valid `MULTI_MCQ`, `maxScore` equals the number of marked-correct option IDs and
+`awardedScore` equals the size of the submitted/correct ID intersection. Exact-set equality alone
+controls `isCorrect`; it must not control whether partial points are awarded.

@@ -3288,6 +3288,7 @@ struct ObjectiveAnswerSpec {
 enum ObjectiveExpectedAnswer {
     TextAnyOf(HashSet<String>),
     ExactSet(HashSet<String>),
+    MultiChoice(HashSet<String>),
 }
 
 impl ObjectiveExpectedAnswer {
@@ -3301,7 +3302,22 @@ impl ObjectiveExpectedAnswer {
                 };
                 expected.contains(&normalize_exact_text(answer))
             }
-            Self::ExactSet(expected) => !expected.is_empty() && strict_text_set(value) == *expected,
+            Self::ExactSet(expected) | Self::MultiChoice(expected) => {
+                !expected.is_empty() && strict_text_set(value) == *expected
+            }
+        }
+    }
+
+    fn awarded_score(&self, value: &Value, max_score: i64) -> i64 {
+        match self {
+            Self::MultiChoice(expected) => strict_text_set(value)
+                .intersection(expected)
+                .count()
+                .try_into()
+                .unwrap_or(i64::MAX)
+                .min(max_score.max(0)),
+            _ if self.matches(value, "") => max_score.max(0),
+            _ => 0,
         }
     }
 }
@@ -3352,16 +3368,23 @@ fn compute_objective_auto_grading_results(
         } else {
             spec.expected.matches(&student_answer, &spec.scoring_rule)
         };
-        if is_correct {
-            total_score += question_max;
-        }
+        let awarded_score = if spec.shared_answer_group.is_some() {
+            if is_correct {
+                question_max
+            } else {
+                0
+            }
+        } else {
+            spec.expected.awarded_score(&student_answer, question_max)
+        };
+        total_score += awarded_score;
 
         question_results.push(json!({
             "questionId": spec.question_id,
             "studentAnswer": value_to_display_text(&student_answer),
             "correctAnswer": value_to_display_text(&spec.correct_answer),
             "isCorrect": is_correct,
-            "awardedScore": if is_correct { question_max } else { 0 },
+            "awardedScore": awarded_score,
             "maxScore": question_max,
             "scoringRule": spec.scoring_rule,
             "hasOverride": spec.has_override
@@ -3660,9 +3683,14 @@ fn apply_objective_scoring_overrides(
             .map(|values| values.iter().filter(|v| !v.is_empty()).cloned().collect::<Vec<_>>())
             .filter(|values| !values.is_empty())
         {
+            let is_multi_choice = matches!(&spec.expected, ObjectiveExpectedAnswer::MultiChoice(_));
+            let option_count = option_ids.len();
             if option_ids.len() > 1 {
-                spec.expected =
-                    ObjectiveExpectedAnswer::ExactSet(option_ids.iter().cloned().collect());
+                spec.expected = if is_multi_choice {
+                    ObjectiveExpectedAnswer::MultiChoice(option_ids.iter().cloned().collect())
+                } else {
+                    ObjectiveExpectedAnswer::ExactSet(option_ids.iter().cloned().collect())
+                };
                 spec.correct_answer = Value::Array(
                     option_ids
                         .into_iter()
@@ -3670,9 +3698,15 @@ fn apply_objective_scoring_overrides(
                         .collect::<Vec<_>>(),
                 );
             } else {
-                spec.expected =
-                    ObjectiveExpectedAnswer::TextAnyOf(option_ids.iter().cloned().collect());
+                spec.expected = if is_multi_choice {
+                    ObjectiveExpectedAnswer::MultiChoice(option_ids.iter().cloned().collect())
+                } else {
+                    ObjectiveExpectedAnswer::TextAnyOf(option_ids.iter().cloned().collect())
+                };
                 spec.correct_answer = Value::String(option_ids.join(" | "));
+            }
+            if is_multi_choice {
+                spec.max_score = option_count.try_into().unwrap_or(i64::MAX);
             }
             continue;
         }
@@ -3848,7 +3882,7 @@ fn index_objective_block_scoring_specs(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            insert_exact_set_spec(specs, seen, block_id, expected, "multi_choice".to_owned());
+            insert_multi_choice_spec(specs, seen, block_id, expected, "multi_choice".to_owned());
         }
         "SINGLE_MCQ" => {
             if let Some(questions) = block.get("questions").and_then(Value::as_array) {
@@ -4128,7 +4162,7 @@ fn matches_shared_sentence_answer(
             .iter()
             .map(|value| normalize_shared_sentence_answer(value))
             .any(|value| value == normalized),
-        ObjectiveExpectedAnswer::ExactSet(_) => false,
+        ObjectiveExpectedAnswer::ExactSet(_) | ObjectiveExpectedAnswer::MultiChoice(_) => false,
     };
     if is_expected {
         consumed.insert(normalized);
@@ -4263,7 +4297,7 @@ fn insert_text_answer_spec(
     });
 }
 
-fn insert_exact_set_spec(
+fn insert_multi_choice_spec(
     specs: &mut Vec<ObjectiveAnswerSpec>,
     seen: &mut HashSet<String>,
     question_id: &str,
@@ -4283,7 +4317,7 @@ fn insert_exact_set_spec(
 
     specs.push(ObjectiveAnswerSpec {
         question_id: question_id.to_owned(),
-        expected: ObjectiveExpectedAnswer::ExactSet(normalized),
+        expected: ObjectiveExpectedAnswer::MultiChoice(normalized.clone()),
         scoring_rule,
         correct_answer: Value::Array(
             expected_values
@@ -4291,7 +4325,7 @@ fn insert_exact_set_spec(
                 .map(Value::String)
                 .collect::<Vec<_>>(),
         ),
-        max_score: 1,
+        max_score: normalized.len().try_into().unwrap_or(i64::MAX).max(1),
         has_override: false,
         shared_answer_group: None,
     });
@@ -5063,6 +5097,44 @@ mod tests {
         assert_eq!(results["maxScore"], 1);
         assert_eq!(results["questionResults"][0]["questionId"], "multi-1");
         assert_eq!(results["questionResults"][0]["isCorrect"], false);
+    }
+
+    #[test]
+    fn objective_auto_grading_awards_one_point_per_selected_correct_multi_mcq_option() {
+        let content_snapshot = json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "id": "multi-partial-1",
+                        "type": "MULTI_MCQ",
+                        "requiredSelections": 1,
+                        "options": [
+                            { "id": "A", "isCorrect": true },
+                            { "id": "B", "isCorrect": false },
+                            { "id": "C", "isCorrect": true },
+                            { "id": "D", "isCorrect": false },
+                            { "id": "E", "isCorrect": true },
+                            { "id": "F", "isCorrect": true },
+                            { "id": "G", "isCorrect": true }
+                        ]
+                    }]
+                }]
+            }
+        });
+
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "multi-partial-1": ["C", "A", "B", "A"] }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["totalScore"], 2);
+        assert_eq!(results["maxScore"], 5);
+        assert_eq!(results["questionResults"][0]["isCorrect"], false);
+        assert_eq!(results["questionResults"][0]["awardedScore"], 2);
+        assert_eq!(results["questionResults"][0]["maxScore"], 5);
     }
 
     #[test]

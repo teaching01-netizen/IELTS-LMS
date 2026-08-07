@@ -204,6 +204,49 @@ describe('gradingReviewUtils', () => {
 
     expect(exportData.rows[0]?.['answer:multi-1']).toBe('Beta, Alpha');
     expect(exportData.rows[0]?.['rightAnswer:multi-1']).toBe('Alpha, Charlie');
+    expect(exportData.rows[0]?.['score:multi-1']).toBe(1);
+    expect(exportData.rows[0]?.['totalScore']).toBe(1);
+    expect(exportData.rows[0]?.['maxScore']).toBe(2);
+  });
+
+  test('recomputes legacy MULTI_MCQ result rows from the marked option set', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages[0]!.blocks = [{
+      id: 'multi-legacy-score',
+      type: 'MULTI_MCQ',
+      instruction: 'Choose the correct options.',
+      stem: 'Pick two',
+      requiredSelections: 4,
+      options: [
+        { id: 'option-a', text: 'Alpha', isCorrect: true },
+        { id: 'option-b', text: 'Beta', isCorrect: false },
+        { id: 'option-c', text: 'Charlie', isCorrect: true },
+      ],
+    }];
+
+    const sectionSubmission = createSectionSubmission(
+      'sub-legacy',
+      'reading',
+      { 'multi-legacy-score': ['option-a'] },
+      [createQuestionResult('multi-legacy-score', false, 0)],
+    );
+
+    const groups = buildQuestionTracebackGroups(examState, sectionSubmission, 'reading');
+    expect(groups[0]?.items[0]?.correctness).toBe(false);
+    expect(groups[0]?.items[0]?.awardedScore).toBe(1);
+    expect(groups[0]?.items[0]?.maxScore).toBe(2);
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-legacy', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-legacy', 'stu-legacy', 'Legacy Student')],
+      sectionSubmissions: [{ submissionId: 'sub-legacy', sectionSubmission }],
+      examState,
+      moduleType: 'reading',
+    });
+
+    expect(exportData.rows[0]?.['score:multi-legacy-score']).toBe(1);
+    expect(exportData.rows[0]?.['totalScore']).toBe(1);
+    expect(exportData.rows[0]?.['maxScore']).toBe(2);
   });
 
   test('escapes csv values with commas, quotes, and newlines', () => {

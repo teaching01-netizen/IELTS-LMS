@@ -44,7 +44,7 @@ PDF content:
 - Reading/Listening: rendered as a teacher-friendly table: question, student answer, right answer, correct, score.
 - Writing uses the same structure as the default **"Print all writing"** export (task pages with prompt, response, and assessment form), and includes the full essay text (plain text) when available.
 - Missing section data is rendered as **"No submission"**.
-- For `MULTI_MCQ`, the student-answer column maps the persisted submitted option-ID array to option text, while the right-answer column maps options marked `isCorrect`. A stale legacy `requiredSelections` value must affect neither column.
+- For `MULTI_MCQ`, the student-answer column maps the persisted submitted option-ID array to option text, while the right-answer column maps options marked `isCorrect`. A stale legacy `requiredSelections` value must affect neither column. The score is the number of selected marked-correct IDs out of the marked-correct count (for example, `2/5`); exact-set equality controls the correctness label separately.
 
 The selected sections are persisted per grading session in `localStorage`:
 

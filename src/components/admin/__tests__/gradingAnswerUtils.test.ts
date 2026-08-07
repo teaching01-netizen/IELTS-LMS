@@ -6,6 +6,7 @@ import {
   getCorrectAnswerDisplay,
   getQuestionPrompt,
   getStudentAnswerDisplay,
+  getMultiSelectAnswerScore,
   isStudentAnswerCorrect,
   resolveSentenceCompletionCorrectness,
 } from '../gradingAnswerUtils';
@@ -349,6 +350,41 @@ describe('gradingAnswerUtils', () => {
 
     expect(isStudentAnswerCorrect(descriptor, { 'block-exact-ids': ['option-a'] })).toBe(false);
     expect(isStudentAnswerCorrect(descriptor, { 'block-exact-ids': ['Option-A'] })).toBe(true);
+  });
+
+  test('MULTI_MCQ: awards one point for each selected correct option', () => {
+    const descriptor = {
+      id: 'block-partial',
+      blockId: 'block-partial',
+      groupId: 'p1',
+      groupLabel: 'Passage 1',
+      isMulti: true,
+      correctCount: 5,
+      answerKey: 'block-partial',
+      block: {
+        id: 'block-partial',
+        type: 'MULTI_MCQ',
+        instruction: '',
+        stem: 'Choose five',
+        requiredSelections: 1,
+        options: [
+          { id: 'A', text: 'Alpha', isCorrect: true },
+          { id: 'B', text: 'Beta', isCorrect: false },
+          { id: 'C', text: 'Charlie', isCorrect: true },
+          { id: 'D', text: 'Delta', isCorrect: false },
+          { id: 'E', text: 'Echo', isCorrect: true },
+          { id: 'F', text: 'Foxtrot', isCorrect: true },
+          { id: 'G', text: 'Golf', isCorrect: true },
+        ],
+      },
+      question: null,
+    } as unknown as StudentQuestionDescriptor;
+
+    expect(getMultiSelectAnswerScore(descriptor, { 'block-partial': ['C', 'A', 'B', 'A'] })).toEqual({
+      awardedScore: 2,
+      maxScore: 5,
+    });
+    expect(isStudentAnswerCorrect(descriptor, { 'block-partial': ['C', 'A'] })).toBe(false);
   });
 
   test('MULTI_MCQ: an empty answer key never auto-passes an unanswered student', () => {

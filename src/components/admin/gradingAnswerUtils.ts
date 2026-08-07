@@ -384,6 +384,28 @@ function exactIdSetFromUnknown(value: unknown): Set<string> {
   return new Set(items);
 }
 
+export function getMultiSelectAnswerScore(
+  descriptor: StudentQuestionDescriptor,
+  answerMap: Record<string, StudentAnswerValue | undefined>,
+): { readonly awardedScore: number | null; readonly maxScore: number | null } {
+  if (descriptor.block.type !== 'MULTI_MCQ') {
+    return { awardedScore: null, maxScore: null };
+  }
+
+  const correctSet = exactIdSetFromUnknown(getCorrectAnswerValue(descriptor));
+  if (correctSet.size === 0) {
+    return { awardedScore: null, maxScore: null };
+  }
+
+  const studentSet = exactIdSetFromUnknown(getQuestionAnswer(descriptor, answerMap));
+  const awardedScore = Array.from(studentSet).filter((id) => correctSet.has(id)).length;
+
+  return {
+    awardedScore,
+    maxScore: correctSet.size,
+  };
+}
+
 export function isStudentAnswerCorrect(
   descriptor: StudentQuestionDescriptor,
   answerMap: Record<string, StudentAnswerValue | undefined>,

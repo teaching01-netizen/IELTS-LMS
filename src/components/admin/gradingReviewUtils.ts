@@ -13,6 +13,7 @@ import type { StudentQuestionDescriptor } from '../../services/examAdapterServic
 import {
   extractObjectiveAnswerMap,
   getCorrectAnswerDisplay,
+  getMultiSelectAnswerScore,
   getQuestionPrompt,
   getStudentAnswerDisplay,
   isStudentAnswerCorrect,
@@ -354,10 +355,23 @@ function buildTracebackItem(
   const computedCorrectness = correctnessByDescriptor.has(descriptor.id)
     ? correctnessByDescriptor.get(descriptor.id) ?? null
     : isStudentAnswerCorrect(descriptor, answerMap);
-  const correctness = questionResult?.isCorrect ?? computedCorrectness;
-  const awardedScore =
-    questionResult?.awardedScore ?? (computedCorrectness === null ? null : computedCorrectness ? 1 : 0);
-  const maxScore = questionResult?.maxScore ?? (computedCorrectness === null ? null : 1);
+  const fallbackScore = descriptor.block.type === 'MULTI_MCQ'
+    ? getMultiSelectAnswerScore(descriptor, answerMap)
+    : {
+      awardedScore: computedCorrectness === null ? null : computedCorrectness ? 1 : 0,
+      maxScore: computedCorrectness === null ? null : 1,
+    };
+  const useMultiSelectFallback =
+    descriptor.block.type === 'MULTI_MCQ' && questionResult?.hasOverride !== true;
+  const correctness = useMultiSelectFallback
+    ? computedCorrectness
+    : questionResult?.isCorrect ?? computedCorrectness;
+  const awardedScore = useMultiSelectFallback
+    ? fallbackScore.awardedScore
+    : questionResult?.awardedScore ?? fallbackScore.awardedScore;
+  const maxScore = useMultiSelectFallback
+    ? fallbackScore.maxScore
+    : questionResult?.maxScore ?? fallbackScore.maxScore;
 
   return {
     numberLabel: getQuestionNumberLabel(descriptors, descriptor.id),
@@ -603,7 +617,10 @@ function getQuestionColumnLabel(descriptor: StudentQuestionDescriptor, descripto
 
 function countCorrectAnswers(groups: ObjectiveTracebackGroup[]): number {
   return groups.reduce(
-    (count, group) => count + group.items.filter((item) => item.correctness === true).length,
+    (count, group) => count + group.items.reduce(
+      (groupCount, item) => groupCount + (item.awardedScore ?? 0),
+      0,
+    ),
     0,
   );
 }
@@ -789,6 +806,9 @@ export function buildWideObjectiveExport({
     const derivedMaxScore = derivedTotals.maxScore ?? autoGradingResults?.maxScore ?? null;
     const derivedPercentage = derivedTotals.percentage ?? autoGradingResults?.percentage ?? null;
     const scoredResults = buildQuestionResultMap(autoGradingResults?.questionResults);
+    const tracebackItemsById = new Map(
+      groups.flatMap((group) => group.items).map((item) => [item.questionId, item] as const),
+    );
     const row: Record<string, unknown> = {
       examTitle: session.examTitle,
       sessionId: session.sessionId,
@@ -813,13 +833,19 @@ export function buildWideObjectiveExport({
       if (!slot.isGrouped) {
         const descriptor = slot.descriptors[0];
         if (!descriptor) continue;
+        const scoredResult = scoredResults.get(descriptor.id);
+        const fallbackItem = tracebackItemsById.get(descriptor.id);
         row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(descriptor, answerMap);
         row[`rightAnswer:${descriptor.id}`] = getExportCorrectAnswerDisplay(
           descriptor,
-          scoredResults.get(descriptor.id),
+          scoredResult,
         );
         if (mode === 'auto') {
-          row[`score:${descriptor.id}`] = toOptionalNumber(scoredResults.get(descriptor.id)?.awardedScore);
+          row[`score:${descriptor.id}`] = toOptionalNumber(
+            descriptor.block.type === 'MULTI_MCQ' && scoredResult?.hasOverride !== true
+              ? fallbackItem?.awardedScore
+              : scoredResult?.awardedScore,
+          );
         } else {
           row[`manualCorrect:${descriptor.id}`] = '';
         }
