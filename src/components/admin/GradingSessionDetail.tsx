@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight, Download } from 'lucide-react';
+import { Search, Filter, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight, Download, FileCheck2 } from 'lucide-react';
 import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus, WritingTaskSubmission } from '../../types/grading';
 import { gradingService } from '../../services/gradingService';
 import { gradingRepository } from '../../services/gradingRepository';
@@ -8,6 +8,7 @@ import { seedDevelopmentFixtures } from '../../services/developmentFixtures';
 import { TableLoadingSkeleton } from '@components/ui';
 import { GradingExportButtons } from './GradingExportButtons';
 import { ObjectiveOverridesPanel } from './ObjectiveOverridesPanel';
+import { ExamObjectiveOverviewPanel } from './ExamObjectiveOverviewPanel';
 import {
   buildCsvContent,
   buildCsvFilename,
@@ -164,6 +165,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
   const [exportMode, setExportMode] = useState<'default' | 'per_student_zip_pdf'>('default');
   const [perStudentDialogOpen, setPerStudentDialogOpen] = useState(false);
   const [writingPrintDocument, setWritingPrintDocument] = useState<SessionWritingPrintDocument | null>(null);
+  const [showOverallAnswerCheck, setShowOverallAnswerCheck] = useState(false);
   const [filters, setFilters] = useState<SessionDetailFilters>({});
   const [searchQuery, setSearchQuery] = useState('');
   const writingPrintRequestIdRef = useRef(0);
@@ -731,6 +733,20 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             <Filter size={16} />
             <span className="hidden sm:inline">Filter</span>
           </button>
+          {session ? (
+            <button
+              type="button"
+              onClick={() => setShowOverallAnswerCheck((current) => !current)}
+              className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 transition-colors hover:bg-blue-100"
+              aria-expanded={showOverallAnswerCheck}
+            >
+              <FileCheck2 size={16} />
+              <span className="hidden sm:inline">
+                {showOverallAnswerCheck ? 'Hide overall check' : 'Overall answer check'}
+              </span>
+              <span className="sm:hidden">Overall</span>
+            </button>
+          ) : null}
           <div className="flex items-start gap-3">
             <div className="flex flex-col gap-1">
               <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-gray-400">
@@ -786,6 +802,13 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         <ObjectiveOverridesPanel
           scheduleId={session.scheduleId}
           publishedVersionId={session.publishedVersionId}
+        />
+      ) : null}
+
+      {showOverallAnswerCheck && session ? (
+        <ExamObjectiveOverviewPanel
+          session={session}
+          onStudentSelect={onStudentSelect}
         />
       ) : null}
 

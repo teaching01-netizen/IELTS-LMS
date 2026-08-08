@@ -48,10 +48,18 @@ export function AdminRoot() {
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
+        {sidebarOpen ? (
+          <button
+            type="button"
+            className="fixed inset-0 z-20 bg-slate-900/30 md:hidden"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close admin navigation"
+          />
+        ) : null}
         <aside
-          className={`flex flex-col bg-blue-900 text-blue-100 transition-all duration-300 ${
-            sidebarOpen ? 'w-64' : 'w-16'
-          } shadow-xl z-20`}
+          className={`fixed inset-y-0 left-0 z-30 flex flex-col bg-blue-900 text-blue-100 shadow-xl transition-all duration-300 md:relative md:inset-auto md:z-20 md:translate-x-0 ${
+            sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:w-16'
+          }`}
           role="navigation"
           aria-label="Admin navigation"
         >
@@ -127,11 +135,19 @@ export function AdminRoot() {
 
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           <header
-            className="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0 z-10 shadow-sm"
+            className="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-3 sm:px-6 flex-shrink-0 z-10 shadow-sm"
             role="banner"
           >
             <div className="flex items-center gap-4 flex-1">
-              <div className="relative w-72">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen((open) => !open)}
+                className="inline-flex items-center justify-center rounded-md p-2 text-gray-600 hover:bg-gray-100 md:hidden"
+                aria-label={sidebarOpen ? 'Close admin navigation' : 'Open admin navigation'}
+              >
+                <Menu size={20} />
+              </button>
+              <div className="relative min-w-0 max-w-72 flex-1">
                 <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
                 <input
                   type="text"
@@ -168,7 +184,7 @@ export function AdminRoot() {
             </div>
           </header>
 
-          <main id="main-content" className="flex-1 overflow-y-auto bg-gray-50 p-6" role="main">
+          <main id="main-content" className="min-w-0 flex-1 overflow-y-auto bg-gray-50 p-3 sm:p-6" role="main">
             <Outlet />
           </main>
         </div>

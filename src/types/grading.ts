@@ -286,9 +286,24 @@ export interface ObjectiveQuestionResult {
   maxScore: number;
   scoringRule: string;
   hasOverride: boolean;
+  manualOverride?: ObjectiveManualOverride | undefined;
   overrideReason?: string | undefined;
   overriddenBy?: string | undefined;
   overriddenAt?: string | undefined;
+}
+
+export interface ObjectiveManualOverride {
+  isCorrect: boolean;
+  awardedScore: number;
+  overriddenBy: string;
+  overriddenByName?: string | undefined;
+  overriddenAt: string;
+  reason: string;
+}
+
+export interface ObjectiveQuestionOverrideRequest {
+  isCorrect: boolean;
+  reason?: string | undefined;
 }
 
 export interface ObjectiveOverridePayload {

@@ -44,6 +44,7 @@ import {
   ObjectiveLatestDraftRegradeRequest,
   ObjectiveLatestDraftRegradeResponse,
   ObjectiveOverrideUpsertRequest,
+  ObjectiveQuestionOverrideRequest,
 } from '../types/grading';
 
 /**
@@ -282,6 +283,28 @@ export class GradingService {
       return { success: true, data: response };
     } catch (error) {
       return { success: false, error: `Failed to regrade objective sections: ${error}` };
+    }
+  }
+
+  async overrideObjectiveQuestion(
+    submissionId: string,
+    section: 'reading' | 'listening',
+    questionId: string,
+    request: ObjectiveQuestionOverrideRequest,
+  ): Promise<GradingServiceResult<SectionSubmission>> {
+    try {
+      if (!isBackendGradingEnabled()) {
+        return { success: false, error: 'Per-student objective overrides require backend grading.' };
+      }
+
+      const response = await backendPut<SectionSubmission>(
+        `/v1/grading/submissions/${encodeURIComponent(submissionId)}/sections/${section}/questions/${encodeURIComponent(questionId)}/override`,
+        request,
+      );
+      await gradingRepository.saveSectionSubmission(response);
+      return { success: true, data: response };
+    } catch (error) {
+      return { success: false, error: `Failed to update student answer correctness: ${error}` };
     }
   }
   

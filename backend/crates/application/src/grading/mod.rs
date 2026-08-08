@@ -9,10 +9,10 @@ use ielts_backend_domain::{
         ActorActionRequest, GradingScheduleObjectiveOverride, GradingSession, GradingSessionDetail,
         GradingSessionPagination, GradingSessionStatus, ObjectiveOverrideDeleteRequest,
         ObjectiveOverrideUpsertRequest, OverallGradingStatus, ReleaseEvent, ReleaseNowRequest,
-        ReleaseStatus, ResultsAnalytics, ReviewAction, ReviewDraft, ReviewDraftSummary,
-        SaveReviewDraftRequest, ScheduleReleaseRequest, SectionGradingStatus, SectionSubmission,
-        StartReviewRequest, StudentResult, StudentSubmission, SubmissionReviewBundle,
-        SubmissionReviewSummary, WritingTaskSubmission,
+        ObjectiveQuestionOverrideRequest, ReleaseStatus, ResultsAnalytics, ReviewAction,
+        ReviewDraft, ReviewDraftSummary, SaveReviewDraftRequest, ScheduleReleaseRequest,
+        SectionGradingStatus, SectionSubmission, StartReviewRequest, StudentResult,
+        StudentSubmission, SubmissionReviewBundle, SubmissionReviewSummary, WritingTaskSubmission,
     },
     schedule::{ExamSchedule, ScheduleStatus},
 };
@@ -317,6 +317,115 @@ impl GradingService {
         .fetch_all(&self.pool)
         .await?;
         Ok(sections)
+    }
+
+    #[tracing::instrument(skip(self, ctx, req), fields(submission_id = %submission_id, section = %section, question_id = %question_id))]
+    pub async fn override_objective_question(
+        &self,
+        ctx: &ActorContext,
+        submission_id: Uuid,
+        section: &str,
+        question_id: &str,
+        actor_name: &str,
+        req: ObjectiveQuestionOverrideRequest,
+    ) -> Result<SectionSubmission, GradingError> {
+        if !matches!(section, "reading" | "listening") {
+            return Err(GradingError::Validation(
+                "Only reading and listening objective answers can be overridden.".to_owned(),
+            ));
+        }
+
+        let summary = self.get_submission_summary(ctx, submission_id).await?;
+        if matches!(
+            summary.submission.grading_status,
+            OverallGradingStatus::GradingComplete
+                | OverallGradingStatus::ReadyToRelease
+                | OverallGradingStatus::Released
+        ) {
+            return Err(GradingError::Conflict(
+                "Reopen the grading review before changing a released or finalized result."
+                    .to_owned(),
+            ));
+        }
+        let mut transaction = self.pool.begin().await?;
+        let section_submission = sqlx::query_as::<_, SectionSubmission>(
+            "SELECT * FROM section_submissions WHERE submission_id = ? AND section = ? FOR UPDATE",
+        )
+        .bind(&summary.submission.id)
+        .bind(section)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(GradingError::NotFound)?;
+        let mut auto_grading_results = section_submission
+            .auto_grading_results
+            .clone()
+            .map(Value::from)
+            .ok_or_else(|| {
+                GradingError::Validation(
+                    "Objective grading results are missing for this section.".to_owned(),
+                )
+            })?;
+        let overridden_at = Utc::now();
+        let reason = req
+            .reason
+            .unwrap_or_else(|| "Manual grader correctness override".to_owned());
+        apply_manual_objective_question_override(
+            &mut auto_grading_results,
+            question_id,
+            req.is_correct,
+            &ctx.actor_id.to_string(),
+            actor_name,
+            &reason,
+            overridden_at,
+        )?;
+
+        let actor_id = ctx.actor_id.to_string();
+        let submission_id_db = summary.submission.id.clone();
+        let section_submission_id = section_submission.id.clone();
+        sqlx::query(
+            r#"
+            UPDATE section_submissions
+            SET auto_grading_results = ?, reviewed_by = ?, reviewed_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&auto_grading_results)
+        .bind(&actor_id)
+        .bind(overridden_at)
+        .bind(&section_submission_id)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO review_events (
+                id, submission_id, teacher_id, teacher_name, action, section,
+                question_id, payload, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(Uuid::new_v4().hyphenated())
+        .bind(&submission_id_db)
+        .bind(&actor_id)
+        .bind(actor_name)
+        .bind(ReviewAction::ScoreOverride)
+        .bind(section)
+        .bind(question_id)
+        .bind(json!({
+            "isCorrect": req.is_correct,
+            "reason": reason,
+            "scope": "student_question",
+        }))
+        .bind(overridden_at)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+
+        sqlx::query_as::<_, SectionSubmission>("SELECT * FROM section_submissions WHERE id = ?")
+            .bind(&section_submission_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(GradingError::from)
     }
 
     pub async fn get_submission_writing_tasks(
@@ -2311,7 +2420,22 @@ impl GradingService {
         let overrides = self
             .load_schedule_objective_override_lookup(&submission.schedule_id)
             .await?;
-        let section_specs = build_section_sync_specs(
+        let existing_objective_sections = sqlx::query_as::<_, SectionSubmission>(
+            "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading')",
+        )
+        .bind(&submission.id)
+        .fetch_all(&self.pool)
+        .await?;
+        let existing_objective_results = existing_objective_sections
+            .into_iter()
+            .filter_map(|section| {
+                section
+                    .auto_grading_results
+                    .map(|results| (section.section, Value::from(results)))
+            })
+            .collect::<HashMap<_, _>>();
+
+        let mut section_specs = build_section_sync_specs(
             mode,
             &answers,
             &writing_answers,
@@ -2320,6 +2444,14 @@ impl GradingService {
             submitted_at,
             Some(&overrides),
         );
+        for section_spec in &mut section_specs {
+            let Some(existing_results) = existing_objective_results.get(section_spec.section) else {
+                continue;
+            };
+            if let Some(next_results) = section_spec.auto_grading_results.as_mut() {
+                preserve_manual_objective_overrides(next_results, existing_results);
+            }
+        }
         let mut section_rows_synced: u64 = 0;
         let mut writing_task_rows_synced: u64 = 0;
 
@@ -3300,7 +3432,10 @@ impl ObjectiveExpectedAnswer {
                 let Some(answer) = values.first() else {
                     return false;
                 };
-                expected.contains(&normalize_exact_text(answer))
+                let normalized_answer = normalize_exact_text_for_match(answer);
+                expected
+                    .iter()
+                    .any(|candidate| normalize_exact_text_for_match(candidate) == normalized_answer)
             }
             Self::ExactSet(expected) | Self::MultiChoice(expected) => {
                 !expected.is_empty() && strict_text_set(value) == *expected
@@ -3338,6 +3473,135 @@ fn normalize_exact_text(value: &str) -> String {
         }
     }
     out.trim().to_owned()
+}
+
+fn normalize_exact_text_for_match(value: &str) -> String {
+    normalize_exact_text(value).to_lowercase()
+}
+
+fn recalculate_objective_totals(results: &mut Value) {
+    let Some(question_results) = results.get("questionResults").and_then(Value::as_array) else {
+        return;
+    };
+
+    let total_score = question_results
+        .iter()
+        .filter_map(|result| result.get("awardedScore").and_then(Value::as_i64))
+        .map(|score| score.max(0))
+        .sum::<i64>();
+    let max_score = question_results
+        .iter()
+        .filter_map(|result| result.get("maxScore").and_then(Value::as_i64))
+        .map(|score| score.max(0))
+        .sum::<i64>();
+    let percentage = if max_score > 0 {
+        (total_score as f64 / max_score as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    if let Some(payload) = results.as_object_mut() {
+        payload.insert("totalScore".to_owned(), Value::from(total_score));
+        payload.insert("maxScore".to_owned(), Value::from(max_score));
+        payload.insert("percentage".to_owned(), Value::from(percentage));
+    }
+}
+
+fn preserve_manual_objective_overrides(next_results: &mut Value, existing_results: &Value) {
+    let Some(existing_question_results) = existing_results
+        .get("questionResults")
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    let manual_overrides = existing_question_results
+        .iter()
+        .filter_map(|result| {
+            Some((
+                result.get("questionId")?.as_str()?.to_owned(),
+                result.get("manualOverride")?.clone(),
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let Some(next_question_results) = next_results
+        .get_mut("questionResults")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+
+    for result in next_question_results {
+        let Some(question_id) = result.get("questionId").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(manual_override) = manual_overrides.get(question_id) else {
+            continue;
+        };
+        if let Some(result_object) = result.as_object_mut() {
+            if let Some(is_correct) = manual_override.get("isCorrect").and_then(Value::as_bool) {
+                let max_score = result_object
+                    .get("maxScore")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0)
+                    .max(0);
+                result_object.insert("isCorrect".to_owned(), Value::from(is_correct));
+                result_object.insert(
+                    "awardedScore".to_owned(),
+                    Value::from(if is_correct { max_score } else { 0 }),
+                );
+            }
+            result_object.insert("manualOverride".to_owned(), manual_override.clone());
+        }
+    }
+
+    recalculate_objective_totals(next_results);
+}
+
+fn apply_manual_objective_question_override(
+    results: &mut Value,
+    question_id: &str,
+    is_correct: bool,
+    actor_id: &str,
+    actor_name: &str,
+    reason: &str,
+    overridden_at: DateTime<Utc>,
+) -> Result<(), GradingError> {
+    let question_results = results
+        .get_mut("questionResults")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| GradingError::Validation("Objective question results are missing.".to_owned()))?;
+    let result = question_results
+        .iter_mut()
+        .find(|result| result.get("questionId").and_then(Value::as_str) == Some(question_id))
+        .ok_or(GradingError::NotFound)?;
+    let result_object = result
+        .as_object_mut()
+        .ok_or_else(|| GradingError::Validation("Objective question result is malformed.".to_owned()))?;
+    let max_score = result_object
+        .get("maxScore")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0);
+    result_object.insert("isCorrect".to_owned(), Value::from(is_correct));
+    result_object.insert(
+        "awardedScore".to_owned(),
+        Value::from(if is_correct { max_score } else { 0 }),
+    );
+    result_object.insert(
+        "manualOverride".to_owned(),
+        json!({
+            "isCorrect": is_correct,
+            "awardedScore": if is_correct { max_score } else { 0 },
+            "overriddenBy": actor_id,
+            "overriddenByName": actor_name,
+            "overriddenAt": overridden_at.to_rfc3339(),
+            "reason": reason,
+        }),
+    );
+
+    recalculate_objective_totals(results);
+    Ok(())
 }
 
 fn compute_objective_auto_grading_results(
@@ -3685,11 +3949,21 @@ fn apply_objective_scoring_overrides(
         {
             let is_multi_choice = matches!(&spec.expected, ObjectiveExpectedAnswer::MultiChoice(_));
             let option_count = option_ids.len();
+            let normalized_option_ids = option_ids
+                .iter()
+                .map(|value| {
+                    if is_multi_choice {
+                        value.clone()
+                    } else {
+                        normalize_exact_text_for_match(value)
+                    }
+                })
+                .collect::<Vec<_>>();
             if option_ids.len() > 1 {
                 spec.expected = if is_multi_choice {
                     ObjectiveExpectedAnswer::MultiChoice(option_ids.iter().cloned().collect())
                 } else {
-                    ObjectiveExpectedAnswer::ExactSet(option_ids.iter().cloned().collect())
+                    ObjectiveExpectedAnswer::ExactSet(normalized_option_ids.iter().cloned().collect())
                 };
                 spec.correct_answer = Value::Array(
                     option_ids
@@ -3701,7 +3975,7 @@ fn apply_objective_scoring_overrides(
                 spec.expected = if is_multi_choice {
                     ObjectiveExpectedAnswer::MultiChoice(option_ids.iter().cloned().collect())
                 } else {
-                    ObjectiveExpectedAnswer::TextAnyOf(option_ids.iter().cloned().collect())
+                    ObjectiveExpectedAnswer::TextAnyOf(normalized_option_ids.iter().cloned().collect())
                 };
                 spec.correct_answer = Value::String(option_ids.join(" | "));
             }
@@ -3716,7 +3990,12 @@ fn apply_objective_scoring_overrides(
             override_payload.accepted_answers.as_deref(),
         );
         if !accepted.is_empty() {
-            spec.expected = ObjectiveExpectedAnswer::TextAnyOf(accepted.iter().cloned().collect());
+            spec.expected = ObjectiveExpectedAnswer::TextAnyOf(
+                accepted
+                    .iter()
+                    .map(|value| normalize_exact_text_for_match(value))
+                    .collect(),
+            );
             spec.correct_answer = Value::String(accepted.join(" | "));
         }
     }
@@ -3736,7 +4015,7 @@ fn resolve_override_accepted_answers(
                 if trimmed.is_empty() {
                     continue;
                 }
-                if !seen.insert(trimmed.clone()) {
+                if !seen.insert(normalize_exact_text_for_match(&trimmed)) {
                     continue;
                 }
                 resolved.push(trimmed);
@@ -3751,7 +4030,7 @@ fn resolve_override_accepted_answers(
                 if trimmed.is_empty() {
                     continue;
                 }
-                if !seen.insert(trimmed.clone()) {
+                if !seen.insert(normalize_exact_text_for_match(&trimmed)) {
                     continue;
                 }
                 resolved.push(trimmed);
@@ -4280,7 +4559,10 @@ fn insert_text_answer_spec(
         .map(|value| normalize_exact_text(value))
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>();
-    let normalized = display_answers.iter().cloned().collect::<HashSet<_>>();
+    let normalized = display_answers
+        .iter()
+        .map(|value| normalize_exact_text_for_match(value))
+        .collect::<HashSet<_>>();
     if normalized.is_empty() {
         return;
     }
@@ -4345,7 +4627,7 @@ fn resolve_accepted_answers(
                 if trimmed.is_empty() {
                     continue;
                 }
-                if !seen.insert(trimmed.clone()) {
+                if !seen.insert(normalize_exact_text_for_match(&trimmed)) {
                     continue;
                 }
                 resolved.push(trimmed);
@@ -4360,7 +4642,7 @@ fn resolve_accepted_answers(
                 if trimmed.is_empty() {
                     continue;
                 }
-                if !seen.insert(trimmed.clone()) {
+                if !seen.insert(normalize_exact_text_for_match(&trimmed)) {
                     continue;
                 }
                 resolved.push(trimmed);
@@ -5029,7 +5311,7 @@ mod tests {
     }
 
     #[test]
-    fn objective_auto_grading_supports_array_backed_slot_answers_and_strict_match() {
+    fn objective_auto_grading_matches_array_backed_text_answers_case_insensitively() {
         let section_answers = json!({
             "sentence-1": ["HALF WAY"]
         });
@@ -5056,7 +5338,7 @@ mod tests {
             None,
         );
 
-        assert_eq!(results["totalScore"], 0);
+        assert_eq!(results["totalScore"], 1);
         assert_eq!(results["maxScore"], 1);
         assert_eq!(
             results["questionResults"][0]["questionId"],
@@ -5064,7 +5346,134 @@ mod tests {
         );
         assert_eq!(results["questionResults"][0]["studentAnswer"], "HALF WAY");
         assert_eq!(results["questionResults"][0]["correctAnswer"], "half way");
-        assert_eq!(results["questionResults"][0]["isCorrect"], false);
+        assert_eq!(results["questionResults"][0]["isCorrect"], true);
+    }
+
+    #[test]
+    fn schedule_text_overrides_match_case_insensitively() {
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            "short-1".to_owned(),
+            ObjectiveOverridePayload {
+                correct_answer: Some("Accepted answer".to_owned()),
+                accepted_answers: None,
+                correct_option_ids: None,
+                scoring_rule: "exact_match".to_owned(),
+                max_score: 1,
+            },
+        );
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "short-1": "ACCEPTED ANSWER" }),
+            &json!({
+                "reading": {
+                    "passages": [{
+                        "blocks": [{
+                            "type": "SHORT_ANSWER",
+                            "questions": [{ "id": "short-1", "correctAnswer": "original" }]
+                        }]
+                    }]
+                }
+            }),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            Some(&overrides),
+        );
+
+        assert_eq!(results["questionResults"][0]["isCorrect"], true);
+    }
+
+    #[test]
+    fn manual_objective_override_updates_question_and_section_totals() {
+        let mut results = json!({
+            "totalScore": 0,
+            "maxScore": 2,
+            "percentage": 0.0,
+            "questionResults": [{
+                "questionId": "q-1",
+                "studentAnswer": "A",
+                "correctAnswer": "B",
+                "isCorrect": false,
+                "awardedScore": 0,
+                "maxScore": 2,
+                "scoringRule": "exact_match",
+                "hasOverride": false
+            }]
+        });
+
+        apply_manual_objective_question_override(
+            &mut results,
+            "q-1",
+            true,
+            "teacher-1",
+            "Taylor Grader",
+            "Accepted equivalent answer",
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(results["totalScore"], 2);
+        assert_eq!(results["maxScore"], 2);
+        assert_eq!(results["percentage"], 100.0);
+        assert_eq!(results["questionResults"][0]["isCorrect"], true);
+        assert_eq!(results["questionResults"][0]["awardedScore"], 2);
+        assert_eq!(
+            results["questionResults"][0]["manualOverride"]["overriddenBy"],
+            "teacher-1"
+        );
+    }
+
+    #[test]
+    fn manual_objective_overrides_survive_objective_recalculation() {
+        let existing_results = json!({
+            "totalScore": 0,
+            "maxScore": 2,
+            "percentage": 0.0,
+            "questionResults": [{
+                "questionId": "q-1",
+                "isCorrect": false,
+                "awardedScore": 0,
+                "maxScore": 1,
+                "manualOverride": {
+                    "isCorrect": false,
+                    "awardedScore": 0,
+                    "overriddenBy": "teacher-1"
+                }
+            }, {
+                "questionId": "q-2",
+                "isCorrect": false,
+                "awardedScore": 0,
+                "maxScore": 1
+            }]
+        });
+        let mut recalculated_results = json!({
+            "totalScore": 2,
+            "maxScore": 2,
+            "percentage": 100.0,
+            "questionResults": [{
+                "questionId": "q-1",
+                "isCorrect": true,
+                "awardedScore": 1,
+                "maxScore": 1
+            }, {
+                "questionId": "q-2",
+                "isCorrect": true,
+                "awardedScore": 1,
+                "maxScore": 1
+            }]
+        });
+
+        preserve_manual_objective_overrides(&mut recalculated_results, &existing_results);
+
+        assert_eq!(recalculated_results["totalScore"], 1);
+        assert_eq!(recalculated_results["maxScore"], 2);
+        assert_eq!(recalculated_results["percentage"], 50.0);
+        assert_eq!(recalculated_results["questionResults"][0]["isCorrect"], false);
+        assert_eq!(recalculated_results["questionResults"][0]["awardedScore"], 0);
+        assert_eq!(recalculated_results["questionResults"][1]["isCorrect"], true);
+        assert_eq!(
+            recalculated_results["questionResults"][0]["manualOverride"]["overriddenBy"],
+            "teacher-1"
+        );
     }
 
     #[test]

@@ -239,6 +239,10 @@ pub fn build_router(state: AppState) -> Router {
                     get(grading::get_submission_sections),
                 )
                 .route(
+                    "/submissions/:submission_id/sections/:section/questions/:question_id/override",
+                    put(grading::override_objective_question),
+                )
+                .route(
                     "/submissions/:submission_id/writing-tasks",
                     get(grading::get_submission_writing_tasks),
                 )

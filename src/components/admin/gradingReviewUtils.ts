@@ -1,5 +1,6 @@
 import type { ExamState, SentenceCompletionQuestion } from '../../types';
 import type {
+  ObjectiveManualOverride,
   ObjectiveQuestionResult,
   SectionSubmission,
   StudentSubmission,
@@ -53,6 +54,7 @@ export interface ObjectiveTracebackItem {
   studentAnswer: string;
   correctAnswer: string;
   correctness: boolean | null;
+  manualOverride?: ObjectiveManualOverride;
   awardedScore: number | null;
   maxScore: number | null;
   answerKey: string;
@@ -62,9 +64,13 @@ export interface ObjectiveTracebackItem {
    */
   rootId?: string;
   rootNumberLabel?: string;
+  rootRuleLabel?: string;
   requiredCorrect?: number;
   answerKeys?: string[];
   slotLabels?: string[];
+  slotQuestionIds?: string[];
+  slotCorrectness?: Array<boolean | null>;
+  slotManualOverrides?: Array<ObjectiveManualOverride | null>;
   studentAnswerSlots?: string[];
   correctAnswerSlots?: string[];
 }
@@ -363,12 +369,18 @@ function buildTracebackItem(
     };
   const useMultiSelectFallback =
     descriptor.block.type === 'MULTI_MCQ' && questionResult?.hasOverride !== true;
-  const correctness = useMultiSelectFallback
-    ? computedCorrectness
-    : questionResult?.isCorrect ?? computedCorrectness;
-  const awardedScore = useMultiSelectFallback
-    ? fallbackScore.awardedScore
-    : questionResult?.awardedScore ?? fallbackScore.awardedScore;
+  const persistedCorrectness = questionResult?.hasOverride === true
+    ? questionResult.isCorrect
+    : computedCorrectness;
+  const persistedAwardedScore = questionResult?.hasOverride === true
+    ? questionResult.awardedScore
+    : fallbackScore.awardedScore;
+  const correctness = questionResult?.manualOverride?.isCorrect ?? (
+    useMultiSelectFallback ? computedCorrectness : persistedCorrectness
+  );
+  const awardedScore = questionResult?.manualOverride?.awardedScore ?? (
+    useMultiSelectFallback ? fallbackScore.awardedScore : persistedAwardedScore
+  );
   const maxScore = useMultiSelectFallback
     ? fallbackScore.maxScore
     : questionResult?.maxScore ?? fallbackScore.maxScore;
@@ -380,6 +392,7 @@ function buildTracebackItem(
     studentAnswer: getStudentAnswerDisplay(descriptor, answerMap),
     correctAnswer: getExportCorrectAnswerDisplay(descriptor, questionResult),
     correctness,
+    ...(questionResult?.manualOverride ? { manualOverride: questionResult.manualOverride } : {}),
     awardedScore,
     maxScore,
     answerKey: descriptor.answerKey,
@@ -420,8 +433,13 @@ function buildGroupedTracebackItem(
     const computed = correctnessByDescriptor.has(descriptor.id)
       ? correctnessByDescriptor.get(descriptor.id) ?? null
       : isStudentAnswerCorrect(descriptor, answerMap);
-    return questionResult?.isCorrect ?? computed;
+    return questionResult?.manualOverride?.isCorrect ?? (
+      questionResult?.hasOverride === true ? questionResult.isCorrect : computed
+    );
   });
+  const slotManualOverrides = sorted.map(
+    (descriptor) => results.get(descriptor.id)?.manualOverride ?? null,
+  );
 
   const requiredCorrect = resolveGroupedScoringRequiredCorrect(sorted);
   const correctSlots = slotCorrectness.filter((value) => value === true).length;
@@ -460,6 +478,9 @@ function buildGroupedTracebackItem(
     requiredCorrect,
     answerKeys,
     slotLabels,
+    slotQuestionIds: sorted.map((descriptor) => descriptor.id),
+    slotCorrectness,
+    slotManualOverrides,
     studentAnswerSlots,
     correctAnswerSlots,
   };

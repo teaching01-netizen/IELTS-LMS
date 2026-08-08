@@ -568,6 +568,13 @@ pub struct ActorActionRequest {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ObjectiveQuestionOverrideRequest {
+    pub is_correct: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReleaseNowRequest {
     pub revision_reason: Option<String>,
     pub grader_override_confirmed: Option<bool>,

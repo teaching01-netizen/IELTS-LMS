@@ -8,10 +8,10 @@ use ielts_backend_application::grading::{GradingError, GradingService};
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::grading::{
     ActorActionRequest, GradingScheduleObjectiveOverride, GradingSession, GradingSessionDetail,
-    ObjectiveOverrideDeleteRequest, ObjectiveOverrideUpsertRequest, ReleaseEvent,
-    ReleaseNowRequest, ReviewDraft, SaveReviewDraftRequest, ScheduleReleaseRequest,
-    SectionSubmission, StartReviewRequest, StudentResult, SubmissionReviewSummary,
-    WritingTaskSubmission,
+    ObjectiveOverrideDeleteRequest, ObjectiveOverrideUpsertRequest,
+    ObjectiveQuestionOverrideRequest, ReleaseEvent, ReleaseNowRequest, ReviewDraft,
+    SaveReviewDraftRequest, ScheduleReleaseRequest, SectionSubmission, StartReviewRequest,
+    StudentResult, SubmissionReviewSummary, WritingTaskSubmission,
 };
 use serde::Deserialize;
 use sqlx::query_scalar;
@@ -350,6 +350,51 @@ pub async fn get_submission_sections(
         .telemetry
         .observe_db_operation("grading.get_submission_sections", started.elapsed());
     Ok(ApiResponse::success_with_request_id(sections, request_id.0))
+}
+
+pub async fn override_objective_question(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    _csrf: VerifiedCsrf,
+    Path((submission_id, section, question_id)): Path<(Uuid, String, String)>,
+    Json(req): Json<ObjectiveQuestionOverrideRequest>,
+) -> Result<ApiResponse<SectionSubmission>, ApiError> {
+    let schedule_id: String = query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
+        .bind(submission_id.to_string())
+        .fetch_optional(&state.db_pool())
+        .await
+        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATA_INTEGRITY_ERROR",
+            &format!("Invalid schedule_id in student_submissions: {err}"),
+        )
+    })?;
+    authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
+    let service = grading_service(&state);
+    let started = Instant::now();
+    let section_submission = service
+        .override_objective_question(
+            &ctx,
+            submission_id,
+            &section,
+            &question_id,
+            &principal.display_name(),
+            req,
+        )
+        .await?;
+    state
+        .telemetry
+        .observe_db_operation("grading.override_objective_question", started.elapsed());
+    Ok(ApiResponse::success_with_request_id(
+        section_submission,
+        request_id.0,
+    ))
 }
 
 pub async fn get_submission_writing_tasks(

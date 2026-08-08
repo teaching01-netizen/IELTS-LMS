@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { createInitialExamState } from '../../../services/examAdapterService';
 import { QuestionTracebackPanel } from '../QuestionTracebackPanel';
 import * as gradingReviewUtils from '../gradingReviewUtils';
@@ -20,6 +20,51 @@ afterEach(() => {
 });
 
 describe('QuestionTracebackPanel', () => {
+  test('lets a grader choose a persisted correctness override for an answer row', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages = [
+      {
+        id: 'passage-1',
+        title: 'Passage 1',
+        content: 'Content',
+        blocks: [
+          {
+            id: 'block-1',
+            type: 'SHORT_ANSWER',
+            instruction: 'Answer the question.',
+            questions: [{ id: 'q-1', prompt: 'What is it?', correctAnswer: 'Answer', answerRule: 'ONE_WORD' }],
+          },
+        ],
+        images: [],
+        wordCount: 1,
+      },
+    ];
+    const onOverride = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <QuestionTracebackPanel
+        section="reading"
+        examState={examState}
+        sectionSubmission={{
+          id: 'sec-1',
+          submissionId: 'sub-1',
+          section: 'reading',
+          answers: { type: 'reading', answers: { 'q-1': 'Answer' } },
+          autoGradingResults: undefined,
+          gradingStatus: 'auto_graded',
+          submittedAt: '2026-01-01T00:00:00.000Z',
+        } as any}
+        examLoading={false}
+        examError={null}
+        onOverride={onOverride}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark incorrect' }));
+
+    expect(onOverride).toHaveBeenCalledWith('q-1', false);
+  });
+
   test('renders grouped objective answers from the exam snapshot', () => {
     const examState = createInitialExamState('Exam', 'Academic');
     examState.reading.passages = [

@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { AlertTriangle, BookOpen, CheckCircle2, FileText, Hash } from 'lucide-react';
 import type { ExamState } from '../../types';
-import type { SectionSubmission } from '../../types/grading';
+import type { ObjectiveQuestionResult, SectionSubmission } from '../../types/grading';
 import {
   buildQuestionTracebackGroups,
   type ObjectiveTracebackGroup,
@@ -14,6 +14,9 @@ interface QuestionTracebackPanelProps {
   sectionSubmission: SectionSubmission | null;
   examLoading: boolean;
   examError: string | null;
+  onOverride?: (questionId: string, isCorrect: boolean) => Promise<void> | void;
+  pendingOverrideQuestionIds?: ReadonlySet<string>;
+  overrideError?: string | null;
 }
 
 function QuestionStatusBadge({ correctness }: { correctness: boolean | null }) {
@@ -38,7 +41,43 @@ function QuestionStatusBadge({ correctness }: { correctness: boolean | null }) {
   );
 }
 
-function renderGroup(group: ObjectiveTracebackGroup, index: number) {
+function displayPersistedAnswer(value: string): string {
+  return value.trim() === '' ? '—' : value;
+}
+
+function buildFallbackTracebackGroups(
+  section: QuestionTracebackPanelProps['section'],
+  sectionSubmission: SectionSubmission | null,
+): ObjectiveTracebackGroup[] {
+  const questionResults = sectionSubmission?.autoGradingResults?.questionResults ?? [];
+  if (questionResults.length === 0) {
+    return [];
+  }
+
+  return [{
+    groupId: `${section}:persisted-results`,
+    groupLabel: `${section} persisted answer results`,
+    items: questionResults.map((result: ObjectiveQuestionResult) => ({
+      numberLabel: result.questionId,
+      questionId: result.questionId,
+      prompt: 'Question schema unavailable',
+      studentAnswer: displayPersistedAnswer(result.studentAnswer),
+      correctAnswer: displayPersistedAnswer(result.correctAnswer),
+      correctness: result.manualOverride?.isCorrect ?? result.isCorrect,
+      ...(result.manualOverride ? { manualOverride: result.manualOverride } : {}),
+      awardedScore: result.manualOverride?.awardedScore ?? result.awardedScore,
+      maxScore: result.maxScore,
+      answerKey: result.questionId,
+    })),
+  }];
+}
+
+function renderGroup(
+  group: ObjectiveTracebackGroup,
+  index: number,
+  onOverride: QuestionTracebackPanelProps['onOverride'],
+  pendingOverrideQuestionIds: ReadonlySet<string> | undefined,
+) {
   return (
     <section key={group.groupId} className="rounded-2xl border border-gray-200 bg-white shadow-sm">
       <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
@@ -59,7 +98,7 @@ function renderGroup(group: ObjectiveTracebackGroup, index: number) {
       </div>
 
       <div className="grid gap-4 px-5 py-5">
-        {group.items.map((item) => {
+        {group.items.map((item, itemIndex) => {
           return (
           <article
             key={item.questionId}
@@ -84,13 +123,27 @@ function renderGroup(group: ObjectiveTracebackGroup, index: number) {
 
               <div className="flex flex-wrap items-center gap-2">
                 <QuestionStatusBadge correctness={item.correctness} />
+                {item.manualOverride || item.slotManualOverrides?.some(Boolean) ? (
+                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                    Manual override
+                  </span>
+                ) : null}
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
                   Score {item.awardedScore ?? '—'} / {item.maxScore ?? '—'}
                 </span>
               </div>
             </div>
 
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {item.rootRuleLabel && itemIndex === 0 ? (
+              <p className="mt-2 text-xs font-medium text-gray-500">{item.rootRuleLabel}</p>
+            ) : item.requiredCorrect !== undefined && item.slotLabels && item.slotLabels.length > 0 ? (
+              <p className="mt-2 text-xs font-medium text-gray-500">
+                {item.slotLabels.length} answers required for {item.requiredCorrect} point
+                {item.requiredCorrect === 1 ? '' : 's'}
+              </p>
+            ) : null}
+
+            <div className="mt-4 grid gap-3">
               <div className="rounded-xl border border-gray-200 bg-white p-3">
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">
                   Student answer
@@ -100,12 +153,15 @@ function renderGroup(group: ObjectiveTracebackGroup, index: number) {
                     {item.studentAnswerSlots.map((slotValue, slotIndex) => (
                       <p
                         key={`${item.questionId}:slot:${slotIndex}`}
-                        className="whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-800"
+                        className="flex flex-wrap items-center justify-between gap-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-800"
                       >
-                        {item.slotLabels?.[slotIndex]
-                          ? `${item.slotLabels[slotIndex]}: `
-                          : `[${slotIndex + 1}] `}
-                        {slotValue === '' ? '∅' : slotValue}
+                        <span>
+                          {item.slotLabels?.[slotIndex]
+                            ? `${item.slotLabels[slotIndex]}: `
+                            : `[${slotIndex + 1}] `}
+                          {slotValue === '' ? '∅' : slotValue}
+                        </span>
+                        <QuestionStatusBadge correctness={item.slotCorrectness?.[slotIndex] ?? null} />
                       </p>
                     ))}
                   </div>
@@ -141,6 +197,61 @@ function renderGroup(group: ObjectiveTracebackGroup, index: number) {
                 )}
               </div>
             </div>
+
+            {onOverride ? (
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
+                <span className="mr-1 text-xs font-semibold text-gray-500">Set result:</span>
+                {(item.slotQuestionIds && item.slotQuestionIds.length > 0
+                  ? item.slotQuestionIds
+                  : [item.questionId]
+                ).map((targetQuestionId, targetIndex) => {
+                  const isGrouped = Boolean(item.slotQuestionIds?.length);
+                  const override = isGrouped
+                    ? item.slotManualOverrides?.[targetIndex]
+                    : item.manualOverride;
+                  const isPending = pendingOverrideQuestionIds?.has(targetQuestionId) ?? false;
+                  const targetLabel = isGrouped
+                    ? item.slotLabels?.[targetIndex] ?? `Answer ${targetIndex + 1}`
+                    : null;
+                  return (
+                    <div key={targetQuestionId} className="flex flex-wrap items-center gap-2">
+                      {targetLabel ? <span className="text-xs text-gray-600">{targetLabel}</span> : null}
+                      <button
+                        type="button"
+                        onClick={() => void onOverride(targetQuestionId, true)}
+                        disabled={isPending}
+                        aria-pressed={override?.isCorrect === true}
+                        className={`min-h-9 rounded-md border px-3 py-1 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-wait disabled:opacity-50 ${
+                          override?.isCorrect === true
+                            ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                            : 'border-gray-300 bg-white text-gray-700 hover:bg-emerald-50 hover:text-emerald-800'
+                        }`}
+                      >
+                        Mark correct
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void onOverride(targetQuestionId, false)}
+                        disabled={isPending}
+                        aria-pressed={override?.isCorrect === false}
+                        className={`min-h-9 rounded-md border px-3 py-1 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-wait disabled:opacity-50 ${
+                          override?.isCorrect === false
+                            ? 'border-rose-300 bg-rose-100 text-rose-800'
+                            : 'border-gray-300 bg-white text-gray-700 hover:bg-rose-50 hover:text-rose-800'
+                        }`}
+                      >
+                        Mark incorrect
+                      </button>
+                    </div>
+                  );
+                })}
+                {pendingOverrideQuestionIds && pendingOverrideQuestionIds.size > 0 ? (
+                  <span className="text-xs text-gray-500" role="status" aria-live="polite">
+                    Saving…
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </article>
           );
         })}
@@ -155,11 +266,19 @@ export function QuestionTracebackPanel({
   sectionSubmission,
   examLoading,
   examError,
+  onOverride,
+  pendingOverrideQuestionIds,
+  overrideError,
 }: QuestionTracebackPanelProps) {
-  const groups = useMemo(
+  const schemaGroups = useMemo(
     () => buildQuestionTracebackGroups(examState, sectionSubmission, section),
     [examState, section, sectionSubmission],
   );
+  const fallbackGroups = useMemo(
+    () => buildFallbackTracebackGroups(section, sectionSubmission),
+    [section, sectionSubmission],
+  );
+  const groups = schemaGroups.length > 0 || examLoading ? schemaGroups : fallbackGroups;
 
   const rawAnswerPayload = sectionSubmission ? sectionSubmission.answers : null;
   const objectiveAnswerMap = useMemo(
@@ -219,21 +338,21 @@ export function QuestionTracebackPanel({
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <FileText size={18} className="text-blue-600" />
-          <div>
+      <div className="border-b border-gray-200 px-4 py-4 sm:px-6 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <FileText size={18} className="mt-0.5 shrink-0 text-blue-600" />
+          <div className="min-w-0">
             <h3 className="font-bold text-gray-900">Traceback View</h3>
-            <p className="text-xs text-gray-500 capitalize">
-              {section} section answer replay
+            <p className="break-words text-xs text-gray-600 capitalize">
+              {section} section answer replay · text matches ignore letter case
             </p>
           </div>
         </div>
-        {examLoading ? <span className="text-xs font-medium text-gray-500">Loading exam...</span> : null}
+        {examLoading ? <span className="shrink-0 text-xs font-medium text-gray-600">Loading exam...</span> : null}
       </div>
 
       {examError ? (
-        <div className="px-6 py-5 border-b border-gray-200 bg-red-50 text-sm text-red-800">
+        <div className="px-6 py-5 border-b border-gray-200 bg-red-50 text-sm text-red-800" role="alert">
           <div className="flex items-start gap-2">
             <AlertTriangle size={16} className="mt-0.5 text-red-700" />
             <div>
@@ -248,7 +367,13 @@ export function QuestionTracebackPanel({
         </div>
       ) : null}
 
-      {!examError && !examLoading && groups.length === 0 ? (
+      {overrideError ? (
+        <div className="border-b border-rose-200 bg-rose-50 px-6 py-3 text-sm text-rose-800" role="alert">
+          {overrideError}
+        </div>
+      ) : null}
+
+      {!examError && !examLoading && schemaGroups.length === 0 && fallbackGroups.length === 0 ? (
         <div className="px-6 py-6 text-sm text-gray-700">
           <p className="font-medium text-gray-900">No question schema available</p>
           <p className="mt-1 text-gray-600">
@@ -260,8 +385,14 @@ export function QuestionTracebackPanel({
         </div>
       ) : null}
 
-      {!examError && groups.length > 0 ? (
+      {groups.length > 0 ? (
         <div className="space-y-4 p-4 md:p-6">
+          {examError && fallbackGroups.length > 0 ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Showing persisted answer results because the exam schema could not be loaded.
+            </div>
+          ) : null}
+
           {numberingGapSummary ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <div className="flex items-start gap-2">
@@ -293,7 +424,9 @@ export function QuestionTracebackPanel({
             </div>
           ) : null}
 
-          {groups.map(renderGroup)}
+          {groups.map((group, index) =>
+            renderGroup(group, index, onOverride, pendingOverrideQuestionIds),
+          )}
         </div>
       ) : null}
     </div>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   ArrowLeft, Save, CheckCircle, Clock, FileText,
   MessageSquare, ChevronLeft, ChevronRight, Eye, Calendar,
-  CheckSquare, AlertTriangle, Printer
+  CheckSquare, AlertTriangle, Printer, Menu
 } from 'lucide-react';
 import { 
   StudentSubmission, SectionSubmission, WritingTaskSubmission, ReviewDraft,
@@ -98,6 +98,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const [writingLoading, setWritingLoading] = useState(false);
   const [writingError, setWritingError] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [objectiveOverrideError, setObjectiveOverrideError] = useState<string | null>(null);
+  const [pendingObjectiveOverrideQuestionIds, setPendingObjectiveOverrideQuestionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const examLoadSeq = useRef(0);
   const [releaseAction, setReleaseAction] = useState<
@@ -172,6 +177,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     setWritingLoading(false);
     setWritingError(null);
     setDraftError(null);
+    setObjectiveOverrideError(null);
+    setPendingObjectiveOverrideQuestionIds(new Set());
     try {
       const subData = await gradingRepository.getSubmissionById(submissionId);
 
@@ -309,6 +316,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     setReleaseAction(null);
     setReleaseError(null);
     setShowReportPreview(false);
+    setPendingObjectiveOverrideQuestionIds(new Set());
+    setMobileRailOpen(false);
     void loadData();
   }, [submissionId, loadData]);
 
@@ -320,6 +329,46 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       setReviewDraft(result.data);
     }
     setSaving(false);
+  };
+
+  const handleObjectiveOverride = async (
+    section: 'reading' | 'listening',
+    questionId: string,
+    isCorrect: boolean,
+  ) => {
+    setPendingObjectiveOverrideQuestionIds((current) => {
+      const next = new Set(current);
+      next.add(questionId);
+      return next;
+    });
+    setObjectiveOverrideError(null);
+    try {
+      const result = await gradingService.overrideObjectiveQuestion(
+        submissionId,
+        section,
+        questionId,
+        { isCorrect, reason: 'Manual grader correctness decision' },
+      );
+      if (result.success && result.data) {
+        setSectionSubmissions((current) =>
+          current.map((sectionSubmission) =>
+            sectionSubmission.id === result.data?.id ? result.data : sectionSubmission,
+          ),
+        );
+      } else {
+        setObjectiveOverrideError(result.error ?? 'Failed to update answer correctness.');
+      }
+    } catch (error) {
+      setObjectiveOverrideError(
+        error instanceof Error ? error.message : 'Failed to update answer correctness.',
+      );
+    } finally {
+      setPendingObjectiveOverrideQuestionIds((current) => {
+        const next = new Set(current);
+        next.delete(questionId);
+        return next;
+      });
+    }
   };
 
   const handleMarkGradingComplete = async () => {
@@ -1001,11 +1050,20 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         ))}
       </div>
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+      <div className="bg-white border-b border-gray-200 px-4 py-4 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             <button onClick={onBack} aria-label="Back" className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
               <ArrowLeft size={20} className="text-gray-600" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileRailOpen(true)}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 lg:hidden"
+              aria-label="Open review sections"
+            >
+              <Menu size={16} />
+              Sections
             </button>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-medium">
@@ -1025,9 +1083,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             </div>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             {reviewDraft && getReleaseStatusBadge(reviewDraft.releaseStatus)}
-            <div className="flex items-center gap-2 text-sm text-gray-600">
+            <div className="hidden items-center gap-2 text-sm text-gray-600 sm:flex">
               <Clock size={16} />
               <span>Submitted {new Date(submission.submittedAt).toLocaleString()}</span>
             </div>
@@ -1053,9 +1111,20 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       </div>
 
       {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
+        {mobileRailOpen ? (
+          <button
+            type="button"
+            className="fixed inset-0 z-20 bg-slate-900/30 lg:hidden"
+            onClick={() => setMobileRailOpen(false)}
+            aria-label="Close review sections"
+          />
+        ) : null}
+
         {/* Left Rail - Student Info, Navigation, Checklist */}
-        <div className="w-72 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
+        <div
+          className={`${mobileRailOpen ? 'absolute inset-y-0 left-0 z-30 flex w-72 max-w-[85vw] shadow-xl' : 'hidden'} flex-col overflow-hidden border-r border-gray-200 bg-white lg:relative lg:z-auto lg:flex lg:w-72 lg:shadow-none`}
+        >
           {/* Student Overview */}
           <div className="p-4 border-b border-gray-200">
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Student Overview</h2>
@@ -1114,6 +1183,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     key={section}
                     onClick={() => {
                       setActiveSection(section);
+                      setMobileRailOpen(false);
                       if (section === 'writing') setActiveTask('task1');
                     }}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -1220,13 +1290,25 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         </div>
 
         {/* Center Canvas - Evidence with Annotations */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
           <div className="max-w-4xl mx-auto space-y-6">
             {/* Section Header */}
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-2 capitalize">{activeSection}</h2>
               {activeSection !== 'writing' && sectionsLoading && (
                 <p className="text-sm text-gray-500">Loading section answers...</p>
+              )}
+              {sectionsError && activeSection !== 'writing' && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
+                  <span>{sectionsError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void loadData()}
+                    className="min-h-9 rounded-md border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-800 hover:bg-rose-100"
+                  >
+                    Retry
+                  </button>
+                </div>
               )}
               {activeSection === 'writing' && writingLoading && (
                 <p className="text-sm text-gray-500">Loading writing payload...</p>
@@ -1328,6 +1410,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 sectionSubmission={currentSectionSubmission}
                 examLoading={examLoading}
                 examError={examError}
+                onOverride={(questionId, isCorrect) =>
+                  void handleObjectiveOverride(activeSection, questionId, isCorrect)
+                }
+                pendingOverrideQuestionIds={pendingObjectiveOverrideQuestionIds}
+                overrideError={objectiveOverrideError}
               />
             )}
 
@@ -1348,7 +1435,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         </div>
 
         {/* Right Rail - Rubric, Score Summary, Release Controls */}
-        <div className="w-96 bg-white border-l border-gray-200 flex flex-col overflow-hidden">
+        <div className="hidden w-96 bg-white border-l border-gray-200 flex-col overflow-hidden lg:flex">
           {/* Rubric Assessment */}
           <div className="flex-1 overflow-y-auto p-4">
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Rubric Assessment</h2>

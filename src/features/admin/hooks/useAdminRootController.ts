@@ -53,7 +53,9 @@ export function useAdminRootController(): AdminRootController {
   );
   const [isInitialized, setIsInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window === 'undefined' ? true : window.innerWidth >= 768,
+  );
 
   const navItems = useMemo<AdminNavItem[]>(
     () => {

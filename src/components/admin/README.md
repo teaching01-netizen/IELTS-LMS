@@ -9,3 +9,17 @@ Objective grading exports must use the same exam version that produced the store
 - A stored score must never be combined with an answer key reconstructed from a different exam version.
 
 This keeps the exported student answer, right answer, correctness, and score mutually consistent without mutating submitted answers.
+
+Manual objective correctness overrides are submission-scoped, not schedule-scoped:
+
+- A grader may mark an individual Reading/Listening answer `Correct` or `Incorrect` from the traceback row.
+- The submitted answer and exam answer key remain immutable; only the persisted grading result changes.
+- The override recalculates that section's total and percentage and is retained when objective grading is re-synchronised.
+- Every manual decision is recorded as a `score_override` review event with actor, question, section, and reason.
+
+The session-level `Overall answer check` is an exam/cohort overview, not a replacement
+for the individual review screen:
+
+- It loads every submitted student's Reading/Listening objective rows for the selected grading session.
+- Text rows are recomputed case-insensitively for display unless an explicit per-student override exists.
+- A row-level decision uses the same submission-scoped override endpoint and remains drillable into that student's review.

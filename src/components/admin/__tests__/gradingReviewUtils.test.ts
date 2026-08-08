@@ -594,6 +594,69 @@ describe('gradingReviewUtils', () => {
     expect(rows[0]?.maxScore).toBe(1);
   });
 
+  test('recomputes unoverridden text results without case sensitivity', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages = [
+      {
+        id: 'passage-1',
+        title: 'Passage 1',
+        content: 'Content',
+        blocks: [
+          {
+            id: 'block-1',
+            type: 'SHORT_ANSWER',
+            instruction: 'Answer the question.',
+            questions: [
+              {
+                id: 'q-1',
+                prompt: 'What is it?',
+                correctAnswer: 'Answer',
+                answerRule: 'ONE_WORD',
+              },
+            ],
+          },
+        ],
+        images: [],
+        wordCount: 1,
+      },
+    ];
+
+    const persistedCaseMismatch = {
+      id: 'sec-1',
+      submissionId: 'sub-1',
+      section: 'reading',
+      answers: {
+        type: 'reading',
+        answers: {
+          'q-1': 'ANSWER',
+        },
+      },
+      autoGradingResults: {
+        generatedAt: new Date().toISOString(),
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [
+          {
+            questionId: 'q-1',
+            studentAnswer: 'ANSWER',
+            correctAnswer: 'Answer',
+            isCorrect: false,
+            awardedScore: 0,
+            maxScore: 1,
+            scoringRule: 'one_word',
+            hasOverride: false,
+          },
+        ],
+      },
+      gradingStatus: 'auto_graded',
+    } as any;
+
+    const groups = buildQuestionTracebackGroups(examState, persistedCaseMismatch, 'reading');
+    expect(groups[0]?.items[0]?.correctness).toBe(true);
+    expect(groups[0]?.items[0]?.awardedScore).toBe(1);
+  });
+
   test('builds one reading export row per student with answers before scores', () => {
     const examState = createInitialExamState('Exam', 'Academic');
     examState.config.standards.bandScoreTables.readingAcademic = { 1: 4 };
