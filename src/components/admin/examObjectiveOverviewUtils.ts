@@ -6,6 +6,7 @@ import type {
   StudentSubmission,
 } from '../../types/grading';
 import { getStudentQuestionsForModule } from '../../services/examAdapterService';
+import { getCorrectAnswerDisplay } from './gradingAnswerUtils';
 
 export interface ExamObjectiveOverviewBundle {
   readonly submission: Pick<StudentSubmission, 'id' | 'studentName'>;
@@ -101,6 +102,19 @@ function buildQuestionAnswerKindLookup(examState: ExamState | null | undefined):
   return lookup;
 }
 
+function buildQuestionDescriptorLookup(examState: ExamState | null | undefined) {
+  const lookup = new Map<string, ReturnType<typeof getStudentQuestionsForModule>[number]>();
+  if (!examState) return lookup;
+
+  for (const section of ['reading', 'listening'] as const) {
+    for (const descriptor of getStudentQuestionsForModule(examState, section)) {
+      lookup.set(`${section}:${descriptor.id}`, descriptor);
+    }
+  }
+
+  return lookup;
+}
+
 function isTextAnswerResult(
   result: ObjectiveQuestionResult,
   section: 'reading' | 'listening',
@@ -110,7 +124,10 @@ function isTextAnswerResult(
   return questionAnswerKind ? questionAnswerKind === 'text' : isTextScoringRule(result.scoringRule);
 }
 
-function resolveResultValues(result: ObjectiveQuestionResult): Pick<ExamObjectiveOverviewRow, 'isCorrect' | 'awardedScore'> {
+function resolveResultValues(
+  result: ObjectiveQuestionResult,
+  correctAnswer: string = result.correctAnswer,
+): Pick<ExamObjectiveOverviewRow, 'isCorrect' | 'awardedScore'> {
   if (result.manualOverride) {
     return {
       isCorrect: result.manualOverride.isCorrect,
@@ -119,7 +136,7 @@ function resolveResultValues(result: ObjectiveQuestionResult): Pick<ExamObjectiv
   }
 
   const computedCorrectness = isTextScoringRule(result.scoringRule)
-    ? textAnswersMatch(result.studentAnswer, result.correctAnswer)
+    ? textAnswersMatch(result.studentAnswer, correctAnswer)
     : result.isCorrect;
 
   return {
@@ -130,11 +147,23 @@ function resolveResultValues(result: ObjectiveQuestionResult): Pick<ExamObjectiv
   };
 }
 
+function getOverviewCorrectAnswerDisplay(
+  descriptor: ReturnType<typeof getStudentQuestionsForModule>[number] | undefined,
+  result: ObjectiveQuestionResult,
+): string {
+  if (result.hasOverride && result.correctAnswer.trim() !== '') {
+    return result.correctAnswer;
+  }
+
+  return descriptor ? getCorrectAnswerDisplay(descriptor) || result.correctAnswer : result.correctAnswer;
+}
+
 export function buildExamObjectiveOverviewRows(
   bundles: readonly ExamObjectiveOverviewBundle[],
   options: ExamObjectiveOverviewOptions = {},
 ): ExamObjectiveOverviewRow[] {
   const questionAnswerKinds = buildQuestionAnswerKindLookup(options.examState);
+  const questionDescriptors = buildQuestionDescriptorLookup(options.examState);
 
   return bundles
     .flatMap(({ submission, sections }) => sections
@@ -143,9 +172,14 @@ export function buildExamObjectiveOverviewRows(
       )
       .flatMap((section) => (section.autoGradingResults?.questionResults ?? [])
         .filter((result) => isTextAnswerResult(result, section.section, questionAnswerKinds))
-        .filter((result) => answersDifferOnlyByCaseOrWhitespace(result.studentAnswer, result.correctAnswer))
         .map((result) => {
-          const resolved = resolveResultValues(result);
+          const descriptor = questionDescriptors.get(`${section.section}:${result.questionId}`);
+          const correctAnswer = getOverviewCorrectAnswerDisplay(descriptor, result);
+          if (!answersDifferOnlyByCaseOrWhitespace(result.studentAnswer, correctAnswer)) {
+            return null;
+          }
+
+          const resolved = resolveResultValues(result, correctAnswer);
           const row: ExamObjectiveOverviewRow = {
             rowId: `${submission.id}:${section.id}:${result.questionId}`,
             submissionId: submission.id,
@@ -153,13 +187,14 @@ export function buildExamObjectiveOverviewRows(
             section: section.section,
             questionId: result.questionId,
             studentAnswer: result.studentAnswer,
-            correctAnswer: result.correctAnswer,
+            correctAnswer,
             maxScore: result.maxScore,
             ...resolved,
             manualOverride: result.manualOverride ?? null,
           };
           return row;
-        })))
+        })
+        .filter((row): row is ExamObjectiveOverviewRow => row !== null)))
     .sort((left, right) => {
       const studentOrder = left.studentName.localeCompare(right.studentName);
       if (studentOrder !== 0) return studentOrder;

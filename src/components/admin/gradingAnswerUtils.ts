@@ -268,6 +268,11 @@ function getAcceptedAnswersForDescriptor(descriptor: StudentQuestionDescriptor):
       const blank = question.blanks[answerIndex];
       return blank ? resolveAcceptedAnswers(blank) : null;
     }
+    case 'TABLE_COMPLETION': {
+      if (!Array.isArray(block.cells) || typeof answerIndex !== 'number') return null;
+      const cell = block.cells[answerIndex];
+      return cell ? resolveAcceptedAnswers(cell) : null;
+    }
     default:
       return null;
   }

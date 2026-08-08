@@ -223,6 +223,66 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(rows[0]?.awardedScore).toBe(1);
   });
 
+  test('shows all table-cell accepted answers and matches against the full key', () => {
+    const examState = createInitialExamState('IELTS Mock Test', 'Academic');
+    examState.reading.passages = [{
+      id: 'passage-1',
+      title: 'Passage 1',
+      content: '',
+      blocks: [{
+        id: 'table-1',
+        type: 'TABLE_COMPLETION',
+        instruction: '',
+        headers: ['Answer'],
+        rows: [['']],
+        cells: [{
+          id: 'cell-1',
+          row: 0,
+          col: 0,
+          correctAnswer: 'faces of china',
+          acceptedAnswers: ['faces of china', 'FACES OF CHINA', 'Faces of China'],
+        }],
+        answerRule: 'THREE_WORDS',
+      }],
+    }];
+
+    const section = {
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [{
+          questionId: 'table-1:cell-1',
+          studentAnswer: 'Faces of China',
+          correctAnswer: 'faces of china',
+          isCorrect: false,
+          awardedScore: 0,
+          maxScore: 1,
+          scoringRule: 'table_completion',
+          hasOverride: false,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } satisfies SectionSubmission;
+
+    const rows = buildExamObjectiveOverviewRows([{
+      submission: { id: 'submission-1', studentName: 'Narin Example' },
+      sections: [section],
+    }], { examState });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.correctAnswer).toBe(
+      'faces of china | FACES OF CHINA | Faces of China',
+    );
+    expect(rows[0]?.isCorrect).toBe(true);
+  });
+
   test('keeps an explicit manual override over the computed text result', () => {
     const section = {
       id: 'section-1',

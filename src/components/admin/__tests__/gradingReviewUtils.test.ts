@@ -249,6 +249,54 @@ describe('gradingReviewUtils', () => {
     expect(exportData.rows[0]?.['maxScore']).toBe(2);
   });
 
+  test('exports every accepted answer for a table-completion cell', () => {
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages[0]!.blocks = [{
+      id: 'table-1',
+      type: 'TABLE_COMPLETION',
+      instruction: 'Complete the table.',
+      headers: ['Answer'],
+      rows: [['']],
+      cells: [{
+        id: 'cell-1',
+        row: 0,
+        col: 0,
+        correctAnswer: 'faces of china',
+        acceptedAnswers: ['faces of china', 'FACES OF CHINA', 'Faces of China'],
+      }],
+      answerRule: 'THREE_WORDS',
+    }];
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      sectionSubmissions: [{
+        submissionId: 'sub-1',
+        sectionSubmission: createSectionSubmission(
+          'sub-1',
+          'reading',
+          { 'table-1': ['Faces of China'] },
+          [{
+            questionId: 'table-1:cell-1',
+            studentAnswer: 'Faces of China',
+            correctAnswer: 'faces of china',
+            isCorrect: false,
+            awardedScore: 0,
+            maxScore: 1,
+            scoringRule: 'table_completion',
+            hasOverride: false,
+          }],
+        ),
+      }],
+      examState,
+      moduleType: 'reading',
+    });
+
+    expect(exportData.rows[0]?.['rightAnswer:table-1:cell-1']).toBe(
+      'faces of china | FACES OF CHINA | Faces of China',
+    );
+  });
+
   test('escapes csv values with commas, quotes, and newlines', () => {
     expect(escapeCsvValue('hello, "world"\nline two')).toBe('"hello, ""world""\nline two"');
   });

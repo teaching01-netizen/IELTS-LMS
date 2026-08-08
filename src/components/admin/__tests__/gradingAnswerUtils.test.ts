@@ -521,6 +521,39 @@ describe('gradingAnswerUtils', () => {
     expect(isStudentAnswerCorrect(descriptor, { n1: ['bicycle'] })).toBe(true);
   });
 
+  test('TABLE_COMPLETION: displays every accepted answer for a cell', () => {
+    const descriptor = {
+      id: 'table-1:cell-1',
+      blockId: 'table-1',
+      groupId: 'p1',
+      groupLabel: 'Passage 1',
+      isMulti: false,
+      correctCount: 1,
+      answerKey: 'table-1',
+      answerIndex: 0,
+      block: {
+        id: 'table-1',
+        type: 'TABLE_COMPLETION',
+        instruction: '',
+        headers: ['Answer'],
+        rows: [['']],
+        cells: [{
+          id: 'cell-1',
+          row: 0,
+          col: 0,
+          correctAnswer: 'faces of china',
+          acceptedAnswers: ['faces of china', 'FACES OF CHINA', 'Faces of China'],
+        }],
+        answerRule: 'THREE_WORDS',
+      },
+      question: null,
+    } as unknown as StudentQuestionDescriptor;
+
+    expect(getCorrectAnswerDisplay(descriptor)).toBe(
+      'faces of china | FACES OF CHINA | Faces of China',
+    );
+  });
+
   test('SHORT_ANSWER: supports accepted answer alternatives', () => {
     const descriptor = {
       id: 'sa-1',
