@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileCheck2, LoaderCircle, XCircle } from 'lucide-react';
+import type { ExamState } from '../../types';
 import type { GradingSession } from '../../types/grading';
+import { examRepository } from '../../services/examRepository';
 import { gradingRepository } from '../../services/gradingRepository';
 import { gradingService } from '../../services/gradingService';
 import type { ExamObjectiveOverviewBundle, ExamObjectiveOverviewRow } from './examObjectiveOverviewUtils';
@@ -9,6 +11,12 @@ import { buildExamObjectiveOverviewRows } from './examObjectiveOverviewUtils';
 interface ExamObjectiveOverviewPanelProps {
   readonly session: GradingSession;
   readonly onStudentSelect?: ((submissionId: string) => void) | undefined;
+}
+
+type ExamObjectiveResultFilter = 'all' | 'correct' | 'incorrect';
+
+function isExamObjectiveResultFilter(value: string): value is ExamObjectiveResultFilter {
+  return value === 'all' || value === 'correct' || value === 'incorrect';
 }
 
 function ResultBadge({ isCorrect }: { readonly isCorrect: boolean }) {
@@ -28,35 +36,46 @@ export function ExamObjectiveOverviewPanel({
   onStudentSelect,
 }: ExamObjectiveOverviewPanelProps) {
   const [bundles, setBundles] = useState<ExamObjectiveOverviewBundle[]>([]);
+  const [examState, setExamState] = useState<ExamState | null>(null);
   const [submissionCount, setSubmissionCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingRowIds, setPendingRowIds] = useState<Set<string>>(() => new Set());
+  const [resultFilter, setResultFilter] = useState<ExamObjectiveResultFilter>('all');
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      const [nextSubmissions, examVersion] = await Promise.all([
+        gradingRepository.getSubmissionsBySession(session.id),
+        examRepository.getVersionById(session.publishedVersionId),
+      ]);
       const nextBundles = await Promise.all(
-        (await gradingRepository.getSubmissionsBySession(session.id)).map(async (submission) => ({
+        nextSubmissions.map(async (submission) => ({
           submission: { id: submission.id, studentName: submission.studentName },
           sections: await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id),
         })),
       );
       setBundles(nextBundles);
+      setExamState(examVersion?.contentSnapshot ?? null);
       setSubmissionCount(nextBundles.length);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load overall answer results.');
     } finally {
       setLoading(false);
     }
-  }, [session.id]);
+  }, [session.id, session.publishedVersionId]);
 
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
 
-  const rows = useMemo(() => buildExamObjectiveOverviewRows(bundles), [bundles]);
+  const rows = useMemo(() => buildExamObjectiveOverviewRows(bundles, { examState }), [bundles, examState]);
+  const visibleRows = useMemo(() => {
+    if (resultFilter === 'all') return rows;
+    return rows.filter((row) => resultFilter === 'correct' ? row.isCorrect : !row.isCorrect);
+  }, [resultFilter, rows]);
   const correctCount = rows.filter((row) => row.isCorrect).length;
   const overrideCount = rows.filter((row) => row.manualOverride).length;
 
@@ -103,17 +122,36 @@ export function ExamObjectiveOverviewPanel({
             <div>
               <h2 className="text-base font-bold text-gray-900">Overall exam answer check</h2>
               <p className="mt-1 text-sm text-gray-600">
-                {session.examTitle} · Reading and Listening · text matches ignore letter case
+                {session.examTitle} · typed answers only · shows case or whitespace differences
               </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-gray-600">
             <span>{submissionCount} students</span>
             <span>·</span>
-            <span>{rows.length} answer rows</span>
+            <span>
+              {resultFilter === 'all' ? rows.length : `${visibleRows.length} of ${rows.length}`} text exceptions
+            </span>
             <span>·</span>
             <span>{correctCount} correct</span>
             {overrideCount > 0 ? <span>· {overrideCount} overridden</span> : null}
+            <label className="ml-1 flex items-center gap-2 text-gray-700">
+              <span>Result</span>
+              <select
+                aria-label="Filter result rows"
+                value={resultFilter}
+                onChange={(event) => {
+                  if (isExamObjectiveResultFilter(event.target.value)) {
+                    setResultFilter(event.target.value);
+                  }
+                }}
+                className="h-8 rounded-md border border-blue-200 bg-white px-2 text-xs font-semibold text-gray-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="all">All results</option>
+                <option value="correct">Correct</option>
+                <option value="incorrect">Incorrect</option>
+              </select>
+            </label>
           </div>
         </div>
       </div>
@@ -129,10 +167,12 @@ export function ExamObjectiveOverviewPanel({
 
       {loading ? (
         <div className="flex items-center gap-2 px-4 py-8 text-sm text-gray-600 sm:px-6">
-          <LoaderCircle size={16} className="animate-spin" /> Loading all objective answer rows...
+          <LoaderCircle size={16} className="animate-spin" /> Loading typed answer exceptions...
         </div>
       ) : rows.length === 0 ? (
-        <div className="px-4 py-8 text-sm text-gray-600 sm:px-6">No Reading or Listening answer results are available for this exam yet.</div>
+        <div className="px-4 py-8 text-sm text-gray-600 sm:px-6">No typed answers differ from their key only by letter case or whitespace.</div>
+      ) : visibleRows.length === 0 ? (
+        <div className="px-4 py-8 text-sm text-gray-600 sm:px-6">No rows match the selected result filter.</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-[980px] w-full text-left text-sm">
@@ -148,7 +188,7 @@ export function ExamObjectiveOverviewPanel({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {rows.map((row) => {
+              {visibleRows.map((row) => {
                 const pending = pendingRowIds.has(row.rowId);
                 return (
                   <tr key={row.rowId} className="align-top hover:bg-gray-50">

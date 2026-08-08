@@ -1,10 +1,11 @@
+import type { ExamState, QuestionType } from '../../types';
 import type {
   ObjectiveManualOverride,
   ObjectiveQuestionResult,
   SectionSubmission,
   StudentSubmission,
 } from '../../types/grading';
-import { normalizeAnswerForMatching } from '../../utils/acceptedAnswers';
+import { getStudentQuestionsForModule } from '../../services/examAdapterService';
 
 export interface ExamObjectiveOverviewBundle {
   readonly submission: Pick<StudentSubmission, 'id' | 'studentName'>;
@@ -25,19 +26,88 @@ export interface ExamObjectiveOverviewRow {
   readonly manualOverride: ObjectiveManualOverride | null;
 }
 
+export interface ExamObjectiveOverviewOptions {
+  readonly examState?: ExamState | null;
+}
+
+type ExamObjectiveAnswerKind = 'text' | 'choice';
+
+const TEXT_ANSWER_QUESTION_TYPES: ReadonlySet<QuestionType> = new Set([
+  'CLOZE',
+  'SHORT_ANSWER',
+  'SENTENCE_COMPLETION',
+  'NOTE_COMPLETION',
+  'DIAGRAM_LABELING',
+  'FLOW_CHART',
+  'TABLE_COMPLETION',
+]);
+
+const TEXT_SCORING_RULES: ReadonlySet<string> = new Set([
+  'exact_match',
+  'one_word',
+  'two_words',
+  'three_words',
+  'sub_answer_tree',
+  'diagram_label',
+  'flow_chart',
+  'table_completion',
+  'text',
+  'word',
+]);
+
 function isTextScoringRule(scoringRule: string): boolean {
-  const normalized = scoringRule.toLowerCase();
-  return normalized.includes('word') || normalized.includes('text') || normalized.includes('exact');
+  return TEXT_SCORING_RULES.has(scoringRule.trim().toLowerCase());
+}
+
+function normalizeCaseAndWhitespace(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/gu, ' ').trim().toLowerCase();
 }
 
 function textAnswersMatch(studentAnswer: string, correctAnswer: string): boolean {
-  const normalizedStudentAnswer = normalizeAnswerForMatching(studentAnswer);
+  const normalizedStudentAnswer = normalizeCaseAndWhitespace(studentAnswer);
   if (!normalizedStudentAnswer) return false;
 
   return correctAnswer
     .split('|')
-    .map((answer) => normalizeAnswerForMatching(answer))
+    .map((answer) => normalizeCaseAndWhitespace(answer))
     .some((answer) => answer === normalizedStudentAnswer);
+}
+
+function answersDifferOnlyByCaseOrWhitespace(studentAnswer: string, correctAnswer: string): boolean {
+  if (!studentAnswer || !correctAnswer) return false;
+
+  return correctAnswer
+    .split('|')
+    .map((answer) => answer.trim())
+    .some((answer) => (
+      studentAnswer !== answer
+      && normalizeCaseAndWhitespace(studentAnswer) === normalizeCaseAndWhitespace(answer)
+  ));
+}
+
+function buildQuestionAnswerKindLookup(examState: ExamState | null | undefined): Map<string, ExamObjectiveAnswerKind> {
+  const lookup = new Map<string, ExamObjectiveAnswerKind>();
+  if (!examState) return lookup;
+
+  for (const section of ['reading', 'listening'] as const) {
+    for (const descriptor of getStudentQuestionsForModule(examState, section)) {
+      const answerKind = descriptor.isSubAnswerTreeLeaf || TEXT_ANSWER_QUESTION_TYPES.has(descriptor.block.type)
+        ? 'text'
+        : 'choice';
+      lookup.set(`${section}:${descriptor.id}`, answerKind);
+    }
+  }
+
+  return lookup;
+}
+
+function isTextAnswerResult(
+  result: ObjectiveQuestionResult,
+  section: 'reading' | 'listening',
+  questionAnswerKinds: ReadonlyMap<string, ExamObjectiveAnswerKind>,
+): boolean {
+  const questionAnswerKind = questionAnswerKinds.get(`${section}:${result.questionId}`);
+  return questionAnswerKind ? questionAnswerKind === 'text' : isTextScoringRule(result.scoringRule);
 }
 
 function resolveResultValues(result: ObjectiveQuestionResult): Pick<ExamObjectiveOverviewRow, 'isCorrect' | 'awardedScore'> {
@@ -62,28 +132,34 @@ function resolveResultValues(result: ObjectiveQuestionResult): Pick<ExamObjectiv
 
 export function buildExamObjectiveOverviewRows(
   bundles: readonly ExamObjectiveOverviewBundle[],
+  options: ExamObjectiveOverviewOptions = {},
 ): ExamObjectiveOverviewRow[] {
+  const questionAnswerKinds = buildQuestionAnswerKindLookup(options.examState);
+
   return bundles
     .flatMap(({ submission, sections }) => sections
       .filter((section): section is SectionSubmission & { section: 'reading' | 'listening' } =>
         section.section === 'reading' || section.section === 'listening',
       )
-      .flatMap((section) => (section.autoGradingResults?.questionResults ?? []).map((result) => {
-        const resolved = resolveResultValues(result);
-        const row: ExamObjectiveOverviewRow = {
-          rowId: `${submission.id}:${section.id}:${result.questionId}`,
-          submissionId: submission.id,
-          studentName: submission.studentName,
-          section: section.section,
-          questionId: result.questionId,
-          studentAnswer: result.studentAnswer,
-          correctAnswer: result.correctAnswer,
-          maxScore: result.maxScore,
-          ...resolved,
-          manualOverride: result.manualOverride ?? null,
-        };
-        return row;
-      })))
+      .flatMap((section) => (section.autoGradingResults?.questionResults ?? [])
+        .filter((result) => isTextAnswerResult(result, section.section, questionAnswerKinds))
+        .filter((result) => answersDifferOnlyByCaseOrWhitespace(result.studentAnswer, result.correctAnswer))
+        .map((result) => {
+          const resolved = resolveResultValues(result);
+          const row: ExamObjectiveOverviewRow = {
+            rowId: `${submission.id}:${section.id}:${result.questionId}`,
+            submissionId: submission.id,
+            studentName: submission.studentName,
+            section: section.section,
+            questionId: result.questionId,
+            studentAnswer: result.studentAnswer,
+            correctAnswer: result.correctAnswer,
+            maxScore: result.maxScore,
+            ...resolved,
+            manualOverride: result.manualOverride ?? null,
+          };
+          return row;
+        })))
     .sort((left, right) => {
       const studentOrder = left.studentName.localeCompare(right.studentName);
       if (studentOrder !== 0) return studentOrder;

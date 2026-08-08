@@ -17,9 +17,12 @@ Manual objective correctness overrides are submission-scoped, not schedule-scope
 - The override recalculates that section's total and percentage and is retained when objective grading is re-synchronised.
 - Every manual decision is recorded as a `score_override` review event with actor, question, section, and reason.
 
-The session-level `Overall answer check` is an exam/cohort overview, not a replacement
+The session-level `Overall answer check` is an exam/cohort exception list, not a replacement
 for the individual review screen:
 
 - It loads every submitted student's Reading/Listening objective rows for the selected grading session.
-- Text rows are recomputed case-insensitively for display unless an explicit per-student override exists.
+- It keeps only typed-answer question blocks, excluding choice blocks using the session's immutable exam version.
+- It keeps only rows where the raw student answer differs from an accepted key by capitalization and/or whitespace, while the normalized values match.
+- Punctuation changes, exact raw matches, genuinely incorrect answers, and choice answers are excluded.
+- The `Result` filter narrows the visible exception rows to all, correct, or incorrect without reloading the session.
 - A row-level decision uses the same submission-scoped override endpoint and remains drillable into that student's review.
