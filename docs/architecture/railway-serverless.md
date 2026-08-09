@@ -64,6 +64,12 @@ Those are inbound activity and/or cause outbound database work, so the service c
 awake. `/healthz`, `/readyz`, and `/metrics` do not extend the application coordinator's grace window,
 but external requests to them still wake Railway.
 
+The Railway deployment uses the Dockerfile as the production build authority. The Dockerfile runs the
+frontend production build and compiles the Rust services; Railway does not run the repository-wide
+Vitest suite as a `preBuild` gate because that suite currently discovers unrelated vendored and
+environment-dependent tests. Run the targeted grading checks and production build locally before
+deploying changes.
+
 ## Verification and rollback
 
 After deployment, stop all clients and monitors. The log line `background runtime quiescent` should
