@@ -197,9 +197,9 @@ describe('answerKeyOverview.applyAnswerKeyEdit', () => {
     });
 
     const q = (next.reading.passages[0]!.blocks[0] as any).questions[0];
-    expect(resolveAcceptedAnswers(q)).toEqual(['Alpha', 'beta']);
+    expect(resolveAcceptedAnswers(q)).toEqual(['Alpha', 'alpha', 'beta']);
     expect(q.correctAnswer).toBe('Alpha');
-    expect(q.acceptedAnswers).toEqual(['Alpha', 'beta']);
+    expect(q.acceptedAnswers).toEqual(['Alpha', 'alpha', 'beta']);
   });
 
   it('updates single MCQ so exactly one option is correct', () => {

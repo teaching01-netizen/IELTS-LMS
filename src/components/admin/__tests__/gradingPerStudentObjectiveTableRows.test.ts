@@ -26,7 +26,7 @@ describe('buildObjectiveQuestionTableRows', () => {
     });
   });
 
-  test('falls back to normalized student/right answer comparison when score missing', () => {
+  test('requires answer-key case when score is missing', () => {
     const columns: CsvColumn[] = [{ key: 'answer:q1', label: 'Q1 Answer' }];
 
     const rows = buildObjectiveQuestionTableRows(columns, {
@@ -35,7 +35,6 @@ describe('buildObjectiveQuestionTableRows', () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.correct).toBe('Yes');
+    expect(rows[0]?.correct).toBe('No');
   });
 });
-

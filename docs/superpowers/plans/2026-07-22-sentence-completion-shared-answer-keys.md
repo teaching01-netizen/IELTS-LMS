@@ -80,14 +80,14 @@ it('treats an explicitly empty shared pool as authoritative', () => {
   expect(getSharedSentenceAnswerPool(question)).toEqual([]);
 });
 
-it('counts case-insensitive normalized keys once', () => {
+it('counts exact-case normalized keys once', () => {
   const question = buildQuestion({
     acceptAnyAnswerKey: true,
     sharedAcceptedAnswers: ['Physical Chemistry', 'physical-chemistry', 'THERMODYNAMICS'],
     blanks: [{ correctAnswer: '', acceptedAnswers: [] }, { correctAnswer: '', acceptedAnswers: [] }],
   });
 
-  expect(countUniqueSharedSentenceKeys(question)).toBe(2);
+  expect(countUniqueSharedSentenceKeys(question)).toBe(3);
 });
 
 it('allows permutations but consumes one matching key only once', () => {
@@ -140,7 +140,7 @@ Rules for the implementation:
 2. An explicitly present `sharedAcceptedAnswers` array, including `[]`, is authoritative.
 3. If shared mode is enabled and the field is absent, derive the pool from each blank's primary `correctAnswer` followed by its accepted variants. Deduplicate pool membership using accepted-key normalization (case preserved, formatting normalized), while retaining the first display spelling for each authoring key.
 4. When re-enabling shared mode, merge a saved non-empty pool with the current derived blank-key pool in saved-key order, preserving manual additions. An explicitly empty saved pool remains empty.
-5. `matchSharedSentenceAnswers` normalizes each non-empty student value with `normalizeAnswerForMatching`, accepts it only if it is in the normalized pool, and consumes that normalized key after the first match. Preserve answer-slot order in the returned boolean array.
+5. `matchSharedSentenceAnswers` normalizes each non-empty student value with `normalizeAnswerForMatching`, preserving answer-key letter case, accepts it only if it is in the normalized pool, and consumes that normalized key after the first match. Preserve answer-slot order in the returned boolean array.
 
 - [ ] **Step 4: Run the focused test and verify it passes.**
 
@@ -353,7 +353,7 @@ git commit -m "feat: grade shared sentence keys one-to-one in review"
 Add unit tests to `backend/crates/application/src/validation.rs` that call `validate_exam_content` with a sentence question containing:
 
 1. `acceptAnyAnswerKey: true`, empty preserved blank answers, and a non-empty `sharedAcceptedAnswers` array; assert no blank-answer errors.
-2. Two blanks and one case-insensitive unique shared key; assert `warnings` contains a sentence-question field and `errors` is empty.
+2. Two blanks and one exact-case unique shared key; assert `warnings` contains a sentence-question field and `errors` is empty.
 3. A legacy sentence without the toggle and an empty blank answer; assert the existing blank-answer error remains.
 
 - [ ] **Step 2: Run the focused Rust tests and verify they fail.**
@@ -446,7 +446,7 @@ In `index_objective_block_scoring_specs` for `SENTENCE_COMPLETION`:
 In `compute_objective_auto_grading_results`, keep a `HashMap<String, HashSet<String>>` of consumed normalized answers by shared group. For a shared spec:
 
 1. Read the first strict text value from the student answer.
-2. Normalize it with a shared-mode comparator that lowercases Unicode text and collapses whitespace, matching the TypeScript shared comparator.
+2. Normalize it with a shared-mode comparator that preserves Unicode letter case and collapses whitespace, matching the TypeScript shared comparator.
 3. Return false for empty, unknown, or already-consumed keys.
 4. Insert a matched key into the group’s consumed set and return true.
 

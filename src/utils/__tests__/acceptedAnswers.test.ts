@@ -20,9 +20,12 @@ describe('acceptedAnswers', () => {
     ).toEqual(['dog', 'cat', 'CAT']);
   });
 
-  it('normalizes case and punctuation for matching', () => {
+  it('normalizes punctuation and keeps case differences significant', () => {
     expect(normalizeAnswerForMatching('HALF-WAY')).toBe(
-      normalizeAnswerForMatching('half way'),
+      normalizeAnswerForMatching('HALF WAY'),
+    );
+    expect(normalizeAnswerForMatching('Garden hall')).not.toBe(
+      normalizeAnswerForMatching('GARDEN HALL'),
     );
   });
 });

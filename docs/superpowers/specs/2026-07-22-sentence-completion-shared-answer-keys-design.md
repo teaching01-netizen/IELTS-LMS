@@ -38,9 +38,9 @@ per-blank keys.
 
 With the toggle off, each blank is graded against its own accepted answers.
 With it on, the effective accepted set for every blank is the shared pool.
-Matching is case-insensitive and uses the repository’s existing answer
-normalization. A maximum one-to-one matching across the sentence prevents a
-student from repeating one valid answer in every blank. Existing grouped
+Matching preserves answer-key letter case and uses the repository’s existing
+format normalization. A maximum one-to-one matching across the sentence
+prevents a student from repeating one valid answer in every blank. Existing grouped
 scoring (including 2-for-1) is applied after slot matches are determined.
 
 The student answer map remains the existing question-keyed array of blank

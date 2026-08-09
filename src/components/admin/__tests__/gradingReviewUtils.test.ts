@@ -642,7 +642,7 @@ describe('gradingReviewUtils', () => {
     expect(rows[0]?.maxScore).toBe(1);
   });
 
-  test('recomputes unoverridden text results without case sensitivity', () => {
+  test('recomputes unoverridden text results with answer-key case sensitivity', () => {
     const examState = createInitialExamState('Exam', 'Academic');
     examState.reading.passages = [
       {
@@ -701,8 +701,8 @@ describe('gradingReviewUtils', () => {
     } as any;
 
     const groups = buildQuestionTracebackGroups(examState, persistedCaseMismatch, 'reading');
-    expect(groups[0]?.items[0]?.correctness).toBe(true);
-    expect(groups[0]?.items[0]?.awardedScore).toBe(1);
+    expect(groups[0]?.items[0]?.correctness).toBe(false);
+    expect(groups[0]?.items[0]?.awardedScore).toBe(0);
   });
 
   test('builds one reading export row per student with answers before scores', () => {

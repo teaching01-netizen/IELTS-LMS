@@ -30,6 +30,44 @@ Purpose: turn incidents and bug fixes into durable memory for humans and AI agen
 
 ---
 
+## 2026-08-09: Objective Text Answers Must Match Answer-Key Case
+
+### Symptom
+An objective answer such as `Garden hall` was awarded `1/1` when the configured
+answer key used a different capitalization such as `GARDEN HALL`.
+
+### Scope
+Reading/Listening objective text grading, shared sentence-completion keys,
+schedule-scoped objective overrides, and the admin overall answer check.
+
+### Root Cause
+Frontend and Rust grading comparators lowercased answer text before comparing it.
+The overview also recomputed case-only differences as correct, so stored results
+could be displayed as passing.
+
+### Fix
+- Preserve letter case during objective answer matching.
+- Keep explicit `|` alternatives and existing whitespace/format normalization.
+- Keep case-only differences visible in the overview, but classify them as incorrect.
+
+### Regression Protection
+- Tests: `src/utils/__tests__/acceptedAnswers.test.ts`,
+  `src/utils/__tests__/sentenceCompletionAnswerPool.test.ts`,
+  `src/components/admin/__tests__/gradingAnswerUtils.test.ts`,
+  `src/components/admin/__tests__/ExamObjectiveOverviewPanel.test.tsx`,
+  `src/components/admin/__tests__/gradingPerStudentObjectiveTableRows.test.ts`,
+  `backend/crates/application/src/grading/mod.rs`
+- Diagnostics: none added
+- Rules/Docs updated: `docs/superpowers/specs/2026-07-22-sentence-completion-shared-answer-keys-design.md`
+
+### Invariant
+An objective text answer earns credit only when its normalized text matches an
+explicit answer-key variant with the same capitalization. A differently cased
+answer is incorrect unless that exact casing is separately configured as an
+accepted variant.
+
+---
+
 ## 2026-07-18: Inferred Viewport Geometry Survived Browser Recovery
 
 ### Symptom

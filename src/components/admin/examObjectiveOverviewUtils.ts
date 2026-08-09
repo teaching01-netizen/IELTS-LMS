@@ -61,7 +61,11 @@ function isTextScoringRule(scoringRule: string): boolean {
 }
 
 function normalizeCaseAndWhitespace(value: string): string {
-  return value.normalize('NFKC').replace(/\s+/gu, ' ').trim().toLowerCase();
+  return value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
+}
+
+function normalizeCaseInsensitiveAndWhitespace(value: string): string {
+  return normalizeCaseAndWhitespace(value).toLowerCase();
 }
 
 function textAnswersMatch(studentAnswer: string, correctAnswer: string): boolean {
@@ -82,7 +86,7 @@ function answersDifferOnlyByCaseOrWhitespace(studentAnswer: string, correctAnswe
     .map((answer) => answer.trim())
     .some((answer) => (
       studentAnswer !== answer
-      && normalizeCaseAndWhitespace(studentAnswer) === normalizeCaseAndWhitespace(answer)
+      && normalizeCaseInsensitiveAndWhitespace(studentAnswer) === normalizeCaseInsensitiveAndWhitespace(answer)
   ));
 }
 

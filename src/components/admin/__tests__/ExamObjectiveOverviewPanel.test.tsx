@@ -111,7 +111,8 @@ describe('buildExamObjectiveOverviewRows', () => {
     }]);
 
     expect(rows.map((row) => row.questionId)).toEqual(['q-case', 'q-space']);
-    expect(rows.every((row) => row.isCorrect)).toBe(true);
+    expect(rows.every((row) => row.isCorrect)).toBe(false);
+    expect(rows.every((row) => row.awardedScore === 0)).toBe(true);
   });
 
   test('uses the exam question type to exclude choice blocks with exact-match scoring', () => {
@@ -187,7 +188,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(rows.map((row) => row.questionId)).toEqual(['q-text-exact']);
   });
 
-  test('marks case-mismatched text answers correct in the exam overview', () => {
+  test('marks case-mismatched text answers incorrect in the exam overview', () => {
     const section = {
       id: 'section-1',
       submissionId: 'submission-1',
@@ -219,8 +220,8 @@ describe('buildExamObjectiveOverviewRows', () => {
     }]);
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.isCorrect).toBe(true);
-    expect(rows[0]?.awardedScore).toBe(1);
+    expect(rows[0]?.isCorrect).toBe(false);
+    expect(rows[0]?.awardedScore).toBe(0);
   });
 
   test('shows all table-cell accepted answers and matches against the full key', () => {
@@ -393,8 +394,8 @@ describe('buildExamObjectiveOverviewRows', () => {
         questionResults: [
           {
             questionId: 'q-correct',
-            studentAnswer: 'ANSWER',
-            correctAnswer: 'Answer',
+            studentAnswer: ' ANSWER ',
+            correctAnswer: 'ANSWER',
             isCorrect: false,
             awardedScore: 0,
             maxScore: 1,

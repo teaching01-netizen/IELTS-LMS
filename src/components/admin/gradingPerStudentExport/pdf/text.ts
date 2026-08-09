@@ -15,8 +15,7 @@ export function toDisplayValue(value: unknown): string {
 export function normalizeAnswer(value: string): string {
   return value
     .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase();
+    .replace(/\s+/g, ' ');
 }
 
 export function toOptionalFiniteNumber(value: unknown): number | null {
@@ -56,4 +55,3 @@ export function writeWrappedText(
 
   return cursorY;
 }
-

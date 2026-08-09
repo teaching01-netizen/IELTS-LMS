@@ -22,7 +22,7 @@ function normalizeAnswer(value: string, foldCase: boolean): string {
 }
 
 export function normalizeAnswerForMatching(value: string): string {
-  return normalizeAnswer(value, true);
+  return normalizeAnswer(value, false);
 }
 
 export function normalizeAnswerForAcceptedAnswerKey(value: string): string {

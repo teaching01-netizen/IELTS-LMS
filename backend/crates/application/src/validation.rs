@@ -867,7 +867,7 @@ fn normalize_shared_sentence_answer(value: &str) -> String {
         if pending_space && !normalized.ends_with(' ') {
             normalized.push(' ');
         }
-        normalized.extend(character.to_lowercase());
+        normalized.push(character);
         pending_space = false;
     }
 
@@ -1975,7 +1975,7 @@ mod tests {
                 ],
                 "answerRule": "ONE_WORD",
                 "acceptAnyAnswerKey": true,
-                "sharedAcceptedAnswers": ["Physical Chemistry", "physical-chemistry"]
+                "sharedAcceptedAnswers": ["Physical Chemistry", "Physical-Chemistry"]
             }]
         }));
 

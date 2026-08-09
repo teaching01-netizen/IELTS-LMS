@@ -16,7 +16,7 @@ export type ObjectiveQuestionTableRow = {
  * Invariants:
  * - One row per `answer:*` column in the wide export.
  * - `rightAnswer:*` and `score:*` keys are best-effort; missing keys yield empty values.
- * - Correctness is derived from numeric score when present, else a normalized string compare.
+ * - Correctness is derived from numeric score when present, else a case-sensitive normalized string compare.
  */
 export function buildObjectiveQuestionTableRows(
   columns: CsvColumn[],
@@ -64,4 +64,3 @@ export function buildObjectiveQuestionTableRows(
 
   return rows;
 }
-

@@ -19,5 +19,5 @@ Shared answer-key mode is question-level, defaults off when absent, and changes 
 - Enabling shared mode seeds the pool from each blank's primary and accepted keys, preserving case variants for authoring visibility while removing only equivalent formatting duplicates.
 - Re-enabling a saved shared question reconciles an older/stale non-empty shared pool with the current blank keys; an explicitly empty shared pool remains empty.
 - The student submission remains one answer per blank in the existing array-backed question answer shape.
-- Shared grading still matches case-insensitively and consumes each normalized key at most once per sentence, so case variants do not create extra credit capacity.
+- Shared grading preserves answer-key letter case and consumes each normalized key at most once per sentence, so differently cased variants are distinct accepted keys.
 - A shared pool with fewer unique keys than blanks is a warning, not a publish blocker.

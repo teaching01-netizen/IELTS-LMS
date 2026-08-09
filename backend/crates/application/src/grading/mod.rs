@@ -3476,7 +3476,7 @@ fn normalize_exact_text(value: &str) -> String {
 }
 
 fn normalize_exact_text_for_match(value: &str) -> String {
-    normalize_exact_text(value).to_lowercase()
+    normalize_exact_text(value)
 }
 
 fn recalculate_objective_totals(results: &mut Value) {
@@ -4285,7 +4285,7 @@ fn index_objective_block_scoring_specs(
 }
 
 fn normalize_shared_sentence_answer(value: &str) -> String {
-    normalize_shared_sentence_answer_with_case(value, true)
+    normalize_shared_sentence_answer_with_case(value, false)
 }
 
 fn normalize_shared_sentence_answer_key(value: &str) -> String {
@@ -4880,6 +4880,13 @@ mod tests {
         assert!(expected.matches(&value, "ONE_WORD"));
     }
 
+    #[test]
+    fn objective_text_matching_requires_answer_key_case() {
+        let expected = ObjectiveExpectedAnswer::TextAnyOf(["NOT GIVEN".to_owned()].into_iter().collect());
+        let value = Value::String("not given".to_owned());
+        assert!(!expected.matches(&value, "ONE_WORD"));
+    }
+
     fn shared_sentence_content_snapshot() -> Value {
         json!({
             "reading": {
@@ -4949,6 +4956,21 @@ mod tests {
         assert_eq!(results["totalScore"], 1);
         assert_eq!(results["questionResults"][0]["isCorrect"], true);
         assert_eq!(results["questionResults"][1]["isCorrect"], false);
+    }
+
+    #[test]
+    fn shared_sentence_objective_grading_requires_answer_key_case() {
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "sentence-1": ["ALPHA", "beta"] }),
+            &shared_sentence_content_snapshot(),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["totalScore"], 1);
+        assert_eq!(results["questionResults"][0]["isCorrect"], false);
+        assert_eq!(results["questionResults"][1]["isCorrect"], true);
     }
 
     #[test]
@@ -5311,7 +5333,7 @@ mod tests {
     }
 
     #[test]
-    fn objective_auto_grading_matches_array_backed_text_answers_case_insensitively() {
+    fn objective_auto_grading_requires_array_backed_text_answer_case() {
         let section_answers = json!({
             "sentence-1": ["HALF WAY"]
         });
@@ -5338,7 +5360,7 @@ mod tests {
             None,
         );
 
-        assert_eq!(results["totalScore"], 1);
+        assert_eq!(results["totalScore"], 0);
         assert_eq!(results["maxScore"], 1);
         assert_eq!(
             results["questionResults"][0]["questionId"],
@@ -5346,11 +5368,11 @@ mod tests {
         );
         assert_eq!(results["questionResults"][0]["studentAnswer"], "HALF WAY");
         assert_eq!(results["questionResults"][0]["correctAnswer"], "half way");
-        assert_eq!(results["questionResults"][0]["isCorrect"], true);
+        assert_eq!(results["questionResults"][0]["isCorrect"], false);
     }
 
     #[test]
-    fn schedule_text_overrides_match_case_insensitively() {
+    fn schedule_text_overrides_require_answer_case() {
         let mut overrides = HashMap::new();
         overrides.insert(
             "short-1".to_owned(),
@@ -5379,7 +5401,7 @@ mod tests {
             Some(&overrides),
         );
 
-        assert_eq!(results["questionResults"][0]["isCorrect"], true);
+        assert_eq!(results["questionResults"][0]["isCorrect"], false);
     }
 
     #[test]
