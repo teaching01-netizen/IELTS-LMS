@@ -1557,6 +1557,42 @@ impl GradingService {
         Ok((report, draft_version_id))
     }
 
+    /// Regrade every schedule for an exam from its newly saved draft.
+    ///
+    /// Draft content is immutable once saved, as are submitted answers. This method only
+    /// refreshes the objective-grading projection for existing submissions and records the
+    /// draft version as each schedule's active grading source.
+    pub async fn regrade_exam_objectives_from_latest_draft(
+        &self,
+        ctx: &ActorContext,
+        actor_name: &str,
+        exam_id: &str,
+        reason: String,
+    ) -> Result<(), GradingError> {
+        let schedule_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM exam_schedules WHERE exam_id = ? ORDER BY start_time DESC, id ASC",
+        )
+        .bind(exam_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        for schedule_id in schedule_ids {
+            let schedule_uuid = Uuid::parse_str(&schedule_id).map_err(|error| {
+                GradingError::Validation(format!("Invalid schedule id '{schedule_id}': {error}"))
+            })?;
+            let schedule_ctx = ctx.clone().with_schedule_scope_id(schedule_id);
+            self.regrade_schedule_objectives_from_latest_draft(
+                &schedule_ctx,
+                actor_name,
+                schedule_uuid,
+                reason.clone(),
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn list_schedule_objective_overrides(
         &self,
         ctx: &ActorContext,

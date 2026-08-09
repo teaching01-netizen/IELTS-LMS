@@ -12,6 +12,7 @@ import type {
 import type { StudentQuestionDescriptor } from '../../services/examAdapterService';
 import { getStudentQuestionsForModule } from '../../services/examAdapterService';
 import { getCorrectAnswerDisplay, getQuestionPrompt } from './gradingAnswerUtils';
+import { notifyObjectiveGradingUpdated } from '../../utils/objectiveGradingSync';
 
 type ObjectiveModule = Extract<ModuleType, 'reading' | 'listening'>;
 
@@ -189,7 +190,7 @@ function buildEmptyUpsertRequest(
   };
 }
 
-export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVersionId?: string | undefined }) {
+export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: string | undefined; publishedVersionId?: string | undefined }) {
   const { scheduleId, publishedVersionId } = props;
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -374,6 +375,9 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
         throw new Error(result.error ?? 'Failed to regrade objective sections');
       }
       setScheduleRegradeResult(result.data);
+      if (props.examId) {
+        notifyObjectiveGradingUpdated(props.examId);
+      }
     } catch (error) {
       setScheduleRegradeError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -399,14 +403,14 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; publishedVe
         <div className="border-t border-gray-200 px-4 py-4">
           <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
             <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-              <div className="text-xs font-semibold text-gray-700">Regrade objective sections (latest draft)</div>
+              <div className="text-xs font-semibold text-gray-700">Objective grading updates automatically after answer-key saves</div>
               <button
                 type="button"
                 onClick={() => void handleScheduleRegradeLatestDraft()}
                 disabled={scheduleRegrading}
                 className="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                {scheduleRegrading ? 'Regrading…' : 'Refresh grading'}
+                {scheduleRegrading ? 'Regrading…' : 'Retry regrade'}
               </button>
             </div>
             {scheduleRegradeError ? <div className="mt-2 text-sm text-red-700">{scheduleRegradeError}</div> : null}

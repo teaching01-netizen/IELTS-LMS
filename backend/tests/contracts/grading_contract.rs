@@ -1522,18 +1522,28 @@ async fn grading_objective_regrade_latest_draft_updates_objective_scores_for_sch
     draft_snapshot["listening"]["parts"][0]["blocks"][0]["questions"][0]["correctAnswer"] =
         json!("Different response");
 
-    builder_service
-        .save_draft(
-            &actor,
-            schedule.exam_id.clone(),
-            SaveDraftRequest {
-                content_snapshot: draft_snapshot,
-                config_snapshot: sample_delivery_config(),
-                revision: exam.revision,
-            },
+    let save_draft = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!("/api/v1/exams/{}/draft", schedule.exam_id))
+            )
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&SaveDraftRequest {
+                    content_snapshot: draft_snapshot,
+                    config_snapshot: sample_delivery_config(),
+                    revision: exam.revision,
+                })
+                .unwrap(),
+            ))
+            .unwrap(),
         )
         .await
-        .expect("save new draft");
+        .unwrap();
+    assert_eq!(save_draft.status(), StatusCode::OK);
 
     let exam_after_draft = builder_service
         .get_exam(&actor, schedule.exam_id.clone())
@@ -1553,31 +1563,7 @@ async fn grading_objective_regrade_latest_draft_updates_objective_scores_for_sch
         json!("Beta answer")
     );
 
-    // Regrade using latest draft snapshot (not the published version).
-    let regrade = app
-        .clone()
-        .oneshot(
-            auth.with_csrf(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!(
-                        "/api/v1/grading/schedules/{}/objective-regrade-latest-draft",
-                        schedule.id
-                    )),
-            )
-            .header("content-type", "application/json")
-            .body(Body::from(json!({ "reason": "Use latest draft" }).to_string()))
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(regrade.status(), StatusCode::OK);
-    let regrade_json = json_body(regrade).await;
-    assert_eq!(regrade_json["data"]["draftVersionId"], json!(draft_version_id));
-    assert_eq!(regrade_json["data"]["regradeReport"]["attemptsScanned"], json!(1));
-    assert_eq!(regrade_json["data"]["regradeReport"]["sectionsUpdated"], json!(2));
-
-    // After regrade, the stored objective totals should reflect the latest draft answer key (both incorrect).
+    // The draft save itself must regrade from the latest draft (no manual refresh endpoint call).
     let section_detail = app
         .clone()
         .oneshot(

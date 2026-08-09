@@ -48,6 +48,7 @@ import {
   rememberExamRevision,
 } from './backendBridge';
 import { canTransition, type ExamTransitionActorRole } from './policies/examStatusTransitions';
+import { notifyObjectiveGradingUpdated } from '../utils/objectiveGradingSync';
 
 /**
  * Generate a slug from a title
@@ -283,6 +284,7 @@ export class ExamLifecycleService {
           await this.repository.getExamById(examId);
         }
         const version = savedVersion ? mapBackendExamVersion(savedVersion) : null;
+        notifyObjectiveGradingUpdated(examId);
 
         return {
           success: true,
@@ -359,6 +361,7 @@ export class ExamLifecycleService {
     await this.repository.saveExam(exam);
     await this.repository.saveVersion(version);
     await this.repository.saveEvent(event);
+    notifyObjectiveGradingUpdated(examId);
 
     return {
       success: true,

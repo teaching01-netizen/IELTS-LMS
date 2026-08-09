@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileCheck2, LoaderCircle, XCircle } from 'lucide-react';
 import type { ExamState } from '../../types';
 import type { GradingSession } from '../../types/grading';
@@ -7,6 +7,8 @@ import { gradingRepository } from '../../services/gradingRepository';
 import { gradingService } from '../../services/gradingService';
 import type { ExamObjectiveOverviewBundle, ExamObjectiveOverviewRow } from './examObjectiveOverviewUtils';
 import { buildExamObjectiveOverviewRows } from './examObjectiveOverviewUtils';
+import { resolveObjectiveGradingVersionId } from './gradingReviewUtils';
+import { subscribeObjectiveGradingUpdates } from '../../utils/objectiveGradingSync';
 
 interface ExamObjectiveOverviewPanelProps {
   readonly session: GradingSession;
@@ -42,34 +44,52 @@ export function ExamObjectiveOverviewPanel({
   const [error, setError] = useState<string | null>(null);
   const [pendingRowIds, setPendingRowIds] = useState<Set<string>>(() => new Set());
   const [resultFilter, setResultFilter] = useState<ExamObjectiveResultFilter>('all');
+  const loadRequestId = useRef(0);
 
   const loadOverview = useCallback(async () => {
+    const requestId = loadRequestId.current + 1;
+    loadRequestId.current = requestId;
     setLoading(true);
     setError(null);
     try {
-      const [nextSubmissions, examVersion] = await Promise.all([
+      const [nextSubmissions, sourceResult] = await Promise.all([
         gradingRepository.getSubmissionsBySession(session.id),
-        examRepository.getVersionById(session.publishedVersionId),
+        session.scheduleId
+          ? gradingService.getObjectiveGradingSource(session.scheduleId)
+          : Promise.resolve(null),
       ]);
+      const versionId = resolveObjectiveGradingVersionId(
+        session.publishedVersionId,
+        sourceResult?.success ? sourceResult.data?.draftVersionId : null,
+      );
+      const examVersion = versionId ? await examRepository.getVersionById(versionId) : null;
       const nextBundles = await Promise.all(
         nextSubmissions.map(async (submission) => ({
           submission: { id: submission.id, studentName: submission.studentName },
           sections: await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id),
         })),
       );
+      if (loadRequestId.current !== requestId) return;
       setBundles(nextBundles);
       setExamState(examVersion?.contentSnapshot ?? null);
       setSubmissionCount(nextBundles.length);
     } catch (loadError) {
+      if (loadRequestId.current !== requestId) return;
       setError(loadError instanceof Error ? loadError.message : 'Failed to load overall answer results.');
     } finally {
-      setLoading(false);
+      if (loadRequestId.current === requestId) {
+        setLoading(false);
+      }
     }
-  }, [session.id, session.publishedVersionId]);
+  }, [session.id, session.publishedVersionId, session.scheduleId]);
 
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
+
+  useEffect(() => subscribeObjectiveGradingUpdates(session.examId, () => {
+    void loadOverview();
+  }), [loadOverview, session.examId]);
 
   const rows = useMemo(() => buildExamObjectiveOverviewRows(bundles, { examState }), [bundles, examState]);
   const visibleRows = useMemo(() => {

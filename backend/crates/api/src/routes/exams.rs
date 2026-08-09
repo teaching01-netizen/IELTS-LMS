@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use ielts_backend_application::builder::{BuilderError, BuilderService};
+use ielts_backend_application::grading::GradingService;
 use ielts_backend_application::version_serializer::VersionSerializer;
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::exam::{
@@ -139,6 +140,17 @@ pub async fn save_draft(
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let version = service.save_draft(&ctx, exam_id.to_string(), req).await?;
+    GradingService::with_sync_on_read_fallback(
+        state.db_pool(),
+        state.config.grading_sync_on_read_fallback,
+    )
+    .regrade_exam_objectives_from_latest_draft(
+        &ctx,
+        &principal.display_name(),
+        &exam_id.to_string(),
+        "Automatic answer-key draft update".to_owned(),
+    )
+    .await?;
     Ok(ApiResponse::success_with_request_id(version, request_id.0))
 }
 

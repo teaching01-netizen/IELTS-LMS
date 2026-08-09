@@ -1,11 +1,13 @@
-import { describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createInitialExamState } from '../../../services/examAdapterService';
 import type { SectionSubmission } from '../../../types/grading';
 import { ExamObjectiveOverviewPanel } from '../ExamObjectiveOverviewPanel';
 import { buildExamObjectiveOverviewRows } from '../examObjectiveOverviewUtils';
+import { examRepository } from '../../../services/examRepository';
 import { gradingRepository } from '../../../services/gradingRepository';
 import { gradingService } from '../../../services/gradingService';
+import { notifyObjectiveGradingUpdated } from '../../../utils/objectiveGradingSync';
 
 vi.mock('../../../services/gradingRepository', () => ({
   gradingRepository: {
@@ -23,10 +25,15 @@ vi.mock('../../../services/examRepository', () => ({
 vi.mock('../../../services/gradingService', () => ({
   gradingService: {
     overrideObjectiveQuestion: vi.fn(),
+    getObjectiveGradingSource: vi.fn(),
   },
 }));
 
 describe('buildExamObjectiveOverviewRows', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   test('returns only typed answers with case-or-whitespace-only differences', () => {
     const section = {
       id: 'section-1',
@@ -452,5 +459,98 @@ describe('buildExamObjectiveOverviewRows', () => {
 
     expect(screen.getByText('q-correct')).toBeInTheDocument();
     expect(screen.queryByText('q-incorrect')).not.toBeInTheDocument();
+  });
+
+  test('uses the active objective-grading draft after an answer-key update', async () => {
+    const publishedState = createInitialExamState('IELTS Mock Test', 'Academic');
+    publishedState.reading.passages = [{
+      id: 'passage-1',
+      title: 'Passage 1',
+      content: '',
+      blocks: [{
+        id: 'short-answer-block',
+        type: 'SHORT_ANSWER',
+        instruction: '',
+        questions: [{
+          id: 'q-17',
+          prompt: 'Answer',
+          correctAnswer: 'GARDEN HALL',
+          acceptedAnswers: ['GARDEN HALL'],
+          answerRule: 'ONE_WORD',
+        }],
+      }],
+    }];
+
+    const draftState = structuredClone(publishedState);
+    const draftQuestion = draftState.reading.passages[0]?.blocks[0];
+    if (draftQuestion?.type !== 'SHORT_ANSWER') {
+      throw new Error('Expected short-answer block');
+    }
+    draftQuestion.questions[0] = {
+      ...draftQuestion.questions[0],
+      acceptedAnswers: ['GARDEN HALL', 'Garden hall'],
+    };
+
+    const section = {
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [{
+          questionId: 'q-17',
+          studentAnswer: 'Garden hall',
+          correctAnswer: 'GARDEN HALL',
+          isCorrect: false,
+          awardedScore: 0,
+          maxScore: 1,
+          scoringRule: 'one_word',
+          hasOverride: false,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } satisfies SectionSubmission;
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
+    vi.mocked(gradingService.getObjectiveGradingSource).mockResolvedValue({
+      success: true,
+      data: { draftVersionId: 'draft-version-1' },
+    });
+    vi.mocked(examRepository.getVersionById).mockImplementation(async (versionId) => ({
+      contentSnapshot: versionId === 'draft-version-1' ? draftState : publishedState,
+    } as never));
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{
+          id: 'session-1',
+          examId: 'exam-1',
+          scheduleId: 'schedule-1',
+          publishedVersionId: 'published-version-1',
+        } as never}
+      />,
+    );
+
+    await waitFor(() => expect(gradingService.getObjectiveGradingSource).toHaveBeenCalledWith('schedule-1'));
+    expect(await screen.findByText('GARDEN HALL | Garden hall')).toBeInTheDocument();
+    expect(screen.getByText('1 correct')).toBeInTheDocument();
+    expect(screen.getByText('1 / 1')).toBeInTheDocument();
+    expect(examRepository.getVersionById).toHaveBeenCalledWith('draft-version-1');
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([]);
+    act(() => {
+      notifyObjectiveGradingUpdated('exam-1');
+    });
+
+    await waitFor(() => expect(gradingRepository.getSubmissionsBySession).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('No typed answers differ from their key only by letter case or whitespace.')).toBeInTheDocument();
   });
 });

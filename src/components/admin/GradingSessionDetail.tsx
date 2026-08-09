@@ -801,6 +801,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       {session ? (
         <ObjectiveOverridesPanel
           scheduleId={session.scheduleId}
+          examId={session.examId}
           publishedVersionId={session.publishedVersionId}
         />
       ) : null}
