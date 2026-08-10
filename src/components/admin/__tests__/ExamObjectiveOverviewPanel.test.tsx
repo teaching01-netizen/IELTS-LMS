@@ -3,7 +3,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createInitialExamState } from '../../../services/examAdapterService';
 import type { SectionSubmission } from '../../../types/grading';
 import { ExamObjectiveOverviewPanel } from '../ExamObjectiveOverviewPanel';
-import { buildExamObjectiveOverviewRows } from '../examObjectiveOverviewUtils';
+import {
+  buildExamObjectiveOverviewRows,
+  groupExamObjectiveOverviewRows,
+  type ExamObjectiveOverviewRow,
+} from '../examObjectiveOverviewUtils';
 import { examRepository } from '../../../services/examRepository';
 import { gradingRepository } from '../../../services/gradingRepository';
 import { gradingService } from '../../../services/gradingService';
@@ -25,6 +29,7 @@ vi.mock('../../../services/examRepository', () => ({
 vi.mock('../../../services/gradingService', () => ({
   gradingService: {
     overrideObjectiveQuestion: vi.fn(),
+    upsertObjectiveOverride: vi.fn(),
     getObjectiveGradingSource: vi.fn(),
   },
 }));
@@ -364,30 +369,35 @@ describe('buildExamObjectiveOverviewRows', () => {
       { id: 'submission-1', studentName: 'Narin Example' } as never,
     ]);
     vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
-    vi.mocked(gradingService.overrideObjectiveQuestion).mockResolvedValue({
+    vi.mocked(gradingService.upsertObjectiveOverride).mockResolvedValue({
       success: true,
-      data: section,
+      data: { regradeReport: {} as never },
     });
 
     render(
       <ExamObjectiveOverviewPanel
-        session={{ examTitle: 'IELTS Mock Test', id: 'session-1' } as never}
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
       />,
     );
 
-    expect(await screen.findByText('Narin Example')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
     expect(screen.getByText('ANSWER')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Incorrect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reject for exam' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reject and regrade' }));
 
-    await waitFor(() => expect(gradingService.overrideObjectiveQuestion).toHaveBeenCalledWith(
-      'submission-1',
-      'reading',
+    await waitFor(() => expect(gradingService.upsertObjectiveOverride).toHaveBeenCalledWith(
+      'schedule-1',
       'q-1',
-      expect.objectContaining({ isCorrect: false }),
+      expect.objectContaining({
+        excludedAnswers: ['ANSWER'],
+        reason: expect.stringContaining('incorrect'),
+      }),
     ));
+    expect(gradingService.overrideObjectiveQuestion).not.toHaveBeenCalled();
   });
 
-  test('filters visible answer rows by correctness result', async () => {
+  test('filters answer groups by correctness', async () => {
     const section = {
       id: 'section-1',
       submissionId: 'submission-1',
@@ -443,22 +453,20 @@ describe('buildExamObjectiveOverviewRows', () => {
       />,
     );
 
-    expect(await screen.findByText('q-correct')).toBeInTheDocument();
-    expect(screen.getByText('q-incorrect')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'WRONG' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'ANSWER' })).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Filter result rows' }), {
-      target: { value: 'incorrect' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: /^All/ }));
+    expect(screen.getByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'WRONG' })).toBeInTheDocument();
 
-    expect(screen.queryByText('q-correct')).not.toBeInTheDocument();
-    expect(screen.getByText('q-incorrect')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Correct/ }));
+    expect(screen.getByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'WRONG' })).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Filter result rows' }), {
-      target: { value: 'correct' },
-    });
-
-    expect(screen.getByText('q-correct')).toBeInTheDocument();
-    expect(screen.queryByText('q-incorrect')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Incorrect/ }));
+    expect(screen.queryByRole('heading', { name: 'ANSWER' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'WRONG' })).toBeInTheDocument();
   });
 
   test('uses the active objective-grading draft after an answer-key update', async () => {
@@ -540,8 +548,10 @@ describe('buildExamObjectiveOverviewRows', () => {
     );
 
     await waitFor(() => expect(gradingService.getObjectiveGradingSource).toHaveBeenCalledWith('schedule-1'));
+    fireEvent.click(await screen.findByRole('button', { name: /^Correct/ }));
     expect(await screen.findByText('GARDEN HALL | Garden hall')).toBeInTheDocument();
-    expect(screen.getByText('1 correct')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Garden hall' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'View 1 student and 1 question' }));
     expect(screen.getByText('1 / 1')).toBeInTheDocument();
     expect(examRepository.getVersionById).toHaveBeenCalledWith('draft-version-1');
 
@@ -552,5 +562,112 @@ describe('buildExamObjectiveOverviewRows', () => {
 
     await waitFor(() => expect(gradingRepository.getSubmissionsBySession).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('No typed answers differ from their key only by letter case or whitespace.')).toBeInTheDocument();
+  });
+
+  test('groups equivalent student answers across the exam into one review group', () => {
+    const rows: ExamObjectiveOverviewRow[] = [
+      {
+        rowId: 'submission-1:reading:q-1',
+        submissionId: 'submission-1',
+        studentName: 'Narin Example',
+        section: 'reading',
+        questionId: 'q-1',
+        studentAnswer: ' ANSWER ',
+        correctAnswer: 'Answer',
+        isCorrect: false,
+        awardedScore: 0,
+        maxScore: 1,
+        scoringRule: 'exact_match',
+        hasOverride: false,
+        manualOverride: null,
+      },
+      {
+        rowId: 'submission-2:reading:q-1',
+        submissionId: 'submission-2',
+        studentName: 'Mali Example',
+        section: 'reading',
+        questionId: 'q-1',
+        studentAnswer: 'answer',
+        correctAnswer: 'Answer',
+        isCorrect: false,
+        awardedScore: 0,
+        maxScore: 1,
+        scoringRule: 'exact_match',
+        hasOverride: false,
+        manualOverride: null,
+      },
+    ];
+
+    const groups = groupExamObjectiveOverviewRows(rows);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.studentAnswer).toBe('ANSWER');
+    expect(groups[0]?.rows).toHaveLength(2);
+  });
+
+  test('sets one answer group for the whole exam and adds the answer to the key', async () => {
+    const makeSection = (submissionId: string): SectionSubmission => ({
+      id: `section-${submissionId}`,
+      submissionId,
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [{
+          questionId: 'q-1',
+          studentAnswer: 'ANSWER',
+          correctAnswer: 'Answer',
+          isCorrect: false,
+          awardedScore: 0,
+          maxScore: 1,
+          scoringRule: 'exact_match',
+          hasOverride: false,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+      { id: 'submission-2', studentName: 'Mali Example' } as never,
+    ]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId)
+      .mockImplementation(async (submissionId) => [makeSection(submissionId)]);
+    vi.mocked(gradingService.upsertObjectiveOverride).mockResolvedValue({
+      success: true,
+      data: { regradeReport: {} as never },
+    });
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{
+          examTitle: 'IELTS Mock Test',
+          id: 'session-1',
+          scheduleId: 'schedule-1',
+        } as never}
+      />,
+    );
+
+    expect(await screen.findAllByText('ANSWER')).not.toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Accept and add to key' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Students affected');
+    fireEvent.click(screen.getByRole('button', { name: 'Accept and regrade' }));
+
+    await waitFor(() => expect(gradingService.upsertObjectiveOverride).toHaveBeenCalledTimes(1));
+    expect(gradingService.upsertObjectiveOverride).toHaveBeenCalledWith(
+      'schedule-1',
+      'q-1',
+      expect.objectContaining({
+        correctAnswer: 'Answer',
+        acceptedAnswers: ['Answer', 'ANSWER'],
+        scoringRule: 'exact_match',
+        maxScore: 1,
+      }),
+    );
+    expect(gradingService.overrideObjectiveQuestion).not.toHaveBeenCalled();
   });
 });

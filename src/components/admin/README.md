@@ -24,7 +24,13 @@ for the individual review screen:
 
 - It loads every submitted student's Reading/Listening objective rows for the selected grading session.
 - It keeps only typed-answer question blocks, excluding choice blocks using the session's immutable exam version.
+- It groups rows by the normalized student answer across the selected exam session, while retaining every student/question occurrence inside the group.
 - It keeps only rows where the raw student answer differs from an accepted key by capitalization and/or whitespace, while the normalized values match.
 - Punctuation changes, exact raw matches, genuinely incorrect answers, and choice answers are excluded.
-- The `Result` filter narrows the visible exception rows to all, correct, or incorrect without reloading the session.
-- A row-level decision uses the same submission-scoped override endpoint and remains drillable into that student's review.
+- The default `Incorrect` filter shows answer groups currently scored incorrect; `All` and `Correct` switch the view at group level without reloading the session.
+- Group summaries show the student answer, current key, affected student/question counts, and correctness status. Student/question evidence is collapsed by default and remains available through the accessible details disclosure.
+- Exam-wide decisions require confirmation showing the exact student/question impact, then report the persisted key update and regrade outcome in an inline live status message.
+- A group-level decision applies to the whole selected exam session through the schedule-scoped objective override endpoint; there are no per-row result buttons.
+- `Correct + add to answer key` merges every observed spelling/spacing variant in the group into the question's accepted answer key and regrades every submission in the session.
+- `Incorrect for whole exam` records the grouped answer as excluded for the affected question and regrades every submission in the session.
+- Student names remain drillable into the individual review screen, but the answer decision is never limited to that one student.

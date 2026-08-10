@@ -24,7 +24,18 @@ export interface ExamObjectiveOverviewRow {
   readonly isCorrect: boolean;
   readonly awardedScore: number;
   readonly maxScore: number;
+  readonly scoringRule: string;
+  readonly hasOverride: boolean;
   readonly manualOverride: ObjectiveManualOverride | null;
+}
+
+export type ExamObjectiveOverviewGroupStatus = 'correct' | 'incorrect';
+
+export interface ExamObjectiveOverviewGroup {
+  readonly groupId: string;
+  readonly studentAnswer: string;
+  readonly normalizedStudentAnswer: string;
+  readonly rows: readonly ExamObjectiveOverviewRow[];
 }
 
 export interface ExamObjectiveOverviewOptions {
@@ -193,6 +204,8 @@ export function buildExamObjectiveOverviewRows(
             studentAnswer: result.studentAnswer,
             correctAnswer,
             maxScore: result.maxScore,
+            scoringRule: result.scoringRule,
+            hasOverride: result.hasOverride,
             ...resolved,
             manualOverride: result.manualOverride ?? null,
           };
@@ -206,4 +219,35 @@ export function buildExamObjectiveOverviewRows(
       if (sectionOrder !== 0) return sectionOrder;
       return left.questionId.localeCompare(right.questionId, undefined, { numeric: true });
     });
+}
+
+export function groupExamObjectiveOverviewRows(
+  rows: readonly ExamObjectiveOverviewRow[],
+): ExamObjectiveOverviewGroup[] {
+  const grouped = new Map<string, ExamObjectiveOverviewGroup>();
+
+  for (const row of rows) {
+    const normalizedStudentAnswer = normalizeCaseInsensitiveAndWhitespace(row.studentAnswer);
+    const groupId = normalizedStudentAnswer || `empty:${row.rowId}`;
+    const existing = grouped.get(groupId);
+
+    if (existing) {
+      grouped.set(groupId, {
+        ...existing,
+        rows: [...existing.rows, row],
+      });
+      continue;
+    }
+
+    grouped.set(groupId, {
+      groupId,
+      studentAnswer: normalizeCaseAndWhitespace(row.studentAnswer),
+      normalizedStudentAnswer,
+      rows: [row],
+    });
+  }
+
+  return [...grouped.values()].sort((left, right) =>
+    left.studentAnswer.localeCompare(right.studentAnswer, undefined, { numeric: true }),
+  );
 }

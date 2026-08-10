@@ -309,6 +309,7 @@ export interface ObjectiveQuestionOverrideRequest {
 export interface ObjectiveOverridePayload {
   correctAnswer?: string | undefined;
   acceptedAnswers?: string[] | undefined;
+  excludedAnswers?: string[] | undefined;
   correctOptionIds?: string[] | undefined;
   scoringRule: string;
   maxScore: number;
@@ -336,6 +337,7 @@ export interface ObjectiveAutoGradingBackfillReport {
 export interface ObjectiveOverrideUpsertRequest {
   correctAnswer?: string | undefined;
   acceptedAnswers?: string[] | undefined;
+  excludedAnswers?: string[] | undefined;
   correctOptionIds?: string[] | undefined;
   scoringRule: string;
   maxScore: number;

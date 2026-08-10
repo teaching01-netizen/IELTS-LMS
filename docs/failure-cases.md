@@ -66,6 +66,39 @@ explicit answer-key variant with the same capitalization. A differently cased
 answer is incorrect unless that exact casing is separately configured as an
 accepted variant.
 
+## 2026-08-10: Overall Answer Decisions Must Be Exam-Scoped
+
+### Symptom
+The overall answer check displayed one action per student/question row. A grader
+had to repeat the same decision for every student, and accepting a case or spacing
+variant did not add that variant to the answer key for the exam.
+
+### Scope
+Admin overall answer check, schedule-scoped objective overrides, and Reading/Listening
+text-answer regrading.
+
+### Root Cause
+The overview used the submission-scoped correctness endpoint directly from each row.
+That endpoint can only change one student's persisted result and cannot update the
+exam's accepted answer set.
+
+### Fix
+- Group equivalent normalized student answers across the selected exam session.
+- Route group decisions through schedule-scoped objective overrides.
+- Merge observed variants into `acceptedAnswers` when a group is marked correct.
+- Persist excluded variants when a group is marked incorrect.
+- Regrade the full schedule after each answer-key decision.
+
+### Regression Protection
+- Tests: `src/components/admin/__tests__/ExamObjectiveOverviewPanel.test.tsx`,
+  `backend/crates/application/src/grading/mod.rs`
+- Rules/Docs updated: `src/components/admin/README.md`
+
+### Invariant
+An overall answer decision applies to every submission in the selected exam
+session, while student answers remain immutable and individual review remains
+available for drill-down.
+
 ---
 
 ## 2026-07-18: Inferred Viewport Geometry Survived Browser Recovery

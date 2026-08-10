@@ -607,6 +607,7 @@ pub struct CompleteUploadRequest {
 pub struct ObjectiveOverrideUpsertRequest {
     pub correct_answer: Option<String>,
     pub accepted_answers: Option<Vec<String>>,
+    pub excluded_answers: Option<Vec<String>>,
     pub correct_option_ids: Option<Vec<String>>,
     pub scoring_rule: String,
     pub max_score: i64,

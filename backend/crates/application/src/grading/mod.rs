@@ -91,6 +91,8 @@ struct ObjectiveOverridePayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_answers: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    excluded_answers: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     correct_option_ids: Option<Vec<String>>,
     scoring_rule: String,
     max_score: i64,
@@ -1694,6 +1696,7 @@ impl GradingService {
         let payload = ObjectiveOverridePayload {
             correct_answer: req.correct_answer.clone(),
             accepted_answers: req.accepted_answers.clone(),
+            excluded_answers: req.excluded_answers.clone(),
             correct_option_ids: req.correct_option_ids.clone(),
             scoring_rule: req.scoring_rule.clone(),
             max_score: req.max_score,
@@ -3455,6 +3458,10 @@ struct ObjectiveAnswerSpec {
 #[derive(Debug, Clone)]
 enum ObjectiveExpectedAnswer {
     TextAnyOf(HashSet<String>),
+    TextAnyOfExcluding {
+        expected: HashSet<String>,
+        excluded: HashSet<String>,
+    },
     ExactSet(HashSet<String>),
     MultiChoice(HashSet<String>),
 }
@@ -3472,6 +3479,17 @@ impl ObjectiveExpectedAnswer {
                 expected
                     .iter()
                     .any(|candidate| normalize_exact_text_for_match(candidate) == normalized_answer)
+            }
+            Self::TextAnyOfExcluding { expected, excluded } => {
+                let values = strict_text_values(value);
+                let Some(answer) = values.first() else {
+                    return false;
+                };
+                let normalized_answer = normalize_exact_text_for_match(answer);
+                !excluded.contains(&normalized_answer)
+                    && expected
+                        .iter()
+                        .any(|candidate| normalize_exact_text_for_match(candidate) == normalized_answer)
             }
             Self::ExactSet(expected) | Self::MultiChoice(expected) => {
                 !expected.is_empty() && strict_text_set(value) == *expected
@@ -4026,12 +4044,25 @@ fn apply_objective_scoring_overrides(
             override_payload.accepted_answers.as_deref(),
         );
         if !accepted.is_empty() {
-            spec.expected = ObjectiveExpectedAnswer::TextAnyOf(
-                accepted
-                    .iter()
-                    .map(|value| normalize_exact_text_for_match(value))
-                    .collect(),
-            );
+            let expected = accepted
+                .iter()
+                .map(|value| normalize_exact_text_for_match(value))
+                .collect::<HashSet<_>>();
+            let excluded = override_payload
+                .excluded_answers
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .flat_map(|value| split_accepted_answer_variants(value))
+                .map(normalize_exact_text)
+                .filter(|value| !value.is_empty())
+                .map(|value| normalize_exact_text_for_match(&value))
+                .collect::<HashSet<_>>();
+            spec.expected = if excluded.is_empty() {
+                ObjectiveExpectedAnswer::TextAnyOf(expected)
+            } else {
+                ObjectiveExpectedAnswer::TextAnyOfExcluding { expected, excluded }
+            };
             spec.correct_answer = Value::String(accepted.join(" | "));
         }
     }
@@ -4477,6 +4508,16 @@ fn matches_shared_sentence_answer(
             .iter()
             .map(|value| normalize_shared_sentence_answer(value))
             .any(|value| value == normalized),
+        ObjectiveExpectedAnswer::TextAnyOfExcluding { expected, excluded } => {
+            !excluded
+                .iter()
+                .map(|value| normalize_shared_sentence_answer(value))
+                .any(|value| value == normalized)
+                && expected
+                    .iter()
+                    .map(|value| normalize_shared_sentence_answer(value))
+                    .any(|value| value == normalized)
+        }
         ObjectiveExpectedAnswer::ExactSet(_) | ObjectiveExpectedAnswer::MultiChoice(_) => false,
     };
     if is_expected {
@@ -5415,6 +5456,7 @@ mod tests {
             ObjectiveOverridePayload {
                 correct_answer: Some("Accepted answer".to_owned()),
                 accepted_answers: None,
+                excluded_answers: None,
                 correct_option_ids: None,
                 scoring_rule: "exact_match".to_owned(),
                 max_score: 1,
@@ -5423,6 +5465,43 @@ mod tests {
         let results = compute_objective_auto_grading_results(
             "reading",
             &json!({ "short-1": "ACCEPTED ANSWER" }),
+            &json!({
+                "reading": {
+                    "passages": [{
+                        "blocks": [{
+                            "type": "SHORT_ANSWER",
+                            "questions": [{ "id": "short-1", "correctAnswer": "original" }]
+                        }]
+                    }]
+                }
+            }),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            Some(&overrides),
+        );
+
+        assert_eq!(results["questionResults"][0]["isCorrect"], false);
+    }
+
+    #[test]
+    fn schedule_text_override_can_exclude_an_answer_for_the_whole_schedule() {
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            "short-1".to_owned(),
+            ObjectiveOverridePayload {
+                correct_answer: Some("Accepted answer".to_owned()),
+                accepted_answers: Some(vec![
+                    "Accepted answer".to_owned(),
+                    "Accepted alternative".to_owned(),
+                ]),
+                excluded_answers: Some(vec!["Accepted answer".to_owned()]),
+                correct_option_ids: None,
+                scoring_rule: "exact_match".to_owned(),
+                max_score: 1,
+            },
+        );
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "short-1": "Accepted answer" }),
             &json!({
                 "reading": {
                     "passages": [{

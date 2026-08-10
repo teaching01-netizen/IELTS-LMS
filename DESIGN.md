@@ -91,6 +91,13 @@ below the desktop breakpoint so objective answer controls retain usable width.
 - **Motion**: 200–300ms panel/state transitions only.
 - **Layout**: stack within the center evidence canvas.
 
+### Exam answer group summary
+
+- **Structure**: student answer, current key, affected student/question counts, decision status, primary accept action, secondary reject action, and an expandable evidence table.
+- **Variants**: correct, incorrect, saving, saved confirmation, and save error.
+- **Accessibility**: group actions use explicit labels, evidence uses a native disclosure button with `aria-expanded`/`aria-controls`, status is written as text, and high-impact decisions use a labelled confirmation dialog.
+- **Interaction**: details are collapsed by default; confirmation states the exact scope before regrading; successful mutations announce the affected questions and students in a live status region.
+
 ## 6. Motion & Interaction
 
 Interactive feedback uses existing Tailwind transitions and the global reduced-motion
