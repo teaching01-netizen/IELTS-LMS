@@ -470,6 +470,53 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(screen.getByRole('heading', { name: 'WRONG' })).toBeInTheDocument();
   });
 
+  test('highlights a case-only answer-key variant beside the raw student answer', async () => {
+    const section = {
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [{
+          questionId: 'q-case',
+          studentAnswer: 'Faces of china',
+          correctAnswer: 'faces of china | FACES OF CHINA | Faces of China',
+          isCorrect: false,
+          awardedScore: 0,
+          maxScore: 1,
+          scoringRule: 'one_word',
+          hasOverride: false,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } satisfies SectionSubmission;
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Faces of china' })).toBeInTheDocument();
+    const caseMismatchMarks = screen.getAllByTitle('Case differs from student answer');
+    expect(caseMismatchMarks.map((element) => element.textContent)).toEqual([
+      'faces of china',
+      'FACES OF CHINA',
+      'Faces of China',
+    ]);
+    expect(caseMismatchMarks[0]).toHaveClass('bg-yellow-100');
+  });
+
   test('uses the active objective-grading draft after an answer-key update', async () => {
     const publishedState = createInitialExamState('IELTS Mock Test', 'Academic');
     publishedState.reading.passages = [{
@@ -551,6 +598,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     await waitFor(() => expect(gradingService.getObjectiveGradingSource).toHaveBeenCalledWith('schedule-1'));
     fireEvent.click(await screen.findByRole('button', { name: /^Correct/ }));
     expect(await screen.findByText('GARDEN HALL | Garden hall')).toBeInTheDocument();
+    expect(screen.queryByTitle('Case differs from student answer')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Garden hall' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'View 1 student and 1 question' }));
     expect(screen.getByText('1 / 1')).toBeInTheDocument();

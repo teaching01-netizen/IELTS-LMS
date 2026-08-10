@@ -51,6 +51,55 @@ function ResultBadge({ isCorrect }: { readonly isCorrect: boolean }) {
   );
 }
 
+function normalizeAnswerForCaseComparison(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
+}
+
+function isCaseOnlyMismatch(studentAnswer: string, answerKeyVariant: string): boolean {
+  const normalizedStudentAnswer = normalizeAnswerForCaseComparison(studentAnswer);
+  const normalizedAnswerKeyVariant = normalizeAnswerForCaseComparison(answerKeyVariant);
+
+  return normalizedStudentAnswer !== normalizedAnswerKeyVariant
+    && normalizedStudentAnswer.toLowerCase() === normalizedAnswerKeyVariant.toLowerCase();
+}
+
+function AnswerKeyVariantList({
+  variants,
+  studentAnswer,
+}: {
+  readonly variants: readonly string[];
+  readonly studentAnswer: string;
+}) {
+  const normalizedStudentAnswer = normalizeAnswerForCaseComparison(studentAnswer);
+  const hasExactKeyVariant = variants.some((variant) => (
+    normalizeAnswerForCaseComparison(variant) === normalizedStudentAnswer
+  ));
+
+  return (
+    <>
+      {variants.map((variant, index) => {
+        const highlightCaseMismatch = !hasExactKeyVariant
+          && isCaseOnlyMismatch(studentAnswer, variant);
+
+        return (
+          <React.Fragment key={variant}>
+            {index > 0 ? ' | ' : null}
+            {highlightCaseMismatch ? (
+              <mark
+                className="rounded-sm bg-yellow-100 px-1 text-yellow-900 ring-1 ring-inset ring-yellow-300"
+                title="Case differs from student answer"
+                aria-label={`Case differs from student answer: ${variant}`}
+              >
+                {variant}
+              </mark>
+            ) : variant}
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
+}
+
 function StatusPill({ status }: { readonly status: ExamObjectiveOverviewGroupStatus }) {
   const { label, className, Icon } = statusCopy[status];
   return (
@@ -71,12 +120,15 @@ export function ExamObjectiveOverviewGroupCard({
   const [expanded, setExpanded] = useState(false);
   const studentCount = new Set(group.rows.map((row) => row.submissionId)).size;
   const questionCount = new Set(group.rows.map((row) => row.questionId)).size;
-  const answerKeys = useMemo(() => [...new Set(
+  const answerKeyEntries = useMemo(() => [...new Set(
     group.rows.map((row) => row.correctAnswer.trim()).filter(Boolean),
   )], [group.rows]);
-  const currentKeySummary = answerKeys.length === 1
-    ? answerKeys[0]
-    : `${answerKeys.length} current keys across ${questionCount} questions`;
+  const answerKeyVariants = useMemo(() => [...new Set(
+    answerKeyEntries.flatMap((entry) => entry.split('|').map((variant) => variant.trim()).filter(Boolean)),
+  )], [answerKeyEntries]);
+  const currentKeySummary = answerKeyEntries.length === 1
+    ? <AnswerKeyVariantList variants={answerKeyVariants} studentAnswer={group.studentAnswer} />
+    : `${answerKeyEntries.length} current keys across ${questionCount} questions`;
   const headingId = `exam-answer-group-${group.rows[0]?.rowId ?? group.groupId}`;
   const detailsId = `${headingId}-details`;
 

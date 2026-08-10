@@ -29,6 +29,7 @@ for the individual review screen:
 - Punctuation changes, exact raw matches, genuinely incorrect answers, and choice answers are excluded.
 - The default `Incorrect` filter shows answer groups currently scored incorrect; `All` and `Correct` switch the view at group level without reloading the session.
 - Group summaries show the exact student answer text, current key, affected student/question counts, and correctness status. Student/question evidence is collapsed by default and remains available through the accessible details disclosure; the evidence table repeats the raw answer and uses human question labels such as `q-17`.
+- When no exact-casing accepted variant exists, answer-key variants that match the raw student answer only by capitalization are highlighted in yellow; an exact accepted variant suppresses that warning.
 - Exam-wide decisions require confirmation showing the exact student/question impact, then report the persisted key update and regrade outcome in an inline live status message.
 - A group-level decision applies to the whole selected exam session through the schedule-scoped objective override endpoint; there are no per-row result buttons.
 - `Correct + add to answer key` adds the selected exact answer text to the question's accepted answer key and regrades every submission in the session.
