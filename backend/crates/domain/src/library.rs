@@ -67,6 +67,23 @@ pub struct AdminDefaultProfile {
     pub revision: i32,
 }
 
+/// Organization-scoped export configuration saved for reuse by grading staff.
+/// The export plan remains the source of truth for resolved student paths; this
+/// record only stores the profile snapshot and its audit metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "sqlx", derive(FromRow))]
+#[serde(rename_all = "camelCase")]
+pub struct GradingExportProfile {
+    pub id: String,
+    pub organization_id: Option<String>,
+    pub profile_name: String,
+    pub config_snapshot: serde_json::Value,
+    pub created_by: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub revision: i32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePassageRequest {
@@ -118,4 +135,11 @@ pub struct UpdateQuestionRequest {
 pub struct UpdateExamDefaultsRequest {
     pub config_snapshot: serde_json::Value,
     pub revision: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateGradingExportProfileRequest {
+    pub profile_name: String,
+    pub config_snapshot: serde_json::Value,
 }

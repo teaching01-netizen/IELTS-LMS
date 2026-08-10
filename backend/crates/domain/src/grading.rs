@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::{collections::HashSet, fmt};
 
 #[cfg(feature = "sqlx")]
 use sqlx::FromRow;
@@ -122,6 +123,364 @@ pub enum ReleaseStatus {
     ReadyToRelease,
     Released,
     Reopened,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ObjectiveVerificationStatus {
+    VerifiedCorrect,
+    VerifiedIncorrect,
+    VerifiedUnanswered,
+    NeedsRecheck,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ObjectiveIntegrityIssueCode {
+    MissingAnswerKey,
+    InvalidAnswerKey,
+    AnswerKeyViolatesScoringRule,
+    UnsupportedQuestionType,
+    DuplicateQuestionId,
+    UnknownStudentAnswerId,
+    AnswerPayloadTypeInvalid,
+    SectionMappingUnavailable,
+    SectionMappingAmbiguous,
+    SubmissionMergeIncomplete,
+    GradingSourceStale,
+    ManualOverrideStale,
+}
+
+impl ObjectiveIntegrityIssueCode {
+    pub const fn is_invalid(self) -> bool {
+        matches!(
+            self,
+            Self::InvalidAnswerKey
+                | Self::AnswerKeyViolatesScoringRule
+                | Self::UnsupportedQuestionType
+                | Self::DuplicateQuestionId
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ObjectiveIntegrityStatus {
+    Verified,
+    NeedsRecheck,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveQuestionAudit {
+    pub question_id: String,
+    pub section: String,
+    pub status: ObjectiveVerificationStatus,
+    pub student_answer: Option<Value>,
+    pub accepted_answers: Vec<String>,
+    pub awarded_score: Option<f64>,
+    pub max_score: f64,
+    pub issue_code: Option<ObjectiveIntegrityIssueCode>,
+    pub issue_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveGradingAudit {
+    pub section: String,
+    pub expected_question_count: u32,
+    pub verified_correct_count: u32,
+    pub verified_incorrect_count: u32,
+    pub verified_unanswered_count: u32,
+    pub unresolved_count: u32,
+    pub invalid_count: u32,
+    pub unknown_answer_count: u32,
+    pub integrity_status: ObjectiveIntegrityStatus,
+    pub grading_source_version_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unknown_answer_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub issue_codes: Vec<ObjectiveIntegrityIssueCode>,
+    pub questions: Vec<ObjectiveQuestionAudit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObjectiveIntegrityInvariantError {
+    ExpectedQuestionAccountingMismatch {
+        expected: u32,
+        accounted: u32,
+    },
+    QuestionCountMismatch {
+        expected: u32,
+        actual: u32,
+    },
+    DuplicateQuestionIdentity {
+        identity: String,
+    },
+    UnknownAnswerCountMismatch {
+        expected: u32,
+        actual: u32,
+    },
+    IntegrityStatusMismatch {
+        expected: ObjectiveIntegrityStatus,
+        actual: ObjectiveIntegrityStatus,
+    },
+}
+
+impl fmt::Display for ObjectiveIntegrityInvariantError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ExpectedQuestionAccountingMismatch {
+                expected,
+                accounted,
+            } => write!(
+                formatter,
+                "objective question accounting mismatch: expected {expected}, accounted {accounted}"
+            ),
+            Self::QuestionCountMismatch { expected, actual } => write!(
+                formatter,
+                "objective audit question count mismatch: expected {expected}, actual {actual}"
+            ),
+            Self::DuplicateQuestionIdentity { identity } => {
+                write!(
+                    formatter,
+                    "duplicate objective question identity: {identity}"
+                )
+            }
+            Self::UnknownAnswerCountMismatch { expected, actual } => write!(
+                formatter,
+                "unknown objective answer count mismatch: expected {expected}, actual {actual}"
+            ),
+            Self::IntegrityStatusMismatch { expected, actual } => write!(
+                formatter,
+                "objective integrity status mismatch: expected {expected:?}, actual {actual:?}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ObjectiveIntegrityInvariantError {}
+
+impl ObjectiveGradingAudit {
+    pub fn from_questions(
+        section: impl Into<String>,
+        grading_source_version_id: impl Into<String>,
+        questions: Vec<ObjectiveQuestionAudit>,
+        unknown_answer_ids: Vec<String>,
+        issue_codes: Vec<ObjectiveIntegrityIssueCode>,
+    ) -> Self {
+        let expected_question_count = questions.len().try_into().unwrap_or(u32::MAX);
+        let verified_correct_count = questions
+            .iter()
+            .filter(|question| question.status == ObjectiveVerificationStatus::VerifiedCorrect)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let verified_incorrect_count = questions
+            .iter()
+            .filter(|question| question.status == ObjectiveVerificationStatus::VerifiedIncorrect)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let verified_unanswered_count = questions
+            .iter()
+            .filter(|question| question.status == ObjectiveVerificationStatus::VerifiedUnanswered)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let invalid_count = questions
+            .iter()
+            .filter(|question| question.status == ObjectiveVerificationStatus::Invalid)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let unresolved_count = expected_question_count
+            .saturating_sub(verified_correct_count)
+            .saturating_sub(verified_incorrect_count)
+            .saturating_sub(verified_unanswered_count);
+        let mut unknown_answer_ids = unknown_answer_ids;
+        unknown_answer_ids.sort();
+        unknown_answer_ids.dedup();
+        let unknown_answer_count = unknown_answer_ids.len().try_into().unwrap_or(u32::MAX);
+        let mut issue_codes = issue_codes;
+        for question in &questions {
+            if let Some(issue_code) = question.issue_code {
+                if !issue_codes.contains(&issue_code) {
+                    issue_codes.push(issue_code);
+                }
+            }
+        }
+        if unknown_answer_count > 0
+            && !issue_codes.contains(&ObjectiveIntegrityIssueCode::UnknownStudentAnswerId)
+        {
+            issue_codes.push(ObjectiveIntegrityIssueCode::UnknownStudentAnswerId);
+        }
+        let integrity_status = derive_integrity_status(
+            invalid_count,
+            unresolved_count,
+            unknown_answer_count,
+            &issue_codes,
+        );
+
+        Self {
+            section: section.into(),
+            expected_question_count,
+            verified_correct_count,
+            verified_incorrect_count,
+            verified_unanswered_count,
+            unresolved_count,
+            invalid_count,
+            unknown_answer_count,
+            integrity_status,
+            grading_source_version_id: grading_source_version_id.into(),
+            unknown_answer_ids,
+            issue_codes,
+            questions,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ObjectiveIntegrityInvariantError> {
+        let actual_question_count = self.questions.len().try_into().unwrap_or(u32::MAX);
+        if actual_question_count != self.expected_question_count {
+            return Err(ObjectiveIntegrityInvariantError::QuestionCountMismatch {
+                expected: self.expected_question_count,
+                actual: actual_question_count,
+            });
+        }
+
+        let mut identities = HashSet::new();
+        for question in &self.questions {
+            let identity = format!("{}:{}", question.section, question.question_id);
+            if !identities.insert(identity.clone()) {
+                return Err(
+                    ObjectiveIntegrityInvariantError::DuplicateQuestionIdentity { identity },
+                );
+            }
+        }
+
+        let verified_correct_count = self
+            .questions
+            .iter()
+            .filter(|question| question.status == ObjectiveVerificationStatus::VerifiedCorrect)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let verified_incorrect_count = self
+            .questions
+            .iter()
+            .filter(|question| question.status == ObjectiveVerificationStatus::VerifiedIncorrect)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let verified_unanswered_count = self
+            .questions
+            .iter()
+            .filter(|question| question.status == ObjectiveVerificationStatus::VerifiedUnanswered)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let invalid_count = self
+            .questions
+            .iter()
+            .filter(|question| question.status == ObjectiveVerificationStatus::Invalid)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let unresolved_count = self
+            .expected_question_count
+            .saturating_sub(verified_correct_count)
+            .saturating_sub(verified_incorrect_count)
+            .saturating_sub(verified_unanswered_count);
+        let accounted = verified_correct_count
+            .saturating_add(verified_incorrect_count)
+            .saturating_add(verified_unanswered_count)
+            .saturating_add(unresolved_count);
+        if accounted != self.expected_question_count
+            || verified_correct_count != self.verified_correct_count
+            || verified_incorrect_count != self.verified_incorrect_count
+            || verified_unanswered_count != self.verified_unanswered_count
+            || unresolved_count != self.unresolved_count
+            || invalid_count != self.invalid_count
+        {
+            return Err(
+                ObjectiveIntegrityInvariantError::ExpectedQuestionAccountingMismatch {
+                    expected: self.expected_question_count,
+                    accounted,
+                },
+            );
+        }
+
+        let actual_unknown_count = self.unknown_answer_ids.len().try_into().unwrap_or(u32::MAX);
+        if actual_unknown_count != self.unknown_answer_count {
+            return Err(
+                ObjectiveIntegrityInvariantError::UnknownAnswerCountMismatch {
+                    expected: self.unknown_answer_count,
+                    actual: actual_unknown_count,
+                },
+            );
+        }
+
+        let expected_integrity_status = derive_integrity_status(
+            self.invalid_count,
+            self.unresolved_count,
+            self.unknown_answer_count,
+            &self.issue_codes,
+        );
+        if expected_integrity_status != self.integrity_status {
+            return Err(ObjectiveIntegrityInvariantError::IntegrityStatusMismatch {
+                expected: expected_integrity_status,
+                actual: self.integrity_status,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn has_blocking_issue(&self) -> bool {
+        self.integrity_status != ObjectiveIntegrityStatus::Verified
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveIntegrityIssueSummary {
+    pub submission_id: String,
+    pub student_id: String,
+    pub student_name: String,
+    pub section: String,
+    pub question_id: Option<String>,
+    pub question_number: Option<String>,
+    pub code: ObjectiveIntegrityIssueCode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveIntegrityOverview {
+    pub student_count: u64,
+    pub expected_answer_count: u64,
+    pub verified_correct_count: u64,
+    pub verified_incorrect_count: u64,
+    pub verified_unanswered_count: u64,
+    pub needs_recheck_count: u64,
+    pub invalid_count: u64,
+    pub integrity_status: ObjectiveIntegrityStatus,
+    pub issues: Vec<ObjectiveIntegrityIssueSummary>,
+}
+
+fn derive_integrity_status(
+    invalid_count: u32,
+    unresolved_count: u32,
+    unknown_answer_count: u32,
+    issue_codes: &[ObjectiveIntegrityIssueCode],
+) -> ObjectiveIntegrityStatus {
+    if invalid_count > 0 || issue_codes.iter().any(|code| code.is_invalid()) {
+        ObjectiveIntegrityStatus::Invalid
+    } else if unresolved_count > 0 || unknown_answer_count > 0 || !issue_codes.is_empty() {
+        ObjectiveIntegrityStatus::NeedsRecheck
+    } else {
+        ObjectiveIntegrityStatus::Verified
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -630,4 +989,86 @@ pub struct GradingScheduleObjectiveOverride {
     pub updated_by_actor_id: String,
     pub updated_by_actor_name: String,
     pub updated_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod objective_integrity_tests {
+    use super::*;
+
+    fn question(question_id: &str, status: ObjectiveVerificationStatus) -> ObjectiveQuestionAudit {
+        ObjectiveQuestionAudit {
+            question_id: question_id.to_owned(),
+            section: "reading".to_owned(),
+            status,
+            student_answer: None,
+            accepted_answers: Vec::new(),
+            awarded_score: None,
+            max_score: 1.0,
+            issue_code: None,
+            issue_message: None,
+        }
+    }
+
+    #[test]
+    fn audit_counts_all_terminal_and_unresolved_question_states() {
+        let audit = ObjectiveGradingAudit::from_questions(
+            "reading",
+            "version-1",
+            vec![
+                question("q1", ObjectiveVerificationStatus::VerifiedCorrect),
+                question("q2", ObjectiveVerificationStatus::VerifiedIncorrect),
+                question("q3", ObjectiveVerificationStatus::VerifiedUnanswered),
+                question("q4", ObjectiveVerificationStatus::NeedsRecheck),
+            ],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert_eq!(audit.expected_question_count, 4);
+        assert_eq!(audit.verified_correct_count, 1);
+        assert_eq!(audit.verified_incorrect_count, 1);
+        assert_eq!(audit.verified_unanswered_count, 1);
+        assert_eq!(audit.unresolved_count, 1);
+        assert_eq!(
+            audit.integrity_status,
+            ObjectiveIntegrityStatus::NeedsRecheck
+        );
+        assert!(audit.validate().is_ok());
+    }
+
+    #[test]
+    fn audit_rejects_a_verified_status_with_unresolved_questions() {
+        let mut audit = ObjectiveGradingAudit::from_questions(
+            "reading",
+            "version-1",
+            vec![question("q1", ObjectiveVerificationStatus::NeedsRecheck)],
+            Vec::new(),
+            Vec::new(),
+        );
+        audit.integrity_status = ObjectiveIntegrityStatus::Verified;
+
+        assert!(matches!(
+            audit.validate(),
+            Err(ObjectiveIntegrityInvariantError::IntegrityStatusMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn audit_rejects_duplicate_section_question_identity() {
+        let audit = ObjectiveGradingAudit::from_questions(
+            "reading",
+            "version-1",
+            vec![
+                question("q1", ObjectiveVerificationStatus::VerifiedCorrect),
+                question("q1", ObjectiveVerificationStatus::VerifiedIncorrect),
+            ],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert!(matches!(
+            audit.validate(),
+            Err(ObjectiveIntegrityInvariantError::DuplicateQuestionIdentity { .. })
+        ));
+    }
 }

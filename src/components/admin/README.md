@@ -35,3 +35,15 @@ for the individual review screen:
 - `Accept this answer and add to key` adds the selected exact answer text to the question's accepted answer key and regrades every submission in the session.
 - `Incorrect for whole exam` records the grouped answer as excluded for the affected question and regrades every submission in the session.
 - Student names remain drillable into the individual review screen, but the answer decision is never limited to that one student.
+
+## Export Builder memory
+
+Bulk PDF exports are planned before they are rendered. Keep filters and selection as separate state,
+carry the resolved `ExportPlan` into ZIP packaging, and leave `gradingPerStudentExport/studentPdf.ts`
+unchanged when folder or filename requirements evolve. Canonical naming uses `nickname`, `wcode`, `level`,
+and `fullName`; missing identity fields must be visible in the preview rather than silently producing an
+ambiguous path.
+
+Export profiles are organization-scoped records served by `/v1/settings/export-profiles`. The frontend
+adapter may fall back to browser storage only when the backend is unavailable, so shared profiles remain
+the normal source of truth.

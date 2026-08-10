@@ -1,8 +1,8 @@
 use chrono::Utc;
 use ielts_backend_domain::library::{
-    AdminDefaultProfile, CreatePassageRequest, CreateQuestionRequest, Difficulty,
-    PassageLibraryItem, QuestionBankItem, UpdateExamDefaultsRequest, UpdatePassageRequest,
-    UpdateQuestionRequest,
+    AdminDefaultProfile, CreateGradingExportProfileRequest, CreatePassageRequest,
+    CreateQuestionRequest, Difficulty, GradingExportProfile, PassageLibraryItem, QuestionBankItem,
+    UpdateExamDefaultsRequest, UpdatePassageRequest, UpdateQuestionRequest,
 };
 use ielts_backend_infrastructure::actor_context::ActorContext;
 use sqlx::MySqlPool;
@@ -348,6 +348,72 @@ impl LibraryService {
         q = q.bind(limit);
 
         q.fetch_all(&self.pool).await.map_err(LibraryError::from)
+    }
+
+    // Grading Export Profiles
+
+    pub async fn list_grading_export_profiles(
+        &self,
+        ctx: &ActorContext,
+    ) -> Result<Vec<GradingExportProfile>, LibraryError> {
+        let organization_id = ctx.organization_id.as_ref().map(|id| id.to_string());
+        sqlx::query_as::<_, GradingExportProfile>(
+            "SELECT * FROM grading_export_profiles WHERE organization_id <=> ? ORDER BY updated_at DESC, id DESC",
+        )
+        .bind(organization_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(LibraryError::from)
+    }
+
+    pub async fn create_grading_export_profile(
+        &self,
+        ctx: &ActorContext,
+        req: CreateGradingExportProfileRequest,
+    ) -> Result<GradingExportProfile, LibraryError> {
+        let profile_name = req.profile_name.trim();
+        if profile_name.is_empty() {
+            return Err(LibraryError::Validation(
+                "Export profile name is required".to_string(),
+            ));
+        }
+        if profile_name.chars().count() > 255 {
+            return Err(LibraryError::Validation(
+                "Export profile name must be 255 characters or fewer".to_string(),
+            ));
+        }
+        if !req.config_snapshot.is_object() {
+            return Err(LibraryError::Validation(
+                "Export profile snapshot must be a JSON object".to_string(),
+            ));
+        }
+
+        let id = Uuid::new_v4();
+        let organization_id = ctx.organization_id.as_ref().map(|value| value.to_string());
+        sqlx::query(
+            r#"
+            INSERT INTO grading_export_profiles (
+                id, organization_id, profile_name, config_snapshot,
+                created_by, created_at, updated_at, revision
+            )
+            VALUES (?, ?, ?, ?, ?, NOW(), NOW(), 0)
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(organization_id)
+        .bind(profile_name)
+        .bind(&req.config_snapshot)
+        .bind(&ctx.actor_id)
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query_as::<_, GradingExportProfile>(
+            "SELECT * FROM grading_export_profiles WHERE id = ?",
+        )
+        .bind(id.to_string())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(LibraryError::from)
     }
 
     // Admin Default Profiles

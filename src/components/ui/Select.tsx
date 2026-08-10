@@ -7,6 +7,7 @@ interface SelectOption {
 }
 
 interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'size'> {
+  size?: number;
   label?: string;
   error?: string;
   helperText?: string;

@@ -59,7 +59,11 @@ describe('createPerStudentZipPdfExport', () => {
 
     const entries = unzipSync(exportResult.bytes);
     expect(Object.keys(entries)).toEqual(
-      expect.arrayContaining(['manifest.json', 'Ada Student_sub-1_reading-writing.pdf', 'Ben Student_sub-2_reading-writing.pdf']),
+      expect.arrayContaining([
+        'manifest.json',
+        'No nickname (student-sub-1) - No level - Ada Student.pdf',
+        'No nickname (student-sub-2) - No level - Ben Student.pdf',
+      ]),
     );
 
     const manifestRaw = entries['manifest.json'];
@@ -69,7 +73,7 @@ describe('createPerStudentZipPdfExport', () => {
     expect(manifest.sections).toEqual(['reading', 'writing']);
     expect(manifest.pdfMode).toBe('combined');
     expect(manifest.students).toHaveLength(2);
-    expect(manifest.students[0]?.outputs).toEqual(['Ada Student_sub-1_reading-writing.pdf']);
+    expect(manifest.students[0]?.outputs).toEqual(['No nickname (student-sub-1) - No level - Ada Student.pdf']);
   });
 
   test('includes listening in combined mode when selected', async () => {
@@ -103,13 +107,77 @@ describe('createPerStudentZipPdfExport', () => {
 
     const entries = unzipSync(exportResult.bytes);
     expect(Object.keys(entries)).toEqual(
-      expect.arrayContaining(['manifest.json', 'Ada Student_sub-1_listening-reading.pdf']),
+      expect.arrayContaining(['manifest.json', 'No nickname (student-sub-1) - No level - Ada Student.pdf']),
     );
 
     const manifest = JSON.parse(strFromU8(entries['manifest.json'] as Uint8Array));
     expect(manifest.sections).toEqual(['reading', 'listening']);
     expect(manifest.pdfMode).toBe('combined');
-    expect(manifest.students[0]?.outputs).toEqual(['Ada Student_sub-1_listening-reading.pdf']);
+    expect(manifest.students[0]?.outputs).toEqual(['No nickname (student-sub-1) - No level - Ada Student.pdf']);
+  });
+
+  test('packages the deterministic plan path and records the plan snapshot', async () => {
+    const objectiveColumns: CsvColumn[] = [
+      { key: 'studentName', label: 'Student Name' },
+      { key: 'answer:q1', label: 'Q1 Answer' },
+    ];
+
+    const exportResult = await createPerStudentZipPdfExport({
+      filenameBase: 'grading-export',
+      generatedAt: new Date('2026-08-10T00:00:00.000Z'),
+      sections: ['reading'],
+      plan: {
+        profile: { id: 'warwick-standard', name: 'Warwick standard export', version: 1 },
+        grouping: ['course', 'level'],
+        filenameTemplate: '{{nickname}} ({{wcode}}) - {{level}} - {{fullName}}.pdf',
+        matchedCount: 1,
+        selectedCount: 1,
+        folderCount: 2,
+        pdfCount: 1,
+        warnings: [],
+        conflicts: [],
+      },
+      students: [
+        {
+          submissionId: 'sub-1',
+          studentName: 'Somsri Saelim',
+          studentId: 'W12345',
+          nickname: 'Mew',
+          ieltsCourse: 'IELTS Advanced',
+          sectionData: {
+            reading: {
+              columns: objectiveColumns,
+              row: { studentName: 'Somsri Saelim', 'answer:q1': 'A' },
+            },
+          },
+          plannedOutputs: [
+            {
+              folderPath: ['IELTS Advanced', 'Level 5'],
+              filename: 'Mew (W12345) - Level 5 - Somsri Saelim.pdf',
+              path: 'IELTS Advanced/Level 5/Mew (W12345) - Level 5 - Somsri Saelim.pdf',
+            },
+          ],
+          wcode: 'W12345',
+          level: 'Level 5',
+        },
+      ],
+    });
+
+    const entries = unzipSync(exportResult.bytes);
+    expect(Object.keys(entries)).toEqual(
+      expect.arrayContaining([
+        'manifest.json',
+        'IELTS Advanced/Level 5/Mew (W12345) - Level 5 - Somsri Saelim.pdf',
+      ]),
+    );
+
+    const manifest = JSON.parse(strFromU8(entries['manifest.json'] as Uint8Array));
+    expect(manifest.plan.profile.id).toBe('warwick-standard');
+    expect(manifest.students[0]?.wcode).toBe('W12345');
+    expect(manifest.students[0]?.level).toBe('Level 5');
+    expect(manifest.students[0]?.outputs).toEqual([
+      'IELTS Advanced/Level 5/Mew (W12345) - Level 5 - Somsri Saelim.pdf',
+    ]);
   });
 
   test('builds per-student folders with one PDF per section in separate mode', async () => {
@@ -141,9 +209,9 @@ describe('createPerStudentZipPdfExport', () => {
     expect(Object.keys(entries)).toEqual(
       expect.arrayContaining([
         'manifest.json',
-        'Ada Student_sub-1/Ada Student_sub-1_listening-reading-writing.pdf',
-        'Ada Student_sub-1/Ada Student_sub-1_listening-reading-writing (2).pdf',
-        'Ada Student_sub-1/Ada Student_sub-1_listening-reading-writing (3).pdf',
+        'Ada Student_sub-1/No nickname (student-sub-1) - No level - Ada Student.pdf',
+        'Ada Student_sub-1/No nickname (student-sub-1) - No level - Ada Student (2).pdf',
+        'Ada Student_sub-1/No nickname (student-sub-1) - No level - Ada Student (3).pdf',
       ]),
     );
 

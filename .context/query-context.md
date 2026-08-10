@@ -1,103 +1,100 @@
 # SigMap Query Context
-Generated: 2026-05-10T06:27:19.105Z
+Generated: 2026-08-04T14:32:45.471Z
 
-## src/features/builder/routes/BuilderRoot.tsx
+## src/features/student/hooks/studentSessionStateMachine.ts
 ```
-component ScoringAside
-component BuilderRoot
-hook useParams
-hook useNavigate
-hook useLocation
-hook useBuilderRouteController
-hook useUndoRedo
+export interface StudentAnswerInvariantRolloutState
+enabled: boolean
+killSwitch: boolean
+cohort: string | null
+configFingerprint: string | null
+source: 'default' | 'runtime'
+export interface StudentSessionMachineEventContext
+applyEpoch: number
+currentEpoch: number
+scheduleId: string | null
+attemptId: string | null
+syncState: string
+source: 'refresh' | 'load'
+rollout: StudentAnswerInvariantRolloutState
+incomingFreshness: LiveSnapshotFreshness
+export interface StudentSessionMachineDecision
+discardAll: boolean
+applyAttempt: boolean
+applyRuntime: boolean
+export interface StudentSessionMetricCommand
+```
+
+## backend/crates/domain/src/attempt.rs
+```
+pub struct QuestionValueMutationPayload
+pub struct QuestionIdMutationPayload
+pub struct QuestionSlotValueMutationPayload
+pub struct QuestionSlotIdMutationPayload
+pub struct TaskValueMutationPayload
+pub struct TaskIdMutationPayload
+pub struct PositionMutationPayload
+pub struct ViolationMutationPayload
+pub struct TelemetryMutationPayload
+pub struct ObjectiveAnswers
+pub struct WritingAnswers
+pub struct QuestionFlags
+pub struct StudentIntegrity
+pub struct StudentClientPosition
+pub struct StudentRecovery
+pub struct ViolationSnapshotEntry
+pub struct ViolationsSnapshot
+pub struct StudentAttempt
+pub struct StudentAttemptMutation
+pub struct StudentHeartbeatEvent
+```
+
+## k6/prod-submit-storm-200.js
+```
+export function setup()
+export function controlFlow(data)
+export function studentFlow(data)
+export function handleSummary(data)
+function progressiveValues(finalValue, steps)
+function looksLikeRuntimeAlreadyExistsError(resp)
+function normalizeText(value)
+function canonicalObjective(value)
+function canonicalWriting(value)
+function hash12(value)
+function findByKeyDeep(root, key)
+function objectiveTargetKey(target)
+function collectObjectiveTargets(contentSnapshot)
+function collectWritingTargets(contentSnapshot)
+function buildExpectedAnswerMaps(localRunId, student, objectiveTargets, writingIds)
+function buildMutationBatch(stepIndex, stepCount, objectiveTargets, writingIds, expectedObjective, expectedWriting)
+function collectMismatches(attempt, objectiveTargets, expectedObjective, writingTargets, expectedWriting)
+```
+
+## backend/crates/api/src/runtime_auto_advance.rs
+```
+pub fn spawn_runtime_auto_advance(state: AppState) → Option<tokio::task::JoinHan...
+```
+
+## src/components/admin/StudentReviewWorkspace.tsx
+```
+component StudentReviewWorkspace
+props StudentReviewWorkspaceProps
 hook useState
 hook useRef
 hook useEffect
+hook useCallback
 hook useMemo
-hook useKeyboardShortcuts
-export BuilderRoot
-handler onThreshold
-handler onChange
-handler onSubmitGrade
-handler onIndex
-handler onAction
-handler onUpdateState
-handler onReturnToAdmin
-```
-
-## src/features/builder/hooks/useBuilderRouteController.ts
-```
-export interface BuilderRouteController
-error: string | null
-exam: ExamEntity | undefined
-isLoading: boolean
-state: ExamState | null
-handleArchive: () => Promise<void>
-handleOpenScheduling: () => void
-handlePublish: (notes?: string) => Promise<void>
-handleReturnToAdmin: () => void
-export function useBuilderRouteController(examId?,) → BuilderRouteController
-```
-
-## src/features/admin/contracts/index.ts
-```
-export interface AdminRootProps
-onNavigate: (mode: 'builder' | 'student' | 'adm
-exams: Exam[]
-examEntities: ExamEntity[]
-schedules: ExamSchedule[]
-defaults: ExamConfig
-setDefaults: (config: ExamConfig) => void
-export interface ExamOperationCallbacks
-onEditExam: (id: string) => void
-onCreateExam: ( title: string, type: 'Academic' |
-onCloneExam?: (examId: string, newTitle: string)
-onCreateFromTemplate?: (templateId: string, newTitle: stri
-export interface VersionManagementCallbacks
-onGetVersions: (examId: string) => Promise<ExamVer
-onGetEvents: (examId: string) => Promise<ExamEve
-onRestoreVersion: (versionId: string) => Promise<void
-onRepublishVersion: (versionId: string) => Promise<void
-onCompareVersions: (versionIdA: string, versionIdB: st
-export interface ScheduleManagementCallbacks
-onCreateSchedule: (schedule: ExamSchedule) => Promise
-```
-
-## src/features/builder/routes/ExamPreviewRoute.tsx
-```
-component ExamPreviewRoute
-component RuntimePreviewSurface
-hook useParams
-hook useNavigate
-hook useSearchParams
-hook useAuthSession
-hook useBuilderRouteController
-hook useState
-hook useMemo
-hook useEffect
-hook useStudentSessionRouteData
-export ExamPreviewRoute
-handler onModuleChange
-handler onChange
-handler onExit
-handler onRuntimeRefresh
-```
-
-## src/features/builder/routes/ExamReviewRoute.tsx
-```
-component ExamReviewRoute
-hook useParams
-hook useReviewRouteController
-hook useState
-export ExamReviewRoute
-handler onNavigateToBuilder
-handler onPublish
-handler onSchedulePublish
-handler onUnpublish
-handler onNumber
-handler onRestoreVersion
-handler onRepublishVersion
-handler onCompareVersions
-handler onCreateSchedule
+export StudentReviewWorkspaceProps
+export StudentReviewWorkspace
+handler onLoadSeq
+handler onId
+handler onAdd
+handler onDelete
+handler onSubmission
+handler onAnswers
+handler onCount
+handler onTaskBySlot
+handler onBands
 handler onClick
+handler onSub
 ```

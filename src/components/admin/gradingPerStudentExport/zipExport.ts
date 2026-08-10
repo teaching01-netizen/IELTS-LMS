@@ -11,9 +11,18 @@ import type {
   PerStudentZipPdfExportInput,
   PerStudentZipPdfExportManifest,
   PerStudentZipPdfExportManifestStudent,
+  PerStudentZipPdfPlannedOutput,
   PerStudentZipPdfExportResult,
   PerStudentZipPdfMode,
 } from './types';
+
+function safePlannedOutputPath(output: PerStudentZipPdfPlannedOutput): string {
+  const folderPath = output.folderPath
+    .map((segment) => sanitizeFilenameSegment(segment) || 'Unlabelled')
+    .filter((segment) => segment.length > 0);
+  const filename = output.filename.trim() || 'student.pdf';
+  return [...folderPath, filename].join('/');
+}
 
 export async function createPerStudentZipPdfExport(
   input: PerStudentZipPdfExportInput,
@@ -30,13 +39,54 @@ export async function createPerStudentZipPdfExport(
 
   const pdfMode: PerStudentZipPdfMode = input.pdfMode ?? 'combined';
   const template = (input.pdfFilenameTemplate || '').trim() || DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE;
-  if (pdfMode === 'combined') {
+  const hasPlannedOutputs = input.students.length > 0 && input.students.every((student) => student.plannedOutputs !== undefined);
+  if (hasPlannedOutputs) {
+    for (const student of input.students) {
+      const plannedOutputs = student.plannedOutputs ?? [];
+      const outputs: string[] = [];
+      const errors: string[] = [];
+
+      for (const output of plannedOutputs) {
+        const zipPath = safePlannedOutputPath(output);
+        try {
+          const sectionsForPdf = output.section ? [output.section] : sections;
+          const pdfBytes = buildStudentPdfBytes(student, sectionsForPdf, input.generatedAt);
+          files[zipPath] = pdfBytes;
+          outputs.push(zipPath);
+        } catch (error) {
+          const prefix = output.section ? `${output.section}: ` : '';
+          errors.push(`${prefix}${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }
+
+      const firstOutput = plannedOutputs[0];
+      manifestStudents.push({
+        submissionId: student.submissionId,
+        studentId: student.studentId,
+        studentName: student.studentName,
+        nickname: student.nickname ?? undefined,
+        ieltsCourse: student.ieltsCourse ?? undefined,
+        wcode: student.wcode ?? student.studentId,
+        level: student.level ?? student.ieltsCourse ?? undefined,
+        outputs,
+        filename: pdfMode === 'combined'
+          ? (outputs[0] ?? '')
+          : (firstOutput?.folderPath.join('/') ?? ''),
+        status: errors.length === 0 && outputs.length > 0 ? 'ok' : 'failed',
+        error: errors.length > 0 ? errors.join('; ') : undefined,
+      });
+    }
+  } else if (pdfMode === 'combined') {
     const desiredPdfFilenames = input.students.map((student) =>
       renderPerStudentPdfFilenameTemplate(template, {
         studentName: student.studentName,
         studentId: student.studentId,
+        fullName: student.studentName,
+        wcode: student.studentId,
+        level: student.ieltsCourse ?? 'No level',
         studentEmail: student.studentEmail,
-        nickname: student.nickname,
+        nickname: student.nickname ?? 'No nickname',
+        course: student.ieltsCourse,
         ieltsCourse: student.ieltsCourse,
         submissionId: student.submissionId,
         examTitle: input.session?.examTitle,
@@ -50,6 +100,7 @@ export async function createPerStudentZipPdfExport(
 
     for (let i = 0; i < input.students.length; i += 1) {
       const student = input.students[i];
+      if (!student) continue;
       const pdfFilename = pdfFilenames[i] ?? `student_${i + 1}_${sectionSuffix}.pdf`;
 
       try {
@@ -61,6 +112,8 @@ export async function createPerStudentZipPdfExport(
           studentName: student.studentName,
           nickname: student.nickname ?? undefined,
           ieltsCourse: student.ieltsCourse ?? undefined,
+          wcode: student.studentId,
+          level: student.ieltsCourse ?? undefined,
           outputs: [pdfFilename],
           filename: pdfFilename,
           status: 'ok',
@@ -72,6 +125,8 @@ export async function createPerStudentZipPdfExport(
           studentName: student.studentName,
           nickname: student.nickname ?? undefined,
           ieltsCourse: student.ieltsCourse ?? undefined,
+          wcode: student.studentId,
+          level: student.ieltsCourse ?? undefined,
           outputs: [pdfFilename],
           filename: pdfFilename,
           status: 'failed',
@@ -85,14 +140,19 @@ export async function createPerStudentZipPdfExport(
 
     for (let studentIndex = 0; studentIndex < input.students.length; studentIndex += 1) {
       const student = input.students[studentIndex];
+      if (!student) continue;
       const folderName = folderNames[studentIndex] ?? `student_${studentIndex + 1}`;
 
       const desiredStudentPdfFilenames = sections.map((section) =>
         renderPerStudentPdfFilenameTemplate(template, {
           studentName: student.studentName,
           studentId: student.studentId,
+          fullName: student.studentName,
+          wcode: student.studentId,
+          level: student.ieltsCourse ?? 'No level',
           studentEmail: student.studentEmail,
-          nickname: student.nickname,
+          nickname: student.nickname ?? 'No nickname',
+          course: student.ieltsCourse,
           ieltsCourse: student.ieltsCourse,
           submissionId: student.submissionId,
           examTitle: input.session?.examTitle,
@@ -109,6 +169,7 @@ export async function createPerStudentZipPdfExport(
       const errors: string[] = [];
       for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
         const section = sections[sectionIndex];
+        if (!section) continue;
         const pdfFilename = studentPdfFilenames[sectionIndex] ?? `${section}.pdf`;
         const zipPath = `${folderName}/${pdfFilename}`;
 
@@ -127,6 +188,8 @@ export async function createPerStudentZipPdfExport(
         studentName: student.studentName,
         nickname: student.nickname ?? undefined,
         ieltsCourse: student.ieltsCourse ?? undefined,
+        wcode: student.studentId,
+        level: student.ieltsCourse ?? undefined,
         outputs,
         filename: folderName,
         status: errors.length === 0 && outputs.length > 0 ? 'ok' : 'failed',
@@ -142,6 +205,8 @@ export async function createPerStudentZipPdfExport(
     sections,
     pdfMode,
     students: manifestStudents,
+    plan: input.plan,
+    files: Object.keys(files).filter((path) => path !== 'manifest.json'),
   };
 
   const manifestBytes = strToU8(JSON.stringify(manifest, null, 2));
@@ -159,4 +224,3 @@ export async function createPerStudentZipPdfExport(
     manifest,
   };
 }
-

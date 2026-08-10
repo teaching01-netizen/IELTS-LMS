@@ -81,6 +81,8 @@ export const queryKeys = {
     submissions: (sessionId: string) => [...queryKeys.grading.all, sessionId, 'submissions'] as const,
     submission: (id: string) => [...queryKeys.grading.all, 'submission', id] as const,
     review: (submissionId: string) => [...queryKeys.grading.all, submissionId, 'review'] as const,
+    objectiveIntegrity: (scheduleId: string) =>
+      [...queryKeys.grading.all, scheduleId, 'objective-integrity'] as const,
   },
 
   // Student-related queries

@@ -45,6 +45,7 @@ import {
   ObjectiveLatestDraftRegradeResponse,
   ObjectiveOverrideUpsertRequest,
   ObjectiveQuestionOverrideRequest,
+  ObjectiveIntegrityOverview,
 } from '../types/grading';
 
 /**
@@ -224,6 +225,23 @@ export class GradingService {
       return { success: true, data: source };
     } catch (error) {
       return { success: false, error: `Failed to load objective grading source: ${error}` };
+    }
+  }
+
+  async getObjectiveIntegrityOverview(
+    scheduleId: string,
+  ): Promise<GradingServiceResult<ObjectiveIntegrityOverview>> {
+    try {
+      if (!isBackendGradingEnabled()) {
+        return { success: false, error: 'Objective integrity requires backend grading.' };
+      }
+
+      const overview = await backendGet<ObjectiveIntegrityOverview>(
+        `/v1/grading/schedules/${scheduleId}/objective-integrity`,
+      );
+      return { success: true, data: overview };
+    } catch (error) {
+      return { success: false, error: `Failed to load objective integrity: ${error}` };
     }
   }
 

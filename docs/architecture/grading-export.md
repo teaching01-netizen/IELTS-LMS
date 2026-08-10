@@ -20,6 +20,21 @@ The selected mode is persisted **per grading session** using `localStorage`:
 
 ## Per-student ZIP (PDF) export
 
+The primary bulk-export surface is the **Export Builder** (`src/components/admin/gradingExportBuilder/`).
+It is deliberately split into two phases:
+
+1. `exportPlan.ts` applies filters, keeps selection separate from the filter result, resolves canonical
+   identity fields, groups folder segments, renders safe filenames, and reports warnings/conflicts.
+2. `buildPerStudentZipPdfExportInput.ts` assembles the read-only section data and carries the plan's
+   resolved output paths into the ZIP implementation.
+
+`gradingPerStudentExport/studentPdf.ts` remains the PDF source of truth. The ZIP builder consumes the
+plan's folder/filename outputs but does not change the renderer or PDF layout.
+
+Canonical identity fields for export are `nickname`, `wcode`, `level`, and `fullName`. Until registration
+metadata exposes a distinct level, the adapter uses the explicit `level` field when present and falls back
+to the existing course value; it never parses display text.
+
 When `exportMode = per_student_zip_pdf`, the UI provides:
 
 - Student picker: multi-select + search + select-all
@@ -46,29 +61,37 @@ PDF content:
 - Missing section data is rendered as **"No submission"**.
 - For `MULTI_MCQ`, the student-answer column maps the persisted submitted option-ID array to option text, while the right-answer column maps options marked `isCorrect`. A stale legacy `requiredSelections` value must affect neither column. The score is the number of selected marked-correct IDs out of the marked-correct count (for example, `2/5`); exact-set equality controls the correctness label separately.
 
-The selected sections are persisted per grading session in `localStorage`:
+The selected sections, PDF mode, and filename template are now part of the active Export Profile. The
+legacy per-session preference keys are not the source of truth for the builder and are intentionally not
+used to hydrate a profile.
 
-- `grading:<sessionId>:perStudentExportSections` (JSON array)
-
-The PDF mode is persisted per grading session in `localStorage`:
-
-- `grading:<sessionId>:perStudentPdfMode` (`combined` / `separate`)
-
-PDF filenames inside the ZIP can be customized via a template persisted per grading session in `localStorage`:
-
-- `grading:<sessionId>:perStudentPdfFilenameTemplate`
-
-The template affects **only** PDF filenames inside the ZIP (the ZIP filename remains unchanged). Unknown placeholders are kept as literal text and the UI warns.
+The template affects **only** PDF filenames inside the ZIP (the ZIP filename remains unchanged). Unknown
+placeholders are kept as literal text and the UI warns.
 
 Notes:
 
 - In `separate` PDF mode, use `{{section}}` in the template to generate distinct filenames per section and avoid ` (2)`, ` (3)` suffixes.
 
+The default filename template is:
+
+```text
+{{nickname}} ({{wcode}}) - {{level}} - {{fullName}}.pdf
+```
+
+The builder preview shows the resolved folder tree, file count, missing identity warnings, and collision
+resolution before generation. Profiles are stored through the shared `/v1/settings/export-profiles`
+endpoint; `profileStorage.ts` keeps a browser-only fallback for offline/dev environments without changing
+the plan or PDF seams.
+
 ## Owning modules and seams
 
 Per-student ZIP export is intentionally split into a few deep modules to keep UI changes local and make PDF layout work safer:
 
-- Dialog UI (state + persisted preferences): `src/components/admin/PerStudentZipPdfExportDialog.tsx`
+- Dialog entrypoint: `src/components/admin/PerStudentZipPdfExportDialog.tsx`
+- Export Builder UI: `src/components/admin/gradingExportBuilder/ExportBuilderDialog.tsx`
+- Export plan domain: `src/components/admin/gradingExportBuilder/exportPlan.ts`
+- Profile adapter: `src/components/admin/gradingExportBuilder/profileStorage.ts`
+  - Responsibility: load/save organization-scoped profiles through the backend, with an offline/dev fallback.
 - Export orchestrator (read-only data assembly seam): `src/components/admin/buildPerStudentZipPdfExportInput.ts`
   - Responsibility: fetch section submissions + writing submissions, build wide exports, and assemble `PerStudentZipPdfExportInput`.
   - Invariant: must not mutate grading/submission data.

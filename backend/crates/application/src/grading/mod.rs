@@ -1,3 +1,4 @@
+pub mod objective_integrity;
 pub mod ports;
 pub mod projection_sync;
 pub mod review_actions;
@@ -7,12 +8,15 @@ use chrono::{DateTime, Utc};
 use ielts_backend_domain::{
     grading::{
         ActorActionRequest, GradingScheduleObjectiveOverride, GradingSession, GradingSessionDetail,
-        GradingSessionPagination, GradingSessionStatus, ObjectiveOverrideDeleteRequest,
-        ObjectiveOverrideUpsertRequest, OverallGradingStatus, ReleaseEvent, ReleaseNowRequest,
-        ObjectiveQuestionOverrideRequest, ReleaseStatus, ResultsAnalytics, ReviewAction,
-        ReviewDraft, ReviewDraftSummary, SaveReviewDraftRequest, ScheduleReleaseRequest,
-        SectionGradingStatus, SectionSubmission, StartReviewRequest, StudentResult,
-        StudentSubmission, SubmissionReviewBundle, SubmissionReviewSummary, WritingTaskSubmission,
+        GradingSessionPagination, GradingSessionStatus, ObjectiveGradingAudit,
+        ObjectiveIntegrityIssueCode, ObjectiveIntegrityIssueSummary, ObjectiveIntegrityOverview,
+        ObjectiveIntegrityStatus, ObjectiveOverrideDeleteRequest, ObjectiveOverrideUpsertRequest,
+        ObjectiveQuestionAudit, ObjectiveQuestionOverrideRequest, ObjectiveVerificationStatus,
+        OverallGradingStatus, ReleaseEvent, ReleaseNowRequest, ReleaseStatus, ResultsAnalytics,
+        ReviewAction, ReviewDraft, ReviewDraftSummary, SaveReviewDraftRequest,
+        ScheduleReleaseRequest, SectionGradingStatus, SectionSubmission, StartReviewRequest,
+        StudentResult, StudentSubmission, SubmissionReviewBundle, SubmissionReviewSummary,
+        WritingTaskSubmission,
     },
     schedule::{ExamSchedule, ScheduleStatus},
 };
@@ -765,105 +769,98 @@ impl GradingService {
             schedule.organization_id.as_deref(),
         )?;
 
-        let draft = self.get_review_draft(submission_id).await?;
+        let current_draft = self.get_review_draft(submission_id).await?;
+        if current_draft.release_status != ReleaseStatus::ReadyToRelease {
+            return Err(GradingError::Conflict(format!(
+                "Cannot release result from {:?} state.",
+                current_draft.release_status
+            )));
+        }
+
+        let mut transaction = self.pool.begin().await?;
+        let draft = sqlx::query_as::<_, ReviewDraft>(
+            "SELECT * FROM review_drafts WHERE submission_id = ? FOR UPDATE",
+        )
+        .bind(&submission_id_db)
+        .fetch_one(&mut *transaction)
+        .await?;
         if draft.release_status != ReleaseStatus::ReadyToRelease {
             return Err(GradingError::Conflict(format!(
                 "Cannot release result from {:?} state.",
                 draft.release_status
             )));
         }
-        validate_release_override_requirement(&submission, &req)?;
+        self.lock_and_validate_objective_integrity_for_submission(
+            &mut transaction,
+            &submission_id_db,
+        )
+        .await?;
         let section_bands = build_section_bands(&draft.section_drafts);
         let overall_band = average_band(&section_bands);
-        let now = Utc::now();
         let actor_id_str = ctx.actor_id.to_string();
         let writing_tasks = sqlx::query_as::<_, WritingTaskSubmission>(
             "SELECT * FROM writing_task_submissions WHERE submission_id = ? ORDER BY task_id ASC",
         )
         .bind(&submission_id_db)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await?;
 
         let existing = sqlx::query_as::<_, StudentResult>(
             "SELECT * FROM student_results WHERE submission_id = ? ORDER BY updated_at DESC LIMIT 1",
         )
         .bind(&submission_id_db)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await?;
         let revision_reason = req.revision_reason.clone();
-        let result = if let Some(existing) = existing {
-            sqlx::query(
-                r#"
-                UPDATE student_results
-                SET
-                    release_status = 'released',
-                    released_at = NOW(),
-                    released_by = ?,
-                    overall_band = ?,
-                    section_bands = ?,
-                    writing_results = ?,
-                    teacher_summary = ?,
-                    version = version + 1,
-                    revision_reason = ?,
-                    updated_at = NOW()
-                WHERE id = ?
-                "#,
+        let previous_version_id = existing.as_ref().map(|result| result.id.clone());
+        let version = existing
+            .as_ref()
+            .map_or(1, |result| result.version.saturating_add(1));
+        let result_id = Uuid::new_v4().hyphenated();
+        sqlx::query(
+            r#"
+            INSERT INTO student_results (
+                id, submission_id, student_id, student_name, release_status, released_at,
+                released_by, overall_band, section_bands, writing_results,
+                teacher_summary, version, previous_version_id, revision_reason,
+                authorized_actor_id, created_at, updated_at
             )
-            .bind(&actor_id_str)
-            .bind(overall_band)
-            .bind(&section_bands)
-            .bind(build_writing_results(&draft, &writing_tasks))
-            .bind(draft.teacher_summary.clone())
-            .bind(revision_reason.clone())
-            .bind(&existing.id)
-            .execute(&self.pool)
-            .await?;
+            VALUES (?, ?, ?, ?, 'released', NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            "#,
+        )
+        .bind(&result_id)
+        .bind(&submission_id_db)
+        .bind(&submission.student_id)
+        .bind(&submission.student_name)
+        .bind(&actor_id_str)
+        .bind(overall_band)
+        .bind(&section_bands)
+        .bind(build_writing_results(&draft, &writing_tasks))
+        .bind(draft.teacher_summary.clone())
+        .bind(version)
+        .bind(previous_version_id)
+        .bind(revision_reason.clone())
+        .bind(&actor_id_str)
+        .execute(&mut *transaction)
+        .await?;
 
+        let result =
             sqlx::query_as::<_, StudentResult>("SELECT * FROM student_results WHERE id = ?")
-                .bind(&existing.id)
-                .fetch_one(&self.pool)
-                .await?
-        } else {
-            let result_id = Uuid::new_v4().hyphenated();
-            sqlx::query(
-                r#"
-                INSERT INTO student_results (
-                    id, submission_id, student_id, student_name, release_status, released_at,
-                    released_by, overall_band, section_bands, writing_results,
-                    teacher_summary, version, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, 'released', NOW(), ?, ?, ?, ?, ?, 1, NOW(), NOW())
-                "#,
-            )
-            .bind(result_id)
-            .bind(&submission_id_db)
-            .bind(submission.student_id)
-            .bind(submission.student_name)
-            .bind(&actor_id_str)
-            .bind(overall_band)
-            .bind(&section_bands)
-            .bind(build_writing_results(&draft, &writing_tasks))
-            .bind(draft.teacher_summary.clone())
-            .execute(&self.pool)
-            .await?;
-
-            sqlx::query_as::<_, StudentResult>("SELECT * FROM student_results WHERE id = ?")
-                .bind(result_id)
-                .fetch_one(&self.pool)
-                .await?
-        };
+                .bind(&result_id)
+                .fetch_one(&mut *transaction)
+                .await?;
 
         sqlx::query(
             "UPDATE review_drafts SET release_status = 'released', has_unsaved_changes = false, updated_at = NOW(), revision = revision + 1 WHERE submission_id = ?",
         )
         .bind(&submission_id_db)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
         sqlx::query(
             "UPDATE student_submissions SET grading_status = 'released', updated_at = NOW() WHERE id = ?",
         )
         .bind(&submission_id_db)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
         sqlx::query(
             r#"
@@ -876,8 +873,9 @@ impl GradingService {
         .bind(&submission_id_db)
         .bind(&actor_id_str)
         .bind(json!({ "overallBand": overall_band, "revisionReason": revision_reason }))
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
+        transaction.commit().await?;
         self.insert_review_event(
             submission_id,
             &actor_id_str,
@@ -924,31 +922,52 @@ impl GradingService {
             schedule.organization_id.as_deref(),
         )?;
 
-        let draft = self.get_review_draft(submission_id).await?;
+        let current_draft = self.get_review_draft(submission_id).await?;
+        if current_draft.release_status != ReleaseStatus::ReadyToRelease {
+            return Err(GradingError::Conflict(format!(
+                "Cannot schedule release from {:?} state.",
+                current_draft.release_status
+            )));
+        }
+
+        let mut transaction = self.pool.begin().await?;
+        let draft = sqlx::query_as::<_, ReviewDraft>(
+            "SELECT * FROM review_drafts WHERE submission_id = ? FOR UPDATE",
+        )
+        .bind(&submission_id_db)
+        .fetch_one(&mut *transaction)
+        .await?;
         if draft.release_status != ReleaseStatus::ReadyToRelease {
             return Err(GradingError::Conflict(format!(
                 "Cannot schedule release from {:?} state.",
                 draft.release_status
             )));
         }
+        self.lock_and_validate_objective_integrity_for_submission(
+            &mut transaction,
+            &submission_id_db,
+        )
+        .await?;
         let section_bands = build_section_bands(&draft.section_drafts);
         let overall_band = average_band(&section_bands);
-        let now = Utc::now();
         let actor_id_str = ctx.actor_id.to_string();
         let writing_tasks = sqlx::query_as::<_, WritingTaskSubmission>(
             "SELECT * FROM writing_task_submissions WHERE submission_id = ? ORDER BY task_id ASC",
         )
         .bind(&submission_id_db)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await?;
 
         let existing = sqlx::query_as::<_, StudentResult>(
             "SELECT * FROM student_results WHERE submission_id = ? ORDER BY updated_at DESC LIMIT 1",
         )
         .bind(&submission_id_db)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await?;
-        if let Some(existing) = existing {
+        if let Some(existing) = existing
+            .as_ref()
+            .filter(|result| result.release_status != ReleaseStatus::Released)
+        {
             sqlx::query(
                 r#"
                 UPDATE student_results
@@ -970,31 +989,39 @@ impl GradingService {
             .bind(&section_bands)
             .bind(build_writing_results(&draft, &writing_tasks))
             .bind(draft.teacher_summary.clone())
-            .bind(existing.id)
-            .execute(&self.pool)
+            .bind(&existing.id)
+            .execute(&mut *transaction)
             .await?;
         } else {
             let result_id = Uuid::new_v4().hyphenated();
+            let previous_version_id = existing.as_ref().map(|result| result.id.clone());
+            let version = existing
+                .as_ref()
+                .map_or(1, |result| result.version.saturating_add(1));
             sqlx::query(
                 r#"
                 INSERT INTO student_results (
                     id, submission_id, student_id, student_name, release_status,
                     scheduled_release_date, overall_band, section_bands, writing_results,
-                    teacher_summary, version, created_at, updated_at
+                    teacher_summary, version, previous_version_id, authorized_actor_id,
+                    created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, 'ready_to_release', ?, ?, ?, ?, ?, 1, NOW(), NOW())
+                VALUES (?, ?, ?, ?, 'ready_to_release', ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 "#,
             )
-            .bind(result_id)
+            .bind(&result_id)
             .bind(&submission_id_db)
-            .bind(submission.student_id)
-            .bind(submission.student_name)
+            .bind(&submission.student_id)
+            .bind(&submission.student_name)
             .bind(req.release_at)
             .bind(overall_band)
             .bind(&section_bands)
             .bind(build_writing_results(&draft, &writing_tasks))
             .bind(draft.teacher_summary.clone())
-            .execute(&self.pool)
+            .bind(version)
+            .bind(previous_version_id)
+            .bind(&actor_id_str)
+            .execute(&mut *transaction)
             .await?;
         }
 
@@ -1002,25 +1029,25 @@ impl GradingService {
             "UPDATE review_drafts SET release_status = 'ready_to_release', has_unsaved_changes = false, updated_at = NOW(), revision = revision + 1 WHERE submission_id = ?",
         )
         .bind(&submission_id_db)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
         let updated_draft =
             sqlx::query_as::<_, ReviewDraft>("SELECT * FROM review_drafts WHERE submission_id = ?")
                 .bind(&submission_id_db)
-                .fetch_one(&self.pool)
+                .fetch_one(&mut *transaction)
                 .await?;
         sqlx::query(
             "UPDATE student_submissions SET grading_status = 'ready_to_release', updated_at = NOW() WHERE id = ?",
         )
         .bind(&submission_id_db)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
         let event_id = Uuid::new_v4().hyphenated();
         let result_row = sqlx::query_as::<_, StudentResult>(
             "SELECT * FROM student_results WHERE submission_id = ? ORDER BY updated_at DESC LIMIT 1",
         )
         .bind(&submission_id_db)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await?;
 
         if let Some(result) = result_row {
@@ -1039,9 +1066,11 @@ impl GradingService {
                 "scheduledReleaseDate": req.release_at,
                 "teacherName": "", // actor_name not available in ActorContext
             }))
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await?;
         }
+
+        transaction.commit().await?;
 
         Ok(updated_draft)
     }
@@ -1153,6 +1182,13 @@ impl GradingService {
         let actor_id_str = ctx.actor_id.to_string();
         let current_draft = self.get_review_draft(submission_id).await?;
         Self::ensure_valid_release_transition(&current_draft.release_status, &release_status)?;
+        if matches!(
+            &release_status,
+            ReleaseStatus::GradingComplete | ReleaseStatus::ReadyToRelease
+        ) {
+            self.ensure_objective_integrity_for_submission(&submission_id_db)
+                .await?;
+        }
         sqlx::query(
             r#"
             UPDATE review_drafts
@@ -1190,6 +1226,123 @@ impl GradingService {
         .await?;
 
         Ok(draft)
+    }
+
+    async fn ensure_objective_integrity_for_submission(
+        &self,
+        submission_id: &str,
+    ) -> Result<(), GradingError> {
+        let submission = sqlx::query_as::<_, ObjectiveIntegritySubmissionSourceRow>(
+            r#"
+            SELECT schedule_id, published_version_id
+            FROM student_submissions
+            WHERE id = ?
+            "#,
+        )
+        .bind(submission_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(submission) = submission else {
+            return Err(GradingError::NotFound);
+        };
+        let source_version_id = self
+            .load_schedule_objective_grading_source_version_id(&submission.schedule_id)
+            .await?
+            .unwrap_or(submission.published_version_id);
+        let stored_sections = sqlx::query_as::<_, SectionSubmission>(
+            "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading')",
+        )
+        .bind(submission_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut results = Vec::with_capacity(2);
+        for section in ["listening", "reading"] {
+            let Some(stored_section) = stored_sections
+                .iter()
+                .find(|stored| stored.section == section)
+            else {
+                return Err(GradingError::Conflict(
+                    "Objective grading integrity blocks release: GradingSourceStale.".to_owned(),
+                ));
+            };
+            let Some(auto_grading_results) = stored_section.auto_grading_results.clone() else {
+                return Err(GradingError::Conflict(
+                    "Objective grading integrity blocks release: GradingSourceStale.".to_owned(),
+                ));
+            };
+            results.push(Value::from(auto_grading_results));
+        }
+
+        objective_integrity::validate_release_integrity_for_source(&results, &source_version_id)
+            .map_err(|issue_code| {
+                GradingError::Conflict(format!(
+                    "Objective grading integrity blocks release: {issue_code:?}."
+                ))
+            })
+    }
+
+    async fn lock_and_validate_objective_integrity_for_submission(
+        &self,
+        transaction: &mut sqlx::Transaction<'_, MySql>,
+        submission_id: &str,
+    ) -> Result<(), GradingError> {
+        let submission = sqlx::query_as::<_, ObjectiveIntegritySubmissionSourceRow>(
+            r#"
+            SELECT schedule_id, published_version_id
+            FROM student_submissions
+            WHERE id = ?
+            FOR UPDATE
+            "#,
+        )
+        .bind(submission_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+        .ok_or(GradingError::NotFound)?;
+        let source_row = sqlx::query_as::<_, (String, Option<String>)>(
+            r#"
+            SELECT source, version_id
+            FROM grading_schedule_objective_grading_source
+            WHERE schedule_id = ?
+            FOR UPDATE
+            "#,
+        )
+        .bind(&submission.schedule_id)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        let source_version_id = source_row
+            .and_then(|(_, version_id)| version_id)
+            .unwrap_or(submission.published_version_id);
+        let stored_sections = sqlx::query_as::<_, SectionSubmission>(
+            "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading') ORDER BY section ASC FOR UPDATE",
+        )
+        .bind(submission_id)
+        .fetch_all(&mut **transaction)
+        .await?;
+        let mut results = Vec::with_capacity(2);
+        for section in ["listening", "reading"] {
+            let Some(stored_section) = stored_sections
+                .iter()
+                .find(|stored| stored.section == section)
+            else {
+                return Err(GradingError::Conflict(
+                    "Objective grading integrity blocks release: GradingSourceStale.".to_owned(),
+                ));
+            };
+            let Some(auto_grading_results) = stored_section.auto_grading_results.clone() else {
+                return Err(GradingError::Conflict(
+                    "Objective grading integrity blocks release: GradingSourceStale.".to_owned(),
+                ));
+            };
+            results.push(Value::from(auto_grading_results));
+        }
+
+        objective_integrity::validate_release_integrity_for_source(&results, &source_version_id)
+            .map_err(|issue_code| {
+                GradingError::Conflict(format!(
+                    "Objective grading integrity blocks release: {issue_code:?}."
+                ))
+            })
     }
 
     fn ensure_valid_release_transition(
@@ -1392,19 +1545,33 @@ impl GradingService {
             let listening_answers =
                 filter_answers_for_section(&answers, &answer_sections, "listening");
             let reading_answers = filter_answers_for_section(&answers, &answer_sections, "reading");
-            let listening_auto_results = compute_objective_auto_grading_results(
+            let mut listening_auto_results = compute_objective_auto_grading_results(
                 "listening",
                 &listening_answers,
                 &attempt.content_snapshot,
                 submission.submitted_at,
                 overrides,
             );
-            let reading_auto_results = compute_objective_auto_grading_results(
+            let mut reading_auto_results = compute_objective_auto_grading_results(
                 "reading",
                 &reading_answers,
                 &attempt.content_snapshot,
                 submission.submitted_at,
                 overrides,
+            );
+            let source_version_id = attempt.published_version_id.to_string();
+            objective_integrity::set_grading_source_version(
+                &mut listening_auto_results,
+                &source_version_id,
+            );
+            objective_integrity::set_grading_source_version(
+                &mut reading_auto_results,
+                &source_version_id,
+            );
+            objective_integrity::attach_answer_mapping_issues(
+                &mut listening_auto_results,
+                &answers,
+                &answer_sections,
             );
 
             let existing_sections = sqlx::query_as::<_, SectionSubmission>(
@@ -1447,6 +1614,7 @@ impl GradingService {
                     &attempt.final_submission,
                     &attempt.content_snapshot,
                     &attempt.config_snapshot,
+                    &source_version_id,
                 )
                 .await?;
                 report.submissions_updated = report.submissions_updated.saturating_add(1);
@@ -1481,13 +1649,11 @@ impl GradingService {
             ));
         }
 
-        let exam_id: String = sqlx::query_scalar(
-            "SELECT exam_id FROM exam_schedules WHERE id = ?",
-        )
-        .bind(&schedule_id_db)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let exam_id: String = sqlx::query_scalar("SELECT exam_id FROM exam_schedules WHERE id = ?")
+            .bind(&schedule_id_db)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(GradingError::NotFound)?;
 
         let draft_version_id: Option<String> = sqlx::query_scalar(
             "SELECT CAST(current_draft_version_id AS CHAR) AS current_draft_version_id FROM exam_entities WHERE id = ?",
@@ -1524,8 +1690,18 @@ impl GradingService {
         )
         .await?;
 
-        // Persist the grading source so future sync-on-read projection cycles keep objective
-        // sections aligned with the same draft version until an admin changes it again.
+        let report = self
+            .backfill_objective_auto_grading_from_snapshots(
+                &schedule_id_db,
+                &draft_content_snapshot,
+                &draft_config_snapshot,
+                &draft_version_id,
+            )
+            .await?;
+
+        // Publish the source revision only after every objective projection has been refreshed.
+        // This makes a concurrent release observe either the old source with old projections or
+        // the new source with new projections, and otherwise fail closed as stale.
         self.upsert_schedule_objective_grading_source(
             &schedule_id_db,
             &actor_id,
@@ -1534,14 +1710,6 @@ impl GradingService {
             Some(&draft_version_id),
         )
         .await?;
-
-        let report = self
-            .backfill_objective_auto_grading_from_snapshots(
-                &schedule_id_db,
-                &draft_content_snapshot,
-                &draft_config_snapshot,
-            )
-            .await?;
 
         self.append_schedule_override_event(
             &schedule_id_db,
@@ -1648,6 +1816,232 @@ impl GradingService {
             .await
     }
 
+    pub async fn get_objective_integrity_overview(
+        &self,
+        ctx: &ActorContext,
+        schedule_id: Uuid,
+    ) -> Result<ObjectiveIntegrityOverview, GradingError> {
+        self.maybe_sync_on_read().await?;
+        let schedule_id_db = schedule_id.to_string();
+        let schedule =
+            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+                .bind(&schedule_id_db)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(GradingError::NotFound)?;
+        Self::ensure_can_grade_schedule(ctx, &schedule_id_db, schedule.organization_id.as_deref())?;
+        let expected_source_version_id = self
+            .load_schedule_objective_grading_source_version_id(&schedule_id_db)
+            .await?
+            .unwrap_or_else(|| schedule.published_version_id.clone());
+
+        let student_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM student_submissions WHERE schedule_id = ?",
+        )
+        .bind(&schedule_id_db)
+        .fetch_one(&self.pool)
+        .await?
+        .max(0) as u64;
+        let rows = sqlx::query_as::<_, ObjectiveIntegritySectionRow>(
+            r#"
+            SELECT
+                s.id AS submission_id,
+                s.student_id,
+                s.student_name,
+                ss.section,
+                ss.auto_grading_results
+            FROM student_submissions s
+            LEFT JOIN section_submissions ss
+                ON ss.submission_id = s.id
+                AND ss.section IN ('listening', 'reading')
+            WHERE s.schedule_id = ?
+            ORDER BY s.student_name ASC, s.id ASC, ss.section ASC
+            "#,
+        )
+        .bind(&schedule_id_db)
+        .fetch_all(&self.pool)
+        .await?;
+        let had_materialized_rows = !rows.is_empty();
+
+        let mut overview = ObjectiveIntegrityOverview {
+            student_count,
+            expected_answer_count: 0,
+            verified_correct_count: 0,
+            verified_incorrect_count: 0,
+            verified_unanswered_count: 0,
+            needs_recheck_count: 0,
+            invalid_count: 0,
+            integrity_status: ObjectiveIntegrityStatus::Verified,
+            issues: Vec::new(),
+        };
+
+        for row in rows {
+            let Some(section) = row.section else {
+                overview.needs_recheck_count = overview.needs_recheck_count.saturating_add(1);
+                overview.integrity_status = ObjectiveIntegrityStatus::NeedsRecheck;
+                overview.issues.push(ObjectiveIntegrityIssueSummary {
+                    submission_id: row.submission_id,
+                    student_id: row.student_id,
+                    student_name: row.student_name,
+                    section: "unknown".to_owned(),
+                    question_id: None,
+                    question_number: None,
+                    code: ObjectiveIntegrityIssueCode::GradingSourceStale,
+                });
+                continue;
+            };
+            let Some(results) = row.auto_grading_results else {
+                overview.needs_recheck_count = overview.needs_recheck_count.saturating_add(1);
+                overview.integrity_status = ObjectiveIntegrityStatus::NeedsRecheck;
+                overview.issues.push(ObjectiveIntegrityIssueSummary {
+                    submission_id: row.submission_id,
+                    student_id: row.student_id,
+                    student_name: row.student_name,
+                    section,
+                    question_id: None,
+                    question_number: None,
+                    code: ObjectiveIntegrityIssueCode::GradingSourceStale,
+                });
+                continue;
+            };
+            let Ok(audit) = serde_json::from_value::<ObjectiveGradingAudit>(results) else {
+                overview.needs_recheck_count = overview.needs_recheck_count.saturating_add(1);
+                overview.integrity_status = ObjectiveIntegrityStatus::NeedsRecheck;
+                overview.issues.push(ObjectiveIntegrityIssueSummary {
+                    submission_id: row.submission_id,
+                    student_id: row.student_id,
+                    student_name: row.student_name,
+                    section,
+                    question_id: None,
+                    question_number: None,
+                    code: ObjectiveIntegrityIssueCode::GradingSourceStale,
+                });
+                continue;
+            };
+            if audit.validate().is_err() {
+                overview.needs_recheck_count = overview.needs_recheck_count.saturating_add(1);
+                overview.integrity_status = ObjectiveIntegrityStatus::NeedsRecheck;
+                overview.issues.push(ObjectiveIntegrityIssueSummary {
+                    submission_id: row.submission_id,
+                    student_id: row.student_id,
+                    student_name: row.student_name,
+                    section,
+                    question_id: None,
+                    question_number: None,
+                    code: ObjectiveIntegrityIssueCode::GradingSourceStale,
+                });
+                continue;
+            }
+            if audit.grading_source_version_id != expected_source_version_id {
+                overview.needs_recheck_count = overview.needs_recheck_count.saturating_add(1);
+                overview.integrity_status = ObjectiveIntegrityStatus::NeedsRecheck;
+                overview.issues.push(ObjectiveIntegrityIssueSummary {
+                    submission_id: row.submission_id,
+                    student_id: row.student_id,
+                    student_name: row.student_name,
+                    section,
+                    question_id: None,
+                    question_number: None,
+                    code: ObjectiveIntegrityIssueCode::GradingSourceStale,
+                });
+                continue;
+            }
+
+            overview.expected_answer_count = overview
+                .expected_answer_count
+                .saturating_add(u64::from(audit.expected_question_count));
+            overview.verified_correct_count = overview
+                .verified_correct_count
+                .saturating_add(u64::from(audit.verified_correct_count));
+            overview.verified_incorrect_count = overview
+                .verified_incorrect_count
+                .saturating_add(u64::from(audit.verified_incorrect_count));
+            overview.verified_unanswered_count = overview
+                .verified_unanswered_count
+                .saturating_add(u64::from(audit.verified_unanswered_count));
+            overview.needs_recheck_count = overview.needs_recheck_count.saturating_add(u64::from(
+                audit
+                    .unresolved_count
+                    .saturating_add(audit.unknown_answer_count),
+            ));
+            overview.invalid_count = overview
+                .invalid_count
+                .saturating_add(u64::from(audit.invalid_count));
+            if audit.integrity_status == ObjectiveIntegrityStatus::Invalid {
+                overview.integrity_status = ObjectiveIntegrityStatus::Invalid;
+            } else if audit.has_blocking_issue()
+                && overview.integrity_status != ObjectiveIntegrityStatus::Invalid
+            {
+                overview.integrity_status = ObjectiveIntegrityStatus::NeedsRecheck;
+            }
+            let mut represented_issue_codes = HashSet::new();
+            for question in audit.questions {
+                if let Some(code) = question.issue_code {
+                    represented_issue_codes.insert(code);
+                    overview.issues.push(ObjectiveIntegrityIssueSummary {
+                        submission_id: row.submission_id.clone(),
+                        student_id: row.student_id.clone(),
+                        student_name: row.student_name.clone(),
+                        section: section.clone(),
+                        question_number: question_number(&question.question_id),
+                        question_id: Some(question.question_id),
+                        code,
+                    });
+                }
+            }
+            let unknown_code = audit
+                .issue_codes
+                .iter()
+                .copied()
+                .find(|code| {
+                    matches!(
+                        code,
+                        ObjectiveIntegrityIssueCode::SectionMappingUnavailable
+                            | ObjectiveIntegrityIssueCode::SectionMappingAmbiguous
+                            | ObjectiveIntegrityIssueCode::UnknownStudentAnswerId
+                    )
+                })
+                .unwrap_or(ObjectiveIntegrityIssueCode::UnknownStudentAnswerId);
+            for unknown_answer_id in audit.unknown_answer_ids {
+                represented_issue_codes.insert(unknown_code);
+                overview.issues.push(ObjectiveIntegrityIssueSummary {
+                    submission_id: row.submission_id.clone(),
+                    student_id: row.student_id.clone(),
+                    student_name: row.student_name.clone(),
+                    section: section.clone(),
+                    question_number: question_number(&unknown_answer_id),
+                    question_id: Some(unknown_answer_id),
+                    code: unknown_code,
+                });
+            }
+            for code in audit.issue_codes {
+                if represented_issue_codes.contains(&code) {
+                    continue;
+                }
+                overview.issues.push(ObjectiveIntegrityIssueSummary {
+                    submission_id: row.submission_id.clone(),
+                    student_id: row.student_id.clone(),
+                    student_name: row.student_name.clone(),
+                    section: section.clone(),
+                    question_id: None,
+                    question_number: None,
+                    code,
+                });
+            }
+        }
+
+        if student_count > 0
+            && !had_materialized_rows
+            && overview.issues.is_empty()
+            && overview.expected_answer_count == 0
+        {
+            overview.integrity_status = ObjectiveIntegrityStatus::NeedsRecheck;
+            overview.needs_recheck_count = student_count;
+        }
+
+        Ok(overview)
+    }
+
     pub async fn upsert_schedule_objective_override(
         &self,
         ctx: &ActorContext,
@@ -1655,8 +2049,13 @@ impl GradingService {
         schedule_id: Uuid,
         question_id: String,
         req: ObjectiveOverrideUpsertRequest,
-    ) -> Result<(GradingScheduleObjectiveOverride, ObjectiveAutoGradingBackfillReport), GradingError>
-    {
+    ) -> Result<
+        (
+            GradingScheduleObjectiveOverride,
+            ObjectiveAutoGradingBackfillReport,
+        ),
+        GradingError,
+    > {
         let schedule_id_db = schedule_id.to_string();
         if req.reason.trim().is_empty() {
             return Err(GradingError::Validation(
@@ -1701,13 +2100,18 @@ impl GradingService {
             scoring_rule: req.scoring_rule.clone(),
             max_score: req.max_score,
         };
-        let override_json = serde_json::to_value(&payload).map_err(|err| {
-            GradingError::Validation(format!("Invalid override payload: {err}"))
-        })?;
+        let override_json = serde_json::to_value(&payload)
+            .map_err(|err| GradingError::Validation(format!("Invalid override payload: {err}")))?;
 
         if payload.correct_answer.is_none()
-            && payload.accepted_answers.as_ref().is_none_or(|v| v.is_empty())
-            && payload.correct_option_ids.as_ref().is_none_or(|v| v.is_empty())
+            && payload
+                .accepted_answers
+                .as_ref()
+                .is_none_or(|v| v.is_empty())
+            && payload
+                .correct_option_ids
+                .as_ref()
+                .is_none_or(|v| v.is_empty())
         {
             return Err(GradingError::Validation(
                 "Override must include correctAnswer, acceptedAnswers, or correctOptionIds."
@@ -2367,21 +2771,24 @@ impl GradingService {
             };
 
             if let Some(source_version_id) = source_version_id {
-                let (source_content_snapshot, source_config_snapshot) =
-                    if let Some(cached) = objective_source_snapshot_cache.get(&source_version_id) {
-                        (cached.0.clone(), cached.1.clone())
-                    } else {
-                        let loaded: (Value, Value) = sqlx::query_as(
-                            "SELECT content_snapshot, config_snapshot FROM exam_versions WHERE id = ?",
-                        )
-                        .bind(&source_version_id)
-                        .fetch_optional(&self.pool)
-                        .await?
-                        .ok_or(GradingError::NotFound)?;
-                        objective_source_snapshot_cache
-                            .insert(source_version_id.clone(), (loaded.0.clone(), loaded.1.clone()));
-                        loaded
-                    };
+                let (source_content_snapshot, source_config_snapshot) = if let Some(cached) =
+                    objective_source_snapshot_cache.get(&source_version_id)
+                {
+                    (cached.0.clone(), cached.1.clone())
+                } else {
+                    let loaded: (Value, Value) = sqlx::query_as(
+                        "SELECT content_snapshot, config_snapshot FROM exam_versions WHERE id = ?",
+                    )
+                    .bind(&source_version_id)
+                    .fetch_optional(&self.pool)
+                    .await?
+                    .ok_or(GradingError::NotFound)?;
+                    objective_source_snapshot_cache.insert(
+                        source_version_id.clone(),
+                        (loaded.0.clone(), loaded.1.clone()),
+                    );
+                    loaded
+                };
 
                 let objective_sync = self
                     .ensure_objective_section_submissions(
@@ -2389,6 +2796,7 @@ impl GradingService {
                         &attempt.final_submission,
                         &source_content_snapshot,
                         &source_config_snapshot,
+                        &source_version_id,
                     )
                     .await?;
                 section_rows_synced =
@@ -2417,6 +2825,7 @@ impl GradingService {
             final_submission,
             content_snapshot,
             config_snapshot,
+            &submission.published_version_id,
             SectionSyncMode::Full,
         )
         .await
@@ -2428,12 +2837,14 @@ impl GradingService {
         final_submission: &Value,
         content_snapshot: &Value,
         config_snapshot: &Value,
+        grading_source_version_id: &str,
     ) -> Result<SectionSyncReport, GradingError> {
         self.ensure_section_submissions_with_mode(
             submission,
             final_submission,
             content_snapshot,
             config_snapshot,
+            grading_source_version_id,
             SectionSyncMode::ObjectiveOnly,
         )
         .await
@@ -2445,6 +2856,7 @@ impl GradingService {
         final_submission: &Value,
         content_snapshot: &Value,
         config_snapshot: &Value,
+        grading_source_version_id: &str,
         mode: SectionSyncMode,
     ) -> Result<SectionSyncReport, GradingError> {
         let answers = final_submission
@@ -2484,13 +2896,29 @@ impl GradingService {
             Some(&overrides),
         );
         for section_spec in &mut section_specs {
-            let Some(existing_results) = existing_objective_results.get(section_spec.section) else {
+            if let Some(results) = section_spec.auto_grading_results.as_mut() {
+                objective_integrity::set_grading_source_version(results, grading_source_version_id);
+            }
+        }
+        for section_spec in &mut section_specs {
+            let Some(existing_results) = existing_objective_results.get(section_spec.section)
+            else {
                 continue;
             };
             if let Some(next_results) = section_spec.auto_grading_results.as_mut() {
                 preserve_manual_objective_overrides(next_results, existing_results);
             }
         }
+        let objective_results_changed = section_specs.iter().any(|section_spec| {
+            section_spec
+                .auto_grading_results
+                .as_ref()
+                .is_some_and(|next_results| {
+                    existing_objective_results
+                        .get(section_spec.section)
+                        .is_none_or(|existing_results| existing_results != next_results)
+                })
+        });
         let mut section_rows_synced: u64 = 0;
         let mut writing_task_rows_synced: u64 = 0;
 
@@ -2513,6 +2941,7 @@ impl GradingService {
                 ON DUPLICATE KEY UPDATE
                     answers = VALUES(answers),
                     auto_grading_results = VALUES(auto_grading_results),
+                    grading_status = VALUES(grading_status),
                     submitted_at = VALUES(submitted_at)
                 "#,
             )
@@ -2575,10 +3004,46 @@ impl GradingService {
             }
         }
 
+        if mode == SectionSyncMode::ObjectiveOnly && objective_results_changed {
+            self.reopen_after_objective_regrade(&submission.id).await?;
+        }
+
         Ok(SectionSyncReport {
             section_rows_synced,
             writing_task_rows_synced,
         })
+    }
+
+    async fn reopen_after_objective_regrade(
+        &self,
+        submission_id: &str,
+    ) -> Result<(), GradingError> {
+        sqlx::query(
+            r#"
+            UPDATE review_drafts
+            SET release_status = 'reopened',
+                has_unsaved_changes = true,
+                updated_at = NOW(),
+                revision = revision + 1
+            WHERE submission_id = ?
+              AND release_status IN ('grading_complete', 'ready_to_release', 'released')
+            "#,
+        )
+        .bind(submission_id)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            r#"
+            UPDATE student_submissions
+            SET grading_status = 'reopened', updated_at = NOW()
+            WHERE id = ?
+              AND grading_status IN ('grading_complete', 'ready_to_release', 'released')
+            "#,
+        )
+        .bind(submission_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn refresh_session_counters_for_schedules(
@@ -2638,6 +3103,7 @@ impl GradingService {
         schedule_id: &str,
         content_snapshot: &Value,
         config_snapshot: &Value,
+        grading_source_version_id: &str,
     ) -> Result<ObjectiveAutoGradingBackfillReport, GradingError> {
         let mut builder = QueryBuilder::<MySql>::new(
             r#"
@@ -2705,19 +3171,32 @@ impl GradingService {
             let listening_answers =
                 filter_answers_for_section(&answers, &answer_sections, "listening");
             let reading_answers = filter_answers_for_section(&answers, &answer_sections, "reading");
-            let listening_auto_results = compute_objective_auto_grading_results(
+            let mut listening_auto_results = compute_objective_auto_grading_results(
                 "listening",
                 &listening_answers,
                 content_snapshot,
                 submission.submitted_at,
                 overrides,
             );
-            let reading_auto_results = compute_objective_auto_grading_results(
+            let mut reading_auto_results = compute_objective_auto_grading_results(
                 "reading",
                 &reading_answers,
                 content_snapshot,
                 submission.submitted_at,
                 overrides,
+            );
+            objective_integrity::set_grading_source_version(
+                &mut listening_auto_results,
+                grading_source_version_id,
+            );
+            objective_integrity::set_grading_source_version(
+                &mut reading_auto_results,
+                grading_source_version_id,
+            );
+            objective_integrity::attach_answer_mapping_issues(
+                &mut listening_auto_results,
+                &answers,
+                &answer_sections,
             );
 
             let existing_sections = sqlx::query_as::<_, SectionSubmission>(
@@ -2760,6 +3239,7 @@ impl GradingService {
                     &attempt.final_submission,
                     content_snapshot,
                     config_snapshot,
+                    grading_source_version_id,
                 )
                 .await?;
                 report.submissions_updated = report.submissions_updated.saturating_add(1);
@@ -2787,6 +3267,34 @@ fn student_submission_query(suffix: &str) -> String {
         {suffix}
         "#
     )
+}
+
+#[derive(Debug, FromRow)]
+struct ObjectiveIntegritySubmissionSourceRow {
+    schedule_id: String,
+    published_version_id: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ObjectiveIntegritySectionRow {
+    submission_id: String,
+    student_id: String,
+    student_name: String,
+    section: Option<String>,
+    auto_grading_results: Option<Value>,
+}
+
+fn question_number(question_id: &str) -> Option<String> {
+    let digits = question_id
+        .chars()
+        .rev()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>();
+    if digits.is_empty() {
+        None
+    } else {
+        Some(digits.chars().rev().collect())
+    }
 }
 
 #[derive(FromRow)]
@@ -2896,7 +3404,7 @@ fn build_section_sync_specs(
     let answer_sections = build_objective_answer_sections(content_snapshot);
     let listening_answers = filter_answers_for_section(answers, &answer_sections, "listening");
     let reading_answers = filter_answers_for_section(answers, &answer_sections, "reading");
-    let listening_auto_results = compute_objective_auto_grading_results(
+    let mut listening_auto_results = compute_objective_auto_grading_results(
         "listening",
         &listening_answers,
         content_snapshot,
@@ -2910,19 +3418,36 @@ fn build_section_sync_specs(
         submitted_at,
         overrides,
     );
+    objective_integrity::attach_answer_mapping_issues(
+        &mut listening_auto_results,
+        answers,
+        &answer_sections,
+    );
+    let listening_grading_status =
+        if objective_integrity::objective_results_are_verified(&listening_auto_results) {
+            SectionGradingStatus::AutoGraded
+        } else {
+            SectionGradingStatus::NeedsReview
+        };
+    let reading_grading_status =
+        if objective_integrity::objective_results_are_verified(&reading_auto_results) {
+            SectionGradingStatus::AutoGraded
+        } else {
+            SectionGradingStatus::NeedsReview
+        };
 
     let mut specs = vec![
         SectionSyncSpec {
             section: "listening",
             payload: json!({ "type": "listening", "answers": listening_answers }),
             auto_grading_results: Some(listening_auto_results),
-            grading_status: SectionGradingStatus::AutoGraded,
+            grading_status: listening_grading_status,
         },
         SectionSyncSpec {
             section: "reading",
             payload: json!({ "type": "reading", "answers": reading_answers }),
             auto_grading_results: Some(reading_auto_results),
-            grading_status: SectionGradingStatus::AutoGraded,
+            grading_status: reading_grading_status,
         },
     ];
 
@@ -3254,7 +3779,7 @@ fn filter_answers_for_section(
     section_key: &str,
 ) -> Value {
     if answer_sections.is_empty() {
-        return answers.clone();
+        return json!({});
     }
 
     let Some(items) = answers.as_object() else {
@@ -3344,7 +3869,31 @@ fn index_objective_block_sections(
         "MATCHING_FEATURES" => {
             register_block_slot_sections(block, block_id, "features", section_key, sections);
         }
-        _ => {}
+        _ => register_unsupported_block_sections(block, block_id, section_key, sections),
+    }
+}
+
+fn register_unsupported_block_sections(
+    block: &Value,
+    block_id: Option<&str>,
+    section_key: &str,
+    sections: &mut HashMap<String, String>,
+) {
+    if let Some(questions) = block.get("questions").and_then(Value::as_array) {
+        let mut registered = false;
+        for question_id in questions
+            .iter()
+            .filter_map(|question| question.get("id").and_then(Value::as_str))
+        {
+            register_answer_section(sections, question_id, section_key);
+            registered = true;
+        }
+        if registered {
+            return;
+        }
+    }
+    if let Some(block_id) = block_id {
+        register_answer_section(sections, block_id, section_key);
     }
 }
 
@@ -3439,9 +3988,18 @@ fn register_answer_section(
     answer_key: &str,
     section_key: &str,
 ) {
-    sections
-        .entry(answer_key.to_owned())
-        .or_insert_with(|| section_key.to_owned());
+    match sections.entry(answer_key.to_owned()) {
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(section_key.to_owned());
+        }
+        std::collections::hash_map::Entry::Occupied(mut entry)
+            if entry.get() != section_key
+                && entry.get() != objective_integrity::AMBIGUOUS_SECTION_MAPPING =>
+        {
+            entry.insert(objective_integrity::AMBIGUOUS_SECTION_MAPPING.to_owned());
+        }
+        std::collections::hash_map::Entry::Occupied(_) => {}
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -3450,9 +4008,11 @@ struct ObjectiveAnswerSpec {
     expected: ObjectiveExpectedAnswer,
     scoring_rule: String,
     correct_answer: Value,
+    accepted_answers: Vec<String>,
     max_score: i64,
     has_override: bool,
     shared_answer_group: Option<String>,
+    integrity_issue: Option<ObjectiveIntegrityIssueCode>,
 }
 
 #[derive(Debug, Clone)]
@@ -3468,7 +4028,9 @@ enum ObjectiveExpectedAnswer {
 
 impl ObjectiveExpectedAnswer {
     fn matches(&self, value: &Value, scoring_rule: &str) -> bool {
-        let _ = scoring_rule;
+        if !objective_integrity::student_answer_obeys_scoring_rule(value, scoring_rule) {
+            return false;
+        }
         match self {
             Self::TextAnyOf(expected) => {
                 let values = strict_text_values(value);
@@ -3487,9 +4049,9 @@ impl ObjectiveExpectedAnswer {
                 };
                 let normalized_answer = normalize_exact_text_for_match(answer);
                 !excluded.contains(&normalized_answer)
-                    && expected
-                        .iter()
-                        .any(|candidate| normalize_exact_text_for_match(candidate) == normalized_answer)
+                    && expected.iter().any(|candidate| {
+                        normalize_exact_text_for_match(candidate) == normalized_answer
+                    })
             }
             Self::ExactSet(expected) | Self::MultiChoice(expected) => {
                 !expected.is_empty() && strict_text_set(value) == *expected
@@ -3624,14 +4186,16 @@ fn apply_manual_objective_question_override(
     let question_results = results
         .get_mut("questionResults")
         .and_then(Value::as_array_mut)
-        .ok_or_else(|| GradingError::Validation("Objective question results are missing.".to_owned()))?;
+        .ok_or_else(|| {
+            GradingError::Validation("Objective question results are missing.".to_owned())
+        })?;
     let result = question_results
         .iter_mut()
         .find(|result| result.get("questionId").and_then(Value::as_str) == Some(question_id))
         .ok_or(GradingError::NotFound)?;
-    let result_object = result
-        .as_object_mut()
-        .ok_or_else(|| GradingError::Validation("Objective question result is malformed.".to_owned()))?;
+    let result_object = result.as_object_mut().ok_or_else(|| {
+        GradingError::Validation("Objective question result is malformed.".to_owned())
+    })?;
     let max_score = result_object
         .get("maxScore")
         .and_then(Value::as_i64)
@@ -3671,43 +4235,127 @@ fn compute_objective_auto_grading_results(
     let mut total_score = 0i64;
     let mut max_score = 0i64;
     let mut question_results = Vec::with_capacity(specs.len());
+    let mut question_audits = Vec::with_capacity(specs.len());
     let mut consumed_shared_answers = HashMap::<String, HashSet<String>>::new();
 
     for spec in specs {
         let question_max = spec.max_score.max(0);
         max_score += question_max;
+        let answer_present = answer_map.contains_key(&spec.question_id);
         let student_answer = answer_map
             .get(&spec.question_id)
             .cloned()
             .unwrap_or(Value::Null);
-        let is_correct = if let Some(group) = spec.shared_answer_group.as_deref() {
-            let consumed = consumed_shared_answers.entry(group.to_owned()).or_default();
-            matches_shared_sentence_answer(&spec.expected, &student_answer, consumed)
-        } else {
-            spec.expected.matches(&student_answer, &spec.scoring_rule)
-        };
-        let awarded_score = if spec.shared_answer_group.is_some() {
-            if is_correct {
-                question_max
+        let issue_code = spec.integrity_issue.or_else(|| {
+            if !answer_present {
+                Some(ObjectiveIntegrityIssueCode::SubmissionMergeIncomplete)
+            } else if objective_integrity::student_answer_is_malformed(&student_answer) {
+                Some(ObjectiveIntegrityIssueCode::AnswerPayloadTypeInvalid)
             } else {
-                0
+                None
             }
+        });
+        let (verification_status, is_correct, awarded_score) = if issue_code.is_some() {
+            let status = if issue_code.is_some_and(ObjectiveIntegrityIssueCode::is_invalid) {
+                ObjectiveVerificationStatus::Invalid
+            } else {
+                ObjectiveVerificationStatus::NeedsRecheck
+            };
+            (status, None, None)
+        } else if objective_integrity::answer_is_blank(&student_answer) {
+            (
+                ObjectiveVerificationStatus::VerifiedUnanswered,
+                Some(false),
+                Some(0),
+            )
         } else {
-            spec.expected.awarded_score(&student_answer, question_max)
+            let is_correct = if let Some(group) = spec.shared_answer_group.as_deref() {
+                let consumed = consumed_shared_answers.entry(group.to_owned()).or_default();
+                matches_shared_sentence_answer(&spec.expected, &student_answer, consumed)
+            } else {
+                spec.expected.matches(&student_answer, &spec.scoring_rule)
+            };
+            let awarded_score = if spec.shared_answer_group.is_some() {
+                if is_correct {
+                    question_max
+                } else {
+                    0
+                }
+            } else {
+                spec.expected.awarded_score(&student_answer, question_max)
+            };
+            (
+                if is_correct {
+                    ObjectiveVerificationStatus::VerifiedCorrect
+                } else {
+                    ObjectiveVerificationStatus::VerifiedIncorrect
+                },
+                Some(is_correct),
+                Some(awarded_score),
+            )
         };
-        total_score += awarded_score;
+        if let Some(score) = awarded_score {
+            total_score += score;
+        }
+
+        let issue_message = issue_code.map(objective_integrity::issue_message);
+        question_audits.push(ObjectiveQuestionAudit {
+            question_id: spec.question_id.clone(),
+            section: section_key.to_owned(),
+            status: verification_status,
+            student_answer: answer_present.then_some(student_answer.clone()),
+            accepted_answers: spec.accepted_answers.clone(),
+            awarded_score: awarded_score.map(|score| score as f64),
+            max_score: question_max as f64,
+            issue_code,
+            issue_message: issue_message.map(ToOwned::to_owned),
+        });
 
         question_results.push(json!({
             "questionId": spec.question_id,
             "studentAnswer": value_to_display_text(&student_answer),
             "correctAnswer": value_to_display_text(&spec.correct_answer),
+            "acceptedAnswers": spec.accepted_answers,
+            "verificationStatus": verification_status,
             "isCorrect": is_correct,
             "awardedScore": awarded_score,
             "maxScore": question_max,
             "scoringRule": spec.scoring_rule,
-            "hasOverride": spec.has_override
+            "hasOverride": spec.has_override,
+            "issueCode": issue_code,
+            "issueMessage": issue_message
         }));
     }
+
+    let audit = ObjectiveGradingAudit::from_questions(
+        section_key,
+        "unknown",
+        question_audits,
+        Vec::new(),
+        Vec::new(),
+    );
+    let integrity = match audit.validate() {
+        Ok(()) => serde_json::to_value(&audit).unwrap_or_else(|_| {
+            json!({
+                "integrityStatus": "invalid",
+                "issueCodes": ["invalid_answer_key"]
+            })
+        }),
+        Err(_) => json!({
+            "section": section_key,
+            "expectedQuestionCount": audit.expected_question_count,
+            "verifiedCorrectCount": audit.verified_correct_count,
+            "verifiedIncorrectCount": audit.verified_incorrect_count,
+            "verifiedUnansweredCount": audit.verified_unanswered_count,
+            "unresolvedCount": audit.unresolved_count,
+            "invalidCount": audit.invalid_count,
+            "unknownAnswerCount": audit.unknown_answer_count,
+            "integrityStatus": "invalid",
+            "gradingSourceVersionId": "unknown",
+            "questions": audit.questions,
+            "issueCodes": ["invalid_answer_key"]
+        }),
+    };
 
     let percentage = if max_score > 0 {
         (total_score as f64 / max_score as f64) * 100.0
@@ -3720,6 +4368,7 @@ fn compute_objective_auto_grading_results(
         "totalScore": total_score,
         "maxScore": max_score,
         "percentage": percentage,
+        "integrity": integrity,
         "questionResults": question_results
     })
 }
@@ -3995,12 +4644,19 @@ fn apply_objective_scoring_overrides(
         spec.max_score = override_payload.max_score;
         spec.has_override = true;
 
-        if let Some(option_ids) = override_payload
-            .correct_option_ids
-            .as_ref()
-            .map(|values| values.iter().filter(|v| !v.is_empty()).cloned().collect::<Vec<_>>())
-            .filter(|values| !values.is_empty())
-        {
+        if let Some(raw_option_ids) = override_payload.correct_option_ids.as_ref() {
+            let option_ids = raw_option_ids
+                .iter()
+                .filter(|value| !value.trim().is_empty())
+                .cloned()
+                .collect::<Vec<_>>();
+            if option_ids.is_empty() {
+                spec.expected = ObjectiveExpectedAnswer::TextAnyOf(HashSet::new());
+                spec.correct_answer = Value::Null;
+                spec.accepted_answers.clear();
+                spec.integrity_issue = Some(ObjectiveIntegrityIssueCode::MissingAnswerKey);
+                continue;
+            }
             let is_multi_choice = matches!(&spec.expected, ObjectiveExpectedAnswer::MultiChoice(_));
             let option_count = option_ids.len();
             let normalized_option_ids = option_ids
@@ -4017,11 +4673,14 @@ fn apply_objective_scoring_overrides(
                 spec.expected = if is_multi_choice {
                     ObjectiveExpectedAnswer::MultiChoice(option_ids.iter().cloned().collect())
                 } else {
-                    ObjectiveExpectedAnswer::ExactSet(normalized_option_ids.iter().cloned().collect())
+                    ObjectiveExpectedAnswer::ExactSet(
+                        normalized_option_ids.iter().cloned().collect(),
+                    )
                 };
                 spec.correct_answer = Value::Array(
                     option_ids
-                        .into_iter()
+                        .iter()
+                        .cloned()
                         .map(Value::String)
                         .collect::<Vec<_>>(),
                 );
@@ -4029,10 +4688,14 @@ fn apply_objective_scoring_overrides(
                 spec.expected = if is_multi_choice {
                     ObjectiveExpectedAnswer::MultiChoice(option_ids.iter().cloned().collect())
                 } else {
-                    ObjectiveExpectedAnswer::TextAnyOf(normalized_option_ids.iter().cloned().collect())
+                    ObjectiveExpectedAnswer::TextAnyOf(
+                        normalized_option_ids.iter().cloned().collect(),
+                    )
                 };
                 spec.correct_answer = Value::String(option_ids.join(" | "));
             }
+            spec.accepted_answers = option_ids.clone();
+            spec.integrity_issue = None;
             if is_multi_choice {
                 spec.max_score = option_count.try_into().unwrap_or(i64::MAX);
             }
@@ -4043,6 +4706,9 @@ fn apply_objective_scoring_overrides(
             override_payload.correct_answer.as_deref(),
             override_payload.accepted_answers.as_deref(),
         );
+        spec.accepted_answers = accepted.clone();
+        spec.integrity_issue =
+            objective_integrity::answer_key_issue(None, None, &accepted, &spec.scoring_rule);
         if !accepted.is_empty() {
             let expected = accepted
                 .iter()
@@ -4137,19 +4803,23 @@ fn index_objective_block_scoring_specs(
                         question.get("correctAnswer"),
                         question.get("acceptedAnswers"),
                     );
-                    if accepted.is_empty() {
-                        continue;
-                    }
                     let scoring_rule = question
                         .get("answerRule")
                         .and_then(Value::as_str)
                         .unwrap_or(fallback_rule);
-                    insert_text_answer_spec(
+                    let integrity_issue = objective_integrity::answer_key_issue(
+                        question.get("correctAnswer"),
+                        question.get("acceptedAnswers"),
+                        &accepted,
+                        scoring_rule,
+                    );
+                    insert_text_answer_spec_with_issue(
                         specs,
                         seen,
                         question_id,
                         accepted,
                         scoring_rule.to_owned(),
+                        integrity_issue,
                     );
                 }
             }
@@ -4170,14 +4840,20 @@ fn index_objective_block_scoring_specs(
                             .get("acceptAnyAnswerKey")
                             .and_then(Value::as_bool)
                             .unwrap_or(false);
-                    let shared_answers = shared_mode
-                        .then(|| resolve_shared_sentence_answers(question));
+                    let shared_answers =
+                        shared_mode.then(|| resolve_shared_sentence_answers(question));
                     if let Some(blanks) = question.get("blanks").and_then(Value::as_array) {
                         for blank in blanks {
                             let Some(blank_id) = blank.get("id").and_then(Value::as_str) else {
                                 continue;
                             };
                             if let Some(shared_answers) = shared_answers.as_ref() {
+                                let integrity_issue = objective_integrity::answer_key_issue(
+                                    None,
+                                    question.get("sharedAcceptedAnswers"),
+                                    shared_answers,
+                                    &scoring_rule,
+                                );
                                 insert_shared_sentence_answer_spec(
                                     specs,
                                     seen,
@@ -4185,6 +4861,7 @@ fn index_objective_block_scoring_specs(
                                     shared_answers,
                                     &scoring_rule,
                                     question_id,
+                                    integrity_issue,
                                 );
                                 continue;
                             }
@@ -4192,15 +4869,19 @@ fn index_objective_block_scoring_specs(
                                 blank.get("correctAnswer"),
                                 blank.get("acceptedAnswers"),
                             );
-                            if accepted.is_empty() {
-                                continue;
-                            }
-                            insert_text_answer_spec(
+                            let integrity_issue = objective_integrity::answer_key_issue(
+                                blank.get("correctAnswer"),
+                                blank.get("acceptedAnswers"),
+                                &accepted,
+                                &scoring_rule,
+                            );
+                            insert_text_answer_spec_with_issue(
                                 specs,
                                 seen,
                                 &format!("{question_id}:{blank_id}"),
                                 accepted,
                                 scoring_rule.clone(),
+                                integrity_issue,
                             );
                         }
                     }
@@ -4252,15 +4933,13 @@ fn index_objective_block_scoring_specs(
                                             .map(ToOwned::to_owned)
                                     })
                                 });
-                        if let Some(expected) = expected {
-                            insert_text_answer_spec(
-                                specs,
-                                seen,
-                                question_id,
-                                vec![expected],
-                                "single_choice".to_owned(),
-                            );
-                        }
+                        insert_text_answer_spec(
+                            specs,
+                            seen,
+                            question_id,
+                            expected.into_iter().collect(),
+                            "single_choice".to_owned(),
+                        );
                     }
                     return;
                 }
@@ -4282,15 +4961,13 @@ fn index_objective_block_scoring_specs(
                             .map(ToOwned::to_owned)
                     })
                 });
-            if let Some(expected) = expected {
-                insert_text_answer_spec(
-                    specs,
-                    seen,
-                    block_id,
-                    vec![expected],
-                    "single_choice".to_owned(),
-                );
-            }
+            insert_text_answer_spec(
+                specs,
+                seen,
+                block_id,
+                expected.into_iter().collect(),
+                "single_choice".to_owned(),
+            );
         }
         "DIAGRAM_LABELING" => {
             register_text_slot_specs(block, block_id, "labels", "diagram_label", specs, seen);
@@ -4311,15 +4988,19 @@ fn index_objective_block_scoring_specs(
                         continue;
                     };
                     let accepted = resolve_accepted_answers(item.get("correctCategory"), None);
-                    if accepted.is_empty() {
-                        continue;
-                    }
-                    insert_text_answer_spec(
+                    let integrity_issue = objective_integrity::answer_key_issue(
+                        item.get("correctCategory"),
+                        None,
+                        &accepted,
+                        "classification",
+                    );
+                    insert_text_answer_spec_with_issue(
                         specs,
                         seen,
                         &format!("{block_id}:{item_id}"),
                         accepted,
                         "classification".to_owned(),
+                        integrity_issue,
                     );
                 }
             }
@@ -4334,21 +5015,72 @@ fn index_objective_block_scoring_specs(
                         continue;
                     };
                     let accepted = resolve_accepted_answers(feature.get("correctMatch"), None);
-                    if accepted.is_empty() {
-                        continue;
-                    }
-                    insert_text_answer_spec(
+                    let integrity_issue = objective_integrity::answer_key_issue(
+                        feature.get("correctMatch"),
+                        None,
+                        &accepted,
+                        "matching_features",
+                    );
+                    insert_text_answer_spec_with_issue(
                         specs,
                         seen,
                         &format!("{block_id}:{feature_id}"),
                         accepted,
                         "matching_features".to_owned(),
+                        integrity_issue,
                     );
                 }
             }
         }
-        _ => {}
+        _ => insert_unsupported_block_specs(block, block_id, specs, seen),
     }
+}
+
+fn insert_unsupported_block_specs(
+    block: &Value,
+    block_id: Option<&str>,
+    specs: &mut Vec<ObjectiveAnswerSpec>,
+    seen: &mut HashSet<String>,
+) {
+    if let Some(questions) = block.get("questions").and_then(Value::as_array) {
+        let mut inserted = false;
+        for question_id in questions
+            .iter()
+            .filter_map(|question| question.get("id").and_then(Value::as_str))
+        {
+            insert_unsupported_objective_spec(specs, seen, question_id);
+            inserted = true;
+        }
+        if inserted {
+            return;
+        }
+    }
+    if let Some(block_id) = block_id {
+        insert_unsupported_objective_spec(specs, seen, block_id);
+    }
+}
+
+fn insert_unsupported_objective_spec(
+    specs: &mut Vec<ObjectiveAnswerSpec>,
+    seen: &mut HashSet<String>,
+    question_id: &str,
+) {
+    if seen.contains(question_id) {
+        mark_duplicate_objective_spec(specs, question_id);
+        return;
+    }
+    seen.insert(question_id.to_owned());
+    specs.push(ObjectiveAnswerSpec {
+        question_id: question_id.to_owned(),
+        expected: ObjectiveExpectedAnswer::TextAnyOf(HashSet::new()),
+        scoring_rule: "unsupported".to_owned(),
+        correct_answer: Value::Null,
+        accepted_answers: Vec::new(),
+        max_score: 1,
+        has_override: false,
+        shared_answer_group: None,
+        integrity_issue: Some(ObjectiveIntegrityIssueCode::UnsupportedQuestionType),
+    });
 }
 
 fn normalize_shared_sentence_answer(value: &str) -> String {
@@ -4367,8 +5099,8 @@ fn normalize_shared_sentence_answer_with_case(value: &str, fold_case: bool) -> S
         '’' | '‘' | '`' => Some('\''),
         '‐' | '‑' | '‒' | '–' | '—' | '−' | '-' => Some(' '),
         '\'' => None,
-        '.' | ',' | ';' | ':' | '!' | '?' | '/' | '\\' | '(' | ')' | '[' | ']' | '{'
-        | '}' | '"' => Some(' '),
+        '.' | ',' | ';' | ':' | '!' | '?' | '/' | '\\' | '(' | ')' | '[' | ']' | '{' | '}'
+        | '"' => Some(' '),
         character => Some(character),
     }) {
         if character.is_whitespace() {
@@ -4466,8 +5198,10 @@ fn insert_shared_sentence_answer_spec(
     shared_answers: &[String],
     scoring_rule: &str,
     shared_answer_question_id: &str,
+    integrity_issue: Option<ObjectiveIntegrityIssueCode>,
 ) {
     if seen.contains(question_id) {
+        mark_duplicate_objective_spec(specs, question_id);
         return;
     }
     seen.insert(question_id.to_owned());
@@ -4483,9 +5217,13 @@ fn insert_shared_sentence_answer_spec(
         expected: ObjectiveExpectedAnswer::TextAnyOf(expected),
         scoring_rule: scoring_rule.to_owned(),
         correct_answer: Value::String(shared_answers.join(" | ")),
+        accepted_answers: shared_answers.to_vec(),
         max_score: 1,
         has_override: false,
         shared_answer_group: Some(format!("sentence:{shared_answer_question_id}:shared")),
+        integrity_issue: integrity_issue.or_else(|| {
+            objective_integrity::answer_key_issue(None, None, shared_answers, scoring_rule)
+        }),
     });
 }
 
@@ -4565,15 +5303,19 @@ fn register_sub_answer_tree_scoring_specs(
                     node.get("correctAnswer"),
                     node.get("acceptedAnswers"),
                 );
-                if accepted.is_empty() {
-                    continue;
-                }
-                insert_text_answer_spec(
+                let integrity_issue = objective_integrity::answer_key_issue(
+                    node.get("correctAnswer"),
+                    node.get("acceptedAnswers"),
+                    &accepted,
+                    "sub_answer_tree",
+                );
+                insert_text_answer_spec_with_issue(
                     specs,
                     seen,
                     &format!("{block_id}::tree::{root_id}::{node_id}"),
                     accepted,
                     "sub_answer_tree".to_owned(),
+                    integrity_issue,
                 );
                 continue;
             }
@@ -4607,15 +5349,19 @@ fn register_text_slot_specs(
             };
             let accepted =
                 resolve_accepted_answers(slot.get("correctAnswer"), slot.get("acceptedAnswers"));
-            if accepted.is_empty() {
-                continue;
-            }
-            insert_text_answer_spec(
+            let integrity_issue = objective_integrity::answer_key_issue(
+                slot.get("correctAnswer"),
+                slot.get("acceptedAnswers"),
+                &accepted,
+                scoring_rule,
+            );
+            insert_text_answer_spec_with_issue(
                 specs,
                 seen,
                 &format!("{block_id}:{slot_id}"),
                 accepted,
                 scoring_rule.to_owned(),
+                integrity_issue,
             );
         }
     }
@@ -4628,7 +5374,26 @@ fn insert_text_answer_spec(
     accepted_answers: Vec<String>,
     scoring_rule: String,
 ) {
+    insert_text_answer_spec_with_issue(
+        specs,
+        seen,
+        question_id,
+        accepted_answers,
+        scoring_rule,
+        None,
+    );
+}
+
+fn insert_text_answer_spec_with_issue(
+    specs: &mut Vec<ObjectiveAnswerSpec>,
+    seen: &mut HashSet<String>,
+    question_id: &str,
+    accepted_answers: Vec<String>,
+    scoring_rule: String,
+    integrity_issue: Option<ObjectiveIntegrityIssueCode>,
+) {
     if seen.contains(question_id) {
+        mark_duplicate_objective_spec(specs, question_id);
         return;
     }
     let display_answers = accepted_answers
@@ -4640,19 +5405,20 @@ fn insert_text_answer_spec(
         .iter()
         .map(|value| normalize_exact_text_for_match(value))
         .collect::<HashSet<_>>();
-    if normalized.is_empty() {
-        return;
-    }
     seen.insert(question_id.to_owned());
 
     specs.push(ObjectiveAnswerSpec {
         question_id: question_id.to_owned(),
         expected: ObjectiveExpectedAnswer::TextAnyOf(normalized),
-        scoring_rule,
+        scoring_rule: scoring_rule.clone(),
         correct_answer: Value::String(display_answers.join(" | ")),
+        accepted_answers: display_answers.clone(),
         max_score: 1,
         has_override: false,
         shared_answer_group: None,
+        integrity_issue: integrity_issue.or_else(|| {
+            objective_integrity::answer_key_issue(None, None, &display_answers, &scoring_rule)
+        }),
     });
 }
 
@@ -4664,6 +5430,7 @@ fn insert_multi_choice_spec(
     scoring_rule: String,
 ) {
     if seen.contains(question_id) {
+        mark_duplicate_objective_spec(specs, question_id);
         return;
     }
 
@@ -4684,10 +5451,25 @@ fn insert_multi_choice_spec(
                 .map(Value::String)
                 .collect::<Vec<_>>(),
         ),
+        accepted_answers: normalized.iter().cloned().collect(),
         max_score: normalized.len().try_into().unwrap_or(i64::MAX).max(1),
         has_override: false,
         shared_answer_group: None,
+        integrity_issue: if normalized.is_empty() {
+            Some(ObjectiveIntegrityIssueCode::MissingAnswerKey)
+        } else {
+            None
+        },
     });
+}
+
+fn mark_duplicate_objective_spec(specs: &mut [ObjectiveAnswerSpec], question_id: &str) {
+    if let Some(spec) = specs
+        .iter_mut()
+        .find(|spec| spec.question_id == question_id)
+    {
+        spec.integrity_issue = Some(ObjectiveIntegrityIssueCode::DuplicateQuestionId);
+    }
 }
 
 fn resolve_accepted_answers(
@@ -4752,6 +5534,7 @@ fn strict_text_values(value: &Value) -> Vec<String> {
     }
 }
 
+#[cfg(test)]
 fn validate_release_override_requirement(
     submission: &StudentSubmission,
     req: &ReleaseNowRequest,
@@ -4862,6 +5645,99 @@ mod tests {
     }
 
     #[test]
+    fn release_integrity_gate_rejects_unresolved_objective_results() {
+        let results = vec![json!({
+            "integrity": { "integrityStatus": "needs_recheck" }
+        })];
+
+        assert_eq!(
+            objective_integrity::validate_release_integrity(&results),
+            Err(ObjectiveIntegrityIssueCode::GradingSourceStale)
+        );
+    }
+
+    #[test]
+    fn release_integrity_gate_rejects_legacy_results_without_an_audit() {
+        let results = vec![json!({
+            "totalScore": 1,
+            "maxScore": 1,
+            "questionResults": []
+        })];
+
+        assert_eq!(
+            objective_integrity::validate_release_integrity(&results),
+            Err(ObjectiveIntegrityIssueCode::GradingSourceStale)
+        );
+    }
+
+    #[test]
+    fn release_integrity_gate_accepts_only_verified_objective_results() {
+        let results = vec![json!({
+            "integrity": {
+                "section": "reading",
+                "expectedQuestionCount": 0,
+                "verifiedCorrectCount": 0,
+                "verifiedIncorrectCount": 0,
+                "verifiedUnansweredCount": 0,
+                "unresolvedCount": 0,
+                "invalidCount": 0,
+                "unknownAnswerCount": 0,
+                "integrityStatus": "verified",
+                "gradingSourceVersionId": "source-1",
+                "questions": []
+            }
+        })];
+
+        assert!(objective_integrity::validate_release_integrity(&results).is_ok());
+    }
+
+    #[test]
+    fn release_integrity_gate_rejects_audit_from_an_obsolete_source() {
+        let results = vec![json!({
+            "integrity": {
+                "section": "reading",
+                "expectedQuestionCount": 0,
+                "verifiedCorrectCount": 0,
+                "verifiedIncorrectCount": 0,
+                "verifiedUnansweredCount": 0,
+                "unresolvedCount": 0,
+                "invalidCount": 0,
+                "unknownAnswerCount": 0,
+                "integrityStatus": "verified",
+                "gradingSourceVersionId": "source-1",
+                "questions": []
+            }
+        })];
+
+        assert_eq!(
+            objective_integrity::validate_release_integrity_for_source(&results, "source-2"),
+            Err(ObjectiveIntegrityIssueCode::GradingSourceStale)
+        );
+    }
+
+    #[test]
+    fn zero_objective_questions_are_verified_and_auto_graded() {
+        let specs = build_section_sync_specs(
+            SectionSyncMode::Full,
+            &json!({}),
+            &json!({}),
+            &json!({}),
+            &json!({}),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert!(specs
+            .iter()
+            .filter_map(|spec| spec.auto_grading_results.as_ref())
+            .all(|results| results["integrity"]["integrityStatus"] == "verified"));
+        assert!(specs
+            .iter()
+            .filter(|spec| matches!(spec.section, "reading" | "listening"))
+            .all(|spec| spec.grading_status == SectionGradingStatus::AutoGraded));
+    }
+
+    #[test]
     fn writing_task_array_supports_string_writing_answers() {
         let writing_answers = json!({
             "task1": "Hello world"
@@ -4940,26 +5816,258 @@ mod tests {
     }
 
     #[test]
-    fn objective_text_matches_ignores_word_limit_rules() {
+    fn objective_text_matches_rejects_student_answer_that_exceeds_one_word() {
         let expected = ObjectiveExpectedAnswer::TextAnyOf(
             ["crowd".to_owned(), "crowd noise".to_owned()]
                 .into_iter()
                 .collect(),
         );
         let value = Value::String("crowd noise".to_owned());
-        assert!(expected.matches(&value, "ONE_WORD"));
+        assert!(!expected.matches(&value, "ONE_WORD"));
+    }
+
+    #[test]
+    fn objective_grading_accounts_for_expected_question_with_missing_key() {
+        let content_snapshot = json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "type": "SHORT_ANSWER",
+                        "questions": [
+                            { "id": "q-valid", "correctAnswer": "London" },
+                            { "id": "q-missing", "correctAnswer": "   " }
+                        ]
+                    }]
+                }]
+            }
+        });
+
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "q-valid": "London", "q-missing": "London" }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["integrity"]["integrityStatus"], "needs_recheck");
+        assert_eq!(results["integrity"]["expectedQuestionCount"], 2);
+        assert_eq!(results["integrity"]["verifiedCorrectCount"], 1);
+        assert_eq!(results["integrity"]["unresolvedCount"], 1);
+        assert_eq!(
+            results["questionResults"]
+                .as_array()
+                .and_then(|items| items.iter().find(|item| item["questionId"] == "q-missing"))
+                .map(|item| item["issueCode"].clone()),
+            Some(json!("missing_answer_key"))
+        );
+    }
+
+    #[test]
+    fn missing_answer_key_derives_needs_review_section_status() {
+        let specs = build_section_sync_specs(
+            SectionSyncMode::Full,
+            &json!({ "q-missing": "London" }),
+            &json!({}),
+            &json!({
+                "reading": {
+                    "passages": [{
+                        "blocks": [{
+                            "type": "SHORT_ANSWER",
+                            "questions": [{ "id": "q-missing", "correctAnswer": "" }]
+                        }]
+                    }]
+                }
+            }),
+            &json!({}),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        let reading = specs.iter().find(|spec| spec.section == "reading").unwrap();
+        assert_eq!(reading.grading_status, SectionGradingStatus::NeedsReview);
+    }
+
+    #[test]
+    fn objective_grading_marks_authoritative_blank_as_verified_unanswered() {
+        let content_snapshot = json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "type": "SHORT_ANSWER",
+                        "questions": [{ "id": "q-blank", "correctAnswer": "London" }]
+                    }]
+                }]
+            }
+        });
+
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "q-blank": "" }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["integrity"]["integrityStatus"], "verified");
+        assert_eq!(results["integrity"]["verifiedUnansweredCount"], 1);
+        assert_eq!(results["integrity"]["unresolvedCount"], 0);
+        assert_eq!(
+            results["questionResults"][0]["verificationStatus"],
+            "verified_unanswered"
+        );
+    }
+
+    #[test]
+    fn malformed_answer_key_is_invalid_and_stays_in_the_audit() {
+        let content_snapshot = json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "type": "SHORT_ANSWER",
+                        "questions": [{ "id": "q-invalid", "correctAnswer": 42 }]
+                    }]
+                }]
+            }
+        });
+
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "q-invalid": "London" }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["integrity"]["integrityStatus"], "invalid");
+        assert_eq!(results["integrity"]["invalidCount"], 1);
+        assert_eq!(results["questionResults"][0]["isCorrect"], Value::Null);
+        assert_eq!(
+            results["questionResults"][0]["issueCode"],
+            "invalid_answer_key"
+        );
+    }
+
+    #[test]
+    fn unsupported_question_type_is_accounted_as_invalid() {
+        let content_snapshot = json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{ "id": "q-unsupported", "type": "FUTURE_WIDGET" }]
+                }]
+            }
+        });
+
+        let results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "q-unsupported": "answer" }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(results["integrity"]["expectedQuestionCount"], 1);
+        assert_eq!(results["integrity"]["invalidCount"], 1);
+        assert_eq!(
+            results["questionResults"][0]["issueCode"],
+            "unsupported_question_type"
+        );
+    }
+
+    #[test]
+    fn ambiguous_mapping_quarantines_without_copying_an_answer() {
+        let answers = json!({ "shared-q": "answer" });
+        let content_snapshot = json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "type": "SHORT_ANSWER",
+                        "questions": [{ "id": "shared-q", "correctAnswer": "answer" }]
+                    }]
+                }]
+            },
+            "listening": {
+                "parts": [{
+                    "blocks": [{
+                        "type": "SHORT_ANSWER",
+                        "questions": [{ "id": "shared-q", "correctAnswer": "answer" }]
+                    }]
+                }]
+            }
+        });
+        let answer_sections = build_objective_answer_sections(&content_snapshot);
+        assert_eq!(
+            answer_sections.get("shared-q").map(String::as_str),
+            Some(objective_integrity::AMBIGUOUS_SECTION_MAPPING)
+        );
+
+        let mut results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({}),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+        objective_integrity::attach_answer_mapping_issues(&mut results, &answers, &answer_sections);
+
+        assert_eq!(results["integrity"]["integrityStatus"], "needs_recheck");
+        assert!(results["integrity"]["issueCodes"]
+            .as_array()
+            .is_some_and(|codes| codes.iter().any(|code| code == "section_mapping_ambiguous")));
+        assert_eq!(results["integrity"]["unknownAnswerCount"], 1);
+    }
+
+    #[test]
+    fn unknown_answer_is_quarantined_while_known_question_continues() {
+        let content_snapshot = json!({
+            "reading": {
+                "passages": [{
+                    "blocks": [{
+                        "type": "SHORT_ANSWER",
+                        "questions": [{ "id": "q-known", "correctAnswer": "London" }]
+                    }]
+                }]
+            }
+        });
+        let answers = json!({ "q-known": "London", "q-unknown": "Paris" });
+        let answer_sections = build_objective_answer_sections(&content_snapshot);
+        let mut results = compute_objective_auto_grading_results(
+            "reading",
+            &json!({ "q-known": "London" }),
+            &content_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+        objective_integrity::attach_answer_mapping_issues(&mut results, &answers, &answer_sections);
+
+        assert_eq!(results["questionResults"][0]["isCorrect"], true);
+        assert_eq!(results["integrity"]["unknownAnswerCount"], 1);
+        assert_eq!(results["integrity"]["integrityStatus"], "needs_recheck");
+    }
+
+    #[test]
+    fn empty_section_mapping_quarantines_answers_instead_of_copying_them() {
+        let answers = json!({ "unknown-q": "London" });
+        let sections = HashMap::new();
+
+        assert_eq!(
+            filter_answers_for_section(&answers, &sections, "reading"),
+            json!({})
+        );
     }
 
     #[test]
     fn objective_text_matches_trims_student_answer_before_matching() {
-        let expected = ObjectiveExpectedAnswer::TextAnyOf(["NOT GIVEN".to_owned()].into_iter().collect());
+        let expected =
+            ObjectiveExpectedAnswer::TextAnyOf(["NOT GIVEN".to_owned()].into_iter().collect());
         let value = Value::String("NOT GIVEN   ".to_owned());
-        assert!(expected.matches(&value, "ONE_WORD"));
+        assert!(expected.matches(&value, "exact_match"));
     }
 
     #[test]
     fn objective_text_matching_requires_answer_key_case() {
-        let expected = ObjectiveExpectedAnswer::TextAnyOf(["NOT GIVEN".to_owned()].into_iter().collect());
+        let expected =
+            ObjectiveExpectedAnswer::TextAnyOf(["NOT GIVEN".to_owned()].into_iter().collect());
         let value = Value::String("not given".to_owned());
         assert!(!expected.matches(&value, "ONE_WORD"));
     }
@@ -5013,8 +6121,14 @@ mod tests {
         for results in [alias_results, materialized_results] {
             assert_eq!(results["totalScore"], 2);
             assert_eq!(results["maxScore"], 2);
-            assert_eq!(results["questionResults"][0]["questionId"], "sentence-1:blank-1");
-            assert_eq!(results["questionResults"][1]["questionId"], "sentence-1:blank-2");
+            assert_eq!(
+                results["questionResults"][0]["questionId"],
+                "sentence-1:blank-1"
+            );
+            assert_eq!(
+                results["questionResults"][1]["questionId"],
+                "sentence-1:blank-2"
+            );
             assert_eq!(results["questionResults"][0]["isCorrect"], true);
             assert_eq!(results["questionResults"][1]["isCorrect"], true);
         }
@@ -5604,9 +6718,18 @@ mod tests {
         assert_eq!(recalculated_results["totalScore"], 1);
         assert_eq!(recalculated_results["maxScore"], 2);
         assert_eq!(recalculated_results["percentage"], 50.0);
-        assert_eq!(recalculated_results["questionResults"][0]["isCorrect"], false);
-        assert_eq!(recalculated_results["questionResults"][0]["awardedScore"], 0);
-        assert_eq!(recalculated_results["questionResults"][1]["isCorrect"], true);
+        assert_eq!(
+            recalculated_results["questionResults"][0]["isCorrect"],
+            false
+        );
+        assert_eq!(
+            recalculated_results["questionResults"][0]["awardedScore"],
+            0
+        );
+        assert_eq!(
+            recalculated_results["questionResults"][1]["isCorrect"],
+            true
+        );
         assert_eq!(
             recalculated_results["questionResults"][0]["manualOverride"]["overriddenBy"],
             "teacher-1"
@@ -5642,7 +6765,14 @@ mod tests {
         assert_eq!(results["totalScore"], 0);
         assert_eq!(results["maxScore"], 1);
         assert_eq!(results["questionResults"][0]["questionId"], "multi-1");
-        assert_eq!(results["questionResults"][0]["isCorrect"], false);
+        assert_eq!(
+            results["questionResults"][0]["verificationStatus"],
+            "needs_recheck"
+        );
+        assert_eq!(
+            results["questionResults"][0]["issueCode"],
+            "missing_answer_key"
+        );
     }
 
     #[test]

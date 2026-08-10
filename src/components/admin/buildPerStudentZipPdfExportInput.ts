@@ -12,6 +12,7 @@ import type {
   PerStudentZipPdfMode,
   PerStudentZipPdfSectionData,
 } from './gradingPerStudentExport';
+import type { ExportPlan } from './gradingExportBuilder/exportPlan';
 
 export interface BuildPerStudentZipPdfExportInputDeps {
   getSectionSubmissionsBySubmissionId: (submissionId: string) => Promise<SectionSubmission[]>;
@@ -29,6 +30,7 @@ export interface BuildPerStudentZipPdfExportInputArgs {
   pdfMode: PerStudentZipPdfMode;
   pdfFilenameTemplate: string;
   generatedAt?: Date | undefined;
+  exportPlan?: ExportPlan | undefined;
 }
 
 type ExportSectionRow = { columns: CsvColumn[]; row: Record<string, unknown> | null };
@@ -77,7 +79,7 @@ export async function buildPerStudentZipPdfExportInput(
         args.selectedSubmissions.map(async (submission) => [
           submission.id,
           await deps.getSectionSubmissionsBySubmissionId(submission.id),
-        ]),
+        ] as const),
       ),
     );
 
@@ -157,14 +159,44 @@ export async function buildPerStudentZipPdfExportInput(
       cohortName: args.session.cohortName,
       sessionId: args.session.id,
     },
-    students: args.selectedSubmissions.map((submission) => ({
-      submissionId: submission.id,
-      studentName: submission.studentName,
-      studentId: submission.studentId || submission.submissionId,
-      studentEmail: submission.studentEmail,
-      nickname: submission.nickname,
-      ieltsCourse: submission.ieltsCourse,
-      sectionData: sectionDataBySubmissionId.get(submission.id) ?? {},
-    })),
+    plan: args.exportPlan
+      ? {
+          profile: {
+            id: args.exportPlan.profileSnapshot.id,
+            name: args.exportPlan.profileSnapshot.name,
+            version: args.exportPlan.profileSnapshot.version,
+          },
+          grouping: args.exportPlan.profileSnapshot.grouping.map((grouping) => grouping.field),
+          filenameTemplate: args.exportPlan.profileSnapshot.filenameTemplate,
+          matchedCount: args.exportPlan.matchedCount,
+          selectedCount: args.exportPlan.selectedCount,
+          folderCount: args.exportPlan.folderCount,
+          pdfCount: args.exportPlan.pdfCount,
+          warnings: args.exportPlan.warnings,
+          conflicts: args.exportPlan.conflicts,
+        }
+      : undefined,
+    students: args.selectedSubmissions.map((submission) => {
+      const plannedStudent = args.exportPlan?.students.find(
+        (student) => student.submissionId === submission.id,
+      );
+      return {
+        submissionId: submission.id,
+        studentName: submission.studentName,
+        studentId: submission.studentId || submission.submissionId,
+        studentEmail: submission.studentEmail,
+        nickname: submission.nickname,
+        ieltsCourse: submission.ieltsCourse,
+        wcode: plannedStudent?.identity.wcode,
+        level: plannedStudent?.identity.level,
+        sectionData: sectionDataBySubmissionId.get(submission.id) ?? {},
+        plannedOutputs: plannedStudent?.outputs.map((output) => ({
+          folderPath: output.folderPath,
+          filename: output.filename,
+          path: output.path,
+          section: output.section,
+        })),
+      };
+    }),
   };
 }

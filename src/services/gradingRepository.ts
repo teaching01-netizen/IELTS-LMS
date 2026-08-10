@@ -117,6 +117,7 @@ type BackendStudentSubmission = Omit<
   | 'studentEmail'
   | 'nickname'
   | 'ieltsCourse'
+  | 'level'
   | 'assignedTeacherId'
   | 'assignedTeacherName'
   | 'flagReason'
@@ -125,6 +126,7 @@ type BackendStudentSubmission = Omit<
   studentEmail?: string | null | undefined;
   nickname?: string | null | undefined;
   ieltsCourse?: string | null | undefined;
+  level?: string | null | undefined;
   assignedTeacherId?: string | null | undefined;
   assignedTeacherName?: string | null | undefined;
   flagReason?: string | null | undefined;
@@ -347,6 +349,7 @@ class BackendGradingRepository implements IGradingRepository {
       studentEmail: payload.studentEmail ?? undefined,
       nickname: payload.nickname ?? undefined,
       ieltsCourse: payload.ieltsCourse ?? undefined,
+      level: payload.level ?? undefined,
       cohortName: payload.cohortName,
       submittedAt: payload.submittedAt,
       timeSpentSeconds: payload.timeSpentSeconds,

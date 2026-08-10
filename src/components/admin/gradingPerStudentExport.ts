@@ -7,6 +7,8 @@ export type {
   PerStudentZipPdfExportManifestStudent,
   PerStudentZipPdfExportManifest,
   PerStudentZipPdfExportResult,
+  PerStudentZipPdfPlannedOutput,
+  PerStudentZipPdfPlanSnapshot,
 } from './gradingPerStudentExport/types';
 
 export { createPerStudentZipPdfExport } from './gradingPerStudentExport/zipExport';

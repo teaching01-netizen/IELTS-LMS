@@ -206,10 +206,16 @@ pub fn build_router(state: AppState) -> Router {
         )
         .nest(
             "/api/v1/settings",
-            Router::new().route(
-                "/exam-defaults",
-                get(settings::get_exam_defaults).put(settings::update_exam_defaults),
-            ),
+            Router::new()
+                .route(
+                    "/exam-defaults",
+                    get(settings::get_exam_defaults).put(settings::update_exam_defaults),
+                )
+                .route(
+                    "/export-profiles",
+                    get(settings::list_grading_export_profiles)
+                        .post(settings::create_grading_export_profile),
+                ),
         )
         .nest(
             "/api/v1/grading",
@@ -223,6 +229,10 @@ pub fn build_router(state: AppState) -> Router {
                 .route(
                     "/schedules/:schedule_id/objective-grading-source",
                     get(grading::get_objective_grading_source),
+                )
+                .route(
+                    "/schedules/:schedule_id/objective-integrity",
+                    get(grading::get_objective_integrity_overview),
                 )
                 .route(
                     "/schedules/:schedule_id/objective-overrides/:question_id",

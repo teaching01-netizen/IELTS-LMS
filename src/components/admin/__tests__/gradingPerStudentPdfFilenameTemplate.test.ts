@@ -1,11 +1,32 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE,
   renderPerStudentPdfFilenameTemplate,
   resolvePerStudentPdfFilenameCollisions,
 } from '../gradingPerStudentPdfFilenameTemplate';
 
 describe('renderPerStudentPdfFilenameTemplate', () => {
+  test('uses the canonical nickname, Wcode, level, and full name fields', () => {
+    const result = renderPerStudentPdfFilenameTemplate(
+      DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE,
+      {
+        studentName: 'Somsri Saelim',
+        studentId: 'student-1',
+        submissionId: 'sub-1',
+        nickname: 'Mew',
+        wcode: 'W12345',
+        level: 'Level 5',
+        fullName: 'Somsri Saelim',
+        sections: ['reading', 'listening', 'writing'],
+        generatedAt: new Date('2026-05-14T10:11:12.000Z'),
+      },
+    );
+
+    expect(result.unknownPlaceholders).toEqual([]);
+    expect(result.filename).toBe('Mew (W12345) - Level 5 - Somsri Saelim.pdf');
+  });
+
   test('renders known placeholders and ensures .pdf extension', () => {
     const result = renderPerStudentPdfFilenameTemplate('{{studentName}}_{{submissionId}}_{{sections}}', {
       studentName: 'Ada Student',

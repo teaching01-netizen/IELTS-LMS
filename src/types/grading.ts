@@ -48,6 +48,79 @@ export type ReleaseStatus =
   | 'released'
   | 'reopened';
 
+export type ObjectiveVerificationStatus =
+  | 'verified_correct'
+  | 'verified_incorrect'
+  | 'verified_unanswered'
+  | 'needs_recheck'
+  | 'invalid';
+
+export type ObjectiveIntegrityIssueCode =
+  | 'missing_answer_key'
+  | 'invalid_answer_key'
+  | 'answer_key_violates_scoring_rule'
+  | 'unsupported_question_type'
+  | 'duplicate_question_id'
+  | 'unknown_student_answer_id'
+  | 'answer_payload_type_invalid'
+  | 'section_mapping_unavailable'
+  | 'section_mapping_ambiguous'
+  | 'submission_merge_incomplete'
+  | 'grading_source_stale'
+  | 'manual_override_stale';
+
+export type ObjectiveIntegrityStatus = 'verified' | 'needs_recheck' | 'invalid';
+
+export interface ObjectiveQuestionAudit {
+  questionId: string;
+  section: string;
+  status: ObjectiveVerificationStatus;
+  studentAnswer?: unknown;
+  acceptedAnswers: string[];
+  awardedScore?: number;
+  maxScore: number;
+  issueCode?: ObjectiveIntegrityIssueCode;
+  issueMessage?: string;
+}
+
+export interface ObjectiveGradingAudit {
+  section: string;
+  expectedQuestionCount: number;
+  verifiedCorrectCount: number;
+  verifiedIncorrectCount: number;
+  verifiedUnansweredCount: number;
+  unresolvedCount: number;
+  invalidCount: number;
+  unknownAnswerCount: number;
+  integrityStatus: ObjectiveIntegrityStatus;
+  gradingSourceVersionId: string;
+  unknownAnswerIds?: string[];
+  issueCodes?: ObjectiveIntegrityIssueCode[];
+  questions: ObjectiveQuestionAudit[];
+}
+
+export interface ObjectiveIntegrityIssueSummary {
+  submissionId: string;
+  studentId: string;
+  studentName: string;
+  section: string;
+  questionId?: string;
+  questionNumber?: string;
+  code: ObjectiveIntegrityIssueCode;
+}
+
+export interface ObjectiveIntegrityOverview {
+  studentCount: number;
+  expectedAnswerCount: number;
+  verifiedCorrectCount: number;
+  verifiedIncorrectCount: number;
+  verifiedUnansweredCount: number;
+  needsRecheckCount: number;
+  invalidCount: number;
+  integrityStatus: ObjectiveIntegrityStatus;
+  issues: ObjectiveIntegrityIssueSummary[];
+}
+
 /**
  * Visibility for comments and notes
  */
@@ -141,6 +214,8 @@ export interface StudentSubmission {
   studentEmail?: string | undefined;
   nickname?: string | undefined;
   ieltsCourse?: string | undefined;
+  /** Canonical level when supplied by registration metadata; kept separate from course. */
+  level?: string | undefined;
   cohortName: string;
   
   // Submission timing
@@ -272,6 +347,7 @@ export interface AutoGradingResult {
   percentage: number;
   questionResults: ObjectiveQuestionResult[];
   generatedAt: string;
+  integrity?: ObjectiveGradingAudit | undefined;
 }
 
 /**

@@ -1,13 +1,19 @@
 import type { PerStudentZipPdfExportSection } from './gradingPerStudentExport';
 
 export const DEFAULT_PER_STUDENT_PDF_FILENAME_TEMPLATE =
-  '{{studentName}}_{{submissionId}}_{{sections}}.pdf';
+  '{{nickname}} ({{wcode}}) - {{level}} - {{fullName}}.pdf';
 
 export const PER_STUDENT_PDF_FILENAME_TEMPLATE_FIELDS = [
+  { key: 'nickname', label: 'Nickname' },
+  { key: 'wcode', label: 'Wcode' },
+  { key: 'level', label: 'Level' },
+  { key: 'fullName', label: 'Full name' },
+  { key: 'course', label: 'Course' },
+  { key: 'cohort', label: 'Cohort' },
+  { key: 'customGroup', label: 'Custom group' },
   { key: 'studentName', label: 'Student name' },
   { key: 'studentId', label: 'Student ID' },
   { key: 'studentEmail', label: 'Student email' },
-  { key: 'nickname', label: 'Nickname' },
   { key: 'ieltsCourse', label: 'IELTS course' },
   { key: 'submissionId', label: 'Submission ID' },
   { key: 'examTitle', label: 'Exam title' },
@@ -25,21 +31,31 @@ export type PerStudentPdfFilenameTemplateFieldKey =
 export interface PerStudentPdfFilenameTemplateContext {
   studentName: string;
   studentId: string;
+  fullName?: string | null | undefined;
+  wcode?: string | null | undefined;
+  level?: string | null | undefined;
   studentEmail?: string | null | undefined;
   nickname?: string | null | undefined;
   ieltsCourse?: string | null | undefined;
+  course?: string | null | undefined;
+  cohort?: string | null | undefined;
+  customGroup?: string | null | undefined;
   submissionId: string;
   examTitle?: string | null | undefined;
   cohortName?: string | null | undefined;
   sessionId?: string | null | undefined;
   section?: PerStudentZipPdfExportSection | undefined;
-  sections: PerStudentZipPdfExportSection[];
+  sections: readonly PerStudentZipPdfExportSection[];
   generatedAt: Date;
 }
 
 export interface RenderPerStudentPdfFilenameResult {
   filename: string;
   unknownPlaceholders: string[];
+}
+
+function isTemplateFieldKey(value: string): value is PerStudentPdfFilenameTemplateFieldKey {
+  return PER_STUDENT_PDF_FILENAME_TEMPLATE_FIELDS.some((field) => field.key === value);
 }
 
 const INVALID_FILENAME_CHARS = /[\\/:"*?<>|]+/g;
@@ -61,7 +77,7 @@ function formatTimestampLocalSafe(value: Date): string {
   return `${year}-${month}-${day}T${hours}-${minutes}-${seconds}`;
 }
 
-function formatSections(sections: PerStudentZipPdfExportSection[]): string {
+function formatSections(sections: readonly PerStudentZipPdfExportSection[]): string {
   return [...sections].sort().join('-');
 }
 
@@ -104,10 +120,16 @@ export function renderPerStudentPdfFilenameTemplate(
   const resolved = template.replace(/{{\s*([^}]+)\s*}}/g, (match, rawKey: string) => {
     const key = rawKey.trim();
     const valueByKey: Record<PerStudentPdfFilenameTemplateFieldKey, string> = {
+      nickname: context.nickname ?? '',
+      wcode: context.wcode ?? context.studentId,
+      level: context.level ?? '',
+      fullName: context.fullName ?? context.studentName,
+      course: context.course ?? context.ieltsCourse ?? '',
+      cohort: context.cohort ?? context.cohortName ?? '',
+      customGroup: context.customGroup ?? '',
       studentName: context.studentName,
       studentId: context.studentId,
       studentEmail: context.studentEmail ?? '',
-      nickname: context.nickname ?? '',
       ieltsCourse: context.ieltsCourse ?? '',
       submissionId: context.submissionId,
       examTitle: context.examTitle ?? '',
@@ -119,8 +141,8 @@ export function renderPerStudentPdfFilenameTemplate(
       timestamp: formatTimestampLocalSafe(context.generatedAt),
     };
 
-    if (Object.prototype.hasOwnProperty.call(valueByKey, key)) {
-      return valueByKey[key as PerStudentPdfFilenameTemplateFieldKey];
+    if (isTemplateFieldKey(key)) {
+      return valueByKey[key];
     }
 
     unknown.add(key);

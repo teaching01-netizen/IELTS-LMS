@@ -8,7 +8,7 @@ use ielts_backend_application::grading::{GradingError, GradingService};
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::grading::{
     ActorActionRequest, GradingScheduleObjectiveOverride, GradingSession, GradingSessionDetail,
-    ObjectiveOverrideDeleteRequest, ObjectiveOverrideUpsertRequest,
+    ObjectiveIntegrityOverview, ObjectiveOverrideDeleteRequest, ObjectiveOverrideUpsertRequest,
     ObjectiveQuestionOverrideRequest, ReleaseEvent, ReleaseNowRequest, ReviewDraft,
     SaveReviewDraftRequest, ScheduleReleaseRequest, SectionSubmission, StartReviewRequest,
     StudentResult, SubmissionReviewSummary, WritingTaskSubmission,
@@ -150,6 +150,27 @@ pub async fn get_objective_grading_source(
     ))
 }
 
+pub async fn get_objective_integrity_overview(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    Path(schedule_id): Path<Uuid>,
+) -> Result<ApiResponse<ObjectiveIntegrityOverview>, ApiError> {
+    authorize_schedule_for_overrides(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
+    let service = grading_service(&state);
+    let started = Instant::now();
+    let overview = service
+        .get_objective_integrity_overview(&ctx, schedule_id)
+        .await?;
+    state.telemetry.observe_db_operation(
+        "grading.get_objective_integrity_overview",
+        started.elapsed(),
+    );
+    Ok(ApiResponse::success_with_request_id(overview, request_id.0))
+}
+
 pub async fn upsert_objective_override(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
@@ -235,7 +256,12 @@ pub async fn regrade_objective_latest_draft(
     let service = grading_service(&state);
     let started = Instant::now();
     let (report, draft_version_id) = service
-        .regrade_schedule_objectives_from_latest_draft(&ctx, &principal.display_name(), schedule_id, req.reason)
+        .regrade_schedule_objectives_from_latest_draft(
+            &ctx,
+            &principal.display_name(),
+            schedule_id,
+            req.reason,
+        )
         .await?;
     state
         .telemetry
@@ -360,12 +386,21 @@ pub async fn override_objective_question(
     Path((submission_id, section, question_id)): Path<(Uuid, String, String)>,
     Json(req): Json<ObjectiveQuestionOverrideRequest>,
 ) -> Result<ApiResponse<SectionSubmission>, ApiError> {
-    let schedule_id: String = query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
-        .bind(submission_id.to_string())
-        .fetch_optional(&state.db_pool())
-        .await
-        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &err.to_string()))?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))?;
+    let schedule_id: String =
+        query_scalar("SELECT schedule_id FROM student_submissions WHERE id = ?")
+            .bind(submission_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|err| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &err.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
     let schedule_id = Uuid::parse_str(&schedule_id).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,

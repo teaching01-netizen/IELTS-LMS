@@ -9,11 +9,11 @@ import { TableLoadingSkeleton } from '@components/ui';
 import { GradingExportButtons } from './GradingExportButtons';
 import { ObjectiveOverridesPanel } from './ObjectiveOverridesPanel';
 import { ExamObjectiveOverviewPanel } from './ExamObjectiveOverviewPanel';
+import { ObjectiveIntegrityOverviewPanel } from './ObjectiveIntegrityOverviewPanel';
 import {
   buildCsvContent,
   buildCsvFilename,
   buildWideObjectiveExport,
-  buildWideWritingExport,
   downloadCsvFile,
   resolveObjectiveGradingVersionId,
   type GradingExportSection,
@@ -750,7 +750,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           <div className="flex items-start gap-3">
             <div className="flex flex-col gap-1">
               <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-gray-400">
-                Export Mode
+                Export
               </span>
               <select
                 value={exportMode}
@@ -758,8 +758,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                 disabled={exportingSection !== null || perStudentDialogOpen}
                 className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <option value="default">CSV / Print (Default)</option>
-                <option value="per_student_zip_pdf">Per-student ZIP (PDF)</option>
+                <option value="default">CSV / Print</option>
+                <option value="per_student_zip_pdf">Export Builder · PDF ZIP</option>
               </select>
             </div>
 
@@ -775,7 +775,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             ) : (
               <div className="flex flex-col items-start gap-2 sm:items-end">
                 <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-gray-400">
-                  Export PDFs
+                  Export Builder
                 </span>
                 <button
                   type="button"
@@ -784,7 +784,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                   className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Download size={14} />
-                  Per-student ZIP PDFs
+                  Build PDF ZIP
                 </button>
               </div>
             )}
@@ -805,6 +805,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           publishedVersionId={session.publishedVersionId}
         />
       ) : null}
+
+      {session ? <ObjectiveIntegrityOverviewPanel scheduleId={session.scheduleId} /> : null}
 
       {showOverallAnswerCheck && session ? (
         <ExamObjectiveOverviewPanel
