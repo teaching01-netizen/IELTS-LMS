@@ -24,13 +24,13 @@ for the individual review screen:
 
 - It loads every submitted student's Reading/Listening objective rows for the selected grading session.
 - It keeps only typed-answer question blocks, excluding choice blocks using the session's immutable exam version.
-- It groups rows by the normalized student answer across the selected exam session, while retaining every student/question occurrence inside the group.
+- It groups rows by the exact raw student answer across the selected exam session, so casing and whitespace variants such as `Garden Hall`, `garden hall`, and `Garden hall` remain separate groups while every matching student/question occurrence is retained.
 - It keeps only rows where the raw student answer differs from an accepted key by capitalization and/or whitespace, while the normalized values match.
 - Punctuation changes, exact raw matches, genuinely incorrect answers, and choice answers are excluded.
 - The default `Incorrect` filter shows answer groups currently scored incorrect; `All` and `Correct` switch the view at group level without reloading the session.
-- Group summaries show the student answer, current key, affected student/question counts, and correctness status. Student/question evidence is collapsed by default and remains available through the accessible details disclosure.
+- Group summaries show the exact student answer text, current key, affected student/question counts, and correctness status. Student/question evidence is collapsed by default and remains available through the accessible details disclosure; the evidence table repeats the raw answer and uses human question labels such as `q-17`.
 - Exam-wide decisions require confirmation showing the exact student/question impact, then report the persisted key update and regrade outcome in an inline live status message.
 - A group-level decision applies to the whole selected exam session through the schedule-scoped objective override endpoint; there are no per-row result buttons.
-- `Correct + add to answer key` merges every observed spelling/spacing variant in the group into the question's accepted answer key and regrades every submission in the session.
+- `Correct + add to answer key` adds the selected exact answer text to the question's accepted answer key and regrades every submission in the session.
 - `Incorrect for whole exam` records the grouped answer as excluded for the affected question and regrades every submission in the session.
 - Student names remain drillable into the individual review screen, but the answer decision is never limited to that one student.

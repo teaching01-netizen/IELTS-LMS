@@ -293,6 +293,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(rows[0]?.correctAnswer).toBe(
       'faces of china | FACES OF CHINA | Faces of China',
     );
+    expect(rows[0]?.questionNumberLabel).toBe('q-1');
     expect(rows[0]?.isCorrect).toBe(true);
   });
 
@@ -553,6 +554,8 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(screen.getByRole('heading', { name: 'Garden hall' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'View 1 student and 1 question' }));
     expect(screen.getByText('1 / 1')).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Garden hall' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'q-1' })).toBeInTheDocument();
     expect(examRepository.getVersionById).toHaveBeenCalledWith('draft-version-1');
 
     vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([]);
@@ -564,7 +567,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(await screen.findByText('No typed answers differ from their key only by letter case or whitespace.')).toBeInTheDocument();
   });
 
-  test('groups equivalent student answers across the exam into one review group', () => {
+  test('keeps raw casing variants in separate review groups', () => {
     const rows: ExamObjectiveOverviewRow[] = [
       {
         rowId: 'submission-1:reading:q-1',
@@ -572,10 +575,11 @@ describe('buildExamObjectiveOverviewRows', () => {
         studentName: 'Narin Example',
         section: 'reading',
         questionId: 'q-1',
-        studentAnswer: ' ANSWER ',
+        questionNumberLabel: 'q-1',
+        studentAnswer: 'Garden Hall',
         correctAnswer: 'Answer',
-        isCorrect: false,
-        awardedScore: 0,
+        isCorrect: true,
+        awardedScore: 1,
         maxScore: 1,
         scoringRule: 'exact_match',
         hasOverride: false,
@@ -587,7 +591,24 @@ describe('buildExamObjectiveOverviewRows', () => {
         studentName: 'Mali Example',
         section: 'reading',
         questionId: 'q-1',
-        studentAnswer: 'answer',
+        questionNumberLabel: 'q-1',
+        studentAnswer: 'garden hall',
+        correctAnswer: 'Answer',
+        isCorrect: false,
+        awardedScore: 0,
+        maxScore: 1,
+        scoringRule: 'exact_match',
+        hasOverride: false,
+        manualOverride: null,
+      },
+      {
+        rowId: 'submission-3:reading:q-1',
+        submissionId: 'submission-3',
+        studentName: 'Ploy Example',
+        section: 'reading',
+        questionId: 'q-1',
+        questionNumberLabel: 'q-1',
+        studentAnswer: 'Garden hall',
         correctAnswer: 'Answer',
         isCorrect: false,
         awardedScore: 0,
@@ -600,9 +621,13 @@ describe('buildExamObjectiveOverviewRows', () => {
 
     const groups = groupExamObjectiveOverviewRows(rows);
 
-    expect(groups).toHaveLength(1);
-    expect(groups[0]?.studentAnswer).toBe('ANSWER');
-    expect(groups[0]?.rows).toHaveLength(2);
+    expect(groups).toHaveLength(3);
+    expect(groups.map((group) => group.studentAnswer)).toEqual(expect.arrayContaining([
+      'garden hall',
+      'Garden hall',
+      'Garden Hall',
+    ]));
+    expect(groups.every((group) => group.rows.length === 1)).toBe(true);
   });
 
   test('sets one answer group for the whole exam and adds the answer to the key', async () => {

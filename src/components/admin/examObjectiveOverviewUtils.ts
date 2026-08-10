@@ -5,7 +5,10 @@ import type {
   SectionSubmission,
   StudentSubmission,
 } from '../../types/grading';
-import { getStudentQuestionsForModule } from '../../services/examAdapterService';
+import {
+  getQuestionNumberLabel,
+  getStudentQuestionsForModule,
+} from '../../services/examAdapterService';
 import { getCorrectAnswerDisplay } from './gradingAnswerUtils';
 
 export interface ExamObjectiveOverviewBundle {
@@ -19,6 +22,7 @@ export interface ExamObjectiveOverviewRow {
   readonly studentName: string;
   readonly section: 'reading' | 'listening';
   readonly questionId: string;
+  readonly questionNumberLabel: string;
   readonly studentAnswer: string;
   readonly correctAnswer: string;
   readonly isCorrect: boolean;
@@ -34,7 +38,6 @@ export type ExamObjectiveOverviewGroupStatus = 'correct' | 'incorrect';
 export interface ExamObjectiveOverviewGroup {
   readonly groupId: string;
   readonly studentAnswer: string;
-  readonly normalizedStudentAnswer: string;
   readonly rows: readonly ExamObjectiveOverviewRow[];
 }
 
@@ -130,6 +133,23 @@ function buildQuestionDescriptorLookup(examState: ExamState | null | undefined) 
   return lookup;
 }
 
+function buildQuestionNumberLabelLookup(examState: ExamState | null | undefined): Map<string, string> {
+  const lookup = new Map<string, string>();
+  if (!examState) return lookup;
+
+  for (const section of ['reading', 'listening'] as const) {
+    const descriptors = getStudentQuestionsForModule(examState, section);
+    for (const descriptor of descriptors) {
+      const numberLabel = getQuestionNumberLabel(descriptors, descriptor.id);
+      if (numberLabel) {
+        lookup.set(`${section}:${descriptor.id}`, `q-${numberLabel}`);
+      }
+    }
+  }
+
+  return lookup;
+}
+
 function isTextAnswerResult(
   result: ObjectiveQuestionResult,
   section: 'reading' | 'listening',
@@ -179,6 +199,7 @@ export function buildExamObjectiveOverviewRows(
 ): ExamObjectiveOverviewRow[] {
   const questionAnswerKinds = buildQuestionAnswerKindLookup(options.examState);
   const questionDescriptors = buildQuestionDescriptorLookup(options.examState);
+  const questionNumberLabels = buildQuestionNumberLabelLookup(options.examState);
 
   return bundles
     .flatMap(({ submission, sections }) => sections
@@ -201,6 +222,7 @@ export function buildExamObjectiveOverviewRows(
             studentName: submission.studentName,
             section: section.section,
             questionId: result.questionId,
+            questionNumberLabel: questionNumberLabels.get(`${section.section}:${result.questionId}`) ?? result.questionId,
             studentAnswer: result.studentAnswer,
             correctAnswer,
             maxScore: result.maxScore,
@@ -227,8 +249,7 @@ export function groupExamObjectiveOverviewRows(
   const grouped = new Map<string, ExamObjectiveOverviewGroup>();
 
   for (const row of rows) {
-    const normalizedStudentAnswer = normalizeCaseInsensitiveAndWhitespace(row.studentAnswer);
-    const groupId = normalizedStudentAnswer || `empty:${row.rowId}`;
+    const groupId = row.studentAnswer || `empty:${row.rowId}`;
     const existing = grouped.get(groupId);
 
     if (existing) {
@@ -241,8 +262,7 @@ export function groupExamObjectiveOverviewRows(
 
     grouped.set(groupId, {
       groupId,
-      studentAnswer: normalizeCaseAndWhitespace(row.studentAnswer),
-      normalizedStudentAnswer,
+      studentAnswer: row.studentAnswer,
       rows: [row],
     });
   }

@@ -90,7 +90,7 @@ export function ExamObjectiveOverviewGroupCard({
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Student answer</p>
                 <StatusPill status={status} />
               </div>
-              <h3 id={headingId} className="mt-2 break-words font-mono text-base font-semibold text-gray-900">
+              <h3 id={headingId} className="mt-2 whitespace-pre-wrap break-words font-mono text-base font-semibold text-gray-900">
                 {group.studentAnswer || 'Blank answer'}
               </h3>
               <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
@@ -148,11 +148,12 @@ export function ExamObjectiveOverviewGroupCard({
       {expanded ? (
         <div id={detailsId} className="border-t border-gray-200 bg-gray-50/60 px-4 py-3 sm:px-6">
           <div className="overflow-x-auto">
-            <table className="min-w-[720px] w-full text-left text-sm">
+            <table className="min-w-[840px] w-full text-left text-sm">
               <caption className="sr-only">Students and questions for answer {group.studentAnswer || 'blank answer'}</caption>
               <thead className="text-[11px] uppercase tracking-wider text-gray-500">
                 <tr>
                   <th scope="col" className="px-3 py-2 font-semibold">Student</th>
+                  <th scope="col" className="px-3 py-2 font-semibold">Student answer</th>
                   <th scope="col" className="px-3 py-2 font-semibold">Section</th>
                   <th scope="col" className="px-3 py-2 font-semibold">Question</th>
                   <th scope="col" className="px-3 py-2 font-semibold">Answer key</th>
@@ -169,8 +170,9 @@ export function ExamObjectiveOverviewGroupCard({
                         </button>
                       ) : <span className="font-semibold text-gray-900">{row.studentName}</span>}
                     </td>
+                    <td className="max-w-56 whitespace-pre-wrap break-words px-3 py-3 font-mono text-xs text-gray-700">{row.studentAnswer || '—'}</td>
                     <td className="px-3 py-3 capitalize text-gray-700">{row.section}</td>
-                    <td className="px-3 py-3 font-mono text-xs text-gray-600">{row.questionId}</td>
+                    <td className="px-3 py-3 font-mono text-xs text-gray-600">{row.questionNumberLabel}</td>
                     <td className="max-w-56 whitespace-pre-wrap break-words px-3 py-3 text-gray-700">{row.correctAnswer || '—'}</td>
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap items-center gap-2">
