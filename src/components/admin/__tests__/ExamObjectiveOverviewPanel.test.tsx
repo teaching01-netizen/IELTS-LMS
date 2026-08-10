@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createInitialExamState } from '../../../services/examAdapterService';
-import type { SectionSubmission } from '../../../types/grading';
+import type { ObjectiveIntegrityOverview, SectionSubmission } from '../../../types/grading';
 import { ExamObjectiveOverviewPanel } from '../ExamObjectiveOverviewPanel';
 import {
   buildExamObjectiveOverviewRows,
@@ -31,12 +31,34 @@ vi.mock('../../../services/gradingService', () => ({
     overrideObjectiveQuestion: vi.fn(),
     upsertObjectiveOverride: vi.fn(),
     getObjectiveGradingSource: vi.fn(),
+    getObjectiveIntegrityOverview: vi.fn(),
   },
 }));
+
+function makeObjectiveIntegrityOverview(
+  overrides: Partial<ObjectiveIntegrityOverview> = {},
+): ObjectiveIntegrityOverview {
+  return {
+    studentCount: 1,
+    expectedAnswerCount: 9,
+    verifiedCorrectCount: 6,
+    verifiedIncorrectCount: 2,
+    verifiedUnansweredCount: 1,
+    needsRecheckCount: 0,
+    invalidCount: 0,
+    integrityStatus: 'verified',
+    issues: [],
+    ...overrides,
+  };
+}
 
 describe('buildExamObjectiveOverviewRows', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(gradingService.getObjectiveIntegrityOverview).mockResolvedValue({
+      success: true,
+      data: makeObjectiveIntegrityOverview(),
+    });
   });
 
   test('returns only typed answers with case-or-whitespace-only differences', () => {
@@ -338,6 +360,99 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(rows[0]?.isCorrect).toBe(false);
     expect(rows[0]?.awardedScore).toBe(0);
     expect(rows[0]?.manualOverride?.overriddenBy).toBe('teacher-1');
+  });
+
+  test('shows persisted audit findings inside the overall answer check without mark-review controls', async () => {
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([]);
+    vi.mocked(gradingService.getObjectiveIntegrityOverview).mockResolvedValue({
+      success: true,
+      data: makeObjectiveIntegrityOverview({
+        needsRecheckCount: 1,
+        integrityStatus: 'needs_recheck',
+        issues: [{
+          submissionId: 'submission-1',
+          studentId: 'student-1',
+          studentName: 'Narin Example',
+          section: 'reading',
+          questionId: 'q-12',
+          questionNumber: '12',
+          code: 'missing_answer_key',
+        }],
+      }),
+    });
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Audit findings' })).toBeInTheDocument();
+    expect(screen.getByText('1 answer needs recheck')).toBeInTheDocument();
+    expect(screen.getByText('Missing answer key')).toBeInTheDocument();
+    expect(screen.getByText('Narin Example · Reading · q-12')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mark review/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /accept|reject/i })).not.toBeInTheDocument();
+  });
+
+  test('shows the authoritative accounted summary when the persisted audit is verified', async () => {
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([]);
+    vi.mocked(gradingService.getObjectiveIntegrityOverview).mockResolvedValue({
+      success: true,
+      data: makeObjectiveIntegrityOverview({ expectedAnswerCount: 9 }),
+    });
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    expect(await screen.findByText('All 9 objective answers accounted for')).toBeInTheDocument();
+    expect(screen.getByText('Verified')).toBeInTheDocument();
+  });
+
+  test('shows an audit loading problem without creating a mark-review action', async () => {
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([]);
+    vi.mocked(gradingService.getObjectiveIntegrityOverview).mockResolvedValue({
+      success: false,
+      error: 'Integrity audit unavailable',
+    });
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Audit findings' })).toBeInTheDocument();
+    expect(screen.getByText('Integrity audit unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mark review/i })).not.toBeInTheDocument();
+  });
+
+  test('does not claim that there are no problems when the audit reports unresolved data without details', async () => {
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([]);
+    vi.mocked(gradingService.getObjectiveIntegrityOverview).mockResolvedValue({
+      success: true,
+      data: makeObjectiveIntegrityOverview({
+        needsRecheckCount: 1,
+        integrityStatus: 'needs_recheck',
+      }),
+    });
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    expect(await screen.findByText('1 answer needs recheck')).toBeInTheDocument();
+    expect(screen.getByText('The persisted audit reports unresolved grading data, but no question-level issue details were returned.')).toBeInTheDocument();
+    expect(screen.queryByText('No audit problems found in the persisted grading results.')).not.toBeInTheDocument();
   });
 
   test('renders all-student rows and sends an override from the exam overview', async () => {

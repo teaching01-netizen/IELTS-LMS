@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, FileCheck2, LoaderCircle } from 'lucide-react';
 import { Button, Dialog } from '@components/ui';
 import type { ExamState } from '../../types';
-import type { GradingSession, ObjectiveOverrideUpsertRequest } from '../../types/grading';
+import type {
+  GradingSession,
+  ObjectiveIntegrityOverview,
+  ObjectiveOverrideUpsertRequest,
+} from '../../types/grading';
 import { examRepository } from '../../services/examRepository';
 import { gradingRepository } from '../../services/gradingRepository';
 import { gradingService } from '../../services/gradingService';
@@ -20,6 +24,7 @@ import {
 import { resolveObjectiveGradingVersionId } from './gradingReviewUtils';
 import { notifyObjectiveGradingUpdated, subscribeObjectiveGradingUpdates } from '../../utils/objectiveGradingSync';
 import { ExamObjectiveOverviewGroupCard } from './ExamObjectiveOverviewGroupCard';
+import { ObjectiveIntegrityAuditSection } from './ObjectiveIntegrityAuditSection';
 
 interface ExamObjectiveOverviewPanelProps {
   readonly session: GradingSession;
@@ -99,6 +104,8 @@ export function ExamObjectiveOverviewPanel({
   const [bundles, setBundles] = useState<ExamObjectiveOverviewBundle[]>([]);
   const [examState, setExamState] = useState<ExamState | null>(null);
   const [submissionCount, setSubmissionCount] = useState(0);
+  const [integrityOverview, setIntegrityOverview] = useState<ObjectiveIntegrityOverview | null>(null);
+  const [integrityError, setIntegrityError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -112,11 +119,16 @@ export function ExamObjectiveOverviewPanel({
     loadRequestId.current = requestId;
     setLoading(true);
     setError(null);
+    setIntegrityOverview(null);
+    setIntegrityError(null);
     try {
-      const [nextSubmissions, sourceResult] = await Promise.all([
+      const [nextSubmissions, sourceResult, integrityResult] = await Promise.all([
         gradingRepository.getSubmissionsBySession(session.id),
         session.scheduleId
           ? gradingService.getObjectiveGradingSource(session.scheduleId)
+          : Promise.resolve(null),
+        session.scheduleId
+          ? gradingService.getObjectiveIntegrityOverview(session.scheduleId)
           : Promise.resolve(null),
       ]);
       const versionId = resolveObjectiveGradingVersionId(
@@ -134,6 +146,11 @@ export function ExamObjectiveOverviewPanel({
       setBundles(nextBundles);
       setExamState(examVersion?.contentSnapshot ?? null);
       setSubmissionCount(nextBundles.length);
+      if (integrityResult?.success && integrityResult.data) {
+        setIntegrityOverview(integrityResult.data);
+      } else if (integrityResult && !integrityResult.success) {
+        setIntegrityError(integrityResult.error ?? 'Failed to load persisted integrity audit.');
+      }
     } catch (loadError) {
       if (loadRequestId.current !== requestId) return;
       setError(loadError instanceof Error ? loadError.message : 'Failed to load overall answer results.');
@@ -319,6 +336,14 @@ export function ExamObjectiveOverviewPanel({
           ))}
         </div>
       )}
+
+      {session.scheduleId ? (
+        <ObjectiveIntegrityAuditSection
+          loading={loading}
+          overview={integrityOverview}
+          error={integrityError}
+        />
+      ) : null}
 
       <Dialog
         isOpen={Boolean(pendingDecision)}
