@@ -9,7 +9,7 @@ import {
   getQuestionNumberLabel,
   getStudentQuestionsForModule,
 } from '../../services/examAdapterService';
-import { getCorrectAnswerDisplay } from './gradingAnswerUtils';
+import { formatAnswerValue, getCorrectAnswerDisplay, getCorrectAnswerValue } from './gradingAnswerUtils';
 
 export interface ExamObjectiveOverviewBundle {
   readonly submission: Pick<StudentSubmission, 'id' | 'studentName'>;
@@ -25,6 +25,7 @@ export interface ExamObjectiveOverviewRow {
   readonly questionNumberLabel: string;
   readonly studentAnswer: string;
   readonly correctAnswer: string;
+  readonly primaryCorrectAnswer: string;
   readonly isCorrect: boolean;
   readonly awardedScore: number;
   readonly maxScore: number;
@@ -193,6 +194,26 @@ function getOverviewCorrectAnswerDisplay(
   return descriptor ? getCorrectAnswerDisplay(descriptor) || result.correctAnswer : result.correctAnswer;
 }
 
+function getPrimaryCorrectAnswer(value: string): string {
+  return value.split('|')[0]?.trim() ?? '';
+}
+
+function getOverviewPrimaryCorrectAnswer(
+  descriptor: ReturnType<typeof getStudentQuestionsForModule>[number] | undefined,
+  result: ObjectiveQuestionResult,
+): string {
+  if (result.hasOverride && result.correctAnswer.trim() !== '') {
+    return getPrimaryCorrectAnswer(result.correctAnswer);
+  }
+
+  if (descriptor) {
+    const descriptorAnswer = formatAnswerValue(getCorrectAnswerValue(descriptor)).trim();
+    if (descriptorAnswer) return descriptorAnswer;
+  }
+
+  return getPrimaryCorrectAnswer(result.correctAnswer);
+}
+
 export function buildExamObjectiveOverviewRows(
   bundles: readonly ExamObjectiveOverviewBundle[],
   options: ExamObjectiveOverviewOptions = {},
@@ -225,6 +246,7 @@ export function buildExamObjectiveOverviewRows(
             questionNumberLabel: questionNumberLabels.get(`${section.section}:${result.questionId}`) ?? result.questionId,
             studentAnswer: result.studentAnswer,
             correctAnswer,
+            primaryCorrectAnswer: getOverviewPrimaryCorrectAnswer(descriptor, result),
             maxScore: result.maxScore,
             scoringRule: result.scoringRule,
             hasOverride: result.hasOverride,

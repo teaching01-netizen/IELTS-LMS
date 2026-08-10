@@ -382,7 +382,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
-    expect(screen.getByText('ANSWER')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Reject for exam' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Reject and regrade' }));
@@ -470,7 +470,26 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(screen.getByRole('heading', { name: 'WRONG' })).toBeInTheDocument();
   });
 
-  test('highlights a case-only answer-key variant beside the raw student answer', async () => {
+  test('highlights only the case-different character in the raw student answer', async () => {
+    const examState = createInitialExamState('IELTS Mock Test', 'Academic');
+    examState.reading.passages = [{
+      id: 'passage-1',
+      title: 'Passage 1',
+      content: '',
+      blocks: [{
+        id: 'short-answer-block',
+        type: 'SHORT_ANSWER',
+        instruction: '',
+        questions: [{
+          id: 'q-case',
+          prompt: 'Answer',
+          correctAnswer: 'Faces of China',
+          acceptedAnswers: ['faces of china', 'FACES OF CHINA', 'Faces of China'],
+          answerRule: 'ONE_WORD',
+        }],
+      }],
+    }];
+
     const section = {
       id: 'section-1',
       submissionId: 'submission-1',
@@ -483,8 +502,8 @@ describe('buildExamObjectiveOverviewRows', () => {
         percentage: 0,
         questionResults: [{
           questionId: 'q-case',
-          studentAnswer: 'Faces of china',
-          correctAnswer: 'faces of china | FACES OF CHINA | Faces of China',
+          studentAnswer: 'faces of China',
+          correctAnswer: 'faces of china',
           isCorrect: false,
           awardedScore: 0,
           maxScore: 1,
@@ -500,21 +519,27 @@ describe('buildExamObjectiveOverviewRows', () => {
       { id: 'submission-1', studentName: 'Narin Example' } as never,
     ]);
     vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
+    vi.mocked(examRepository.getVersionById).mockResolvedValue({ contentSnapshot: examState } as never);
 
     render(
       <ExamObjectiveOverviewPanel
-        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+        session={{
+          examTitle: 'IELTS Mock Test',
+          id: 'session-1',
+          scheduleId: 'schedule-1',
+          publishedVersionId: 'published-version-1',
+        } as never}
       />,
     );
 
-    expect(await screen.findByRole('heading', { name: 'Faces of china' })).toBeInTheDocument();
-    const caseMismatchMarks = screen.getAllByTitle('Case differs from student answer');
-    expect(caseMismatchMarks.map((element) => element.textContent)).toEqual([
-      'faces of china',
-      'FACES OF CHINA',
-      'Faces of China',
-    ]);
-    expect(caseMismatchMarks[0]).toHaveClass('bg-yellow-100');
+    expect(await screen.findByRole('heading', { name: 'faces of China' })).toBeInTheDocument();
+    const studentCaseMismatch = screen.getByTitle('Capitalization differs from answer key');
+    expect(studentCaseMismatch).toHaveTextContent('f');
+    expect(studentCaseMismatch).toHaveClass('bg-yellow-100');
+    const currentAnswerKey = screen.getByText('faces of china | FACES OF CHINA | Faces of China');
+    expect(currentAnswerKey).toBeInTheDocument();
+    expect(currentAnswerKey.querySelector('mark')).toBeNull();
+    expect(screen.queryByTitle('Case differs from student answer')).not.toBeInTheDocument();
   });
 
   test('uses the active objective-grading draft after an answer-key update', async () => {
@@ -598,7 +623,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     await waitFor(() => expect(gradingService.getObjectiveGradingSource).toHaveBeenCalledWith('schedule-1'));
     fireEvent.click(await screen.findByRole('button', { name: /^Correct/ }));
     expect(await screen.findByText('GARDEN HALL | Garden hall')).toBeInTheDocument();
-    expect(screen.queryByTitle('Case differs from student answer')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Capitalization differs from answer key')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Garden hall' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'View 1 student and 1 question' }));
     expect(screen.getByText('1 / 1')).toBeInTheDocument();
@@ -626,6 +651,7 @@ describe('buildExamObjectiveOverviewRows', () => {
         questionNumberLabel: 'q-1',
         studentAnswer: 'Garden Hall',
         correctAnswer: 'Answer',
+        primaryCorrectAnswer: 'Answer',
         isCorrect: true,
         awardedScore: 1,
         maxScore: 1,
@@ -642,6 +668,7 @@ describe('buildExamObjectiveOverviewRows', () => {
         questionNumberLabel: 'q-1',
         studentAnswer: 'garden hall',
         correctAnswer: 'Answer',
+        primaryCorrectAnswer: 'Answer',
         isCorrect: false,
         awardedScore: 0,
         maxScore: 1,
@@ -658,6 +685,7 @@ describe('buildExamObjectiveOverviewRows', () => {
         questionNumberLabel: 'q-1',
         studentAnswer: 'Garden hall',
         correctAnswer: 'Answer',
+        primaryCorrectAnswer: 'Answer',
         isCorrect: false,
         awardedScore: 0,
         maxScore: 1,
@@ -725,7 +753,7 @@ describe('buildExamObjectiveOverviewRows', () => {
       />,
     );
 
-    expect(await screen.findAllByText('ANSWER')).not.toHaveLength(0);
+    expect(await screen.findAllByRole('heading', { name: 'ANSWER' })).not.toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Accept and add to key' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Students affected');
     fireEvent.click(screen.getByRole('button', { name: 'Accept and regrade' }));

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   CheckCircle2,
   ChevronDown,
@@ -13,6 +13,7 @@ import type {
   ExamObjectiveOverviewGroup,
   ExamObjectiveOverviewGroupStatus,
 } from './examObjectiveOverviewUtils';
+import { StudentAnswerCaseHighlight } from './StudentAnswerCaseHighlight';
 
 interface ExamObjectiveOverviewGroupCardProps {
   readonly group: ExamObjectiveOverviewGroup;
@@ -51,55 +52,6 @@ function ResultBadge({ isCorrect }: { readonly isCorrect: boolean }) {
   );
 }
 
-function normalizeAnswerForCaseComparison(value: string): string {
-  return value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
-}
-
-function isCaseOnlyMismatch(studentAnswer: string, answerKeyVariant: string): boolean {
-  const normalizedStudentAnswer = normalizeAnswerForCaseComparison(studentAnswer);
-  const normalizedAnswerKeyVariant = normalizeAnswerForCaseComparison(answerKeyVariant);
-
-  return normalizedStudentAnswer !== normalizedAnswerKeyVariant
-    && normalizedStudentAnswer.toLowerCase() === normalizedAnswerKeyVariant.toLowerCase();
-}
-
-function AnswerKeyVariantList({
-  variants,
-  studentAnswer,
-}: {
-  readonly variants: readonly string[];
-  readonly studentAnswer: string;
-}) {
-  const normalizedStudentAnswer = normalizeAnswerForCaseComparison(studentAnswer);
-  const hasExactKeyVariant = variants.some((variant) => (
-    normalizeAnswerForCaseComparison(variant) === normalizedStudentAnswer
-  ));
-
-  return (
-    <>
-      {variants.map((variant, index) => {
-        const highlightCaseMismatch = !hasExactKeyVariant
-          && isCaseOnlyMismatch(studentAnswer, variant);
-
-        return (
-          <React.Fragment key={variant}>
-            {index > 0 ? ' | ' : null}
-            {highlightCaseMismatch ? (
-              <mark
-                className="rounded-sm bg-yellow-100 px-1 text-yellow-900 ring-1 ring-inset ring-yellow-300"
-                title="Case differs from student answer"
-                aria-label={`Case differs from student answer: ${variant}`}
-              >
-                {variant}
-              </mark>
-            ) : variant}
-          </React.Fragment>
-        );
-      })}
-    </>
-  );
-}
-
 function StatusPill({ status }: { readonly status: ExamObjectiveOverviewGroupStatus }) {
   const { label, className, Icon } = statusCopy[status];
   return (
@@ -126,8 +78,12 @@ export function ExamObjectiveOverviewGroupCard({
   const answerKeyVariants = useMemo(() => [...new Set(
     answerKeyEntries.flatMap((entry) => entry.split('|').map((variant) => variant.trim()).filter(Boolean)),
   )], [answerKeyEntries]);
+  const primaryAnswerKeys = useMemo(() => [...new Set(
+    group.rows.map((row) => row.primaryCorrectAnswer.trim()).filter(Boolean),
+  )], [group.rows]);
+  const comparisonAnswerKey = primaryAnswerKeys.length === 1 ? primaryAnswerKeys[0] ?? '' : '';
   const currentKeySummary = answerKeyEntries.length === 1
-    ? <AnswerKeyVariantList variants={answerKeyVariants} studentAnswer={group.studentAnswer} />
+    ? answerKeyEntries[0]
     : `${answerKeyEntries.length} current keys across ${questionCount} questions`;
   const headingId = `exam-answer-group-${group.rows[0]?.rowId ?? group.groupId}`;
   const detailsId = `${headingId}-details`;
@@ -142,8 +98,16 @@ export function ExamObjectiveOverviewGroupCard({
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Student answer</p>
                 <StatusPill status={status} />
               </div>
-              <h3 id={headingId} className="mt-2 whitespace-pre-wrap break-words font-mono text-base font-semibold text-gray-900">
-                {group.studentAnswer || 'Blank answer'}
+              <h3
+                id={headingId}
+                aria-label={group.studentAnswer || 'Blank answer'}
+                className="mt-2 whitespace-pre-wrap break-words font-mono text-base font-semibold text-gray-900"
+              >
+                <StudentAnswerCaseHighlight
+                  studentAnswer={group.studentAnswer}
+                  answerKey={comparisonAnswerKey}
+                  answerKeyVariants={answerKeyVariants}
+                />
               </h3>
               <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
                 <span className="inline-flex items-center gap-1"><Users size={13} aria-hidden="true" /> {studentCount} {studentCount === 1 ? 'student' : 'students'}</span>
