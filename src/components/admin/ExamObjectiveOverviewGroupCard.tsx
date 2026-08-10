@@ -13,7 +13,9 @@ import type {
   ExamObjectiveOverviewGroup,
   ExamObjectiveOverviewGroupStatus,
 } from './examObjectiveOverviewUtils';
+import { StudentAnswerExplanation } from './StudentAnswerExplanation';
 import { StudentAnswerCaseHighlight } from './StudentAnswerCaseHighlight';
+import { getClosestAcceptedAnswer, getStudentAnswerComparison } from './studentAnswerComparison';
 
 interface ExamObjectiveOverviewGroupCardProps {
   readonly group: ExamObjectiveOverviewGroup;
@@ -82,9 +84,13 @@ export function ExamObjectiveOverviewGroupCard({
     group.rows.map((row) => row.primaryCorrectAnswer.trim()).filter(Boolean),
   )], [group.rows]);
   const comparisonAnswerKey = primaryAnswerKeys.length === 1 ? primaryAnswerKeys[0] ?? '' : '';
-  const currentKeySummary = answerKeyEntries.length === 1
-    ? answerKeyEntries[0]
-    : `${answerKeyEntries.length} current keys across ${questionCount} questions`;
+  const closestAcceptedAnswer = comparisonAnswerKey
+    ? getClosestAcceptedAnswer(group.studentAnswer, comparisonAnswerKey, answerKeyVariants)
+    : '';
+  const comparison = comparisonAnswerKey
+    ? getStudentAnswerComparison(group.studentAnswer, comparisonAnswerKey, answerKeyVariants)
+    : null;
+  const otherAcceptedAnswers = answerKeyVariants.filter((variant) => variant !== closestAcceptedAnswer);
   const headingId = `exam-answer-group-${group.rows[0]?.rowId ?? group.groupId}`;
   const detailsId = `${headingId}-details`;
 
@@ -101,11 +107,11 @@ export function ExamObjectiveOverviewGroupCard({
               <h3
                 id={headingId}
                 aria-label={group.studentAnswer || 'Blank answer'}
-                className="mt-2 whitespace-pre-wrap break-words font-mono text-base font-semibold text-gray-900"
+                className="mt-2 whitespace-pre-wrap break-words font-sans text-base font-semibold text-gray-900"
               >
                 <StudentAnswerCaseHighlight
                   studentAnswer={group.studentAnswer}
-                  answerKey={comparisonAnswerKey}
+                  answerKey={comparison?.expectedAnswer ?? closestAcceptedAnswer}
                   answerKeyVariants={answerKeyVariants}
                 />
               </h3>
@@ -114,10 +120,30 @@ export function ExamObjectiveOverviewGroupCard({
                 <span className="inline-flex items-center gap-1"><ListChecks size={13} aria-hidden="true" /> {questionCount} {questionCount === 1 ? 'question' : 'questions'}</span>
                 <span>{group.rows.length} answer {group.rows.length === 1 ? 'entry' : 'entries'}</span>
               </p>
+              {status === 'incorrect' ? (
+                <StudentAnswerExplanation comparison={comparison} studentAnswer={group.studentAnswer} />
+              ) : null}
             </div>
             <div className="min-w-0 border-gray-200 md:border-l md:pl-4">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Current answer key</p>
-              <p className="mt-2 break-words text-sm font-medium text-gray-800">{currentKeySummary || 'No answer key configured'}</p>
+              {closestAcceptedAnswer ? (
+                <>
+                  <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500">Closest accepted answer</p>
+                  <p className="mt-1 break-words text-sm font-medium text-gray-800">{closestAcceptedAnswer}</p>
+                  {otherAcceptedAnswers.length > 0 ? (
+                    <details className="mt-2 text-xs text-gray-600">
+                      <summary className="cursor-pointer font-semibold text-blue-800 hover:text-blue-900">View {otherAcceptedAnswers.length} other accepted answers</summary>
+                      <ul className="mt-2 space-y-1 border-l-2 border-gray-200 pl-3">
+                        {otherAcceptedAnswers.map((variant) => <li key={variant} className="break-words">{variant}</li>)}
+                      </ul>
+                    </details>
+                  ) : null}
+                </>
+              ) : (
+                <p className="mt-2 break-words text-sm font-medium text-gray-800">
+                  {answerKeyEntries.length === 1 ? answerKeyEntries[0] : `${answerKeyEntries.length} current keys across ${questionCount} questions`}
+                </p>
+              )}
               <p className="mt-2 text-xs text-blue-700">
                 {status === 'correct'
                   ? 'This answer is currently correct for this exam.'
@@ -135,7 +161,7 @@ export function ExamObjectiveOverviewGroupCard({
               leftIcon={<CheckCircle2 size={15} aria-hidden="true" />}
               onClick={() => onRequestResult(group, true)}
             >
-              Accept and add to key
+              Accept this answer and add to key
             </Button>
             <button
               type="button"
@@ -186,7 +212,7 @@ export function ExamObjectiveOverviewGroupCard({
                         </button>
                       ) : <span className="font-semibold text-gray-900">{row.studentName}</span>}
                     </td>
-                    <td className="max-w-56 whitespace-pre-wrap break-words px-3 py-3 font-mono text-xs text-gray-700">{row.studentAnswer || '—'}</td>
+                    <td className="max-w-56 whitespace-pre-wrap break-words px-3 py-3 font-sans text-xs text-gray-700">{row.studentAnswer || '—'}</td>
                     <td className="px-3 py-3 capitalize text-gray-700">{row.section}</td>
                     <td className="px-3 py-3 font-mono text-xs text-gray-600">{row.questionNumberLabel}</td>
                     <td className="max-w-56 whitespace-pre-wrap break-words px-3 py-3 text-gray-700">{row.correctAnswer || '—'}</td>

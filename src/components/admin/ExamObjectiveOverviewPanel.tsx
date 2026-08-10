@@ -353,7 +353,7 @@ export function ExamObjectiveOverviewPanel({
             </p>
             <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Student answer</p>
-              <p className="mt-2 break-words font-mono text-base font-semibold text-gray-900">{pendingDecision.group.studentAnswer || 'Blank answer'}</p>
+              <p className="mt-2 break-words font-sans text-base font-semibold text-gray-900">{pendingDecision.group.studentAnswer || 'Blank answer'}</p>
             </div>
             <dl className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-md border border-gray-200 p-3">

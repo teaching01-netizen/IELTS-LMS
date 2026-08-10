@@ -29,9 +29,9 @@ for the individual review screen:
 - Punctuation changes, exact raw matches, genuinely incorrect answers, and choice answers are excluded.
 - The default `Incorrect` filter shows answer groups currently scored incorrect; `All` and `Correct` switch the view at group level without reloading the session.
 - Group summaries show the exact student answer text, current key, affected student/question counts, and correctness status. Student/question evidence is collapsed by default and remains available through the accessible details disclosure; the evidence table repeats the raw answer and uses human question labels such as `q-17`.
-- When no exact-casing accepted variant exists, only the case-different characters in the raw student answer are highlighted in yellow against the primary answer key; the current answer-key summary stays plain, and an exact accepted variant suppresses the warning.
+- When no exact-casing accepted variant exists, only the case-different characters in the raw student answer are highlighted in yellow against the closest accepted answer; the student answer uses the system sans font, the card explains the capitalization/spacing mismatch in plain language, and additional accepted variants stay behind an accessible disclosure.
 - Exam-wide decisions require confirmation showing the exact student/question impact, then report the persisted key update and regrade outcome in an inline live status message.
 - A group-level decision applies to the whole selected exam session through the schedule-scoped objective override endpoint; there are no per-row result buttons.
-- `Correct + add to answer key` adds the selected exact answer text to the question's accepted answer key and regrades every submission in the session.
+- `Accept this answer and add to key` adds the selected exact answer text to the question's accepted answer key and regrades every submission in the session.
 - `Incorrect for whole exam` records the grouped answer as excluded for the affected question and regrades every submission in the session.
 - Student names remain drillable into the individual review screen, but the answer decision is never limited to that one student.

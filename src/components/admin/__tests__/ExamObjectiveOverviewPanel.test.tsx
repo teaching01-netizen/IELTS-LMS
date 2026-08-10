@@ -533,12 +533,22 @@ describe('buildExamObjectiveOverviewRows', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'faces of China' })).toBeInTheDocument();
+    const studentAnswerHeading = screen.getByRole('heading', { name: 'faces of China' });
+    expect(studentAnswerHeading).toHaveClass('font-sans');
+    expect(studentAnswerHeading).not.toHaveClass('font-mono');
     const studentCaseMismatch = screen.getByTitle('Capitalization differs from answer key');
     expect(studentCaseMismatch).toHaveTextContent('f');
     expect(studentCaseMismatch).toHaveClass('bg-yellow-100');
-    const currentAnswerKey = screen.getByText('faces of china | FACES OF CHINA | Faces of China');
-    expect(currentAnswerKey).toBeInTheDocument();
-    expect(currentAnswerKey.querySelector('mark')).toBeNull();
+    expect(screen.getByText('Why incorrect')).toBeInTheDocument();
+    expect(screen.getByText('Capitalization differs from the closest accepted answer.')).toBeInTheDocument();
+    expect(screen.getByText('Closest accepted answer')).toBeInTheDocument();
+    const acceptedAnswerDisclosure = screen.getByText('View 2 other accepted answers');
+    expect(acceptedAnswerDisclosure).toBeInTheDocument();
+    expect(screen.getByText('faces of china')).not.toBeVisible();
+    fireEvent.click(acceptedAnswerDisclosure);
+    expect(screen.getByText('faces of china')).toBeVisible();
+    const currentAnswerKey = screen.queryByText('faces of china | FACES OF CHINA | Faces of China');
+    expect(currentAnswerKey).not.toBeInTheDocument();
     expect(screen.queryByTitle('Case differs from student answer')).not.toBeInTheDocument();
   });
 
@@ -622,7 +632,9 @@ describe('buildExamObjectiveOverviewRows', () => {
 
     await waitFor(() => expect(gradingService.getObjectiveGradingSource).toHaveBeenCalledWith('schedule-1'));
     fireEvent.click(await screen.findByRole('button', { name: /^Correct/ }));
-    expect(await screen.findByText('GARDEN HALL | Garden hall')).toBeInTheDocument();
+    expect(await screen.findByText('Closest accepted answer')).toBeInTheDocument();
+    expect(screen.getAllByText('Garden hall')).not.toHaveLength(0);
+    expect(screen.queryByText('GARDEN HALL | Garden hall')).not.toBeInTheDocument();
     expect(screen.queryByTitle('Capitalization differs from answer key')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Garden hall' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'View 1 student and 1 question' }));
@@ -754,7 +766,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     );
 
     expect(await screen.findAllByRole('heading', { name: 'ANSWER' })).not.toHaveLength(0);
-    fireEvent.click(screen.getByRole('button', { name: 'Accept and add to key' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Accept this answer and add to key' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Students affected');
     fireEvent.click(screen.getByRole('button', { name: 'Accept and regrade' }));
 
