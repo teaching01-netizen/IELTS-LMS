@@ -9,7 +9,6 @@ import { TableLoadingSkeleton } from '@components/ui';
 import { GradingExportButtons } from './GradingExportButtons';
 import { ObjectiveOverridesPanel } from './ObjectiveOverridesPanel';
 import { ExamObjectiveOverviewPanel } from './ExamObjectiveOverviewPanel';
-import { ObjectiveIntegrityOverviewPanel } from './ObjectiveIntegrityOverviewPanel';
 import {
   buildCsvContent,
   buildCsvFilename,
@@ -805,8 +804,6 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           publishedVersionId={session.publishedVersionId}
         />
       ) : null}
-
-      {session ? <ObjectiveIntegrityOverviewPanel scheduleId={session.scheduleId} /> : null}
 
       {showOverallAnswerCheck && session ? (
         <ExamObjectiveOverviewPanel
