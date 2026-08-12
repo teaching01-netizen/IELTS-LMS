@@ -999,8 +999,8 @@ fn minimal_exam_state(
             ]
         },
         "writing": {
-            "task1Prompt": "",
-            "task2Prompt": "",
+            "task1Prompt": "Task 1: Summarise the information by selecting and reporting the main features.",
+            "task2Prompt": "Task 2: Discuss both views and give your own opinion.",
             "tasks": [
                 {
                     "taskId": "task1",

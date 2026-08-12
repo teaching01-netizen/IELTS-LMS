@@ -1042,8 +1042,8 @@ describe('StudentApp runtime-backed mode', () => {
       />,
     );
 
-    const slotOne = screen.getByLabelText('Answer for question 1') as HTMLInputElement;
-    const slotTwo = screen.getByLabelText('Answer for question 2') as HTMLInputElement;
+    const slotOne = screen.getByLabelText('Answer for question 1 (blank 1)') as HTMLInputElement;
+    const slotTwo = screen.getByLabelText('Answer for question 1 (blank 2)') as HTMLInputElement;
 
     await user.type(slotOne, 'quick');
     await user.click(slotTwo);

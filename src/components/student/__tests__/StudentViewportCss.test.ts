@@ -6,9 +6,9 @@ describe('student exam floating footer viewport shell', () => {
   const css = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8');
 
   it('anchors the footer absolutely inside the dynamic viewport shell', () => {
-    const shellRule = css.match(/\.student-exam-shell\s*\{([^}]*)\}/s)?.[1];
-    const mainRule = css.match(/\.student-exam-main\s*\{([^}]*)\}/s)?.[1];
-    const footerRule = css.match(/\.student-exam-footer\s*\{([^}]*)\}/s)?.[1];
+    const shellRule = css.match(/^\s*\.student-exam-shell\s*\{([^}]*)\}/m)?.[1];
+    const mainRule = css.match(/^\s*\.student-exam-main\s*\{([^}]*)\}/m)?.[1];
+    const footerRule = css.match(/^\s*\.student-exam-footer\s*\{([^}]*)\}/m)?.[1];
 
     expect(shellRule).toBeDefined();
     expect(shellRule).toMatch(/position:\s*relative\s*;/);
@@ -39,7 +39,7 @@ describe('student exam floating footer viewport shell', () => {
   });
 
   it('renders only a white floating pill without a full-width tray', () => {
-    const footerRule = css.match(/\.student-exam-footer\s*\{([^}]*)\}/s)?.[1];
+    const footerRule = css.match(/^\s*\.student-exam-footer\s*\{([^}]*)\}/m)?.[1];
 
     expect(footerRule).toMatch(/background:\s*#fff\s*;/);
     expect(footerRule).toMatch(/max-inline-size:\s*96rem\s*;/);

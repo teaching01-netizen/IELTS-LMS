@@ -6,6 +6,10 @@ import { Lobby } from './Lobby';
 import { PreCheck } from './PreCheck';
 import { StudentExamWorkspace } from './StudentExamWorkspace';
 import { StudentHeader } from './StudentHeader';
+import { CompactStudentHeader } from './layout/CompactStudentHeader';
+import { StudentExamShell } from './layout/StudentExamShell';
+import { StudentExamViewport } from './layout/StudentExamViewport';
+import { useStudentLayoutEnvironment } from './layout/useStudentLayoutEnvironment';
 import { StudentPostExamView } from './StudentPostExamView';
 import { SubmitConfirmation } from './SubmitConfirmation';
 import { WarningOverlay } from './WarningOverlay';
@@ -18,7 +22,6 @@ import {
 } from './accessibilityScale';
 import { StudentHighlightSelectionManagerProvider } from './highlightSelectionManager';
 import { useStudentSubmissionOrchestration } from './useStudentSubmissionOrchestration';
-import { useStudentTabletMode } from './tabletMode';
 import { shouldOfferTimeExtension } from './timeExtensionPolicy';
 import { useStudentWarningVisibility } from './useStudentWarningVisibility';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
@@ -126,7 +129,17 @@ export function StudentApp({
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
   const { state: uiState, actions: uiActions } = useStudentUI();
-  const tabletMode = useStudentTabletMode();
+  const layoutEnvironment = useStudentLayoutEnvironment();
+  const layoutMode = layoutEnvironment.layoutMode;
+  const tabletMode =
+    layoutMode === 'medium' &&
+    (layoutEnvironment.hasTouch || layoutEnvironment.primaryPointer === 'coarse');
+  const autoSaveStatus =
+    runtimeState.attemptSyncState === 'syncing_reconnect'
+      ? 'syncing'
+      : runtimeState.attemptSyncState === 'error' || runtimeState.attemptSyncState === 'idle'
+        ? null
+        : runtimeState.attemptSyncState;
   const canIncreasePassageReadability = canIncreaseStudentPassageReadability(
     uiState.accessibilitySettings.passageReadabilityLevel,
   );
@@ -605,12 +618,11 @@ export function StudentApp({
   }
 
   return (
-      <div
-      className={`student-exam-shell h-screen w-full bg-gray-50 font-sans text-gray-900 transition-all ${
-        uiState.accessibilitySettings.highContrast ? 'high-contrast' : ''
-      }`}
-      style={studentShellStyle}
-    >
+      <StudentExamShell
+        layoutMode={layoutMode}
+        highContrast={uiState.accessibilitySettings.highContrast}
+        style={studentShellStyle}
+      >
       <style>{`
         input:-webkit-autofill,
         input:-webkit-autofill:hover,
@@ -628,61 +640,87 @@ export function StudentApp({
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
-      <StudentHeader
-        testTakerId={attemptState.attempt?.candidateId ?? undefined}
-        timeRemaining={runtimeState.displayTimeRemaining}
-        highlightEnabled={highlightEnabled}
-        highlightToolMode={uiState.accessibilitySettings.highlightToolMode}
-        highlightColor={highlightColor}
-        onToggleHighlightMode={uiActions.toggleHighlightMode}
-        onSelectHighlightColor={uiActions.setHighlightColor}
-        onSelectEraseMode={uiActions.toggleEraseMode}
-        tabletMode={tabletMode}
-        onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
-        onOpenNavigator={
-          runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening'
-            ? () => uiActions.setShowNavigator(true)
-            : undefined
-        }
-        isExamActive={effectivePhase === 'exam'}
-      />
-
-      <StudentHighlightSelectionManagerProvider>
-        <StudentExamWorkspace
-          currentModule={runtimeState.currentModule}
-          examState={examState}
-          currentQuestionId={runtimeState.currentQuestionId}
-          allQuestions={runtimeState.allQuestions}
-          answers={attemptAnswers}
-          writingAnswers={attemptWritingAnswers}
-          flags={attemptFlags}
-          tabletMode={tabletMode}
-          showSubmitControls={showSubmitControls}
-          contentZoom={uiState.accessibilitySettings.zoom}
-          displayTimeRemaining={runtimeState.displayTimeRemaining}
+      {layoutMode === 'compact' ? (
+        <CompactStudentHeader
+          moduleLabel={`${runtimeState.currentModule.charAt(0).toUpperCase()}${runtimeState.currentModule.slice(1)}`}
+          testTakerId={attemptState.attempt?.candidateId ?? undefined}
+          timeRemaining={runtimeState.displayTimeRemaining}
+          autoSaveStatus={autoSaveStatus}
           highlightEnabled={highlightEnabled}
+          highlightToolMode={uiState.accessibilitySettings.highlightToolMode}
           highlightColor={highlightColor}
-          passageReadabilityLabel={getStudentPassageReadabilityLabel(
-            uiState.accessibilitySettings.passageReadabilityLevel,
-          )}
-          canIncreasePassageReadability={canIncreasePassageReadability}
-          canDecreasePassageReadability={canDecreasePassageReadability}
-          showNavigator={uiState.showNavigator}
-          security={examState.config.security}
-          onNavigate={runtimeActions.setCurrentQuestionId}
-          onObjectiveAnswerChange={handleAnswerChange}
-          onFlagToggle={handleFlagToggle}
-          onWritingChange={handleWritingChange}
-          onModuleSubmit={handleModuleSubmit}
-          onRegisterWritingDraftCommit={registerWritingDraftCommit}
-          onRegisterLiveObjectiveAnswer={registerLiveObjectiveAnswer}
-          onRegisterLiveWritingAnswer={registerLiveWritingAnswer}
-          onIncreasePassageReadability={uiActions.increasePassageReadability}
-          onDecreasePassageReadability={uiActions.decreasePassageReadability}
-          onResetPassageReadability={uiActions.resetPassageReadability}
-          onCloseNavigator={() => uiActions.setShowNavigator(false)}
+          onToggleHighlightMode={uiActions.toggleHighlightMode}
+          onSelectHighlightColor={uiActions.setHighlightColor}
+          onSelectEraseMode={uiActions.toggleEraseMode}
+          onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
+          onOpenNavigator={
+            runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening'
+              ? () => uiActions.setShowNavigator(true)
+              : undefined
+          }
         />
-      </StudentHighlightSelectionManagerProvider>
+      ) : (
+        <StudentHeader
+          testTakerId={attemptState.attempt?.candidateId ?? undefined}
+          timeRemaining={runtimeState.displayTimeRemaining}
+          autoSaveStatus={autoSaveStatus}
+          highlightEnabled={highlightEnabled}
+          highlightToolMode={uiState.accessibilitySettings.highlightToolMode}
+          highlightColor={highlightColor}
+          onToggleHighlightMode={uiActions.toggleHighlightMode}
+          onSelectHighlightColor={uiActions.setHighlightColor}
+          onSelectEraseMode={uiActions.toggleEraseMode}
+          tabletMode={tabletMode}
+          onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
+          onOpenNavigator={
+            runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening'
+              ? () => uiActions.setShowNavigator(true)
+              : undefined
+          }
+          isExamActive={effectivePhase === 'exam'}
+        />
+      )}
+
+      <StudentExamViewport>
+        <StudentHighlightSelectionManagerProvider>
+          <StudentExamWorkspace
+            currentModule={runtimeState.currentModule}
+            examState={examState}
+            currentQuestionId={runtimeState.currentQuestionId}
+            allQuestions={runtimeState.allQuestions}
+            answers={attemptAnswers}
+            writingAnswers={attemptWritingAnswers}
+            flags={attemptFlags}
+            tabletMode={tabletMode}
+            layoutMode={layoutMode}
+            showSubmitControls={showSubmitControls}
+            contentZoom={uiState.accessibilitySettings.zoom}
+            displayTimeRemaining={runtimeState.displayTimeRemaining}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+            passageReadabilityLabel={getStudentPassageReadabilityLabel(
+              uiState.accessibilitySettings.passageReadabilityLevel,
+            )}
+            canIncreasePassageReadability={canIncreasePassageReadability}
+            canDecreasePassageReadability={canDecreasePassageReadability}
+            showNavigator={uiState.showNavigator}
+            security={examState.config.security}
+            onNavigate={runtimeActions.setCurrentQuestionId}
+            onObjectiveAnswerChange={handleAnswerChange}
+            onFlagToggle={handleFlagToggle}
+            onWritingChange={handleWritingChange}
+            onModuleSubmit={handleModuleSubmit}
+            onRegisterWritingDraftCommit={registerWritingDraftCommit}
+            onRegisterLiveObjectiveAnswer={registerLiveObjectiveAnswer}
+            onRegisterLiveWritingAnswer={registerLiveWritingAnswer}
+            onIncreasePassageReadability={uiActions.increasePassageReadability}
+            onDecreasePassageReadability={uiActions.decreasePassageReadability}
+            onResetPassageReadability={uiActions.resetPassageReadability}
+            onOpenNavigator={() => uiActions.setShowNavigator(true)}
+            onCloseNavigator={() => uiActions.setShowNavigator(false)}
+          />
+        </StudentHighlightSelectionManagerProvider>
+      </StudentExamViewport>
 
       {blockingOverlay}
       {finalSubmitOverlay}
@@ -820,6 +858,6 @@ export function StudentApp({
         onFontSizeChange={uiActions.setFontSize}
         onHighContrastToggle={uiActions.toggleHighContrast}
       />
-      </div>
+      </StudentExamShell>
   );
 }

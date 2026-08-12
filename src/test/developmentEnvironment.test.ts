@@ -20,7 +20,7 @@ describe('development environment wiring', () => {
     expect(config.server?.proxy).toBeDefined();
     expect(config.server?.proxy?.['/api']).toMatchObject({
       target: 'http://127.0.0.1:4000',
-      changeOrigin: true,
+      changeOrigin: false,
     });
   });
 

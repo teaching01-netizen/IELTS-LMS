@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Flag, X } from 'lucide-react';
 import {
   countAnsweredQuestions,
@@ -76,10 +77,13 @@ export function QuestionNavigator({
     return result;
   }, {});
 
-  return (
+  const dialog = (
     <dialog
       ref={dialogRef}
-      onClose={onClose}
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
       className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col p-0 backdrop:bg-black/50"
       aria-labelledby="question-navigator-title"
     >
@@ -155,4 +159,6 @@ export function QuestionNavigator({
       </div>
     </dialog>
   );
+
+  return typeof document === 'undefined' ? null : createPortal(dialog, document.body);
 }

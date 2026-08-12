@@ -9,6 +9,7 @@ import { StudentSpeaking } from './StudentSpeaking';
 import { StudentWriting } from './StudentWriting';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
+import type { StudentLayoutMode } from './layout/studentLayoutMode';
 
 interface StudentExamWorkspaceProps {
   currentModule: ModuleType;
@@ -19,6 +20,7 @@ interface StudentExamWorkspaceProps {
   writingAnswers: Record<string, string>;
   flags: Record<string, boolean>;
   tabletMode: boolean;
+  layoutMode?: StudentLayoutMode | undefined;
   showSubmitControls: boolean;
   contentZoom: number;
   displayTimeRemaining: number | undefined;
@@ -49,6 +51,7 @@ interface StudentExamWorkspaceProps {
   onDecreasePassageReadability: () => void;
   onResetPassageReadability: () => void;
   onCloseNavigator: () => void;
+  onOpenNavigator?: (() => void) | undefined;
 }
 
 export function StudentExamWorkspace({
@@ -60,6 +63,7 @@ export function StudentExamWorkspace({
   writingAnswers,
   flags,
   tabletMode,
+  layoutMode = 'wide',
   showSubmitControls,
   contentZoom,
   displayTimeRemaining,
@@ -83,6 +87,7 @@ export function StudentExamWorkspace({
   onDecreasePassageReadability,
   onResetPassageReadability,
   onCloseNavigator,
+  onOpenNavigator,
 }: StudentExamWorkspaceProps) {
   return (
     <>
@@ -180,6 +185,8 @@ export function StudentExamWorkspace({
           onSubmit={onModuleSubmit}
           showSubmitButton={showSubmitControls}
           tabletMode={tabletMode}
+          layoutMode={layoutMode}
+          onOpenNavigator={onOpenNavigator}
         />
       ) : null}
 

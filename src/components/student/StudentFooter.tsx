@@ -8,6 +8,8 @@ import {
   type StudentQuestionDescriptor,
 } from '@services/examAdapterService';
 import type { StudentAnswer } from './providers/StudentRuntimeProvider';
+import type { StudentLayoutMode } from './layout/studentLayoutMode';
+import { CompactQuestionNavigation } from './layout/CompactQuestionNavigation';
 
 interface StudentFooterProps {
   questions: StudentQuestionDescriptor[];
@@ -19,6 +21,8 @@ interface StudentFooterProps {
   onSubmit: () => void;
   showSubmitButton?: boolean | undefined;
   tabletMode?: boolean | undefined;
+  layoutMode?: StudentLayoutMode | undefined;
+  onOpenNavigator?: (() => void) | undefined;
 }
 
 export function StudentFooter({
@@ -30,6 +34,8 @@ export function StudentFooter({
   onSubmit,
   showSubmitButton = true,
   tabletMode = false,
+  layoutMode,
+  onOpenNavigator,
 }: StudentFooterProps) {
   const dedupeGroupedScoringSlots = React.useCallback(
     (items: StudentQuestionDescriptor[]) => {
@@ -71,6 +77,19 @@ export function StudentFooter({
   const totalQuestions = countQuestionSlots(questions);
   const answeredCount = countAnsweredQuestions(questions, answers);
   const hasUnanswered = totalQuestions > 0 && answeredCount < totalQuestions;
+
+  if (layoutMode === 'compact') {
+    return (
+      <CompactQuestionNavigation
+        questions={questions}
+        currentQuestionId={currentQuestionId}
+        onNavigate={onNavigate}
+        onOpenNavigator={onOpenNavigator}
+        onSubmit={onSubmit}
+        showSubmitButton={showSubmitButton}
+      />
+    );
+  }
 
   return (
     <footer

@@ -219,8 +219,14 @@
 
   .student-exam-shell {
     --student-exam-footer-gap: clamp(0.5rem, 1.25vmin, 0.875rem);
+    --student-header-height: 4rem;
+    --student-bottom-bar-height: 4rem;
+    --student-safe-top: env(safe-area-inset-top, 0px);
+    --student-safe-right: env(safe-area-inset-right, 0px);
+    --student-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --student-safe-left: env(safe-area-inset-left, 0px);
     --student-exam-footer-clearance: calc(
-      5rem + max(var(--student-exam-footer-gap), env(safe-area-inset-bottom, 0px))
+      var(--student-bottom-bar-height) + max(var(--student-exam-footer-gap), var(--student-safe-bottom))
     );
     position: relative;
     display: grid;
@@ -231,8 +237,44 @@
     overflow: clip;
     overscroll-behavior: none;
     touch-action: manipulation;
-    padding-left: env(safe-area-inset-left, 0);
-    padding-right: env(safe-area-inset-right, 0);
+    padding-left: var(--student-safe-left);
+    padding-right: var(--student-safe-right);
+  }
+
+  .student-exam-shell[data-student-layout-mode='compact'] {
+    --student-header-height: 3.5rem;
+    --student-bottom-bar-height: 3.5rem;
+  }
+
+  .student-exam-viewport {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .student-compact-header {
+    padding-top: var(--student-safe-top);
+    height: calc(var(--student-header-height) + var(--student-safe-top));
+  }
+
+  .student-compact-question-navigation {
+    display: flex;
+    min-height: var(--student-bottom-bar-height);
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem;
+    padding-bottom: max(0.25rem, var(--student-safe-bottom));
+  }
+
+  .student-compact-question-navigation [data-student-primary-touch-target] {
+    touch-action: manipulation;
+  }
+
+  .student-exam-shell[data-student-layout-mode='compact'] .student-exam-footer {
+    border-radius: 0.75rem;
+  }
+
+  .student-exam-shell[data-student-layout-mode='compact'] .student-exam-main {
+    overflow: hidden;
   }
 
   /*

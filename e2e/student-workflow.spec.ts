@@ -160,4 +160,77 @@ test.describe('Student LRW workflow', () => {
     await adminContext.close();
     await context.close();
   });
+
+  test('runtime-backed: compact shell fits 360px and keeps mobile controls usable', async ({ browser }, testInfo) => {
+    const manifest = readBackendE2EManifest();
+    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
+    const context = await browser.newContext({
+      viewport: { width: 360, height: 800 },
+    });
+    await stubScreenDetails(context);
+    const page = await context.newPage();
+
+    await studentCheckIn(page, manifest.student.scheduleId, {
+      wcode,
+      email: `e2e+${wcode.toLowerCase()}@example.com`,
+      fullName: `E2E Candidate ${wcode}`,
+    });
+    await openStudentSessionWithRetry(page, manifest.student.scheduleId, wcode);
+    await completePreCheckIfPresent(page);
+    await startLobbyIfPresent(page);
+    await openStudentSessionWithRetry(page, manifest.student.scheduleId, wcode);
+
+    await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
+      'data-student-layout-mode',
+      'compact',
+    );
+    await expect(page.getByTestId('student-compact-header')).toBeVisible();
+    await expect(page.getByTestId('student-compact-question-navigation')).toBeVisible();
+    await expect(page.getByRole('timer', { name: 'Time remaining' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Previous question' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Next question' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Finish' })).toBeVisible();
+
+    const geometry = await page.evaluate(() => {
+      const targetRects = [...document.querySelectorAll<HTMLElement>('[data-student-primary-touch-target]')]
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return { width: rect.width, height: rect.height };
+        });
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth,
+        targetRects,
+      };
+    });
+    expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+    expect(geometry.targetRects.length).toBeGreaterThan(0);
+    expect(geometry.targetRects.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
+
+    const answerField = page.getByLabel('Answer for question 1');
+    await answerField.fill(manifest.student.expectedAnswer);
+    await expect
+      .poll(async () => {
+        const banner = page.getByRole('banner');
+        const saved = banner.getByText('Saved');
+        if (await saved.isVisible().catch(() => false)) return 'saved';
+        const saving = banner.getByText(/Saving|Syncing/i);
+        if (await saving.isVisible().catch(() => false)) return 'saving';
+        return 'unknown';
+      }, { timeout: 20_000 })
+      .toBe('saved');
+
+    await page.getByRole('button', { name: 'Open exam tools' }).click();
+    const toolsDialog = page.getByRole('dialog', { name: 'Exam tools' });
+    await expect(toolsDialog).toBeVisible();
+    const questionNavigatorButton = toolsDialog.getByRole('button', { name: 'Question navigator' });
+    await expect(questionNavigatorButton).toBeVisible();
+    await questionNavigatorButton.click();
+    const questionNavigator = page.locator('dialog[aria-labelledby="question-navigator-title"]');
+    await expect(questionNavigator).toBeVisible();
+    await questionNavigator.getByRole('button', { name: 'Close question navigator' }).click();
+    await expect(questionNavigator).not.toBeVisible();
+
+    await context.close();
+  });
 });

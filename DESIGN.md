@@ -117,3 +117,49 @@ element, full keyboard reachability, semantic form controls, and `prefers-reduce
 support. Existing admin screens still contain some raw Tailwind color classes rather than
 named component tokens; this change preserves those established classes and adds no new
 color family.
+
+## 9. Student exam adaptive shell
+
+The student exam surface uses an adaptive environment contract rather than device
+labels. Available inline space determines `compact` (<700 CSS px), `medium`
+(700–1199 CSS px), or `wide` (>=1200 CSS px). Pointer precision, touch support,
+hover capability, and orientation are reported independently so a touch laptop and
+a mouse-connected phone do not receive the same layout by accident.
+
+### StudentExamShell
+
+- **Structure**: safe-area-aware shell, persistent header, viewport-owned workspace,
+  and a floating bottom navigation surface.
+- **Variants**: compact single-pane presentation, medium split-pane presentation,
+  wide split-pane presentation.
+- **Spacing**: 4px base scale; compact controls use 48px preferred hit targets and
+  never depend on toolbar scrolling.
+- **States**: default, saving, syncing, offline, warning, blocked, submitted.
+- **Accessibility**: the timer stays in the persistent header; navigation remains
+  keyboard reachable; sheets/dialogs return focus to their trigger; primary controls
+  expose explicit labels and visible focus.
+- **Motion**: 100–150ms interaction feedback and 200–300ms sheet/dialog transitions;
+  reduced motion disables non-essential transitions.
+- **Layout**: the shell owns viewport sizing and safe-area clearance; answer state
+  remains in runtime providers and module components.
+
+### StudentToolsSheet
+
+- **Structure**: compact-screen bottom sheet containing navigator, highlight, zoom,
+  and accessibility actions.
+- **Variants**: compact bottom sheet, medium/wide native dialog presentation.
+- **Spacing**: 16px panel padding, 48px frequent action rows.
+- **States**: closed, open, focus-return, escape-close.
+- **Accessibility**: labelled dialog, keyboard close, focus return, no hover-only action.
+- **Layout**: overlay-owned scroll; the exam workspace remains the only primary content
+  scroll owner.
+
+### CompactQuestionNavigation
+
+- **Structure**: previous action, current question summary, next action, and a
+  navigator trigger.
+- **Variants**: first-question disabled previous, last-question disabled next, normal.
+- **Spacing**: 8px cluster gap with 48px hit targets.
+- **States**: default, pressed, disabled, flagged/current summary.
+- **Accessibility**: native buttons with explicit labels; next never submits the exam.
+- **Layout**: safe-area-aware floating bottom bar; no document-level horizontal scroll.

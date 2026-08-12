@@ -143,7 +143,7 @@ describe('QuestionNavigator', () => {
 
   it('calls onNavigate when a question button is clicked', () => {
     const onNavigate = vi.fn();
-    const { container } = render(
+    render(
       <QuestionNavigator
         questions={mockQuestions}
         answers={{}}
@@ -153,15 +153,8 @@ describe('QuestionNavigator', () => {
         onClose={() => {}}
       />,
     );
-    const dialog = container.querySelector('dialog');
-    const buttons = dialog?.querySelectorAll('button') ?? [];
-    const questionButton = Array.from(buttons).find(
-      (btn) => btn.textContent?.trim() === '1',
-    );
-    if (questionButton) {
-      fireEvent.click(questionButton);
-      expect(onNavigate).toHaveBeenCalledWith('q1');
-    }
+    fireEvent.click(screen.getByRole('button', { name: '1' }));
+    expect(onNavigate).toHaveBeenCalledWith('q1');
   });
 
   it('renders groups as sections', () => {
