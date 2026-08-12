@@ -56,6 +56,9 @@ Output:
 
 PDF content:
 
+- Every PDF page header shows the candidate identity in this order: `nickname (Wcode)`,
+  `Course: <course> | Level: <level>`, and `Name: <full name>`. Missing optional identity fields
+  use explicit fallback text so the header remains useful for legacy submissions.
 - Reading/Listening: rendered as a teacher-friendly table: question, student answer, right answer, correct, score.
 - Writing uses the same structure as the default **"Print all writing"** export (task pages with prompt, response, and assessment form), and includes the full essay text (plain text) when available.
 - Missing section data is rendered as **"No submission"**.

@@ -3,8 +3,36 @@ import { strFromU8, unzipSync } from 'fflate';
 
 import { createPerStudentZipPdfExport } from '../gradingPerStudentExport';
 import type { CsvColumn } from '../gradingReviewUtils';
+import { buildStudentPdfBytes } from '../gradingPerStudentExport/studentPdf';
 
 describe('createPerStudentZipPdfExport', () => {
+  test('shows candidate identity at the top of the generated PDF', () => {
+    const pdfBytes = buildStudentPdfBytes(
+      {
+        submissionId: 'sub-1',
+        studentName: 'Somsri Saelim',
+        studentId: 'student-sub-1',
+        nickname: 'Mew',
+        wcode: 'W12345',
+        ieltsCourse: 'IELTS Advanced',
+        level: 'Level 5',
+        sectionData: {
+          reading: { columns: [], row: null },
+        },
+      },
+      ['reading'],
+      new Date('2026-05-13T00:00:00.000Z'),
+    );
+
+    const pdfText = new TextDecoder().decode(pdfBytes);
+
+    expect(pdfText).toContain('Mew \\(W12345\\)');
+    expect(pdfText).toContain('Course: IELTS Advanced | Level: Level 5');
+    expect(pdfText).toContain('Name: Somsri Saelim');
+    expect(pdfText).not.toContain('Generated:');
+    expect(pdfText).not.toContain('Submission:');
+  });
+
   test('builds a zip containing one PDF per student plus manifest.json', async () => {
     const readingColumns: CsvColumn[] = [
       { key: 'studentName', label: 'Student Name' },

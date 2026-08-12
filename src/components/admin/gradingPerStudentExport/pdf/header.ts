@@ -7,8 +7,16 @@ export type PdfHeaderContext = {
   studentId: string;
   submissionId: string;
   generatedAt: Date;
+  nickname?: string | null | undefined;
+  wcode?: string | null | undefined;
+  ieltsCourse?: string | null | undefined;
+  level?: string | null | undefined;
   sectionLabel?: string | undefined;
 };
+
+function displayIdentityValue(value: string | null | undefined, fallback: string): string {
+  return value?.trim() || fallback;
+}
 
 export function renderPdfHeader(doc: jsPDF, context: PdfHeaderContext): number {
   const left = 14;
@@ -19,19 +27,39 @@ export function renderPdfHeader(doc: jsPDF, context: PdfHeaderContext): number {
   doc.setFont('helvetica', 'bold');
   doc.text('Grading Export', left, y);
 
+  y += 6;
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  y = writeWrappedText(
+    doc,
+    `${displayIdentityValue(context.nickname, 'No nickname')} (${displayIdentityValue(context.wcode, context.studentId)})`,
+    left,
+    y,
+    maxWidth,
+    5.2,
+  );
+
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  y += 5;
+  y = writeWrappedText(
+    doc,
+    `Course: ${displayIdentityValue(context.ieltsCourse, 'No course')} | Level: ${displayIdentityValue(context.level, 'No level')}`,
+    left,
+    y,
+    maxWidth,
+    4.2,
+  );
+  y = writeWrappedText(
+    doc,
+    `Name: ${displayIdentityValue(context.studentName, 'No name')}`,
+    left,
+    y,
+    maxWidth,
+    4.2,
+  );
 
-  const meta = [
-    `Generated: ${context.generatedAt.toISOString()}`,
-    `Student: ${context.studentName} (${context.studentId})`,
-    `Submission: ${context.submissionId}`,
-    context.sectionLabel ? `Section: ${context.sectionLabel}` : null,
-  ].filter((line): line is string => Boolean(line));
-
-  for (const line of meta) {
-    y = writeWrappedText(doc, line, left, y, maxWidth, 4.2);
+  if (context.sectionLabel) {
+    y = writeWrappedText(doc, `Section: ${context.sectionLabel}`, left, y, maxWidth, 4.2);
   }
 
   // Divider
@@ -83,4 +111,3 @@ export function writeKeyValueRow(
 
   return y + rowLines * lineHeight;
 }
-

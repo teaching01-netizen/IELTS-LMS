@@ -60,7 +60,16 @@ function getAssessmentRows(task: WritingTaskSubmission | null) {
 
 export function renderWritingLikeDefaultPrint(
   doc: jsPDF,
-  student: { studentName: string; studentId: string; submissionId: string },
+  student: {
+    studentName: string;
+    studentId: string;
+    submissionId: string;
+    nickname?: string | null | undefined;
+    wcode?: string | null | undefined;
+    ieltsCourse?: string | null | undefined;
+    level?: string | null | undefined;
+    generatedAt?: Date | undefined;
+  },
   writingTasks: WritingTaskSubmission[],
   startY: number,
 ): number {
@@ -70,6 +79,16 @@ export function renderWritingLikeDefaultPrint(
   const pageHeight = doc.internal.pageSize.getHeight();
   const bottomMargin = 12;
   const topMargin = 14;
+  const headerContext = {
+    studentName: student.studentName,
+    studentId: student.studentId,
+    submissionId: student.submissionId,
+    generatedAt: student.generatedAt ?? new Date(),
+    nickname: student.nickname,
+    wcode: student.wcode,
+    ieltsCourse: student.ieltsCourse,
+    level: student.level,
+  };
 
   const tasksBySlot = new Map<'task1' | 'task2', WritingTaskSubmission>();
   for (const task of writingTasks) {
@@ -82,6 +101,7 @@ export function renderWritingLikeDefaultPrint(
   const slots = ['task1', 'task2'] as const;
   for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
     const slot = slots[slotIndex];
+    if (!slot) continue;
     const task = tasksBySlot.get(slot) ?? null;
 
     // Start each task on a fresh page if we are too low.
@@ -92,18 +112,12 @@ export function renderWritingLikeDefaultPrint(
 
     const sectionLabel = `WRITING - ${getTaskLabelForSlot(slot)}`;
     y = renderPdfHeader(doc, {
-      studentName: student.studentName,
-      studentId: student.studentId,
-      submissionId: student.submissionId,
-      generatedAt: new Date(),
+      ...headerContext,
       sectionLabel,
     });
     y = writeWrappedText(doc, `Submitted: ${formatSubmittedAt(task?.submittedAt)}`, left, y, maxWidth, 4.8, () => {
       y = renderPdfHeader(doc, {
-        studentName: student.studentName,
-        studentId: student.studentId,
-        submissionId: student.submissionId,
-        generatedAt: new Date(),
+        ...headerContext,
         sectionLabel,
       });
     });
@@ -195,10 +209,7 @@ export function renderWritingLikeDefaultPrint(
         doc.addPage();
         y = topMargin;
         y = renderPdfHeader(doc, {
-          studentName: student.studentName,
-          studentId: student.studentId,
-          submissionId: student.submissionId,
-          generatedAt: new Date(),
+          ...headerContext,
           sectionLabel,
         });
         doc.setFontSize(11);
