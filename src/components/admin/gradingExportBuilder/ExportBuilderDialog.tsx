@@ -283,7 +283,7 @@ export function ExportBuilderDialog({
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(15rem,0.9fr)_minmax(20rem,1.25fr)_minmax(22rem,1.15fr)]">
-          <div className="rounded-md border border-gray-200 bg-white p-4">
+          <div className="min-w-0 rounded-md border border-gray-200 bg-white p-4">
             <ExportBuilderFilters
               records={records}
               filters={profile.filters}
@@ -291,7 +291,7 @@ export function ExportBuilderDialog({
               onChange={(filters) => updateProfile({ ...profile, filters })}
             />
           </div>
-          <div className="rounded-md border border-gray-200 bg-white p-4">
+          <div className="min-w-0 rounded-md border border-gray-200 bg-white p-4">
             <ExportBuilderStudents
               matchingRecords={matchingRecords}
               selectedSubmissionIds={selectedSubmissionIds}
@@ -303,8 +303,8 @@ export function ExportBuilderDialog({
               onClear={() => setSelectedSubmissionIds([])}
             />
           </div>
-          <div className="space-y-4">
-            <div className="rounded-md border border-gray-200 bg-white p-4">
+          <div className="min-w-0 space-y-4">
+            <div className="min-w-0 rounded-md border border-gray-200 bg-white p-4">
               <ExportBuilderStructure
                 profile={profile}
                 records={records}
@@ -312,7 +312,7 @@ export function ExportBuilderDialog({
                 onChange={updateProfile}
               />
             </div>
-            <div className="rounded-md border border-gray-200 bg-white p-4">
+            <div className="min-w-0 rounded-md border border-gray-200 bg-white p-4">
               <ExportBuilderPreview plan={plan} />
             </div>
           </div>

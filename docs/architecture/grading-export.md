@@ -83,6 +83,14 @@ resolution before generation. Profiles are stored through the shared `/v1/settin
 endpoint; `profileStorage.ts` keeps a browser-only fallback for offline/dev environments without changing
 the plan or PDF seams.
 
+### Export Builder UI invariant
+
+The filter panel is designed to live inside a narrow column of the grading export dialog. Multi-value
+filters must use compact trigger controls with checkbox options; native `select[multiple]` listboxes are
+not allowed because they expand vertically, collide with adjacent controls, and make the export plan hard
+to scan. The control must continue to emit the existing `ExportFilterState` arrays so filtering and
+selection semantics remain unchanged.
+
 ## Owning modules and seams
 
 Per-student ZIP export is intentionally split into a few deep modules to keep UI changes local and make PDF layout work safer:

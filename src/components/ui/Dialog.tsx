@@ -90,7 +90,7 @@ export function Dialog({
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && closeOnEscape && isOpen) {
+      if (e.key === 'Escape' && !e.defaultPrevented && closeOnEscape && isOpen) {
         onClose();
       }
     };

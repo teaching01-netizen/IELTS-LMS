@@ -6,6 +6,7 @@ import type {
   ExportFilterState,
   ExportStudentRecord,
 } from './exportPlan';
+import { ExportBuilderMultiSelect } from './ExportBuilderMultiSelect';
 
 export interface ExportBuilderFiltersProps {
   records: readonly ExportStudentRecord[];
@@ -48,41 +49,6 @@ function uniqueTeacherOptions(records: readonly ExportStudentRecord[]) {
     .map(([value, label]) => ({ value, label }));
 }
 
-function readSelectedValues(event: React.ChangeEvent<HTMLSelectElement>): readonly string[] {
-  return Array.from(event.currentTarget.selectedOptions, (option) => option.value);
-}
-
-function MultiSelect({
-  id,
-  label,
-  value,
-  options,
-  disabled,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: readonly string[];
-  options: readonly { value: string; label: string }[];
-  disabled: boolean;
-  onChange: (value: readonly string[]) => void;
-}) {
-  return (
-    <Select
-      id={id}
-      label={label}
-      multiple
-      size={Math.min(4, Math.max(2, options.length))}
-      value={[...value]}
-      options={[...options]}
-      onChange={(event) => onChange(readSelectedValues(event))}
-      disabled={disabled}
-      className="h-auto min-h-10 py-2"
-      aria-label={label}
-    />
-  );
-}
-
 export function ExportBuilderFilters({
   records,
   filters,
@@ -100,7 +66,7 @@ export function ExportBuilderFilters({
   );
 
   return (
-    <section aria-labelledby="export-filter-heading" className="space-y-4">
+    <section aria-labelledby="export-filter-heading" className="min-w-0 space-y-5">
       <div>
         <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">Filter students</p>
         <h3 id="export-filter-heading" className="mt-1 text-base font-semibold tracking-tight text-gray-900">
@@ -121,8 +87,8 @@ export function ExportBuilderFilters({
         disabled={disabled}
       />
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <MultiSelect
+      <div className="grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(13rem,100%),1fr))]">
+        <ExportBuilderMultiSelect
           id="export-filter-course"
           label="Course"
           value={filters.courses}
@@ -130,7 +96,7 @@ export function ExportBuilderFilters({
           disabled={disabled}
           onChange={(courses) => onChange({ ...filters, courses })}
         />
-        <MultiSelect
+        <ExportBuilderMultiSelect
           id="export-filter-level"
           label="Level"
           value={filters.levels}
@@ -138,7 +104,7 @@ export function ExportBuilderFilters({
           disabled={disabled}
           onChange={(levels) => onChange({ ...filters, levels })}
         />
-        <MultiSelect
+        <ExportBuilderMultiSelect
           id="export-filter-cohort"
           label="Cohort"
           value={filters.cohorts}
@@ -146,7 +112,7 @@ export function ExportBuilderFilters({
           disabled={disabled}
           onChange={(cohorts) => onChange({ ...filters, cohorts })}
         />
-        <MultiSelect
+        <ExportBuilderMultiSelect
           id="export-filter-teacher"
           label="Assigned grader"
           value={filters.assignedTeacherIds}
@@ -156,7 +122,7 @@ export function ExportBuilderFilters({
         />
       </div>
 
-      <MultiSelect
+      <ExportBuilderMultiSelect
         id="export-filter-status"
         label="Grading status"
         value={filters.gradingStatuses}
@@ -168,7 +134,7 @@ export function ExportBuilderFilters({
         })}
       />
 
-      <MultiSelect
+      <ExportBuilderMultiSelect
         id="export-filter-release-status"
         label="Release status"
         value={filters.releaseStatuses}
@@ -180,7 +146,7 @@ export function ExportBuilderFilters({
         })}
       />
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(13rem,100%),1fr))]">
         <Select
           label="Flagged"
           value={filters.flagged === null ? '' : String(filters.flagged)}
@@ -194,6 +160,7 @@ export function ExportBuilderFilters({
             onChange({ ...filters, flagged: value === '' ? null : value === 'true' });
           }}
           disabled={disabled}
+          fullWidth
         />
         <Select
           label="Missing data"
@@ -209,16 +176,18 @@ export function ExportBuilderFilters({
             missingData: event.target.value as ExportFilterState['missingData'],
           })}
           disabled={disabled}
+          fullWidth
         />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(13rem,100%),1fr))]">
         <Input
           label="Submitted from"
           type="date"
           value={filters.submittedFrom}
           onChange={(event) => onChange({ ...filters, submittedFrom: event.target.value })}
           disabled={disabled}
+          fullWidth
         />
         <Input
           label="Submitted to"
@@ -226,6 +195,7 @@ export function ExportBuilderFilters({
           value={filters.submittedTo}
           onChange={(event) => onChange({ ...filters, submittedTo: event.target.value })}
           disabled={disabled}
+          fullWidth
         />
       </div>
     </section>
