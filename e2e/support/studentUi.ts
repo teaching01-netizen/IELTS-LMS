@@ -215,6 +215,7 @@ export async function completePreCheckIfPresent(page: Page) {
   // (waiting room, lobby preview, or an already-started exam) without any click.
   const waitingForStart = page.getByRole('heading', { name: 'Waiting for the exam to start' });
   const startExam = page.getByRole('button', { name: 'Start Exam' });
+  const examShell = page.getByTestId('student-exam-shell');
   const answerField = page.getByLabel(/Answer for question/i).first();
   const writingEditor = page.locator('[contenteditable="true"]').first();
 
@@ -225,6 +226,7 @@ export async function completePreCheckIfPresent(page: Page) {
       async () => {
         if (await waitingForStart.isVisible().catch(() => false)) return 'waiting';
         if (await startExam.isVisible().catch(() => false)) return 'lobby';
+        if (await examShell.isVisible().catch(() => false)) return 'exam';
         if (await answerField.isVisible().catch(() => false)) return 'answer';
         if (await writingEditor.isVisible().catch(() => false)) return 'writing';
         return 'pending';
@@ -254,21 +256,23 @@ export async function startLobbyIfPresent(page: Page) {
       headers: { 'x-csrf-token': csrfToken },
       data: { action: 'start_runtime' },
     });
-    if (!response.ok() && response.status() !== 409) {
-      throw new Error(`Authoritative runtime start failed: ${response.status()} ${(await response.text()).slice(0, 200)}`);
+    const responseText = await response.text();
+    const runtimeAlreadyExists =
+      response.status() === 409 ||
+      /duplicate entry.*exam_session_runtimes\.schedule_id/i.test(responseText);
+    if (!response.ok() && !runtimeAlreadyExists) {
+      throw new Error(`Authoritative runtime start failed: ${response.status()} ${responseText.slice(0, 200)}`);
     }
   } finally {
     await controlContext.close();
   }
 
   await expect.poll(async () => {
+    if (await page.getByTestId('student-exam-shell').isVisible().catch(() => false)) return 'exam';
     if (await page.getByLabel(/Answer for question/i).first().isVisible().catch(() => false)) return 'exam';
     if (await page.locator('[contenteditable="true"]').first().isVisible().catch(() => false)) return 'exam';
     return 'waiting';
   }, { timeout: 60_000 }).toBe('exam');
-}
-
-export async function acknowledgeWarningOverlayIfPresent(page: Page) {
   const overlay = page.getByText(/Tab switching detected/i);
   const understand = page.getByRole('button', { name: /I Understand/i });
   const visible = await overlay.isVisible().catch(() => false);
@@ -342,4 +346,64 @@ export async function openStudentSessionWithRetry(
   }
 
   throw new Error(`Student session failed to load for ${targetUrl} after retries.`);
+}
+
+export interface StudentTouchTargetFailure {
+  selector: string;
+  name: string;
+  width: number;
+  height: number;
+}
+
+export async function scanStudentTouchTargets(
+  page: Page,
+  options: { allowedSelectors?: string[]; minimumSize?: number } = {},
+): Promise<StudentTouchTargetFailure[]> {
+  const allowedSelectors = options.allowedSelectors ?? [];
+  const minimumSize = options.minimumSize ?? 44;
+
+  return page.evaluate(
+    ({ allowedSelectors: selectors, minimumSize: requiredSize }) => {
+      const interactiveSelector =
+        'button, [role="button"], input, select, textarea, a[href], [contenteditable="true"]';
+
+      return Array.from(document.querySelectorAll<HTMLElement>(interactiveSelector))
+        .filter((element) => {
+          const isDisabled =
+            element.getAttribute('aria-disabled') === 'true' ||
+            (element instanceof HTMLButtonElement && element.disabled) ||
+            (element instanceof HTMLInputElement && element.disabled) ||
+            (element instanceof HTMLSelectElement && element.disabled) ||
+            (element instanceof HTMLTextAreaElement && element.disabled);
+          const style = window.getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          const intersectsViewport =
+            rect.bottom > 0 &&
+            rect.top < window.innerHeight &&
+            rect.right > 0 &&
+            rect.left < window.innerWidth;
+        return (
+          !isDisabled &&
+          !element.hidden &&
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          intersectsViewport &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      })
+      .filter((element) => !selectors.some((selector) => element.matches(selector)))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          selector: element.tagName.toLowerCase(),
+          name: element.getAttribute('aria-label') || element.textContent?.trim() || element.tagName,
+          width: rect.width,
+          height: rect.height,
+        };
+      })
+      .filter(({ width, height }) => width < requiredSize || height < requiredSize);
+    },
+    { allowedSelectors, minimumSize },
+  );
 }

@@ -319,4 +319,53 @@ describe('StudentWriting lifecycle durability', () => {
       'Boundary draft',
     );
   });
+  it('preserves the response when switching compact prompt and response panes', () => {
+    const onWritingChange = vi.fn();
+
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={onWritingChange}
+        onSubmit={() => undefined}
+        currentQuestionId="task1"
+        onNavigate={() => undefined}
+        layoutMode="compact"
+        showSubmitButton={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show response' }));
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    setWritingEditorText(editor, 'Compact response draft');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show prompt' }));
+    expect(screen.queryByRole('textbox', { name: /writing response/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('writing-task-prompt')).toHaveTextContent('Task 1 prompt');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show response' }));
+    expect(screen.getByRole('textbox', { name: /writing response/i })).toHaveValue('Compact response draft');
+    expect(screen.queryByRole('button', { name: /review & submit/i })).not.toBeInTheDocument();
+  });
+  it('gives the compact prompt pane its own vertical scroll owner', () => {
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId="task1"
+        onNavigate={() => undefined}
+        layoutMode="compact"
+        showSubmitButton={false}
+      />,
+    );
+
+    const promptScrollOwner = screen
+      .getByTestId('writing-task-prompt')
+      .closest<HTMLElement>('[data-student-zoom-scroll]');
+
+    expect(promptScrollOwner).not.toBeNull();
+    expect(promptScrollOwner).toHaveClass('flex-1', 'min-h-0', 'overflow-y-auto');
+  });
 });

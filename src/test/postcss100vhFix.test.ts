@@ -11,7 +11,12 @@ describe('PostCSS Safari 100vh fallback', () => {
     resolve(projectRoot, 'src/components/student/StudentApp.tsx'),
     'utf8',
   );
+  const studentShellSource = readFileSync(
+    resolve(projectRoot, 'src/components/student/layout/StudentExamShell.tsx'),
+    'utf8',
+  );
   const appCss = readFileSync(resolve(projectRoot, 'src/index.css'), 'utf8');
+
 
   it('emits -webkit-fill-available after the modern viewport cascade', async () => {
     expect(existsSync(configPath)).toBe(true);
@@ -40,24 +45,26 @@ describe('PostCSS Safari 100vh fallback', () => {
     expect(result.css).toContain('height: 100dvh');
   });
 
-  it('routes every student app phase through the transformable h-screen utility', () => {
+  it('keeps the active exam shell height-owned by semantic CSS rules', () => {
     const shellStyle = studentAppSource.match(
       /const studentShellStyle = \{([\s\S]*?)\}\s+as React\.CSSProperties/,
     )?.[1];
     expect(shellStyle).toBeDefined();
     expect(shellStyle).not.toMatch(/height:/);
 
-    const shellClassNames = Array.from(
-      studentAppSource.matchAll(/className=(?:"([^"]+)"|\{`([^`]+)`\})/g),
-      (match) => match[1] ?? match[2] ?? '',
-    ).filter((className) =>
-      className.includes('student-exam-shell') || className.includes('flex flex-col h-screen'),
+    const activeShellClass = studentShellSource.match(
+      /className=\{`([^`]*student-exam-shell[^`]*)`\}/,
+    )?.[1];
+    expect(activeShellClass).toBeDefined();
+    expect(activeShellClass).not.toContain('h-screen');
+    expect(appCss).toMatch(
+      /@supports\s*\(height:\s*100svh\)[\s\S]*?\.student-exam-shell\.student-exam-shell\s*\{[^}]*height:\s*100svh/,
     );
-
-    expect(shellClassNames).toHaveLength(3);
-    expect(shellClassNames.every((className) => className.includes('h-screen'))).toBe(true);
     expect(appCss).toMatch(
       /@supports\s*\(height:\s*100dvh\)[\s\S]*?\.student-exam-shell\.student-exam-shell\s*\{[^}]*height:\s*100dvh/,
+    );
+    expect(appCss).toMatch(
+      /height:\s*var\(--student-visual-viewport-height,\s*100dvh\)\s*;/,
     );
   });
 });

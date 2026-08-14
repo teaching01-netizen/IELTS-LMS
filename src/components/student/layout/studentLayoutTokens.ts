@@ -1,12 +1,12 @@
 export const STUDENT_LAYOUT_TOKENS = {
   headerHeight: {
-    compact: '3.5rem',
-    medium: '4rem',
-    wide: '4rem',
+    compact: 'var(--student-header-height-compact)',
+    medium: 'var(--student-header-height-medium)',
+    wide: 'var(--student-header-height-wide)',
   },
-  bottomBarMinHeight: '3.5rem',
-  touchTargetMin: '2.75rem',
-  touchTargetPreferred: '3rem',
+  bottomBarMinHeight: 'var(--student-bottom-bar-height)',
+  touchTargetMin: 'var(--student-touch-target-min)',
+  touchTargetPreferred: 'var(--student-touch-target-preferred)',
 } as const;
 
 export function getStudentLayoutModeClassName(

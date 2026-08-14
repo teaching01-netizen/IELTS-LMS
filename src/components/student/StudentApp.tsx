@@ -120,12 +120,15 @@ function formatRuntimeTime(seconds: number) {
 interface StudentAppProps {
   showSubmitControls?: boolean | undefined;
   allowPreviewStart?: boolean | undefined;
+  allowExitDuringExam?: boolean | undefined;
 }
 
 export function StudentApp({
   showSubmitControls = true,
   allowPreviewStart = false,
+  allowExitDuringExam = false,
 }: StudentAppProps) {
+  void allowExitDuringExam;
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
   const { state: uiState, actions: uiActions } = useStudentUI();
@@ -621,6 +624,7 @@ export function StudentApp({
       <StudentExamShell
         layoutMode={layoutMode}
         highContrast={uiState.accessibilitySettings.highContrast}
+        touchMode={tabletMode}
         style={studentShellStyle}
       >
       <style>{`

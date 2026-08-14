@@ -147,7 +147,7 @@ describe('getBlockQuestionCount', () => {
           ],
           answerRule: 'ONE_WORD',
           acceptAnyAnswerKey: true,
-          sharedAcceptedAnswers: ['alpha', 'ALPHA'],
+          sharedAcceptedAnswers: ['alpha', 'alpha-'],
         },
       ],
     };

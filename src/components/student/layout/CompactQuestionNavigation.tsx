@@ -4,7 +4,10 @@ import {
   getQuestionNumberLabel,
   type StudentQuestionDescriptor,
 } from '@services/examAdapterService';
-import { getStudentNavigableQuestions } from './studentQuestionNavigation';
+import {
+  getStudentNavigableQuestions,
+  getStudentQuestionNavigationKey,
+} from './studentQuestionNavigation';
 
 interface CompactQuestionNavigationProps {
   readonly questions: StudentQuestionDescriptor[];
@@ -16,7 +19,7 @@ interface CompactQuestionNavigationProps {
 }
 
 const navigationButtonClassName =
-  'flex min-h-12 min-w-12 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40';
+  'student-touch-target flex items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40';
 
 export function CompactQuestionNavigation({
   questions,
@@ -27,13 +30,19 @@ export function CompactQuestionNavigation({
   showSubmitButton,
 }: CompactQuestionNavigationProps) {
   const navigableQuestions = getStudentNavigableQuestions(questions);
+  const currentQuestion = questions.find((question) => question.id === currentQuestionId);
+  const currentNavigationKey = currentQuestion
+    ? getStudentQuestionNavigationKey(currentQuestion)
+    : currentQuestionId;
   const currentIndex = Math.max(
     0,
-    navigableQuestions.findIndex((question) => question.id === currentQuestionId),
+    navigableQuestions.findIndex(
+      (question) => getStudentQuestionNavigationKey(question) === currentNavigationKey,
+    ),
   );
-  const currentQuestion = navigableQuestions[currentIndex];
+  const activeQuestion = navigableQuestions[currentIndex];
   const totalQuestions = countQuestionSlots(questions);
-  const currentLabel = currentQuestion ? getQuestionNumberLabel(questions, currentQuestion.id) : '—';
+  const currentLabel = activeQuestion ? getQuestionNumberLabel(questions, activeQuestion.id) : '—';
   const canGoPrevious = currentIndex > 0;
   const canGoNext = currentIndex >= 0 && currentIndex < navigableQuestions.length - 1;
 
@@ -59,8 +68,11 @@ export function CompactQuestionNavigation({
 
       <button
         type="button"
-        className="flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-sm px-2 text-sm font-bold text-gray-900 hover:bg-gray-50"
-        onClick={onOpenNavigator}
+        className="student-touch-target flex min-w-0 flex-1 items-center justify-center gap-2 rounded-sm px-2 text-sm font-bold text-gray-900 hover:bg-gray-50"
+        onClick={(event) => {
+          event.currentTarget.focus();
+          onOpenNavigator?.();
+        }}
         aria-label={`Open question navigator, question ${currentLabel} of ${totalQuestions}`}
         disabled={!onOpenNavigator}
         data-student-primary-touch-target
@@ -86,7 +98,7 @@ export function CompactQuestionNavigation({
       {showSubmitButton ? (
         <button
           type="button"
-          className="min-h-12 rounded-sm bg-blue-800 px-3 text-sm font-bold text-white hover:bg-blue-700"
+          className="student-touch-target rounded-sm bg-blue-800 px-3 text-sm font-bold text-white hover:bg-blue-700"
           onClick={onSubmit}
           data-student-primary-touch-target
         >

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { QuestionNavigator } from '../QuestionNavigator';
@@ -140,6 +140,38 @@ describe('QuestionNavigator', () => {
     fireEvent.click(screen.getByLabelText('Close question navigator'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+  it('restores focus to the navigator trigger after the dialog closes', () => {
+    function Harness() {
+      const [open, setOpen] = useState(true);
+
+      return (
+        <>
+          <button type="button" data-testid="navigator-trigger">
+            Open navigator
+          </button>
+          {open ? (
+            <QuestionNavigator
+              questions={mockQuestions}
+              answers={{}}
+              flags={{}}
+              currentQuestionId="q1"
+              onNavigate={() => undefined}
+              onClose={() => setOpen(false)}
+            />
+          ) : null}
+        </>
+      );
+    }
+
+    render(<Harness />);
+    const trigger = screen.getByTestId('navigator-trigger');
+    trigger.focus();
+
+    fireEvent.click(screen.getByLabelText('Close question navigator'));
+
+    expect(trigger).toHaveFocus();
+  });
+
 
   it('calls onNavigate when a question button is clicked', () => {
     const onNavigate = vi.fn();

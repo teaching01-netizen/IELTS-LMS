@@ -19,7 +19,11 @@ function parseCsv(content: string): VirtualUser[] {
     return [];
   }
 
-  const headers = lines[0].split(',').map((h) => h.trim());
+  const header = lines[0];
+  if (header === undefined) {
+    return [];
+  }
+  const headers = header.split(',').map((h) => h.trim());
   const index = (name: string) => headers.findIndex((h) => h.toLowerCase() === name.toLowerCase());
 
   const userIdIdx = index('userId');

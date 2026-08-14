@@ -14,7 +14,7 @@ import { isInstructionReferencePlacement } from '../../utils/referenceImagePlace
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { hasHtmlMarkup } from './normalizeReadingPassageText';
 import { StudentMaterialWithQuestionPane } from './StudentMaterialWithQuestionPane';
-import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
+import type { StudentLayoutMode } from './layout/studentLayoutMode';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -32,6 +32,7 @@ interface StudentListeningProps {
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
   tabletMode?: boolean | undefined;
+  layoutMode?: StudentLayoutMode | undefined;
   contentZoom?: number | undefined;
   onIncreasePassageReadability?: (() => void) | undefined;
   onDecreasePassageReadability?: (() => void) | undefined;
@@ -53,7 +54,6 @@ function isCurrentDiagramBlock(block: DiagramLabelingBlock, currentQuestionId: s
 
   return Boolean(currentQuestionId && getDiagramSlotIds(block).includes(currentQuestionId));
 }
-
 export function StudentListening({
   state,
   answers,
@@ -66,6 +66,7 @@ export function StudentListening({
   highlightColor,
   highlightClassName,
   tabletMode = false,
+  layoutMode = 'wide',
   contentZoom = 1,
   onIncreasePassageReadability,
   onDecreasePassageReadability,
@@ -150,7 +151,10 @@ export function StudentListening({
     return currentDiagramBlocks.length > 0 ? currentDiagramBlocks : diagramBlocks;
   }, [activePart?.blocks, currentQ?.blockId, currentQuestionId]);
   const diagramBlocksInMaterialPane = useMemo(
-    () => activeDiagramBlocks.filter((block) => !isInstructionReferencePlacement(block)),
+    () =>
+      activeDiagramBlocks.filter(
+        (block): block is DiagramLabelingBlock => !isInstructionReferencePlacement(block),
+      ),
     [activeDiagramBlocks],
   );
   const hiddenDiagramReferenceBlockIds = useMemo(
@@ -276,10 +280,10 @@ export function StudentListening({
   if (!activePart) {
     return null;
   }
-
   return (
     <StudentMaterialWithQuestionPane
       isTabletMode={isTabletMode}
+      layoutMode={layoutMode}
       workspaceRef={workspaceRef}
       splitPaneStyle={splitPaneStyle}
       leftWidth={leftWidth}
@@ -298,7 +302,6 @@ export function StudentListening({
           data-student-zoom-scroll
           style={{
             ...(tabletContentZoomStyle ?? {}),
-            ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
           }}
         >
           <h2 className={`${materialCompact ? 'mb-2 text-base md:text-lg' : 'mb-4 text-lg md:mb-6 md:text-xl'} font-bold break-words [overflow-wrap:anywhere]`}>{activePart.title}</h2>

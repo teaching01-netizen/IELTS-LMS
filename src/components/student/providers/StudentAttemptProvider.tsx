@@ -289,6 +289,13 @@ function shouldPreferLocalAttemptState(
     return true;
   }
 
+  if (
+    localAttempt.recovery.syncState === 'saved' &&
+    incomingAttempt.recovery.syncState === 'idle'
+  ) {
+    return true;
+  }
+
   // When accepted sequence is tied and no authoritative revision breaks the tie,
   // keep local state to avoid regressing visible student answers.
   return false;

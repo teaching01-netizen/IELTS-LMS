@@ -152,7 +152,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     ieltsCourse: string;
   }) => {
     const result = await authService.studentEntry(payload);
-    if ('state' in result && result.state === 'queued') {
+    if (!('user' in result)) {
       return result;
     }
     return setSessionState(result, setSession, setStatus) as AuthSession;

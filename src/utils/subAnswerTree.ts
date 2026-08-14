@@ -60,11 +60,11 @@ function collectExistingIds(nodes: unknown, target: Set<string>): void {
   if (!Array.isArray(nodes)) return;
   nodes.forEach((node) => {
     if (!isNodeObject(node)) return;
-    const id = typeof node.id === 'string' ? node.id.trim() : '';
+    const id = typeof node['id'] === 'string' ? node['id'].trim() : '';
     if (id) {
       target.add(id);
     }
-    collectExistingIds(node.children, target);
+    collectExistingIds(node['children'], target);
   });
 }
 
@@ -73,20 +73,20 @@ function normalizeNodeTree(
   assignedIds: Set<string>,
   forbiddenIds: Set<string>,
 ): SubAnswerTreeNode {
-  let id = typeof node.id === 'string' ? node.id.trim() : '';
+  let id = typeof node['id'] === 'string' ? node['id'].trim() : '';
   if (!id || assignedIds.has(id)) {
     id = nextGeneratedNodeId(forbiddenIds);
   }
   assignedIds.add(id);
   forbiddenIds.add(id);
 
-  const label = typeof node.label === 'string' ? node.label : '';
-  const acceptedAnswers = Array.isArray(node.acceptedAnswers)
-    ? node.acceptedAnswers.filter((entry): entry is string => typeof entry === 'string')
+  const label = typeof node['label'] === 'string' ? node['label'] : '';
+  const acceptedAnswers = Array.isArray(node['acceptedAnswers'])
+    ? node['acceptedAnswers'].filter((entry): entry is string => typeof entry === 'string')
     : undefined;
-  const required = typeof node.required === 'boolean' ? node.required : undefined;
-  const rawChildren = Array.isArray(node.children)
-    ? node.children.filter((child): child is Record<string, unknown> => isNodeObject(child))
+  const required = typeof node['required'] === 'boolean' ? node['required'] : undefined;
+  const rawChildren = Array.isArray(node['children'])
+    ? node['children'].filter((child): child is Record<string, unknown> => isNodeObject(child))
     : [];
 
   const children = rawChildren.map((child) => normalizeNodeTree(child, assignedIds, forbiddenIds));

@@ -261,7 +261,7 @@ function syncSingleMcqBlockFromQuestions(block: SingleMCQBlock, questions: Array
     ...block,
     stem: first.stem,
     options: first.options,
-    questions: questions as unknown as SingleMCQBlock['questions'],
+    questions,
   };
 }
 

@@ -196,12 +196,12 @@ async function defaultLoginOrRegister(page: Page, user: VirtualUser, registerUrl
     (await fillFirst(
     [
       'input#wcode',
-      'input[aria-label=\"Wcode\"]',
-      'input[placeholder*=\"W\" i]',
-      'input[name=\"candidateId\"]',
-      'input[name=\"candidate_id\"]',
-      'input[placeholder*=\"Candidate\" i]',
-      'input[placeholder*=\"ID\" i]',
+      'input[aria-label="Wcode"]',
+      'input[placeholder*="W" i]',
+      'input[name="candidateId"]',
+      'input[name="candidate_id"]',
+      'input[placeholder*="Candidate" i]',
+      'input[placeholder*="ID" i]',
     ],
     candidateCode,
   ));
@@ -211,11 +211,11 @@ async function defaultLoginOrRegister(page: Page, user: VirtualUser, registerUrl
     (await fillFirst(
     [
       'input#studentName',
-      'input[aria-label=\"Full Name\"]',
-      'input[name=\"candidateName\"]',
-      'input[name=\"name\"]',
-      'input[placeholder*=\"Name\" i]',
-      'input[autocomplete=\"name\"]',
+      'input[aria-label="Full Name"]',
+      'input[name="candidateName"]',
+      'input[name="name"]',
+      'input[placeholder*="Name" i]',
+      'input[autocomplete="name"]',
     ],
     user.userId,
   ));
@@ -265,10 +265,10 @@ async function defaultLoginOrRegister(page: Page, user: VirtualUser, registerUrl
   // Some deployments do not require a password at student check-in.
   await fillFirst(
     [
-      'input[name=\"password\"]',
-      'input[type=\"password\"]',
-      'input[autocomplete=\"current-password\"]',
-      'input[placeholder*=\"Password\" i]',
+      'input[name="password"]',
+      'input[type="password"]',
+      'input[autocomplete="current-password"]',
+      'input[placeholder*="Password" i]',
     ],
     user.password,
   ).catch(() => {});
@@ -1103,10 +1103,14 @@ async function run(): Promise<void> {
   if (config.deleteArtifactsOnFinish) {
     try {
       fs.unlinkSync(summaryPath);
-    } catch {}
+    } catch {
+      // Best-effort cleanup must not mask the run result.
+    }
     try {
       fs.unlinkSync(liveLogFile);
-    } catch {}
+    } catch {
+      // Best-effort cleanup must not mask the run result.
+    }
     console.log('[live-runner] artifacts deleted (DELETE_ARTIFACTS_ON_FINISH=true)');
   }
 }

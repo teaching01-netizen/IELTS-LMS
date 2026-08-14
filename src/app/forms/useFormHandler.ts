@@ -10,10 +10,10 @@ import { z } from 'zod';
 import { ValidationError } from '../error/errorTypes';
 import { logError } from '../error/errorLogger';
 
-type FormSchema<TValues extends FieldValues> = z.ZodType<TValues, unknown, TValues>;
+type FormSchema<TValues extends FieldValues> = z.ZodType<TValues, TValues>;
 
 function createResolver<TValues extends FieldValues>(schema: FormSchema<TValues>): Resolver<TValues> {
-  return zodResolver(schema) as Resolver<TValues>;
+  return zodResolver(schema);
 }
 
 export interface UseFormHandlerOptions<TValues extends FieldValues> {

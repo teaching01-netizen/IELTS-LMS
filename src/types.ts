@@ -31,10 +31,10 @@ export type SlotGroupRule = 'all_required' | 'at_least_n';
 
 export interface SubAnswerTreeNode {
   id: string;
-  label?: string;
-  acceptedAnswers?: string[];
-  children?: SubAnswerTreeNode[];
-  required?: boolean;
+  label?: string | undefined;
+  acceptedAnswers?: string[] | undefined;
+  children?: SubAnswerTreeNode[] | undefined;
+  required?: boolean | undefined;
 }
 
 export interface TFNGQuestion {

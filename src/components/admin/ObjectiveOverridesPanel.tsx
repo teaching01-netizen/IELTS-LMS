@@ -119,9 +119,6 @@ function getDefaultScoringRule(descriptor: StudentQuestionDescriptor): string {
     || block.type === 'SHORT_ANSWER'
     || block.type === 'SENTENCE_COMPLETION'
     || block.type === 'NOTE_COMPLETION'
-    || block.type === 'TABLE_COMPLETION'
-    || block.type === 'DIAGRAM_LABELING'
-    || block.type === 'FLOW_CHART'
   ) {
     return 'exact_match';
   }
@@ -300,7 +297,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
 
       if (currentLimit && isTextOverride) {
         const required = maxVariantWordCount({
-          correctAnswer: form.correctAnswer ?? undefined,
+          ...(form.correctAnswer?.trim() ? { correctAnswer: form.correctAnswer } : {}),
           acceptedAnswers: form.acceptedAnswers ?? [],
         });
         if (required > currentLimit) {
@@ -316,7 +313,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
       }
 
       const payload: ObjectiveOverrideUpsertRequest = {
-        correctAnswer: form.correctAnswer?.trim() ? form.correctAnswer : undefined,
+        ...(form.correctAnswer?.trim() ? { correctAnswer: form.correctAnswer } : {}),
         acceptedAnswers: Array.isArray(form.acceptedAnswers) ? form.acceptedAnswers : [],
         correctOptionIds: Array.isArray(form.correctOptionIds) ? form.correctOptionIds : [],
         scoringRule,

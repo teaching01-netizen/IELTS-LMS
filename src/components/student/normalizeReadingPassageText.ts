@@ -241,7 +241,7 @@ function hasBoldStyle(styleValue: string | null): boolean {
   if (!numericMatch) {
     return false;
   }
-  const numericWeight = Number.parseInt(numericMatch[1], 10);
+  const numericWeight = Number.parseInt(numericMatch[1] ?? '', 10);
   return Number.isFinite(numericWeight) && numericWeight >= 600;
 }
 
@@ -275,7 +275,10 @@ const RICH_TEXT_BLOCK_SELECTOR =
 
 function collectLeafReadableBlocks(root: ParentNode): HTMLElement[] {
   const candidates = Array.from(root.querySelectorAll(RICH_TEXT_BLOCK_SELECTOR));
-  return candidates.filter((candidate) => !candidate.querySelector(RICH_TEXT_BLOCK_SELECTOR));
+  return candidates.filter(
+    (candidate): candidate is HTMLElement =>
+      candidate instanceof HTMLElement && !candidate.querySelector(RICH_TEXT_BLOCK_SELECTOR),
+  );
 }
 
 function htmlToMarkedText(html: string): string {

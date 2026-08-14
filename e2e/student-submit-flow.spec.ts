@@ -157,7 +157,7 @@ test.describe('Student submission flow (LRW)', () => {
     await stubScreenDetails(context);
     const page = await context.newPage();
 
-    let submittedValues: string[] = [];
+    const submittedValues: string[] = [];
     await page.route(
       `**/api/v1/student/sessions/${manifest.student.scheduleId}/mutations:batch`,
       async (route) => {

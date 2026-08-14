@@ -19,7 +19,7 @@ import {
 } from './normalizeReadingPassageText';
 import { isInstructionReferencePlacement } from '../../utils/referenceImagePlacement';
 import { StudentMaterialWithQuestionPane } from './StudentMaterialWithQuestionPane';
-import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
+import type { StudentLayoutMode } from './layout/studentLayoutMode';
 
 interface StudentReadingProps {
   state: ExamState;
@@ -37,6 +37,7 @@ interface StudentReadingProps {
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
   tabletMode?: boolean | undefined;
+  layoutMode?: StudentLayoutMode | undefined;
   contentZoom?: number | undefined;
   onIncreasePassageReadability?: (() => void) | undefined;
   onDecreasePassageReadability?: (() => void) | undefined;
@@ -86,7 +87,6 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
       data-student-highlightable="true"
       style={{
         ...(tabletContentZoomStyle ?? {}),
-        ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
         fontSize: 'var(--student-passage-font-size)',
         lineHeight: 'var(--student-passage-line-height)',
         WebkitUserSelect: 'text',
@@ -134,7 +134,6 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
     </div>
   );
 });
-
 export function StudentReading({
   state,
   answers,
@@ -147,6 +146,7 @@ export function StudentReading({
   highlightColor,
   highlightClassName,
   tabletMode = false,
+  layoutMode = 'wide',
   contentZoom = 1,
   onIncreasePassageReadability,
   onDecreasePassageReadability,
@@ -332,6 +332,7 @@ export function StudentReading({
   return (
     <StudentMaterialWithQuestionPane
       isTabletMode={isTabletMode}
+      layoutMode={layoutMode}
       workspaceRef={workspaceRef}
       splitPaneStyle={splitPaneStyle}
       leftWidth={leftWidth}

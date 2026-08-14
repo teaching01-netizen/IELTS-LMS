@@ -266,7 +266,7 @@ export function StudentHeader({
 
   return (
     <header
-      className="h-14 md:h-16 border-b border-gray-200 bg-white grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 md:gap-3 px-3 md:px-4 lg:px-6 flex-shrink-0 z-10 shadow-sm"
+      className="student-wide-header border-b border-gray-200 bg-white grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 md:gap-3 px-3 md:px-4 lg:px-6 flex-shrink-0 z-10 shadow-sm"
       role="banner"
     >
       <div className="flex items-center gap-3 md:gap-4 lg:gap-6 min-w-0 justify-self-start">

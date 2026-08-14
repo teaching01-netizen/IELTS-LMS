@@ -14,7 +14,7 @@ function readBackendFile(relativePath: string): string {
 }
 
 describe('development environment wiring', () => {
-  it('proxies frontend api requests to the backend server in dev', () => {
+  it('preserves the browser origin for backend CSRF validation in dev', () => {
     const config = viteConfigFactory({ command: 'serve', mode: 'development' });
 
     expect(config.server?.proxy).toBeDefined();

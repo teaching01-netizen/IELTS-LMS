@@ -106,6 +106,7 @@ export function StudentExamWorkspace({
             flags={flags}
             onToggleFlag={onFlagToggle}
             tabletMode={tabletMode}
+            layoutMode={layoutMode}
             contentZoom={contentZoom}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
@@ -130,6 +131,7 @@ export function StudentExamWorkspace({
             flags={flags}
             onToggleFlag={onFlagToggle}
             tabletMode={tabletMode}
+            layoutMode={layoutMode}
             contentZoom={contentZoom}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
@@ -157,6 +159,7 @@ export function StudentExamWorkspace({
             security={security}
             showSubmitButton={showSubmitControls}
             tabletMode={tabletMode}
+            layoutMode={layoutMode}
             registerLiveWritingAnswer={onRegisterLiveWritingAnswer}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}

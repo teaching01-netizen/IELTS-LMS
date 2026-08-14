@@ -75,7 +75,11 @@ export function SubAnswerTreeQuestionList({
       if (leftIndex >= 0 && rightIndex >= 0) {
         return leftIndex - rightIndex;
       }
-      return left.numberLabel.localeCompare(right.numberLabel, undefined, { numeric: true });
+      return (left.numberLabel ?? String(left.rootNumber)).localeCompare(
+        right.numberLabel ?? String(right.rootNumber),
+        undefined,
+        { numeric: true },
+      );
     });
   });
 

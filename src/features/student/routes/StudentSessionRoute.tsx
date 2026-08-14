@@ -91,7 +91,7 @@ export function StudentSessionRoute() {
       onRuntimeRefresh={refreshRuntime}
       runtimeSnapshot={runtimeSnapshot}
       answerInvariantRollout={answerInvariantRollout}
-      showSubmitControls
+      showSubmitControls={false}
       allowExitDuringExam={false}
     />
   );

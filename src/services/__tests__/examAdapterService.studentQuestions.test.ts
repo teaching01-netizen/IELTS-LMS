@@ -197,4 +197,58 @@ describe('student question descriptors (student exam core logic)', () => {
     expect(getQuestionNumberLabel(questions, questions[0]!.id)).toBe('1');
     expect(getQuestionNumberLabel(questions, questions[1]!.id)).toBe('1');
   });
+  it('collapses grouped table-completion cells and requires both 2-for-1 answers', () => {
+    const state = createInitialExamState('Exam', 'Academic');
+
+    state.reading.passages[0].blocks = [
+      {
+        id: 'table-grouped',
+        type: 'TABLE_COMPLETION',
+        instruction: 'Complete the table.',
+        headers: ['Item', 'Answer'],
+        rows: [['First', '____'], ['Second', '____']],
+        answerRule: 'ONE_WORD',
+        cells: [
+          {
+            id: 'cell-1',
+            row: 0,
+            col: 1,
+            correctAnswer: 'first',
+            scoreGroupId: 'table-pair',
+            scoreWeight: 1,
+            groupRule: 'at_least_n',
+            requiredCorrect: 2,
+          },
+          {
+            id: 'cell-2',
+            row: 1,
+            col: 1,
+            correctAnswer: 'second',
+            scoreGroupId: 'table-pair',
+            scoreWeight: 0,
+            groupRule: 'at_least_n',
+            requiredCorrect: 2,
+          },
+        ],
+      } as any,
+    ];
+
+    const questions = getStudentQuestionsForModule(state, 'reading');
+    expect(questions).toHaveLength(2);
+    expect(questions[0]?.rootId).toBe('table-grouped::table::group::table-pair');
+    expect(questions[1]?.rootId).toBe(questions[0]?.rootId);
+    expect(countQuestionSlots(questions)).toBe(1);
+    expect(getQuestionNumberLabel(questions, questions[1]!.id)).toBe('1');
+
+    expect(
+      isQuestionFullyAnswered(questions[0]!, {
+        'table-grouped': ['first', ''],
+      }),
+    ).toBe(false);
+    expect(
+      isQuestionFullyAnswered(questions[1]!, {
+        'table-grouped': ['first', 'second'],
+      }),
+    ).toBe(true);
+  });
 });

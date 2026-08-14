@@ -31,6 +31,7 @@ vi.mock('../../../services/gradingService', () => {
       releaseResult: vi.fn(),
       scheduleRelease: vi.fn(),
       reopenReview: vi.fn(),
+      getObjectiveGradingSource: vi.fn().mockResolvedValue({ success: false }),
     },
   };
 });

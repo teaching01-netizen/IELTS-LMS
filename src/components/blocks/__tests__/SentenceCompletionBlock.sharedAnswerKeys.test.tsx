@@ -204,7 +204,7 @@ describe('SentenceCompletionBlock shared answer keys', () => {
     renderHarness(
       buildBlock({
         acceptAnyAnswerKey: true,
-        sharedAcceptedAnswers: ['alpha', 'ALPHA'],
+        sharedAcceptedAnswers: ['alpha', 'alpha-'],
       }),
     );
 

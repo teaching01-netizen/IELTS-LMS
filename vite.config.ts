@@ -34,6 +34,8 @@ export default defineConfig(({mode}) => {
       proxy: {
         '/api': {
           target: backendApiUrl,
+          // Keep the browser-visible Host for backend same-origin CSRF validation.
+          // Rewriting it to the proxy target makes frontend mutations fail origin checks.
           changeOrigin: false,
           ws: true,
         },

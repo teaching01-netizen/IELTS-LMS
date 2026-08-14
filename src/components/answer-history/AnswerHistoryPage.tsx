@@ -69,27 +69,27 @@ function signalTargetsAnswer(
     return false;
   }
 
-  const directTargetId = evidence.targetId;
+  const directTargetId = evidence['targetId'];
   if (typeof directTargetId === 'string' && directTargetId === targetId) {
     return true;
   }
 
-  const questionId = evidence.questionId;
+  const questionId = evidence['questionId'];
   if (typeof questionId === 'string' && questionId === targetId) {
     return true;
   }
 
-  const taskId = evidence.taskId;
+  const taskId = evidence['taskId'];
   if (typeof taskId === 'string' && taskId === targetId) {
     return true;
   }
 
-  const affectedAnswers = evidence.affectedAnswers;
+  const affectedAnswers = evidence['affectedAnswers'];
   if (Array.isArray(affectedAnswers) && affectedAnswers.some((value) => value === targetId)) {
     return true;
   }
 
-  const affectedWritingAnswers = evidence.affectedWritingAnswers;
+  const affectedWritingAnswers = evidence['affectedWritingAnswers'];
   if (
     Array.isArray(affectedWritingAnswers) &&
     affectedWritingAnswers.some((value) => value === targetId)
@@ -97,7 +97,7 @@ function signalTargetsAnswer(
     return true;
   }
 
-  const affectedAnswerSlots = evidence.affectedAnswerSlots;
+  const affectedAnswerSlots = evidence['affectedAnswerSlots'];
   if (Array.isArray(affectedAnswerSlots)) {
     return affectedAnswerSlots.some((slot) => {
       if (!slot || typeof slot !== 'object') {
@@ -337,7 +337,7 @@ export function AnswerHistoryPage({
   const reconciliationBadgesByTarget = useMemo(() => {
     const map = new Map<string, ReconciliationBadgeState>();
     const signals = (overview?.signals ?? []).filter(
-      (signal): signal is { signalType: string; evidence: Record<string, unknown> } =>
+      (signal) =>
         Boolean(signal?.signalType) && Boolean(signal?.evidence && typeof signal.evidence === 'object'),
     );
     for (const summary of overview?.questionSummaries ?? []) {
@@ -358,7 +358,7 @@ export function AnswerHistoryPage({
       ...(overview?.signals ?? []),
       ...(detailQuery.data?.signals ?? []),
     ].filter(
-      (signal): signal is { signalType: string; evidence: Record<string, unknown> } =>
+      (signal) =>
         Boolean(signal?.signalType) && Boolean(signal?.evidence && typeof signal.evidence === 'object'),
     );
 

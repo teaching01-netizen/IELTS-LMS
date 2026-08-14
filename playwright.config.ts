@@ -30,6 +30,25 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
+      name: 'mobile-chromium',
+      use: { ...devices['Pixel 7'] },
+    },
+    {
+      name: 'mobile-webkit',
+      use: { ...devices['iPhone 13'] },
+    },
+    {
+      name: 'tablet-portrait',
+      use: { ...devices['iPad (gen 7)'] },
+    },
+    {
+      name: 'tablet-landscape',
+      use: {
+        ...devices['iPad (gen 7)'],
+        viewport: { width: 1080, height: 810 },
+      },
+    },
+    {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
     },

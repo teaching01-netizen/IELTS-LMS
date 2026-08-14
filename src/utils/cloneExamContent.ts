@@ -132,7 +132,7 @@ export function cloneQuestionBlockWithNewIds(block: QuestionBlock): QuestionBloc
         id: nextBlockId,
         stem: firstQuestion?.stem ?? typed.stem,
         options: firstQuestion?.options ?? legacyOptions,
-        questions: clonedQuestions,
+        ...(clonedQuestions ? { questions: clonedQuestions } : {}),
       };
     }
 

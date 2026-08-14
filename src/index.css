@@ -109,6 +109,24 @@
   --radius-xl: 3px;
 }
 
+:root {
+  --student-exam-footer-gap: clamp(0.5rem, 1.25vmin, 0.875rem);
+  --student-header-height-compact: 3.5rem;
+  --student-header-height-medium: 4rem;
+  --student-header-height-wide: 4rem;
+  --student-bottom-bar-height-compact: 3.5rem;
+  --student-bottom-bar-height-medium: 4rem;
+  --student-bottom-bar-height-wide: 4rem;
+  --student-touch-target-min: 2.75rem;
+  --student-touch-target-preferred: 3rem;
+  --student-safe-top: env(safe-area-inset-top, 0px);
+  --student-safe-right: env(safe-area-inset-right, 0px);
+  --student-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --student-safe-left: env(safe-area-inset-left, 0px);
+  --student-header-height: var(--student-header-height-wide);
+  --student-bottom-bar-height: var(--student-bottom-bar-height-wide);
+}
+
 @layer base {
   /* Native dialog styles for accessible modals */
   dialog::backdrop {
@@ -218,21 +236,12 @@
   }
 
   .student-exam-shell {
-    --student-exam-footer-gap: clamp(0.5rem, 1.25vmin, 0.875rem);
-    --student-header-height: 4rem;
-    --student-bottom-bar-height: 4rem;
-    --student-safe-top: env(safe-area-inset-top, 0px);
-    --student-safe-right: env(safe-area-inset-right, 0px);
-    --student-safe-bottom: env(safe-area-inset-bottom, 0px);
-    --student-safe-left: env(safe-area-inset-left, 0px);
-    --student-exam-footer-clearance: calc(
-      var(--student-bottom-bar-height) + max(var(--student-exam-footer-gap), var(--student-safe-bottom))
-    );
     position: relative;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     width: 100%;
     min-width: 0;
+    min-height: 0;
     overflow: hidden;
     overflow: clip;
     overscroll-behavior: none;
@@ -242,11 +251,24 @@
   }
 
   .student-exam-shell[data-student-layout-mode='compact'] {
-    --student-header-height: 3.5rem;
-    --student-bottom-bar-height: 3.5rem;
+    --student-header-height: var(--student-header-height-compact);
+    --student-bottom-bar-height: var(--student-bottom-bar-height-compact);
+  }
+
+  .student-exam-shell[data-student-layout-mode='medium'] {
+    --student-header-height: var(--student-header-height-medium);
+    --student-bottom-bar-height: var(--student-bottom-bar-height-medium);
+  }
+
+  .student-wide-header {
+    height: var(--student-header-height);
   }
 
   .student-exam-viewport {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    min-height: 0;
+    min-width: 0;
     overflow: hidden;
     overscroll-behavior: none;
   }
@@ -268,6 +290,38 @@
   .student-compact-question-navigation [data-student-primary-touch-target] {
     touch-action: manipulation;
   }
+  .student-exam-shell[data-student-layout-mode='compact'] :is(
+    button,
+    [role='button'],
+    input,
+    select,
+    textarea,
+    a[href]
+  ) {
+    min-block-size: var(--student-touch-target-preferred);
+    min-inline-size: var(--student-touch-target-preferred);
+  }
+  .student-exam-shell[data-student-touch-mode='true'] :is(
+    button,
+    [role='button'],
+    input,
+    select,
+    textarea,
+    a[href]
+  ) {
+    min-block-size: var(--student-touch-target-preferred) !important;
+    min-inline-size: var(--student-touch-target-preferred) !important;
+    min-width: var(--student-touch-target-preferred) !important;
+  }
+
+  .student-touch-target {
+    min-block-size: var(--student-touch-target-preferred);
+    min-inline-size: var(--student-touch-target-preferred);
+  }
+
+  .student-tools-sheet {
+    padding-bottom: max(1rem, var(--student-safe-bottom));
+  }
 
   .student-exam-shell[data-student-layout-mode='compact'] .student-exam-footer {
     border-radius: 0.75rem;
@@ -278,10 +332,15 @@
   }
 
   /*
-   * h-screen supplies the exact 100vh declaration transformed by
-   * postcss-100vh-fix. These more-specific enhancements win only when the
-   * browser understands modern viewport units.
+   * Keep viewport height ownership in the shell. The base 100vh declaration
+   * works in older engines; supported small and dynamic viewport units win
+   * through feature detection. The runtime visual viewport sample is only an
+   * override, with a valid CSS fallback when it is unavailable.
    */
+  .student-exam-shell.student-exam-shell {
+    height: 100vh;
+  }
+
   @supports (height: 100svh) {
     .student-exam-shell.student-exam-shell {
       height: 100svh;
@@ -295,38 +354,30 @@
   }
 
   .student-exam-shell.student-exam-shell {
-    height: var(--student-visual-viewport-height);
+    height: var(--student-visual-viewport-height, 100dvh);
   }
 
   .student-exam-main {
     min-height: 0;
     min-width: 0;
+    overflow: hidden;
     box-sizing: border-box;
     background-color: #fff;
   }
 
-  .student-adaptive-workspace {
-    min-height: 0;
-    min-width: 0;
-  }
-
-  .student-adaptive-workspace {
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
 
   .student-exam-footer {
-    position: absolute;
-    left: max(var(--student-exam-footer-gap), env(safe-area-inset-left, 0px));
-    right: max(var(--student-exam-footer-gap), env(safe-area-inset-right, 0px));
-    bottom: max(var(--student-exam-footer-gap), env(safe-area-inset-bottom, 0px));
+    align-self: stretch;
+    justify-self: stretch;
     z-index: 30;
     box-sizing: border-box;
     width: auto;
     min-inline-size: 0;
     max-inline-size: 96rem;
-    margin-inline: auto;
+    margin-block-start: var(--student-exam-footer-gap);
+    margin-block-end: max(var(--student-exam-footer-gap), var(--student-safe-bottom));
+    margin-inline-start: max(var(--student-exam-footer-gap), var(--student-safe-left));
+    margin-inline-end: max(var(--student-exam-footer-gap), var(--student-safe-right));
     overflow: hidden;
     background: #fff;
     border: 1px solid #d8dee8;
@@ -338,7 +389,7 @@
   }
 
   .student-question-stepper {
-    bottom: calc(var(--student-exam-footer-clearance) + 0.25rem);
+    bottom: 1rem;
   }
 
   .student-pane-separator {

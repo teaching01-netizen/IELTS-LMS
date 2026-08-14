@@ -57,14 +57,14 @@ function blockHasSubAnswerData(block: QuestionBlock): boolean {
   if ('subAnswerModeEnabled' in candidate) {
     return true;
   }
-  return Array.isArray(candidate.answerTree) && candidate.answerTree.length > 0;
+  return Array.isArray(candidate['answerTree']) && candidate['answerTree'].length > 0;
 }
 
 function clearSubAnswerData(block: QuestionBlock): QuestionBlock {
-  const next = { ...(block as Record<string, unknown>) };
-  delete next.subAnswerModeEnabled;
-  delete next.answerTree;
-  return next as QuestionBlock;
+  const next = { ...(block as unknown as Record<string, unknown>) };
+  delete next['subAnswerModeEnabled'];
+  delete next['answerTree'];
+  return next as unknown as QuestionBlock;
 }
 
 export function QuestionBuilderPane({

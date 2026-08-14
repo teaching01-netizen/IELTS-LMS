@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, GitCompare, ArrowRight, XCircle, Clock, User, FileText, Layers } from 'lucide-react';
+import { X, GitCompare, ArrowRight, XCircle, CheckCircle2, Clock, User, FileText, Layers } from 'lucide-react';
 import { VersionDiff } from '../../types/domain';
 import { summarizeChanges, getChangeCount, formatTimestamp, getVersionStatusLabel, getVersionStatusColor } from '../../utils/versionUtils';
 

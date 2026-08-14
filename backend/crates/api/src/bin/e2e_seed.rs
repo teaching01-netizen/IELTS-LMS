@@ -38,6 +38,8 @@ const BUILDER_EXAM_SLUG: &str = "e2e-builder-backend-draft";
 const STUDENT_EXAM_SLUG: &str = "e2e-student-backend-live";
 const STUDENT_EXPECTED_ANSWER: &str = "seeded answer";
 const STUDENT_LISTENING_QUESTION_ID: &str = "listening-q1";
+const STUDENT_LISTENING_QUESTION_2_ID: &str = "listening-q2";
+const STUDENT_LISTENING_QUESTION_3_ID: &str = "listening-q3";
 const STUDENT_READING_QUESTION_ID: &str = "reading-q1";
 const DEFAULT_FRONTEND_ORIGIN: &str = "http://localhost:3000";
 
@@ -979,6 +981,7 @@ fn minimal_exam_state(
                     "id": "listening-part-1",
                     "title": "Backend E2E Listening Part 1",
                     "audioUrl": audio_url,
+                    "transcript": "The seeded listening transcript provides a scrollable reference for viewport acceptance.\nThe speaker introduces the topic and explains the first detail in plain language.\nThe second detail gives a short example that supports the main idea.\nA third detail compares the earlier example with a later observation.\nThe discussion then records a change in timing, location, and expected outcome.\nListeners should note which fact belongs to the opening section of the talk.\nThe next section describes a practical response and names the person responsible.\nA later sentence clarifies that the response is provisional rather than final.\nThe speaker returns to the original question and summarizes the evidence.\nThe final example connects the evidence to the recommendation for the group.\nThis reference continues so the material pane has realistic reading length.\nStudents can move between the reference and answer panes without losing position.\nThe closing paragraph repeats the central point and identifies the next step.\nThe transcript ends after the speaker confirms the recorded answer.",
                     "pins": [],
                     "blocks": [
                         {
@@ -989,6 +992,18 @@ fn minimal_exam_state(
                                 {
                                     "id": STUDENT_LISTENING_QUESTION_ID,
                                     "prompt": "What is the seeded listening answer?",
+                                    "correctAnswer": correct_answer,
+                                    "answerRule": "ONE_WORD"
+                                },
+                                {
+                                    "id": STUDENT_LISTENING_QUESTION_2_ID,
+                                    "prompt": "What is the second seeded listening answer?",
+                                    "correctAnswer": correct_answer,
+                                    "answerRule": "ONE_WORD"
+                                },
+                                {
+                                    "id": STUDENT_LISTENING_QUESTION_3_ID,
+                                    "prompt": "What is the third seeded listening answer?",
                                     "correctAnswer": correct_answer,
                                     "answerRule": "ONE_WORD"
                                 }

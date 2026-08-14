@@ -175,13 +175,13 @@ export interface StudentQuestionDescriptor {
     | SingleMCQQuestion
     | NoteCompletionQuestion
     | null;
-  rootId?: string;
-  rootNumber?: number;
-  numberLabel?: string;
-  rootLeafQuestionIds?: string[];
-  isSubAnswerTreeLeaf?: boolean;
-  treeRequired?: boolean;
-  treePrompt?: string;
+  rootId?: string | undefined;
+  rootNumber?: number | undefined;
+  numberLabel?: string | undefined;
+  rootLeafQuestionIds?: string[] | undefined;
+  isSubAnswerTreeLeaf?: boolean | undefined;
+  treeRequired?: boolean | undefined;
+  treePrompt?: string | undefined;
 }
 
 export function getEnabledModules(config: ExamConfig): ModuleType[] {
@@ -642,7 +642,7 @@ function resolveGroupedScoringRequiredCorrect(groupQuestions: StudentQuestionDes
 
   for (const question of groupQuestions) {
     if (question.block.type === 'SENTENCE_COMPLETION' && question.question && question.answerIndex !== undefined) {
-      const blank = question.question.blanks[question.answerIndex];
+      const blank = (question.question as SentenceCompletionQuestion).blanks[question.answerIndex];
       if (blank?.requiredCorrect !== undefined) {
         candidates.push(blank.requiredCorrect);
       }
@@ -778,7 +778,7 @@ function questionsForGroupedScoringSlot(
   // shape to locate all sibling slots that belong to the same group key.
   // This is only used for grouped scoring on SentenceCompletion/TableCompletion slots.
   if (representative.block.type === 'SENTENCE_COMPLETION' && representative.question) {
-    const question = representative.question;
+    const question = representative.question as SentenceCompletionQuestion;
     return question.blanks
       .map((blank, index) => ({
         ...representative,

@@ -9,9 +9,9 @@ import { StudentZoomableMedia } from './StudentZoomableMedia';
 import { useSplitPaneResize } from './useSplitPaneResize';
 import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 import { StudentSplitPaneResizer } from './StudentSplitPaneResizer';
-import { STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE } from './studentFooterOverlayLayout';
 import { RichTextHighlighter } from './RichTextHighlighter';
 import type { StudentHighlightColor } from './highlightPalette';
+import type { StudentLayoutMode } from './layout/studentLayoutMode';
 
 interface StudentWritingProps {
   state: ExamState;
@@ -31,6 +31,7 @@ interface StudentWritingProps {
   studentId?: string | undefined;
   showSubmitButton?: boolean | undefined;
   tabletMode?: boolean | undefined;
+  layoutMode?: StudentLayoutMode | undefined;
   registerLiveWritingAnswer?: ((taskId: string, text: string) => void) | undefined;
   highlightEnabled?: boolean | undefined;
   highlightColor?: StudentHighlightColor | undefined;
@@ -38,6 +39,8 @@ interface StudentWritingProps {
 }
 
 const WRITING_DRAFT_COMMIT_DEBOUNCE_MS = 300;
+
+type WritingPane = 'prompt' | 'response';
 
 type WritingDraftPreview = {
   taskId: string;
@@ -105,7 +108,6 @@ function readWritingAnswerByTaskId(
 
   return '';
 }
-
 export function StudentWriting({
   state,
   writingAnswers,
@@ -121,12 +123,14 @@ export function StudentWriting({
   studentId,
   showSubmitButton = true,
   tabletMode = false,
+  layoutMode = 'wide',
   registerLiveWritingAnswer,
   highlightEnabled = false,
   highlightColor,
   highlightClassName,
 }: StudentWritingProps) {
   const isTabletMode = Boolean(tabletMode);
+  const isCompactLayout = layoutMode === 'compact';
   const attemptContext = useOptionalStudentAttempt();
   const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
   const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
@@ -156,6 +160,12 @@ export function StudentWriting({
   const commitEditorDraftRef = useRef<() => void>(() => undefined);
   const previousResolvedTaskIdRef = useRef<string | null>(resolvedCurrentQuestionTaskId);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [activeCompactPane, setActiveCompactPane] = useState<WritingPane>('prompt');
+  const lastFocusedPaneRef = useRef<WritingPane>('prompt');
+  const previousCompactLayoutRef = useRef(isCompactLayout);
+  const promptPaneRef = useRef<HTMLDivElement>(null);
+  const promptScrollTopRef = useRef(0);
+  const responseScrollTopRef = useRef(0);
   const { handleDrag, handleKeyboardResize, leftWidth, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: '--writing-prompt-pane-width',
@@ -235,6 +245,49 @@ export function StudentWriting({
       writeEditorPlainText(editor, committed);
     }
   }, [activeTaskId, clearScheduledDraftCommit, commitDraftText, readLiveDraftForTask]);
+  const selectCompactPane = useCallback(
+    (nextPane: WritingPane) => {
+      if (nextPane === activeCompactPane) {
+        lastFocusedPaneRef.current = nextPane;
+        return;
+      }
+
+      lastFocusedPaneRef.current = nextPane;
+      if (activeCompactPane === 'prompt') {
+        promptScrollTopRef.current = promptPaneRef.current?.scrollTop ?? 0;
+      } else {
+        responseScrollTopRef.current = editorRef.current?.scrollTop ?? 0;
+      }
+
+      commitEditorDraft();
+      setActiveCompactPane(nextPane);
+    },
+    [activeCompactPane, commitEditorDraft],
+  );
+
+  useEffect(() => {
+    if (isCompactLayout && !previousCompactLayoutRef.current) {
+      setActiveCompactPane(lastFocusedPaneRef.current);
+    }
+    previousCompactLayoutRef.current = isCompactLayout;
+  }, [isCompactLayout]);
+
+  useEffect(() => {
+    if (!isCompactLayout) {
+      return;
+    }
+
+    if (activeCompactPane === 'prompt') {
+      if (promptPaneRef.current) {
+        promptPaneRef.current.scrollTop = promptScrollTopRef.current;
+      }
+      return;
+    }
+
+    if (editorRef.current) {
+      editorRef.current.scrollTop = responseScrollTopRef.current;
+    }
+  }, [activeCompactPane, isCompactLayout]);
 
   useEffect(() => {
     commitEditorDraftRef.current = commitEditorDraft;
@@ -526,31 +579,58 @@ export function StudentWriting({
     setShowReviewModal(false);
   };
 
-	return (
-    <div className="flex flex-col h-full w-full bg-white">
+  return (
+    <div className="flex h-full w-full flex-col bg-white">
       <div
-        className={`relative flex flex-1 min-h-0 overflow-hidden border-t border-gray-300 ${
-          isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
-        }`}
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden border-t border-gray-300"
         ref={workspaceRef}
         style={splitPaneStyle}
         data-testid="writing-split-workspace"
       >
+        {isCompactLayout ? (
+          <div className="student-compact-pane-tabs flex flex-shrink-0 gap-2 border-b border-gray-200 bg-gray-50 p-2">
+            <button
+              type="button"
+              className="student-touch-target flex-1 rounded-sm border border-gray-300 px-3 text-sm font-semibold text-gray-900"
+              aria-pressed={activeCompactPane === 'prompt'}
+              onClick={() => selectCompactPane('prompt')}
+            >
+              Show prompt
+            </button>
+            <button
+              type="button"
+              className="student-touch-target flex-1 rounded-sm border border-gray-300 px-3 text-sm font-semibold text-gray-900"
+              aria-pressed={activeCompactPane === 'response'}
+              onClick={() => selectCompactPane('response')}
+            >
+              Show response
+            </button>
+          </div>
+        ) : null}
         <div
-          className={`h-full flex flex-col relative ${
-            isTabletMode
-              ? 'w-[var(--writing-prompt-pane-width)] min-w-[48px] border-r border-gray-200'
-              : 'min-w-[260px] md:min-w-[280px] lg:w-[var(--writing-prompt-pane-width)] lg:min-w-[300px]'
+          className={`relative flex min-h-0 flex-1 overflow-hidden ${
+            isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
           }`}
         >
+        {!isCompactLayout || activeCompactPane === 'prompt' ? (
+          <div
+            className={`h-full flex flex-col relative ${
+              isTabletMode
+                ? 'w-[var(--writing-prompt-pane-width)] min-w-[48px] border-r border-gray-200'
+                : 'min-w-[260px] md:min-w-[280px] lg:w-[var(--writing-prompt-pane-width)] lg:min-w-[300px]'
+            }`}
+            onFocusCapture={() => {
+              lastFocusedPaneRef.current = 'prompt';
+            }}
+          >
           {/* Timer Bar */}
           <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-500' : isTimeWarning ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
 
           <div
-            className="flex-1 overflow-y-auto p-4 pr-4 font-sans text-gray-900 md:p-6 md:pr-6 lg:p-8 lg:pr-12"
+            ref={promptPaneRef}
             data-student-zoom-scroll
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
             style={{
-              ...STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE,
               fontSize: 'var(--student-passage-font-size)',
               lineHeight: 'var(--student-passage-line-height)',
             }}
@@ -617,23 +697,29 @@ export function StudentWriting({
               />
             </div>
           </div>
-        </div>
+          </div>
+        ) : null}
+        {!isCompactLayout ? (
+          <StudentSplitPaneResizer
+            isTabletMode={isTabletMode}
+            leftWidth={leftWidth}
+            onDividerPointerDown={handleDrag}
+            onDividerKeyDown={handleKeyboardResize}
+            ariaLabel="Resize writing prompt and answer panels"
+            testId="writing-pane-resizer"
+          />
+        ) : null}
 
-        <StudentSplitPaneResizer
-          isTabletMode={isTabletMode}
-          leftWidth={leftWidth}
-          onDividerPointerDown={handleDrag}
-          onDividerKeyDown={handleKeyboardResize}
-          ariaLabel="Resize writing prompt and answer panels"
-          testId="writing-pane-resizer"
-        />
-
-        <div
-          className={`h-full flex flex-col relative ${
-            isTabletMode
-              ? 'w-[var(--writing-editor-pane-width)] min-w-[48px]'
-              : 'min-w-[280px] md:min-w-[320px] lg:w-[var(--writing-editor-pane-width)]'
-          }`}
+        {!isCompactLayout || activeCompactPane === 'response' ? (
+          <div
+            className={`h-full flex flex-col relative ${
+              isTabletMode
+                ? 'w-[var(--writing-editor-pane-width)] min-w-[48px]'
+                : 'min-w-[280px] md:min-w-[320px] lg:w-[var(--writing-editor-pane-width)]'
+            }`}
+            onFocusCapture={() => {
+              lastFocusedPaneRef.current = 'response';
+            }}
         >
           <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
             <div className="relative flex flex-1 min-h-0 w-full flex-col">
@@ -701,7 +787,6 @@ export function StudentWriting({
                     : 'p-4 md:p-6 lg:p-8'
                 } h-full min-h-0 resize-none whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
                 data-student-zoom-scroll
-                style={STUDENT_FOOTER_SCROLL_CLEARANCE_STYLE}
                 spellCheck={!security.preventAutocorrect}
                 autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
                 autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
@@ -709,6 +794,8 @@ export function StudentWriting({
               </div>
 	          </div>
 
+          </div>
+        ) : null}
         </div>
       </div>
 

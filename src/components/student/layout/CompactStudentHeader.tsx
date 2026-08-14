@@ -26,7 +26,7 @@ function formatTime(seconds: number): string {
 }
 
 const sheetActionClassName =
-  'flex min-h-12 items-center gap-3 rounded-sm border border-gray-200 px-3 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50';
+  'student-touch-target flex items-center gap-3 rounded-sm border border-gray-200 px-3 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50';
 
 export function CompactStudentHeader({
   moduleLabel,
@@ -53,7 +53,7 @@ export function CompactStudentHeader({
 
   return (
     <header
-      className="student-compact-header flex h-14 flex-shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-3 shadow-sm"
+      className="student-compact-header flex flex-shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-3 shadow-sm"
       role="banner"
       data-testid="student-compact-header"
     >
@@ -103,7 +103,7 @@ export function CompactStudentHeader({
       <button
         ref={toolsTriggerRef}
         type="button"
-        className="flex min-h-12 min-w-12 flex-shrink-0 items-center justify-center rounded-sm bg-gray-50 text-gray-900 hover:bg-gray-100"
+        className="student-touch-target flex flex-shrink-0 items-center justify-center rounded-sm bg-gray-50 text-gray-900 hover:bg-gray-100"
         aria-label="Open exam tools"
         aria-expanded={toolsOpen}
         onClick={() => setToolsOpen((open) => !open)}
@@ -146,7 +146,7 @@ export function CompactStudentHeader({
                 <button
                   key={entry.id}
                   type="button"
-                  className="flex min-h-12 items-center gap-2 rounded-sm border border-gray-200 px-3 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+                  className="student-touch-target flex items-center gap-2 rounded-sm border border-gray-200 px-3 text-sm font-semibold text-gray-800 hover:bg-gray-50"
                   aria-label={entry.label}
                   onClick={() => onSelectHighlightColor?.(entry.id)}
                   data-student-primary-touch-target

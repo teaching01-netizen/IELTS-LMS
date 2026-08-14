@@ -31,14 +31,26 @@ export function AccessibilitySettings({
     if (!dialog) return;
 
     if (isOpen && !dialog.open) {
-      dialog.showModal();
+      if (typeof dialog.showModal === 'function') {
+        dialog.showModal();
+      } else {
+        dialog.setAttribute('open', '');
+      }
     } else if (!isOpen && dialog.open) {
-      dialog.close();
+      if (typeof dialog.close === 'function') {
+        dialog.close();
+      } else {
+        dialog.removeAttribute('open');
+      }
     }
 
     return () => {
       if (dialog.open) {
-        dialog.close();
+        if (typeof dialog.close === 'function') {
+          dialog.close();
+        } else {
+          dialog.removeAttribute('open');
+        }
       }
     };
   }, [isOpen]);

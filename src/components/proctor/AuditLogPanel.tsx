@@ -35,7 +35,7 @@ type LogFilter = {
 type SortOption = 'timestamp' | 'action' | 'actor';
 
 function resolveDisplayAction(log: SessionAuditLog): string {
-  const payloadEvent = log.payload?.event;
+  const payloadEvent = log.payload?.['event'];
   if (typeof payloadEvent === 'string' && payloadEvent.trim().length > 0) {
     return payloadEvent;
   }

@@ -29,10 +29,14 @@ export function QuestionNavigator({
   onClose,
 }: QuestionNavigatorProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
+
+    previousActiveElementRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     if (!dialog.open) {
       dialog.showModal();
@@ -42,6 +46,7 @@ export function QuestionNavigator({
       if (dialog.open) {
         dialog.close();
       }
+      queueMicrotask(() => previousActiveElementRef.current?.focus());
     };
   }, []);
 
@@ -86,6 +91,7 @@ export function QuestionNavigator({
       }}
       className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col p-0 backdrop:bg-black/50"
       aria-labelledby="question-navigator-title"
+      aria-modal="true"
     >
       <div className="flex items-center justify-between p-3 md:p-4 border-b border-gray-200">
         <h2 id="question-navigator-title" className="text-base md:text-lg font-bold text-gray-900">
@@ -94,7 +100,7 @@ export function QuestionNavigator({
         <button
           type="button"
           onClick={onClose}
-          className="p-2 md:p-2.5 text-gray-500 hover:bg-gray-100 rounded-md"
+          className="student-touch-target flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100"
           aria-label="Close question navigator"
         >
           <X size={18} />

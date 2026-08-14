@@ -97,7 +97,7 @@ function buildUndersizedSharedPoolState(): ExamState {
         ],
         answerRule: 'ONE_WORD',
         acceptAnyAnswerKey: true,
-        sharedAcceptedAnswers: ['alpha', 'ALPHA'],
+      sharedAcceptedAnswers: ['alpha', 'alpha-'],
       },
     ],
   });
