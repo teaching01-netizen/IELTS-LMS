@@ -204,6 +204,28 @@ describe('QuestionNavigator', () => {
     expect(screen.getByText('Passage 2')).toBeInTheDocument();
   });
 
+  it('keeps the question list from collapsing in WebKit native dialogs', () => {
+    render(
+      <QuestionNavigator
+        questions={mockQuestions}
+        answers={{}}
+        flags={{}}
+        currentQuestionId={null}
+        onNavigate={() => {}}
+        onClose={() => {}}
+      />,
+    );
+
+    const passageHeading = screen.getByText('Passage 1');
+    const questionList = passageHeading.parentElement?.parentElement;
+    if (!(questionList instanceof HTMLElement)) {
+      throw new Error('Question navigator list was not rendered.');
+    }
+
+    expect(questionList).toHaveClass('overflow-y-auto');
+    expect(questionList).not.toHaveClass('flex-1');
+  });
+
   it('calls dialog show modal on mount', () => {
     render(
       <QuestionNavigator

@@ -139,7 +139,7 @@ export function QuestionNavigator({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-8">
+      <div className="overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-8">
         {Object.entries(groups).map(([groupId, groupQuestions], groupIndex) => (
           <div key={groupId}>
             <h3 className="font-medium text-gray-700 mb-3 text-[length:var(--student-control-font-size)]">
