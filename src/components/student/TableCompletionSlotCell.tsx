@@ -1,6 +1,7 @@
 import React from 'react';
 import { ProtectedInput } from './ProtectedInput';
 import { StudentQuestionText } from './StudentQuestionText';
+import { StudentQuestionNumber } from './StudentQuestionNumber';
 import type { StudentHighlightColor } from './highlightPalette';
 
 export type TableCompletionSlotCellProps = {
@@ -59,7 +60,7 @@ export function TableCompletionSlotCell({
             highlightSurfaceId={`${highlightSurfaceIdPrefix}:prefix`}
           />
           <span className="mx-1 inline-flex items-center gap-2 align-middle">
-            <span className="font-bold text-gray-900">{slotNumber}.</span>
+            <StudentQuestionNumber number={slotNumber} isActive={isActive} />
             <span className="inline-block min-w-[11rem] max-w-full align-middle">
               <ProtectedInput
                 type="text"

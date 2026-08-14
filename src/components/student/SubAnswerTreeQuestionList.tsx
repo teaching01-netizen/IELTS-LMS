@@ -5,6 +5,7 @@ import type { StudentQuestionDescriptor } from '../../services/examAdapterServic
 import { ProtectedInput } from './ProtectedInput';
 import { Flag } from 'lucide-react';
 import { StudentQuestionText } from './StudentQuestionText';
+import { StudentQuestionNumber } from './StudentQuestionNumber';
 import type { StudentHighlightColor } from './highlightPalette';
 
 interface SubAnswerTreeQuestionListProps {
@@ -89,7 +90,7 @@ export function SubAnswerTreeQuestionList({
         <div key={group.rootId} className="space-y-2">
           {group.prompt ? (
             <div className="flex gap-3">
-              <span className="min-w-[1.75rem] font-bold text-gray-900">{group.rootNumber}.</span>
+              <StudentQuestionNumber number={group.rootNumber} />
               <StudentQuestionText
                 as="span"
                 className="text-gray-800"
@@ -107,7 +108,9 @@ export function SubAnswerTreeQuestionList({
               const isCurrent = currentQuestionId === slotId;
               const isFlagged = Boolean(flags[slotId]);
               const showLeafNumber = group.leaves.length > 1;
-              const displayNumber = showLeafNumber ? leaf.numberLabel : String(group.rootNumber);
+              const displayNumber = showLeafNumber
+                ? (leaf.numberLabel ?? String(group.rootNumber))
+                : String(group.rootNumber);
 
               return (
                 <div
@@ -119,15 +122,10 @@ export function SubAnswerTreeQuestionList({
                 >
                   <div className={tabletMode ? 'flex flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
                     {showLeafNumber ? (
-                      <span
-                        className={`min-w-[2.5rem] font-bold ${
-                          isCurrent
-                            ? 'inline-flex h-6 items-center justify-center rounded-sm bg-blue-800 px-1 text-white'
-                            : 'text-gray-900'
-                        }`}
-                      >
-                        {displayNumber}
-                      </span>
+                      <StudentQuestionNumber
+                        number={displayNumber}
+                        isActive={isCurrent}
+                      />
                     ) : null}
                     <div className="flex-1">
                       <ProtectedInput

@@ -76,7 +76,7 @@ describe('SubAnswerTreeQuestionList', () => {
       'data-highlight-surface-id',
       'question:tree-block:tree-block::tree::root::root-a:root-prompt',
     );
-    expect(screen.getByText('1.')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Answer for question 1' })).toBeInTheDocument();
   });
 
@@ -112,7 +112,7 @@ describe('SubAnswerTreeQuestionList', () => {
       />,
     );
 
-    expect(screen.getByText('21.')).toBeInTheDocument();
+    expect(screen.getByText('21')).toBeInTheDocument();
     expect(screen.queryByText('21.1')).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Answer for question 21' })).toBeInTheDocument();
   });
@@ -144,7 +144,7 @@ describe('SubAnswerTreeQuestionList', () => {
       />,
     );
 
-    expect(screen.getByText('31.')).toBeInTheDocument();
+    expect(screen.getByText('31')).toBeInTheDocument();
     expect(screen.getByText('31.1')).toBeInTheDocument();
     expect(screen.getByText('31.2')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Answer for question 31.1' })).toBeInTheDocument();

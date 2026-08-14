@@ -47,7 +47,7 @@ describe('TableCompletionSlotCell', () => {
         </tbody>
       </table>,
     );
-    expect(screen.getByText('1.')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
   });
 
   it('renders prefix and suffix text', () => {
@@ -209,6 +209,6 @@ describe('TableCompletionSlotCell', () => {
         </tbody>
       </table>,
     );
-    expect(screen.getByText('5.')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
   });
 });

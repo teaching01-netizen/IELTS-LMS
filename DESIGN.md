@@ -163,3 +163,13 @@ a mouse-connected phone do not receive the same layout by accident.
 - **States**: default, pressed, disabled, flagged/current summary.
 - **Accessibility**: native buttons with explicit labels; next never submits the exam.
 - **Layout**: safe-area-aware floating bottom bar; no document-level horizontal scroll.
+
+### StudentQuestionNumber
+
+- **Structure**: a reusable square number badge shared by every student question block,
+  including inline completion slots and sub-answer tree leaves.
+- **Default**: 24px high, 28px minimum width, 2px blue outline, white surface, and blue
+  number text, matching the established 38–39 question treatment.
+- **Active**: the same square geometry with a filled blue surface and white number text.
+- **Accessibility**: rendered as text so the question number remains available to assistive
+  technology and is never the only indicator of answer or flag state.

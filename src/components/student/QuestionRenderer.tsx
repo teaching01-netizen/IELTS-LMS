@@ -26,6 +26,7 @@ import {
 } from '../../types';
 import { ProtectedInput } from './ProtectedInput';
 import { StudentQuestionText } from './StudentQuestionText';
+import { StudentQuestionNumber } from './StudentQuestionNumber';
 import { stripBoldMarkdown } from '../../utils/boldMarkdown';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
@@ -126,11 +127,6 @@ export function QuestionRenderer({
     return `rounded-lg border p-2 transition-colors ${activeClass} ${flaggedClass}`;
   };
 
-  const getActiveNumberClassName = (isActiveSlot: boolean) =>
-    isActiveSlot
-      ? 'inline-flex h-6 items-center justify-center rounded-sm bg-blue-800 px-1 text-white'
-      : 'text-gray-900';
-
   const renderFlagButton = (slotId: string) => {
     if (!onToggleFlag) {
       return null;
@@ -204,13 +200,9 @@ export function QuestionRenderer({
         />
       ) : null}
       <div className={isCompactPane ? 'flex flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
-        <StudentQuestionText
-          as="span"
-          className={`min-w-[2rem] font-bold ${getActiveNumberClassName(currentQuestionId === slotId)}`}
-          text={`${slotNumber}.`}
-          highlightEnabled={highlightEnabled}
-          highlightColor={highlightColor}
-          highlightSurfaceId={getHighlightSurfaceId(slotId, 'number')}
+        <StudentQuestionNumber
+          number={slotNumber}
+          isActive={currentQuestionId === slotId}
         />
         <ProtectedInput
           type="text"
@@ -249,11 +241,10 @@ export function QuestionRenderer({
     return (
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3 items-start">
-          <div className={`mt-0.5 flex h-6 min-w-[1.75rem] items-center justify-center border-2 text-[length:var(--student-chip-font-size)] font-bold transition-colors ${
-            isActive ? 'border-blue-800 bg-blue-800 text-white' : 'border-blue-500 text-blue-600'
-          }`}>
-            {number}
-          </div>
+          <StudentQuestionNumber
+            number={number}
+            isActive={isActive}
+          />
           <StudentQuestionText
             as="span"
             className="leading-relaxed text-gray-900"
@@ -286,7 +277,9 @@ export function QuestionRenderer({
     return (
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <span className="min-w-[1.75rem] font-bold text-gray-900">{number}.</span>
+          <StudentQuestionNumber
+            number={number}
+          />
           <StudentQuestionText
             as="span"
             className="text-gray-800"
@@ -317,7 +310,9 @@ export function QuestionRenderer({
   const renderMatching = (matchingBlock: MatchingBlock, q: MatchingQuestion) => (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-4">
-          <StudentQuestionText as="span" className="min-w-[1.75rem] font-bold text-gray-900" text={`${number}.`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'number')} />
+          <StudentQuestionNumber
+            number={number}
+          />
         <StudentQuestionText as="span" className="font-medium text-gray-800 text-[length:var(--student-control-font-size)]" text={`Paragraph ${q.paragraphLabel}`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'paragraph-label')} />
 
         <select
@@ -364,7 +359,9 @@ export function QuestionRenderer({
     return (
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3">
-          <span className="min-w-[1.75rem] font-bold text-gray-900">{blockNum}.</span>
+          <StudentQuestionNumber
+            number={blockNum}
+          />
         <StudentQuestionText
           as="span"
           className="text-gray-800"
@@ -431,7 +428,9 @@ export function QuestionRenderer({
       />
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <span className="min-w-[1.75rem] font-bold text-gray-900">{num}.</span>
+          <StudentQuestionNumber
+            number={num}
+          />
           <StudentQuestionText as="span" className="text-gray-800" text={`Label ${q.label}`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'label')} />
         </div>
         <div className={`${fieldIndentClass} mt-2`}>
@@ -466,7 +465,9 @@ export function QuestionRenderer({
     return (
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3">
-          <span className="min-w-[1.75rem] font-bold text-gray-900">{blockNum}.</span>
+          <StudentQuestionNumber
+            number={blockNum}
+          />
           <StudentQuestionText
             as="span"
             className="text-gray-800"
@@ -512,9 +513,10 @@ export function QuestionRenderer({
     return (
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <span className={`min-w-[1.75rem] font-bold ${getActiveNumberClassName(isActive)}`}>
-            {num}.
-          </span>
+          <StudentQuestionNumber
+            number={num}
+            isActive={isActive}
+          />
           <StudentQuestionText as="span" className="text-gray-800" text={q.prompt} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'prompt')} />
         </div>
         <div className={`${fieldIndentClass} mt-2`}>
@@ -558,9 +560,10 @@ export function QuestionRenderer({
                     slotId,
                   )}`}
                 >
-                  <span className="min-w-[1.75rem] text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
-                    {slotNumber}
-                  </span>
+                  <StudentQuestionNumber
+                    number={slotNumber}
+                    isActive={currentQuestionId === slotId}
+                  />
                   <ProtectedInput
                     type="text"
                     name={slotId}
@@ -609,9 +612,10 @@ export function QuestionRenderer({
                     slotId,
                   )}`}
                 >
-                  <span className="min-w-[1.75rem] text-[length:var(--student-chip-font-size)] font-bold text-blue-700">
-                    {slotNumber}
-                  </span>
+                  <StudentQuestionNumber
+                    number={slotNumber}
+                    isActive={currentQuestionId === slotId}
+                  />
                   <ProtectedInput
                     type="text"
                     name={slotId}
@@ -915,9 +919,10 @@ export function QuestionRenderer({
                                     id={`question-${slot.slotId}`}
                                     className="mx-1 inline-flex items-center gap-2 align-middle"
                                   >
-                                    <span className="font-bold text-gray-900">
-                                      {getSlotNumber(slot.index, number + slot.index)}.
-                                    </span>
+                                    <StudentQuestionNumber
+                                      number={getSlotNumber(slot.index, number + slot.index)}
+                                      isActive={currentQuestionId === slot.slotId}
+                                    />
                                     <span className="inline-block min-w-[11rem] max-w-full align-middle">
                                       <ProtectedInput
                                         type="text"
@@ -976,7 +981,10 @@ export function QuestionRenderer({
             <div key={item.id} id={`question-${slotId}`} className={getSlotClassName(slotId)}>
               <div className={`flex flex-col gap-3 ${isCompactPane ? '' : 'md:flex-row md:items-center'}`}>
                 <div className="flex items-start gap-3 md:flex-1">
-                  <span className="min-w-[2rem] font-bold text-gray-900">{slotNumber}.</span>
+                  <StudentQuestionNumber
+                    number={slotNumber}
+                    isActive={currentQuestionId === slotId}
+                  />
                   <StudentQuestionText as="span" className="text-gray-800" text={item.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(slotId, 'item-text')} />
                 </div>
                 <div className={isCompactPane ? 'flex w-full flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
@@ -1020,7 +1028,10 @@ export function QuestionRenderer({
             <div key={feature.id} id={`question-${slotId}`} className={getSlotClassName(slotId)}>
               <div className={`flex flex-col gap-3 ${isCompactPane ? '' : 'md:flex-row md:items-center'}`}>
                 <div className="flex items-start gap-3 md:flex-1">
-                  <span className="min-w-[2rem] font-bold text-gray-900">{slotNumber}.</span>
+                  <StudentQuestionNumber
+                    number={slotNumber}
+                    isActive={currentQuestionId === slotId}
+                  />
                   <StudentQuestionText as="span" className="text-gray-800" text={feature.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(slotId, 'feature-text')} />
                 </div>
                 <div className={isCompactPane ? 'flex w-full flex-col items-stretch gap-2' : 'flex items-center gap-3'}>

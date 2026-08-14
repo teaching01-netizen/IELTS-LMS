@@ -315,7 +315,7 @@ describe('student question experience', () => {
     );
     expect(screen.getByText(/\(red\)/i)).toBeInTheDocument();
     expect(screen.queryByText('no _______ (red)')).not.toBeInTheDocument();
-    expect(screen.getByText('5.')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
     const answerControl = screen.getByRole('textbox', { name: 'Answer for question 5' });
     expect(answerControl).not.toHaveAttribute('data-student-question-callout-protected');
     expect(answerControl.closest('[data-student-question-callout-protected="true"]')).toBeNull();
@@ -347,7 +347,7 @@ describe('student question experience', () => {
     expect(slotCell).toHaveTextContent('no');
     expect(slotCell).toHaveTextContent('(red)');
     expect(slotCell).not.toHaveTextContent('_______');
-    expect(slotCell).toHaveTextContent('5.');
+    expect(slotCell).toHaveTextContent('5');
   });
 
   it('emits slot metadata for table completion edits so shared answer keys persist per question slot', () => {
