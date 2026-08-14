@@ -17,6 +17,7 @@ vi.mock('../../../services/gradingRepository', () => ({
   gradingRepository: {
     getSubmissionsBySession: vi.fn(),
     getSectionSubmissionsBySubmissionId: vi.fn(),
+    invalidateSubmissionBundle: vi.fn(),
   },
 }));
 
@@ -949,6 +950,7 @@ describe('buildExamObjectiveOverviewRows', () => {
   });
 
   test('sets one answer group for the whole exam and adds the answer to the key', async () => {
+    let cacheInvalidated = false;
     const makeSection = (submissionId: string): SectionSubmission => ({
       id: `section-${submissionId}`,
       submissionId,
@@ -962,12 +964,12 @@ describe('buildExamObjectiveOverviewRows', () => {
         questionResults: [{
           questionId: 'q-1',
           studentAnswer: 'ANSWER',
-          correctAnswer: 'Answer',
-          isCorrect: false,
-          awardedScore: 0,
+          correctAnswer: cacheInvalidated ? 'Answer | ANSWER' : 'Answer',
+          isCorrect: cacheInvalidated,
+          awardedScore: cacheInvalidated ? 1 : 0,
           maxScore: 1,
           scoringRule: 'exact_match',
-          hasOverride: false,
+          hasOverride: cacheInvalidated,
         }],
       },
       gradingStatus: 'auto_graded',
@@ -980,6 +982,9 @@ describe('buildExamObjectiveOverviewRows', () => {
     ]);
     vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId)
       .mockImplementation(async (submissionId) => [makeSection(submissionId)]);
+    vi.mocked(gradingRepository.invalidateSubmissionBundle).mockImplementation(() => {
+      cacheInvalidated = true;
+    });
     vi.mocked(gradingService.upsertObjectiveOverride).mockResolvedValue({
       success: true,
       data: { regradeReport: {} as never },
@@ -996,6 +1001,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     );
 
     expect(await screen.findAllByRole('heading', { name: 'ANSWER' })).not.toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: /^All/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Accept for whole exam' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Students affected');
     fireEvent.click(screen.getByRole('button', { name: 'Accept and regrade' }));
@@ -1011,6 +1017,8 @@ describe('buildExamObjectiveOverviewRows', () => {
         maxScore: 1,
       }),
     );
+    expect(gradingRepository.invalidateSubmissionBundle).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole('status', { name: 'Correct' })).toBeInTheDocument();
     expect(gradingService.overrideObjectiveQuestion).not.toHaveBeenCalled();
   });
 });

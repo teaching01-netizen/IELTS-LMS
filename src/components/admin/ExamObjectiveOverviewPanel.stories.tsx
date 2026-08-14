@@ -257,10 +257,25 @@ gradingService.getObjectiveOverrides = async () => ({
     },
   ],
 });
-gradingService.upsertObjectiveOverride = async () => ({
-  success: true,
-  data: { regradeReport: {} } as never,
-});
+gradingService.upsertObjectiveOverride = async (_scheduleId, questionId, request) => {
+  const acceptedAnswers = request.acceptedAnswers ?? [];
+  for (const sectionList of Object.values(sectionsBySubmission)) {
+    for (const section of sectionList) {
+      for (const result of section.autoGradingResults?.questionResults ?? []) {
+        if (result.questionId !== questionId) continue;
+        result.correctAnswer = acceptedAnswers.join(' | ');
+        result.isCorrect = acceptedAnswers.includes(result.studentAnswer);
+        result.awardedScore = result.isCorrect ? result.maxScore : 0;
+        result.hasOverride = true;
+      }
+    }
+  }
+
+  return {
+    success: true,
+    data: { regradeReport: {} } as never,
+  };
+};
 
 const session = {
   id: 'session-1',

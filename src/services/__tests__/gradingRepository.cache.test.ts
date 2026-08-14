@@ -95,4 +95,26 @@ describe('gradingRepository bundle cache', () => {
     expect(secondDraft?.overallFeedback).toBe('Updated feedback');
     expect(backendGet).toHaveBeenCalledTimes(2);
   });
+
+  it('reloads section submissions after targeted invalidation', async () => {
+    const section = {
+      id: 'section-1',
+      submissionId: 'sub-2',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T09:00:00.000Z',
+    };
+    const updatedSection = { ...section, id: 'section-2' };
+
+    backendGet.mockResolvedValueOnce([section]).mockResolvedValueOnce([updatedSection]);
+
+    const initialSections = await gradingRepository.getSectionSubmissionsBySubmissionId('sub-2');
+    gradingRepository.invalidateSubmissionBundle('sub-2');
+    const refreshedSections = await gradingRepository.getSectionSubmissionsBySubmissionId('sub-2');
+
+    expect(initialSections[0]?.id).toBe('section-1');
+    expect(refreshedSections[0]?.id).toBe('section-2');
+    expect(backendGet).toHaveBeenCalledTimes(2);
+  });
 });

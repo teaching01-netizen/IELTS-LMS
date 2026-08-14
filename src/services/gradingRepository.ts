@@ -244,6 +244,7 @@ export interface IGradingRepository {
   getSubmissionsByStudent(studentId: string): Promise<StudentSubmission[]>;
   getSubmissionsByTeacher(teacherId: string): Promise<StudentSubmission[]>;
   saveSubmission(submission: StudentSubmission): Promise<void>;
+  invalidateSubmissionBundle(submissionId: string): void;
   deleteSubmission(id: string): Promise<void>;
   getAllSectionSubmissions(): Promise<SectionSubmission[]>;
   getSectionSubmissionById(id: string): Promise<SectionSubmission | null>;
@@ -663,6 +664,10 @@ class BackendGradingRepository implements IGradingRepository {
   async saveSubmission(submission: StudentSubmission): Promise<void> {
     this.invalidateSubmissionBundleCache(submission.id);
     this.invalidateSubmissionBundleCache(submission.submissionId);
+  }
+
+  invalidateSubmissionBundle(submissionId: string): void {
+    this.invalidateSubmissionBundleCache(submissionId);
   }
 
   async deleteSubmission(id: string): Promise<void> {

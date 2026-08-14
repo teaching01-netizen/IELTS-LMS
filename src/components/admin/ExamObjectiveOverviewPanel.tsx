@@ -225,6 +225,11 @@ export function ExamObjectiveOverviewPanel({
         }
       }
 
+      const submissionIds = new Set(bundles.map(({ submission }) => submission.id));
+      for (const submissionId of submissionIds) {
+        gradingRepository.invalidateSubmissionBundle(submissionId);
+      }
+
       const studentCount = new Set(group.rows.map((row) => row.submissionId)).size;
       const questionCount = new Set(group.rows.map((row) => row.questionId)).size;
       await loadOverview();
