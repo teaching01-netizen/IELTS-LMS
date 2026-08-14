@@ -135,7 +135,10 @@ export class GradingService {
   async getSessionQueue(filters?: GradingQueueFilters): Promise<GradingServiceResult<GradingSession[]>> {
     try {
       let sessions = await gradingRepository.getAllSessions();
-      
+      sessions = sessions.filter(
+        (session) => !isPreviewRuntimeCohortName(session.cohortName ?? ''),
+      );
+
       if (filters) {
         sessions = filterGradingSessions(sessions, filters);
       }
@@ -154,8 +157,10 @@ export class GradingService {
    */
   async getSessionQueueSummary(): Promise<GradingServiceResult<SessionQueueSummary>> {
     try {
-      const sessions = await gradingRepository.getAllSessions();
-      
+      const sessions = (await gradingRepository.getAllSessions()).filter(
+        (session) => !isPreviewRuntimeCohortName(session.cohortName ?? ''),
+      );
+
       const summary: SessionQueueSummary = {
         totalSessions: sessions.length,
         totalStudents: sessions.reduce((sum, s) => sum + s.totalStudents, 0),

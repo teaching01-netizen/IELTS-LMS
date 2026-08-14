@@ -102,6 +102,41 @@ struct ObjectiveOverridePayload {
     max_score: i64,
 }
 
+/// Reserved cohort namespace used by the builder preview runtime
+/// (see `previewRuntimeSessionService` on the frontend and
+/// `is_preview_runtime_schedule` in the student access repository).
+/// Preview schedules in this namespace must never surface in grading.
+const PREVIEW_RUNTIME_COHORT_PREFIX: &str = "__preview_runtime__:";
+
+/// WHERE fragment that excludes preview-runtime schedules from the grading
+/// queue, keyed on the reserved cohort namespace.
+fn preview_runtime_exclusion_sql() -> String {
+    format!("cohort_name NOT LIKE '{}%'", PREVIEW_RUNTIME_COHORT_PREFIX)
+}
+
+/// Builds the session-list query for `list_sessions`. Admin roles see all
+/// sessions; graders are restricted to their assigned schedule scope. Every
+/// branch excludes preview-runtime schedules.
+fn list_sessions_query(role: &ActorRole, has_schedule_scope: bool) -> String {
+    let exclusion = preview_runtime_exclusion_sql();
+    if matches!(
+        role,
+        ielts_backend_infrastructure::actor_context::ActorRole::Admin
+            | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+    ) {
+        format!(
+            "SELECT * FROM grading_sessions WHERE {exclusion} ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?"
+        )
+    } else if has_schedule_scope {
+        format!(
+            "SELECT * FROM grading_sessions WHERE schedule_id = ? AND {exclusion} ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?"
+        )
+    } else {
+        // No access
+        "SELECT * FROM grading_sessions WHERE 1=0 ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?".to_owned()
+    }
+}
+
 impl GradingService {
     pub fn new(pool: MySqlPool) -> Self {
         Self {
@@ -160,28 +195,19 @@ impl GradingService {
         let capped_limit = limit.clamp(1, 500) as i64;
 
         // Admins and AdminObservers can see all grading sessions
-        // Other roles can only see grading sessions for their schedules
-        let query = if matches!(
-            ctx.role,
-            ielts_backend_infrastructure::actor_context::ActorRole::Admin
-                | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
-        ) {
-            "SELECT * FROM grading_sessions ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?"
-        } else if let Some(ref schedule_id) = ctx.schedule_scope_id {
-            "SELECT * FROM grading_sessions WHERE schedule_id = ? ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?"
-        } else {
-            "SELECT * FROM grading_sessions WHERE 1=0 ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?"
-            // No access
-        };
+        // Other roles can only see grading sessions for their schedules.
+        // Preview-runtime schedules (reserved `__preview_runtime__:` cohort
+        // namespace) are always excluded so they never surface in grading.
+        let query = list_sessions_query(&ctx.role, ctx.schedule_scope_id.is_some());
 
         let sessions = if let Some(schedule_id) = ctx.schedule_scope_id.clone() {
-            sqlx::query_as::<_, GradingSession>(query)
+            sqlx::query_as::<_, GradingSession>(&query)
                 .bind(schedule_id.to_string())
                 .bind(capped_limit)
                 .fetch_all(&self.pool)
                 .await?
         } else {
-            sqlx::query_as::<_, GradingSession>(query)
+            sqlx::query_as::<_, GradingSession>(&query)
                 .bind(capped_limit)
                 .fetch_all(&self.pool)
                 .await?
@@ -5613,6 +5639,35 @@ mod tests {
             created_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
         }
+    }
+
+    #[test]
+    fn list_sessions_excludes_preview_runtime_schedules() {
+        let admin_query = list_sessions_query(&ActorRole::Admin, false);
+        assert!(admin_query.contains("cohort_name NOT LIKE '__preview_runtime__:%'"));
+        assert!(!admin_query.contains("WHERE 1=0"));
+
+        let scoped_query = list_sessions_query(&ActorRole::Grader, true);
+        assert!(scoped_query.contains("schedule_id = ?"));
+        assert!(scoped_query.contains("AND cohort_name NOT LIKE '__preview_runtime__:%'"));
+
+        let denied_query = list_sessions_query(&ActorRole::Student, false);
+        assert!(denied_query.contains("WHERE 1=0"));
+    }
+
+    #[test]
+    fn preview_runtime_exclusion_uses_the_reserved_cohort_namespace() {
+        // The exclusion must be keyed on the exact reserved prefix so preview
+        // schedules created by the builder preview runtime (e.g.
+        // `__preview_runtime__:exam-1:user-1:reading`) are never surfaced in
+        // the grading queue. Kept in sync with the frontend
+        // `isPreviewRuntimeCohortName` contract.
+        let exclusion = preview_runtime_exclusion_sql();
+        assert_eq!(
+            exclusion,
+            "cohort_name NOT LIKE '__preview_runtime__:%'",
+        );
+        assert!(PREVIEW_RUNTIME_COHORT_PREFIX.ends_with(':'));
     }
 
     #[test]

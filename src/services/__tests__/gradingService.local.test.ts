@@ -216,6 +216,98 @@ describe('gradingService local mode', () => {
     expect(gradingRepository.saveStudentResult).toHaveBeenCalled();
   });
 
+  it('excludes preview runtime sessions from the grading queue', async () => {
+    const { gradingService } = await import('../gradingService');
+    (gradingRepository.getAllSessions as any).mockResolvedValue([
+      {
+        id: 'sched-real',
+        scheduleId: 'sched-real',
+        examId: 'exam-1',
+        examTitle: 'IELTS Academic',
+        publishedVersionId: 'ver-1',
+        cohortName: 'Cohort A',
+        institution: 'Test Center',
+        startTime: '2026-01-02T09:00:00.000Z',
+        endTime: '2026-01-02T12:00:00.000Z',
+        status: 'completed',
+        totalStudents: 5,
+        submittedCount: 4,
+        pendingManualReviews: 1,
+        inProgressReviews: 0,
+        finalizedReviews: 3,
+        overdueReviews: 0,
+        assignedTeachers: [],
+        createdAt: '2026-01-01T08:00:00.000Z',
+        createdBy: 'Admin',
+        updatedAt: '2026-01-02T09:00:00.000Z',
+      },
+      {
+        id: 'sched-preview',
+        scheduleId: 'sched-preview',
+        examId: 'exam-1',
+        examTitle: 'IELTS Academic (Preview)',
+        publishedVersionId: 'ver-2',
+        cohortName: '__preview_runtime__:exam-1:user-1:reading',
+        institution: 'preview-runtime',
+        startTime: '2026-01-02T10:00:00.000Z',
+        endTime: '2026-01-02T18:00:00.000Z',
+        status: 'live',
+        totalStudents: 1,
+        submittedCount: 0,
+        pendingManualReviews: 0,
+        inProgressReviews: 0,
+        finalizedReviews: 0,
+        overdueReviews: 0,
+        assignedTeachers: [],
+        createdAt: '2026-01-02T10:00:00.000Z',
+        createdBy: 'preview-runtime',
+        updatedAt: '2026-01-02T10:00:00.000Z',
+      },
+    ]);
+
+    const result = await gradingService.getSessionQueue();
+
+    expect(result.success).toBe(true);
+    expect(result.data?.map((session) => session.id)).toEqual(['sched-real']);
+  });
+
+  it('excludes preview runtime sessions from the queue summary', async () => {
+    const { gradingService } = await import('../gradingService');
+    (gradingRepository.getAllSessions as any).mockResolvedValue([
+      {
+        id: 'sched-real',
+        startTime: '2026-01-02T09:00:00.000Z',
+        totalStudents: 5,
+        pendingManualReviews: 1,
+        inProgressReviews: 0,
+        finalizedReviews: 3,
+        overdueReviews: 0,
+      },
+      {
+        id: 'sched-preview',
+        cohortName: '__preview_runtime__:exam-1:user-1:writing',
+        startTime: '2026-01-02T10:00:00.000Z',
+        totalStudents: 1,
+        pendingManualReviews: 0,
+        inProgressReviews: 0,
+        finalizedReviews: 0,
+        overdueReviews: 0,
+      },
+    ]);
+
+    const result = await gradingService.getSessionQueueSummary();
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      totalSessions: 1,
+      totalStudents: 5,
+      pendingManualReviews: 1,
+      inProgressReviews: 0,
+      finalizedReviews: 3,
+      overdueReviews: 0,
+    });
+  });
+
   it('sorts sessions with invalid timestamps last', async () => {
     const { gradingService } = await import('../gradingService');
     (gradingRepository.getAllSessions as any).mockResolvedValue([
