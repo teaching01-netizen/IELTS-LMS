@@ -93,10 +93,10 @@ below the desktop breakpoint so objective answer controls retain usable width.
 
 ### Exam answer group summary
 
-- **Structure**: student answer, current key, affected student/question counts, decision status, primary accept action, secondary reject action, and an expandable evidence table.
+- **Structure**: the student answer leads with a case/whitespace highlight and status pill, an inline `Expected · <key>` line follows (with a disclosure for additional accepted variants), a compact one-line reason explains the flag, a last-decision line shows the most recent outcome (accepted or kept incorrect), actor, and date when the group was already triaged, and a decision row carries the primary accept action, the secondary keep-incorrect action, and the expandable evidence disclosure with student/question counts.
 - **Variants**: correct, incorrect, saving, saved confirmation, and save error.
 - **Accessibility**: group actions use explicit labels, evidence uses a native disclosure button with `aria-expanded`/`aria-controls`, status is written as text, and high-impact decisions use a labelled confirmation dialog.
-- **Interaction**: details are collapsed by default; confirmation states the exact scope before regrading; successful mutations announce the affected questions and students in a live status region.
+- **Interaction**: details are collapsed by default; confirmation states the exact scope before regrading; successful mutations announce the affected questions and students in a live status region. The decision row is separated from the answer context by a hairline divider so the choice reads as the card's single action point.
 
 ## 6. Motion & Interaction
 

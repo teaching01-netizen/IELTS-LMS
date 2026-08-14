@@ -1,5 +1,6 @@
 import type { ExamState, QuestionType } from '../../types';
 import type {
+  GradingScheduleObjectiveOverrideRow,
   ObjectiveManualOverride,
   ObjectiveQuestionResult,
   SectionSubmission,
@@ -263,6 +264,57 @@ export function buildExamObjectiveOverviewRows(
       if (sectionOrder !== 0) return sectionOrder;
       return left.questionId.localeCompare(right.questionId, undefined, { numeric: true });
     });
+}
+
+export interface ExamObjectiveOverrideDecision {
+  readonly questionId: string;
+  /** `true` when the answer was accepted for the exam, `false` when it was kept incorrect. */
+  readonly isCorrect: boolean;
+  readonly actorName: string;
+  readonly updatedAt: string;
+}
+
+/**
+ * Resolve the most recent overall-check decision that touched this answer group.
+ * A decision exists when the group's raw answer appears in a schedule override's
+ * accepted or excluded answers for one of the group's questions.
+ */
+export function resolveGroupOverrideDecision(
+  group: ExamObjectiveOverviewGroup,
+  overrides: readonly GradingScheduleObjectiveOverrideRow[],
+): ExamObjectiveOverrideDecision | null {
+  const rawAnswer = group.studentAnswer.trim();
+  let latest: ExamObjectiveOverrideDecision | null = null;
+
+  for (const row of group.rows) {
+    const override = overrides.find((candidate) => candidate.questionId === row.questionId);
+    if (!override) {
+      continue;
+    }
+
+    const accepted = (override.overrideJson.acceptedAnswers ?? []).some(
+      (answer) => answer.trim() === rawAnswer,
+    );
+    const excluded = (override.overrideJson.excludedAnswers ?? []).some(
+      (answer) => answer.trim() === rawAnswer,
+    );
+    if (!accepted && !excluded) {
+      continue;
+    }
+
+    const candidate: ExamObjectiveOverrideDecision = {
+      questionId: row.questionId,
+      isCorrect: accepted,
+      actorName: override.updatedByActorName,
+      updatedAt: override.updatedAt,
+    };
+
+    if (!latest || candidate.updatedAt > latest.updatedAt) {
+      latest = candidate;
+    }
+  }
+
+  return latest;
 }
 
 export function groupExamObjectiveOverviewRows(

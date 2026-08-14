@@ -3,26 +3,34 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  ListChecks,
-  Users,
   XCircle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Button } from '@components/ui';
+import type { GradingScheduleObjectiveOverrideRow } from '../../types/grading';
 import type {
   ExamObjectiveOverviewGroup,
   ExamObjectiveOverviewGroupStatus,
 } from './examObjectiveOverviewUtils';
+import { resolveGroupOverrideDecision } from './examObjectiveOverviewUtils';
 import { StudentAnswerExplanation } from './StudentAnswerExplanation';
 import { StudentAnswerCaseHighlight } from './StudentAnswerCaseHighlight';
 import { getClosestAcceptedAnswer, getStudentAnswerComparison } from './studentAnswerComparison';
 
 interface ExamObjectiveOverviewGroupCardProps {
   readonly group: ExamObjectiveOverviewGroup;
+  readonly overrides: readonly GradingScheduleObjectiveOverrideRow[];
   readonly onStudentSelect?: ((submissionId: string) => void) | undefined;
   readonly onRequestResult: (group: ExamObjectiveOverviewGroup, isCorrect: boolean) => void;
   readonly pending: boolean;
   readonly status: ExamObjectiveOverviewGroupStatus;
+}
+
+const decisionDateFormatter = new Intl.DateTimeFormat('en', { dateStyle: 'medium' });
+
+function formatDecisionDate(value: string): string {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? decisionDateFormatter.format(date) : value;
 }
 
 const statusCopy: Record<ExamObjectiveOverviewGroupStatus, {
@@ -42,6 +50,16 @@ const statusCopy: Record<ExamObjectiveOverviewGroupStatus, {
   },
 };
 
+function StatusPill({ status }: { readonly status: ExamObjectiveOverviewGroupStatus }) {
+  const { label, className, Icon } = statusCopy[status];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-sm border px-2 py-1 text-[11px] font-semibold ${className}`} role="status" aria-label={label}>
+      <Icon size={13} aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
 function ResultBadge({ isCorrect }: { readonly isCorrect: boolean }) {
   return isCorrect ? (
     <span className="inline-flex items-center gap-1 rounded-sm bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">
@@ -54,24 +72,19 @@ function ResultBadge({ isCorrect }: { readonly isCorrect: boolean }) {
   );
 }
 
-function StatusPill({ status }: { readonly status: ExamObjectiveOverviewGroupStatus }) {
-  const { label, className, Icon } = statusCopy[status];
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[11px] font-semibold ${className}`} role="status" aria-label={label}>
-      <Icon size={13} aria-hidden="true" />
-      {label}
-    </span>
-  );
-}
-
 export function ExamObjectiveOverviewGroupCard({
   group,
+  overrides,
   onStudentSelect,
   onRequestResult,
   pending,
   status,
 }: ExamObjectiveOverviewGroupCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const decision = useMemo(
+    () => resolveGroupOverrideDecision(group, overrides),
+    [group, overrides],
+  );
   const studentCount = new Set(group.rows.map((row) => row.submissionId)).size;
   const questionCount = new Set(group.rows.map((row) => row.questionId)).size;
   const answerKeyEntries = useMemo(() => [...new Set(
@@ -97,17 +110,13 @@ export function ExamObjectiveOverviewGroupCard({
   return (
     <section className="border-b border-gray-200 last:border-b-0" aria-labelledby={headingId}>
       <div className="px-4 py-4 sm:px-6">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div className="grid min-w-0 flex-1 gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Student answer</p>
-                <StatusPill status={status} />
-              </div>
+        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <h3
                 id={headingId}
                 aria-label={group.studentAnswer || 'Blank answer'}
-                className="mt-2 whitespace-pre-wrap break-words font-sans text-base font-semibold text-gray-900"
+                className="whitespace-pre-wrap break-words font-sans text-base font-semibold text-gray-900"
               >
                 <StudentAnswerCaseHighlight
                   studentAnswer={group.studentAnswer}
@@ -115,76 +124,97 @@ export function ExamObjectiveOverviewGroupCard({
                   answerKeyVariants={answerKeyVariants}
                 />
               </h3>
-              <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
-                <span className="inline-flex items-center gap-1"><Users size={13} aria-hidden="true" /> {studentCount} {studentCount === 1 ? 'student' : 'students'}</span>
-                <span className="inline-flex items-center gap-1"><ListChecks size={13} aria-hidden="true" /> {questionCount} {questionCount === 1 ? 'question' : 'questions'}</span>
-                <span>{group.rows.length} answer {group.rows.length === 1 ? 'entry' : 'entries'}</span>
-              </p>
-              {status === 'incorrect' ? (
-                <StudentAnswerExplanation comparison={comparison} studentAnswer={group.studentAnswer} />
-              ) : null}
+              <StatusPill status={status} />
             </div>
-            <div className="min-w-0 border-gray-200 md:border-l md:pl-4">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Current answer key</p>
+
+            <div className="mt-2">
               {closestAcceptedAnswer ? (
                 <>
-                  <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500">Closest accepted answer</p>
-                  <p className="mt-1 break-words text-sm font-medium text-gray-800">{closestAcceptedAnswer}</p>
+                  <p className="text-sm text-gray-600">
+                    <span className="font-semibold text-gray-500">Expected</span>
+                    <span className="mx-1.5 text-gray-300" aria-hidden="true">·</span>
+                    <span className="font-medium text-gray-800">{closestAcceptedAnswer}</span>
+                  </p>
                   {otherAcceptedAnswers.length > 0 ? (
-                    <details className="mt-2 text-xs text-gray-600">
-                      <summary className="cursor-pointer font-semibold text-blue-800 hover:text-blue-900">View {otherAcceptedAnswers.length} other accepted answers</summary>
-                      <ul className="mt-2 space-y-1 border-l-2 border-gray-200 pl-3">
+                    <details className="mt-1.5 text-xs text-gray-600">
+                      <summary className="cursor-pointer font-semibold text-blue-800 hover:text-blue-900">
+                        +{otherAcceptedAnswers.length} other accepted {otherAcceptedAnswers.length === 1 ? 'answer' : 'answers'}
+                      </summary>
+                      <ul className="mt-1.5 space-y-1 border-l-2 border-gray-200 pl-3">
                         {otherAcceptedAnswers.map((variant) => <li key={variant} className="break-words">{variant}</li>)}
                       </ul>
                     </details>
                   ) : null}
                 </>
               ) : (
-                <p className="mt-2 break-words text-sm font-medium text-gray-800">
-                  {answerKeyEntries.length === 1 ? answerKeyEntries[0] : `${answerKeyEntries.length} current keys across ${questionCount} questions`}
+                <p className="text-sm text-gray-600">
+                  <span className="font-semibold text-gray-500">Answer key</span>
+                  <span className="mx-1.5 text-gray-300" aria-hidden="true">·</span>
+                  <span className="font-medium text-gray-800">
+                    {answerKeyEntries.length === 1 ? answerKeyEntries[0] : `${answerKeyEntries.length} current keys across ${questionCount} questions`}
+                  </span>
                 </p>
               )}
-              <p className="mt-2 text-xs text-blue-700">
-                {status === 'correct'
-                  ? 'This answer is currently correct for this exam.'
-                  : 'This answer is currently incorrect for this exam.'}
-              </p>
             </div>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2 xl:max-w-[420px] xl:justify-end">
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              disabled={pending}
-              leftIcon={<CheckCircle2 size={15} aria-hidden="true" />}
-              onClick={() => onRequestResult(group, true)}
-            >
-              Accept this answer and add to key
-            </Button>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => onRequestResult(group, false)}
-              className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-[3px] border border-rose-300 bg-white px-3 text-xs font-semibold text-rose-800 transition-colors hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-300 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
-            >
-              <XCircle size={15} aria-hidden="true" /> Reject for exam
-            </button>
-            {pending ? <span className="text-xs text-gray-500" aria-live="polite">Saving…</span> : null}
+            {status === 'incorrect' ? (
+              <StudentAnswerExplanation comparison={comparison} studentAnswer={group.studentAnswer} />
+            ) : null}
+
+            {decision ? (
+              <p className="mt-2 flex items-start gap-1.5 text-xs text-gray-600">
+                {decision.isCorrect ? (
+                  <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                ) : (
+                  <XCircle size={13} className="mt-0.5 shrink-0 text-rose-600" aria-hidden="true" />
+                )}
+                <span>
+                  <span className="font-semibold text-gray-700">
+                    {decision.isCorrect ? 'Accepted' : 'Kept incorrect'}
+                  </span>
+                  {' by '}
+                  {decision.actorName || 'a grader'}
+                  {' · '}
+                  {formatDecisionDate(decision.updatedAt)}
+                </span>
+              </p>
+            ) : null}
           </div>
         </div>
 
-        <button
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={detailsId}
-          onClick={() => setExpanded((current) => !current)}
-          className="mt-4 inline-flex min-h-8 items-center gap-1.5 rounded-[3px] px-2 text-xs font-semibold text-blue-800 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2"
-        >
-          {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
-          {expanded ? 'Hide students and questions' : `View ${studentCount} ${studentCount === 1 ? 'student' : 'students'} and ${questionCount} ${questionCount === 1 ? 'question' : 'questions'}`}
-        </button>
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            disabled={pending}
+            leftIcon={<CheckCircle2 size={15} aria-hidden="true" />}
+            onClick={() => onRequestResult(group, true)}
+          >
+            Accept for whole exam
+          </Button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => onRequestResult(group, false)}
+            className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-[3px] border border-rose-300 bg-white px-3 text-xs font-semibold text-rose-800 transition-colors hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-300 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
+          >
+            <XCircle size={15} aria-hidden="true" /> Keep incorrect
+          </button>
+          {pending ? <span className="text-xs text-gray-500" aria-live="polite">Saving…</span> : null}
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            onClick={() => setExpanded((current) => !current)}
+            className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-[3px] px-2 text-xs font-semibold text-blue-800 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2"
+          >
+            {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
+            {expanded
+              ? 'Hide students and questions'
+              : `View ${studentCount} ${studentCount === 1 ? 'student' : 'students'} and ${questionCount} ${questionCount === 1 ? 'question' : 'questions'}`}
+          </button>
+        </div>
       </div>
 
       {expanded ? (

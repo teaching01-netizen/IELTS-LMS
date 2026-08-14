@@ -28,12 +28,13 @@ for the individual review screen:
 - It keeps only rows where the raw student answer differs from an accepted key by capitalization and/or whitespace, while the normalized values match.
 - Punctuation changes, exact raw matches, genuinely incorrect answers, and choice answers are excluded.
 - The default `Incorrect` filter shows answer groups currently scored incorrect; `All` and `Correct` switch the view at group level without reloading the session.
-- Group summaries show the exact student answer text, current key, affected student/question counts, and correctness status. Student/question evidence is collapsed by default and remains available through the accessible details disclosure; the evidence table repeats the raw answer and uses human question labels such as `q-17`.
+- Group summaries lead with the exact student answer text, an inline expected key, a compact reason for the flag, and correctness status; student/question counts are carried by the evidence disclosure and the confirmation dialog.
+- A group already decided in this session shows the most recent overall-check outcome (`Accepted` or `Kept incorrect`), the deciding actor, and the decision date, resolved from the schedule-scoped objective override records; untouched groups show no decision line. Student/question evidence is collapsed by default and remains available through the accessible details disclosure; the evidence table repeats the raw answer and uses human question labels such as `q-17`.
 - When no exact-casing accepted variant exists, only the case-different characters in the raw student answer are highlighted in yellow against the closest accepted answer; the student answer uses the system sans font, the card explains the capitalization/spacing mismatch in plain language, and additional accepted variants stay behind an accessible disclosure.
 - Exam-wide decisions require confirmation showing the exact student/question impact, then report the persisted key update and regrade outcome in an inline live status message.
 - A group-level decision applies to the whole selected exam session through the schedule-scoped objective override endpoint; there are no per-row result buttons.
-- `Accept this answer and add to key` adds the selected exact answer text to the question's accepted answer key and regrades every submission in the session.
-- `Incorrect for whole exam` records the grouped answer as excluded for the affected question and regrades every submission in the session.
+- `Accept for whole exam` adds the selected exact answer text to the question's accepted answer key and regrades every submission in the session.
+- `Keep incorrect` records the grouped answer as excluded for the affected question and regrades every submission in the session.
 - Student names remain drillable into the individual review screen, but the answer decision is never limited to that one student.
 
 ## Export Builder memory

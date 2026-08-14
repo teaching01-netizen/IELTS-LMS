@@ -32,6 +32,7 @@ vi.mock('../../../services/gradingService', () => ({
     upsertObjectiveOverride: vi.fn(),
     getObjectiveGradingSource: vi.fn(),
     getObjectiveIntegrityOverview: vi.fn(),
+    getObjectiveOverrides: vi.fn(),
   },
 }));
 
@@ -58,6 +59,10 @@ describe('buildExamObjectiveOverviewRows', () => {
     vi.mocked(gradingService.getObjectiveIntegrityOverview).mockResolvedValue({
       success: true,
       data: makeObjectiveIntegrityOverview(),
+    });
+    vi.mocked(gradingService.getObjectiveOverrides).mockResolvedValue({
+      success: true,
+      data: [],
     });
   });
 
@@ -498,9 +503,9 @@ describe('buildExamObjectiveOverviewRows', () => {
 
     expect(await screen.findByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Reject for exam' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep incorrect' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Reject and regrade' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep incorrect and regrade' }));
 
     await waitFor(() => expect(gradingService.upsertObjectiveOverride).toHaveBeenCalledWith(
       'schedule-1',
@@ -585,6 +590,117 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(screen.getByRole('heading', { name: 'WRONG' })).toBeInTheDocument();
   });
 
+  test('shows the last overall-check decision per answer group', async () => {
+    const section = {
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 1,
+        maxScore: 3,
+        percentage: 33.33,
+        questionResults: [
+          {
+            questionId: 'q-kept',
+            studentAnswer: 'Garden Hall',
+            correctAnswer: 'GARDEN HALL',
+            isCorrect: false,
+            awardedScore: 0,
+            maxScore: 1,
+            scoringRule: 'one_word',
+            hasOverride: false,
+          },
+          {
+            questionId: 'q-accepted',
+            studentAnswer: 'ANSWER',
+            correctAnswer: 'Answer',
+            isCorrect: true,
+            awardedScore: 1,
+            maxScore: 1,
+            scoringRule: 'one_word',
+            hasOverride: false,
+          },
+          {
+            questionId: 'q-untouched',
+            studentAnswer: 'car park',
+            correctAnswer: 'CAR PARK',
+            isCorrect: false,
+            awardedScore: 0,
+            maxScore: 1,
+            scoringRule: 'one_word',
+            hasOverride: false,
+          },
+        ],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } satisfies SectionSubmission;
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
+    vi.mocked(gradingService.getObjectiveOverrides).mockResolvedValue({
+      success: true,
+      data: [
+        {
+          scheduleId: 'schedule-1',
+          questionId: 'q-kept',
+          overrideJson: {
+            correctAnswer: 'GARDEN HALL',
+            acceptedAnswers: ['GARDEN HALL'],
+            excludedAnswers: ['Garden Hall'],
+            scoringRule: 'one_word',
+            maxScore: 1,
+          },
+          updatedByActorId: 'teacher-1',
+          updatedByActorName: 'Grace Grader',
+          updatedAt: '2026-01-02T10:00:00.000Z',
+        },
+        {
+          scheduleId: 'schedule-1',
+          questionId: 'q-accepted',
+          overrideJson: {
+            correctAnswer: 'Answer',
+            acceptedAnswers: ['Answer', 'ANSWER'],
+            excludedAnswers: [],
+            scoringRule: 'one_word',
+            maxScore: 1,
+          },
+          updatedByActorId: 'teacher-1',
+          updatedByActorName: 'Grace Grader',
+          updatedAt: '2026-01-03T10:00:00.000Z',
+        },
+      ],
+    });
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{
+          examTitle: 'IELTS Mock Test',
+          id: 'session-1',
+          scheduleId: 'schedule-1',
+        } as never}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /^All/ }));
+
+    const keptLine = await screen.findByText((_content, node) => (
+      node?.tagName === 'SPAN'
+      && node.textContent === 'Kept incorrect by Grace Grader · Jan 2, 2026'
+    ));
+    expect(keptLine).toBeInTheDocument();
+    const acceptedLine = screen.getByText((_content, node) => (
+      node?.tagName === 'SPAN'
+      && node.textContent === 'Accepted by Grace Grader · Jan 3, 2026'
+    ));
+    expect(acceptedLine).toBeInTheDocument();
+    expect(screen.getAllByText(/by Grace Grader/)).toHaveLength(2);
+  });
+
   test('highlights only the case-different character in the raw student answer', async () => {
     const examState = createInitialExamState('IELTS Mock Test', 'Academic');
     examState.reading.passages = [{
@@ -654,10 +770,9 @@ describe('buildExamObjectiveOverviewRows', () => {
     const studentCaseMismatch = screen.getByTitle('Capitalization differs from answer key');
     expect(studentCaseMismatch).toHaveTextContent('f');
     expect(studentCaseMismatch).toHaveClass('bg-yellow-100');
-    expect(screen.getByText('Why incorrect')).toBeInTheDocument();
     expect(screen.getByText('Capitalization differs from the closest accepted answer.')).toBeInTheDocument();
-    expect(screen.getByText('Closest accepted answer')).toBeInTheDocument();
-    const acceptedAnswerDisclosure = screen.getByText('View 2 other accepted answers');
+    expect(screen.getByText('Expected', { selector: 'span' })).toBeInTheDocument();
+    const acceptedAnswerDisclosure = screen.getByText('+2 other accepted answers');
     expect(acceptedAnswerDisclosure).toBeInTheDocument();
     expect(screen.getByText('faces of china')).not.toBeVisible();
     fireEvent.click(acceptedAnswerDisclosure);
@@ -747,7 +862,7 @@ describe('buildExamObjectiveOverviewRows', () => {
 
     await waitFor(() => expect(gradingService.getObjectiveGradingSource).toHaveBeenCalledWith('schedule-1'));
     fireEvent.click(await screen.findByRole('button', { name: /^Correct/ }));
-    expect(await screen.findByText('Closest accepted answer')).toBeInTheDocument();
+    expect(await screen.findByText('Expected', { selector: 'span' })).toBeInTheDocument();
     expect(screen.getAllByText('Garden hall')).not.toHaveLength(0);
     expect(screen.queryByText('GARDEN HALL | Garden hall')).not.toBeInTheDocument();
     expect(screen.queryByTitle('Capitalization differs from answer key')).not.toBeInTheDocument();
@@ -881,7 +996,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     );
 
     expect(await screen.findAllByRole('heading', { name: 'ANSWER' })).not.toHaveLength(0);
-    fireEvent.click(screen.getByRole('button', { name: 'Accept this answer and add to key' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Accept for whole exam' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Students affected');
     fireEvent.click(screen.getByRole('button', { name: 'Accept and regrade' }));
 

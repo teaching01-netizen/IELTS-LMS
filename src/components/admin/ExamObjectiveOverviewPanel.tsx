@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, FileCheck2, LoaderCircle } from 'lucide-re
 import { Button, Dialog } from '@components/ui';
 import type { ExamState } from '../../types';
 import type {
+  GradingScheduleObjectiveOverrideRow,
   GradingSession,
   ObjectiveIntegrityOverview,
   ObjectiveOverrideUpsertRequest,
@@ -106,6 +107,7 @@ export function ExamObjectiveOverviewPanel({
   const [submissionCount, setSubmissionCount] = useState(0);
   const [integrityOverview, setIntegrityOverview] = useState<ObjectiveIntegrityOverview | null>(null);
   const [integrityError, setIntegrityError] = useState<string | null>(null);
+  const [overrides, setOverrides] = useState<readonly GradingScheduleObjectiveOverrideRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -121,14 +123,18 @@ export function ExamObjectiveOverviewPanel({
     setError(null);
     setIntegrityOverview(null);
     setIntegrityError(null);
+    setOverrides([]);
     try {
-      const [nextSubmissions, sourceResult, integrityResult] = await Promise.all([
+      const [nextSubmissions, sourceResult, integrityResult, overridesResult] = await Promise.all([
         gradingRepository.getSubmissionsBySession(session.id),
         session.scheduleId
           ? gradingService.getObjectiveGradingSource(session.scheduleId)
           : Promise.resolve(null),
         session.scheduleId
           ? gradingService.getObjectiveIntegrityOverview(session.scheduleId)
+          : Promise.resolve(null),
+        session.scheduleId
+          ? gradingService.getObjectiveOverrides(session.scheduleId)
           : Promise.resolve(null),
       ]);
       const versionId = resolveObjectiveGradingVersionId(
@@ -150,6 +156,9 @@ export function ExamObjectiveOverviewPanel({
         setIntegrityOverview(integrityResult.data);
       } else if (integrityResult && !integrityResult.success) {
         setIntegrityError(integrityResult.error ?? 'Failed to load persisted integrity audit.');
+      }
+      if (overridesResult?.success && overridesResult.data) {
+        setOverrides(overridesResult.data);
       }
     } catch (loadError) {
       if (loadRequestId.current !== requestId) return;
@@ -223,7 +232,7 @@ export function ExamObjectiveOverviewPanel({
       setSuccessMessage(
         isCorrect
           ? `Added “${group.studentAnswer}” to the answer key for ${questionCount} ${questionCount === 1 ? 'question' : 'questions'} and regraded ${studentCount} ${studentCount === 1 ? 'student' : 'students'}.`
-          : `Rejected “${group.studentAnswer}” for this exam and regraded ${studentCount} ${studentCount === 1 ? 'student' : 'students'}.`,
+          : `Kept “${group.studentAnswer}” incorrect for the exam and regraded ${studentCount} ${studentCount === 1 ? 'student' : 'students'}.`,
       );
       setPendingDecision(null);
     } catch (overrideError) {
@@ -261,36 +270,40 @@ export function ExamObjectiveOverviewPanel({
             <div>
               <h2 className="text-base font-bold text-gray-900">Overall exam answer check</h2>
               <p className="mt-1 text-sm text-gray-600">
-                {session.examTitle} · typed answers only · grouped across this exam session
+                {submissionCount} {submissionCount === 1 ? 'student' : 'students'} · {groups.length} answer {groups.length === 1 ? 'group' : 'groups'} · {rows.length} answer {rows.length === 1 ? 'entry' : 'entries'}
               </p>
             </div>
           </div>
-          <p className="max-w-xl text-xs leading-relaxed text-gray-600">
-            Review each answer variation once. Your decision updates the answer key or result for every matching submission in this exam session.
-          </p>
-        </div>
-
-        <div className="mt-4 flex flex-col gap-3 border-t border-blue-100 pt-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs font-medium text-gray-600">
-            {submissionCount} students · {groups.length} answer groups · {rows.length} answer {rows.length === 1 ? 'entry' : 'entries'}
-          </p>
           <div role="group" aria-label="Filter answer groups" className="flex flex-wrap gap-1 rounded-md bg-white/70 p-1">
-            {filterOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={resultFilter === option.value}
-                onClick={() => setResultFilter(option.value)}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-1 ${resultFilter === option.value ? 'bg-blue-800 text-white shadow-sm' : 'text-gray-700 hover:bg-blue-100'}`}
-              >
-                {option.label}
-                <span className={`rounded-sm px-1.5 py-0.5 text-[10px] ${resultFilter === option.value ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'}`}>
-                  {option.count}
-                </span>
-              </button>
-            ))}
+            {filterOptions.map((option) => {
+              const isSelected = resultFilter === option.value;
+              const selectedClass = 'bg-blue-800 text-white shadow-sm';
+              const idleClass = 'text-gray-700 hover:bg-blue-100';
+              const buttonClass = isSelected ? selectedClass : idleClass;
+              const selectedBadgeClass = 'bg-white/20 text-white';
+              const idleBadgeClass = 'bg-gray-100 text-gray-600';
+              const badgeClass = isSelected ? selectedBadgeClass : idleBadgeClass;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => setResultFilter(option.value)}
+                  className={`inline-flex min-h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-1 ${buttonClass}`}
+                >
+                  {option.label}
+                  <span className={`rounded-sm px-1.5 py-0.5 text-[10px] ${badgeClass}`}>
+                    {option.count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
+
+        <p className="mt-3 max-w-3xl text-xs leading-relaxed text-gray-600">
+          Typed answers that differ from the answer key only by capitalization or spacing. Decide each group once — the result applies to every matching student and question in this exam session.
+        </p>
       </div>
 
       {successMessage ? (
@@ -328,6 +341,7 @@ export function ExamObjectiveOverviewPanel({
             <ExamObjectiveOverviewGroupCard
               key={group.groupId}
               group={group}
+              overrides={overrides}
               onStudentSelect={onStudentSelect}
               onRequestResult={handleRequestGroupResult}
               pending={pendingGroupIds.has(group.groupId)}
@@ -350,7 +364,7 @@ export function ExamObjectiveOverviewPanel({
         onClose={() => {
           if (!pendingMutation) setPendingDecision(null);
         }}
-        title={pendingDecision?.isCorrect ? 'Accept answer for this exam?' : 'Reject answer for this exam?'}
+        title={pendingDecision?.isCorrect ? 'Mark this answer correct for the whole exam?' : 'Keep this answer incorrect for the whole exam?'}
         size="md"
         preventCloseOnOverlayClick={pendingMutation}
         closeOnEscape={!pendingMutation}
@@ -366,7 +380,7 @@ export function ExamObjectiveOverviewPanel({
               isLoading={pendingMutation}
               onClick={() => void handleConfirmGroupResult()}
             >
-              {pendingDecision?.isCorrect ? 'Accept and regrade' : 'Reject and regrade'}
+              {pendingDecision?.isCorrect ? 'Accept and regrade' : 'Keep incorrect and regrade'}
             </Button>
           </>
         )}
@@ -393,7 +407,7 @@ export function ExamObjectiveOverviewPanel({
             <p className={`text-sm leading-relaxed ${pendingDecision.isCorrect ? 'text-emerald-800' : 'text-rose-800'}`}>
               {pendingDecision.isCorrect
                 ? 'The student answer will be added to the accepted answer key automatically.'
-                : 'The current answer key will stay unchanged, and this answer will be excluded for the exam.'}
+                : 'The answer will stay excluded from the answer key for the whole exam.'}
             </p>
           </div>
         ) : null}
