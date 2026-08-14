@@ -419,6 +419,16 @@ export function isStudentAnswerCorrect(
   const student = getQuestionAnswer(descriptor, answerMap);
   const acceptedAnswers = getAcceptedAnswersForDescriptor(descriptor);
 
+  if (acceptedAnswers && acceptedAnswers.length > 0) {
+    const studentText = normalizeComparable(formatAnswerValue(student));
+    if (studentText === '') {
+      return false;
+    }
+    return acceptedAnswers.some(
+      (answer) => normalizeComparable(answer) === studentText,
+    );
+  }
+
   if (correct === null || correct === undefined) {
     return null;
   }
@@ -432,16 +442,6 @@ export function isStudentAnswerCorrect(
       if (!studentSet.has(value)) return false;
     }
     return true;
-  }
-
-  if (acceptedAnswers && acceptedAnswers.length > 0) {
-    const studentText = normalizeComparable(formatAnswerValue(student));
-    if (studentText === '') {
-      return false;
-    }
-    return acceptedAnswers.some(
-      (answer) => normalizeComparable(answer) === studentText,
-    );
   }
 
   const correctText = normalizeComparable(formatAnswerValue(correct));

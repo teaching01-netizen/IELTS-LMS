@@ -1,12 +1,13 @@
 import React from 'react';
 import { describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('../../../services/gradingRepository', () => {
   return {
     gradingRepository: {
       getSubmissionById: vi.fn(),
       getSectionSubmissionsBySubmissionId: vi.fn(),
+      invalidateSubmissionBundle: vi.fn(),
       getWritingSubmissionsBySubmissionId: vi.fn(),
       getReviewDraftBySubmission: vi.fn(),
     },
@@ -159,6 +160,18 @@ describe('StudentReviewWorkspace objective answers', () => {
 
     expect(await screen.findByText('Traceback View')).toBeInTheDocument();
     expect(await screen.findByText(answerValue)).toBeInTheDocument();
+    const initialSectionLoadCount = vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mock.calls.length;
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('objective-grading-updated', {
+        detail: { examId: 'exam-1', updatedAt: new Date().toISOString() },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(gradingRepository.invalidateSubmissionBundle).toHaveBeenCalledWith('sub-1');
+      expect(gradingRepository.getSectionSubmissionsBySubmissionId).toHaveBeenCalledTimes(initialSectionLoadCount + 1);
+    });
   });
 
   test('shows both writing tasks in the student preview with the correct labels and bands', async () => {

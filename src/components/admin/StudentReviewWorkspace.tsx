@@ -22,6 +22,7 @@ import { logger } from '../../utils/logger';
 import { SectionLoadingSkeleton } from '@components/ui';
 import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
+import { subscribeObjectiveGradingUpdates } from '../../utils/objectiveGradingSync';
 
 export interface StudentReviewWorkspaceProps {
   submissionId: string;
@@ -301,6 +302,26 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     }
   }, [submissionId, currentTeacherId, currentTeacherName]);
 
+  const reloadObjectiveSections = useCallback(async () => {
+    const seq = submissionLoadSeq.current;
+    gradingRepository.invalidateSubmissionBundle(submissionId);
+    setSectionsLoading(true);
+    setSectionsError(null);
+
+    try {
+      const sectionsData = await gradingRepository.getSectionSubmissionsBySubmissionId(submissionId);
+      if (seq !== submissionLoadSeq.current) return;
+      setSectionSubmissions(sectionsData);
+    } catch (error) {
+      if (seq !== submissionLoadSeq.current) return;
+      setSectionsError(error instanceof Error ? error.message : 'Failed to reload section answers.');
+    } finally {
+      if (seq === submissionLoadSeq.current) {
+        setSectionsLoading(false);
+      }
+    }
+  }, [submissionId]);
+
   useEffect(() => {
     submissionLoadSeq.current += 1;
     setLoading(true);
@@ -320,6 +341,14 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     setMobileRailOpen(false);
     void loadData();
   }, [submissionId, loadData]);
+
+  useEffect(() => {
+    if (!submission?.examId) return undefined;
+
+    return subscribeObjectiveGradingUpdates(submission.examId, () => {
+      void reloadObjectiveSections();
+    });
+  }, [reloadObjectiveSections, submission?.examId]);
 
   const handleSaveDraft = async () => {
     if (!reviewDraft) return;

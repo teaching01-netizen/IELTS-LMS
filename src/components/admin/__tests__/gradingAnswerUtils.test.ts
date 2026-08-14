@@ -556,6 +556,37 @@ describe('gradingAnswerUtils', () => {
     );
   });
 
+  test('TABLE_COMPLETION: scores from accepted answers when the canonical answer is absent', () => {
+    const descriptor = {
+      id: 'table-1:cell-1',
+      blockId: 'table-1',
+      groupId: 'p1',
+      groupLabel: 'Passage 1',
+      isMulti: false,
+      correctCount: 1,
+      answerKey: 'table-1',
+      answerIndex: 0,
+      block: {
+        id: 'table-1',
+        type: 'TABLE_COMPLETION',
+        instruction: '',
+        headers: ['Answer'],
+        rows: [['']],
+        cells: [{
+          id: 'cell-1',
+          row: 0,
+          col: 0,
+          correctAnswer: undefined,
+          acceptedAnswers: ['GARDEN HALL', 'garden hall', 'Garden Hall', 'Garden hall'],
+        }],
+        answerRule: 'TWO_WORDS',
+      },
+      question: null,
+    } as unknown as StudentQuestionDescriptor;
+
+    expect(isStudentAnswerCorrect(descriptor, { 'table-1': ['Garden hall'] })).toBe(true);
+  });
+
   test('SHORT_ANSWER: supports accepted answer alternatives', () => {
     const descriptor = {
       id: 'sa-1',
