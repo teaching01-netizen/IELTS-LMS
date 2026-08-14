@@ -4801,7 +4801,11 @@ fn apply_objective_scoring_overrides(
         spec.max_score = override_payload.max_score;
         spec.has_override = true;
 
-        if let Some(raw_option_ids) = override_payload.correct_option_ids.as_ref() {
+        if let Some(raw_option_ids) = override_payload
+            .correct_option_ids
+            .as_ref()
+            .filter(|values| values.iter().any(|value| !value.trim().is_empty()))
+        {
             let option_ids = raw_option_ids
                 .iter()
                 .filter(|value| !value.trim().is_empty())

@@ -56,6 +56,7 @@ const GRADING_MIGRATIONS: &[&str] = &[
     "0027_grading_objective_overrides.sql",
     "0028_grading_objective_grading_source.sql",
     "0029_release_events_timestamp_precision.sql",
+    "0030_outbox_retry_policy.sql",
 ];
 
 #[tokio::test]
@@ -966,6 +967,210 @@ async fn objective_block_matrix_auto_scoring_is_correct_per_block() {
             "expected question-level scoring results for section={section}"
         );
     }
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn grading_table_completion_override_updates_persisted_student_result() {
+    let database = mysql::TestDatabase::new(GRADING_MIGRATIONS).await;
+    let schedule = seed_schedule_with_content(
+        database.pool(),
+        "table-completion-answer-key-override",
+        "Table Completion Answer Key Override",
+        json!({
+            "reading": {
+                "passages": [{
+                    "id": "reading-placeholder",
+                    "title": "Reading Placeholder",
+                    "blocks": [{
+                        "id": "reading-placeholder-block",
+                        "type": "SHORT_ANSWER",
+                        "instruction": "Answer the question.",
+                        "questions": [{
+                            "id": "reading-placeholder-question",
+                            "prompt": "What is the answer?",
+                            "correctAnswer": "placeholder"
+                        }]
+                    }]
+                }]
+            },
+            "listening": {
+                "parts": [{
+                    "id": "listening-table-part",
+                    "title": "Listening Table",
+                    "blocks": [{
+                        "id": "table-block-1",
+                        "type": "TABLE_COMPLETION",
+                        "instruction": "Complete the table.",
+                        "headers": ["Location", "Details"],
+                        "rows": [["____"]],
+                        "cells": [{
+                            "id": "cell-1",
+                            "row": 0,
+                            "col": 0,
+                            "correctAnswer": "GARDEN HALL",
+                            "acceptedAnswers": [
+                                "GARDEN HALL",
+                                "garden hall",
+                                "Garden Hall",
+                                "the garden hall",
+                                "The Garden Hall",
+                                "THE GARDEN HALL"
+                            ]
+                        }]
+                    }]
+                }]
+            },
+            "writing": {
+                "task1Prompt": "Summarise the chart.",
+                "task2Prompt": "Discuss both views.",
+                "tasks": [{"id": "task1"}, {"id": "task2"}]
+            },
+            "speaking": {
+                "part1Topics": ["topic"],
+                "cueCard": "cue",
+                "part3Discussion": ["discussion"]
+            }
+        }),
+    )
+    .await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let attempt_id = bootstrap_and_submit(
+        database.pool(),
+        schedule_id,
+        "table-answer-key",
+        json!({ "table-block-1": ["Garden hall"] }),
+        json!({}),
+        json!({}),
+    )
+    .await;
+
+    let auth = create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "table-admin@example.com",
+        "Table Admin",
+    )
+    .await;
+    let mut config = AppConfig::default();
+    config.grading_sync_on_read_fallback = true;
+    let app = build_router(AppState::with_pool(config, database.pool().clone()));
+
+    let session_detail = app
+        .clone()
+        .oneshot(
+            auth.with_auth(
+                Request::builder().uri(format!("/api/v1/grading/sessions/{}", schedule.id)),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(session_detail.status(), StatusCode::OK);
+    let session_detail_json = json_body(session_detail).await;
+    let submission_id = Uuid::parse_str(
+        session_detail_json["data"]["submissions"][0]["id"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        session_detail_json["data"]["submissions"][0]["attemptId"],
+        attempt_id.to_string()
+    );
+
+    let before = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/grading/submissions/{}/sections",
+                submission_id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(before.status(), StatusCode::OK);
+    let before_json = json_body(before).await;
+    let before_result = before_json["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|section| section["section"] == "listening")
+        .and_then(|section| section["autoGradingResults"]["questionResults"].as_array())
+        .and_then(|results| results.iter().find(|result| result["questionId"] == "table-block-1:cell-1"))
+        .expect("table result before override");
+    assert_eq!(before_result["isCorrect"], false);
+    assert_eq!(before_result["hasOverride"], false);
+
+    let override_response = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!(
+                        "/api/v1/grading/schedules/{}/objective-overrides/{}",
+                        schedule.id, "table-block-1:cell-1"
+                    )),
+            )
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "correctAnswer": "GARDEN HALL",
+                    "acceptedAnswers": [
+                        "GARDEN HALL",
+                        "garden hall",
+                        "Garden Hall",
+                        "the garden hall",
+                        "The Garden Hall",
+                        "THE GARDEN HALL",
+                        "Garden hall"
+                    ],
+                    "excludedAnswers": [],
+                    "correctOptionIds": [],
+                    "scoringRule": "exact_match",
+                    "maxScore": 1,
+                    "reason": "Accept the observed table-cell answer for the whole exam"
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(override_response.status(), StatusCode::OK);
+
+    let after = app
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!(
+                "/api/v1/grading/submissions/{}/sections",
+                submission_id
+            )))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(after.status(), StatusCode::OK);
+    let after_json = json_body(after).await;
+    let after_result = after_json["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|section| section["section"] == "listening")
+        .and_then(|section| section["autoGradingResults"]["questionResults"].as_array())
+        .and_then(|results| results.iter().find(|result| result["questionId"] == "table-block-1:cell-1"))
+        .expect("table result after override");
+    assert_eq!(after_result["studentAnswer"], "Garden hall");
+    assert_eq!(after_result["correctAnswer"], "GARDEN HALL | garden hall | Garden Hall | the garden hall | The Garden Hall | THE GARDEN HALL | Garden hall");
+    assert_eq!(after_result["acceptedAnswers"].as_array().unwrap().len(), 7);
+    assert_eq!(after_result["hasOverride"], true);
+    assert_eq!(after_result["isCorrect"], true);
+    assert_eq!(after_result["awardedScore"], 1);
 
     database.shutdown().await;
 }
