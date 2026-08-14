@@ -667,7 +667,9 @@ export function StudentApp({
           onSelectEraseMode={uiActions.toggleEraseMode}
           onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
           onOpenNavigator={
-            runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening'
+            runtimeState.currentModule === 'reading' ||
+            runtimeState.currentModule === 'listening' ||
+            runtimeState.currentModule === 'writing'
               ? () => uiActions.setShowNavigator(true)
               : undefined
           }
@@ -686,7 +688,9 @@ export function StudentApp({
           tabletMode={tabletMode}
           onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
           onOpenNavigator={
-            runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening'
+            runtimeState.currentModule === 'reading' ||
+            runtimeState.currentModule === 'listening' ||
+            runtimeState.currentModule === 'writing'
               ? () => uiActions.setShowNavigator(true)
               : undefined
           }

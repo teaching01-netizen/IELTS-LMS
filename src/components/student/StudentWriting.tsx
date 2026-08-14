@@ -624,7 +624,7 @@ export function StudentWriting({
             }}
           >
           {/* Timer Bar */}
-          <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-500' : isTimeWarning ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
+          <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-600' : isTimeWarning ? 'bg-amber-700' : 'bg-blue-800'}`} style={{ width: `${progressPercent}%` }} />
 
           <div
             ref={promptPaneRef}
@@ -734,10 +734,10 @@ export function StudentWriting({
                     Word Count
                   </span>
                   <span className={`text-lg font-black leading-none ${
-                    isOptimal ? 'text-emerald-600' :
-                    isOverLength ? 'text-red-600' :
-                    isWordCountMet ? 'text-blue-600' :
-                    isWordCountWarning ? 'text-amber-500' : 'text-gray-900'
+                    isOptimal ? 'text-green-800' :
+                    isOverLength ? 'text-red-800' :
+                    isWordCountMet ? 'text-blue-800' :
+                    isWordCountWarning ? 'text-amber-950' : 'text-gray-900'
                   }`}>
                     {wordCount}
                   </span>
@@ -818,7 +818,7 @@ export function StudentWriting({
               }}
               className={`min-w-[5rem] md:min-w-[5.75rem] px-3 md:px-4 py-1.5 md:py-2 rounded-sm text-[length:var(--student-control-font-size)] font-bold transition-all flex-shrink-0 ${
                 activeTaskId === task.id
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-100'
+                  ? 'bg-blue-800 text-white'
                   : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
               }`}
             >
@@ -828,7 +828,7 @@ export function StudentWriting({
           {showSubmitButton ? (
             <button
               onClick={handleSubmitClick}
-              className="min-w-[8.25rem] md:min-w-[9.5rem] px-4 md:px-6 py-1.5 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-sm text-[length:var(--student-control-font-size)] font-bold transition-colors shadow-md flex-shrink-0"
+              className="min-w-[8.25rem] md:min-w-[9.5rem] px-4 md:px-6 py-1.5 md:py-2 bg-blue-800 hover:bg-blue-700 text-white rounded-sm text-[length:var(--student-control-font-size)] font-bold transition-colors shadow-md flex-shrink-0"
             >
               Review & Submit
             </button>
@@ -878,7 +878,7 @@ export function StudentWriting({
                 </button>
                 <button
                   onClick={handleConfirmSubmit}
-                  className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 rounded-xl text-sm font-semibold text-white transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-3 bg-blue-800 hover:bg-blue-700 rounded-xl text-sm font-semibold text-white transition-colors flex items-center justify-center gap-2"
                 >
                   <Check size={16} />
                   Confirm Submission

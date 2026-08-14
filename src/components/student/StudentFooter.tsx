@@ -139,7 +139,7 @@ export function StudentFooter({
                             : isFlagged
                               ? 'bg-amber-100 border-amber-700 text-amber-900'
                               : isAnswered
-                                ? 'bg-blue-200 border-blue-500 text-blue-800'
+                                ? 'bg-green-200 border-green-700 text-green-900'
                                 : 'bg-white border-gray-100 text-gray-700'
                         }`}
                         aria-label={displayLabel}

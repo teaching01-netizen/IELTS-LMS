@@ -189,7 +189,7 @@ describe('QuestionNavigator', () => {
     expect(onNavigate).toHaveBeenCalledWith('q1');
   });
 
-  it('renders groups as sections', () => {
+  it('renders groups under their real passage labels', () => {
     render(
       <QuestionNavigator
         questions={mockQuestions}
@@ -200,8 +200,8 @@ describe('QuestionNavigator', () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.getByText('Section 1')).toBeInTheDocument();
-    expect(screen.getByText('Section 2')).toBeInTheDocument();
+    expect(screen.getByText('Passage 1')).toBeInTheDocument();
+    expect(screen.getByText('Passage 2')).toBeInTheDocument();
   });
 
   it('calls dialog show modal on mount', () => {

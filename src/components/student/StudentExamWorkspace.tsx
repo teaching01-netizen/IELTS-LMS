@@ -2,6 +2,7 @@ import React from 'react';
 import type { ExamState, ModuleType, QuestionAnswer } from '../../types';
 import type { StudentQuestionDescriptor } from '@services/examAdapterService';
 import { QuestionNavigator } from './QuestionNavigator';
+import { WritingTaskNavigator } from './WritingTaskNavigator';
 import { StudentFooter } from './StudentFooter';
 import { StudentListening } from './StudentListening';
 import { StudentReading } from './StudentReading';
@@ -194,17 +195,30 @@ export function StudentExamWorkspace({
       ) : null}
 
       {showNavigator ? (
-        <QuestionNavigator
-          questions={allQuestions}
-          answers={answers}
-          flags={flags}
-          currentQuestionId={currentQuestionId}
-          onNavigate={(id) => {
-            onNavigate(id);
-            onCloseNavigator();
-          }}
-          onClose={onCloseNavigator}
-        />
+        currentModule === 'writing' ? (
+          <WritingTaskNavigator
+            tasks={examState.config.sections.writing.tasks ?? []}
+            writingAnswers={writingAnswers}
+            currentQuestionId={currentQuestionId}
+            onNavigate={(id) => {
+              onNavigate(id);
+              onCloseNavigator();
+            }}
+            onClose={onCloseNavigator}
+          />
+        ) : (
+          <QuestionNavigator
+            questions={allQuestions}
+            answers={answers}
+            flags={flags}
+            currentQuestionId={currentQuestionId}
+            onNavigate={(id) => {
+              onNavigate(id);
+              onCloseNavigator();
+            }}
+            onClose={onCloseNavigator}
+          />
+        )
       ) : null}
     </>
   );

@@ -126,7 +126,7 @@ describe('TableCompletionSlotCell', () => {
     );
     const td = container.querySelector('td');
     expect(td?.className).toContain('ring-2');
-    expect(td?.className).toContain('ring-blue-500');
+    expect(td?.className).toContain('ring-blue-800');
   });
 
   it('applies flagged background when isFlagged is true', () => {

@@ -114,12 +114,20 @@ export function SubAnswerTreeQuestionList({
                   key={slotId}
                   id={`question-${slotId}`}
                   className={`rounded-lg p-1 transition-colors ${
-                    isCurrent ? 'ring-2 ring-blue-500 ring-offset-2' : ''
+                    isCurrent ? 'ring-2 ring-blue-800 ring-offset-2' : ''
                   } ${isFlagged ? 'bg-amber-50' : ''}`}
                 >
                   <div className={tabletMode ? 'flex flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
                     {showLeafNumber ? (
-                      <span className="min-w-[2.5rem] font-bold text-gray-900">{displayNumber}</span>
+                      <span
+                        className={`min-w-[2.5rem] font-bold ${
+                          isCurrent
+                            ? 'inline-flex h-6 items-center justify-center rounded-sm bg-blue-800 px-1 text-white'
+                            : 'text-gray-900'
+                        }`}
+                      >
+                        {displayNumber}
+                      </span>
                     ) : null}
                     <div className="flex-1">
                       <ProtectedInput

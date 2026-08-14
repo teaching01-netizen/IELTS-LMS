@@ -60,6 +60,25 @@ vi.mock('../QuestionNavigator', () => ({
   ),
 }));
 
+vi.mock('../WritingTaskNavigator', () => ({
+  WritingTaskNavigator: ({
+    onNavigate,
+    onClose,
+  }: {
+    onNavigate: (id: string) => void;
+    onClose: () => void;
+  }) => (
+    <div data-testid="workspace-writing-navigator">
+      <button type="button" data-testid="workspace-writing-nav-go" onClick={() => onNavigate('task2')}>
+        go
+      </button>
+      <button type="button" data-testid="workspace-writing-nav-close" onClick={onClose}>
+        close
+      </button>
+    </div>
+  ),
+}));
+
 function createExamState(): ExamState {
   return {
     title: 'Mock Exam',
@@ -156,12 +175,25 @@ describe('StudentExamWorkspace', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
-  it('renders writing module without footer', () => {
-    renderWorkspace('writing');
+  it('renders writing module with a task navigator and without an objective footer', () => {
+    const { onNavigate, onCloseNavigator } = renderWorkspace('writing');
 
     expect(screen.getByTestId('writing-module')).toHaveAttribute('data-highlight-enabled', 'false');
     expect(screen.getByTestId('writing-module')).toHaveAttribute('data-highlight-color', 'yellow');
     expect(screen.getByTestId('writing-module')).toHaveAttribute('data-highlight-class-name', '');
     expect(screen.queryByTestId('workspace-footer-submit')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-navigator')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-writing-navigator')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('workspace-writing-nav-go'));
+    expect(onNavigate).toHaveBeenCalledWith('task2');
+    expect(onCloseNavigator).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render the writing task navigator for reading', () => {
+    renderWorkspace('reading');
+
+    expect(screen.getByTestId('workspace-navigator')).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-writing-navigator')).not.toBeInTheDocument();
   });
 });

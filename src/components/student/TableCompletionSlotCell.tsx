@@ -46,7 +46,7 @@ export function TableCompletionSlotCell({
   return (
     <td
       id={`question-${slotId}`}
-      className={`border border-gray-200 px-3 py-2 align-top ${isActive ? 'ring-2 ring-blue-500 ring-inset' : ''} ${isFlagged ? 'bg-amber-50' : ''}`}
+      className={`border border-gray-200 px-3 py-2 align-top ${isActive ? 'ring-2 ring-blue-800 ring-inset' : ''} ${isFlagged ? 'bg-amber-50' : ''}`}
     >
       <div className="space-y-2">
         <div className="text-[length:var(--student-control-font-size)] text-gray-800 [white-space:pre-wrap]">

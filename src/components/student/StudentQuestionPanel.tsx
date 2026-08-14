@@ -113,7 +113,7 @@ export function StudentQuestionPanel({
       <div className={`student-question-stepper absolute ${tabletMode ? 'right-4' : 'right-4 md:right-6'} flex shadow-md z-20`}>
         <button
           onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
-          className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
+          className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
         >
           <ArrowLeft size={16} strokeWidth={3} />
         </button>

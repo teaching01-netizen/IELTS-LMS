@@ -304,7 +304,7 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
                   onNavigate(previousPart.id);
                 }
               }}
-              className={`w-9 h-9 md:w-10 md:h-10 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-gray-200 hover:bg-gray-300 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
+              className={`w-9 h-9 md:w-10 md:h-10 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
             >
               <ArrowLeft size={16} strokeWidth={3} />
             </button>

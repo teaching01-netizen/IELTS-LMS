@@ -71,6 +71,11 @@ export function QuestionNavigator({
   const totalQuestions = countQuestionSlots(questions);
   const answeredCount = countAnsweredQuestions(questions, answers);
   const flaggedCount = Object.values(flags).filter(Boolean).length;
+  const partiallyAnsweredCount = questions.reduce(
+    (count, question) =>
+      count + (isQuestionAnswered(question, answers) && !isQuestionFullyAnswered(question, answers) ? 1 : 0),
+    0,
+  );
 
   const groups = questions.reduce<Record<string, StudentQuestionDescriptor[]>>((result, question) => {
     const existingGroup = result[question.groupId];
@@ -107,20 +112,28 @@ export function QuestionNavigator({
         </button>
       </div>
 
-      <div className="p-3 md:p-4 border-b border-gray-100 bg-gray-50 flex gap-2 md:gap-4 text-xs md:text-sm">
+      <div className="p-3 md:p-4 border-b border-gray-100 bg-gray-50 flex flex-wrap gap-x-3 md:gap-x-5 gap-y-1.5 text-xs md:text-sm">
         <div className="flex items-center gap-1.5 md:gap-2">
-          <div className="w-3 md:w-4 h-3 md:h-4 bg-green-500 rounded-sm flex items-center justify-center text-white text-[length:var(--student-meta-font-size)]">
+          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-blue-800 rounded-sm"></div>
+          <span>Current</span>
+        </div>
+        <div className="flex items-center gap-1.5 md:gap-2">
+          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-green-800 rounded-sm flex items-center justify-center text-white text-[length:var(--student-meta-font-size)]">
             ✓
           </div>
           <span>Answered ({answeredCount})</span>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2">
-          <div className="w-3 md:w-4 h-3 md:h-4 bg-gray-200 rounded-sm"></div>
+          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-green-200 rounded-sm border border-green-700"></div>
+          <span>Partially answered ({partiallyAnsweredCount})</span>
+        </div>
+        <div className="flex items-center gap-1.5 md:gap-2">
+          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-gray-100 rounded-sm border border-gray-200"></div>
           <span>Unanswered ({totalQuestions - answeredCount})</span>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2">
-          <div className="w-3 md:w-4 h-3 md:h-4 bg-amber-500 rounded-sm flex items-center justify-center text-white">
-            <Flag size={8} className="fill-white" />
+          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-amber-100 rounded-sm border border-amber-300 flex items-center justify-center">
+            <Flag size={8} className="text-amber-700 fill-amber-700" />
           </div>
           <span>Flagged ({flaggedCount})</span>
         </div>
@@ -130,9 +143,9 @@ export function QuestionNavigator({
         {Object.entries(groups).map(([groupId, groupQuestions], groupIndex) => (
           <div key={groupId}>
             <h3 className="font-medium text-gray-700 mb-3 text-[length:var(--student-control-font-size)]">
-              Section {groupIndex + 1}
+              {groupQuestions[0]?.groupLabel || `Section ${groupIndex + 1}`}
             </h3>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(2.75rem,3.5rem))] gap-2 md:gap-2.5">
               {dedupeGroupedScoringSlots(groupQuestions).map((question) => {
                 const isAnswered = isQuestionAnswered(question, answers);
                 const isFullyComplete = isQuestionFullyAnswered(question, answers);
@@ -145,9 +158,16 @@ export function QuestionNavigator({
                     key={question.id}
                     onClick={() => onNavigate(question.id)}
                     className={`
-                      relative ${question.isMulti ? 'px-2.5 md:px-3 min-w-[2.75rem] md:min-w-[3.25rem]' : 'w-11 md:w-12'} h-11 md:h-12 rounded-md flex items-center justify-center text-[length:var(--student-control-font-size)] font-medium transition-all
-                      ${isCurrent ? 'ring-2 ring-blue-500 ring-offset-2' : ''}
-                      ${isFlagged ? 'bg-amber-100 text-amber-800 border border-amber-300' : isFullyComplete ? 'bg-green-500 text-white hover:bg-green-600' : isAnswered ? 'bg-green-200 text-green-800' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
+                      relative h-11 md:h-12 rounded-md border border-transparent flex items-center justify-center text-[length:var(--student-control-font-size)] font-medium transition-colors
+                      ${isCurrent
+                        ? 'bg-blue-800 text-white border-blue-800 hover:bg-blue-700'
+                        : isFlagged
+                          ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200'
+                          : isFullyComplete
+                            ? 'bg-green-800 text-white hover:bg-green-900'
+                            : isAnswered
+                              ? 'bg-green-200 text-green-900 hover:bg-green-300'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
                     `}
                   >
                     {getQuestionNumberLabel(questions, question.id)}

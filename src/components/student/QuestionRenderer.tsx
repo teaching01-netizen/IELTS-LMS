@@ -121,10 +121,15 @@ export function QuestionRenderer({
   const getSlotAriaLabelSuffix = (slotIndex: number) =>
     hasDuplicateSlotNumbers ? ` (blank ${slotIndex + 1})` : '';
   const getSlotClassName = (slotId: string) => {
-    const activeClass = currentQuestionId === slotId ? 'ring-2 ring-blue-500 ring-offset-2' : '';
+    const activeClass = currentQuestionId === slotId ? 'ring-2 ring-blue-800 ring-offset-2' : '';
     const flaggedClass = flags[slotId] ? 'border-amber-300 bg-amber-50' : 'border-transparent';
     return `rounded-lg border p-2 transition-colors ${activeClass} ${flaggedClass}`;
   };
+
+  const getActiveNumberClassName = (isActiveSlot: boolean) =>
+    isActiveSlot
+      ? 'inline-flex h-6 items-center justify-center rounded-sm bg-blue-800 px-1 text-white'
+      : 'text-gray-900';
 
   const renderFlagButton = (slotId: string) => {
     if (!onToggleFlag) {
@@ -199,7 +204,14 @@ export function QuestionRenderer({
         />
       ) : null}
       <div className={isCompactPane ? 'flex flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
-        <StudentQuestionText as="span" className="min-w-[2rem] font-bold text-gray-900" text={`${slotNumber}.`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(slotId, 'number')} />
+        <StudentQuestionText
+          as="span"
+          className={`min-w-[2rem] font-bold ${getActiveNumberClassName(currentQuestionId === slotId)}`}
+          text={`${slotNumber}.`}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+          highlightSurfaceId={getHighlightSurfaceId(slotId, 'number')}
+        />
         <ProtectedInput
           type="text"
           name={slotId}
@@ -237,7 +249,9 @@ export function QuestionRenderer({
     return (
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3 items-start">
-          <div className="mt-0.5 flex h-6 min-w-[1.75rem] items-center justify-center border-2 border-blue-500 text-[length:var(--student-chip-font-size)] font-bold text-blue-600">
+          <div className={`mt-0.5 flex h-6 min-w-[1.75rem] items-center justify-center border-2 text-[length:var(--student-chip-font-size)] font-bold transition-colors ${
+            isActive ? 'border-blue-800 bg-blue-800 text-white' : 'border-blue-500 text-blue-600'
+          }`}>
             {number}
           </div>
           <StudentQuestionText
@@ -498,7 +512,9 @@ export function QuestionRenderer({
     return (
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <span className="min-w-[1.75rem] font-bold text-gray-900">{num}.</span>
+          <span className={`min-w-[1.75rem] font-bold ${getActiveNumberClassName(isActive)}`}>
+            {num}.
+          </span>
           <StudentQuestionText as="span" className="text-gray-800" text={q.prompt} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'prompt')} />
         </div>
         <div className={`${fieldIndentClass} mt-2`}>
@@ -872,7 +888,7 @@ export function QuestionRenderer({
                     <td
                       key={`cell-${rowIndex}-${cellIndex}`}
                       className={`border border-gray-200 px-3 py-2 align-top ${
-                        isActive ? 'ring-2 ring-blue-500 ring-inset' : ''
+                        isActive ? 'ring-2 ring-blue-800 ring-inset' : ''
                       } ${isFlagged ? 'bg-amber-50' : ''}`}
                     >
                       <div className="space-y-2">
