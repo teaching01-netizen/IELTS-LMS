@@ -23,9 +23,24 @@ answers, timer state, flags, submission state, or persistence state.
 
 ## Viewport ownership
 
-- `StudentExamShell` owns the exam height. It consumes the runtime visual-viewport
-  sample through `--student-visual-viewport-height`, with `100vh`, `100svh`, and
-  `100dvh` fallbacks for engines without the runtime sample.
+- `StudentExamShell` owns the exam height through exactly one semantic
+  variable: `--student-exam-height` (CSS fallback `100dvh`).
+- `useStudentExamViewport` observes environment events
+  (`visualViewport.resize`/`scroll`, `window.resize`, `orientationchange`,
+  `focusin`, `focusout`) and applies the pure policy in
+  `studentExamViewportPolicy.ts`. An editable focus combined with a meaningful
+  visual-viewport reduction is a probable software keyboard; the shell height
+  is then frozen at the pre-keyboard value so the keyboard never reflows the
+  exam chrome. A shrink without focus is browser chrome and may update the
+  baseline. Orientation changes always re-establish the baseline.
+- `useStudentExamPageLock` scopes `html/body.student-exam-active` to the exam
+  phase and restores the prior scroll position on leave.
+- `useStudentFocusedControlVisibility` scrolls only internal exam panes
+  (never the document) to reveal a focused answer control that the keyboard
+  would otherwise obscure.
+- While `data-student-keyboard-open="true"`, the footer keeps its grid row but
+  becomes `visibility: hidden; pointer-events: none`. It is never `display: none`
+  and never fixed/sticky/absolute.
 - `StudentExamViewport` is the bounded grid between the header and the exam
   overlays. Its first row owns the workspace; its automatic row owns the footer.
 - `StudentExamWorkspace` keeps the main exam region at `min-height: 0` and

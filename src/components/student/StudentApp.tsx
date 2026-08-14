@@ -9,6 +9,9 @@ import { StudentHeader } from './StudentHeader';
 import { CompactStudentHeader } from './layout/CompactStudentHeader';
 import { StudentExamShell } from './layout/StudentExamShell';
 import { StudentExamViewport } from './layout/StudentExamViewport';
+import { useStudentExamViewport } from './layout/useStudentExamViewport';
+import { useStudentExamPageLock } from './layout/useStudentExamPageLock';
+import { useStudentFocusedControlVisibility } from './layout/useStudentFocusedControlVisibility';
 import { useStudentLayoutEnvironment } from './layout/useStudentLayoutEnvironment';
 import { StudentPostExamView } from './StudentPostExamView';
 import { SubmitConfirmation } from './SubmitConfirmation';
@@ -240,13 +243,17 @@ export function StudentApp({
   const effectivePhase =
     runtimeState.phase === 'post-exam' && !shouldRenderPostExam ? 'exam' : runtimeState.phase;
   const runtimeCompletionVerified = isRuntimeStructurallyCompleted(runtimeState.runtimeSnapshot);
+  const examViewportActive = effectivePhase === 'exam';
+  const examViewport = useStudentExamViewport(examViewportActive);
+  useStudentExamPageLock(examViewportActive);
+  useStudentFocusedControlVisibility(examViewportActive && examViewport.keyboardOpen);
 
   useEffect(() => {
-    if (effectivePhase !== 'exam') {
+    if (!examViewportActive) {
       return;
     }
     return installExamPageZoomGuard(document);
-  }, [effectivePhase]);
+  }, [examViewportActive]);
 
   useEffect(() => {
     runtimeStateRef.current = runtimeState;
@@ -626,6 +633,8 @@ export function StudentApp({
         highContrast={uiState.accessibilitySettings.highContrast}
         touchMode={tabletMode}
         style={studentShellStyle}
+        keyboardOpen={examViewportActive ? examViewport.keyboardOpen : false}
+        examHeight={examViewportActive ? examViewport.stableExamHeight : null}
       >
       <style>{`
         input:-webkit-autofill,

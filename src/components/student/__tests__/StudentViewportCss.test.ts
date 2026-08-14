@@ -5,22 +5,15 @@ import { describe, expect, it } from 'vitest';
 describe('student exam viewport shell CSS', () => {
   const css = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8');
 
-  it('uses dynamic viewport fallbacks without an unguarded height owner', () => {
+  it('owns the exam height through a single semantic variable without legacy chains', () => {
     const shellRule = css.match(/^\s*\.student-exam-shell\s*\{([^}]*)\}/m)?.[1];
 
     expect(shellRule).toBeDefined();
     expect(shellRule).toMatch(/position:\s*relative\s*;/);
     expect(shellRule).toMatch(/min-height:\s*0\s*;/);
-    expect(shellRule).not.toMatch(/height:\s*(?:100vh|100svh|100dvh)\s*;/);
-    expect(css).toMatch(
-      /@supports\s*\(height:\s*100svh\)[\s\S]*?\.student-exam-shell\.student-exam-shell\s*\{[^}]*height:\s*100svh\s*;/,
-    );
-    expect(css).toMatch(
-      /@supports\s*\(height:\s*100dvh\)[\s\S]*?\.student-exam-shell\.student-exam-shell\s*\{[^}]*height:\s*100dvh\s*;/,
-    );
-    expect(css).toMatch(
-      /\.student-exam-shell\.student-exam-shell\s*\{[^}]*height:\s*var\(--student-visual-viewport-height,\s*100dvh\)\s*;/,
-    );
+    expect(shellRule).toMatch(/height:\s*var\(--student-exam-height,\s*100dvh\)\s*;/);
+    expect(shellRule).toMatch(/max-height:\s*var\(--student-exam-height,\s*100dvh\)\s*;/);
+    expect(css).not.toContain('--student-visual-viewport-height');
     expect(css).not.toContain('--student-viewport-height');
     expect(css).not.toContain('--student-viewport-offset-top');
   });

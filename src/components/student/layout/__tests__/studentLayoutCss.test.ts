@@ -13,22 +13,21 @@ describe('student adaptive shell CSS contract', () => {
     expect(css).not.toContain('--student-exam-footer-clearance');
   });
 
-  it('gives the shell the only viewport-height ownership and clips document overflow', () => {
+  it('gives the shell exactly one exam-height variable and clips document overflow', () => {
     const shellRule = css.match(/\.student-exam-shell\s*\{([^}]*)\}/s)?.[1];
 
     expect(shellRule).toBeDefined();
+    expect(shellRule).toMatch(/height:\s*var\(--student-exam-height,\s*100dvh\)\s*;/);
+    expect(shellRule).toMatch(/max-height:\s*var\(--student-exam-height,\s*100dvh\)\s*;/);
     expect(shellRule).toMatch(/min-height:\s*0\s*;/);
     expect(shellRule).toMatch(/overflow:\s*hidden\s*;/);
     expect(shellRule).toMatch(/grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s*;/);
-    expect(css).toMatch(
-      /@supports\s*\(height:\s*100svh\)[\s\S]*?height:\s*100svh\s*;/,
-    );
-    expect(css).toMatch(
-      /@supports\s*\(height:\s*100dvh\)[\s\S]*?height:\s*100dvh\s*;/,
-    );
-    expect(css).toMatch(
-      /height:\s*var\(--student-visual-viewport-height,\s*100dvh\)\s*;/,
-    );
+
+    // The old 100vh -> 100svh -> 100dvh -> --student-visual-viewport-height
+    // runtime chain is retired; one semantic variable remains.
+    expect(css).not.toContain('--student-visual-viewport-height');
+    expect(css).not.toMatch(/@supports\s*\(height:\s*100svh\)/);
+    expect(css).not.toMatch(/@supports\s*\(height:\s*100dvh\)/);
   });
 
   it('partitions the viewport into flexible workspace and normal-flow footer rows', () => {
@@ -50,6 +49,26 @@ describe('student adaptive shell CSS contract', () => {
     expect(footerRule).not.toMatch(/position:\s*(?:absolute|fixed|sticky)\s*;/);
     expect(footerRule).toMatch(/margin-block-end:\s*max\(/);
     expect(footerRule).toMatch(/max-inline-size:\s*96rem\s*;/);
+  });
+
+  it('hides the keyboard-open footer without removing its layout row', () => {
+    const rule = css.match(
+      /\.student-exam-shell\[data-student-keyboard-open='true'\]\s*\.student-exam-footer\s*\{([^}]*)\}/s,
+    )?.[1];
+
+    expect(rule).toBeDefined();
+    expect(rule).toMatch(/visibility:\s*hidden\s*;/);
+    expect(rule).toMatch(/pointer-events:\s*none\s*;/);
+    expect(rule).not.toMatch(/display:\s*none\s*;/);
+    expect(rule).not.toMatch(/position:/);
+  });
+
+  it('scopes the document lock to the active exam only', () => {
+    const lockRule = css.match(/html\.student-exam-active,[\s\S]*?body\.student-exam-active\s*\{([^}]*)\}/s)?.[1];
+
+    expect(lockRule).toBeDefined();
+    expect(lockRule).toMatch(/overflow:\s*hidden\s*;/);
+    expect(lockRule).toMatch(/height:\s*100%\s*;/);
   });
 
   it('defines compact navigation as a safe-area-aware touch row', () => {

@@ -45,7 +45,7 @@ describe('PostCSS Safari 100vh fallback', () => {
     expect(result.css).toContain('height: 100dvh');
   });
 
-  it('keeps the active exam shell height-owned by semantic CSS rules', () => {
+  it('keeps the active exam shell height-owned by a single semantic CSS variable', () => {
     const shellStyle = studentAppSource.match(
       /const studentShellStyle = \{([\s\S]*?)\}\s+as React\.CSSProperties/,
     )?.[1];
@@ -57,14 +57,8 @@ describe('PostCSS Safari 100vh fallback', () => {
     )?.[1];
     expect(activeShellClass).toBeDefined();
     expect(activeShellClass).not.toContain('h-screen');
-    expect(appCss).toMatch(
-      /@supports\s*\(height:\s*100svh\)[\s\S]*?\.student-exam-shell\.student-exam-shell\s*\{[^}]*height:\s*100svh/,
-    );
-    expect(appCss).toMatch(
-      /@supports\s*\(height:\s*100dvh\)[\s\S]*?\.student-exam-shell\.student-exam-shell\s*\{[^}]*height:\s*100dvh/,
-    );
-    expect(appCss).toMatch(
-      /height:\s*var\(--student-visual-viewport-height,\s*100dvh\)\s*;/,
-    );
+    expect(appCss).toMatch(/height:\s*var\(--student-exam-height,\s*100dvh\)\s*;/);
+    expect(appCss).not.toContain('--student-visual-viewport-height');
+    expect(appCss).not.toMatch(/@supports\s*\(height:\s*100svh\)/);
   });
 });

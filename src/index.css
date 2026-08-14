@@ -110,7 +110,9 @@
 }
 
 :root {
-  --student-exam-footer-gap: clamp(0.5rem, 1.25vmin, 0.875rem);
+  /* Width-relative so a height-only viewport shrink (software keyboard) can
+     never reflow the footer. vw equals vmin for every phone/tablet profile. */
+  --student-exam-footer-gap: clamp(0.5rem, 1.25vw, 0.875rem);
   --student-header-height-compact: 3.5rem;
   --student-header-height-medium: 4rem;
   --student-header-height-wide: 4rem;
@@ -242,6 +244,8 @@
     width: 100%;
     min-width: 0;
     min-height: 0;
+    height: var(--student-exam-height, 100dvh);
+    max-height: var(--student-exam-height, 100dvh);
     overflow: hidden;
     overflow: clip;
     overscroll-behavior: none;
@@ -332,31 +336,12 @@
   }
 
   /*
-   * Keep viewport height ownership in the shell. The base 100vh declaration
-   * works in older engines; supported small and dynamic viewport units win
-   * through feature detection. The runtime visual viewport sample is only an
-   * override, with a valid CSS fallback when it is unavailable.
+   * The exam owns a stable layout viewport through exactly one semantic
+   * variable: --student-exam-height. The software keyboard may reduce the
+   * visible area, but it must never resize/reflow the exam chrome. The hook
+   * (useStudentExamViewport) freezes this value while the keyboard is open;
+   * when it is unavailable, 100dvh is the CSS fallback.
    */
-  .student-exam-shell.student-exam-shell {
-    height: 100vh;
-  }
-
-  @supports (height: 100svh) {
-    .student-exam-shell.student-exam-shell {
-      height: 100svh;
-    }
-  }
-
-  @supports (height: 100dvh) {
-    .student-exam-shell.student-exam-shell {
-      height: 100dvh;
-    }
-  }
-
-  .student-exam-shell.student-exam-shell {
-    height: var(--student-visual-viewport-height, 100dvh);
-  }
-
   .student-exam-main {
     min-height: 0;
     min-width: 0;
@@ -386,6 +371,16 @@
       0 1px 2px rgba(9, 30, 66, 0.08),
       0 8px 24px rgba(9, 30, 66, 0.12);
     isolation: isolate;
+  }
+
+  /*
+   * While the software keyboard is open the footer keeps its grid row but is
+   * visually hidden and inert. display:none is intentionally avoided because
+   * it would collapse the `auto` grid row and reflow the workspace.
+   */
+  .student-exam-shell[data-student-keyboard-open='true'] .student-exam-footer {
+    visibility: hidden;
+    pointer-events: none;
   }
 
   .student-question-stepper {

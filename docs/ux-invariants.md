@@ -6,16 +6,27 @@ Purpose: keep student-facing interaction rules explicit so future UI changes do 
 
 ### Owning Module
 
-The active exam shell and footer row layout are owned by `src/index.css`. `StudentApp` installs the
-exam lifecycle guard. Modern browsers use CSS dynamic viewport units; the guard publishes a visual
-viewport height only as a capability fallback when `100dvh` is unsupported.
+The active exam shell and footer row layout are owned by `src/index.css` plus the viewport
+policy/hook in `src/components/student/layout/` (`studentExamViewportPolicy.ts`,
+`useStudentExamViewport.ts`). `StudentApp` installs the exam lifecycle guard, the page lock
+(`useStudentExamPageLock.ts`), and the focused-control reveal
+(`useStudentFocusedControlVisibility.ts`).
 
 ### Invariant
 
-The exam shell is a page-layout grid sized in fallback order by `100vh`, `100svh`, and `100dvh`.
-Its rows are intrinsic header, `minmax(0, 1fr)` workspace, and intrinsic footer. Every student
-footer remains in normal flow, so its actual height is reserved and no passage, question, or editor
-content can render underneath it. Safe-area insets are footer padding, never position offsets.
+The exam owns a stable layout viewport. The browser keyboard may reduce the visible area, but it
+must never resize or reflow the exam chrome.
+
+The exam shell is a page-layout grid sized by exactly one semantic variable,
+`--student-exam-height` (CSS fallback `100dvh`). Its rows are intrinsic header,
+`minmax(0, 1fr)` workspace, and intrinsic footer. Every student footer remains in normal flow, so
+its actual height is reserved and no passage, question, or editor content can render underneath it.
+Safe-area insets are footer padding, never position offsets.
+
+Keyboard inference requires an editable focus plus a meaningful visual-viewport reduction; a plain
+viewport shrink without focus is browser chrome and may update the baseline. While the keyboard is
+open, the footer keeps its grid row but becomes `visibility: hidden; pointer-events: none` and the
+shell height stays frozen at the pre-keyboard baseline.
 
 ### Must Not Break
 
@@ -30,10 +41,11 @@ content can render underneath it. Safe-area insets are footer padding, never pos
 - Pane scroll owners must not add footer-overlay padding or scroll padding.
 - The workspace grid item has `min-height: 0`; reading, listening, and writing panes remain the only
   content scroll owners.
-- Browsers supporting `100dvh` must not receive JavaScript viewport geometry. The legacy fallback
-  may publish only `--student-visual-viewport-height` from `VisualViewport.height`/`innerHeight`.
-- No code may publish a viewport origin, footer coordinates, inferred keyboard state, or persisted
-  geometry baseline.
+- The shell publishes `--student-exam-height` from the viewport policy; the retired
+  `100vh`/`100svh`/`100dvh`/`--student-visual-viewport-height` runtime chain must not return.
+- No code may publish a viewport origin, footer coordinates, or persisted geometry baseline.
+- Keyboard state is a layout event: it must never recreate answer controls or change an answer
+  control's value.
 - Root exam scrolling and overscroll chaining remain disabled.
 - The viewport meta policy includes `viewport-fit=cover` and does not force an interactive-widget
   resize mode.
@@ -47,9 +59,13 @@ content can render underneath it. Safe-area insets are footer padding, never pos
 
 - `src/components/student/__tests__/StudentApp.test.tsx`
 - `src/components/student/__tests__/StudentViewportCss.test.ts`
-- `src/components/student/__tests__/StudentFooterInFlowLayout.test.ts`
+- `src/components/student/layout/__tests__/studentLayoutCss.test.ts`
+- `src/components/student/layout/__tests__/studentExamViewportPolicy.test.ts`
+- `src/components/student/layout/__tests__/useStudentExamViewport.test.ts`
 - `src/components/student/__tests__/examPageZoomGuard.test.ts`
+- `e2e/student-exam-viewport.atdd.spec.ts`
 - `e2e/student-ipad-layout.spec.ts`
+- `e2e/student-viewport-layout.spec.ts`
 
 ## Student Exam Dialog Positioning
 
