@@ -32,6 +32,7 @@ import {
   ReviewEvent,
   GradingQueueFilters,
   SessionDetailFilters,
+  SessionQueuePage,
   RubricAssessment,
   WritingAnnotation,
   StudentResult,
@@ -152,6 +153,24 @@ export class GradingService {
     }
   }
   
+  /**
+   * Get one page of the session queue with server-side pagination and search
+   */
+  async getSessionQueuePage(options?: {
+    page?: number;
+    pageSize?: number;
+    searchQuery?: string;
+  }): Promise<GradingServiceResult<SessionQueuePage>> {
+    try {
+      const page = Math.max(1, Math.floor(options?.page ?? 1));
+      const pageSize = Math.min(100, Math.max(1, Math.floor(options?.pageSize ?? 10)));
+      const data = await gradingRepository.getSessionQueuePage(page, pageSize, options?.searchQuery);
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: `Failed to load grading session queue: ${error}` };
+    }
+  }
+
   /**
    * Get session queue summary
    */

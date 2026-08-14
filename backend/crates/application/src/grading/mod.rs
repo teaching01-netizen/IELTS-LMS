@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use ielts_backend_domain::{
     grading::{
         ActorActionRequest, GradingScheduleObjectiveOverride, GradingSession, GradingSessionDetail,
-        GradingSessionPagination, GradingSessionStatus, ObjectiveGradingAudit,
+        GradingSessionPage, GradingSessionPagination, GradingSessionStatus, ObjectiveGradingAudit,
         ObjectiveIntegrityIssueCode, ObjectiveIntegrityIssueSummary, ObjectiveIntegrityOverview,
         ObjectiveIntegrityStatus, ObjectiveOverrideDeleteRequest, ObjectiveOverrideUpsertRequest,
         ObjectiveQuestionAudit, ObjectiveQuestionOverrideRequest, ObjectiveVerificationStatus,
@@ -114,27 +114,81 @@ fn preview_runtime_exclusion_sql() -> String {
     format!("cohort_name NOT LIKE '{}%'", PREVIEW_RUNTIME_COHORT_PREFIX)
 }
 
-/// Builds the session-list query for `list_sessions`. Admin roles see all
-/// sessions; graders are restricted to their assigned schedule scope. Every
-/// branch excludes preview-runtime schedules.
-fn list_sessions_query(role: &ActorRole, has_schedule_scope: bool) -> String {
+/// Query parts for the grading session list, including the optional
+/// text search across exam title / cohort name. The schedule-id and search
+/// bind values are tracked explicitly so the no-access branch (no
+/// placeholders) never receives stray binds.
+struct SessionListQueryParts {
+    select_sql: String,
+    count_sql: String,
+    schedule_binds: Vec<String>,
+    bind_search: bool,
+}
+
+fn list_sessions_query_parts(
+    role: &ActorRole,
+    schedule_scope_id: Option<&str>,
+    allowed_schedule_ids: Option<&HashSet<String>>,
+    search: Option<&str>,
+) -> SessionListQueryParts {
     let exclusion = preview_runtime_exclusion_sql();
+    let search_clause = match search {
+        Some(query) if !query.trim().is_empty() => {
+            " AND (exam_title LIKE ? OR cohort_name LIKE ?)".to_owned()
+        }
+        _ => String::new(),
+    };
+    let bind_search = !search_clause.is_empty();
+
+    let build = |where_clause: String, schedule_binds: Vec<String>| SessionListQueryParts {
+        select_sql: format!("SELECT * FROM grading_sessions {where_clause}"),
+        count_sql: format!("SELECT COUNT(*) FROM grading_sessions {where_clause}"),
+        schedule_binds,
+        bind_search,
+    };
+
     if matches!(
         role,
         ielts_backend_infrastructure::actor_context::ActorRole::Admin
             | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
     ) {
-        format!(
-            "SELECT * FROM grading_sessions WHERE {exclusion} ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?"
-        )
-    } else if has_schedule_scope {
-        format!(
-            "SELECT * FROM grading_sessions WHERE schedule_id = ? AND {exclusion} ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?"
-        )
-    } else {
-        // No access
-        "SELECT * FROM grading_sessions WHERE 1=0 ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?".to_owned()
+        return build(format!("WHERE {exclusion}{search_clause}"), Vec::new());
     }
+
+    if let Some(ids) = allowed_schedule_ids {
+        if ids.is_empty() {
+            return build("WHERE 1=0".to_owned(), Vec::new());
+        }
+        let mut sorted_ids: Vec<String> = ids.iter().cloned().collect();
+        sorted_ids.sort();
+        let placeholders = sorted_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        return build(
+            format!("WHERE schedule_id IN ({placeholders}) AND {exclusion}{search_clause}"),
+            sorted_ids,
+        );
+    }
+
+    if let Some(schedule_id) = schedule_scope_id {
+        return build(
+            format!("WHERE schedule_id = ? AND {exclusion}{search_clause}"),
+            vec![schedule_id.to_owned()],
+        );
+    }
+
+    // No access
+    build("WHERE 1=0".to_owned(), Vec::new())
+}
+
+/// Builds the session-list query for `list_sessions` (legacy non-paginated
+/// endpoint). Admin roles see all sessions; graders are restricted to their
+/// assigned schedule scope. Every branch excludes preview-runtime schedules.
+fn list_sessions_query(role: &ActorRole, has_schedule_scope: bool) -> String {
+    let scope = if has_schedule_scope { Some("") } else { None };
+    let parts = list_sessions_query_parts(role, scope, None, None);
+    format!(
+        "{} ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?",
+        parts.select_sql
+    )
 }
 
 impl GradingService {
@@ -214,6 +268,83 @@ impl GradingService {
         };
 
         Ok(sessions)
+    }
+
+    /// Paginated variant of `list_sessions` for the grading queue UI.
+    ///
+    /// Returns one page of sessions ordered by recency together with the
+    /// total count (honoring the same role scope and preview-runtime
+    /// exclusion) so the frontend can render stable pagination controls.
+    /// The optional `search` filters exam title / cohort name, and
+    /// `allowed_schedule_ids` narrows graders to their assigned schedules.
+    pub async fn list_sessions_page(
+        &self,
+        ctx: &ActorContext,
+        page: u64,
+        page_size: u64,
+        search: Option<&str>,
+        allowed_schedule_ids: Option<&HashSet<String>>,
+    ) -> Result<GradingSessionPage, GradingError> {
+        self.maybe_sync_on_read().await?;
+        let page = page.max(1);
+        let page_size = page_size.clamp(1, 100);
+        let offset = ((page - 1) * page_size) as i64;
+        let page_size_i64 = page_size as i64;
+
+        let parts = list_sessions_query_parts(
+            &ctx.role,
+            ctx.schedule_scope_id.as_deref(),
+            allowed_schedule_ids,
+            search,
+        );
+        let pattern = search
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("%{value}%"));
+        let schedule_binds = parts.schedule_binds.clone();
+
+        let total: i64 = {
+            let mut query = sqlx::query_scalar(&parts.count_sql);
+            for bind in &schedule_binds {
+                query = query.bind(bind);
+            }
+            if let Some(pattern) = &pattern {
+                query = query.bind(pattern).bind(pattern);
+            }
+            query.fetch_one(&self.pool).await?
+        };
+
+        let select_sql = format!(
+            "{} ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ? OFFSET ?",
+            parts.select_sql
+        );
+        let sessions = {
+            let mut query = sqlx::query_as::<_, GradingSession>(&select_sql);
+            for bind in &schedule_binds {
+                query = query.bind(bind);
+            }
+            if let Some(pattern) = &pattern {
+                query = query.bind(pattern).bind(pattern);
+            }
+            query
+                .bind(page_size_i64)
+                .bind(offset)
+                .fetch_all(&self.pool)
+                .await?
+        };
+
+        let total = total.max(0) as u64;
+        let has_more = (offset.saturating_add(page_size_i64)) < (total as i64);
+
+        Ok(GradingSessionPage {
+            sessions,
+            pagination: GradingSessionPagination {
+                page,
+                page_size,
+                total,
+                has_more,
+            },
+        })
     }
 
     pub async fn get_session_detail(

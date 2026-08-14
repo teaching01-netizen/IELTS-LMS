@@ -5,6 +5,7 @@ import type {
   ReviewDraft,
   ReviewEvent,
   SectionSubmission,
+  SessionQueuePage,
   StudentResult,
   StudentSubmission,
   WritingTaskSubmission,
@@ -220,8 +221,19 @@ type BackendSessionDetailResponse = {
   } | null | undefined;
 };
 
+type BackendSessionQueuePageResponse = {
+  sessions?: BackendGradingSession[] | null | undefined;
+  pagination?: {
+    page?: number | null | undefined;
+    pageSize?: number | null | undefined;
+    total?: number | null | undefined;
+    hasMore?: boolean | null | undefined;
+  } | null | undefined;
+};
+
 export interface IGradingRepository {
   getAllSessions(): Promise<GradingSession[]>;
+  getSessionQueuePage(page: number, pageSize: number, searchQuery?: string): Promise<SessionQueuePage>;
   getSessionById(id: string): Promise<GradingSession | null>;
   getSessionsBySchedule(scheduleId: string): Promise<GradingSession[]>;
   saveSession(session: GradingSession): Promise<void>;
@@ -537,6 +549,41 @@ class BackendGradingRepository implements IGradingRepository {
     return (await backendGet<BackendGradingSession[]>('/v1/grading/sessions')).map((session) =>
       this.mapSession(session),
     );
+  }
+
+  async getSessionQueuePage(
+    page: number,
+    pageSize: number,
+    searchQuery?: string,
+  ): Promise<SessionQueuePage> {
+    const query = new URLSearchParams({
+      page: String(Math.max(1, page)),
+      pageSize: String(Math.min(100, Math.max(1, pageSize))),
+    });
+    const search = searchQuery?.trim() ?? '';
+    if (search !== '') {
+      query.set('search', search);
+    }
+
+    const payload = await backendGet<BackendSessionQueuePageResponse>(
+      `/v1/grading/sessions?${query.toString()}`,
+    );
+    return {
+      sessions: (payload.sessions ?? []).map((session) => this.mapSession(session)),
+      pagination: payload.pagination
+        ? {
+            page: payload.pagination.page ?? page,
+            pageSize: payload.pagination.pageSize ?? pageSize,
+            total: payload.pagination.total ?? 0,
+            hasMore: payload.pagination.hasMore ?? false,
+          }
+        : {
+            page,
+            pageSize,
+            total: (payload.sessions ?? []).length,
+            hasMore: false,
+          },
+    };
   }
 
   async getSessionById(id: string): Promise<GradingSession | null> {

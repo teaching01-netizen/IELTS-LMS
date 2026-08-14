@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight, Download, FileCheck2 } from 'lucide-react';
+import { Search, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight, FileCheck2 } from 'lucide-react';
 import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus, WritingTaskSubmission } from '../../types/grading';
 import { gradingService } from '../../services/gradingService';
 import { gradingRepository } from '../../services/gradingRepository';
@@ -161,7 +161,6 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
   const [loading, setLoading] = useState(true);
   const [exportingSection, setExportingSection] = useState<GradingExportSection | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [exportMode, setExportMode] = useState<'default' | 'per_student_zip_pdf'>('default');
   const [perStudentDialogOpen, setPerStudentDialogOpen] = useState(false);
   const [writingPrintDocument, setWritingPrintDocument] = useState<SessionWritingPrintDocument | null>(null);
   const [showOverallAnswerCheck, setShowOverallAnswerCheck] = useState(false);
@@ -186,29 +185,6 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, filters]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const stored = window.localStorage.getItem(`grading:${sessionId}:exportMode`);
-      if (stored === 'per_student_zip_pdf' || stored === 'default') {
-        setExportMode(stored);
-      } else {
-        setExportMode('default');
-      }
-    } catch {
-      setExportMode('default');
-    }
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(`grading:${sessionId}:exportMode`, exportMode);
-    } catch {
-      // Ignore storage failures (private mode / quota).
-    }
-  }, [exportMode, sessionId]);
 
   const loadSubmissions = async () => {
     setLoading(true);
@@ -728,15 +704,11 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
               className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             />
           </div>
-          <button className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors">
-            <Filter size={16} />
-            <span className="hidden sm:inline">Filter</span>
-          </button>
           {session ? (
             <button
               type="button"
               onClick={() => setShowOverallAnswerCheck((current) => !current)}
-              className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 transition-colors hover:bg-blue-100"
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 transition-colors hover:bg-blue-100"
               aria-expanded={showOverallAnswerCheck}
             >
               <FileCheck2 size={16} />
@@ -746,48 +718,15 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
               <span className="sm:hidden">Overall</span>
             </button>
           ) : null}
-          <div className="flex items-start gap-3">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-gray-400">
-                Export
-              </span>
-              <select
-                value={exportMode}
-                onChange={(e) => setExportMode(e.target.value as 'default' | 'per_student_zip_pdf')}
-                disabled={exportingSection !== null || perStudentDialogOpen}
-                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="default">CSV / Print</option>
-                <option value="per_student_zip_pdf">Export Builder · PDF ZIP</option>
-              </select>
-            </div>
-
-            {exportMode === 'default' ? (
-              <GradingExportButtons
-                exportingSection={exportingSection}
-                onExportReading={() => void handleExportSection('reading')}
-                onExportReadingManual={() => void handleExportSection('reading_manual')}
-                onExportListening={() => void handleExportSection('listening')}
-                onExportListeningManual={() => void handleExportSection('listening_manual')}
-                onPrintWriting={() => void handleExportSection('writing')}
-              />
-            ) : (
-              <div className="flex flex-col items-start gap-2 sm:items-end">
-                <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-gray-400">
-                  Export Builder
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void openPerStudentExportDialog()}
-                  disabled={exportingSection !== null || perStudentDialogOpen}
-                  className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Download size={14} />
-                  Build PDF ZIP
-                </button>
-              </div>
-            )}
-          </div>
+          <GradingExportButtons
+            exportingSection={exportingSection}
+            onExportReading={() => void handleExportSection('reading')}
+            onExportReadingManual={() => void handleExportSection('reading_manual')}
+            onExportListening={() => void handleExportSection('listening')}
+            onExportListeningManual={() => void handleExportSection('listening_manual')}
+            onPrintWriting={() => void handleExportSection('writing')}
+            onOpenExportBuilder={openPerStudentExportDialog}
+          />
         </div>
       </div>
 

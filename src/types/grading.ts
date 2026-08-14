@@ -626,6 +626,24 @@ export interface ReviewEvent {
 }
 
 /**
+ * Pagination metadata returned by the paginated grading session queue
+ */
+export interface SessionQueuePagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+}
+
+/**
+ * A single page of the grading session queue
+ */
+export interface SessionQueuePage {
+  sessions: GradingSession[];
+  pagination: SessionQueuePagination;
+}
+
+/**
  * Grading Queue Filters
  */
 export interface GradingQueueFilters {
@@ -635,7 +653,6 @@ export interface GradingQueueFilters {
   exam?: string[] | undefined;
   isFlagged?: boolean | undefined;
   isOverdue?: boolean | undefined;
-  recentDays?: number | undefined;
   searchQuery?: string | undefined;
 }
 

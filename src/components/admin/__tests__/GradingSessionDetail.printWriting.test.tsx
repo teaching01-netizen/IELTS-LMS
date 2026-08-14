@@ -140,7 +140,9 @@ test('prints writing document from grading session detail', async () => {
       />,
     );
 
-    const printAllWritingButton = await screen.findByRole('button', { name: /print all writing/i });
+    const exportButton = await screen.findByRole('button', { name: 'Export' });
+    fireEvent.click(exportButton);
+    const printAllWritingButton = await screen.findByRole('menuitem', { name: /print all writing/i });
     fireEvent.click(printAllWritingButton);
 
     await waitFor(() => expect(printSpy).toHaveBeenCalledTimes(1));

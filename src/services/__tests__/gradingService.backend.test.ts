@@ -299,6 +299,37 @@ describe('gradingService backend mode', () => {
     );
   });
 
+  it('loads a paginated session queue page with server-side search', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_GRADING', 'true');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/v1/grading/sessions?page=2&pageSize=10&search=cambridge') {
+        return jsonResponse({
+          sessions: [buildSession()],
+          pagination: { page: 2, pageSize: 10, total: 23, hasMore: true },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const result = await gradingService.getSessionQueuePage({
+      page: 2,
+      pageSize: 10,
+      searchQuery: 'cambridge',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data?.sessions).toEqual([
+      expect.objectContaining({ id: 'sched-1', examTitle: 'Mock Exam' }),
+    ]);
+    expect(result.data?.pagination).toEqual({ page: 2, pageSize: 10, total: 23, hasMore: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/grading/sessions?page=2&pageSize=10&search=cambridge',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('saves review drafts through the backend review-draft endpoint', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_GRADING', 'true');
     const initialDraft = buildDraft(0) as ReviewDraft;

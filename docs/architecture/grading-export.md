@@ -7,16 +7,20 @@ This document describes the grading export behavior in the admin grading session
 - Exports are **read-only**: exporting must not mutate submissions, answers, grades, or review state.
 - If a selected section has no stored submission data for a student, the export must still produce that student's PDF and show **"No submission"** for that section.
 
-## Export Modes (per grading session UI)
+## Export Menu (per grading session UI)
 
-The grading session detail page supports a UI-level export mode selector:
+The grading session detail page exposes a single **Export** dropdown menu that
+keeps every export surface in one place:
 
-- `default`: existing CSV exports (Reading/Listening) and "Print all writing"
-- `per_student_zip_pdf`: export selected students into a single ZIP containing one PDF per student
+- **Download CSV**: Reading answers & scores, Reading manual check sheet,
+  Listening answers & scores, Listening manual check sheet
+- **Print**: Print all writing (task pages with prompts, responses, assessment forms)
+- **Export Builder · PDF ZIP**: per-student PDF export dialog
 
-The selected mode is persisted **per grading session** using `localStorage`:
-
-- `grading:<sessionId>:exportMode`
+The menu lives in `GradingExportButtons` and opens the existing
+`PerStudentZipPdfExportDialog` (Export Builder) directly; the former
+UI-level export mode selector and its `grading:<sessionId>:exportMode`
+localStorage key are no longer used.
 
 ## Per-student ZIP (PDF) export
 
@@ -35,7 +39,7 @@ Canonical identity fields for export are `nickname`, `wcode`, `level`, and `full
 metadata exposes a distinct level, the adapter uses the explicit `level` field when present and falls back
 to the existing course value; it never parses display text.
 
-When `exportMode = per_student_zip_pdf`, the UI provides:
+The Export Builder dialog (opened from the Export menu) provides:
 
 - Student picker: multi-select + search + select-all
 - Section picker: Reading, Listening, and/or Writing

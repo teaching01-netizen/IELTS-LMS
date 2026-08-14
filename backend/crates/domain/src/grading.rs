@@ -871,6 +871,15 @@ pub struct GradingSessionPagination {
     pub has_more: bool,
 }
 
+/// A single page of the grading session queue. Used by the paginated
+/// `GET /api/v1/grading/sessions?page=&pageSize=&search=` endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GradingSessionPage {
+    pub sessions: Vec<GradingSession>,
+    pub pagination: GradingSessionPagination,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewDraftSummary {

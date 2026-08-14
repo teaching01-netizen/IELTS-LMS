@@ -38,6 +38,9 @@ pub struct SessionDetailQuery {
 #[serde(rename_all = "camelCase")]
 pub struct SessionListQuery {
     pub limit: Option<u64>,
+    pub page: Option<u64>,
+    pub page_size: Option<u64>,
+    pub search: Option<String>,
 }
 
 fn grading_service(state: &AppState) -> GradingService {
@@ -73,11 +76,44 @@ pub async fn list_sessions(
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
     Query(query): Query<SessionListQuery>,
-) -> Result<ApiResponse<Vec<GradingSession>>, ApiError> {
+) -> Result<ApiResponse<serde_json::Value>, ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Grader])?;
     let ctx = crate::http::auth::actor_context_from_principal(&principal);
     let service = grading_service(&state);
     let started = Instant::now();
+
+    // Paginated response: `{ sessions, pagination }` with optional `search`.
+    if query.page.is_some() || query.page_size.is_some() || query.search.is_some() {
+        let page = query.page.unwrap_or(1);
+        let page_size = query.page_size.unwrap_or(10);
+        let allowed_schedule_ids = if principal.user.role == UserRole::Admin {
+            None
+        } else {
+            Some(assigned_schedule_ids(&state, &principal.user.id).await?)
+        };
+        let page_data = service
+            .list_sessions_page(
+                &ctx,
+                page,
+                page_size,
+                query.search.as_deref(),
+                allowed_schedule_ids.as_ref(),
+            )
+            .await?;
+        state
+            .telemetry
+            .observe_db_operation("grading.list_sessions", started.elapsed());
+        return Ok(ApiResponse::success_with_request_id(
+            serde_json::json!({
+                "sessions": page_data.sessions,
+                "pagination": page_data.pagination,
+            }),
+            request_id.0,
+        ));
+    }
+
+    // Legacy response: a plain array (used by load-runner, prod smoke, and
+    // internal consumers that expect the historical shape).
     let limit = query.limit.unwrap_or(200).clamp(1, 500);
     let db_limit = if principal.user.role == UserRole::Admin {
         limit
@@ -98,7 +134,10 @@ pub async fn list_sessions(
     state
         .telemetry
         .observe_db_operation("grading.list_sessions", started.elapsed());
-    Ok(ApiResponse::success_with_request_id(sessions, request_id.0))
+    Ok(ApiResponse::success_with_request_id(
+        serde_json::json!(sessions),
+        request_id.0,
+    ))
 }
 
 pub async fn list_objective_overrides(

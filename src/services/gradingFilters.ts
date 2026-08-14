@@ -23,14 +23,6 @@ export function filterGradingSessions(
 ): GradingSession[] {
   let filtered = sessions;
 
-  if (typeof filters.recentDays === 'number' && filters.recentDays > 0) {
-    const threshold = Date.now() - (filters.recentDays * 24 * 60 * 60 * 1000);
-    filtered = filtered.filter((session) => {
-      const startTime = Date.parse(session.startTime);
-      return Number.isFinite(startTime) && startTime >= threshold;
-    });
-  }
-
   if (filters.cohort && filters.cohort.length > 0) {
     filtered = filtered.filter((session) => filters.cohort!.includes(session.cohortName));
   }
