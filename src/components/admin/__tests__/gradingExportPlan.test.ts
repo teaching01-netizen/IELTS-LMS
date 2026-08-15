@@ -219,6 +219,50 @@ describe('grading export plan', () => {
     expect(plan.students[1]?.outputs[0]?.filename).toContain('(2).pdf');
   });
 
+  test('builds one folder per section with per-student PDFs in bySection mode', () => {
+    const students = [
+      makeRecord('sub-1', 'Somsri Saelim', {
+        nickname: 'Mew',
+        wcode: 'W12345',
+        level: 'Level 5',
+        courseName: 'IELTS Advanced',
+      }),
+      makeRecord('sub-2', 'Somchai Dee', {
+        nickname: 'Beam',
+        wcode: 'W12346',
+        level: 'Level 5',
+        courseName: 'IELTS Advanced',
+      }),
+    ];
+
+    const plan = buildExportPlan({
+      session: { sessionId: 'session-1', examTitle: 'IELTS Mock' },
+      students,
+      selectedSubmissionIds: ['sub-1', 'sub-2'],
+      profile: makeProfile({
+        pdfMode: 'bySection',
+        sections: ['reading', 'listening', 'writing'],
+        grouping: [{ field: 'course' }],
+      }),
+      generatedAt,
+    });
+
+    expect(plan.folderCount).toBe(3);
+    expect(plan.folders).toEqual(expect.arrayContaining(['reading', 'listening', 'writing']));
+    expect(plan.pdfCount).toBe(6);
+    const outputs = plan.students.flatMap((student) => student.outputs);
+    expect(outputs.map((output) => output.path)).toEqual(
+      expect.arrayContaining([
+        'reading/Mew (W12345) - Level 5 - Somsri Saelim.pdf',
+        'listening/Mew (W12345) - Level 5 - Somsri Saelim.pdf',
+        'writing/Mew (W12345) - Level 5 - Somsri Saelim.pdf',
+        'reading/Beam (W12346) - Level 5 - Somchai Dee.pdf',
+      ]),
+    );
+    // Course grouping is ignored in bySection mode: no extra sub-folders.
+    expect(outputs.some((output) => output.path.startsWith('IELTS Advanced/'))).toBe(false);
+  });
+
   test('reports zero-result filters without planning files', () => {
     const plan = buildExportPlan({
       session: { sessionId: 'session-1', examTitle: 'IELTS Mock' },

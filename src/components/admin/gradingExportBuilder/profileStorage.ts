@@ -32,7 +32,7 @@ function isStoredExportProfile(value: unknown): value is ExportProfile {
     Array.isArray(value['grouping']) &&
     Array.isArray(value['customGroups']) &&
     typeof value['filenameTemplate'] === 'string' &&
-    (value['pdfMode'] === 'combined' || value['pdfMode'] === 'separate') &&
+    (value['pdfMode'] === 'combined' || value['pdfMode'] === 'separate' || value['pdfMode'] === 'bySection') &&
     value['collisionStrategy'] === 'suffix' &&
     typeof value['version'] === 'number' &&
     typeof value['createdBy'] === 'string' &&

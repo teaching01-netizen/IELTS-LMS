@@ -165,13 +165,6 @@ export function buildExportPlan(input: BuildExportPlanInput): ExportPlan {
     buildFilenameContext(record, input, customGroupBySubmissionId.get(record.identity.submissionId) ?? null),
   ));
   const unknownPlaceholders = new Set(combinedResults.flatMap((result) => result.unknownPlaceholders));
-  if (unknownPlaceholders.size > 0) {
-    warnings.push({
-      code: 'unknown_placeholder',
-      message: `Unknown filename placeholder(s): ${[...unknownPlaceholders].join(', ')}.`,
-      submissionIds: selectedStudents.map((record) => record.identity.submissionId),
-    });
-  }
   const conflicts: ExportConflict[] = [];
   const plannedStudents: PlannedStudentExport[] = [];
   if (input.profile.pdfMode === 'combined') {
@@ -188,7 +181,7 @@ export function buildExportPlan(input: BuildExportPlanInput): ExportPlan {
         outputs: [{ folderPath, filename, path: joinOutputPath(folderPath, filename) }],
       });
     });
-  } else {
+  } else if (input.profile.pdfMode === 'separate') {
     selectedStudents.forEach((record, studentIndex) => {
       const folderPath = folderPaths[studentIndex] ?? [];
       const desiredSections = input.profile.sections.map((section) => renderPerStudentPdfFilenameTemplate(
@@ -214,6 +207,54 @@ export function buildExportPlan(input: BuildExportPlanInput): ExportPlan {
           return { folderPath, filename, path: joinOutputPath(folderPath, filename), section };
         }),
       });
+    });
+  } else {
+    // bySection: one folder per selected section (module), with that section's
+    // PDF for every selected student inside. No per-student or grouping sub-folders.
+    const sectionFolderPaths = input.profile.sections.map((section) => [sanitizeFilenameSegment(section) || section]);
+    const desiredResultsBySection = input.profile.sections.map((section) =>
+      selectedStudents.map((record) => renderPerStudentPdfFilenameTemplate(
+        input.profile.filenameTemplate,
+        buildFilenameContext(record, input, customGroupBySubmissionId.get(record.identity.submissionId) ?? null, section),
+      )),
+    );
+    desiredResultsBySection.flatMap((results) => results).forEach((result) => {
+      result.unknownPlaceholders.forEach((placeholder) => unknownPlaceholders.add(placeholder));
+    });
+    const resolvedNamesBySection = desiredResultsBySection.map((results) =>
+      resolvePerStudentPdfFilenameCollisions(results.map((result) => result.filename)).filenames,
+    );
+    desiredResultsBySection.forEach((results, sectionIndex) => {
+      const folderPath = sectionFolderPaths[sectionIndex] ?? [];
+      const resolvedNames = resolvedNamesBySection[sectionIndex] ?? [];
+      results.forEach((result, studentIndex) => {
+        const originalFilename = result.filename;
+        const filename = resolvedNames[studentIndex] ?? originalFilename;
+        if (filename !== originalFilename) conflicts.push({
+          originalPath: joinOutputPath(folderPath, originalFilename),
+          resolvedPath: joinOutputPath(folderPath, filename),
+          submissionIds: [selectedStudents[studentIndex]?.identity.submissionId ?? ''],
+        });
+      });
+    });
+    selectedStudents.forEach((record, studentIndex) => {
+      plannedStudents.push({
+        submissionId: record.identity.submissionId,
+        studentId: record.identity.studentId,
+        identity: record.identity,
+        outputs: input.profile.sections.map((section, sectionIndex) => {
+          const folderPath = sectionFolderPaths[sectionIndex] ?? [section];
+          const filename = resolvedNamesBySection[sectionIndex]?.[studentIndex] ?? `${section}.pdf`;
+          return { folderPath, filename, path: joinOutputPath(folderPath, filename), section };
+        }),
+      });
+    });
+  }
+  if (unknownPlaceholders.size > 0) {
+    warnings.push({
+      code: 'unknown_placeholder',
+      message: `Unknown filename placeholder(s): ${[...unknownPlaceholders].join(', ')}.`,
+      submissionIds: selectedStudents.map((record) => record.identity.submissionId),
     });
   }
   const folders = [...new Set(plannedStudents.flatMap((student) => student.outputs

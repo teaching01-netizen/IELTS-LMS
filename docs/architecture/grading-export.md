@@ -46,6 +46,7 @@ The Export Builder dialog (opened from the Export menu) provides:
 - PDF mode:
   - `combined`: one PDF per student containing the selected sections
   - `separate`: one folder per student, with one PDF per selected section
+  - `bySection`: one folder per selected section (module), with each student's PDF for that section directly inside (no per-student sub-folders)
 
 Output:
 
@@ -78,6 +79,7 @@ placeholders are kept as literal text and the UI warns.
 Notes:
 
 - In `separate` PDF mode, use `{{section}}` in the template to generate distinct filenames per section and avoid ` (2)`, ` (3)` suffixes.
+- In `bySection` PDF mode, the ZIP root contains one folder per selected section (`reading`, `listening`, `writing`) and each folder holds the student PDFs for that section only. Folder grouping is not applied in this mode; the section folders are the only folder level.
 
 The default filename template is:
 

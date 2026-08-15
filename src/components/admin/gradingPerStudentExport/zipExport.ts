@@ -134,7 +134,7 @@ export async function createPerStudentZipPdfExport(
         });
       }
     }
-  } else {
+  } else if (pdfMode === 'separate') {
     const desiredFolders = input.students.map((student) => `${student.studentName}_${student.submissionId}`);
     const folderNames = resolveUniqueZipPathSegments(desiredFolders);
 
@@ -196,6 +196,70 @@ export async function createPerStudentZipPdfExport(
         error: errors.length > 0 ? errors.join('; ') : undefined,
       });
     }
+  } else {
+    // bySection: one folder per selected section (module), with each student's
+    // PDF for that section inside. No per-student sub-folders.
+    const sectionFolderNames = sections.map((section) => sanitizeFilenameSegment(section) || section);
+    const desiredBySection = sections.map(() => [] as string[]);
+    for (const student of input.students) {
+      sections.forEach((section, sectionIndex) => {
+        desiredBySection[sectionIndex]?.push(
+          renderPerStudentPdfFilenameTemplate(template, {
+            studentName: student.studentName,
+            studentId: student.studentId,
+            fullName: student.studentName,
+            wcode: student.studentId,
+            level: student.ieltsCourse ?? 'No level',
+            studentEmail: student.studentEmail,
+            nickname: student.nickname ?? 'No nickname',
+            course: student.ieltsCourse,
+            ieltsCourse: student.ieltsCourse,
+            submissionId: student.submissionId,
+            examTitle: input.session?.examTitle,
+            cohortName: input.session?.cohortName,
+            sessionId: input.session?.sessionId,
+            sections,
+            section,
+            generatedAt: input.generatedAt,
+          }).filename,
+        );
+      });
+    }
+    const resolvedBySection = desiredBySection.map((desired) =>
+      resolvePerStudentPdfFilenameCollisions(desired).filenames,
+    );
+
+    input.students.forEach((student, studentIndex) => {
+      const outputs: string[] = [];
+      const errors: string[] = [];
+      sections.forEach((section, sectionIndex) => {
+        const folderName = sectionFolderNames[sectionIndex] ?? section;
+        const pdfFilename = resolvedBySection[sectionIndex]?.[studentIndex] ?? `${section}.pdf`;
+        const zipPath = `${folderName}/${pdfFilename}`;
+
+        try {
+          const pdfBytes = buildStudentPdfBytes(student, [section], input.generatedAt);
+          files[zipPath] = pdfBytes;
+          outputs.push(zipPath);
+        } catch (error) {
+          errors.push(`${section}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      });
+
+      manifestStudents.push({
+        submissionId: student.submissionId,
+        studentId: student.studentId,
+        studentName: student.studentName,
+        nickname: student.nickname ?? undefined,
+        ieltsCourse: student.ieltsCourse ?? undefined,
+        wcode: student.studentId,
+        level: student.ieltsCourse ?? undefined,
+        outputs,
+        filename: sectionFolderNames.join('/'),
+        status: errors.length === 0 && outputs.length > 0 ? 'ok' : 'failed',
+        error: errors.length > 0 ? errors.join('; ') : undefined,
+      });
+    });
   }
 
   const manifest: PerStudentZipPdfExportManifest = {

@@ -102,6 +102,7 @@ export function ExportBuilderStructure({
             options={[
               { value: 'combined', label: 'Combined PDF' },
               { value: 'separate', label: 'Separate by section' },
+              { value: 'bySection', label: 'Folder per section' },
             ]}
             onChange={(event) => onChange({ ...profile, pdfMode: event.target.value as ExportProfile['pdfMode'] })}
             disabled={disabled}
@@ -143,7 +144,11 @@ export function ExportBuilderStructure({
         <div className="flex items-end justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-gray-900">Folder structure</p>
-            <p className="mt-1 text-xs text-gray-500">Group by one or more fields. Leave empty for a flat ZIP.</p>
+            <p className="mt-1 text-xs text-gray-500">
+              {profile.pdfMode === 'bySection'
+                ? 'Not used in Folder-per-section mode: each section (module) is its own folder and contains the student PDFs directly.'
+                : 'Group by one or more fields. Leave empty for a flat ZIP.'}
+            </p>
           </div>
           {profile.grouping.length < 3 ? (
             <Button
@@ -151,7 +156,7 @@ export function ExportBuilderStructure({
               variant="ghost"
               size="sm"
               onClick={() => onChange({ ...profile, grouping: [...profile.grouping, { field: 'level' }] })}
-              disabled={disabled}
+              disabled={disabled || profile.pdfMode === 'bySection'}
             >
               + Add folder level
             </Button>
@@ -164,7 +169,7 @@ export function ExportBuilderStructure({
               value="none"
               options={GROUPING_OPTIONS}
               onChange={(event) => onChange(updateGrouping(profile, 0, event.target.value))}
-              disabled={disabled}
+              disabled={disabled || profile.pdfMode === 'bySection'}
             />
           ) : (
             profile.grouping.map((grouping, index) => (
@@ -177,7 +182,7 @@ export function ExportBuilderStructure({
                   value={grouping.field}
                   options={GROUPING_OPTIONS.filter((option) => option.value !== 'none')}
                   onChange={(event) => onChange(updateGrouping(profile, index, event.target.value))}
-                  disabled={disabled}
+                  disabled={disabled || profile.pdfMode === 'bySection'}
                   className="flex-1"
                 />
               </div>

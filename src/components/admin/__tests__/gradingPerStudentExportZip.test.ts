@@ -208,6 +208,49 @@ describe('createPerStudentZipPdfExport', () => {
     ]);
   });
 
+  test('builds one folder per section with per-student PDFs in bySection mode', async () => {
+    const objectiveColumns: CsvColumn[] = [
+      { key: 'studentName', label: 'Student Name' },
+      { key: 'answer:q1', label: 'Q1 Answer' },
+    ];
+
+    const exportResult = await createPerStudentZipPdfExport({
+      filenameBase: 'grading-export',
+      generatedAt: new Date('2026-05-13T00:00:00.000Z'),
+      sections: ['reading', 'listening', 'writing'],
+      pdfMode: 'bySection',
+      students: [
+        {
+          submissionId: 'sub-1',
+          studentName: 'Ada Student',
+          studentId: 'student-sub-1',
+          sectionData: {
+            reading: { columns: objectiveColumns, row: { studentName: 'Ada Student', 'answer:q1': 'A', 'rightAnswer:q1': 'A', 'score:q1': 1 } },
+            listening: { columns: objectiveColumns, row: { studentName: 'Ada Student', 'answer:q1': 'B', 'rightAnswer:q1': 'C', 'score:q1': 0 } },
+            writing: { columns: [{ key: 'studentName', label: 'Student Name' }], row: { studentName: 'Ada Student' } },
+          },
+        },
+      ],
+    });
+
+    const entries = unzipSync(exportResult.bytes);
+    expect(Object.keys(entries)).toEqual(
+      expect.arrayContaining([
+        'manifest.json',
+        'reading/No nickname (student-sub-1) - No level - Ada Student.pdf',
+        'listening/No nickname (student-sub-1) - No level - Ada Student.pdf',
+        'writing/No nickname (student-sub-1) - No level - Ada Student.pdf',
+      ]),
+    );
+    // No per-student sub-folder: the student PDF sits directly inside each section folder.
+    expect(Object.keys(entries).some((key) => key.startsWith('Ada Student_sub-1'))).toBe(false);
+
+    const manifest = JSON.parse(strFromU8(entries['manifest.json'] as Uint8Array));
+    expect(manifest.pdfMode).toBe('bySection');
+    expect(manifest.students[0]?.outputs).toHaveLength(3);
+    expect(manifest.students[0]?.filename).toBe('reading/listening/writing');
+  });
+
   test('builds per-student folders with one PDF per section in separate mode', async () => {
     const objectiveColumns: CsvColumn[] = [
       { key: 'studentName', label: 'Student Name' },

@@ -3,7 +3,7 @@ import type { WritingTaskSubmission } from '../../../types/grading';
 
 export type PerStudentZipPdfExportSection = 'reading' | 'listening' | 'writing';
 
-export type PerStudentZipPdfMode = 'combined' | 'separate';
+export type PerStudentZipPdfMode = 'combined' | 'separate' | 'bySection';
 
 export interface PerStudentZipPdfPlannedOutput {
   folderPath: readonly string[];
