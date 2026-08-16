@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ExamState, ModuleType, QuestionAnswer } from '../../types';
-import type { StudentQuestionDescriptor } from '@services/examAdapterService';
+import type { StudentQuestionDescriptor } from '@student/application/studentExamContentFacade';
 import { QuestionNavigator } from './QuestionNavigator';
 import { WritingTaskNavigator } from './WritingTaskNavigator';
 import { StudentFooter } from './StudentFooter';
@@ -12,7 +12,7 @@ import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import type { StudentLayoutMode } from './layout/studentLayoutMode';
 
-interface StudentExamWorkspaceProps {
+export interface StudentExamWorkspaceProps {
   currentModule: ModuleType;
   examState: ExamState;
   currentQuestionId: string | null;

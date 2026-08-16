@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ModuleType } from '../../types';
 import type { RuntimeStatus } from '../../types/domain';
+import type { StudentSubmissionCommands } from '@student/application/exam-session/submissionCommands';
 
 interface RuntimeStateSnapshot {
   runtimeBacked: boolean;
@@ -19,13 +20,13 @@ interface UseStudentSubmissionOrchestrationOptions {
   attemptId: string | null;
   runtimeCompletionVerified: boolean;
   shouldRenderPostExam: boolean;
-  flushDomAnswerControlsNow: () => void;
   reconcileLiveAnswerCacheNow: () => void;
   commitWritingDraft: () => void;
   attemptActions: {
     flushPending: () => Promise<boolean>;
     submitAttempt: () => Promise<boolean>;
   };
+  submissionCommands?: StudentSubmissionCommands;
   runtimeActions: {
     transitionBlocking: (reason: 'syncing_reconnect' | 'offline', active: boolean) => void;
     submitModule: () => void;
@@ -38,11 +39,11 @@ export function useStudentSubmissionOrchestration({
   attemptId,
   runtimeCompletionVerified,
   shouldRenderPostExam,
-  flushDomAnswerControlsNow,
   reconcileLiveAnswerCacheNow,
   commitWritingDraft,
   attemptActions,
   runtimeActions,
+  submissionCommands,
 }: UseStudentSubmissionOrchestrationOptions) {
   const moduleSubmitInFlightRef = useRef<Promise<void> | null>(null);
   const moduleSubmitFingerprintRef = useRef<string | null>(null);
@@ -78,10 +79,13 @@ export function useStudentSubmissionOrchestration({
             return;
           }
 
-          flushDomAnswerControlsNow();
-          reconcileLiveAnswerCacheNow();
-          commitWritingDraft();
-          const flushed = await attemptActions.flushPending();
+          const flushed = submissionCommands
+            ? (await submissionCommands.flushBarrier()).kind === 'ready'
+            : await (async () => {
+                reconcileLiveAnswerCacheNow();
+                commitWritingDraft();
+                return attemptActions.flushPending();
+              })();
           if (flushed) {
             runtimeActions.transitionBlocking('syncing_reconnect', false);
             runtimeActions.transitionBlocking('offline', false);
@@ -116,10 +120,10 @@ export function useStudentSubmissionOrchestration({
     [
       attemptActions,
       commitWritingDraft,
-      flushDomAnswerControlsNow,
       reconcileLiveAnswerCacheNow,
       runtimeActions,
       runtimeStateRef,
+      submissionCommands,
     ],
   );
 
@@ -160,10 +164,13 @@ export function useStudentSubmissionOrchestration({
         setFinalSubmitStatus(attemptIndex === 0 ? 'submitting' : 'retrying');
 
         try {
-          flushDomAnswerControlsNow();
-          reconcileLiveAnswerCacheNow();
-          commitWritingDraft();
-          const submitted = await attemptActions.submitAttempt();
+          const submitted = submissionCommands
+            ? (await submissionCommands.requestSubmit()).kind === 'submitted'
+            : await (async () => {
+                reconcileLiveAnswerCacheNow();
+                commitWritingDraft();
+                return attemptActions.submitAttempt();
+              })();
           if (submitted) {
             runtimeFinalSubmitRef.current = attemptId;
             setFinalSubmitStatus('idle');
@@ -189,12 +196,12 @@ export function useStudentSubmissionOrchestration({
     attemptActions,
     attemptId,
     commitWritingDraft,
-    flushDomAnswerControlsNow,
     reconcileLiveAnswerCacheNow,
     runtimeCompletionVerified,
     runtimeState.runtimeBacked,
     runtimeState.runtimeStatus,
     shouldRenderPostExam,
+    submissionCommands,
   ]);
 
   return {

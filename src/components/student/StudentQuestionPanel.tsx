@@ -1,6 +1,6 @@
 import React from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
-import type { StudentQuestionDescriptor } from '../../services/examAdapterService';
+import type { StudentQuestionDescriptor } from '@student/application/studentExamContentFacade';
 import type { QuestionAnswer, QuestionBlock } from '../../types';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';

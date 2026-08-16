@@ -3,6 +3,10 @@ import type { ExamState } from '../../types';
 import type { ExamSessionRuntime } from '../../types/domain';
 import type { StudentAttempt } from '../../types/studentAttempt';
 import type { StudentAnswerInvariantRollout } from '../../features/student/hooks/useStudentSessionRouteData';
+import { getEnabledModules } from '@student/application/studentExamContentFacade';
+import { deriveStudentPhase } from '@student/domain/exam-session/deriveStudentPhase';
+import { StudentExamSessionProvider } from '@student/hooks/exam-session/StudentExamSessionProvider';
+import { getStudentExamScopeKey, type StudentExamStoreSeed } from '@student/application/exam-session/studentExamStore';
 import { StudentApp } from './StudentApp';
 import { KeyboardProvider } from './providers/StudentKeyboardProvider';
 import { StudentAttemptProvider } from './providers/StudentAttemptProvider';
@@ -41,6 +45,44 @@ export function StudentAppWrapper({
   enableMonitoring = true,
   allowPreviewStart = false,
 }: StudentAppWrapperProps) {
+  const enabledModules = getEnabledModules(state.config);
+  const sessionScheduleId = scheduleId ?? attemptSnapshot?.scheduleId ?? 'preview';
+  const sessionCandidateId =
+    attemptSnapshot?.candidateId ?? attemptSnapshot?.studentKey ?? null;
+  const currentModule =
+    runtimeSnapshot?.currentSectionKey ??
+    attemptSnapshot?.currentModule ??
+    enabledModules[0] ??
+    'listening';
+  const sessionSeed: StudentExamStoreSeed = {
+    attemptId: attemptSnapshot?.id ?? null,
+    scheduleId: sessionScheduleId,
+    candidateId: sessionCandidateId,
+    phase: deriveStudentPhase({
+      attempt: attemptSnapshot,
+      runtime: runtimeSnapshot,
+      runtimeBacked: Boolean(runtimeSnapshot),
+    }),
+    currentModule,
+    currentQuestionId:
+      attemptSnapshot?.currentModule === currentModule
+        ? attemptSnapshot.currentQuestionId
+        : null,
+    answers: attemptSnapshot?.answers ?? {},
+    writingAnswers: attemptSnapshot?.writingAnswers ?? {},
+    flags: attemptSnapshot?.flags ?? {},
+    runtimeSnapshot,
+    displayTimeRemaining: runtimeSnapshot?.currentSectionRemainingSeconds ?? null,
+    syncState: attemptSnapshot?.recovery.syncState ?? 'idle',
+    pendingMutationCount: attemptSnapshot?.recovery.pendingMutationCount ?? 0,
+    acceptedThroughSeq: attemptSnapshot?.recovery.serverAcceptedThroughSeq ?? 0,
+    blocking: {
+      active: false,
+      reason: null,
+      timeRemaining: runtimeSnapshot?.currentSectionRemainingSeconds ?? 0,
+    },
+  };
+  const sessionScopeKey = getStudentExamScopeKey(sessionSeed);
   const highlightPersistenceNamespace = `attempt:${
     attemptSnapshot?.id ??
     [
@@ -84,23 +126,25 @@ export function StudentAppWrapper({
         attemptSnapshot={attemptSnapshot}
         persistenceEnabled={persistenceEnabled}
       >
-        <ProctoringProvider
-          config={state.config}
-          scheduleId={scheduleId}
-          enabled={enableMonitoring}
-        >
-          {enableMonitoring ? (
-            <StudentNetworkProvider
-              config={state.config}
-              scheduleId={scheduleId}
-              onRefreshRuntime={onRuntimeRefresh}
-            >
-              {app}
-            </StudentNetworkProvider>
-          ) : (
-            app
-          )}
-        </ProctoringProvider>
+        <StudentExamSessionProvider key={sessionScopeKey} seed={sessionSeed}>
+          <ProctoringProvider
+            config={state.config}
+            scheduleId={scheduleId}
+            enabled={enableMonitoring}
+          >
+            {enableMonitoring ? (
+              <StudentNetworkProvider
+                config={state.config}
+                scheduleId={scheduleId}
+                onRefreshRuntime={onRuntimeRefresh}
+              >
+                {app}
+              </StudentNetworkProvider>
+            ) : (
+              app
+            )}
+          </ProctoringProvider>
+        </StudentExamSessionProvider>
       </StudentAttemptProvider>
     </StudentRuntimeProvider>
   );

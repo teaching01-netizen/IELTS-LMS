@@ -1,7 +1,7 @@
 import React from 'react';
 import type { QuestionAnswer } from '../../types';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
-import type { StudentQuestionDescriptor } from '../../services/examAdapterService';
+import type { StudentQuestionDescriptor } from '@student/application/studentExamContentFacade';
 import { ProtectedInput } from './ProtectedInput';
 import { Flag } from 'lucide-react';
 import { StudentQuestionText } from './StudentQuestionText';

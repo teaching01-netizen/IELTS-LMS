@@ -14,7 +14,7 @@ import {
   getFirstQuestionIdForModule,
   getStudentQuestionsForModule,
   type StudentQuestionDescriptor,
-} from '@services/examAdapterService';
+} from '@student/application/studentExamContentFacade';
 import type { ExamState, ModuleType, Violation, ViolationSeverity, QuestionAnswer } from '../../../types';
 import type { ExamSessionRuntime, RuntimeStatus } from '../../../types/domain';
 import type {
@@ -25,7 +25,10 @@ import {
   emitStudentObservabilityMetric,
   withStudentObservabilityDimensions,
 } from '../../../utils/studentObservability';
-import { isRuntimeStructurallyCompleted } from './verifiedTerminalState';
+import { deriveStudentPhase } from '@student/domain/exam-session/deriveStudentPhase';
+import { deriveBlockingState as deriveStudentBlockingState } from '@student/domain/exam-session/blockingPolicy';
+import { isRuntimeStructurallyCompleted } from '@student/domain/exam-session/terminalState';
+import { reconcileRuntimeSnapshot } from '@student/domain/exam-session/runtimeReconciliation';
 import {
   createBlockingMachineState,
   syncProctorBlockingMachine,
@@ -248,75 +251,14 @@ function deriveBlockingState(
   blockingReasonOverride: RuntimeReducerState['blockingReasonOverride'],
   timeRemainingSeconds: number,
 ): RuntimeBlockingState {
-  const runtimeStatus = runtimeBacked ? runtimeSnapshot?.status ?? 'not_started' : null;
-  const timeRemaining = timeRemainingSeconds;
-
-  if (blockingReasonOverride) {
-    return {
-      active: true,
-      reason: blockingReasonOverride,
-      runtimeStatus,
-      timeRemaining,
-    };
-  }
-
-  if (proctorStatus === 'paused') {
-    return {
-      active: true,
-      reason: 'proctor_paused',
-      runtimeStatus,
-      timeRemaining,
-    };
-  }
-
-  if (!runtimeBacked) {
-    return {
-      active: false,
-      reason: null,
-      runtimeStatus: null,
-      timeRemaining,
-    };
-  }
-
-  const activeSection = runtimeSnapshot?.currentSectionKey
-    ? runtimeSnapshot.sections.find(
-        (section) => section.sectionKey === runtimeSnapshot.currentSectionKey,
-      )
-    : null;
-
-  if (runtimeStatus === 'paused' || activeSection?.status === 'paused') {
-    return {
-      active: true,
-      reason: 'cohort_paused',
-      runtimeStatus,
-      timeRemaining,
-    };
-  }
-
-  if (runtimeStatus === 'not_started') {
-    return {
-      active: true,
-      reason: 'not_started',
-      runtimeStatus,
-      timeRemaining,
-    };
-  }
-
-  if (waitingForCohortAdvance || runtimeSnapshot?.waitingForNextSection) {
-    return {
-      active: true,
-      reason: 'waiting_for_advance',
-      runtimeStatus,
-      timeRemaining,
-    };
-  }
-
-  return {
-    active: false,
-    reason: null,
-    runtimeStatus,
-    timeRemaining,
-  };
+  return deriveStudentBlockingState({
+    runtimeBacked,
+    runtime: runtimeSnapshot,
+    waitingForCohortAdvance,
+    proctorStatus,
+    blockingReasonOverride,
+    timeRemaining: timeRemainingSeconds,
+  });
 }
 
 function getInitialPhase(
@@ -324,38 +266,11 @@ function getInitialPhase(
   runtimeSnapshot: ExamSessionRuntime | null,
   attemptSnapshot: StudentAttempt | null,
 ): ExamPhase {
-  const verifiedTerminal =
-    attemptSnapshot?.proctorStatus === 'terminated' ||
-    Boolean(attemptSnapshot?.submittedAt) ||
-    isRuntimeStructurallyCompleted(runtimeSnapshot);
-
-  if (verifiedTerminal) {
-    return 'post-exam';
-  }
-
-  if (!attemptSnapshot) {
-    return 'pre-check';
-  }
-
-  if (runtimeBacked && !attemptSnapshot.integrity.preCheck?.completedAt) {
-    return 'pre-check';
-  }
-
-  if (runtimeBacked && attemptSnapshot.integrity.preCheck?.completedAt) {
-    const runtimeIsActive = runtimeSnapshot?.status === 'live' || runtimeSnapshot?.status === 'paused';
-    return runtimeIsActive ? 'exam' : 'lobby';
-  }
-
-  if (!runtimeBacked && attemptSnapshot.phase === 'post-exam') {
-    return 'post-exam';
-  }
-
-  // Guard against transient/incorrect post-exam phases until terminal state is verified.
-  if (attemptSnapshot.phase === 'post-exam') {
-    return 'exam';
-  }
-
-  return attemptSnapshot.phase;
+  return deriveStudentPhase({
+    attempt: attemptSnapshot,
+    runtime: runtimeSnapshot,
+    runtimeBacked,
+  });
 }
 
 function createInitialRuntimeState(
@@ -446,55 +361,45 @@ function runtimeReducer(
 ): RuntimeReducerState {
   switch (action.type) {
     case 'hydrate_runtime': {
-      const moduleChanged = action.nextModule !== state.currentModule;
-      const terminalVerified =
-        state.proctorStatus === 'terminated' ||
-        Boolean(state.submittedAt) ||
-        isRuntimeStructurallyCompleted(action.snapshot);
-      const runtimeStatus = action.snapshot?.status ?? null;
-      const shouldPromoteToExamPhase =
-        !terminalVerified && (runtimeStatus === 'live' || runtimeStatus === 'paused');
-      if (action.preserveLocalAdvance && !terminalVerified) {
+      if (!action.snapshot) {
         return state;
       }
-      const nextPhase =
-        terminalVerified
-          ? 'post-exam'
-          : shouldPromoteToExamPhase
-            ? 'exam'
-            : state.phase === 'pre-check' ? 'pre-check' : 'lobby';
-      const nextQuestionId = moduleChanged ? action.nextQuestionId : state.currentQuestionId;
-      const snapshotTimeRemaining = action.snapshot?.currentSectionRemainingSeconds;
-      const nextTimeRemaining =
-        typeof snapshotTimeRemaining === 'number' ? snapshotTimeRemaining : state.timeRemaining;
-      const nextCurrentSectionExtensionMinutes =
-        typeof action.currentSectionExtensionMinutes === 'number'
-          ? action.currentSectionExtensionMinutes
-          : moduleChanged
-            ? null
-            : state.currentSectionExtensionMinutes;
-      const nextWaitingForCohortAdvance =
-        state.waitingForCohortAdvance && !moduleChanged && !terminalVerified;
+
+      const reconciled = reconcileRuntimeSnapshot({
+        current: {
+          phase: state.phase,
+          currentModule: state.currentModule,
+          currentQuestionId: state.currentQuestionId,
+          timeRemaining: state.timeRemaining,
+          currentSectionExtensionMinutes: state.currentSectionExtensionMinutes,
+          waitingForCohortAdvance: state.waitingForCohortAdvance,
+        },
+        incoming: action.snapshot,
+        nextModule: action.nextModule,
+        firstQuestionId: action.nextQuestionId,
+        currentSectionExtensionMinutes: action.currentSectionExtensionMinutes,
+        preserveLocalAdvance: action.preserveLocalAdvance ?? false,
+      });
 
       if (
-        state.phase === nextPhase &&
+        state.phase === reconciled.phase &&
         state.currentModule === action.nextModule &&
-        state.currentQuestionId === nextQuestionId &&
-        state.timeRemaining === nextTimeRemaining &&
-        state.currentSectionExtensionMinutes === nextCurrentSectionExtensionMinutes &&
-        state.waitingForCohortAdvance === nextWaitingForCohortAdvance
+        state.currentQuestionId === reconciled.currentQuestionId &&
+        state.timeRemaining === reconciled.timeRemaining &&
+        state.currentSectionExtensionMinutes === reconciled.currentSectionExtensionMinutes &&
+        state.waitingForCohortAdvance === reconciled.waitingForCohortAdvance
       ) {
         return state;
       }
 
       return {
         ...state,
-        phase: nextPhase,
-        currentModule: action.nextModule,
-        currentQuestionId: nextQuestionId,
-        timeRemaining: nextTimeRemaining,
-        currentSectionExtensionMinutes: nextCurrentSectionExtensionMinutes,
-        waitingForCohortAdvance: nextWaitingForCohortAdvance,
+        phase: reconciled.phase,
+        currentModule: reconciled.currentModule,
+        currentQuestionId: reconciled.currentQuestionId,
+        timeRemaining: reconciled.timeRemaining,
+        currentSectionExtensionMinutes: reconciled.currentSectionExtensionMinutes,
+        waitingForCohortAdvance: reconciled.waitingForCohortAdvance,
       };
     }
     case 'hydrate_proctor': {

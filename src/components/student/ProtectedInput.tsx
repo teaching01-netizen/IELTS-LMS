@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { ExamConfig } from '../../types';
-import { saveStudentAuditEvent } from '../../services/studentAuditService';
+import { saveStudentAuditEvent } from '@student/application/studentAttemptFacade';
 import { useOptionalStudentAttemptControls } from './providers/StudentAttemptProvider';
 import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 import { registerProtectedAnswerControlLifecycle } from './protectedAnswerControlLifecycle';

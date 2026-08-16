@@ -6,7 +6,7 @@ import {
   getQuestionNumberLabel,
   isQuestionAnswered,
   type StudentQuestionDescriptor,
-} from '@services/examAdapterService';
+} from '@student/application/studentExamContentFacade';
 import type { StudentAnswer } from './providers/StudentRuntimeProvider';
 import type { StudentLayoutMode } from './layout/studentLayoutMode';
 import { CompactQuestionNavigation } from './layout/CompactQuestionNavigation';

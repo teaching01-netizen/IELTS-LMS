@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { DiagramLabelingBlock, ExamState, QuestionAnswer } from '../../types';
 import { Play, Pause, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
-import { getStudentQuestionsForModule } from '../../services/examAdapterService';
+import { getStudentQuestionsForModule } from '@student/application/studentExamContentFacade';
 import { prefersReducedMotion } from './prefersReducedMotion';
 import { RichTextHighlighter } from './RichTextHighlighter';
 import { StudentQuestionText } from './StudentQuestionText';

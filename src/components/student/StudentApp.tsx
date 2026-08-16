@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { countAnsweredQuestions, countQuestionSlots } from '@services/examAdapterService';
+import { countAnsweredQuestions, countQuestionSlots } from '@student/application/studentExamContentFacade';
 import { Button } from '../ui/Button';
 import { AccessibilitySettings } from './AccessibilitySettings';
-import { Lobby } from './Lobby';
-import { PreCheck } from './PreCheck';
-import { StudentExamWorkspace } from './StudentExamWorkspace';
+import { StudentExamPhaseRenderer } from './StudentExamPhaseRenderer';
+import { StudentExamWorkspaceSession } from './StudentExamWorkspaceSession';
 import { StudentHeader } from './StudentHeader';
 import { CompactStudentHeader } from './layout/CompactStudentHeader';
 import { StudentExamShell } from './layout/StudentExamShell';
@@ -13,7 +12,6 @@ import { useStudentExamViewport } from './layout/useStudentExamViewport';
 import { useStudentExamPageLock } from './layout/useStudentExamPageLock';
 import { useStudentFocusedControlVisibility } from './layout/useStudentFocusedControlVisibility';
 import { useStudentLayoutEnvironment } from './layout/useStudentLayoutEnvironment';
-import { StudentPostExamView } from './StudentPostExamView';
 import { SubmitConfirmation } from './SubmitConfirmation';
 import { WarningOverlay } from './WarningOverlay';
 import { useStudentAutoSubmitBoundary } from './useStudentAutoSubmitBoundary';
@@ -30,6 +28,9 @@ import { useStudentWarningVisibility } from './useStudentWarningVisibility';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
 import { useStudentRuntime } from './providers/StudentRuntimeProvider';
 import { useStudentUI } from './providers/StudentUIProvider';
+import { useExamCommands } from '@student/hooks/exam-session/useExamCommands';
+import { useStudentExamSessionStore } from '@student/hooks/exam-session/StudentExamSessionProvider';
+import { createStudentSubmissionCommands } from '@student/application/exam-session/submissionCommands';
 import { isRuntimeStructurallyCompleted, isVerifiedTerminalStudentState } from './providers/verifiedTerminalState';
 import { resolveObjectiveAnswerUpdate } from './resolveObjectiveAnswerUpdate';
 import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
@@ -134,6 +135,8 @@ export function StudentApp({
   void allowExitDuringExam;
   const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
+  const examSessionCommands = useExamCommands();
+  const examSessionStore = useStudentExamSessionStore();
   const { state: uiState, actions: uiActions } = useStudentUI();
   const layoutEnvironment = useStudentLayoutEnvironment();
   const layoutMode = layoutEnvironment.layoutMode;
@@ -189,27 +192,38 @@ export function StudentApp({
   const [warningSeverity, setWarningSeverity] = useState<'medium' | 'high' | 'critical'>(
     'medium',
   );
-  const flushDomAnswerControlsNow = useCallback(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
 
-    const controls = document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-      'input, select, textarea',
+  useEffect(() => {
+    examSessionCommands.setPhase(runtimeState.phase);
+    examSessionCommands.setNavigation(runtimeState.currentModule, runtimeState.currentQuestionId);
+    examSessionCommands.setRuntimeSnapshot(
+      runtimeState.runtimeSnapshot,
+      runtimeState.displayTimeRemaining ?? null,
     );
-
-    controls.forEach((control) => {
-      control.dispatchEvent(new Event('input', { bubbles: true }));
-      control.dispatchEvent(new Event('change', { bubbles: true }));
-      control.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+    examSessionCommands.setPersistence({
+      syncState: runtimeState.attemptSyncState,
+      pendingMutationCount: attemptState.attempt?.recovery.pendingMutationCount ?? 0,
+      acceptedThroughSeq: attemptState.attempt?.recovery.serverAcceptedThroughSeq ?? 0,
     });
-
-    const contentEditables = document.querySelectorAll<HTMLElement>('[contenteditable="true"]');
-    contentEditables.forEach((node) => {
-      node.dispatchEvent(new Event('input', { bubbles: true }));
-      node.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+    examSessionCommands.setBlocking({
+      active: runtimeState.blocking.active,
+      reason: runtimeState.blocking.reason,
+      timeRemaining: runtimeState.blocking.timeRemaining,
     });
-  }, []);
+  }, [
+    attemptState.attempt?.recovery.pendingMutationCount,
+    attemptState.attempt?.recovery.serverAcceptedThroughSeq,
+    examSessionCommands,
+    runtimeState.attemptSyncState,
+    runtimeState.blocking.active,
+    runtimeState.blocking.reason,
+    runtimeState.blocking.timeRemaining,
+    runtimeState.currentModule,
+    runtimeState.currentQuestionId,
+    runtimeState.displayTimeRemaining,
+    runtimeState.phase,
+    runtimeState.runtimeSnapshot,
+  ]);
   const reconcileLiveAnswerCacheNow = useCallback(() => {
     latestAnswersRef.current = liveObjectiveAnswersRef.current;
   }, []);
@@ -266,6 +280,34 @@ export function StudentApp({
     writingDraftCommitRef.current?.();
   }, []);
 
+  const submissionCommands = useMemo(
+    () =>
+      createStudentSubmissionCommands({
+        store: examSessionStore,
+        drafts: {
+          async commitAll() {
+            reconcileLiveAnswerCacheNow();
+            commitWritingDraft();
+          },
+          async flushDurability() {
+            attemptActions.flushAnswerDurabilityNow();
+          },
+        },
+        transport: {
+          flushPending: attemptActions.flushPending,
+          submit: attemptActions.submitAttempt,
+        },
+      }),
+    [
+      attemptActions.flushAnswerDurabilityNow,
+      attemptActions.flushPending,
+      attemptActions.submitAttempt,
+      commitWritingDraft,
+      examSessionStore,
+      reconcileLiveAnswerCacheNow,
+    ],
+  );
+
   const {
     finalSubmitStatus,
     flushAndSubmitCurrentModuleWithRetry,
@@ -279,7 +321,6 @@ export function StudentApp({
     attemptId: attemptState.attemptId,
     runtimeCompletionVerified,
     shouldRenderPostExam,
-    flushDomAnswerControlsNow,
     reconcileLiveAnswerCacheNow,
     commitWritingDraft,
     attemptActions: {
@@ -290,6 +331,7 @@ export function StudentApp({
       transitionBlocking: runtimeActions.transitionBlocking,
       submitModule: runtimeActions.submitModule,
     },
+    submissionCommands,
   });
 
   useEffect(() => {
@@ -420,7 +462,6 @@ export function StudentApp({
       return;
     }
 
-    flushDomAnswerControlsNow();
     reconcileLiveAnswerCacheNow();
     writingDraftCommitRef.current?.();
     runtimeActions.submitModule();
@@ -466,6 +507,7 @@ export function StudentApp({
       ...liveObjectiveAnswersRef.current,
       [questionId]: resolvedAnswer,
     };
+    examSessionCommands.setObjectiveAnswer(questionId, resolvedAnswer, meta);
     attemptActions.persistAnswer(questionId, resolvedAnswer, meta);
   };
 
@@ -474,6 +516,7 @@ export function StudentApp({
       return;
     }
     const nextFlagged = !attemptFlags[questionId];
+    examSessionCommands.toggleFlag(questionId);
     attemptActions.persistFlag(questionId, nextFlagged);
   };
 
@@ -502,12 +545,21 @@ export function StudentApp({
       ...liveWritingAnswersRef.current,
       [taskId]: text,
     };
+    examSessionCommands.setWritingAnswer(taskId, text);
     attemptActions.persistWritingAnswer(taskId, text);
   };
 
   const registerWritingDraftCommit = useCallback((commitDraft: (() => void) | null) => {
     writingDraftCommitRef.current = commitDraft;
   }, []);
+
+  const handleNavigate = useCallback(
+    (questionId: string) => {
+      examSessionCommands.setNavigation(runtimeState.currentModule, questionId);
+      runtimeActions.setCurrentQuestionId(questionId);
+    },
+    [examSessionCommands, runtimeActions, runtimeState.currentModule],
+  );
 
   const blockingOverlay =
     runtimeState.blocking.active && blockingCopy ? (
@@ -565,64 +617,17 @@ export function StudentApp({
       </div>
     ) : null;
 
-  if (!shouldRenderPostExam && effectivePhase === 'pre-check') {
+  if (shouldRenderPostExam || effectivePhase !== 'exam') {
     return (
-      <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900" style={studentShellStyle}>
-        <a href="#main-content" className="skip-link">
-          Skip to main content
-        </a>
-        <main id="main-content" role="main">
-          <PreCheck
-            config={examState.config}
-            examTitle={attemptState.attempt?.examTitle ?? examState.title}
-            candidateName={attemptState.attempt?.candidateName}
-            candidateId={attemptState.attempt?.candidateId}
-            onComplete={async (result) => {
-              await attemptActions.recordPreCheckResult(result);
-              runtimeActions.setPhase('lobby');
-            }}
-          />
-        </main>
-        {finalSubmitOverlay}
-      </div>
-    );
-  }
-
-  if (!shouldRenderPostExam && effectivePhase === 'lobby') {
-    return (
-      <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900" style={studentShellStyle}>
-        <a href="#main-content" className="skip-link">
-          Skip to main content
-        </a>
-        <main id="main-content" role="main">
-          <Lobby
-            state={examState}
-            candidateName={attemptState.attempt?.candidateName}
-            candidateId={attemptState.attempt?.candidateId}
-            onPreviewStart={allowPreviewStart ? runtimeActions.startExam : undefined}
-          />
-        </main>
-        {finalSubmitOverlay}
-      </div>
-    );
-  }
-
-  if (shouldRenderPostExam) {
-    const isProctorTerminated = verifiedTerminalState === 'terminated';
-    const studentInfo = [
-      { label: 'Student Name', value: attemptState.attempt?.candidateName },
-      { label: 'Student ID', value: attemptState.attempt?.candidateId },
-      { label: 'Email', value: attemptState.attempt?.candidateEmail },
-      { label: 'Exam', value: attemptState.attempt?.examTitle ?? examState.title },
-    ].filter((item): item is { label: string; value: string } => Boolean(item.value));
-
-    return (
-      <StudentPostExamView
-        isProctorTerminated={isProctorTerminated}
-        proctorNote={runtimeState.proctorNote}
-        studentInfo={studentInfo}
-        onExit={onExit}
+      <StudentExamPhaseRenderer
+        phase={effectivePhase}
+        shouldRenderPostExam={shouldRenderPostExam}
+        examState={examState}
+        allowPreviewStart={allowPreviewStart}
+        shellStyle={studentShellStyle}
+        verifiedTerminalState={verifiedTerminalState}
         finalSubmitOverlay={finalSubmitOverlay}
+        onExit={onExit}
       />
     );
   }
@@ -700,19 +705,13 @@ export function StudentApp({
 
       <StudentExamViewport>
         <StudentHighlightSelectionManagerProvider>
-          <StudentExamWorkspace
-            currentModule={runtimeState.currentModule}
+          <StudentExamWorkspaceSession
             examState={examState}
-            currentQuestionId={runtimeState.currentQuestionId}
             allQuestions={runtimeState.allQuestions}
-            answers={attemptAnswers}
-            writingAnswers={attemptWritingAnswers}
-            flags={attemptFlags}
             tabletMode={tabletMode}
             layoutMode={layoutMode}
             showSubmitControls={showSubmitControls}
             contentZoom={uiState.accessibilitySettings.zoom}
-            displayTimeRemaining={runtimeState.displayTimeRemaining}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
             passageReadabilityLabel={getStudentPassageReadabilityLabel(
@@ -722,7 +721,7 @@ export function StudentApp({
             canDecreasePassageReadability={canDecreasePassageReadability}
             showNavigator={uiState.showNavigator}
             security={examState.config.security}
-            onNavigate={runtimeActions.setCurrentQuestionId}
+            onNavigate={handleNavigate}
             onObjectiveAnswerChange={handleAnswerChange}
             onFlagToggle={handleFlagToggle}
             onWritingChange={handleWritingChange}

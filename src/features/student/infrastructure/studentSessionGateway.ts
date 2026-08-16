@@ -11,8 +11,7 @@ import {
 } from '@services/studentAttemptRepository';
 import { studentSessionTransport } from '@services/studentSessionTransport';
 import type { ExamState } from '../../../types';
-import type { ExamSchedule, ExamSessionRuntime, ExamVersion } from '../../../types/domain';
-import type { StudentAttempt, StudentAttemptSeed } from '../../../types/studentAttempt';
+import type { StudentAttemptSeed } from '../../../types/studentAttempt';
 import type {
   StudentSessionFacade,
   StudentSessionLivePayload,

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useMemo } from 'react';
 import { ExamState, QuestionAnswer } from '../../types';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { getBlockQuestionCount } from '../../utils/examUtils';
-import { getStudentQuestionsForModule } from '../../services/examAdapterService';
+import { getStudentQuestionsForModule } from '@student/application/studentExamContentFacade';
 import { prefersReducedMotion } from './prefersReducedMotion';
 import { FormattedText } from './FormattedText';
 import { RichTextHighlighter } from './RichTextHighlighter';

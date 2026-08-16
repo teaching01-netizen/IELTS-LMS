@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useAuthSession } from '../../auth/authSession';
-import { studentAttemptRepository } from '@services/studentAttemptRepository';
+import { useAuthSession, type StudentQueuedAdmission } from '../../auth/authSession';
+import { studentAttemptRepository } from '@student/application/studentAttemptFacade';
 import { commonSchemas } from '@app/validation/validateApiResponse';
-import type { StudentQueuedAdmission } from '@services/authService';
 
 interface EntryFormData {
   wcode: string;

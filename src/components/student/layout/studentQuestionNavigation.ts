@@ -1,4 +1,4 @@
-import type { StudentQuestionDescriptor } from '@services/examAdapterService';
+import type { StudentQuestionDescriptor } from '@student/application/studentExamContentFacade';
 
 export function getStudentQuestionNavigationKey(question: StudentQuestionDescriptor): string {
   return question.rootId?.includes('::group::') ? question.rootId : question.id;

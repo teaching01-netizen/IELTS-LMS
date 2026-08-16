@@ -2,7 +2,7 @@ import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { ExamState } from '../../types';
 import { Check, X } from 'lucide-react';
 import { getWritingTaskContent } from '../../utils/writingTaskUtils';
-import { saveStudentAuditEvent } from '../../services/studentAuditService';
+import { saveStudentAuditEvent } from '@student/application/studentAttemptFacade';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 import { StudentZoomableMedia } from './StudentZoomableMedia';

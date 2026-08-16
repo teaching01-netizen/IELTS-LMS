@@ -6,7 +6,7 @@ import React, {
   useRef,
   type ReactNode,
 } from 'react';
-import { saveStudentAuditEvent } from '@services/studentAuditService';
+import { saveStudentAuditEvent } from '@student/application/studentAttemptFacade';
 import { ExamConfig, ViolationSeverity } from '../../../types';
 import { isAppleMobileDevice } from '../appleMobileDevice';
 import { useStudentAttempt } from './StudentAttemptProvider';

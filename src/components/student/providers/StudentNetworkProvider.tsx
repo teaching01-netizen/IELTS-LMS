@@ -8,15 +8,17 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import { saveStudentAuditEvent } from '@services/studentAuditService';
+import { saveStudentAuditEvent } from '@student/application/studentAttemptFacade';
+import { classifyStudentPlatformEvent } from '@student/application/exam-session/studentPlatformEventPolicy';
 import {
   getHeartbeatEnforcementThresholds,
   getHeartbeatIntervalMs,
   getStudentIntegritySecurityPolicy,
   hasDeviceContinuityMismatch,
-} from '@services/studentIntegrityService';
+} from '@student/application/studentIntegrityFacade';
 import type { ExamConfig } from '../../../types';
-import { getDeviceFingerprint } from '../../../utils/deviceFingerprinting';
+import { createBrowserNetworkMonitor } from '@student/infrastructure/exam-session/platform/BrowserNetworkMonitor';
+import { readBrowserDeviceFingerprint } from '@student/infrastructure/exam-session/platform/BrowserDeviceFingerprint';
 import { useStudentAttempt } from './StudentAttemptProvider';
 import { useStudentRuntime } from './StudentRuntimeProvider';
 
@@ -97,7 +99,7 @@ export function StudentNetworkProvider({
       return true;
     }
 
-    const fingerprint = await getDeviceFingerprint();
+    const fingerprint = await readBrowserDeviceFingerprint();
     const previousHash = attempt.integrity.deviceFingerprintHash;
 
     if (!previousHash) {
@@ -273,15 +275,16 @@ export function StudentNetworkProvider({
   ]);
 
   useEffect(() => {
-    const onlineListener = () => {
-      handleOnline();
-    };
-    const offlineListener = () => {
-      void handleOffline();
-    };
-
-    window.addEventListener('online', onlineListener);
-    window.addEventListener('offline', offlineListener);
+    const networkMonitor = createBrowserNetworkMonitor();
+    const unsubscribeNetwork = networkMonitor.subscribe((event) => {
+      const action = classifyStudentPlatformEvent(event);
+      if (action.kind === 'network' && action.status === 'online') {
+        handleOnline();
+      }
+      if (action.kind === 'network' && action.status === 'offline') {
+        void handleOffline();
+      }
+    });
     const pageShowListener = () => {
       handleForegroundResume();
     };
@@ -294,8 +297,7 @@ export function StudentNetworkProvider({
     document.addEventListener('visibilitychange', visibilityListener);
 
     return () => {
-      window.removeEventListener('online', onlineListener);
-      window.removeEventListener('offline', offlineListener);
+      unsubscribeNetwork();
       window.removeEventListener('pageshow', pageShowListener);
       document.removeEventListener('visibilitychange', visibilityListener);
     };
@@ -309,7 +311,7 @@ export function StudentNetworkProvider({
     }
 
     void (async () => {
-      const fingerprint = await getDeviceFingerprint();
+      const fingerprint = await readBrowserDeviceFingerprint();
       if (cancelled) {
         return;
       }

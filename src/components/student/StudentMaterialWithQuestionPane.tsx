@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { QuestionAnswer, QuestionBlock } from '../../types';
-import type { StudentQuestionDescriptor } from '@services/examAdapterService';
+import type { StudentQuestionDescriptor } from '@student/application/studentExamContentFacade';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentLayoutMode } from './layout/studentLayoutMode';

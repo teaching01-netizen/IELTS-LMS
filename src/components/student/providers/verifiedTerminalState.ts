@@ -1,47 +1,22 @@
 import type { ExamSessionRuntime } from '../../../types/domain';
 import type { StudentAttempt } from '../../../types/studentAttempt';
+import {
+  getVerifiedTerminalState,
+  isRuntimeStructurallyCompleted,
+} from '@student/domain/exam-session/terminalState';
 
 export type VerifiedTerminalState = 'not_terminal' | 'completed' | 'terminated';
 
-export function isRuntimeStructurallyCompleted(runtimeSnapshot: ExamSessionRuntime | null): boolean {
-  if (!runtimeSnapshot) {
-    return false;
-  }
-
-  if (runtimeSnapshot.status !== 'completed') {
-    return false;
-  }
-
-  if (runtimeSnapshot.actualEndAt) {
-    return true;
-  }
-
-  if (runtimeSnapshot.currentSectionKey == null) {
-    return true;
-  }
-
-  return runtimeSnapshot.sections.every((section) => section.status === 'completed');
-}
+export { isRuntimeStructurallyCompleted };
 
 export function isVerifiedTerminalStudentState(params: {
   attempt: StudentAttempt | null;
   runtimeSnapshot: ExamSessionRuntime | null;
 }): VerifiedTerminalState {
-  const { attempt, runtimeSnapshot } = params;
-
-  if (attempt?.proctorStatus === 'terminated') {
-    return 'terminated';
-  }
-
-  if (attempt?.submittedAt) {
-    return 'completed';
-  }
-
-  if (isRuntimeStructurallyCompleted(runtimeSnapshot)) {
-    return 'completed';
-  }
-
-  return 'not_terminal';
+  return getVerifiedTerminalState({
+    attempt: params.attempt,
+    runtime: params.runtimeSnapshot,
+  });
 }
 
 // Backwards-compatible alias (older call sites)

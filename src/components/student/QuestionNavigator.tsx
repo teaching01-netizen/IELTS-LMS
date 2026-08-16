@@ -8,7 +8,7 @@ import {
   isQuestionAnswered,
   isQuestionFullyAnswered,
   type StudentQuestionDescriptor,
-} from '@services/examAdapterService';
+} from '@student/application/studentExamContentFacade';
 import type { StudentAnswer } from './providers/StudentRuntimeProvider';
 
 interface QuestionNavigatorProps {

@@ -19,6 +19,11 @@ import {
   mergeLiveSnapshotFreshness,
   type LiveSnapshotFreshness,
 } from '../liveSnapshotFreshness';
+import { createStudentSessionBootstrap } from '../application/exam-session/studentSessionBootstrap';
+import {
+  createStudentRealtimeCoordinator,
+  type StudentRealtimeCoordinator,
+} from '../infrastructure/exam-session/studentRealtimeCoordinator';
 import { runStudentSessionMachineCommands } from './studentSessionMachineAdapters';
 import { evaluateLiveSnapshotTransition, evaluateLoadTransition } from './studentSessionStateMachine';
 
@@ -174,7 +179,6 @@ interface StudentSessionRouteData {
   retry: () => Promise<void>;
 }
 
-type BackendStaticSession = StudentSessionStaticPayload;
 type BackendLiveSession = StudentSessionLivePayload;
 
 type LoadedStaticSnapshot = {
@@ -352,6 +356,7 @@ export function useStudentSessionRouteData(
   const refreshEpochRef = useRef(0);
   const appliedFreshnessRef = useRef<LiveSnapshotFreshness | null>(null);
   const runtimeSnapshotRef = useRef<ExamSessionRuntime | null>(null);
+  const realtimeCoordinatorRef = useRef<StudentRealtimeCoordinator | null>(null);
   const storedCandidateProfile = useMemo(
     () => (scheduleId && candidateId ? loadStoredCandidateProfile(scheduleId, candidateId) : null),
     [candidateId, scheduleId],
@@ -360,6 +365,28 @@ export function useStudentSessionRouteData(
     () => (scheduleId && candidateId ? buildStudentKey(scheduleId, candidateId) : null),
     [candidateId, scheduleId],
   );
+  const sessionBootstrap = useMemo(
+    () =>
+      scheduleId && candidateId
+        ? createStudentSessionBootstrap({ scheduleId, candidateId })
+        : null,
+    [candidateId, scheduleId],
+  );
+  const realtimeCoordinator = useMemo(() => {
+    if (!scheduleId || !candidateId) {
+      return null;
+    }
+
+    return createStudentRealtimeCoordinator({
+      scheduleId,
+      candidateId,
+      cache: {
+        invalidateLiveSession: () => sessionBootstrap?.invalidateLive(),
+        updateLiveRuntime: () => undefined,
+      },
+    });
+  }, [candidateId, scheduleId, sessionBootstrap]);
+  realtimeCoordinatorRef.current = realtimeCoordinator;
 
   useEffect(() => {
     runtimeSnapshotRef.current = runtimeSnapshot;
@@ -370,7 +397,8 @@ export function useStudentSessionRouteData(
       return null;
     }
 
-    const session = await studentSessionFacade.loadStaticSession(scheduleId, candidateId);
+    const session = await (sessionBootstrap?.loadStatic() ??
+      studentSessionFacade.loadStaticSession(scheduleId, candidateId));
     const scheduleEntity = studentSessionFacade.mapSchedule(session.schedule);
     const version = studentSessionFacade.mapVersion(session.version);
     const diagramSnapshotDiagnostics = collectPublishedDiagramSnapshotIssues(version.contentSnapshot);
@@ -400,7 +428,7 @@ export function useStudentSessionRouteData(
       scheduleEntity,
       versionId: version.id,
     };
-  }, [candidateId, scheduleId]);
+  }, [candidateId, scheduleId, sessionBootstrap]);
 
   const maybeRebootstrapStaticOnVersionMismatch = useCallback(
     async (live: BackendLiveSession): Promise<LoadedStaticSnapshot | null> => {
@@ -506,11 +534,13 @@ export function useStudentSessionRouteData(
       scheduleEntity = loaded?.scheduleEntity ?? null;
     }
 
-    let live = await studentSessionFacade.loadLiveSession(scheduleId, candidateId);
+    let live = await (sessionBootstrap?.loadLive() ??
+      studentSessionFacade.loadLiveSession(scheduleId, candidateId));
     const reloadedStatic = await maybeRebootstrapStaticOnVersionMismatch(live);
     if (reloadedStatic) {
       scheduleEntity = reloadedStatic.scheduleEntity;
-      live = await studentSessionFacade.loadLiveSession(scheduleId, candidateId);
+      live = await (sessionBootstrap?.loadLive() ??
+        studentSessionFacade.loadLiveSession(scheduleId, candidateId));
     }
 
     const incomingFreshness = extractLiveSnapshotFreshness(live);
@@ -574,6 +604,7 @@ export function useStudentSessionRouteData(
     schedule,
     scheduleId,
     saveAndReadReconciledAttempt,
+    sessionBootstrap,
   ]);
 
   const handleLiveUpdate = useCallback(
@@ -594,6 +625,7 @@ export function useStudentSessionRouteData(
         return;
       }
 
+      realtimeCoordinatorRef.current?.handleEvent(event);
       void refreshBackendSessionSnapshot();
     },
     [attemptSnapshot?.id, refreshBackendSessionSnapshot, scheduleId],
@@ -608,12 +640,21 @@ export function useStudentSessionRouteData(
         return;
       }
 
+      const runtimeRecord = asRecord(payload.runtime) ?? {};
+      const realtimeResult = realtimeCoordinatorRef.current?.handleRuntimeSnapshot({
+        runtime: payload.runtime,
+        revision: parseFiniteNumber(runtimeRecord['revision']),
+        ...(payload.scheduleId ? { scheduleId: payload.scheduleId } : {}),
+      });
+      if (realtimeResult === 'ignored') {
+        return;
+      }
+
       try {
         const mappedRuntime = studentSessionFacade.mapRuntime(payload.runtime, schedule);
         runtimeSnapshotRef.current = mappedRuntime;
         setRuntimeSnapshot(mappedRuntime);
 
-        const runtimeRecord = payload.runtime as Record<string, unknown>;
         const runtimeFreshness: LiveSnapshotFreshness = {
           attempt: {
             revision: appliedFreshnessRef.current?.attempt.revision ?? null,
@@ -654,12 +695,14 @@ export function useStudentSessionRouteData(
     debounceMs: 0,
     onConnected: () => {
       setLiveSocketConnected(true);
+      realtimeCoordinatorRef.current?.handleSocketConnected();
       if (state) {
         void refreshBackendSessionSnapshot();
       }
     },
     onDisconnected: () => {
       setLiveSocketConnected(false);
+      realtimeCoordinatorRef.current?.handleSocketDisconnected();
     },
     onRuntimeSnapshot: handleRuntimeSnapshot,
     onEvent: handleLiveUpdate,
@@ -703,11 +746,13 @@ export function useStudentSessionRouteData(
       }
       let loadedStatic: LoadedStaticSnapshot = staticSnapshot;
 
-      let live = await studentSessionFacade.loadLiveSession(scheduleId, candidateId);
+      let live = await (sessionBootstrap?.loadLive() ??
+        studentSessionFacade.loadLiveSession(scheduleId, candidateId));
       const reloadedStatic = await maybeRebootstrapStaticOnVersionMismatch(live);
       if (reloadedStatic) {
         loadedStatic = reloadedStatic;
-        live = await studentSessionFacade.loadLiveSession(scheduleId, candidateId);
+        live = await (sessionBootstrap?.loadLive() ??
+          studentSessionFacade.loadLiveSession(scheduleId, candidateId));
       }
 
       const applyEpoch = ++refreshEpochRef.current;
@@ -807,6 +852,7 @@ export function useStudentSessionRouteData(
     readCachedAttemptForCandidate,
     scheduleId,
     saveAndReadReconciledAttempt,
+    sessionBootstrap,
     storedCandidateProfile,
     studentKey,
   ]);
@@ -815,16 +861,10 @@ export function useStudentSessionRouteData(
     void loadStudentData('load');
   }, [loadStudentData]);
 
-  const pollIntervalMs = runtimeSnapshot?.status === 'live'
-    ? liveSocketConnected
-      ? 20_000
-      : 1_500
-    : 15_000;
-  const pollMaxIntervalMs = runtimeSnapshot?.status === 'live'
-    ? liveSocketConnected
-      ? 30_000
-      : 3_000
-    : 25_000;
+  const pollingPolicy = realtimeCoordinator?.getPollingPolicy(runtimeSnapshot?.status ?? null) ?? {
+    intervalMs: runtimeSnapshot?.status === 'live' && liveSocketConnected ? 20_000 : 15_000,
+    maxIntervalMs: runtimeSnapshot?.status === 'live' && liveSocketConnected ? 30_000 : 25_000,
+  };
 
   useAsyncPolling(
     async () => {
@@ -832,8 +872,8 @@ export function useStudentSessionRouteData(
     },
     {
       enabled: Boolean(scheduleId && state && !error),
-      intervalMs: pollIntervalMs,
-      maxIntervalMs: pollMaxIntervalMs,
+      intervalMs: pollingPolicy.intervalMs,
+      maxIntervalMs: pollingPolicy.maxIntervalMs,
     },
   );
 

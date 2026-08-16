@@ -1,7 +1,7 @@
 import React from 'react';
 import { Globe, Lock, Monitor, Shield } from 'lucide-react';
 import type { ExamConfig } from '../../types';
-import { getStudentIntegritySecurityPolicy } from '../../services/studentIntegrityService';
+import { getStudentIntegritySecurityPolicy } from '@student/application/studentIntegrityFacade';
 import type {
   StudentPreCheckCheckResult,
   StudentPreCheckResult,

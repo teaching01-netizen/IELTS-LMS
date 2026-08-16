@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, type ReactNode } from 'react';
-import { countAnsweredQuestions, countQuestionSlots } from '@services/examAdapterService';
+import { countAnsweredQuestions, countQuestionSlots } from '@student/application/studentExamContentFacade';
 import { useProctoring } from './StudentProctoringProvider';
 import { useStudentAttempt } from './StudentAttemptProvider';
 import { useStudentRuntime } from './StudentRuntimeProvider';
-import { saveStudentAuditEvent } from '@services/studentAuditService';
+import { saveStudentAuditEvent } from '@student/application/studentAttemptFacade';
 import { useStudentUI } from './StudentUIProvider';
 
 interface KeyboardProviderProps {

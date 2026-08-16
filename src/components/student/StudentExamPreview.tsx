@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   getEnabledModules,
   getFirstQuestionIdForModule,
-} from '@services/examAdapterService';
+} from '@student/application/studentExamContentFacade';
 import { StudentAppWrapper } from './StudentAppWrapper';
 import type { ExamState, ModuleType } from '../../types';
 import type { StudentAttempt } from '../../types/studentAttempt';

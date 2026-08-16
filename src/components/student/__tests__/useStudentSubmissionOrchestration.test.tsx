@@ -4,7 +4,6 @@ import { useStudentSubmissionOrchestration } from '../useStudentSubmissionOrches
 
 describe('useStudentSubmissionOrchestration', () => {
   it('flushes and submits current module when pending mutations are persisted', async () => {
-    const flushDomAnswerControlsNow = vi.fn();
     const reconcileLiveAnswerCacheNow = vi.fn();
     const commitWritingDraft = vi.fn();
     const flushPending = vi.fn().mockResolvedValue(true);
@@ -29,7 +28,6 @@ describe('useStudentSubmissionOrchestration', () => {
         attemptId: null,
         runtimeCompletionVerified: false,
         shouldRenderPostExam: false,
-        flushDomAnswerControlsNow,
         reconcileLiveAnswerCacheNow,
         commitWritingDraft,
         attemptActions: {
@@ -47,7 +45,6 @@ describe('useStudentSubmissionOrchestration', () => {
       await result.current.flushAndSubmitCurrentModuleWithRetry('manual:reading');
     });
 
-    expect(flushDomAnswerControlsNow).toHaveBeenCalledTimes(1);
     expect(reconcileLiveAnswerCacheNow).toHaveBeenCalledTimes(1);
     expect(commitWritingDraft).toHaveBeenCalledTimes(1);
     expect(flushPending).toHaveBeenCalledTimes(1);
@@ -75,7 +72,6 @@ describe('useStudentSubmissionOrchestration', () => {
         attemptId: 'attempt-1',
         runtimeCompletionVerified: true,
         shouldRenderPostExam: false,
-        flushDomAnswerControlsNow: vi.fn(),
         reconcileLiveAnswerCacheNow: vi.fn(),
         commitWritingDraft: vi.fn(),
         attemptActions: {

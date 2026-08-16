@@ -4,7 +4,7 @@ import { getBlockQuestionCount } from '../../utils/examUtils';
 import {
   getQuestionStartNumber,
   type StudentQuestionDescriptor,
-} from '../../services/examAdapterService';
+} from '@student/application/studentExamContentFacade';
 import type { QuestionAnswer, QuestionBlock } from '../../types';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import type { StudentHighlightColor } from './highlightPalette';

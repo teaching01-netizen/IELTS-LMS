@@ -18,6 +18,8 @@ import {
   type StudentEntryResult,
 } from '../../services/authService';
 
+export type { StudentQueuedAdmission } from '../../services/authService';
+
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
 interface AuthSessionContextValue {
@@ -235,4 +237,13 @@ export function useAuthSession() {
     throw new Error('useAuthSession must be used within AuthSessionProvider');
   }
   return context;
+}
+
+/**
+ * Like `useAuthSession`, but returns `null` instead of throwing when the
+ * component renders outside an `AuthSessionProvider` (e.g. in isolation or
+ * tests). Consumers must handle the `null` case themselves.
+ */
+export function useOptionalAuthSession(): AuthSessionContextValue | null {
+  return useContext(AuthSessionContext);
 }

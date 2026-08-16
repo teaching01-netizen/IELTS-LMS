@@ -3,7 +3,7 @@ import {
   countQuestionSlots,
   getQuestionNumberLabel,
   type StudentQuestionDescriptor,
-} from '@services/examAdapterService';
+} from '@student/application/studentExamContentFacade';
 import {
   getStudentNavigableQuestions,
   getStudentQuestionNavigationKey,
