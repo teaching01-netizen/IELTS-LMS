@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { examLifecycleService, examRepository, hydrateExamState } from '../../exam-authoring/api/examAuthoringGateway';
+import { examAuthoringFacade } from '../../exam-authoring/api/examAuthoringFacade';
 import type { ExamState } from '../../../types';
 import type {
   ExamEntity,
@@ -55,22 +55,24 @@ export function useReviewRouteController(
     setError(null);
 
     try {
-      const entity = await examRepository.getExamById(examId);
+      const entity = await examAuthoringFacade.repository.getExamById(examId);
       if (!entity) {
         throw new Error('Exam not found');
       }
 
       const examState = entity.currentDraftVersionId
-        ? await examRepository.getVersionById(entity.currentDraftVersionId).then(v => v?.contentSnapshot ?? null)
+        ? await examAuthoringFacade.repository
+            .getVersionById(entity.currentDraftVersionId)
+            .then(v => v?.contentSnapshot ?? null)
         : null;
       const [allVersions, allSchedules, readiness] = await Promise.all([
-        examRepository.getVersionSummaries(examId),
-        examRepository.getSchedulesByExam(examId),
-        examLifecycleService.getPublishReadiness(examId),
+        examAuthoringFacade.repository.getVersionSummaries(examId),
+        examAuthoringFacade.repository.getSchedulesByExam(examId),
+        examAuthoringFacade.lifecycle.getPublishReadiness(examId),
       ]);
 
       setExam(entity);
-      setState(examState ? hydrateExamState(examState) : null);
+      setState(examState ? examAuthoringFacade.hydrateExamState(examState) : null);
       setVersions(allVersions);
       setSchedules(allSchedules);
       setPublishReadiness(readiness);
@@ -91,7 +93,7 @@ export function useReviewRouteController(
         return;
       }
 
-      await examLifecycleService.publishExam(examId, 'System', notes);
+      await examAuthoringFacade.lifecycle.publishExam(examId, 'System', notes);
       await loadExam();
     },
     [examId, loadExam],
@@ -102,7 +104,7 @@ export function useReviewRouteController(
       return { success: false, error: 'Exam ID not found' };
     }
 
-    const sourceExam = await examRepository.getExamById(examId);
+    const sourceExam = await examAuthoringFacade.repository.getExamById(examId);
     if (!sourceExam) {
       return { success: false, error: 'Source exam not found' };
     }
@@ -111,7 +113,7 @@ export function useReviewRouteController(
       return { success: false, error: 'You do not have permission to republish this exam.' };
     }
 
-    const result = await examLifecycleService.republishVersion(examId, sourceExam.currentDraftVersionId ?? 'latest', 'System');
+    const result = await examAuthoringFacade.lifecycle.republishVersion(examId, sourceExam.currentDraftVersionId ?? 'latest', 'System');
     if (!result.success) {
       return {
         success: false,
@@ -121,7 +123,7 @@ export function useReviewRouteController(
 
     await loadExam();
     return { success: true };
-  }, [examId, navigate]);
+  }, [examId, loadExam]);
 
   const handleSchedulePublish = useCallback(
     async (scheduledTime: string) => {
@@ -129,7 +131,7 @@ export function useReviewRouteController(
         return;
       }
 
-      await examLifecycleService.schedulePublish(examId, 'System', scheduledTime);
+      await examAuthoringFacade.lifecycle.schedulePublish(examId, 'System', scheduledTime);
       await loadExam();
     },
     [examId, loadExam],
@@ -141,7 +143,7 @@ export function useReviewRouteController(
         return;
       }
 
-      await examLifecycleService.unpublishExam(examId, 'System', reason);
+      await examAuthoringFacade.lifecycle.unpublishExam(examId, 'System', reason);
       await loadExam();
     },
     [examId, loadExam],
@@ -153,7 +155,7 @@ export function useReviewRouteController(
         return;
       }
 
-      await examLifecycleService.restoreVersionAsDraft(examId, versionId, 'System');
+      await examAuthoringFacade.lifecycle.restoreVersionAsDraft(examId, versionId, 'System');
       await loadExam();
     },
     [examId, loadExam],
@@ -186,7 +188,7 @@ export function useReviewRouteController(
   }, [examId, navigate]);
 
   const handleCreateSchedule = useCallback(async (schedule: ExamSchedule) => {
-    await examRepository.saveSchedule(schedule);
+    await examAuthoringFacade.repository.saveSchedule(schedule);
     await loadExam();
   }, [loadExam]);
 
