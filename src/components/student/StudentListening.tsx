@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { DiagramLabelingBlock, ExamState, QuestionAnswer } from '../../types';
 import { Play, Pause, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
@@ -15,6 +15,8 @@ import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import { hasHtmlMarkup } from './normalizeReadingPassageText';
 import { StudentMaterialWithQuestionPane } from './StudentMaterialWithQuestionPane';
 import type { StudentLayoutMode } from './layout/studentLayoutMode';
+
+const emptyCaptionTrackUrl = 'data:text/vtt;charset=utf-8,WEBVTT%0A%0A';
 
 interface StudentListeningProps {
   state: ExamState;
@@ -136,7 +138,8 @@ export function StudentListening({
     return partByCurrentQuestion || state.listening.parts.find((part) => part.id === state.activeListeningPartId) || state.listening.parts[0];
   }, [currentQ, currentQuestionId, state.activeListeningPartId, state.listening.parts]);
   const audioPlaybackEnabled = state.config.sections.listening.audioPlaybackEnabled ?? true;
-  const activeTranscript = ((activePart as { transcript?: string | undefined }).transcript ?? '').trim();
+  const activeTranscript = (activePart?.transcript ?? '').trim();
+  const activeTranscriptUrl = activePart?.transcriptUrl?.trim() || undefined;
   const activeTranscriptHasHtml = useMemo(
     () => hasHtmlMarkup(activeTranscript),
     [activeTranscript],
@@ -174,8 +177,14 @@ export function StudentListening({
 
     return map;
   }, [state.listening.parts]);
-  const getBlockStartQuestionNumber = (blockId: string) => blockStartNumbers.get(blockId) ?? 1;
-  const hideDiagramReferenceForBlock = (blockId: string) => hiddenDiagramReferenceBlockIds.has(blockId);
+  const getBlockStartQuestionNumber = useCallback(
+    (blockId: string) => blockStartNumbers.get(blockId) ?? 1,
+    [blockStartNumbers],
+  );
+  const hideDiagramReferenceForBlock = useCallback(
+    (blockId: string) => hiddenDiagramReferenceBlockIds.has(blockId),
+    [hiddenDiagramReferenceBlockIds],
+  );
 
   useEffect(() => {
     if (currentQuestionId && questionContainerRef.current) {
@@ -258,7 +267,7 @@ export function StudentListening({
       ? audioRef.current.duration
       : 0;
   const currentSeconds = totalSeconds > 0 ? (progress / 100) * totalSeconds : 0;
-  const renderBlockInstruction = (instruction: string, blockId: string) => {
+  const renderBlockInstruction = useCallback((instruction: string, blockId: string) => {
     if (!instruction.trim()) {
       return null;
     }
@@ -275,7 +284,7 @@ export function StudentListening({
         />
       </div>
     );
-  };
+  }, [answerCompact, highlightColor, highlightEnabled]);
 
   if (!activePart) {
     return null;
@@ -310,12 +319,21 @@ export function StudentListening({
             <audio
               ref={audioRef}
               src={activePart.audioUrl}
+              aria-label="Listening audio"
+              aria-describedby={activeTranscript ? `listening-transcript-${activePart.id}` : undefined}
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}
               onEnded={() => setIsPlaying(false)}
               onTimeUpdate={syncProgressFromAudio}
               onLoadedMetadata={syncProgressFromAudio}
-            />
+            >
+              <track
+                kind="captions"
+                src={activeTranscriptUrl ?? emptyCaptionTrackUrl}
+                srcLang="en"
+                label="Transcript"
+              />
+            </audio>
           ) : null}
 
           {shouldShowAudioPanel ? (
@@ -334,16 +352,21 @@ export function StudentListening({
                 </button>
 
                 <div className="flex-1">
-                  <div
-                    className="h-2 bg-gray-200 rounded-full overflow-hidden relative cursor-pointer"
-                    data-testid="listening-progress-track"
-                    onClick={(event) => {
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      const x = event.clientX - rect.left;
-                      seekToPercent((x / rect.width) * 100);
-                    }}
-                  >
-                    <div className="h-full bg-blue-500" style={{ width: `${progress}%` }}></div>
+                  <div className="relative h-2" data-testid="listening-progress-track">
+                    <div aria-hidden="true" className="h-2 overflow-hidden rounded-full bg-gray-200">
+                      <div className="h-full bg-blue-500" style={{ width: `${progress}%` }}></div>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value={progress}
+                      onChange={(event) => seekToPercent(Number.parseFloat(event.target.value))}
+                      className="absolute inset-0 h-2 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                      aria-label="Audio progress"
+                      disabled={!canPlayAudio}
+                    />
                   </div>
                   <div className="flex justify-between mt-2 text-[length:var(--student-meta-font-size)] font-medium text-gray-500 font-mono">
                     <span>{formatTime(currentSeconds)}</span>
@@ -441,7 +464,10 @@ export function StudentListening({
             </div>
           ) : null}
           {activeTranscript ? (
-            <div className={`${materialCompact ? 'mt-3 p-2' : 'mt-4 p-3'} rounded-xl border border-gray-200 bg-white break-words [overflow-wrap:anywhere]`}>
+            <div
+              id={`listening-transcript-${activePart.id}`}
+              className={`${materialCompact ? 'mt-3 p-2' : 'mt-4 p-3'} rounded-xl border border-gray-200 bg-white break-words [overflow-wrap:anywhere]`}
+            >
               <h3 className={`${materialCompact ? 'mb-1 text-xs' : 'mb-2 text-sm'} font-semibold text-gray-700`}>Transcript / Reference</h3>
               <RichTextHighlighter
                 content={activeTranscript}

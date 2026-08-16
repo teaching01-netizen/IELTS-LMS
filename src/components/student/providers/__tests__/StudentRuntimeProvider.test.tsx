@@ -505,4 +505,26 @@ describe('StudentRuntimeProvider', () => {
     ).toBeGreaterThan(scheduledSecondTicks);
     vi.useRealTimers();
   });
+
+  it('does not recreate the non-runtime timer interval for every tick', () => {
+    vi.useFakeTimers();
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+
+    renderRuntime({
+      attemptSnapshot: {
+        ...baseAttempt,
+        phase: 'exam',
+        currentModule: 'reading',
+      },
+    });
+
+    const initialIntervalCount = setIntervalSpy.mock.calls.length;
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(setIntervalSpy).toHaveBeenCalledTimes(initialIntervalCount);
+    vi.useRealTimers();
+  });
 });

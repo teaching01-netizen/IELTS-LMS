@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
 import { defaultStudentHighlightColor, type StudentHighlightColor } from '../highlightPalette';
 import {
   DEFAULT_STUDENT_PASSAGE_READABILITY_LEVEL,
@@ -171,7 +171,7 @@ export function StudentUIProvider({ children }: UIProviderProps) {
     setAccessibilitySettings((prev) => ({ ...prev, highlightToolMode: 'off' }));
   }, []);
 
-  const state: UIState = {
+  const state = useMemo<UIState>(() => ({
     showNavigator,
     showSubmitConfirm,
     showAccessibility,
@@ -180,9 +180,18 @@ export function StudentUIProvider({ children }: UIProviderProps) {
     timeExtensionGranted,
     timeExtensionMinutes,
     accessibilitySettings,
-  };
+  }), [
+    accessibilitySettings,
+    showAccessibility,
+    showNavigator,
+    showSubmitConfirm,
+    showTimeExtensionRequest,
+    timeExtensionGranted,
+    timeExtensionMinutes,
+    timeExtensionReason,
+  ]);
 
-  const actions: UIActions = {
+  const actions = useMemo<UIActions>(() => ({
     setShowNavigator,
     setShowSubmitConfirm,
     setShowAccessibility,
@@ -203,10 +212,33 @@ export function StudentUIProvider({ children }: UIProviderProps) {
     setHighlightToolMode,
     resetHighlightTool,
     setHighlightColor,
-  };
+  }), [
+    decreasePassageReadability,
+    grantTimeExtension,
+    increasePassageReadability,
+    resetHighlightTool,
+    resetPassageReadability,
+    resetZoom,
+    setFontSize,
+    setHighlightColor,
+    setHighlightToolMode,
+    setShowAccessibility,
+    setShowNavigator,
+    setShowSubmitConfirm,
+    setShowTimeExtensionRequest,
+    setTimeExtensionReason,
+    setZoom,
+    toggleEraseMode,
+    toggleHighContrast,
+    toggleHighlightMode,
+    zoomIn,
+    zoomOut,
+  ]);
+
+  const contextValue = useMemo<UIContextValue>(() => ({ state, actions }), [actions, state]);
 
   return (
-    <UIContext.Provider value={{ state, actions }}>
+    <UIContext.Provider value={contextValue}>
       {children}
     </UIContext.Provider>
   );

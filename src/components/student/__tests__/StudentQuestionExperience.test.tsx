@@ -1794,23 +1794,8 @@ describe('student question experience', () => {
     fireEvent.change(volume, { target: { value: '35' } });
     expect((audio as HTMLAudioElement).volume).toBeCloseTo(0.35);
 
-    const progressbar = screen.getByTestId('listening-progress-track');
-    Object.defineProperty(progressbar, 'getBoundingClientRect', {
-      configurable: true,
-      value: () => ({
-        left: 0,
-        top: 0,
-        width: 200,
-        height: 8,
-        right: 200,
-        bottom: 8,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      }),
-    });
-
-    fireEvent.click(progressbar, { clientX: 100 });
+    const progressbar = screen.getByRole('slider', { name: /audio progress/i });
+    fireEvent.change(progressbar, { target: { value: '50' } });
     expect((audio as HTMLAudioElement).currentTime).toBeCloseTo(171.5);
 
     (audio as HTMLAudioElement).currentTime = 120;

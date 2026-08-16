@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { createDefaultConfig } from '../../../constants/examDefaults';
-import type { ExamState } from '../../../types';
+import type { ExamState, ListeningPart, ShortAnswerBlock } from '../../../types';
 import { StudentListening } from '../StudentListening';
 import { StudentHighlightPersistenceProvider } from '../highlightV2Persistence';
 import { readPersistedSurfaceRanges } from '../highlight/highlightStore';
@@ -16,6 +16,13 @@ function HighlightMode({ children }: { children: React.ReactNode }) {
 
 function createExamState(): ExamState {
   const config = createDefaultConfig('Academic', 'Academic');
+  const listeningPart: ListeningPart = {
+    id: 'l1',
+    title: 'Part 1',
+    audioUrl: 'https://example.test/audio.mp3',
+    pins: [],
+    blocks: [],
+  };
   return {
     title: 'Test Exam',
     type: 'Academic',
@@ -25,15 +32,7 @@ function createExamState(): ExamState {
     config,
     reading: { passages: [] },
     listening: {
-      parts: [
-        {
-          id: 'l1',
-          title: 'Part 1',
-          audioUrl: 'https://example.test/audio.mp3',
-          pins: [],
-          blocks: [],
-        } as any,
-      ],
+      parts: [listeningPart],
     },
     writing: {
       task1Prompt: 'Task 1 prompt',
@@ -70,7 +69,7 @@ describe('StudentListening a11y', () => {
     state.listening.parts[0] = {
       ...state.listening.parts[0],
       transcript: '<p>Reference <strong>highlight</strong> line.</p>',
-    } as any;
+    };
 
     const { container } = render(
       <StudentListening
@@ -88,17 +87,46 @@ describe('StudentListening a11y', () => {
     expect(screen.queryByText(/<strong>/i)).not.toBeInTheDocument();
   });
 
-  it('persists block instruction highlights under the owning listening block id', () => {
+  it('exposes an accessible audio progress control and transcript description', () => {
     const state = createExamState();
     state.listening.parts[0] = {
       ...state.listening.parts[0],
-      blocks: [{
-        id: 'listening-block',
-        type: 'SHORT_ANSWER',
-        instruction: 'Listen and answer.',
-        questions: [{ id: 'listening-q1', prompt: 'Who speaks?', correctAnswer: 'Sam' }],
+      transcript: 'Transcript reference for the listening track.',
+    };
+
+    const { container } = render(
+      <StudentListening
+        state={state}
+        answers={{}}
+        onAnswerChange={() => undefined}
+        currentQuestionId={null}
+        onNavigate={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole('slider', { name: /audio progress/i })).toBeInTheDocument();
+    const audio = container.querySelector('audio');
+    expect(audio).toHaveAttribute('aria-label', 'Listening audio');
+    expect(audio).toHaveAttribute('aria-describedby', 'listening-transcript-l1');
+  });
+
+  it('persists block instruction highlights under the owning listening block id', () => {
+    const state = createExamState();
+    const listeningBlock: ShortAnswerBlock = {
+      id: 'listening-block',
+      type: 'SHORT_ANSWER',
+      instruction: 'Listen and answer.',
+      questions: [{
+        id: 'listening-q1',
+        prompt: 'Who speaks?',
+        correctAnswer: 'Sam',
+        answerRule: 'ONE_WORD',
       }],
-    } as any;
+    };
+    state.listening.parts[0] = {
+      ...state.listening.parts[0],
+      blocks: [listeningBlock],
+    };
     render(
       <StudentHighlightPersistenceProvider namespace="test:listening-instruction">
         <StudentUIProvider>

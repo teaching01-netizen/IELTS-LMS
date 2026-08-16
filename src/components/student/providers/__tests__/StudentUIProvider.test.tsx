@@ -56,6 +56,32 @@ describe('StudentUIProvider readability controls', () => {
       DEFAULT_STUDENT_PASSAGE_READABILITY_LEVEL,
     );
   });
+
+  it('keeps context identities stable when the provider rerenders without state changes', () => {
+    let context: ReturnType<typeof useStudentUI> | null = null;
+
+    function Probe() {
+      context = useStudentUI();
+      return null;
+    }
+
+    const rendered = render(
+      <StudentUIProvider>
+        <Probe />
+      </StudentUIProvider>,
+    );
+    const firstContext = context!;
+
+    rendered.rerender(
+      <StudentUIProvider>
+        <Probe />
+      </StudentUIProvider>,
+    );
+
+    expect(context).toBe(firstContext);
+    expect(context!.state).toBe(firstContext.state);
+    expect(context!.actions).toBe(firstContext.actions);
+  });
 });
 
 describe('StudentUIProvider time extension state', () => {

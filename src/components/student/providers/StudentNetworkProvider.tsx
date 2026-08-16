@@ -3,6 +3,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -52,6 +53,7 @@ export function StudentNetworkProvider({
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
   const policy = useMemo(() => getStudentIntegritySecurityPolicy(config), [config]);
   const heartbeatThresholds = useMemo(() => getHeartbeatEnforcementThresholds(config), [config]);
+  const heartbeatIntervalMs = getHeartbeatIntervalMs(policy);
   const [isOnline, setIsOnline] = useState(
     typeof navigator === 'undefined' ? true : navigator.onLine,
   );
@@ -66,6 +68,34 @@ export function StudentNetworkProvider({
   const heartbeatInFlightRef = useRef(false);
   const recoveryEpochRef = useRef(0);
   const onlineInFlightRef = useRef<Promise<void> | null>(null);
+  const runtimeStateRef = useRef(runtimeState);
+  const runtimeActionsRef = useRef(runtimeActions);
+  const attemptStateRef = useRef(attemptState);
+  const attemptActionsRef = useRef(attemptActions);
+  const policyRef = useRef(policy);
+  const heartbeatThresholdsRef = useRef(heartbeatThresholds);
+  const scheduleIdRef = useRef(scheduleId);
+  const onRefreshRuntimeRef = useRef(onRefreshRuntime);
+
+  useLayoutEffect(() => {
+    runtimeStateRef.current = runtimeState;
+    runtimeActionsRef.current = runtimeActions;
+    attemptStateRef.current = attemptState;
+    attemptActionsRef.current = attemptActions;
+    policyRef.current = policy;
+    heartbeatThresholdsRef.current = heartbeatThresholds;
+    scheduleIdRef.current = scheduleId;
+    onRefreshRuntimeRef.current = onRefreshRuntime;
+  }, [
+    attemptActions,
+    attemptState,
+    heartbeatThresholds,
+    onRefreshRuntime,
+    policy,
+    runtimeActions,
+    runtimeState,
+    scheduleId,
+  ]);
 
   useEffect(() => {
     setLastDisconnectAt(attemptState.attempt?.integrity.lastDisconnectAt ?? null);
@@ -81,20 +111,20 @@ export function StudentNetworkProvider({
     setIsOnline(false);
     setIsRecovering(false);
     setLastDisconnectAt(timestamp);
-    runtimeActions.setAttemptSyncState('offline');
-    await attemptActions.recordNetworkStatus('offline', timestamp);
-    await attemptActions
+    runtimeActionsRef.current.setAttemptSyncState('offline');
+    await attemptActionsRef.current.recordNetworkStatus('offline', timestamp);
+    await attemptActionsRef.current
       .recordHeartbeat('disconnect', {
         reason: 'browser_offline',
       })
       .catch(() => {});
-    await saveStudentAuditEvent(scheduleId, 'NETWORK_DISCONNECTED', {
+    await saveStudentAuditEvent(scheduleIdRef.current, 'NETWORK_DISCONNECTED', {
       timestamp,
-    }, attemptState.attemptId ?? undefined);
-  }, [attemptActions, attemptState.attemptId, runtimeActions, scheduleId]);
+    }, attemptStateRef.current.attemptId ?? undefined);
+  }, []);
 
   const verifyDeviceContinuity = useCallback(async () => {
-    const attempt = attemptState.attempt;
+    const attempt = attemptStateRef.current.attempt;
     if (!attempt) {
       return true;
     }
@@ -103,25 +133,25 @@ export function StudentNetworkProvider({
     const previousHash = attempt.integrity.deviceFingerprintHash;
 
     if (!previousHash) {
-      await attemptActions.setDeviceFingerprintHash(fingerprint.hash);
+      await attemptActionsRef.current.setDeviceFingerprintHash(fingerprint.hash);
       return true;
     }
 
     if (hasDeviceContinuityMismatch(previousHash, fingerprint.hash)) {
-      runtimeActions.addViolation(
+      runtimeActionsRef.current.addViolation(
         'DEVICE_MISMATCH',
         'critical',
         'Device continuity check failed after reconnect.',
       );
-      await saveStudentAuditEvent(scheduleId, 'DEVICE_CONTINUITY_FAILED', {
+      await saveStudentAuditEvent(scheduleIdRef.current, 'DEVICE_CONTINUITY_FAILED', {
         previousHash,
         nextHash: fingerprint.hash,
-      }, attemptState.attemptId ?? undefined);
+      }, attemptStateRef.current.attemptId ?? undefined);
       return false;
     }
 
     return true;
-  }, [attemptActions, attemptState.attempt, attemptState.attemptId, runtimeActions, scheduleId]);
+  }, []);
 
   const runReconnectRecovery = useCallback((epoch: number) => {
     if (onlineInFlightRef.current) {
@@ -133,7 +163,7 @@ export function StudentNetworkProvider({
       try {
         while (epoch === recoveryEpochRef.current && navigator.onLine) {
           try {
-            const isSameDevice = policy.requireDeviceContinuityOnReconnect
+            const isSameDevice = policyRef.current.requireDeviceContinuityOnReconnect
               ? await verifyDeviceContinuity()
               : true;
             if (epoch !== recoveryEpochRef.current) {
@@ -143,7 +173,7 @@ export function StudentNetworkProvider({
               return;
             }
 
-            const flushed = await attemptActions.flushPending();
+            const flushed = await attemptActionsRef.current.flushPending();
             if (epoch !== recoveryEpochRef.current) {
               return;
             }
@@ -151,25 +181,25 @@ export function StudentNetworkProvider({
               throw new Error('pending_flush_failed');
             }
 
-            await attemptActions.flushHeartbeatEvents().catch(() => {});
+            await attemptActionsRef.current.flushHeartbeatEvents().catch(() => {});
             if (epoch !== recoveryEpochRef.current) {
               return;
             }
 
-            if (onRefreshRuntime) {
-              await onRefreshRuntime();
+            if (onRefreshRuntimeRef.current) {
+              await onRefreshRuntimeRef.current();
               if (epoch !== recoveryEpochRef.current) {
                 return;
               }
             }
 
-            runtimeActions.setAttemptSyncState('saved');
+            runtimeActionsRef.current.setAttemptSyncState('saved');
             return;
           } catch {
             if (epoch !== recoveryEpochRef.current || !navigator.onLine) {
               return;
             }
-            runtimeActions.setAttemptSyncState('syncing_reconnect');
+            runtimeActionsRef.current.setAttemptSyncState('syncing_reconnect');
             const retryDelayMs = Math.min(10_000, 500 * 2 ** retryAttempt);
             retryAttempt = Math.min(retryAttempt + 1, 20);
             await new Promise<void>((resolve) => {
@@ -190,13 +220,7 @@ export function StudentNetworkProvider({
         onlineInFlightRef.current = null;
       }
     });
-  }, [
-    attemptActions,
-    onRefreshRuntime,
-    policy.requireDeviceContinuityOnReconnect,
-    runtimeActions,
-    verifyDeviceContinuity,
-  ]);
+  }, [verifyDeviceContinuity]);
 
   const handleOnline = useCallback(() => {
     if (onlineInFlightRef.current) {
@@ -211,12 +235,12 @@ export function StudentNetworkProvider({
       setIsOnline(true);
       setIsRecovering(true);
       setLastReconnectAt(timestamp);
-      runtimeActions.setAttemptSyncState('syncing_reconnect');
-      await attemptActions.recordNetworkStatus('online', timestamp).catch(() => {});
+      runtimeActionsRef.current.setAttemptSyncState('syncing_reconnect');
+      await attemptActionsRef.current.recordNetworkStatus('online', timestamp).catch(() => {});
       if (epoch !== recoveryEpochRef.current) {
         return;
       }
-      await attemptActions
+      await attemptActionsRef.current
         .recordHeartbeat('reconnect', {
           reason: 'browser_online',
         })
@@ -225,10 +249,10 @@ export function StudentNetworkProvider({
         return;
       }
       await saveStudentAuditEvent(
-        scheduleId,
+        scheduleIdRef.current,
         'NETWORK_RECONNECTED',
         { timestamp },
-        attemptState.attemptId ?? undefined,
+        attemptStateRef.current.attemptId ?? undefined,
       ).catch(() => {});
     })();
 
@@ -242,13 +266,7 @@ export function StudentNetworkProvider({
         runReconnectRecovery(epoch);
       }
     });
-  }, [
-    attemptActions,
-    attemptState.attemptId,
-    runReconnectRecovery,
-    runtimeActions,
-    scheduleId,
-  ]);
+  }, [runReconnectRecovery]);
 
   const handleForegroundResume = useCallback(() => {
     if (!navigator.onLine || onlineInFlightRef.current) {
@@ -256,23 +274,19 @@ export function StudentNetworkProvider({
     }
 
     const blockedForRecovery =
-      runtimeState.attemptSyncState === 'offline' ||
-      runtimeState.attemptSyncState === 'syncing_reconnect';
+      runtimeStateRef.current.attemptSyncState === 'offline' ||
+      runtimeStateRef.current.attemptSyncState === 'syncing_reconnect';
     if (!blockedForRecovery) {
       return;
     }
 
-    runtimeActions.setAttemptSyncState('syncing_reconnect');
+    runtimeActionsRef.current.setAttemptSyncState('syncing_reconnect');
 
     const epoch = recoveryEpochRef.current;
     setIsOnline(true);
     setIsRecovering(true);
     runReconnectRecovery(epoch);
-  }, [
-    runReconnectRecovery,
-    runtimeActions,
-    runtimeState.attemptSyncState,
-  ]);
+  }, [runReconnectRecovery]);
 
   useEffect(() => {
     const networkMonitor = createBrowserNetworkMonitor();
@@ -306,7 +320,7 @@ export function StudentNetworkProvider({
   useEffect(() => {
     let cancelled = false;
 
-    if (!attemptState.attempt) {
+    if (!attemptStateRef.current.attempt) {
       return;
     }
 
@@ -316,24 +330,19 @@ export function StudentNetworkProvider({
         return;
       }
 
-      const previousHash = attemptState.attempt?.integrity.deviceFingerprintHash;
+      const previousHash = attemptStateRef.current.attempt?.integrity.deviceFingerprintHash;
       if (!previousHash) {
-        await attemptActions.setDeviceFingerprintHash(fingerprint.hash);
+        await attemptActionsRef.current.setDeviceFingerprintHash(fingerprint.hash);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [
-    attemptActions,
-    attemptState.attempt?.id,
-    attemptState.attempt?.integrity.deviceFingerprintHash,
-    scheduleId,
-  ]);
+  }, [attemptState.attempt?.id, scheduleId]);
 
   useEffect(() => {
-    if (runtimeState.phase !== 'exam' || !attemptState.attempt) {
+    if (runtimeState.phase !== 'exam' || !attemptStateRef.current.attempt) {
       missedHeartbeatsRef.current = 0;
       return;
     }
@@ -343,7 +352,7 @@ export function StudentNetworkProvider({
     }
 
     let cancelled = false;
-    const intervalMs = getHeartbeatIntervalMs(policy);
+    const intervalMs = heartbeatIntervalMs;
 
     const intervalId = window.setInterval(() => {
       void (async () => {
@@ -354,7 +363,7 @@ export function StudentNetworkProvider({
         heartbeatInFlightRef.current = true;
 
         try {
-          await attemptActions.recordHeartbeat('heartbeat');
+          await attemptActionsRef.current.recordHeartbeat('heartbeat');
           if (cancelled) {
             return;
           }
@@ -367,42 +376,42 @@ export function StudentNetworkProvider({
 
           missedHeartbeatsRef.current += 1;
 
-          const { warningThreshold, hardBlockThreshold } = heartbeatThresholds;
+          const { warningThreshold, hardBlockThreshold } = heartbeatThresholdsRef.current;
 
           if (missedHeartbeatsRef.current === warningThreshold) {
             void saveStudentAuditEvent(
-              scheduleId,
+              scheduleIdRef.current,
               'HEARTBEAT_MISSED',
               {
                 missedCount: missedHeartbeatsRef.current,
                 threshold: warningThreshold,
                 intervalSeconds: Math.round(intervalMs / 1_000),
               },
-              attemptState.attemptId ?? undefined,
+              attemptStateRef.current.attemptId ?? undefined,
             );
           }
 
           if (missedHeartbeatsRef.current === hardBlockThreshold) {
-            runtimeActions.addViolation(
+            runtimeActionsRef.current.addViolation(
               'HEARTBEAT_LOST',
               'high',
               `Heartbeat delivery failed after ${missedHeartbeatsRef.current} attempts.`,
             );
-            void attemptActions
+            void attemptActionsRef.current
               .recordHeartbeat('lost', {
                 reason: 'delivery_failed',
                 missedCount: missedHeartbeatsRef.current,
               })
               .catch(() => {});
             void saveStudentAuditEvent(
-              scheduleId,
+              scheduleIdRef.current,
               'HEARTBEAT_LOST',
               {
                 missedCount: missedHeartbeatsRef.current,
                 threshold: hardBlockThreshold,
                 intervalSeconds: Math.round(intervalMs / 1_000),
               },
-              attemptState.attemptId ?? undefined,
+              attemptStateRef.current.attemptId ?? undefined,
             );
           }
         } finally {
@@ -416,15 +425,9 @@ export function StudentNetworkProvider({
       window.clearInterval(intervalId);
     };
   }, [
-    attemptActions,
-    attemptState.attempt,
-    attemptState.attemptId,
-    heartbeatThresholds,
+    heartbeatIntervalMs,
     isOnline,
-    policy,
-    runtimeActions,
     runtimeState.phase,
-    scheduleId,
   ]);
 
   const value = useMemo<StudentNetworkContextValue>(() => ({

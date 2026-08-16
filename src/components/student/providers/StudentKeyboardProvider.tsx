@@ -1,4 +1,13 @@
-import React, { useEffect, useRef, type ReactNode } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from 'react';
 import { countAnsweredQuestions, countQuestionSlots } from '@student/application/studentExamContentFacade';
 import { useProctoring } from './StudentProctoringProvider';
 import { useStudentAttempt } from './StudentAttemptProvider';
@@ -9,6 +18,14 @@ import { useStudentUI } from './StudentUIProvider';
 interface KeyboardProviderProps {
   children: ReactNode;
 }
+
+type StudentSubmitHandler = () => Promise<void> | void;
+
+interface KeyboardContextValue {
+  registerSubmitHandler: (handler: StudentSubmitHandler | null) => () => void;
+}
+
+const KeyboardContext = createContext<KeyboardContextValue | null>(null);
 
 const blockedGlobalModifierKeys = new Set(['f', 'p', 's']);
 
@@ -133,27 +150,74 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
     answeredCount < totalQuestions &&
     unansweredSubmissionPolicy !== 'allow';
   const screenshotUnsupportedLoggedRef = useRef(false);
+  const runtimeStateRef = useRef(runtimeState);
+  const runtimeActionsRef = useRef(runtimeActions);
+  const attemptStateRef = useRef(attemptState);
+  const attemptActionsRef = useRef(attemptActions);
+  const uiActionsRef = useRef(uiActions);
+  const handleViolationRef = useRef(handleViolation);
+  const sessionIdRef = useRef(sessionId);
+  const studentIdRef = useRef(studentId);
+  const shouldBlockClipboardRef = useRef(shouldBlockClipboard);
+  const shouldEnableAntiScreenshotGuardRef = useRef(shouldEnableAntiScreenshotGuard);
+  const submitRequiresConfirmationRef = useRef(submitRequiresConfirmation);
+  const submitHandlerRef = useRef<StudentSubmitHandler | null>(null);
+
+  useLayoutEffect(() => {
+    runtimeStateRef.current = runtimeState;
+    runtimeActionsRef.current = runtimeActions;
+    attemptStateRef.current = attemptState;
+    attemptActionsRef.current = attemptActions;
+    uiActionsRef.current = uiActions;
+    handleViolationRef.current = handleViolation;
+    sessionIdRef.current = sessionId;
+    studentIdRef.current = studentId;
+    shouldBlockClipboardRef.current = shouldBlockClipboard;
+    shouldEnableAntiScreenshotGuardRef.current = shouldEnableAntiScreenshotGuard;
+    submitRequiresConfirmationRef.current = submitRequiresConfirmation;
+  }, [
+    attemptActions,
+    attemptState,
+    handleViolation,
+    runtimeActions,
+    runtimeState,
+    sessionId,
+    shouldBlockClipboard,
+    shouldEnableAntiScreenshotGuard,
+    studentId,
+    submitRequiresConfirmation,
+    uiActions,
+  ]);
+
+  const registerSubmitHandler = useCallback((handler: StudentSubmitHandler | null) => {
+    submitHandlerRef.current = handler;
+    return () => {
+      if (submitHandlerRef.current === handler) {
+        submitHandlerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const screenshotShortcutCooldownMs = 2_000;
     let lastScreenshotShortcutAt = 0;
 
     if (
-      shouldEnableAntiScreenshotGuard &&
-      runtimeState.phase === 'exam' &&
+      shouldEnableAntiScreenshotGuardRef.current &&
+      runtimeStateRef.current.phase === 'exam' &&
       isIpadSafari(navigator.userAgent) &&
       !screenshotUnsupportedLoggedRef.current
     ) {
       screenshotUnsupportedLoggedRef.current = true;
       void saveStudentAuditEvent(
-        sessionId,
+        sessionIdRef.current,
         'SCREENSHOT_DETECTION_UNSUPPORTED',
         {
           platform: 'iPad Safari',
           userAgent: navigator.userAgent,
           reason: 'Hardware button screenshots are not detectable by browser JavaScript.',
         },
-        studentId,
+        studentIdRef.current,
       );
     }
 
@@ -163,17 +227,17 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       message: string,
       severity: 'medium' | 'high' = 'medium',
     ) => {
-      if (runtimeState.phase !== 'exam') {
+      if (runtimeStateRef.current.phase !== 'exam') {
         return;
       }
 
       event.preventDefault();
       event.stopPropagation();
-      handleViolation(type, message, severity);
+      handleViolationRef.current(type, message, severity);
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (runtimeState.phase !== 'exam') {
+      if (runtimeStateRef.current.phase !== 'exam') {
         return;
       }
 
@@ -181,7 +245,7 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       const editingTarget = isEditingTarget(target);
       const normalizedKey = event.key.toLowerCase();
 
-      if (shouldEnableAntiScreenshotGuard && isScreenshotShortcut(event)) {
+      if (shouldEnableAntiScreenshotGuardRef.current && isScreenshotShortcut(event)) {
         const now = Date.now();
         event.preventDefault();
         event.stopPropagation();
@@ -191,7 +255,7 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
         }
         lastScreenshotShortcutAt = now;
 
-        handleViolation(
+        handleViolationRef.current(
           'SCREENSHOT_ATTEMPT',
           'Screenshot attempt detected. The exam screen has been hidden. Acknowledge to continue.',
           'high',
@@ -225,7 +289,7 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
           event.preventDefault();
           event.stopPropagation();
           void saveStudentAuditEvent(
-            sessionId,
+            sessionIdRef.current,
             undoRedoKind === 'undo' ? 'UNDO_BLOCKED' : 'REDO_BLOCKED',
             {
               surface: 'student-global',
@@ -233,14 +297,14 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
               via: 'keydown',
               cancelable: event.cancelable,
             },
-            studentId,
+            studentIdRef.current,
           );
           return;
         }
       }
 
       if (
-        shouldBlockClipboard &&
+        shouldBlockClipboardRef.current &&
         editingTarget &&
         (event.metaKey || event.ctrlKey) &&
         normalizedKey === 'v'
@@ -253,7 +317,7 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
         return;
       }
 
-      if (shouldBlockClipboard && (event.metaKey || event.ctrlKey) && blockedGlobalModifierKeys.has(normalizedKey)) {
+      if (shouldBlockClipboardRef.current && (event.metaKey || event.ctrlKey) && blockedGlobalModifierKeys.has(normalizedKey)) {
         handleRestrictedInteraction(
           event,
           'RESTRICTED_SHORTCUT',
@@ -265,27 +329,33 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault();
         void (async () => {
-          if (submitRequiresConfirmation) {
-            uiActions.setShowSubmitConfirm(true);
+          if (submitRequiresConfirmationRef.current) {
+            uiActionsRef.current.setShowSubmitConfirm(true);
             return;
           }
 
-          if (runtimeState.runtimeBacked) {
-            const flushed = await attemptActions.flushPending();
+          const submitHandler = submitHandlerRef.current;
+          if (submitHandler) {
+            await submitHandler();
+            return;
+          }
+
+          if (runtimeStateRef.current.runtimeBacked) {
+            const flushed = await attemptActionsRef.current.flushPending();
             if (!flushed) {
               if (!navigator.onLine) {
-                runtimeActions.transitionBlocking('offline', true);
+                runtimeActionsRef.current.transitionBlocking('offline', true);
               } else {
-                runtimeActions.transitionBlocking('syncing_reconnect', true);
+                runtimeActionsRef.current.transitionBlocking('syncing_reconnect', true);
               }
               return;
             }
 
-            runtimeActions.transitionBlocking('syncing_reconnect', false);
-            runtimeActions.transitionBlocking('offline', false);
+            runtimeActionsRef.current.transitionBlocking('syncing_reconnect', false);
+            runtimeActionsRef.current.transitionBlocking('offline', false);
           }
 
-          runtimeActions.submitModule();
+          runtimeActionsRef.current.submitModule();
         })();
         return;
       }
@@ -307,39 +377,41 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
 
       switch (normalizedKey) {
         case 'f':
-          if (runtimeState.currentQuestionId) {
-            const nextFlagged = !(attemptState.attempt?.flags?.[runtimeState.currentQuestionId] ?? false);
-            attemptActions.persistFlag(runtimeState.currentQuestionId, nextFlagged);
+          if (runtimeStateRef.current.currentQuestionId) {
+            const nextFlagged = !(
+              attemptStateRef.current.attempt?.flags?.[runtimeStateRef.current.currentQuestionId] ?? false
+            );
+            attemptActionsRef.current.persistFlag(runtimeStateRef.current.currentQuestionId, nextFlagged);
           }
           return;
         case 'n': {
-          if (!runtimeState.currentQuestionId) {
+          if (!runtimeStateRef.current.currentQuestionId) {
             return;
           }
 
-          const currentIndex = runtimeState.allQuestions.findIndex(
-            (question) => question.id === runtimeState.currentQuestionId,
+          const currentIndex = runtimeStateRef.current.allQuestions.findIndex(
+            (question) => question.id === runtimeStateRef.current.currentQuestionId,
           );
-          if (currentIndex >= 0 && currentIndex < runtimeState.allQuestions.length - 1) {
-            const nextQuestion = runtimeState.allQuestions[currentIndex + 1];
+          if (currentIndex >= 0 && currentIndex < runtimeStateRef.current.allQuestions.length - 1) {
+            const nextQuestion = runtimeStateRef.current.allQuestions[currentIndex + 1];
             if (nextQuestion) {
-              runtimeActions.setCurrentQuestionId(nextQuestion.id);
+              runtimeActionsRef.current.setCurrentQuestionId(nextQuestion.id);
             }
           }
           return;
         }
         case 'p': {
-          if (!runtimeState.currentQuestionId) {
+          if (!runtimeStateRef.current.currentQuestionId) {
             return;
           }
 
-          const currentIndex = runtimeState.allQuestions.findIndex(
-            (question) => question.id === runtimeState.currentQuestionId,
+          const currentIndex = runtimeStateRef.current.allQuestions.findIndex(
+            (question) => question.id === runtimeStateRef.current.currentQuestionId,
           );
           if (currentIndex > 0) {
-            const previousQuestion = runtimeState.allQuestions[currentIndex - 1];
+            const previousQuestion = runtimeStateRef.current.allQuestions[currentIndex - 1];
             if (previousQuestion) {
-              runtimeActions.setCurrentQuestionId(previousQuestion.id);
+              runtimeActionsRef.current.setCurrentQuestionId(previousQuestion.id);
             }
           }
           return;
@@ -354,10 +426,10 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
         case '8':
         case '9': {
           const questionIndex = Number.parseInt(normalizedKey, 10) - 1;
-          if (questionIndex >= 0 && questionIndex < runtimeState.allQuestions.length) {
-            const targetQuestion = runtimeState.allQuestions[questionIndex];
+          if (questionIndex >= 0 && questionIndex < runtimeStateRef.current.allQuestions.length) {
+            const targetQuestion = runtimeStateRef.current.allQuestions[questionIndex];
             if (targetQuestion) {
-              runtimeActions.setCurrentQuestionId(targetQuestion.id);
+              runtimeActionsRef.current.setCurrentQuestionId(targetQuestion.id);
             }
           }
           return;
@@ -373,7 +445,7 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
         return;
       }
 
-      if (!shouldBlockClipboard || event.type !== 'paste') {
+      if (!shouldBlockClipboardRef.current || event.type !== 'paste') {
         return;
       }
 
@@ -386,14 +458,14 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       // Log paste attempts with metadata
       if (event.type === 'paste') {
         saveStudentAuditEvent(
-          sessionId,
+          sessionIdRef.current,
           'PASTE_BLOCKED',
           {
             targetName: targetElement?.tagName ?? 'unknown',
             targetType: targetElement?.getAttribute('type') ?? targetElement?.tagName ?? 'unknown',
             isContentEditable: targetElement?.isContentEditable ?? false,
           },
-          studentId,
+          studentIdRef.current,
         );
       }
       
@@ -423,23 +495,21 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
       document.removeEventListener('paste', handleClipboardEvent);
       document.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [
-    attemptActions,
-    attemptState.attempt?.scheduleId,
-    attemptState.attemptId,
-    examState.config.security.antiScreenshotGuardEnabled,
-    examState.config.security.blockClipboard,
-    examState.config.progression.unansweredSubmissionPolicy,
-    handleViolation,
-    runtimeActions,
-    runtimeState,
-    submitRequiresConfirmation,
-    uiActions,
-  ]);
+  }, []);
 
-  return <>{children}</>;
+  const contextValue = useMemo<KeyboardContextValue>(() => ({ registerSubmitHandler }), [registerSubmitHandler]);
+
+  return <KeyboardContext.Provider value={contextValue}>{children}</KeyboardContext.Provider>;
 }
 
 export function useKeyboard() {
-  return undefined;
+  return useKeyboardSubmitHandler();
+}
+
+export function useKeyboardSubmitHandler() {
+  const context = useContext(KeyboardContext);
+  if (!context) {
+    throw new Error('useKeyboardSubmitHandler must be used within KeyboardProvider');
+  }
+  return context;
 }

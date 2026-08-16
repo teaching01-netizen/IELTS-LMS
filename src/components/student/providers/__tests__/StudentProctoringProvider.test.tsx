@@ -2,7 +2,7 @@ import React from 'react';
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProctoringProvider, useProctoring } from '../StudentProctoringProvider';
-import { StudentAttemptProvider } from '../StudentAttemptProvider';
+import { StudentAttemptProvider, useStudentAttempt } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
 import { studentAttemptRepository as studentAttemptRepositoryInstance } from '../../../../services/studentAttemptRepository';
 import { resetStudentAttemptPendingMutationIndexedDbForTests } from '../../../../services/studentAttemptRepository';
@@ -213,6 +213,7 @@ function renderHarness(
     () => ({
       proctoring: useProctoring(),
       runtime: useStudentRuntime(),
+      attempt: useStudentAttempt(),
     }),
     { wrapper },
   );
@@ -848,6 +849,20 @@ describe('StudentProctoringProvider', () => {
     expect(
       harness.result.current.runtime.state.violations.some((violation) => violation.type === 'SECONDARY_SCREEN'),
     ).toBe(true);
+  });
+
+  it('keeps the secondary-screen timer mounted while answers are updated', () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const harness = renderHarness();
+    const initialSecondaryScreenTimers = setIntervalSpy.mock.calls.filter(([, delay]) => delay === 3_000).length;
+
+    act(() => {
+      harness.result.current.attempt.actions.persistAnswer('q1', 'A');
+    });
+
+    expect(
+      setIntervalSpy.mock.calls.filter(([, delay]) => delay === 3_000),
+    ).toHaveLength(initialSecondaryScreenTimers);
   });
 
   it('keeps Safari fallback silent and non-violating when screen details are unavailable', async () => {

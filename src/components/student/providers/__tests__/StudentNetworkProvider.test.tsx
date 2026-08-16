@@ -385,6 +385,42 @@ describe('StudentNetworkProvider', () => {
     expect(savedEventTypes.filter((type) => type === 'lost')).toHaveLength(1);
   });
 
+  it('keeps the heartbeat schedule alive while answers are updated', async () => {
+    vi.useFakeTimers();
+
+    const config = createExamState().config;
+    config.security.heartbeatIntervalSeconds = 1;
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+
+    const { result } = renderHook(
+      () => ({
+        attempt: useStudentAttempt(),
+      }),
+      { wrapper: createWrapper(createAttemptSnapshot(), config) },
+    );
+
+    vi.mocked(studentAttemptRepository.saveHeartbeatEvent).mockClear();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(900);
+    });
+
+    act(() => {
+      result.current.attempt.actions.persistAnswer('q1', 'A');
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+
+    expect(studentAttemptRepository.saveHeartbeatEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'heartbeat' }),
+    );
+  });
+
   it('does not hard-block on initial load when the stored fingerprint differs', async () => {
     vi.mocked(getDeviceFingerprint).mockResolvedValue({
       components: {},

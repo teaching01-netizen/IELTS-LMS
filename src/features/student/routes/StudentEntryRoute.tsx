@@ -143,6 +143,24 @@ export function StudentEntryRoute() {
   const [queuedPayload, setQueuedPayload] = useState<EntryFormData | null>(null);
 
   useEffect(() => {
+    const profile = scheduleId && initialWcode
+      ? loadCandidateProfile(scheduleId, initialWcode)
+      : null;
+
+    setFormData({
+      wcode: initialWcode,
+      email: profile?.email ?? '',
+      studentName: profile?.studentName ?? '',
+      nickname: profile?.nickname ?? '',
+      ieltsCourse: profile?.ieltsCourse ?? '',
+    });
+    setErrors({});
+    setSubmitError(null);
+    setQueuedAdmission(null);
+    setQueuedPayload(null);
+  }, [initialWcode, scheduleId]);
+
+  useEffect(() => {
     if (!scheduleId) {
       return;
     }
@@ -344,18 +362,19 @@ export function StudentEntryRoute() {
           <div>
             <label htmlFor="wcode" className="block text-sm font-medium text-gray-700 mb-2">
               Wcode
+              <input
+                id="wcode"
+                type="text"
+                value={formData.wcode}
+                onChange={(e) => handleInputChange('wcode', e.target.value)}
+                placeholder="Enter your wcode"
+                aria-label="Wcode"
+                disabled={isLoading || Boolean(queuedAdmission)}
+                className={`mt-2 w-full px-3 py-2 border rounded-md ${
+                  errors.wcode ? 'border-red-300' : 'border-gray-300'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              />
             </label>
-            <input
-              id="wcode"
-              type="text"
-              value={formData.wcode}
-              onChange={(e) => handleInputChange('wcode', e.target.value)}
-              placeholder="Enter your wcode"
-              disabled={isLoading || Boolean(queuedAdmission)}
-              className={`w-full px-3 py-2 border rounded-md ${
-                errors.wcode ? 'border-red-300' : 'border-gray-300'
-              } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            />
             {errors.wcode && <p className="mt-1 text-sm text-red-600">{errors.wcode}</p>}
             <p className="mt-1 text-xs text-gray-500">Enter the wcode provided to you.</p>
           </div>
@@ -363,36 +382,38 @@ export function StudentEntryRoute() {
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
               Email
+              <input
+                id="email"
+                type="email"
+                value={formData.email}
+                onChange={(e) => handleInputChange('email', e.target.value)}
+                placeholder="student@example.com"
+                aria-label="Email"
+                disabled={isLoading || Boolean(queuedAdmission)}
+                className={`mt-2 w-full px-3 py-2 border rounded-md ${
+                  errors.email ? 'border-red-300' : 'border-gray-300'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              />
             </label>
-            <input
-              id="email"
-              type="email"
-              value={formData.email}
-              onChange={(e) => handleInputChange('email', e.target.value)}
-              placeholder="student@example.com"
-              disabled={isLoading || Boolean(queuedAdmission)}
-              className={`w-full px-3 py-2 border rounded-md ${
-                errors.email ? 'border-red-300' : 'border-gray-300'
-              } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            />
             {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
           </div>
 
           <div>
             <label htmlFor="studentName" className="block text-sm font-medium text-gray-700 mb-2">
               Full Name
+              <input
+                id="studentName"
+                type="text"
+                value={formData.studentName}
+                onChange={(e) => handleInputChange('studentName', e.target.value)}
+                placeholder="John Doe"
+                aria-label="Full Name"
+                disabled={isLoading || Boolean(queuedAdmission)}
+                className={`mt-2 w-full px-3 py-2 border rounded-md ${
+                  errors.studentName ? 'border-red-300' : 'border-gray-300'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              />
             </label>
-            <input
-              id="studentName"
-              type="text"
-              value={formData.studentName}
-              onChange={(e) => handleInputChange('studentName', e.target.value)}
-              placeholder="John Doe"
-              disabled={isLoading || Boolean(queuedAdmission)}
-              className={`w-full px-3 py-2 border rounded-md ${
-                errors.studentName ? 'border-red-300' : 'border-gray-300'
-              } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            />
             {errors.studentName && (
               <p className="mt-1 text-sm text-red-600">{errors.studentName}</p>
             )}
@@ -401,37 +422,39 @@ export function StudentEntryRoute() {
           <div>
             <label htmlFor="nickname" className="block text-sm font-medium text-gray-700 mb-2">
               Nickname
+              <input
+                id="nickname"
+                type="text"
+                value={formData.nickname}
+                onChange={(e) => handleInputChange('nickname', e.target.value)}
+                placeholder="Nickname"
+                aria-label="Nickname"
+                disabled={isLoading || Boolean(queuedAdmission)}
+                maxLength={50}
+                className={`mt-2 w-full px-3 py-2 border rounded-md ${
+                  errors.nickname ? 'border-red-300' : 'border-gray-300'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              />
             </label>
-            <input
-              id="nickname"
-              type="text"
-              value={formData.nickname}
-              onChange={(e) => handleInputChange('nickname', e.target.value)}
-              placeholder="Nickname"
-              disabled={isLoading || Boolean(queuedAdmission)}
-              maxLength={50}
-              className={`w-full px-3 py-2 border rounded-md ${
-                errors.nickname ? 'border-red-300' : 'border-gray-300'
-              } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            />
             {errors.nickname && <p className="mt-1 text-sm text-red-600">{errors.nickname}</p>}
           </div>
 
           <div>
             <label htmlFor="ieltsCourse" className="block text-sm font-medium text-gray-700 mb-2">
               IELTS Course
+              <input
+                id="ieltsCourse"
+                type="text"
+                value={formData.ieltsCourse}
+                onChange={(e) => handleInputChange('ieltsCourse', e.target.value)}
+                placeholder="IELTS Course"
+                aria-label="IELTS Course"
+                disabled={isLoading || Boolean(queuedAdmission)}
+                className={`mt-2 w-full px-3 py-2 border rounded-md ${
+                  errors.ieltsCourse ? 'border-red-300' : 'border-gray-300'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              />
             </label>
-            <input
-              id="ieltsCourse"
-              type="text"
-              value={formData.ieltsCourse}
-              onChange={(e) => handleInputChange('ieltsCourse', e.target.value)}
-              placeholder="IELTS Course"
-              disabled={isLoading || Boolean(queuedAdmission)}
-              className={`w-full px-3 py-2 border rounded-md ${
-                errors.ieltsCourse ? 'border-red-300' : 'border-gray-300'
-              } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            />
             {errors.ieltsCourse && (
               <p className="mt-1 text-sm text-red-600">{errors.ieltsCourse}</p>
             )}

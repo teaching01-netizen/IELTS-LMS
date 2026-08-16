@@ -3,6 +3,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useReducer,
@@ -690,6 +691,10 @@ export function StudentRuntimeProvider({
   );
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [derivedClockNowMs, setDerivedClockNowMs] = useState(() => Date.now());
+  const runtimeStateRef = useRef(runtimeState);
+  useLayoutEffect(() => {
+    runtimeStateRef.current = runtimeState;
+  }, [runtimeState]);
   const lastHydratedAttemptRef = useRef<string | null>(
     attemptSnapshot
       ? `${attemptSnapshot.id}:${attemptSnapshot.updatedAt}:${getDroppedMutationMarker(attemptSnapshot.recovery.lastDroppedMutations) ?? ''}`
@@ -928,28 +933,27 @@ export function StudentRuntimeProvider({
   }, [clockOffsetMs, runtimeBacked, runtimeSnapshot, runtimeState.phase]);
 
   useEffect(() => {
-    if (
-      runtimeBacked ||
-      runtimeState.phase !== 'exam' ||
-      runtimeState.timeRemaining <= 0 ||
-      runtimeState.blockingReasonOverride
-    ) {
+    if (runtimeBacked) {
       return;
     }
 
     const timerId = window.setInterval(() => {
+      const currentState = runtimeStateRef.current;
+      if (
+        currentState.phase !== 'exam' ||
+        currentState.timeRemaining <= 0 ||
+        currentState.blockingReasonOverride
+      ) {
+        return;
+      }
+
       dispatch({ type: 'tick' });
     }, 1_000);
 
     return () => {
       window.clearInterval(timerId);
     };
-  }, [
-    runtimeBacked,
-    runtimeState.blockingReasonOverride,
-    runtimeState.phase,
-    runtimeState.timeRemaining,
-  ]);
+  }, [runtimeBacked]);
 
   const allQuestions = useMemo(
     () => getStudentQuestionsForModule(state, runtimeState.currentModule),

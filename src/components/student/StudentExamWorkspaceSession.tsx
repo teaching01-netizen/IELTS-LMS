@@ -1,3 +1,4 @@
+import React from 'react';
 import { useStudentExamSession } from '@student/hooks/exam-session/StudentExamSessionProvider';
 import {
   selectAnswers,
@@ -22,7 +23,9 @@ export type StudentExamWorkspaceSessionProps = Omit<
   | 'displayTimeRemaining'
 >;
 
-export function StudentExamWorkspaceSession(props: StudentExamWorkspaceSessionProps) {
+export const StudentExamWorkspaceSession = React.memo(function StudentExamWorkspaceSession(
+  props: StudentExamWorkspaceSessionProps,
+) {
   const currentModule = useStudentExamSession(selectCurrentModule);
   const currentQuestionId = useStudentExamSession(selectCurrentQuestionId);
   const answers = useStudentExamSession(selectAnswers);
@@ -41,4 +44,4 @@ export function StudentExamWorkspaceSession(props: StudentExamWorkspaceSessionPr
       displayTimeRemaining={displayTimeRemaining ?? undefined}
     />
   );
-}
+});

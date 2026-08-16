@@ -1,6 +1,6 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, UNSAFE_NavigationContext } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StudentEntryRoute } from '../StudentEntryRoute';
 
@@ -46,6 +46,16 @@ function submitForm(wcode = 'W250334') {
     target: { value: 'IELTS Academic' },
   });
   fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+}
+
+function RouteProbe({ onReady }: { onReady: (push: (to: string) => void) => void }) {
+  const { navigator } = React.useContext(UNSAFE_NavigationContext);
+
+  React.useEffect(() => {
+    onReady((to) => navigator.push(to));
+  }, [navigator, onReady]);
+
+  return null;
 }
 
 describe('StudentEntryRoute', () => {
@@ -365,6 +375,58 @@ describe('StudentEntryRoute', () => {
       expect(navigateMock).toHaveBeenCalledWith(
         `/student/${scheduleId}/${encodeURIComponent(rawAccessCode)}`,
       );
+    });
+  });
+
+  it('resets form state when the schedule or query access code changes in place', async () => {
+    const firstScheduleId = '550e8400-e29b-41d4-a716-446655440128';
+    const secondScheduleId = '550e8400-e29b-41d4-a716-446655440129';
+    window.localStorage.setItem(
+      `ielts-student-profile:${firstScheduleId}:W111111`,
+      JSON.stringify({
+        studentName: 'First Student',
+        email: 'first@example.com',
+        nickname: 'first',
+        ieltsCourse: 'IELTS Academic',
+      }),
+    );
+
+    let pushRoute: ((to: string) => void) | null = null;
+    const setPushRoute = (push: (to: string) => void) => {
+      pushRoute = push;
+    };
+
+    render(
+      <MemoryRouter initialEntries={[`/student/${firstScheduleId}?wcode=W111111`]}>
+        <Routes>
+          <Route
+            path="/student/:scheduleId"
+            element={
+              <>
+                <StudentEntryRoute />
+                <RouteProbe onReady={setPushRoute} />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/email/i)).toHaveValue('first@example.com');
+    });
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: 'edited@example.com' },
+    });
+
+    await act(async () => {
+      pushRoute?.(`/student/${secondScheduleId}?wcode=W222222`);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/access code|wcode/i)).toHaveValue('W222222');
+      expect(screen.getByLabelText(/email/i)).toHaveValue('');
+      expect(screen.getByLabelText(/full name/i)).toHaveValue('');
     });
   });
 });

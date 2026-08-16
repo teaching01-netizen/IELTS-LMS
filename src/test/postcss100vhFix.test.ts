@@ -47,7 +47,7 @@ describe('PostCSS Safari 100vh fallback', () => {
 
   it('keeps the active exam shell height-owned by a single semantic CSS variable', () => {
     const shellStyle = studentAppSource.match(
-      /const studentShellStyle = \{([\s\S]*?)\}\s+as React\.CSSProperties/,
+      /const studentShellStyle = useMemo\(\s*\(\) => \(\{([\s\S]*?)\}\) as React\.CSSProperties/,
     )?.[1];
     expect(shellStyle).toBeDefined();
     expect(shellStyle).not.toMatch(/height:/);

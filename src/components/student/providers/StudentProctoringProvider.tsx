@@ -3,6 +3,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   type ReactNode,
 } from 'react';
@@ -98,13 +99,30 @@ export function ProctoringProvider({
     high: 0,
     critical: 0,
   });
+  const configRef = useRef(config);
+  const runtimeStateRef = useRef(runtimeState);
+  const runtimeActionsRef = useRef(runtimeActions);
+  const attemptStateRef = useRef(attemptState);
+  const attemptActionsRef = useRef(attemptActions);
+  const enabledRef = useRef(enabled);
+  const scheduleIdRef = useRef(scheduleId);
+
+  useLayoutEffect(() => {
+    configRef.current = config;
+    runtimeStateRef.current = runtimeState;
+    runtimeActionsRef.current = runtimeActions;
+    attemptStateRef.current = attemptState;
+    attemptActionsRef.current = attemptActions;
+    enabledRef.current = enabled;
+    scheduleIdRef.current = scheduleId;
+  }, [attemptActions, attemptState, config, enabled, runtimeActions, runtimeState, scheduleId]);
 
   const handleViolation = useCallback((
     type: string,
     message: string,
     severity: ViolationSeverity = 'medium',
   ) => {
-    if (!enabled) {
+    if (!enabledRef.current) {
       return;
     }
 
@@ -129,7 +147,7 @@ export function ProctoringProvider({
     // Increment violation count for severity
     violationCountsRef.current[severity]++;
     
-    const thresholds = config.security.severityThresholds;
+    const thresholds = configRef.current.security.severityThresholds;
     const recordViolation = () => {
       const timestamp = new Date().toISOString();
       const violationId = `v-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -140,8 +158,8 @@ export function ProctoringProvider({
         timestamp,
         description: message,
       };
-      runtimeActions.addViolation(type, severity, message, violationId, timestamp);
-      attemptActions.persistViolation(violation);
+      runtimeActionsRef.current.addViolation(type, severity, message, violationId, timestamp);
+      attemptActionsRef.current.persistViolation(violation);
       return { violationId, timestamp };
     };
     
@@ -150,7 +168,7 @@ export function ProctoringProvider({
       // Always terminate on critical
       const { violationId } = recordViolation();
       void saveStudentAuditEvent(
-        scheduleId,
+        scheduleIdRef.current,
         'VIOLATION_DETECTED',
         {
           violationId,
@@ -159,9 +177,9 @@ export function ProctoringProvider({
           violationType: type,
           action: 'terminate',
         },
-        attemptState.attemptId ?? undefined,
+        attemptStateRef.current.attemptId ?? undefined,
       );
-      runtimeActions.terminateExam();
+      runtimeActionsRef.current.terminateExam();
       return;
     }
     
@@ -170,7 +188,7 @@ export function ProctoringProvider({
       if (violationCountsRef.current.high >= highLimit) {
         const { violationId } = recordViolation();
         void saveStudentAuditEvent(
-          scheduleId,
+          scheduleIdRef.current,
           'VIOLATION_DETECTED',
           {
             violationId,
@@ -179,25 +197,25 @@ export function ProctoringProvider({
             violationType: type,
             count: violationCountsRef.current.high,
             threshold: highLimit,
-            action: config.progression.allowPause ? 'pause' : 'terminate',
+            action: configRef.current.progression.allowPause ? 'pause' : 'terminate',
           },
-          attemptState.attemptId ?? undefined,
+          attemptStateRef.current.attemptId ?? undefined,
         );
-        if (config.progression.allowPause) {
-          runtimeActions.pauseExam();
+        if (configRef.current.progression.allowPause) {
+          runtimeActionsRef.current.pauseExam();
         } else {
-          runtimeActions.terminateExam();
+          runtimeActionsRef.current.terminateExam();
         }
         return;
       }
     }
     
     if (severity === 'medium') {
-      const mediumLimit = thresholds?.mediumLimit ?? config.progression.warningThreshold ?? 3;
+      const mediumLimit = thresholds?.mediumLimit ?? configRef.current.progression.warningThreshold ?? 3;
       if (violationCountsRef.current.medium >= mediumLimit) {
         const { violationId } = recordViolation();
         void saveStudentAuditEvent(
-          scheduleId,
+          scheduleIdRef.current,
           'VIOLATION_DETECTED',
           {
             violationId,
@@ -208,7 +226,7 @@ export function ProctoringProvider({
             threshold: mediumLimit,
             action: 'warn',
           },
-          attemptState.attemptId ?? undefined,
+          attemptStateRef.current.attemptId ?? undefined,
         );
         return;
       }
@@ -219,7 +237,7 @@ export function ProctoringProvider({
       if (violationCountsRef.current.low >= lowLimit) {
         const { violationId } = recordViolation();
         void saveStudentAuditEvent(
-          scheduleId,
+          scheduleIdRef.current,
           'VIOLATION_DETECTED',
           {
             violationId,
@@ -230,7 +248,7 @@ export function ProctoringProvider({
             threshold: lowLimit,
             action: 'warn',
           },
-          attemptState.attemptId ?? undefined,
+          attemptStateRef.current.attemptId ?? undefined,
         );
         return;
       }
@@ -239,7 +257,7 @@ export function ProctoringProvider({
     // Default: just log the violation
     const { violationId } = recordViolation();
     void saveStudentAuditEvent(
-      scheduleId,
+      scheduleIdRef.current,
       'VIOLATION_DETECTED',
       {
         violationId,
@@ -247,18 +265,9 @@ export function ProctoringProvider({
         message,
         violationType: type,
       },
-      attemptState.attemptId ?? undefined,
+      attemptStateRef.current.attemptId ?? undefined,
     );
-  }, [
-    attemptActions,
-    attemptState.attemptId,
-    config.progression.allowPause,
-    config.progression.warningThreshold,
-    config.security.severityThresholds,
-    enabled,
-    runtimeActions,
-    scheduleId,
-  ]);
+  }, []);
 
   useStudentTranslationGuard(
     enabled && runtimeState.phase === 'exam' && shouldPreventTranslation,
@@ -266,7 +275,11 @@ export function ProctoringProvider({
   );
 
   const detectSecondaryScreens = useCallback(async () => {
-    if (!enabled || !config.security.detectSecondaryScreen || runtimeState.phase !== 'exam') {
+    if (
+      !enabledRef.current
+      || !configRef.current.security.detectSecondaryScreen
+      || runtimeStateRef.current.phase !== 'exam'
+    ) {
       return;
     }
 
@@ -278,13 +291,13 @@ export function ProctoringProvider({
       // Log unsupported API as informational event
       if (!isSafariBrowser()) {
         void saveStudentAuditEvent(
-          scheduleId,
+          scheduleIdRef.current,
           'SCREEN_CHECK_UNSUPPORTED',
           {
             browser: navigator.userAgent,
             userAgent: navigator.userAgent,
           },
-          attemptState.attemptId ?? undefined,
+          attemptStateRef.current.attemptId ?? undefined,
         );
       }
       screenDetailsUnsupportedRef.current = true;
@@ -315,22 +328,15 @@ export function ProctoringProvider({
       screenDetailsLastPermissionDeniedAtRef.current = now;
 
       void saveStudentAuditEvent(
-        scheduleId,
+        scheduleIdRef.current,
         'SCREEN_CHECK_PERMISSION_DENIED',
         {
           error: error instanceof Error ? error.message : 'Unknown error',
         },
-        attemptState.attemptId ?? undefined,
+        attemptStateRef.current.attemptId ?? undefined,
       );
     }
-  }, [
-    attemptState.attemptId,
-    config.security.detectSecondaryScreen,
-    enabled,
-    handleViolation,
-    runtimeState.phase,
-    scheduleId,
-  ]);
+  }, [handleViolation]);
 
   useEffect(() => {
     if (!enabled) {
@@ -351,26 +357,26 @@ export function ProctoringProvider({
     const viewportSettleMs = 1_000;
 
     const recordCloseSignal = (eventType: string) => {
-      if (runtimeState.phase !== 'exam') {
+      if (runtimeStateRef.current.phase !== 'exam') {
         return;
       }
 
       closeSignalAt = Date.now();
       void saveStudentAuditEvent(
-        scheduleId,
+        scheduleIdRef.current,
         'BROWSER_CLOSE_DETECTED',
         {
           eventType,
           timestamp: new Date().toISOString(),
         },
-        attemptState.attemptId ?? undefined,
+        attemptStateRef.current.attemptId ?? undefined,
       );
     };
 
     const handleTabSwitch = (eventType: string) => {
       if (
-        runtimeState.phase !== 'exam' ||
-        config.security.tabSwitchRule === 'none'
+        runtimeStateRef.current.phase !== 'exam' ||
+        configRef.current.security.tabSwitchRule === 'none'
       ) {
         return;
       }
@@ -389,7 +395,7 @@ export function ProctoringProvider({
 
       tabSwitchDebounceTimer = null;
 
-      if (config.security.tabSwitchRule === 'warn') {
+      if (configRef.current.security.tabSwitchRule === 'warn') {
         handleViolation(
           'TAB_SWITCH',
           `Tab switching detected via ${eventType}. You must remain on the examination page at all times.`,
@@ -423,13 +429,13 @@ export function ProctoringProvider({
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       recordCloseSignal('beforeunload');
 
-      if (runtimeState.phase !== 'exam') {
+      if (runtimeStateRef.current.phase !== 'exam') {
         return;
       }
 
-      const syncState = attemptState.attempt?.recovery.syncState;
+      const syncState = attemptStateRef.current.attempt?.recovery.syncState;
       const hasUnsyncedAttemptState =
-        attemptState.pendingMutationCount > 0 ||
+        attemptStateRef.current.pendingMutationCount > 0 ||
         syncState === 'saving' ||
         syncState === 'offline' ||
         syncState === 'syncing_reconnect' ||
@@ -514,20 +520,10 @@ export function ProctoringProvider({
         window.clearInterval(secondaryScreenCheckTimer);
       }
     };
-  }, [
-    attemptState.attempt?.recovery.syncState,
-    config.security,
-    detectSecondaryScreens,
-    enabled,
-    handleViolation,
-    attemptState.pendingMutationCount,
-    runtimeState.phase,
-    attemptState.attemptId,
-    scheduleId,
-  ]);
+  }, [config.security.detectSecondaryScreen, detectSecondaryScreens, enabled, handleViolation, runtimeState.phase]);
 
   return (
-    <ProctoringContext.Provider value={{ handleViolation }}>
+    <ProctoringContext.Provider value={React.useMemo(() => ({ handleViolation }), [handleViolation])}>
       {children}
     </ProctoringContext.Provider>
   );

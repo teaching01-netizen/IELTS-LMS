@@ -122,8 +122,8 @@ describe('StudentKeyboardProvider', () => {
 
       return (
         <>
-          <textarea data-testid="editor" />
-          <input data-testid="objective-input" />
+          <textarea aria-label="Editor" data-testid="editor" />
+          <input aria-label="Objective answer" data-testid="objective-input" />
           <div data-testid="highlight-target" data-student-highlightable="true">
             Passage text
           </div>
@@ -194,6 +194,25 @@ describe('StudentKeyboardProvider', () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(harness.runtime.state.violations).toHaveLength(0);
+  });
+
+  it('keeps global keyboard listeners mounted while answers are updated', () => {
+    const addEventListenerSpy = vi.spyOn(document, 'addEventListener');
+    const removeEventListenerSpy = vi.spyOn(document, 'removeEventListener');
+    const harness = renderHarness();
+    const keydownAdds = addEventListenerSpy.mock.calls.filter(([type]) => type === 'keydown').length;
+    const keydownRemoves = removeEventListenerSpy.mock.calls.filter(([type]) => type === 'keydown').length;
+
+    act(() => {
+      harness.attempt.actions.persistAnswer('q1', 'A');
+    });
+
+    expect(
+      addEventListenerSpy.mock.calls.filter(([type]) => type === 'keydown'),
+    ).toHaveLength(keydownAdds);
+    expect(
+      removeEventListenerSpy.mock.calls.filter(([type]) => type === 'keydown'),
+    ).toHaveLength(keydownRemoves);
   });
 
   it('allows clipboard shortcuts when config disables clipboard blocking', () => {

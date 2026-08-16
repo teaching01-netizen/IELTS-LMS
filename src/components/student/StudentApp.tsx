@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { countAnsweredQuestions, countQuestionSlots } from '@student/application/studentExamContentFacade';
 import { Button } from '../ui/Button';
 import { AccessibilitySettings } from './AccessibilitySettings';
@@ -28,6 +28,7 @@ import { useStudentWarningVisibility } from './useStudentWarningVisibility';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
 import { useStudentRuntime } from './providers/StudentRuntimeProvider';
 import { useStudentUI } from './providers/StudentUIProvider';
+import { useKeyboardSubmitHandler } from './providers/StudentKeyboardProvider';
 import { useExamCommands } from '@student/hooks/exam-session/useExamCommands';
 import { useStudentExamSessionStore } from '@student/hooks/exam-session/StudentExamSessionProvider';
 import { createStudentSubmissionCommands } from '@student/application/exam-session/submissionCommands';
@@ -138,6 +139,7 @@ export function StudentApp({
   const examSessionCommands = useExamCommands();
   const examSessionStore = useStudentExamSessionStore();
   const { state: uiState, actions: uiActions } = useStudentUI();
+  const { registerSubmitHandler } = useKeyboardSubmitHandler();
   const layoutEnvironment = useStudentLayoutEnvironment();
   const layoutMode = layoutEnvironment.layoutMode;
   const tabletMode =
@@ -155,7 +157,10 @@ export function StudentApp({
   const canDecreasePassageReadability = canDecreaseStudentPassageReadability(
     uiState.accessibilitySettings.passageReadabilityLevel,
   );
-  const studentTypography = getStudentTypographyScale(uiState.accessibilitySettings.fontSize);
+  const studentTypography = useMemo(
+    () => getStudentTypographyScale(uiState.accessibilitySettings.fontSize),
+    [uiState.accessibilitySettings.fontSize],
+  );
   useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
   const { resetHighlightTool, setShowTimeExtensionRequest } = uiActions;
@@ -164,25 +169,36 @@ export function StudentApp({
   const timeExtensionDialogRef = useRef<HTMLDialogElement>(null);
   const highlightColor = uiState.accessibilitySettings.highlightColor;
   const highlightEnabled = true;
-  const attemptAnswers = attemptState.attempt?.answers ?? {};
-  const attemptWritingAnswers = attemptState.attempt?.writingAnswers ?? {};
-  const attemptFlags = attemptState.attempt?.flags ?? {};
-  const studentShellStyle = {
-    zoom: tabletMode ? 1 : uiState.accessibilitySettings.zoom,
-    fontSize: studentTypography.rootFontSize,
-    lineHeight: studentTypography.lineHeight,
-    ['--student-meta-font-size' as string]: studentTypography.metaFontSize,
-    ['--student-chip-font-size' as string]: studentTypography.chipFontSize,
-    ['--student-control-font-size' as string]: studentTypography.controlFontSize,
-    ['--student-preview-font-size' as string]: studentTypography.previewFontSize,
-    ['--student-passage-font-size' as string]: studentTypography.passageFontSize,
-    ['--student-passage-title-font-size' as string]: studentTypography.passageTitleFontSize,
-    ['--student-passage-h1-font-size' as string]: studentTypography.passageH1FontSize,
-    ['--student-passage-h2-font-size' as string]: studentTypography.passageH2FontSize,
-    ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
-    ['--student-passage-line-height' as string]: studentTypography.passageLineHeight,
-  } as React.CSSProperties;
+  const attemptAnswers = useMemo(() => attemptState.attempt?.answers ?? {}, [attemptState.attempt?.answers]);
+  const attemptWritingAnswers = useMemo(
+    () => attemptState.attempt?.writingAnswers ?? {},
+    [attemptState.attempt?.writingAnswers],
+  );
+  const attemptFlags = useMemo(() => attemptState.attempt?.flags ?? {}, [attemptState.attempt?.flags]);
+  const studentShellStyle = useMemo(
+    () => ({
+      zoom: tabletMode ? 1 : uiState.accessibilitySettings.zoom,
+      fontSize: studentTypography.rootFontSize,
+      lineHeight: studentTypography.lineHeight,
+      ['--student-meta-font-size' as string]: studentTypography.metaFontSize,
+      ['--student-chip-font-size' as string]: studentTypography.chipFontSize,
+      ['--student-control-font-size' as string]: studentTypography.controlFontSize,
+      ['--student-preview-font-size' as string]: studentTypography.previewFontSize,
+      ['--student-passage-font-size' as string]: studentTypography.passageFontSize,
+      ['--student-passage-title-font-size' as string]: studentTypography.passageTitleFontSize,
+      ['--student-passage-h1-font-size' as string]: studentTypography.passageH1FontSize,
+      ['--student-passage-h2-font-size' as string]: studentTypography.passageH2FontSize,
+      ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
+      ['--student-passage-line-height' as string]: studentTypography.passageLineHeight,
+    }) as React.CSSProperties,
+    [studentTypography, tabletMode, uiState.accessibilitySettings.zoom],
+  );
   const runtimeStateRef = useRef(runtimeState);
+  const runtimeActionsRef = useRef(runtimeActions);
+  const attemptActionsRef = useRef(attemptActions);
+  const examSessionCommandsRef = useRef(examSessionCommands);
+  const attemptFlagsRef = useRef(attemptFlags);
+  const uiActionsRef = useRef(uiActions);
   const latestAnswersRef = useRef(attemptAnswers);
   const liveObjectiveAnswersRef = useRef(attemptAnswers);
   const liveWritingAnswersRef = useRef(attemptWritingAnswers);
@@ -192,6 +208,15 @@ export function StudentApp({
   const [warningSeverity, setWarningSeverity] = useState<'medium' | 'high' | 'critical'>(
     'medium',
   );
+
+  useLayoutEffect(() => {
+    runtimeStateRef.current = runtimeState;
+    runtimeActionsRef.current = runtimeActions;
+    attemptActionsRef.current = attemptActions;
+    examSessionCommandsRef.current = examSessionCommands;
+    attemptFlagsRef.current = attemptFlags;
+    uiActionsRef.current = uiActions;
+  }, [attemptActions, attemptFlags, examSessionCommands, runtimeActions, runtimeState, uiActions]);
 
   useEffect(() => {
     examSessionCommands.setPhase(runtimeState.phase);
@@ -270,7 +295,6 @@ export function StudentApp({
   }, [examViewportActive]);
 
   useEffect(() => {
-    runtimeStateRef.current = runtimeState;
     latestAnswersRef.current = attemptAnswers;
     liveObjectiveAnswersRef.current = attemptAnswers;
     liveWritingAnswersRef.current = attemptWritingAnswers;
@@ -299,9 +323,7 @@ export function StudentApp({
         },
       }),
     [
-      attemptActions.flushAnswerDurabilityNow,
-      attemptActions.flushPending,
-      attemptActions.submitAttempt,
+      attemptActions,
       commitWritingDraft,
       examSessionStore,
       reconcileLiveAnswerCacheNow,
@@ -333,6 +355,10 @@ export function StudentApp({
     },
     submissionCommands,
   });
+  const flushAndSubmitCurrentModuleWithRetryRef = useRef(flushAndSubmitCurrentModuleWithRetry);
+  useLayoutEffect(() => {
+    flushAndSubmitCurrentModuleWithRetryRef.current = flushAndSubmitCurrentModuleWithRetry;
+  }, [flushAndSubmitCurrentModuleWithRetry]);
 
   useEffect(() => {
     const isHighlightCapableContext = isStudentHighlightToolContextActive({
@@ -455,38 +481,44 @@ export function StudentApp({
     answeredCount < totalQuestions &&
     unansweredSubmissionPolicy !== 'allow';
 
-  const performModuleSubmit = async () => {
-    if (runtimeState.runtimeBacked) {
-      const fingerprint = `manual:${runtimeState.currentModule}`;
-      await flushAndSubmitCurrentModuleWithRetry(fingerprint);
+  const performModuleSubmit = useCallback(async () => {
+    const currentRuntimeState = runtimeStateRef.current;
+    if (currentRuntimeState.runtimeBacked) {
+      const fingerprint = `manual:${currentRuntimeState.currentModule}`;
+      await flushAndSubmitCurrentModuleWithRetryRef.current(fingerprint);
       return;
     }
 
     reconcileLiveAnswerCacheNow();
     writingDraftCommitRef.current?.();
-    runtimeActions.submitModule();
-  };
+    runtimeActionsRef.current.submitModule();
+  }, [reconcileLiveAnswerCacheNow]);
 
-  const handleModuleSubmit = async () => {
+  useEffect(() => registerSubmitHandler(performModuleSubmit), [
+    performModuleSubmit,
+    registerSubmitHandler,
+  ]);
+
+  const handleModuleSubmit = useCallback(async () => {
     if (submitRequiresConfirmation) {
-      uiActions.setShowSubmitConfirm(true);
+      uiActionsRef.current.setShowSubmitConfirm(true);
       return;
     }
 
     await performModuleSubmit();
-  };
+  }, [performModuleSubmit, submitRequiresConfirmation]);
 
-  const confirmModuleSubmit = async () => {
-    uiActions.setShowSubmitConfirm(false);
+  const confirmModuleSubmit = useCallback(async () => {
+    uiActionsRef.current.setShowSubmitConfirm(false);
     await performModuleSubmit();
-  };
+  }, [performModuleSubmit]);
 
-  const handleAnswerChange = (
+  const handleAnswerChange = useCallback((
     questionId: string,
     answer: StudentAnswerValue,
     meta?: StudentAnswerMutationMeta,
   ) => {
-    if (runtimeState.blocking.reason === 'storage_unavailable') {
+    if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
       return;
     }
     const currentValue = latestAnswersRef.current[questionId];
@@ -507,18 +539,18 @@ export function StudentApp({
       ...liveObjectiveAnswersRef.current,
       [questionId]: resolvedAnswer,
     };
-    examSessionCommands.setObjectiveAnswer(questionId, resolvedAnswer, meta);
-    attemptActions.persistAnswer(questionId, resolvedAnswer, meta);
-  };
+    examSessionCommandsRef.current.setObjectiveAnswer(questionId, resolvedAnswer, meta);
+    attemptActionsRef.current.persistAnswer(questionId, resolvedAnswer, meta);
+  }, []);
 
-  const handleFlagToggle = (questionId: string) => {
-    if (runtimeState.blocking.reason === 'storage_unavailable') {
+  const handleFlagToggle = useCallback((questionId: string) => {
+    if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
       return;
     }
-    const nextFlagged = !attemptFlags[questionId];
-    examSessionCommands.toggleFlag(questionId);
-    attemptActions.persistFlag(questionId, nextFlagged);
-  };
+    const nextFlagged = !attemptFlagsRef.current[questionId];
+    examSessionCommandsRef.current.toggleFlag(questionId);
+    attemptActionsRef.current.persistFlag(questionId, nextFlagged);
+  }, []);
 
   const registerLiveObjectiveAnswer = useCallback(
     (questionId: string, value: StudentAnswerValue) => {
@@ -537,29 +569,40 @@ export function StudentApp({
     };
   }, []);
 
-  const handleWritingChange = (taskId: string, text: string) => {
-    if (runtimeState.blocking.reason === 'storage_unavailable') {
+  const handleWritingChange = useCallback((taskId: string, text: string) => {
+    if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
       return;
     }
     liveWritingAnswersRef.current = {
       ...liveWritingAnswersRef.current,
       [taskId]: text,
     };
-    examSessionCommands.setWritingAnswer(taskId, text);
-    attemptActions.persistWritingAnswer(taskId, text);
-  };
+    examSessionCommandsRef.current.setWritingAnswer(taskId, text);
+    attemptActionsRef.current.persistWritingAnswer(taskId, text);
+  }, []);
 
   const registerWritingDraftCommit = useCallback((commitDraft: (() => void) | null) => {
     writingDraftCommitRef.current = commitDraft;
   }, []);
 
-  const handleNavigate = useCallback(
-    (questionId: string) => {
-      examSessionCommands.setNavigation(runtimeState.currentModule, questionId);
-      runtimeActions.setCurrentQuestionId(questionId);
-    },
-    [examSessionCommands, runtimeActions, runtimeState.currentModule],
-  );
+  const handleNavigate = useCallback((questionId: string) => {
+    examSessionCommandsRef.current.setNavigation(runtimeStateRef.current.currentModule, questionId);
+    runtimeActionsRef.current.setCurrentQuestionId(questionId);
+  }, []);
+
+  const openAccessibility = useCallback(() => {
+    uiActionsRef.current.setShowAccessibility(true);
+  }, []);
+  const openNavigator = useCallback(() => {
+    uiActionsRef.current.setShowNavigator(true);
+  }, []);
+  const closeNavigator = useCallback(() => {
+    uiActionsRef.current.setShowNavigator(false);
+  }, []);
+  const showNavigatorForModule =
+    runtimeState.currentModule === 'reading' ||
+    runtimeState.currentModule === 'listening' ||
+    runtimeState.currentModule === 'writing';
 
   const blockingOverlay =
     runtimeState.blocking.active && blockingCopy ? (
@@ -670,14 +713,8 @@ export function StudentApp({
           onToggleHighlightMode={uiActions.toggleHighlightMode}
           onSelectHighlightColor={uiActions.setHighlightColor}
           onSelectEraseMode={uiActions.toggleEraseMode}
-          onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
-          onOpenNavigator={
-            runtimeState.currentModule === 'reading' ||
-            runtimeState.currentModule === 'listening' ||
-            runtimeState.currentModule === 'writing'
-              ? () => uiActions.setShowNavigator(true)
-              : undefined
-          }
+          onOpenAccessibility={openAccessibility}
+          onOpenNavigator={showNavigatorForModule ? openNavigator : undefined}
         />
       ) : (
         <StudentHeader
@@ -691,14 +728,8 @@ export function StudentApp({
           onSelectHighlightColor={uiActions.setHighlightColor}
           onSelectEraseMode={uiActions.toggleEraseMode}
           tabletMode={tabletMode}
-          onOpenAccessibility={() => uiActions.setShowAccessibility(true)}
-          onOpenNavigator={
-            runtimeState.currentModule === 'reading' ||
-            runtimeState.currentModule === 'listening' ||
-            runtimeState.currentModule === 'writing'
-              ? () => uiActions.setShowNavigator(true)
-              : undefined
-          }
+          onOpenAccessibility={openAccessibility}
+          onOpenNavigator={showNavigatorForModule ? openNavigator : undefined}
           isExamActive={effectivePhase === 'exam'}
         />
       )}
@@ -732,8 +763,8 @@ export function StudentApp({
             onIncreasePassageReadability={uiActions.increasePassageReadability}
             onDecreasePassageReadability={uiActions.decreasePassageReadability}
             onResetPassageReadability={uiActions.resetPassageReadability}
-            onOpenNavigator={() => uiActions.setShowNavigator(true)}
-            onCloseNavigator={() => uiActions.setShowNavigator(false)}
+            onOpenNavigator={openNavigator}
+            onCloseNavigator={closeNavigator}
           />
         </StudentHighlightSelectionManagerProvider>
       </StudentExamViewport>
@@ -846,14 +877,15 @@ export function StudentApp({
             className="block text-sm font-semibold text-gray-900 mb-2"
           >
             Please explain why you need an extension:
+            <textarea
+              id="extension-reason"
+              value={timeExtensionReason}
+              onChange={(event) => uiActions.setTimeExtensionReason(event.target.value)}
+              className="mt-2 w-full border border-gray-300 rounded-sm px-3 py-2 min-h-[120px] font-normal"
+              aria-describedby="extension-reason-hint"
+              aria-label="Time extension reason"
+            />
           </label>
-          <textarea
-            id="extension-reason"
-            value={timeExtensionReason}
-            onChange={(event) => uiActions.setTimeExtensionReason(event.target.value)}
-            className="w-full border border-gray-300 rounded-sm px-3 py-2 min-h-[120px]"
-            aria-describedby="extension-reason-hint"
-          />
           <span id="extension-reason-hint" className="sr-only">
             Enter the reason for your time extension request
           </span>

@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultConfig } from '../../../../constants/examDefaults';
 import type { ExamState } from '../../../../types';
 import type { StudentAttempt } from '../../../../types/studentAttempt';
-import { KeyboardProvider } from '../StudentKeyboardProvider';
+import { KeyboardProvider, useKeyboardSubmitHandler } from '../StudentKeyboardProvider';
 import { ProctoringProvider } from '../StudentProctoringProvider';
 import { StudentAttemptProvider, useStudentAttempt } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider, useStudentRuntime } from '../StudentRuntimeProvider';
@@ -96,11 +96,14 @@ describe('StudentKeyboardProvider shortcuts', () => {
     vi.clearAllMocks();
   });
 
-  function renderHarness(overrides?: {
+  function renderHarness(
+    overrides?: {
     blockClipboard?: boolean;
     antiScreenshotGuard?: boolean;
     unansweredPolicy?: string;
-  }) {
+    },
+    submitHandler?: () => Promise<void> | void,
+  ) {
     let runtimeContext: ReturnType<typeof useStudentRuntime> | null = null;
     let uiContext: ReturnType<typeof useStudentUI> | null = null;
     let attemptContext: ReturnType<typeof useStudentAttempt> | null = null;
@@ -111,6 +114,15 @@ describe('StudentKeyboardProvider shortcuts', () => {
       runtimeContext = useStudentRuntime();
       uiContext = useStudentUI();
       attemptContext = useStudentAttempt();
+      const { registerSubmitHandler } = useKeyboardSubmitHandler();
+
+      useEffect(() => {
+        if (!submitHandler) {
+          return undefined;
+        }
+        return registerSubmitHandler(submitHandler);
+      }, [registerSubmitHandler]);
+
       return <div data-testid="editor" />;
     }
 
@@ -321,6 +333,21 @@ describe('StudentKeyboardProvider shortcuts', () => {
 
       // Cmd+Enter triggers async submit, we just verify it wasn't blocked
       expect(event.defaultPrevented).toBe(true);
+    });
+
+    it('routes Cmd+Enter through the registered submission handler', async () => {
+      const submitHandler = vi.fn().mockResolvedValue(undefined);
+      renderHarness({ unansweredPolicy: 'allow' }, submitHandler);
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+
+      act(() => { document.dispatchEvent(event); });
+
+      await waitFor(() => expect(submitHandler).toHaveBeenCalledTimes(1));
     });
 
     it('does not trigger submit when not in exam phase', () => {

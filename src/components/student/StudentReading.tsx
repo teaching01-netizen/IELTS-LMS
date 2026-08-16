@@ -218,12 +218,15 @@ export function StudentReading({
 
     return map;
   }, [state.reading.passages]);
-  const getBlockStartQuestionNumber = (blockId: string) => blockStartNumbers.get(blockId) ?? 1;
-  const hideDiagramReferenceForBlock = (blockId: string) => {
+  const getBlockStartQuestionNumber = useCallback(
+    (blockId: string) => blockStartNumbers.get(blockId) ?? 1,
+    [blockStartNumbers],
+  );
+  const hideDiagramReferenceForBlock = useCallback((blockId: string) => {
     const block = activePassage?.blocks.find((entry) => entry.id === blockId);
     return block ? isInstructionReferencePlacement(block) : false;
-  };
-  const renderBlockInstruction = (instruction: string, blockId: string) => {
+  }, [activePassage?.blocks]);
+  const renderBlockInstruction = useCallback((instruction: string, blockId: string) => {
     return (
       <div className={`rounded-lg border border-gray-200 bg-gray-50 ${answerCompact ? 'px-2 py-1.5' : 'px-3 py-2'}`}>
         <StudentQuestionText
@@ -236,7 +239,7 @@ export function StudentReading({
         />
       </div>
     );
-  };
+  }, [answerCompact, highlightColor, highlightEnabled]);
 
   const renderPassageImageAnnotations = useCallback((annotations: StimulusAnnotation[], zoom = 1) => (
     <>
