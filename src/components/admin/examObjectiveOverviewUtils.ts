@@ -9,7 +9,7 @@ import type {
 import {
   getQuestionNumberLabel,
   getStudentQuestionsForModule,
-} from '../../services/examAdapterService';
+} from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import { formatAnswerValue, getCorrectAnswerDisplay, getCorrectAnswerValue } from './gradingAnswerUtils';
 
 export interface ExamObjectiveOverviewBundle {

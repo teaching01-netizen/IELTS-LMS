@@ -2,7 +2,7 @@ import {
   createDefaultExportProfile,
   type ExportProfile,
 } from './exportPlan';
-import { backendGet, backendPost, isBackendNotFound } from '../../../services/backendBridge';
+import { backendGet, backendPost, isBackendNotFound } from '../../../features/grading/infrastructure/gradingGateway';
 import { isAppError } from '../../../app/error/errorTypes';
 
 const PROFILE_STORAGE_KEY = 'grading:exportProfiles:v1';

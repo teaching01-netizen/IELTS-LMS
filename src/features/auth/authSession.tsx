@@ -8,17 +8,17 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import { apiClient } from '../../app/api/apiClient';
-import { queryClient } from '../../app/data/queryClient';
-import { logError } from '../../app/error/errorLogger';
+import { apiClient } from '../../shared/api/apiClient';
+import { queryClient } from '../../shared/api/queryClient';
+import { logError } from '../../shared/observability/errorLogger';
 import {
   authService,
   type AuthSession,
   type AuthUserRole,
   type StudentEntryResult,
-} from '../../services/authService';
+} from './api/authGateway';
 
-export type { StudentQueuedAdmission } from '../../services/authService';
+export type { StudentQueuedAdmission } from './api/authGateway';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 

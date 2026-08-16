@@ -9,7 +9,7 @@ import { SpeakingWorkspace } from './workspaces/SpeakingWorkspace';
 import { getBlockQuestionCount } from '../utils/examUtils';
 import { PassageListSidebar } from './passage/PassageListSidebar';
 import { PassageMetadataEditor } from './passage/PassageMetadataEditor';
-import { passageLibraryService } from '../services/passageLibraryService';
+import { passageLibraryService } from '../features/content-library/infrastructure/libraryGateway';
 import { createId } from '../utils/idUtils';
 import { TIMING } from '../constants/uiConstants';
 import { countWords } from '../utils/builderEnhancements';

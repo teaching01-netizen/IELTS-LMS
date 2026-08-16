@@ -5,9 +5,8 @@
  * Call seedGradingData() to populate the repository with sample sessions and submissions.
  */
 
-import { gradingRepository } from '../services/gradingRepository';
-import { gradingService } from '../services/gradingService';
-import { examRepository } from '../services/examRepository';
+import { gradingRepository, gradingService } from '../features/grading/infrastructure/gradingGateway';
+import { examRepository } from '../features/exam-authoring/infrastructure/examAuthoringGateway';
 import { ExamSchedule } from '../types/domain';
 import { logger } from './logger';
 

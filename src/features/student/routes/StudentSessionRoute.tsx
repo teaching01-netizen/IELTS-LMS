@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { StudentAppWrapper } from '@components/student/StudentAppWrapper';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
-import { useAuthSession } from '../../auth/authSession';
+import { useAuthSession } from '../../auth/api/authSession';
 import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRouteData';
 
 /**

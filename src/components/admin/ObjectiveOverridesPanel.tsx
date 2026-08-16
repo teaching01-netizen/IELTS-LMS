@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { ExamState, ModuleType } from '../../types';
-import { examRepository } from '../../services/examRepository';
-import { gradingService } from '../../services/gradingService';
+import { examRepository, getStudentQuestionsForModule } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { gradingService } from '../../features/grading/infrastructure/gradingGateway';
 import type {
   GradingScheduleObjectiveOverrideRow,
   ObjectiveOverrideDeleteRequest,
@@ -9,8 +9,7 @@ import type {
   ObjectiveOverrideMutationResponse,
   ObjectiveOverrideUpsertRequest,
 } from '../../types/grading';
-import type { StudentQuestionDescriptor } from '../../services/examAdapterService';
-import { getStudentQuestionsForModule } from '../../services/examAdapterService';
+import type { StudentQuestionDescriptor } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import { getCorrectAnswerDisplay, getQuestionPrompt } from './gradingAnswerUtils';
 import { notifyObjectiveGradingUpdated } from '../../utils/objectiveGradingSync';
 

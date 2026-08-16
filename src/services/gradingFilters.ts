@@ -31,6 +31,14 @@ export function filterGradingSessions(
     filtered = filtered.filter((session) => filters.exam!.includes(session.examTitle));
   }
 
+  if (typeof filters.recentDays === 'number' && filters.recentDays > 0) {
+    const cutoff = Date.now() - filters.recentDays * 24 * 60 * 60 * 1000;
+    filtered = filtered.filter((session) => {
+      const startTime = Date.parse(session.startTime);
+      return Number.isFinite(startTime) && startTime >= cutoff;
+    });
+  }
+
   if (filters.searchQuery) {
     const query = filters.searchQuery.toLowerCase();
     filtered = filtered.filter(

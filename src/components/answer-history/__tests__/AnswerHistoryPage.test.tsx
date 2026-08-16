@@ -9,11 +9,12 @@ const mockDetailHook = vi.fn();
 const mockAttemptDetailHook = vi.fn();
 const mockExport = vi.fn();
 
-vi.mock('@app/data/answerHistoryQueries', () => ({
+vi.mock('../../../features/answer-history/api/answerHistoryQueries', () => ({
   useAnswerHistoryOverviewBySubmission: (...args: unknown[]) => mockOverviewHook(...args),
   useAnswerHistoryOverviewByAttempt: (...args: unknown[]) => mockAttemptOverviewHook(...args),
   useAnswerHistoryTargetDetail: (...args: unknown[]) => mockDetailHook(...args),
   useAnswerHistoryTargetDetailByAttempt: (...args: unknown[]) => mockAttemptDetailHook(...args),
+  fetchAnswerHistoryExport: (...args: unknown[]) => mockExport(...args),
 }));
 
 vi.mock('@services/answerHistoryService', () => ({

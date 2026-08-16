@@ -2,8 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { Exam } from '../../types';
 import { ExamEntity, ExamSchedule, ExamVersion } from '../../types/domain';
-import { examRepository } from '../../services/examRepository';
-import { examDeliveryService } from '../../services/examDeliveryService';
+import { examRepository, examDeliveryService } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 
 interface ScheduleSessionModalProps {
   isOpen: boolean;

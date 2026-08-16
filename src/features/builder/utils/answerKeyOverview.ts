@@ -12,7 +12,7 @@ import type {
 } from '../../../types';
 import { buildAcceptedAnswerFields } from '../../../utils/acceptedAnswers';
 import { setMultiSelectCorrectOptionIds } from '../../../utils/multiSelectMcq';
-import { getQuestionNumberLabel, getStudentQuestionsForModule, type StudentQuestionDescriptor } from '../../../services/examAdapterService';
+import { getQuestionNumberLabel, getStudentQuestionsForModule, type StudentQuestionDescriptor } from '../../exam-authoring/api/examAuthoringGateway';
 
 type SubAnswerTreeNode = {
   id: string;

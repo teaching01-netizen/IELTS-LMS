@@ -1,5 +1,5 @@
 import type { ExamState, ModuleType } from '../../../types';
-import { getEnabledModules } from '../../../services/examAdapterService';
+import { getEnabledModules } from '../../exam-authoring/api/examAuthoringGateway';
 
 export function getBuilderStateRecoveryIssue(state: ExamState): string | null {
   const enabledModules = getEnabledModules(state.config);

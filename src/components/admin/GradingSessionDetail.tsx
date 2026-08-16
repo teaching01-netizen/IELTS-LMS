@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight, FileCheck2 } from 'lucide-react';
 import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus, WritingTaskSubmission } from '../../types/grading';
-import { gradingService } from '../../services/gradingService';
-import { gradingRepository } from '../../services/gradingRepository';
-import { examRepository } from '../../services/examRepository';
-import { seedDevelopmentFixtures } from '../../services/developmentFixtures';
+import { gradingService, gradingRepository } from '../../features/grading/infrastructure/gradingGateway';
+import { examRepository, seedDevelopmentFixtures } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import { TableLoadingSkeleton } from '@components/ui';
 import { GradingExportButtons } from './GradingExportButtons';
 import { ObjectiveOverridesPanel } from './ObjectiveOverridesPanel';
@@ -708,8 +706,9 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             <button
               type="button"
               onClick={() => setShowOverallAnswerCheck((current) => !current)}
-              className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 transition-colors hover:bg-blue-100"
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 transition-[scale,background-color,border-color] duration-150 ease-out hover:bg-blue-100 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2"
               aria-expanded={showOverallAnswerCheck}
+              aria-pressed={showOverallAnswerCheck}
             >
               <FileCheck2 size={16} />
               <span className="hidden sm:inline">

@@ -3,8 +3,8 @@ import {
   fetchStudentStaticSession,
   type BackendStudentLiveSessionContext,
   type BackendStudentStaticSessionContext,
-} from '../../../../app/data/studentSessionQueries';
-import { queryClient, queryKeys } from '../../../../app/data/queryClient';
+} from '../../api/studentSessionQueries';
+import { queryClient, queryKeys } from '../../../../shared/api/queryClient';
 
 export interface StudentSessionBootstrap {
   loadStatic(): Promise<BackendStudentStaticSessionContext>;

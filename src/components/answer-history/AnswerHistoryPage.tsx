@@ -11,12 +11,12 @@ import {
   Search,
 } from 'lucide-react';
 import {
+  fetchAnswerHistoryExport,
   useAnswerHistoryOverviewByAttempt,
   useAnswerHistoryOverviewBySubmission,
   useAnswerHistoryTargetDetail,
   useAnswerHistoryTargetDetailByAttempt,
-} from '@app/data/answerHistoryQueries';
-import { fetchAnswerHistoryExport } from '@services/answerHistoryService';
+} from '../../features/answer-history/api/answerHistoryQueries';
 import { WritingChartPreview } from '@components/writing/WritingChartPreview';
 import type {
   AnswerHistoryCheckpoint,

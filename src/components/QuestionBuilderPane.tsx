@@ -18,7 +18,7 @@ import { MatchingFeaturesBlock } from './blocks/MatchingFeaturesBlock';
 import { getBlockQuestionCount } from '../utils/examUtils';
 import { QuestionBankLibrary } from './builder/QuestionBankLibrary';
 import { QuestionDetailModal } from './builder/QuestionDetailModal';
-import { questionBankService } from '../services/questionBankService';
+import { questionBankService } from '../features/content-library/infrastructure/libraryGateway';
 import { cloneQuestionBlockWithNewIds } from '../utils/cloneExamContent';
 import { createId } from '../utils/idUtils';
 

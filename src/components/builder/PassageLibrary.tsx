@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PassageLibraryItem, Passage } from '../../types';
-import { passageLibraryService } from '../../services/passageLibraryService';
+import { passageLibraryService } from '../../features/content-library/infrastructure/libraryGateway';
 import { Search, Filter, Grid, List, BookOpen, Clock, FileText } from 'lucide-react';
 import { CollectionLoadingSkeleton } from '../ui/CollectionLoadingSkeleton';
 

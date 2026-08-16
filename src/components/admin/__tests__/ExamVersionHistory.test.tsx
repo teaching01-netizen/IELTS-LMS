@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ExamVersionHistory } from '../ExamVersionHistory';
-import type { ExamVersionHistoryProps } from '../../../features/admin/contracts';
+import type { ExamVersionHistoryProps } from '../../../features/exam-authoring/contracts/examList';
 import type { ExamEntity, ExamEvent, ExamVersionSummary } from '../../../types/domain';
 
 describe('ExamVersionHistory', () => {

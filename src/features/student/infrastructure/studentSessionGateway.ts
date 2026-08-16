@@ -18,6 +18,8 @@ import type {
   StudentSessionStaticPayload,
 } from '../application/studentSessionFacade';
 
+export { studentSessionTransport };
+
 export function createStudentSessionGateway(): StudentSessionFacade {
   return {
     async loadStaticSession(scheduleId, candidateId) {

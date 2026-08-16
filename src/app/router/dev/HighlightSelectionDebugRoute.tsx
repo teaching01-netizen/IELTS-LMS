@@ -1,5 +1,5 @@
 import React from 'react';
-import { RichTextHighlighter } from '../../components/student/RichTextHighlighter';
+import { RichTextHighlighter } from '../../../components/student/RichTextHighlighter';
 
 export function HighlightSelectionDebugRoute() {
   const content =
@@ -27,4 +27,3 @@ export function HighlightSelectionDebugRoute() {
     </div>
   );
 }
-

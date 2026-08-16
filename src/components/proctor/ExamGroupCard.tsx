@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChevronRight, Clock, MessageSquare, Users } from 'lucide-react';
 import { ExamGroup } from '../../types';
-import { examDeliveryService } from '../../services/examDeliveryService';
+import { examDeliveryService } from '../../features/proctor/infrastructure/proctorGateway';
 
 interface ExamGroupCardProps {
   group: ExamGroup;

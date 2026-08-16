@@ -9,7 +9,7 @@ import { createLatestOnlyAsyncRunner, type LatestOnlyAsyncRunner } from '../../.
 import { AcceptedAnswersEditor } from '@components/blocks/AcceptedAnswersEditor';
 import { resolveAcceptedAnswers } from '../../../utils/acceptedAnswers';
 import { applyAnswerKeyEdit, buildAnswerKeyRows, type AnswerKeyRow } from '../utils/answerKeyOverview';
-import { getStudentQuestionsForModule, type StudentQuestionDescriptor } from '@services/examAdapterService';
+import { getStudentQuestionsForModule, type StudentQuestionDescriptor } from '../../exam-authoring/api/examAuthoringGateway';
 
 type SaveStatus = 'unsaved' | 'saving' | 'saved' | 'error';
 

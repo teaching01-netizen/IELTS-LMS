@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Clock, Settings, AlertCircle, Plus, Trash2 } from 'lucide-react';
 import type { ExamConfig, ModuleType } from '../../../types';
-import { examDeliveryService } from '../../../services/examDeliveryService';
+import { examDeliveryService } from '../../exam-authoring/api/examAuthoringGateway';
 import { syncConfigWithStandards } from '../../../constants/examDefaults';
 
 interface TimingTabProps {

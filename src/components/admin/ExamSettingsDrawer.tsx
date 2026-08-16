@@ -14,7 +14,7 @@ import {
   syncConfigWithStandards,
 } from '../../constants/examDefaults';
 import { ExamEntity, ExamVersion, PublishReadiness } from '../../types/domain';
-import { examDeliveryService } from '../../services/examDeliveryService';
+import { examDeliveryService } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import { BandScoreMatrix } from '../scoring/BandScoreMatrix';
 import { isRubricDeviationHigh } from '../../utils/builderEnhancements';
 import {

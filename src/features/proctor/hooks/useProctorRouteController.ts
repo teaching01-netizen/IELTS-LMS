@@ -1,13 +1,14 @@
 import type { Dispatch, SetStateAction } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
-import { useLiveUpdates, type LiveUpdateEvent } from '@app/hooks/useLiveUpdates';
+import { useLiveUpdates, type LiveUpdateEvent } from '@shared/hooks/useLiveUpdates';
 import {
   fetchProctorSessionDetail,
+  liveQueryPolicy,
+  proctorKeys,
   type ProctorSessionDetailPayload,
   useProctorSessionSummaries,
-} from '@app/data/proctorQueries';
-import { liveQueryPolicy, queryKeys } from '@app/data/queryClient';
+} from '../api/proctorQueries';
 import { proctorFacade } from '../application/proctorFacade';
 import type {
   ProctorAlert,
@@ -15,7 +16,6 @@ import type {
   SessionNote,
   StudentSession,
   ViolationRule,
-  ViolationSeverity,
 } from '../../../types';
 import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
 import type { ProctorPresence } from '../../../types/domain';
@@ -241,7 +241,7 @@ export function useProctorRouteController(): ProctorRouteController {
   const scheduleStudentIdsRef = useRef<Map<string, Set<string>>>(new Map());
 
   const summariesQuery = useProctorSessionSummaries(summaryPollIntervalMs);
-  const summaries = summariesQuery.data ?? [];
+  const summaries = useMemo(() => summariesQuery.data ?? [], [summariesQuery.data]);
   useEffect(() => {
     if (!selectedScheduleId) {
       return;
@@ -267,7 +267,7 @@ export function useProctorRouteController(): ProctorRouteController {
 
   const detailQueryState = useQueries({
     queries: detailScheduleIds.map((scheduleId) => ({
-      queryKey: queryKeys.proctoring.detail(scheduleId),
+      queryKey: proctorKeys.detail(scheduleId),
       queryFn: () => fetchProctorSessionDetail(scheduleId),
       ...liveQueryPolicy,
       refetchInterval: detailPollIntervalMs,
@@ -399,18 +399,18 @@ export function useProctorRouteController(): ProctorRouteController {
   ]);
 
   const refresh = useCallback(async () => {
-    await queryClient.refetchQueries({ queryKey: queryKeys.proctoring.sessions() });
+    await queryClient.refetchQueries({ queryKey: proctorKeys.sessions() });
     await Promise.all(
       detailScheduleIds.map((scheduleId) =>
-        queryClient.refetchQueries({ queryKey: queryKeys.proctoring.detail(scheduleId) }),
+        queryClient.refetchQueries({ queryKey: proctorKeys.detail(scheduleId) }),
       ),
     );
   }, [detailScheduleIds, queryClient]);
 
   const refreshSchedule = useCallback(async (scheduleId: string) => {
     await Promise.all([
-      queryClient.refetchQueries({ queryKey: queryKeys.proctoring.sessions() }),
-      queryClient.refetchQueries({ queryKey: queryKeys.proctoring.detail(scheduleId) }),
+      queryClient.refetchQueries({ queryKey: proctorKeys.sessions() }),
+      queryClient.refetchQueries({ queryKey: proctorKeys.detail(scheduleId) }),
     ]);
   }, [queryClient]);
 

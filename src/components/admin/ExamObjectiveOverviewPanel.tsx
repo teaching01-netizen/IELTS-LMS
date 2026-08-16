@@ -8,9 +8,8 @@ import type {
   ObjectiveIntegrityOverview,
   ObjectiveOverrideUpsertRequest,
 } from '../../types/grading';
-import { examRepository } from '../../services/examRepository';
-import { gradingRepository } from '../../services/gradingRepository';
-import { gradingService } from '../../services/gradingService';
+import { examRepository } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { gradingRepository, gradingService } from '../../features/grading/infrastructure/gradingGateway';
 import { sanitizeAcceptedAnswers } from '../../utils/acceptedAnswers';
 import type {
   ExamObjectiveOverviewBundle,

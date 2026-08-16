@@ -1,21 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
-import { Exam } from '../../types';
-import { ExamEntity, ExamSchedule, ExamVersion } from '../../types/domain';
-import { examRepository } from '../../services/examRepository';
-import { examDeliveryService } from '../../services/examDeliveryService';
-
-interface AdminSchedulingProps {
-  schedules: ExamSchedule[];
-  exams: Exam[];
-  examEntities: ExamEntity[];
-  onCreateSchedule: (schedule: ExamSchedule) => Promise<void> | void;
-  onUpdateSchedule: (schedule: ExamSchedule) => Promise<void> | void;
-  onDeleteSchedule: (scheduleId: string) => Promise<void> | void;
-  onStartScheduledSession: (scheduleId: string) => Promise<void> | void;
-  initialExamId?: string;
-  autoOpenCreate?: boolean;
-}
+import type { ExamSchedule, ExamVersion } from '../../types/domain';
+import type { AdminSchedulingProps } from '../../features/scheduling/contracts';
+import { schedulingGateway } from '../../features/scheduling/infrastructure/schedulingGateway';
 
 interface ScheduleDraft {
   examId: string;
@@ -33,9 +20,16 @@ export function AdminScheduling({
   onUpdateSchedule,
   onDeleteSchedule,
   onStartScheduledSession: _onStartScheduledSession,
+  getVersionById,
+  resolveScheduleWindow,
+  getPlannedDuration,
   initialExamId,
   autoOpenCreate = false,
 }: AdminSchedulingProps) {
+  const loadVersionById = getVersionById ?? schedulingGateway.repository.getVersionById;
+  const deriveScheduleWindow =
+    resolveScheduleWindow ?? schedulingGateway.delivery.resolveScheduleWindow;
+  const getDuration = getPlannedDuration ?? schedulingGateway.delivery.getPlannedDuration;
   const defaultScheduleName = examEntities[0]?.title || exams[0]?.title || '';
   const defaultExamId = examEntities[0]?.id || exams[0]?.id || '';
   const [showModal, setShowModal] = useState(false);
@@ -77,7 +71,7 @@ export function AdminScheduling({
 
       setLoadingVersion(true);
       try {
-        const version = await examRepository.getVersionById(versionId);
+        const version = await loadVersionById(versionId);
         if (!cancelled) {
           setSelectedVersion(version);
         }
@@ -92,7 +86,7 @@ export function AdminScheduling({
     return () => {
       cancelled = true;
     };
-  }, [draft.examId, draft.publishedVersionId, examEntities]);
+  }, [draft.examId, draft.publishedVersionId, examEntities, loadVersionById]);
 
   const openCreateModal = (targetExamId?: string) => {
     const exam = examEntities.find((item) => item.id === targetExamId) ?? examEntities[0];
@@ -128,7 +122,7 @@ export function AdminScheduling({
       gradingDisplayName: schedule.gradingDisplayName,
     });
     setShowModal(true);
-    const version = await examRepository.getVersionById(schedule.publishedVersionId);
+    const version = await loadVersionById(schedule.publishedVersionId);
     setSelectedVersion(version);
   };
 
@@ -143,10 +137,10 @@ export function AdminScheduling({
 
     const now = new Date().toISOString();
     const existing = schedules.find(schedule => schedule.id === editingScheduleId);
-    const scheduleWindow = examDeliveryService.resolveProctorStartScheduleWindow({
+    const scheduleWindow = deriveScheduleWindow({
       config: selectedVersion.configSnapshot,
       now,
-      existingSchedule: editingScheduleId ? existing : null,
+      existingSchedule: editingScheduleId ? existing ?? null : null,
     });
 
     const schedule: ExamSchedule = {
@@ -469,7 +463,7 @@ export function AdminScheduling({
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Planned Duration</p>
                   <p className="text-2xl font-bold text-gray-900 mt-2">
-                    {selectedVersion ? examDeliveryService.buildSectionPlan(selectedVersion.configSnapshot).plannedDurationMinutes : 0} min
+                    {selectedVersion ? getDuration(selectedVersion.configSnapshot) : 0} min
                   </p>
                 </div>
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">

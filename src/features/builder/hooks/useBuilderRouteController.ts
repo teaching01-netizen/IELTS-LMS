@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { examAuthoringFacade } from '../../exam-authoring/application/examAuthoringFacade';
+import { examAuthoringFacade } from '../../exam-authoring/api/examAuthoringFacade';
 import type { ExamState } from '../../../types';
 import type { ExamEntity } from '../../../types/domain';
 

@@ -9,8 +9,8 @@ import type {
 import {
   getQuestionNumberLabel,
   getStudentQuestionsForModule,
-} from '../../services/examAdapterService';
-import type { StudentQuestionDescriptor } from '../../services/examAdapterService';
+} from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import type { StudentQuestionDescriptor } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import {
   extractObjectiveAnswerMap,
   getCorrectAnswerDisplay,

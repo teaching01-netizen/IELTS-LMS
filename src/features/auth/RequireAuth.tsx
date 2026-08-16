@@ -2,7 +2,7 @@ import React, { type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { LoadingSurface } from '@components/ui';
 import { resolveRoleLandingPath, useAuthSession } from './authSession';
-import type { AuthUserRole } from '../../services/authService';
+import type { AuthUserRole } from './api/authGateway';
 
 interface RequireAuthProps {
   allowedRoles?: AuthUserRole[] | undefined;

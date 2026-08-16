@@ -3,11 +3,10 @@ import { GitCommit, Clock, User, CheckCircle2, GitCompare, RotateCcw, Copy, Chev
 import { ExamAuditTimeline } from './ExamAuditTimeline';
 import { VersionCompareView } from './VersionCompareView';
 import { formatTimestamp, getRelativeTime, getVersionStatusColor, getVersionStatusLabel, sortVersionsByNumber } from '../../utils/versionUtils';
-import { ExamVersionHistoryProps } from '../../features/admin/contracts';
+import type { ExamVersionHistoryProps } from '../../features/exam-authoring/contracts/examList';
 import { normalizeWritingTaskContents } from '../../utils/writingTaskUtils';
 import { useVersionHistory } from './hooks/useVersionHistory';
-import { hydrateExamState } from '../../services/examAdapterService';
-import { examRepository } from '../../services/examRepository';
+import { examRepository, hydrateExamState } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import type { ExamVersion } from '../../types/domain';
 
 export function ExamVersionHistory({

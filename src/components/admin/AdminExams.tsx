@@ -6,7 +6,7 @@ import { Exam, ExamConfig } from '../../types';
 import { lazyLoad } from '../../app/performance/lazyLoad';
 import { ExamEntity, ExamEvent, ExamVersionSummary, BulkOperationResult } from '../../types/domain';
 import { getExamStatsFromExam, ExamFilterOptions, ExamSortOptions, DEFAULT_FILTERS, DEFAULT_SORT, hasActiveFilters } from '../../utils/examStats';
-import { AdminExamsProps, ExamVersionHistoryProps } from '../../features/admin/contracts';
+import type { ExamListProps, ExamVersionHistoryProps } from '../../features/exam-authoring/contracts/examList';
 import { ExamFiltersPanel } from './ExamFiltersPanel';
 import { ExamBulkActionBar } from './ExamBulkActionBar';
 import { Virtuoso } from 'react-virtuoso';
@@ -187,7 +187,7 @@ export function AdminExams({
   onBulkDuplicate,
   onBulkExport,
   onBulkDelete
-}: AdminExamsProps) {
+}: ExamListProps) {
   // View state
   const [view, setView] = useState<'grid' | 'list'>('list');
   

@@ -7,6 +7,8 @@ import type {
   VersionDiff,
 } from '../../../types/domain';
 
+export type { ExamListProps, ExamVersionHistoryProps } from './examList';
+
 export interface ExamAuthoringReaderContract {
   getExamById(examId: string): Promise<ExamEntity | null>;
   getVersionById(versionId: string): Promise<{ contentSnapshot: ExamState; configSnapshot: ExamConfig } | null>;

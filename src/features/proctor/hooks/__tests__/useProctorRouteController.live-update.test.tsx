@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let liveUpdateHandler: ((event: { kind: string; id: string; revision: number; event: string }) => void) | null = null;
 
-vi.mock('@app/hooks/useLiveUpdates', () => ({
+vi.mock('@shared/hooks/useLiveUpdates', () => ({
   useLiveUpdates: (options: { onEvent: (event: { kind: string; id: string; revision: number; event: string }) => void }) => {
     liveUpdateHandler = options.onEvent;
   },

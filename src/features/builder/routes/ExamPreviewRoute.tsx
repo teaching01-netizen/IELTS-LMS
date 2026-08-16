@@ -3,9 +3,9 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { StudentAppWrapper } from '@components/student/StudentAppWrapper';
 import { useBuilderRouteController } from '@builder/hooks/useBuilderRouteController';
-import { getEnabledModules } from '@services/examAdapterService';
-import { useAuthSession } from '../../auth/authSession';
-import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRouteData';
+import { getEnabledModules } from '../../exam-authoring/api/examAuthoringGateway';
+import { useAuthSession } from '../../auth/api/authSession';
+import { useStudentSessionRouteData } from '@student/api/studentSessionRouteData';
 import {
   resolvePreviewRuntimeSession,
   type PreviewRuntimeSession,

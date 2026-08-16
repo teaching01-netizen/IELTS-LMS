@@ -12,8 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { hydrateExamState } from '@services/examAdapterService';
-import { examRepository } from '@services/examRepository';
+import { examRepository, hydrateExamState } from '../../exam-authoring/api/examAuthoringGateway';
 import type { ExamVersionMetadata } from '../../../types/domain';
 import type { ExamState } from '../../../types';
 

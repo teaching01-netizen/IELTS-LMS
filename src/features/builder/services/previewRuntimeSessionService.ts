@@ -1,16 +1,11 @@
-import { getEnabledModules } from '@services/examAdapterService';
 import {
   backendPost,
   buildCreateSchedulePayload,
   mapBackendSchedule,
-} from '@services/backendBridge';
-import { examDeliveryService } from '@services/examDeliveryService';
-import { examRepository } from '@services/examRepository';
-import {
-  ensureClientSessionIdForAttempt,
-  studentAttemptRepository,
-} from '@services/studentAttemptRepository';
-import { studentSessionTransport } from '@services/studentSessionTransport';
+} from '../../exam-authoring/api/examAuthoringBackendGateway';
+import { examDeliveryService, examRepository, getEnabledModules } from '../../exam-authoring/api/examAuthoringGateway';
+import { ensureClientSessionIdForAttempt, studentAttemptRepository } from '../../student/api/studentAttemptGateway';
+import { studentSessionTransport } from '../../student/api/studentSessionGateway';
 import type { ExamState, ModuleType } from '../../../types';
 import type { ExamEntity, ExamSchedule } from '../../../types/domain';
 

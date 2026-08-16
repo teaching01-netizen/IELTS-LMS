@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Search, Filter, Grid, List, Plus } from 'lucide-react';
 import { QuestionBankItem, QuestionBankQuery } from '../../types';
-import { questionBankService } from '../../services/questionBankService';
+import { questionBankService } from '../../features/content-library/infrastructure/libraryGateway';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { CollectionLoadingSkeleton } from '../ui/CollectionLoadingSkeleton';

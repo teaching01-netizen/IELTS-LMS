@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Download, Save } from 'lucide-react';
 
 import type { GradingSession, StudentSubmission } from '../../../types/grading';
-import { gradingRepository } from '../../../services/gradingRepository';
+import { gradingRepository } from '../../../features/grading/infrastructure/gradingGateway';
 import { Button, Dialog, Input, Select } from '@components/ui';
 import { downloadBinaryFile } from '../gradingReviewUtils';
 import {

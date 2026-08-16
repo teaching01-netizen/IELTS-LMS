@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAsyncPolling } from '@app/hooks/useAsyncPolling';
-import { useLiveUpdates, type LiveUpdateEvent } from '@app/hooks/useLiveUpdates';
-import { useAuthSession } from '../../auth/authSession';
+import { useAsyncPolling } from '@shared/hooks/useAsyncPolling';
+import { useLiveUpdates, type LiveUpdateEvent } from '@shared/hooks/useLiveUpdates';
+import { useAuthSession } from '../../auth/api/authSession';
 import {
   studentSessionFacade,
   type StudentSessionLivePayload,
-  type StudentSessionStaticPayload,
 } from '@student/application/studentSessionFacade';
 import type { ExamState } from '../../../types';
 import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
@@ -26,146 +25,26 @@ import {
 } from '../infrastructure/exam-session/studentRealtimeCoordinator';
 import { runStudentSessionMachineCommands } from './studentSessionMachineAdapters';
 import { evaluateLiveSnapshotTransition, evaluateLoadTransition } from './studentSessionStateMachine';
+import {
+  asRecord,
+  buildDefaultAnswerInvariantRollout,
+  buildLiveMetricEndpoint,
+  extractAttemptSyncState,
+  LIVE_SESSION_STATUS_CODE,
+  parseFiniteNumber,
+  parseIsoTimestampMs,
+  resolveAnswerInvariantRollout,
+  type StudentAnswerInvariantRollout,
+} from './studentSessionRouteUtils';
+import {
+  buildStudentKey,
+  createCandidateProfile,
+  loadStoredCandidateProfile,
+  normalizeCandidateId,
+} from './studentCandidateStorage';
+import { collectPublishedDiagramSnapshotIssues } from './studentSessionDiagnostics';
 
-const PROFILE_STORAGE_PREFIX = 'ielts-student-profile:';
-const LIVE_SESSION_STATUS_CODE = 200;
-const ANSWER_INVARIANT_ENV_ENABLED = 'VITE_FEATURE_STUDENT_LOCAL_WRITER_ANSWER_INVARIANT_ENABLED';
-const ANSWER_INVARIANT_ENV_KILL_SWITCH = 'VITE_FEATURE_STUDENT_LOCAL_WRITER_ANSWER_INVARIANT_KILL_SWITCH';
-
-export interface StudentAnswerInvariantRollout {
-  enabled: boolean;
-  killSwitch: boolean;
-  cohort: string | null;
-  configFingerprint: string | null;
-  source: 'default' | 'runtime';
-}
-
-function getEnvBoolean(name: string): boolean | null {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
-  const value = env[name];
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'true') {
-    return true;
-  }
-  if (normalized === 'false') {
-    return false;
-  }
-  return null;
-}
-
-function buildDefaultAnswerInvariantRollout(): StudentAnswerInvariantRollout {
-  return {
-    enabled: getEnvBoolean(ANSWER_INVARIANT_ENV_ENABLED) ?? true,
-    killSwitch: getEnvBoolean(ANSWER_INVARIANT_ENV_KILL_SWITCH) ?? false,
-    cohort: null,
-    configFingerprint: null,
-    source: 'default',
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-}
-
-function parseFiniteNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function parseIsoTimestampMs(value: unknown): number | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : null;
-}
-
-function parseNullableBoolean(value: unknown): boolean | null {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'true') {
-      return true;
-    }
-    if (normalized === 'false') {
-      return false;
-    }
-  }
-  return null;
-}
-
-function parseNullableString(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function normalizeCandidateId(studentId?: string) {
-  if (!studentId) {
-    return null;
-  }
-
-  const normalized = studentId.trim();
-  if (!normalized) {
-    return null;
-  }
-  if (/^w\d{6}$/i.test(normalized)) {
-    return normalized.toUpperCase();
-  }
-  return normalized;
-}
-
-function buildStudentKey(scheduleId: string, candidateId: string) {
-  return `student-${scheduleId}-${candidateId}`;
-}
-
-function loadStoredCandidateProfile(
-  scheduleId: string,
-  candidateId: string,
-): { candidateName?: string; candidateEmail?: string } | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const raw = window.localStorage.getItem(`${PROFILE_STORAGE_PREFIX}${scheduleId}:${candidateId}`);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as { studentName?: unknown; email?: unknown };
-    const studentName = typeof parsed.studentName === 'string' ? parsed.studentName.trim() : '';
-    const email = typeof parsed.email === 'string' ? parsed.email.trim() : '';
-
-    const profile: { candidateName?: string; candidateEmail?: string } = {};
-    if (studentName) {
-      profile.candidateName = studentName;
-    }
-    if (email) {
-      profile.candidateEmail = email;
-    }
-    return profile;
-  } catch {
-    return null;
-  }
-}
-
-function createCandidateProfile(
-  candidateId: string,
-  stored: { candidateName?: string; candidateEmail?: string } | null,
-) {
-  return {
-    candidateId,
-    candidateName: stored?.candidateName ?? 'Unknown Candidate',
-    candidateEmail: stored?.candidateEmail ?? '',
-  };
-}
+export type { StudentAnswerInvariantRollout } from './studentSessionRouteUtils';
 
 interface StudentSessionRouteData {
   answerInvariantRollout: StudentAnswerInvariantRollout;
@@ -192,148 +71,6 @@ type LiveSnapshotApplyDecision = {
   applyAttempt: boolean;
   applyRuntime: boolean;
 };
-
-function buildLiveMetricEndpoint(scheduleId: string) {
-  return `/v1/student/sessions/${scheduleId}/live`;
-}
-
-function extractAttemptSyncState(live: unknown): string {
-  const record = asRecord(live);
-  const attempt = record ? asRecord(record['attempt']) : null;
-  const recovery = attempt ? asRecord(attempt['recovery']) : null;
-  const syncState = recovery ? recovery['syncState'] : null;
-  return typeof syncState === 'string' && syncState.trim().length > 0 ? syncState : 'idle';
-}
-
-function resolveAnswerInvariantRollout(live: unknown): StudentAnswerInvariantRollout {
-  const runtime = asRecord(asRecord(live)?.['runtime']);
-  if (!runtime) {
-    return buildDefaultAnswerInvariantRollout();
-  }
-
-  const enabled = parseNullableBoolean(runtime['localWriterAnswerInvariantEnabled']);
-  const killSwitch = parseNullableBoolean(runtime['localWriterAnswerInvariantKillSwitch']);
-  const cohort = parseNullableString(runtime['localWriterAnswerInvariantCohort']);
-  const configFingerprint = parseNullableString(runtime['localWriterAnswerInvariantConfigFingerprint']);
-
-  if (enabled === null && killSwitch === null && cohort === null && configFingerprint === null) {
-    return buildDefaultAnswerInvariantRollout();
-  }
-
-  return {
-    enabled: enabled ?? (getEnvBoolean(ANSWER_INVARIANT_ENV_ENABLED) ?? true),
-    killSwitch: killSwitch ?? (getEnvBoolean(ANSWER_INVARIANT_ENV_KILL_SWITCH) ?? false),
-    cohort,
-    configFingerprint,
-    source: 'runtime',
-  };
-}
-
-type DiagramSnapshotIssue = {
-  blockId: string;
-  section: 'reading' | 'listening';
-  containerId: string;
-  hasImageSrc: boolean;
-  hasAssetUrl: boolean;
-  hasUsableFallback: boolean;
-};
-
-function readNonEmptyString(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function collectPublishedDiagramSnapshotIssues(contentSnapshot: unknown): {
-  totalDiagramBlocks: number;
-  missingImageUrlCount: number;
-  missingUsableImageCount: number;
-  missingBlocks: DiagramSnapshotIssue[];
-} {
-  const snapshot = contentSnapshot as {
-    reading?: {
-      passages?: Array<{ id?: unknown; blocks?: unknown }>;
-    };
-    listening?: {
-      parts?: Array<{ id?: unknown; blocks?: unknown }>;
-    };
-  };
-
-  const missingBlocks: DiagramSnapshotIssue[] = [];
-  let totalDiagramBlocks = 0;
-  let missingImageUrlCount = 0;
-  let missingUsableImageCount = 0;
-
-  const collectFromBlocks = (
-    section: DiagramSnapshotIssue['section'],
-    containerId: string,
-    blocks: unknown,
-  ) => {
-    if (!Array.isArray(blocks)) {
-      return;
-    }
-
-    blocks.forEach((block) => {
-      if (!block || typeof block !== 'object') {
-        return;
-      }
-
-      const blockRecord = block as Record<string, unknown>;
-      if (blockRecord['type'] !== 'DIAGRAM_LABELING') {
-        return;
-      }
-
-      totalDiagramBlocks += 1;
-
-      const imageUrl = readNonEmptyString(blockRecord['imageUrl']);
-      if (imageUrl) {
-        return;
-      }
-
-      const imageSrc = readNonEmptyString(blockRecord['imageSrc']);
-      const assetUrl = readNonEmptyString(blockRecord['assetUrl']);
-      const hasUsableFallback = Boolean(imageSrc || assetUrl);
-      if (!hasUsableFallback) {
-        missingUsableImageCount += 1;
-      }
-
-      missingImageUrlCount += 1;
-      missingBlocks.push({
-        blockId: readNonEmptyString(blockRecord['id']) ?? '(unknown-block-id)',
-        section,
-        containerId,
-        hasImageSrc: Boolean(imageSrc),
-        hasAssetUrl: Boolean(assetUrl),
-        hasUsableFallback,
-      });
-    });
-  };
-
-  if (Array.isArray(snapshot.reading?.passages)) {
-    snapshot.reading?.passages.forEach((passage, index) => {
-      const passageId =
-        readNonEmptyString(passage?.id) ?? `reading-passage-${index + 1}`;
-      collectFromBlocks('reading', passageId, passage?.blocks);
-    });
-  }
-
-  if (Array.isArray(snapshot.listening?.parts)) {
-    snapshot.listening?.parts.forEach((part, index) => {
-      const partId = readNonEmptyString(part?.id) ?? `listening-part-${index + 1}`;
-      collectFromBlocks('listening', partId, part?.blocks);
-    });
-  }
-
-  return {
-    totalDiagramBlocks,
-    missingImageUrlCount,
-    missingUsableImageCount,
-    missingBlocks,
-  };
-}
 
 export function useStudentSessionRouteData(
   scheduleId?: string,

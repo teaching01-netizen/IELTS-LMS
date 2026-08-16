@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { QuestionBankItem, QuestionBlock, QuestionType } from '../../types';
-import { questionBankService } from '../../services/questionBankService';
+import { questionBankService } from '../../features/content-library/infrastructure/libraryGateway';
 import { Search, Filter, Grid, List, BookOpen, Clock, TrendingUp, X } from 'lucide-react';
 import { CollectionLoadingSkeleton } from '../ui/CollectionLoadingSkeleton';
 

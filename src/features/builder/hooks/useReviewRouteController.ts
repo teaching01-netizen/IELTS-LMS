@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { hydrateExamState } from '@services/examAdapterService';
-import { examLifecycleService } from '@services/examLifecycleService';
-import { examRepository } from '@services/examRepository';
+import { examLifecycleService, examRepository, hydrateExamState } from '../../exam-authoring/api/examAuthoringGateway';
 import type { ExamState } from '../../../types';
 import type {
   ExamEntity,
