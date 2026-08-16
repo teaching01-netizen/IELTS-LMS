@@ -43,6 +43,22 @@ describe('tableCompletion utils', () => {
     expect(canonical.map((cell) => cell.acceptedAnswers)).toEqual([['first'], ['second', '2nd']]);
   });
 
+  it('assigns stable header and row identities during normalization', () => {
+    const block = buildTableBlock({
+      headers: ['A', 'B'],
+      rows: [['first', ''], ['', 'second']],
+    });
+
+    const normalized = normalizeTableCompletionBlock(block);
+    const normalizedAgain = normalizeTableCompletionBlock(normalized);
+
+    expect(normalized.headerIds).toHaveLength(2);
+    expect(normalized.rowIds).toHaveLength(2);
+    expect(new Set(normalized.headerIds).size).toBe(2);
+    expect(new Set(normalized.rowIds).size).toBe(2);
+    expect(normalizedAgain).toBe(normalized);
+  });
+
   it('converts legacy mapped cells into placeholder-driven rows and drops invalid/duplicate cells', () => {
     const block = buildTableBlock({
       rows: [['Label', 'Value'], ['Other', 'Text']],

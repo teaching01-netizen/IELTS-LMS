@@ -2,6 +2,7 @@ import React from 'react';
 import { TableCompletionBlock as TableCompletionBlockType, AnswerRule } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
+import { createId } from '../../utils/idUtils';
 import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
 import {
   buildAcceptedAnswerFields,
@@ -28,6 +29,8 @@ interface TableCompletionBlockProps {
   errors?: Array<{ field: string; message: string }>;
   onAddSubAnswerAtSlot?: (slotIndex: number) => void;
 }
+
+const emptyTableErrors: Array<{ field: string; message: string }> = [];
 
 const rowEditorGridStyle = {
   gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
@@ -83,7 +86,7 @@ export function TableCompletionBlock({
   updateBlock,
   deleteBlock,
   moveBlock,
-  errors = [],
+  errors = emptyTableErrors,
   onAddSubAnswerAtSlot,
 }: TableCompletionBlockProps) {
   const commitBlock = React.useCallback(
@@ -132,6 +135,8 @@ export function TableCompletionBlock({
       ),
     [block.rows],
   );
+  const headerIds = block.headerIds ?? block.headers.map((_, index) => `${block.id}-header-${index}`);
+  const rowIds = block.rowIds ?? block.rows.map((_, index) => `${block.id}-row-${index}`);
 
   const updateInstruction = (instruction: string) => {
     commitBlock({ ...block, instruction });
@@ -157,11 +162,13 @@ export function TableCompletionBlock({
 
     const nextHeaders = block.headers.filter((_, headerIndex) => headerIndex !== index);
     const nextRows = block.rows.map((row) => row.filter((_, cellIndex) => cellIndex !== index));
+    const nextHeaderIds = block.headerIds?.filter((_, headerIndex) => headerIndex !== index);
 
     commitBlock({
       ...block,
       headers: nextHeaders,
       rows: nextRows,
+      ...(nextHeaderIds ? { headerIds: nextHeaderIds } : {}),
     });
   };
 
@@ -192,17 +199,27 @@ export function TableCompletionBlock({
   const removeRow = (rowIndex: number) => {
     if (block.rows.length <= 1) return;
     const nextRows = block.rows.filter((_, index) => index !== rowIndex);
-    commitBlock({ ...block, rows: nextRows });
+    const nextRowIds = block.rowIds?.filter((_, index) => index !== rowIndex);
+    commitBlock({
+      ...block,
+      rows: nextRows,
+      ...(nextRowIds ? { rowIds: nextRowIds } : {}),
+    });
   };
 
   const addHeader = () => {
-    commitBlock({ ...block, headers: [...block.headers, ''] });
+    commitBlock({
+      ...block,
+      headers: [...block.headers, ''],
+      headerIds: [...(block.headerIds ?? []), createId('header')],
+    });
   };
 
   const addRow = () => {
     commitBlock({
       ...block,
       rows: [...block.rows, new Array(block.headers.length).fill('')],
+      rowIds: [...(block.rowIds ?? []), createId('row')],
     });
   };
 
@@ -353,20 +370,26 @@ export function TableCompletionBlock({
         </div>
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={() => moveBlock(block.id, 'up')}
             className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600"
+            aria-label="Move table completion block up"
           >
             <ArrowUp size={16} />
           </button>
           <button
+            type="button"
             onClick={() => moveBlock(block.id, 'down')}
             className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600"
+            aria-label="Move table completion block down"
           >
             <ArrowDown size={16} />
           </button>
           <button
+            type="button"
             onClick={() => deleteBlock(block.id)}
             className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"
+            aria-label="Delete table completion block"
           >
             <Trash2 size={16} />
           </button>
@@ -375,22 +398,26 @@ export function TableCompletionBlock({
 
       {errors.length > 0 ? (
         <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-          {errors.map((error, index) => (
-            <div key={`${error.field}-${index}`}>{error.message}</div>
+          {errors.map((error) => (
+            <div key={`${error.field}-${error.message}`}>{error.message}</div>
           ))}
         </div>
       ) : null}
 
       <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-2">Instruction</label>
-        <textarea
-          value={block.instruction}
-          onChange={(event) => updateInstruction(event.target.value)}
-          onKeyDown={(event) => handleBoldHotkey(event, (nextValue) => updateInstruction(nextValue))}
-          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          rows={2}
-          placeholder="Enter instruction..."
-        />
+        <label htmlFor={`table-${block.id}-instruction`} className="block text-sm font-medium text-gray-700 mb-2">
+          Instruction
+          <textarea
+            id={`table-${block.id}-instruction`}
+            value={block.instruction}
+            onChange={(event) => updateInstruction(event.target.value)}
+            onKeyDown={(event) => handleBoldHotkey(event, (nextValue) => updateInstruction(nextValue))}
+            className="mt-2 w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-blue-500"
+            rows={2}
+            placeholder="Enter instruction..."
+            aria-label="Table instruction"
+          />
+        </label>
       </div>
       <InsertedImagesEditor
         images={block.insertedImages}
@@ -399,31 +426,38 @@ export function TableCompletionBlock({
       />
 
       <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-2">Answer Rule</label>
-        <select
-          value={block.answerRule}
-          onChange={(event) => updateAnswerRule(event.target.value as AnswerRule)}
-          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="ONE_WORD">One word only</option>
-          <option value="TWO_WORDS">No more than two words</option>
-          <option value="THREE_WORDS">No more than three words</option>
-        </select>
+        <label htmlFor={`table-${block.id}-answer-rule`} className="block text-sm font-medium text-gray-700 mb-2">
+          Answer Rule
+          <select
+            id={`table-${block.id}-answer-rule`}
+            value={block.answerRule}
+            onChange={(event) => updateAnswerRule(event.target.value as AnswerRule)}
+            className="mt-2 w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="ONE_WORD">One word only</option>
+            <option value="TWO_WORDS">No more than two words</option>
+            <option value="THREE_WORDS">No more than three words</option>
+          </select>
+        </label>
       </div>
 
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
-          <label className="block text-sm font-medium text-gray-700">Table Headers</label>
+          <span className="block text-sm font-medium text-gray-700">Table Headers</span>
           <button
+            type="button"
             onClick={addHeader}
             className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+            aria-label="Add table column"
           >
             <Plus size={14} /> Add Column
           </button>
         </div>
         <div className="grid gap-2" style={rowEditorGridStyle}>
-          {block.headers.map((header, headerIndex) => (
-            <div key={headerIndex} className="flex items-center gap-1">
+          {block.headers.map((header, headerIndex) => {
+            const headerId = headerIds[headerIndex] ?? `${block.id}-header-${headerIndex}`;
+            return (
+            <div key={headerId} className="flex items-center gap-1">
               <input
                 type="text"
                 value={header}
@@ -433,6 +467,7 @@ export function TableCompletionBlock({
                 }
                 className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
                 placeholder={`Column ${headerIndex + 1}`}
+                aria-label={`Table column ${headerIndex + 1} heading`}
               />
               <button
                 type="button"
@@ -440,20 +475,24 @@ export function TableCompletionBlock({
                 disabled={block.headers.length <= 2}
                 className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
                 title={block.headers.length <= 2 ? 'At least 2 columns are required' : 'Delete column'}
+                aria-label={block.headers.length <= 2 ? 'At least 2 columns are required' : `Delete table column ${headerIndex + 1}`}
               >
                 <Trash2 size={14} />
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
-          <label className="block text-sm font-medium text-gray-700">Table Rows ({block.rows.length})</label>
+          <span className="block text-sm font-medium text-gray-700">Table Rows ({block.rows.length})</span>
           <button
+            type="button"
             onClick={addRow}
             className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+            aria-label="Add table row"
           >
             <Plus size={14} /> Add Row
           </button>
@@ -480,8 +519,10 @@ export function TableCompletionBlock({
           </div>
         ) : null}
 
-        {block.rows.map((row, rowIndex) => (
-          <div key={rowIndex} className="mb-2 rounded-md border border-gray-200 p-2">
+        {block.rows.map((row, rowIndex) => {
+          const rowId = rowIds[rowIndex] ?? `${block.id}-row-${rowIndex}`;
+          return (
+          <div key={rowId} className="mb-2 rounded-md border border-gray-200 p-2">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-medium text-gray-600">Row {rowIndex + 1}</span>
               <button
@@ -490,6 +531,7 @@ export function TableCompletionBlock({
                 disabled={block.rows.length <= 1}
                 className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
                 title={block.rows.length <= 1 ? 'At least 1 row is required' : 'Delete row'}
+                aria-label={block.rows.length <= 1 ? 'At least 1 row is required' : `Delete row ${rowIndex + 1}`}
               >
                 <Trash2 size={14} />
               </button>
@@ -497,27 +539,31 @@ export function TableCompletionBlock({
 
             <div className="grid gap-2" style={rowEditorGridStyle}>
               {row.map((cell, cellIndex) => {
+                const headerId = headerIds[cellIndex] ?? `${block.id}-header-${cellIndex}`;
+                const cellInputId = `${block.id}-cell-${rowId}-${headerId}`;
                 const placeholderCount = placeholderAnalysis.slots.find(
                   (slot) => slot.row === rowIndex && slot.col === cellIndex,
                 )?.placeholderCount ?? 0;
                 const suspiciousCell = isSuspiciousTableCellContent(cell);
                 return (
-                  <div key={cellIndex} className="space-y-1">
-                    <label className="block text-[11px] font-medium text-gray-500">
+                  <div key={cellInputId} className="space-y-1">
+                    <label htmlFor={cellInputId} className="block text-[11px] font-medium text-gray-500">
                       {block.headers[cellIndex] || `Column ${cellIndex + 1}`}
+                      <textarea
+                        id={cellInputId}
+                        value={cell}
+                        onChange={(event) => updateRowCell(rowIndex, cellIndex, event.target.value)}
+                        onKeyDown={(event) =>
+                          handleBoldHotkey(event, (nextValue) =>
+                            updateRowCell(rowIndex, cellIndex, nextValue),
+                          )
+                        }
+                        className="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        rows={2}
+                        placeholder={`Cell ${rowIndex + 1}-${cellIndex + 1}`}
+                        aria-label={`Table row ${rowIndex + 1}, ${block.headers[cellIndex] || `column ${cellIndex + 1}`}`}
+                      />
                     </label>
-                    <textarea
-                      value={cell}
-                      onChange={(event) => updateRowCell(rowIndex, cellIndex, event.target.value)}
-                      onKeyDown={(event) =>
-                        handleBoldHotkey(event, (nextValue) =>
-                          updateRowCell(rowIndex, cellIndex, nextValue),
-                        )
-                      }
-                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      rows={2}
-                      placeholder={`Cell ${rowIndex + 1}-${cellIndex + 1}`}
-                    />
                     {placeholderCount > 1 ? (
                       <p className="text-[11px] text-blue-700">
                         {placeholderCount} blanks in this cell
@@ -540,18 +586,19 @@ export function TableCompletionBlock({
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
-          <label className="block text-sm font-medium text-gray-700">
+          <span className="block text-sm font-medium text-gray-700">
             Blank Answers ({canonicalCells.length})
-          </label>
+          </span>
         </div>
         <div className="space-y-2">
           {canonicalCells.map((cell, index) => (
-            <div key={`${cell.id}-${cell.row}-${cell.col}-${index}`} className="rounded-md border border-gray-200 p-3">
+            <div key={`${cell.id}-${cell.row}-${cell.col}-${cell.placeholderIndex ?? 0}`} className="rounded-md border border-gray-200 p-3">
               <div className="mb-1 flex items-center justify-between text-sm font-medium text-gray-700">
                 <span>{canonicalCellDisplayNumbers[index] ?? (startNum + index)}.</span>
                 {onAddSubAnswerAtSlot ? (
@@ -574,6 +621,7 @@ export function TableCompletionBlock({
                   <p className="text-xs text-blue-700">Grouped with previous slot (2 correct required = 1 point)</p>
                 ) : (
                   <select
+                    aria-label={`Scoring mode for answer ${canonicalCellDisplayNumbers[index] ?? (startNum + index)}`}
                     value={getCellScoringMode(index) === 'grouped_start' ? 'grouped_start' : 'independent'}
                     onChange={(event) =>
                       updateCellScoringMode(
@@ -595,6 +643,7 @@ export function TableCompletionBlock({
                 onChange={(event) => updateCellPrimaryAnswer(cell, event.target.value)}
                 className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Primary answer..."
+                aria-label={`Primary answer for question ${canonicalCellDisplayNumbers[index] ?? (startNum + index)}`}
               />
             </div>
           ))}
@@ -612,7 +661,7 @@ export function TableCompletionBlock({
         </summary>
         <div className="mt-3 space-y-3">
           {canonicalCells.map((cell, index) => (
-            <div key={`advanced-${cell.id}-${cell.row}-${cell.col}-${index}`} className="rounded-md border border-gray-200 bg-white p-3">
+            <div key={`advanced-${cell.id}-${cell.row}-${cell.col}-${cell.placeholderIndex ?? 0}`} className="rounded-md border border-gray-200 bg-white p-3">
               <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
                 <span>Q{canonicalCellDisplayNumbers[index] ?? (startNum + index)}</span>
                 <span>

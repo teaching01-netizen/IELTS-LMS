@@ -322,7 +322,9 @@ export interface TableCell {
 export interface TableCompletionBlock extends BaseQuestionBlock {
   type: 'TABLE_COMPLETION';
   headers: string[];
+  headerIds?: string[];
   rows: string[][];
+  rowIds?: string[];
   cells: TableCell[];
   answerRule: AnswerRule;
   subAnswerModeEnabled?: boolean;
@@ -464,6 +466,8 @@ export interface ListeningPart {
   id: string;
   title: string;
   audioUrl?: string | undefined;
+  transcript?: string | undefined;
+  transcriptUrl?: string | undefined;
   pins: { id: string, time: string, label: string }[];
   blocks: QuestionBlock[];
 }

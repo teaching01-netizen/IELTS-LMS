@@ -42,6 +42,32 @@ function rowsEqual(left: string[][], right: string[][]): boolean {
   return true;
 }
 
+function stableIdsEqual(left: string[] | undefined, right: string[] | undefined): boolean {
+  if (left === right) return true;
+  if (!left || !right || left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
+function normalizeStableIds(
+  values: string[] | undefined,
+  prefix: 'header' | 'row',
+  length: number,
+  blockId: string,
+): string[] {
+  const seen = new Set<string>();
+  return Array.from({ length }, (_, index) => {
+    const candidate = typeof values?.[index] === 'string' ? values[index].trim() : '';
+    if (candidate && !seen.has(candidate)) {
+      seen.add(candidate);
+      return candidate;
+    }
+
+    const fallback = `${blockId}-${prefix}-${index}`;
+    seen.add(fallback);
+    return fallback;
+  });
+}
+
 function cellsEqual(left: TableCell[], right: TableCell[]): boolean {
   if (left.length !== right.length) return false;
   for (let index = 0; index < left.length; index += 1) {
@@ -249,14 +275,23 @@ export function normalizeTableCompletionBlock(block: TableCompletionBlock): Tabl
   });
 
   const cellsWithUniqueIds = ensureUniqueCellIds(canonicalCells);
+  const normalizedHeaderIds = normalizeStableIds(block.headerIds, 'header', block.headers.length, block.id);
+  const normalizedRowIds = normalizeStableIds(block.rowIds, 'row', effectiveRows.length, block.id);
 
   const normalized: TableCompletionBlock = {
     ...block,
     rows: effectiveRows,
+    headerIds: normalizedHeaderIds,
+    rowIds: normalizedRowIds,
     cells: cellsWithUniqueIds,
   };
 
-  if (rowsEqual(block.rows, normalized.rows) && cellsEqual(block.cells, normalized.cells)) {
+  if (
+    rowsEqual(block.rows, normalized.rows)
+    && stableIdsEqual(block.headerIds, normalized.headerIds)
+    && stableIdsEqual(block.rowIds, normalized.rowIds)
+    && cellsEqual(block.cells, normalized.cells)
+  ) {
     return block;
   }
 

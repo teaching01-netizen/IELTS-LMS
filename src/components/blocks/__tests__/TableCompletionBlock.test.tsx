@@ -86,4 +86,43 @@ describe('TableCompletionBlock', () => {
 
     expect(latestBlock.answerRule).toBe('TWO_WORDS');
   });
+
+  it('preserves focus on a surviving row field when an earlier row is deleted', () => {
+    const initialBlock: TableCompletionBlockType = {
+      id: 'table-focus',
+      type: 'TABLE_COMPLETION',
+      instruction: 'Complete the table',
+      answerRule: 'ONE_WORD',
+      insertedImages: [],
+      headers: ['A', 'B'],
+      rows: [
+        ['first', ''],
+        ['second', ''],
+      ],
+      cells: [],
+    };
+
+    function Harness() {
+      const [block, setBlock] = useState(initialBlock);
+      return (
+        <TableCompletionBlock
+          block={block}
+          startNum={1}
+          endNum={1}
+          updateBlock={setBlock}
+          deleteBlock={() => {}}
+          moveBlock={() => {}}
+          errors={[]}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const survivingField = screen.getByDisplayValue('second');
+    survivingField.focus();
+    fireEvent.click(screen.getAllByTitle('Delete row')[0]!);
+
+    expect(screen.getByDisplayValue('second')).toBe(document.activeElement);
+  });
 });
