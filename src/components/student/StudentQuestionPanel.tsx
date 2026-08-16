@@ -86,41 +86,48 @@ export function StudentQuestionPanel({
           ...(contentZoomStyle ?? {}),
         }}
       >
-        {blocks.map((block) => (
-          <StudentQuestionBlockSection
-            key={block.id}
-            block={block}
-            blockQuestions={questionsByBlockId.get(block.id) ?? []}
-            allQuestions={allQuestions}
-            answers={answers}
-            currentQuestionId={currentQuestionId}
-            flags={flags}
-            onAnswerChange={onAnswerChange}
-            onToggleFlag={onToggleFlag}
-            tabletMode={tabletMode}
-            answerCompact={answerCompact}
-            highlightEnabled={highlightEnabled}
-            highlightColor={highlightColor}
-            registerLiveAnswer={registerLiveAnswer}
-            getBlockStartQuestionNumber={getBlockStartQuestionNumber}
-            renderBlockInstruction={renderBlockInstruction}
-            expandedQuestionGapClassName={expandedQuestionGapClassName}
-            hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
-          />
-        ))}
-      </div>
+        {blocks.map(block => {
+          const activeQuestionId = (questionsByBlockId.get(block.id) ?? []).some(question => question.id === currentQuestionId) ? currentQuestionId : null;
 
+          return (
+            <StudentQuestionBlockSection
+              key={block.id}
+              block={block}
+              blockQuestions={questionsByBlockId.get(block.id) ?? []}
+              allQuestions={allQuestions}
+              answers={answers}
+              activeQuestionId={activeQuestionId}
+              flags={flags}
+              onAnswerChange={onAnswerChange}
+              onToggleFlag={onToggleFlag}
+              tabletMode={tabletMode}
+              answerCompact={answerCompact}
+              highlightEnabled={highlightEnabled}
+              highlightColor={highlightColor}
+              registerLiveAnswer={registerLiveAnswer}
+              getBlockStartQuestionNumber={getBlockStartQuestionNumber}
+              renderBlockInstruction={renderBlockInstruction}
+              expandedQuestionGapClassName={expandedQuestionGapClassName}
+              hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
+            />
+          );
+        })}
+      </div>
       <div className={`student-question-stepper absolute ${tabletMode ? 'right-4' : 'right-4 md:right-6'} flex shadow-md z-20`}>
         <button
+          type="button"
           onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
           className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed'}`}
-        >
+          aria-label="Previous question"
+          disabled={!hasPrev}>
           <ArrowLeft size={16} strokeWidth={3} />
         </button>
         <button
+          type="button"
           onClick={() => nextQuestion && onNavigate(nextQuestion.id)}
           className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? 'bg-black hover:bg-gray-800 text-white' : 'bg-gray-800 text-gray-500 cursor-not-allowed'}`}
-        >
+          aria-label="Next question"
+          disabled={!hasNext}>
           <ArrowRight size={16} strokeWidth={3} />
         </button>
       </div>

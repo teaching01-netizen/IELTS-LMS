@@ -324,3 +324,85 @@ describe('Student typing performance', () => {
     expect(questionRendererCalls).toHaveBeenCalledWith(1, 'changed');
   });
 });
+it('rerenders only the blocks whose active question changes', () => {
+  const model = createQuestionPanelModel();
+  const renderCounts: Record<string, number> = { q1: 0, q2: 0 };
+  const renderBlockInstruction = (_instruction: string, blockId: string) => {
+    renderCounts[blockId] = (renderCounts[blockId] ?? 0) + 1;
+    return <p>{blockId}</p>;
+  };
+  const props = {
+    blocks: model.blocks,
+    allQuestions: model.allQuestions,
+    answers: { q1: '', q2: '' },
+    onAnswerChange: vi.fn(),
+    currentQuestionId: 'q1',
+    onNavigate: vi.fn(),
+    flags: {},
+    answerCompact: false,
+    highlightEnabled: false,
+    questionContainerRef: React.createRef<HTMLDivElement>(),
+    panelTestId: 'question-panel-locality',
+    getBlockStartQuestionNumber: (blockId: string) => (blockId === 'q1' ? 1 : 2),
+    renderBlockInstruction,
+  };
+  const rendered = render(<StudentQuestionPanel {...props} />);
+  expect(renderCounts).toEqual({ q1: 1, q2: 1 });
+
+  rendered.rerender(<StudentQuestionPanel {...props} currentQuestionId="q2" />);
+  expect(renderCounts).toEqual({ q1: 2, q2: 2 });
+});
+
+it('keeps unchanged blocks isolated during same-block navigation and exposes native stepper semantics', () => {
+  const block = {
+    id: 'shared',
+    type: 'SHORT_ANSWER',
+    instruction: 'Answer both questions.',
+    questions: [
+      { id: 'q1', prompt: 'Question one', correctAnswer: 'A' },
+      { id: 'q2', prompt: 'Question two', correctAnswer: 'B' },
+    ],
+    answerRule: 'ONE_WORD',
+  } as QuestionBlock;
+  const model = {
+    blocks: [block],
+    allQuestions: [
+      {
+        id: 'q1', blockId: 'shared', groupId: 'p1', groupLabel: 'Passage 1', isMulti: false,
+        correctCount: 1, answerKey: 'q1', block, question: (block as any).questions[0],
+      },
+      {
+        id: 'q2', blockId: 'shared', groupId: 'p1', groupLabel: 'Passage 1', isMulti: false,
+        correctCount: 1, answerKey: 'q2', block, question: (block as any).questions[1],
+      },
+    ] as StudentQuestionDescriptor[],
+  };
+  const renderCounts = { shared: 0 };
+  const props = {
+    blocks: model.blocks,
+    allQuestions: model.allQuestions,
+    answers: { q1: '', q2: '' },
+    onAnswerChange: vi.fn(),
+    currentQuestionId: 'q1',
+    onNavigate: vi.fn(),
+    flags: {},
+    answerCompact: false,
+    highlightEnabled: false,
+    questionContainerRef: React.createRef<HTMLDivElement>(),
+    panelTestId: 'question-panel-stepper',
+    getBlockStartQuestionNumber: () => 1,
+    renderBlockInstruction: (_instruction: string, blockId: string) => {
+      renderCounts[blockId as 'shared'] += 1;
+      return <p>{blockId}</p>;
+    },
+  };
+  const rendered = render(<StudentQuestionPanel {...props} />);
+  expect(renderCounts.shared).toBe(1);
+  expect(screen.getByRole('button', { name: 'Previous question' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Next question' })).toBeEnabled();
+
+  rendered.rerender(<StudentQuestionPanel {...props} currentQuestionId="q2" />);
+  expect(renderCounts.shared).toBe(2);
+  expect(screen.getByRole('button', { name: 'Previous question' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Next question' })).toBeDisabled();
+});

@@ -18,7 +18,7 @@ export interface StudentQuestionBlockSectionProps {
   blockQuestions: StudentQuestionDescriptor[];
   allQuestions: StudentQuestionDescriptor[];
   answers: Record<string, QuestionAnswer>;
-  currentQuestionId: string | null;
+  activeQuestionId: string | null;
   flags: Record<string, boolean>;
   onAnswerChange: (
     answerKey: string,
@@ -101,7 +101,7 @@ function areBlockPropsEqual(
     previous.block !== next.block ||
     previous.blockQuestions !== next.blockQuestions ||
     previous.allQuestions !== next.allQuestions ||
-    previous.currentQuestionId !== next.currentQuestionId ||
+    previous.activeQuestionId !== next.activeQuestionId ||
     previous.answerCompact !== next.answerCompact ||
     previous.tabletMode !== next.tabletMode ||
     previous.highlightEnabled !== next.highlightEnabled ||
@@ -138,7 +138,7 @@ export const StudentQuestionBlockSection = React.memo(
     blockQuestions,
     allQuestions,
     answers,
-    currentQuestionId,
+    activeQuestionId,
     flags,
     onAnswerChange,
     onToggleFlag,
@@ -167,7 +167,7 @@ export const StudentQuestionBlockSection = React.memo(
       rootNumbers[rootNumbers.length - 1] ??
       blockStartQ + getBlockQuestionCount(block) - 1;
     const getAnswerValue = (answerKey: string): QuestionAnswer => answers[answerKey] ?? null;
-    const containsCurrentQuestion = blockQuestions.some((question) => question.id === currentQuestionId);
+    const containsCurrentQuestion = blockQuestions.some((question) => question.id === activeQuestionId);
     const blockSpacingClassName = answerCompact
       ? 'space-y-3 mb-3 md:mb-4'
       : 'space-y-4 md:space-y-6 mb-4 md:mb-6';
@@ -183,13 +183,12 @@ export const StudentQuestionBlockSection = React.memo(
           ) : null}
           {renderBlockInstruction(block.instruction, block.id)}
         </div>
-
         <div className={answerCompact ? 'space-y-5' : expandedQuestionGapClassName}>
           {treeQuestions.length > 0 ? (
             <SubAnswerTreeQuestionList
               questions={treeQuestions}
               answers={answers}
-              currentQuestionId={currentQuestionId}
+              currentQuestionId={activeQuestionId}
               flags={flags}
               onToggleFlag={onToggleFlag}
               tabletMode={tabletMode}
@@ -204,7 +203,7 @@ export const StudentQuestionBlockSection = React.memo(
               const globalQuestionNumber =
                 (firstEntry ? getQuestionStartNumber(allQuestions, firstEntry.id) : null) ??
                 blockStartQ + questionIndex;
-              const isActive = questionEntries.some((entry) => entry.id === currentQuestionId);
+              const isActive = questionEntries.some((entry) => entry.id === activeQuestionId);
               const inlineFlags = block.type === 'SENTENCE_COMPLETION' || block.type === 'NOTE_COMPLETION';
               const flagId = firstEntry?.id;
               const answerKey = firstEntry?.answerKey ?? question.id;
@@ -250,7 +249,7 @@ export const StudentQuestionBlockSection = React.memo(
                     isActive={isActive}
                     slotIds={questionEntries.map((entry) => entry.id)}
                     slotNumbers={questionEntries.map((entry, index) => entry.rootNumber ?? (blockStartQ + index))}
-                    currentQuestionId={currentQuestionId}
+                    currentQuestionId={activeQuestionId}
                     flags={flags}
                     onToggleFlag={onToggleFlag}
                     tabletMode={tabletMode}
@@ -286,10 +285,10 @@ export const StudentQuestionBlockSection = React.memo(
                   registerLiveAnswer?.(singleBlockQuestion?.answerKey ?? block.id, value)
                 }
                 isFlagged={singleBlockQuestion ? Boolean(flags[singleBlockQuestion.id]) : false}
-                isActive={blockQuestions.some((entry) => entry.id === currentQuestionId)}
+                isActive={blockQuestions.some((entry) => entry.id === activeQuestionId)}
                 slotIds={blockQuestions.map((entry) => entry.id)}
                 slotNumbers={blockQuestions.map((entry, index) => entry.rootNumber ?? (blockStartQ + index))}
-                currentQuestionId={currentQuestionId}
+                currentQuestionId={activeQuestionId}
                 flags={flags}
                 onToggleFlag={onToggleFlag}
                 tabletMode={tabletMode}

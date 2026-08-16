@@ -21,7 +21,7 @@ import type { ExamConfig } from '../../../types';
 import { createBrowserNetworkMonitor } from '@student/infrastructure/exam-session/platform/BrowserNetworkMonitor';
 import { readBrowserDeviceFingerprint } from '@student/infrastructure/exam-session/platform/BrowserDeviceFingerprint';
 import { useStudentAttempt } from './StudentAttemptProvider';
-import { useStudentRuntime } from './StudentRuntimeProvider';
+import { useStudentRuntime, useStudentRuntimeSession } from './StudentRuntimeProvider';
 
 interface StudentNetworkState {
   isOnline: boolean;
@@ -49,7 +49,7 @@ export function StudentNetworkProvider({
   scheduleId,
   onRefreshRuntime,
 }: StudentNetworkProviderProps) {
-  const { state: runtimeState, actions: runtimeActions } = useStudentRuntime();
+  const { state: runtimeState, actions: runtimeActions } = useStudentRuntimeSession();
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
   const policy = useMemo(() => getStudentIntegritySecurityPolicy(config), [config]);
   const heartbeatThresholds = useMemo(() => getHeartbeatEnforcementThresholds(config), [config]);

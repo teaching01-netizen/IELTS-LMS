@@ -5,7 +5,7 @@ import { Lobby } from './Lobby';
 import { PreCheck } from './PreCheck';
 import { StudentPostExamView } from './StudentPostExamView';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
-import { useStudentRuntime } from './providers/StudentRuntimeProvider';
+import { useStudentRuntime, useStudentRuntimeSession } from './providers/StudentRuntimeProvider';
 import { isVerifiedTerminalStudentState } from './providers/verifiedTerminalState';
 
 interface StudentExamPhaseRendererProps {
@@ -30,7 +30,7 @@ export function StudentExamPhaseRenderer({
   onExit,
 }: StudentExamPhaseRendererProps) {
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
-  const { state: runtimeState, actions: runtimeActions } = useStudentRuntime();
+  const { state: runtimeState, actions: runtimeActions } = useStudentRuntimeSession();
 
   if (!shouldRenderPostExam && phase === 'pre-check') {
     return (

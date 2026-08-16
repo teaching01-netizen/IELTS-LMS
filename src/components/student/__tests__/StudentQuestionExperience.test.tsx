@@ -158,7 +158,7 @@ describe('student question experience', () => {
         blockQuestions={blockQuestions}
         allQuestions={blockQuestions}
         answers={{ q2: '' }}
-        currentQuestionId="q1"
+        activeQuestionId="q1"
         flags={{}}
         onAnswerChange={() => undefined}
         tabletMode={false}
@@ -178,7 +178,7 @@ describe('student question experience', () => {
         blockQuestions={blockQuestions}
         allQuestions={blockQuestions}
         answers={{ q2: '' }}
-        currentQuestionId="q2"
+        activeQuestionId="q2"
         flags={{}}
         onAnswerChange={() => undefined}
         tabletMode={false}
@@ -208,7 +208,7 @@ describe('student question experience', () => {
         blockQuestions={[]}
         allQuestions={[]}
         answers={{}}
-        currentQuestionId={null}
+        activeQuestionId={null}
         flags={{}}
         onAnswerChange={() => undefined}
         tabletMode={false}

@@ -1021,4 +1021,264 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(await screen.findByRole('status', { name: 'Correct' })).toBeInTheDocument();
     expect(gradingService.overrideObjectiveQuestion).not.toHaveBeenCalled();
   });
+
+  test('applies the decision optimistically before the save resolves, then reconciles', async () => {
+    let regraded = false;
+    let resolveOverride!: (value: unknown) => void;
+    const deferred = new Promise<unknown>((resolve) => {
+      resolveOverride = resolve;
+    });
+    vi.mocked(gradingService.upsertObjectiveOverride).mockReturnValue(deferred as never);
+
+    const makeSection = (): SectionSubmission => ({
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: regraded ? 1 : 0,
+        maxScore: 1,
+        percentage: regraded ? 100 : 0,
+        questionResults: [{
+          questionId: 'q-1',
+          studentAnswer: 'ANSWER',
+          correctAnswer: 'Answer',
+          isCorrect: regraded,
+          awardedScore: regraded ? 1 : 0,
+          maxScore: 1,
+          scoringRule: 'one_word',
+          hasOverride: regraded,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId)
+      .mockImplementation(async () => [makeSection()]);
+    vi.mocked(gradingRepository.invalidateSubmissionBundle).mockImplementation(() => {
+      regraded = true;
+    });
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Accept for whole exam' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Accept and regrade' }));
+
+    // The group flips to Correct and the card pulses while the save is in flight.
+    expect(await screen.findByRole('status', { name: 'Correct' })).toBeInTheDocument();
+    expect(screen.getByText('Saving…')).toBeInTheDocument();
+    expect(gradingService.upsertObjectiveOverride).toHaveBeenCalledTimes(1);
+
+    resolveOverride({ success: true, data: { regradeReport: {} } });
+    await screen.findByText(/Added “ANSWER” to the answer key/);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  test('keeps the list on screen while the post-save reload runs in the background', async () => {
+    let regraded = false;
+    let resolveReload!: (value: unknown) => void;
+    const reloadGate = new Promise<unknown>((resolve) => {
+      resolveReload = resolve;
+    });
+    vi.mocked(gradingService.upsertObjectiveOverride).mockResolvedValue({
+      success: true,
+      data: { regradeReport: {} as never },
+    });
+
+    const makeSection = (): SectionSubmission => ({
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: regraded ? 1 : 0,
+        maxScore: 1,
+        percentage: regraded ? 100 : 0,
+        questionResults: [{
+          questionId: 'q-1',
+          studentAnswer: 'ANSWER',
+          correctAnswer: 'Answer',
+          isCorrect: regraded,
+          awardedScore: regraded ? 1 : 0,
+          maxScore: 1,
+          scoringRule: 'one_word',
+          hasOverride: regraded,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    // Initial load resolves; the post-save reload hangs on section submissions.
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId)
+      .mockResolvedValueOnce([makeSection()])
+      .mockReturnValueOnce(reloadGate as never)
+      .mockResolvedValue([makeSection()]);
+    vi.mocked(gradingRepository.invalidateSubmissionBundle).mockImplementation(() => {
+      regraded = true;
+    });
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Accept for whole exam' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Accept and regrade' }));
+
+    // The save has resolved and the reload is in flight, but the list stays put:
+    // no loading skeleton, and the optimistic card is still on screen.
+    await waitFor(() => expect(gradingService.upsertObjectiveOverride).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Loading typed answer exceptions...')).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Correct' })).toBeInTheDocument();
+    expect(screen.getByText('Saving…')).toBeInTheDocument();
+
+    // Server truth arrives and the card reconciles without ever flashing a skeleton.
+    resolveReload([makeSection()]);
+    await screen.findByText(/Added “ANSWER” to the answer key/);
+    expect(screen.queryByText('Loading typed answer exceptions...')).not.toBeInTheDocument();
+  });
+
+  test('coalesces a burst of update notifications into a single background reload', async () => {
+    let resolveReload!: (value: unknown) => void;
+    const reloadGate = new Promise<unknown>((resolve) => {
+      resolveReload = resolve;
+    });
+
+    const section = {
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [{
+          questionId: 'q-1',
+          studentAnswer: 'ANSWER',
+          correctAnswer: 'Answer',
+          isCorrect: false,
+          awardedScore: 0,
+          maxScore: 1,
+          scoringRule: 'one_word',
+          hasOverride: false,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } satisfies SectionSubmission;
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    // First call: initial load resolves. Second call: the coalesced reload hangs.
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId)
+      .mockResolvedValueOnce([section])
+      .mockReturnValueOnce(reloadGate as never)
+      .mockResolvedValue([section]);
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{
+          examTitle: 'IELTS Mock Test',
+          id: 'session-1',
+          examId: 'exam-1',
+          scheduleId: 'schedule-1',
+        } as never}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
+
+    // A burst of notifications while one reload is in flight shares the fetch.
+    act(() => {
+      notifyObjectiveGradingUpdated('exam-1');
+      notifyObjectiveGradingUpdated('exam-1');
+      notifyObjectiveGradingUpdated('exam-1');
+    });
+
+    await waitFor(() => expect(gradingRepository.getSectionSubmissionsBySubmissionId).toHaveBeenCalledTimes(2));
+    expect(gradingRepository.getSubmissionsBySession).toHaveBeenCalledTimes(2);
+    // No loading skeleton while the shared reload is in flight.
+    expect(screen.queryByText('Loading typed answer exceptions...')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
+
+    resolveReload([section]);
+    await waitFor(() => expect(gradingRepository.getSubmissionsBySession).toHaveBeenCalledTimes(2));
+  });
+
+  test('reverts the optimistic decision when the save fails', async () => {
+    vi.mocked(gradingService.upsertObjectiveOverride).mockResolvedValue({
+      success: false,
+      error: 'Regrade failed',
+    });
+
+    const section = {
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [{
+          questionId: 'q-1',
+          studentAnswer: 'ANSWER',
+          correctAnswer: 'Answer',
+          isCorrect: false,
+          awardedScore: 0,
+          maxScore: 1,
+          scoringRule: 'one_word',
+          hasOverride: false,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } satisfies SectionSubmission;
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Accept for whole exam' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Accept and regrade' }));
+
+    // Flips optimistically first...
+    expect(await screen.findByRole('status', { name: 'Correct' })).toBeInTheDocument();
+
+    // ...then reverts once the save fails.
+    await screen.findByRole('alert');
+    expect(screen.getByText('Regrade failed')).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Correct' })).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Incorrect' })).toBeInTheDocument();
+    expect(screen.queryByText('Saving…')).not.toBeInTheDocument();
+  });
 });

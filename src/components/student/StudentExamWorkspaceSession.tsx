@@ -4,7 +4,6 @@ import {
   selectAnswers,
   selectCurrentModule,
   selectCurrentQuestionId,
-  selectDisplayTimeRemaining,
   selectFlags,
   selectWritingAnswers,
 } from '@student/application/exam-session/examSessionSelectors';
@@ -31,7 +30,6 @@ export const StudentExamWorkspaceSession = React.memo(function StudentExamWorksp
   const answers = useStudentExamSession(selectAnswers);
   const writingAnswers = useStudentExamSession(selectWritingAnswers);
   const flags = useStudentExamSession(selectFlags);
-  const displayTimeRemaining = useStudentExamSession(selectDisplayTimeRemaining);
 
   return (
     <StudentExamWorkspace
@@ -40,8 +38,6 @@ export const StudentExamWorkspaceSession = React.memo(function StudentExamWorksp
       currentQuestionId={currentQuestionId}
       answers={answers}
       writingAnswers={writingAnswers}
-      flags={flags}
-      displayTimeRemaining={displayTimeRemaining ?? undefined}
-    />
+      flags={flags} />
   );
 });

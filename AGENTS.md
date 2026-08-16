@@ -1,58 +1,40 @@
-# Codebase Guide for AI Agents
+# Skill: Rigorous AST-Guided Code Engineering
 
-## System Type
-This repository is a modularizing monolith for an online exam platform.
+You are a high-precision coding agent. You MUST NOT make raw text-based assumptions, regex-only modifications, or partial refactors. All code discovery, structural analysis, and edits must strictly leverage Abstract Syntax Tree (AST) tools to guarantee zero breaking changes across the repository.
 
-## Mission
-Do not only patch code. Improve the repository's memory so future changes are safer.
+---
 
-## Main Rule
-Never change behavior before identifying the owning module and invariants.
+**Mandatory AST Execution Protocol**
 
-## Required Development Loop
-1. Map ownership and boundaries.
-2. Reproduce with a focused test or script.
-3. Implement the smallest safe change.
-4. Verify with relevant tests/checks.
-5. Add memory artifact (test/doc/script/log policy).
-6. Compress if local complexity is growing.
+* **Phase 1: AST Discovery & Mapping**
+* **Map Symbol Call-Graphs:** Query the repository AST (via `ast-grep`, `tree-sitter`, or LSP indexers) to identify every definition, type signature, and downstream import reference across all files.
+* **Resolve Context Boundaries:** Use AST scope nodes (`FunctionDeclaration`, `ClassDeclaration`, `ModuleBlock`) to isolate variables—do not rely on string matching.
 
-## Dependency Rules
-- Prefer module-local changes over cross-cutting edits.
-- Do not import another module's internal files.
-- Expose inter-module behavior via explicit public interfaces.
-- Keep dependency direction one-way where possible:
-  - `ui -> application -> domain`
-  - `infrastructure` implements domain/application interfaces.
 
-## Critical Invariants
-- Submitted exam answers are immutable.
-- Autosave must be idempotent.
-- Student-visible "saved/verified" state must match persisted reality.
-- Timer fairness must not be bypassed by reload/refresh.
-- Integrity and audit events must be append-only and traceable.
+* **Phase 2: Targeted Structural Edits**
+* **Atomic Signature Updates:** If modifying a function signature or class interface, trace the exact AST reference graph. Update all callers across the repository within the same operation.
+* **Node-Level Precision:** Perform modifications targeting specific AST node types (e.g., `CallExpression`, `JSXElement`). Never manipulate raw text lines where edits could accidently target comments, docstrings, or string literals.
 
-## Dangerous Areas
-- Exam submission and autosave flows.
-- Session recovery/reconnect behavior.
-- Grading mutation and publication workflows.
-- Permission/role boundary checks.
-- Payment confirmation and retries.
 
-## Mandatory Before/After Checklist
-Before editing:
-1. Read module docs and relevant tests.
-2. Identify "must not break" behavior.
-3. Add or update failing characterization test when behavior is unclear.
+* **Phase 3: AST Verification**
+* **Syntax Validation:** Re-parse all modified files into structural ASTs immediately after editing to verify valid syntax.
+* **Dependency Graph Audit:** Re-run cross-file AST symbol queries to confirm no dangling references, broken exports, or unhandled type mismatches remain.
 
-After editing:
-1. Run targeted tests and report results.
-2. Add or update at least one memory artifact:
-   - regression test
-   - failure-case note
-   - diagnostic script
-   - architecture decision note
-3. If behavior changed, update module docs.
 
-## Compression Rule
-If 3+ tactical patches accumulate in one area, stop patching and propose a local abstraction/refactor.
+
+---
+
+| Operation | Prohibited Method | Mandatory AST Method |
+| --- | --- | --- |
+| **Symbol Search** | grep -r "myFunction" | ast-grep --pattern 'myFunction($$$)' |
+| **Refactoring** | String Replace / Regex | AST Node Mutation / Structural Rewrite |
+| **Impact Analysis** | File-by-file text review | Repository Call Graph & AST Dependency Mapping |
+| **Syntax Check** | Visual inspection | Full AST Parser Validation |
+
+---
+
+**Non-Negotiable Guardrails**
+
+* **No Unverified Edits:** Never modify a single file without first checking its global import/export linkages using AST graph parsing.
+* **Fail-Fast Policy:** If an AST tool returns ambiguous syntax trees or unparseable blocks, STOP execution immediately and report the structural error.
+* **Comment & String Safety:** Never alter AST nodes classified as Comment or StringLiteral during structural refactoring unless explicitly instructed to do so.

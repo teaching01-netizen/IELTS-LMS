@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, CircleAlert } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleAlert, LoaderCircle } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type {
   ObjectiveIntegrityIssueCode,
@@ -21,21 +21,25 @@ const STATUS_COPY = {
   verified: {
     label: 'Verified',
     className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    iconClassName: 'bg-emerald-100 text-emerald-700',
     Icon: CheckCircle2,
   },
   needs_recheck: {
     label: 'Needs recheck',
     className: 'border-amber-200 bg-amber-50 text-amber-900',
+    iconClassName: 'bg-amber-100 text-amber-800',
     Icon: CircleAlert,
   },
   invalid: {
     label: 'Invalid',
     className: 'border-rose-200 bg-rose-50 text-rose-800',
+    iconClassName: 'bg-rose-100 text-rose-800',
     Icon: AlertTriangle,
   },
 } satisfies Record<ObjectiveIntegrityStatus, {
   readonly label: string;
   readonly className: string;
+  readonly iconClassName: string;
   readonly Icon: LucideIcon;
 }>;
 
@@ -147,7 +151,7 @@ export function ObjectiveIntegrityAuditSection({
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-200 text-gray-700">
+          <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${statusCopy ? statusCopy.iconClassName : 'bg-gray-200 text-gray-700'}`}>
             <StatusIcon size={17} aria-hidden="true" />
           </div>
           <div>
@@ -168,7 +172,8 @@ export function ObjectiveIntegrityAuditSection({
       </div>
 
       {loading ? (
-        <p className="mt-4 text-sm text-gray-600" role="status" aria-live="polite">
+        <p className="mt-4 flex items-center gap-2 text-sm text-gray-600" role="status" aria-live="polite">
+          <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
           Loading persisted audit…
         </p>
       ) : error ? (

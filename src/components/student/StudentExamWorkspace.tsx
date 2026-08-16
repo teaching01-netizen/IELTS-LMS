@@ -24,7 +24,7 @@ export interface StudentExamWorkspaceProps {
   layoutMode?: StudentLayoutMode | undefined;
   showSubmitControls: boolean;
   contentZoom: number;
-  displayTimeRemaining: number | undefined;
+  displayTimeRemaining?: number | undefined
   highlightEnabled: boolean;
   highlightColor: StudentHighlightColor;
   highlightClassName?: string;

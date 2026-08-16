@@ -121,6 +121,71 @@ describe('ObjectiveOverridesPanel', () => {
     });
   });
 
+  it('shows an inline alert when the post-save overrides refresh fails', async () => {
+    const { examRepository } = await import('../../../services/examRepository');
+    const { gradingService } = await import('../../../services/gradingService');
+
+    (examRepository.getVersionById as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      contentSnapshot: {
+        reading: {
+          passages: [
+            {
+              id: 'p1',
+              title: 'Passage 1',
+              blocks: [
+                {
+                  id: 'b1',
+                  type: 'SHORT_ANSWER',
+                  instruction: 'Answer',
+                  questions: [
+                    { id: 'q-reading-1', prompt: 'Keyword?', correctAnswer: 'Top', answerRule: 'ONE_WORD' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        listening: { parts: [] },
+      },
+    });
+
+    (gradingService.getObjectiveGradingSource as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { draftVersionId: null },
+    });
+
+    // Initial load succeeds; the post-save refresh fails.
+    (gradingService.getObjectiveOverrides as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({ success: false, error: 'Overrides unavailable' });
+
+    (gradingService.upsertObjectiveOverride as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { regradeReport: { sectionsUpdated: 1 } },
+    });
+
+    render(<ObjectiveOverridesPanel scheduleId="sched-1" publishedVersionId="ver-1" />);
+
+    fireEvent.click(screen.getByText('Session Settings'));
+    await waitFor(() => {
+      expect(screen.getByText(/READING • Q1/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText(/READING • Q1/i));
+    fireEvent.change(screen.getByPlaceholderText('Why is this override needed?'), {
+      target: { value: 'Fix key' },
+    });
+    fireEvent.click(screen.getByText('Save override + regrade'));
+
+    // The save succeeded and its confirmation still shows, but the refresh
+    // failure surfaces as its own inline alert instead of failing silently.
+    await waitFor(() => {
+      expect(screen.getByText(/Regraded: 1 sections updated/)).toBeTruthy();
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Overrides unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent(/may be out of date/);
+  });
+
   it('uses exact_match scoringRule for text overrides even when keys include multi-word variants', async () => {
     const { examRepository } = await import('../../../services/examRepository');
     const { gradingService } = await import('../../../services/gradingService');

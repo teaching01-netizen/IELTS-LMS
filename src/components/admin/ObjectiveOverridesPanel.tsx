@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCoalescedReload } from '../../hooks/useCoalescedReload';
+import { AlertTriangle, CheckCircle2, ChevronRight, ListChecks, LoaderCircle, MousePointerClick, SlidersHorizontal } from 'lucide-react';
 import type { ExamState, ModuleType } from '../../types';
 import { examRepository, getStudentQuestionsForModule } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import { gradingService } from '../../features/grading/infrastructure/gradingGateway';
@@ -42,6 +44,9 @@ const SCORING_RULE_OPTIONS = [
 function isKnownScoringRule(value: string): value is (typeof SCORING_RULE_OPTIONS)[number] {
   return (SCORING_RULE_OPTIONS as readonly string[]).includes(value);
 }
+
+const inputClassName =
+  'w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25';
 
 function toTextLines(value: string): string[] {
   return value
@@ -189,7 +194,6 @@ function buildEmptyUpsertRequest(
 export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: string | undefined; publishedVersionId?: string | undefined }) {
   const { scheduleId, publishedVersionId } = props;
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [questions, setQuestions] = useState<ObjectiveQuestionItem[]>([]);
   const [overrides, setOverrides] = useState<GradingScheduleObjectiveOverrideRow[]>([]);
@@ -197,6 +201,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
   const [form, setForm] = useState<ObjectiveOverrideUpsertRequest | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [mutationResult, setMutationResult] = useState<ObjectiveOverrideMutationResponse | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
   const [scheduleRegrading, setScheduleRegrading] = useState(false);
   const [scheduleRegradeError, setScheduleRegradeError] = useState<string | null>(null);
@@ -219,15 +224,14 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
     return questions.find((q) => q.descriptor.id === selectedQuestionId) ?? null;
   }, [questions, selectedQuestionId]);
 
-  useEffect(() => {
+  const { loading, reload: runReload } = useCoalescedReload(false);
+
+  const loadPanel = useCallback(() => {
     if (!open) return;
     if (!publishedVersionId) return;
 
-    let cancelled = false;
-    setLoading(true);
-    setLoadError(null);
-
-    const run = async () => {
+    return runReload(async (isStale) => {
+      setLoadError(null);
       try {
         const [sourceResult, overrideResult] = await Promise.all([
           gradingService.getObjectiveGradingSource(scheduleId),
@@ -238,9 +242,10 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
             ? sourceResult.data.draftVersionId
             : publishedVersionId;
         const version = await examRepository.getVersionById(versionId);
-        if (cancelled) return;
+        if (isStale()) return;
         if (!version?.contentSnapshot) {
-          throw new Error('Could not load exam snapshot for this schedule.');
+          setLoadError('Could not load exam snapshot for this schedule.');
+          return;
         }
         const examState = version.contentSnapshot as ExamState;
         setQuestions(buildQuestionItems(examState));
@@ -250,18 +255,15 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
           setOverrides([]);
         }
       } catch (error) {
-        if (cancelled) return;
+        if (isStale()) return;
         setLoadError(error instanceof Error ? error.message : String(error));
-      } finally {
-        if (!cancelled) setLoading(false);
       }
-    };
+    });
+  }, [open, publishedVersionId, runReload, scheduleId]);
 
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [open, publishedVersionId, scheduleId]);
+  useEffect(() => {
+    void loadPanel();
+  }, [loadPanel]);
 
   useEffect(() => {
     if (!selected) return;
@@ -271,17 +273,31 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
     setMutationResult(null);
   }, [overridesByQuestionId, selected]);
 
-  const refreshOverrides = async () => {
-    const overrideResult = await gradingService.getObjectiveOverrides(scheduleId);
-    if (overrideResult.success && overrideResult.data) {
-      setOverrides(overrideResult.data);
+  // Refresh just the overrides list after a mutation. Force guarantees the
+  // fetch reflects the new server state even if another reload is in flight,
+  // and the staleness guard keeps older data from clobbering a newer load.
+  // Failures surface inline so a stale list is never mistaken for fresh data.
+  const refreshOverrides = () => runReload(async (isStale) => {
+    try {
+      const overrideResult = await gradingService.getObjectiveOverrides(scheduleId);
+      if (isStale()) return;
+      if (overrideResult.success && overrideResult.data) {
+        setOverrides(overrideResult.data);
+        setRefreshError(null);
+      } else {
+        setRefreshError(overrideResult.error ?? 'The overrides list could not be refreshed.');
+      }
+    } catch (error) {
+      if (isStale()) return;
+      setRefreshError(error instanceof Error ? error.message : String(error));
     }
-  };
+  }, { background: true, force: true });
 
   const handleSave = async () => {
     if (!selected || !form) return;
     setMutationError(null);
     setMutationResult(null);
+    setRefreshError(null);
 
     if (!form.reason.trim()) {
       setMutationError('Reason is required.');
@@ -337,6 +353,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
     if (!selected || !form) return;
     setMutationError(null);
     setMutationResult(null);
+    setRefreshError(null);
 
     if (!form.reason.trim()) {
       setMutationError('Reason is required.');
@@ -386,17 +403,27 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left"
+        aria-expanded={open}
+        aria-controls="objective-overrides-panel"
+        className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-[background-color] duration-150 ease-out hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${open ? 'rounded-t-xl' : 'rounded-xl'}`}
       >
-        <div>
-          <div className="text-sm font-semibold text-gray-900">Session Settings</div>
-          <div className="text-xs text-gray-500">Objective overrides (answer key + scoring)</div>
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-700">
+            <SlidersHorizontal size={16} aria-hidden="true" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Session Settings</div>
+            <div className="text-xs text-gray-500">Objective overrides (answer key + scoring)</div>
+          </div>
         </div>
-        <div className="text-sm font-medium text-gray-600">{open ? 'Hide' : 'Show'}</div>
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600">
+          {open ? 'Hide' : 'Show'}
+          <ChevronRight size={16} aria-hidden="true" className={`transition-transform duration-150 ease-out ${open ? 'rotate-90' : ''}`} />
+        </span>
       </button>
 
       {open ? (
-        <div className="border-t border-gray-200 px-4 py-4">
+        <div id="objective-overrides-panel" className="border-t border-gray-200 px-4 py-4">
           <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
             <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
               <div className="text-xs font-semibold text-gray-700">Objective grading updates automatically after answer-key saves</div>
@@ -404,24 +431,69 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                 type="button"
                 onClick={() => void handleScheduleRegradeLatestDraft()}
                 disabled={scheduleRegrading}
-                className="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white transition-[scale,background-color] duration-150 ease-out hover:bg-gray-700 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
               >
+                {scheduleRegrading ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : null}
                 {scheduleRegrading ? 'Regrading…' : 'Retry regrade'}
               </button>
             </div>
-            {scheduleRegradeError ? <div className="mt-2 text-sm text-red-700">{scheduleRegradeError}</div> : null}
+            {scheduleRegradeError ? (
+              <div className="mt-2 flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span>{scheduleRegradeError}</span>
+              </div>
+            ) : null}
             {scheduleRegradeResult ? (
-              <div className="mt-2 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                Regraded from draft {scheduleRegradeResult.draftVersionId}. Updated{' '}
-                {scheduleRegradeResult.regradeReport.sectionsUpdated} sections across{' '}
-                {scheduleRegradeResult.regradeReport.attemptsScanned} attempts scanned.
+              <div className="mt-2 flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800" role="status" aria-live="polite">
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span>
+                  Regraded from draft {scheduleRegradeResult.draftVersionId}. Updated{' '}
+                  {scheduleRegradeResult.regradeReport.sectionsUpdated} sections across{' '}
+                  {scheduleRegradeResult.regradeReport.attemptsScanned} attempts scanned.
+                </span>
               </div>
             ) : null}
           </div>
           {loading ? (
-            <div className="text-sm text-gray-600">Loading objective questions…</div>
+            <div className="px-1 py-4" role="status" aria-live="polite">
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
+                Loading objective questions…
+              </div>
+              <div className="mt-4 grid gap-2 md:grid-cols-2" aria-hidden="true">
+                <div className="space-y-2">
+                  <div className="h-9 animate-pulse rounded-md bg-gray-100" />
+                  <div className="h-9 animate-pulse rounded-md bg-gray-100/70" />
+                  <div className="h-9 animate-pulse rounded-md bg-gray-100" />
+                  <div className="h-9 animate-pulse rounded-md bg-gray-100/70" />
+                </div>
+                <div className="h-40 animate-pulse rounded-md bg-gray-100/70" />
+              </div>
+            </div>
           ) : loadError ? (
-            <div className="text-sm text-red-700">{loadError}</div>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-800" role="alert">
+              <span className="flex items-start gap-2">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                {loadError}
+              </span>
+              <button
+                type="button"
+                onClick={() => void loadPanel()}
+                className="inline-flex min-h-8 items-center justify-center rounded-md border border-rose-300 bg-white px-3 text-xs font-semibold text-rose-800 transition-[scale,background-color,border-color] duration-150 ease-out hover:bg-rose-100 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-rose-300 focus:ring-offset-2"
+              >
+                Retry
+              </button>
+            </div>
+          ) : questions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-gray-200 px-6 py-10 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-500">
+                <ListChecks size={18} aria-hidden="true" />
+              </div>
+              <p className="text-sm font-semibold text-gray-900">No objective questions found</p>
+              <p className="max-w-xs text-xs text-gray-500">
+                Publish an exam version with Reading or Listening questions, then reopen this panel to add overrides.
+              </p>
+            </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
               <div>
@@ -439,8 +511,8 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                         type="button"
                         onClick={() => setSelectedQuestionId(q.descriptor.id)}
                         className={[
-                          'flex w-full flex-col gap-1 border-b border-gray-100 px-3 py-2 text-left hover:bg-gray-50',
-                          isSelected ? 'bg-blue-50' : '',
+                          'flex w-full flex-col gap-1 border-b border-gray-100 px-3 py-2.5 text-left transition-[background-color] duration-150 ease-out hover:bg-gray-50 focus:outline-none focus-visible:bg-blue-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
+                          isSelected ? 'bg-blue-50 shadow-[inset_3px_0_0_0_var(--color-blue-600)]' : '',
                         ].join(' ')}
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -485,7 +557,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                               if (value === '__custom__') return;
                               setForm({ ...form, scoringRule: value });
                             }}
-                            className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                            className={inputClassName}
                           >
                             {SCORING_RULE_OPTIONS.map((rule) => (
                               <option key={rule} value={rule}>
@@ -498,7 +570,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                             <input
                               value={form.scoringRule}
                               onChange={(e) => setForm({ ...form, scoringRule: e.target.value })}
-                              className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                              className={inputClassName}
                               placeholder="Enter a scoring rule"
                             />
                           ) : null}
@@ -510,7 +582,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                           type="number"
                           value={form.maxScore}
                           onChange={(e) => setForm({ ...form, maxScore: Number(e.target.value) })}
-                          className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          className={`mt-1 ${inputClassName}`}
                           min={0}
                           step={1}
                         />
@@ -522,7 +594,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                       <input
                         value={form.correctAnswer ?? ''}
                         onChange={(e) => setForm({ ...form, correctAnswer: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                        className={`mt-1 ${inputClassName}`}
                         placeholder='e.g. Top (case/whitespace sensitive)'
                       />
                     </label>
@@ -532,7 +604,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                       <textarea
                         value={(form.acceptedAnswers ?? []).join('\n')}
                         onChange={(e) => setForm({ ...form, acceptedAnswers: toTextLines(e.target.value) })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                        className={`mt-1 ${inputClassName}`}
                         rows={3}
                         placeholder={'Alternative answers.\nUse | inside a line for variants.'}
                       />
@@ -543,7 +615,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                       <textarea
                         value={(form.correctOptionIds ?? []).join('\n')}
                         onChange={(e) => setForm({ ...form, correctOptionIds: toTextLines(e.target.value) })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                        className={`mt-1 ${inputClassName}`}
                         rows={2}
                         placeholder={'e.g.\nA\nC'}
                       />
@@ -554,40 +626,61 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                       <input
                         value={form.reason}
                         onChange={(e) => setForm({ ...form, reason: e.target.value })}
-                        className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                        className={`mt-1 ${inputClassName}`}
                         placeholder="Why is this override needed?"
                       />
                     </label>
 
-                    {mutationError ? <div className="text-sm text-red-700">{mutationError}</div> : null}
+                    {mutationError ? (
+                      <div className="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
+                        <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+                        <span>{mutationError}</span>
+                      </div>
+                    ) : null}
                     {mutationResult ? (
-                      <div className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                      <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800" role="status" aria-live="polite">
+                        <CheckCircle2 size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
                         Regraded: {mutationResult.regradeReport.sectionsUpdated} sections updated.
                       </div>
                     ) : null}
+                    {refreshError ? (
+                      <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert">
+                        <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+                        <span>
+                          The change went through, but the overrides list failed to refresh and may be out of date.{' '}
+                          {refreshError}
+                        </span>
+                      </div>
+                    ) : null}
 
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <button
                         type="button"
                         onClick={() => void handleSave()}
                         disabled={mutating}
-                        className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                        className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md bg-blue-800 px-4 py-2 text-sm font-semibold text-white transition-[scale,background-color] duration-150 ease-out hover:bg-blue-700 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
                       >
+                        {mutating ? (
+                          <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
+                        ) : (
+                          <CheckCircle2 size={15} aria-hidden="true" />
+                        )}
                         {mutating ? 'Saving…' : 'Save override + regrade'}
                       </button>
                       <button
                         type="button"
                         onClick={() => void handleDelete()}
                         disabled={mutating || !overridesByQuestionId.has(selected.descriptor.id)}
-                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-50"
+                        className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-[scale,background-color,border-color] duration-150 ease-out hover:bg-gray-50 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 disabled:opacity-50"
                       >
                         Remove override
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-md border border-gray-200 p-3 text-sm text-gray-600">
-                    Select a question to edit.
+                  <div className="flex min-h-44 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-gray-200 px-6 py-8 text-center">
+                    <MousePointerClick size={18} className="text-gray-400" aria-hidden="true" />
+                    <p className="text-sm text-gray-600">Select a question to edit.</p>
                   </div>
                 )}
               </div>

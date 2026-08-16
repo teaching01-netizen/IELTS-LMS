@@ -144,28 +144,66 @@ export function createStudentExamStore(seed: StudentExamStoreSeed): StudentExamS
           }));
         },
         setNavigation(module, questionId) {
-          set({ navigation: { currentModule: module, currentQuestionId: questionId } });
-        },
-        setPhase(phase) {
-          set({ phase });
-        },
-        setRuntimeSnapshot(runtime, displayTimeRemaining) {
-          set({ runtime: { snapshot: runtime, displayTimeRemaining } });
-        },
-        setPersistence(update) {
-          set((state) => ({
-            persistence: {
-              syncState: update.syncState ?? state.persistence.syncState,
-              pendingMutationCount:
-                update.pendingMutationCount ?? state.persistence.pendingMutationCount,
-              acceptedThroughSeq:
-                update.acceptedThroughSeq ?? state.persistence.acceptedThroughSeq,
+              set((state) => {
+                if (
+                  state.navigation.currentModule === module &&
+                  state.navigation.currentQuestionId === questionId
+                ) {
+                  return state;
+                }
+
+                return { navigation: { currentModule: module, currentQuestionId: questionId } };
+              });
             },
-          }));
-        },
+        setPhase(phase) {
+              set((state) => (state.phase === phase ? state : { phase }));
+            },
+        setRuntimeSnapshot(runtime, displayTimeRemaining) {
+              set((state) => {
+                if (
+                  state.runtime.snapshot === runtime &&
+                  state.runtime.displayTimeRemaining === displayTimeRemaining
+                ) {
+                  return state;
+                }
+
+                return { runtime: { snapshot: runtime, displayTimeRemaining } };
+              });
+            },
+        setPersistence(update) {
+              set((state) => {
+                const nextPersistence = {
+                  syncState: update.syncState ?? state.persistence.syncState,
+                  pendingMutationCount:
+                    update.pendingMutationCount ?? state.persistence.pendingMutationCount,
+                  acceptedThroughSeq:
+                    update.acceptedThroughSeq ?? state.persistence.acceptedThroughSeq,
+                };
+
+                if (
+                  state.persistence.syncState === nextPersistence.syncState &&
+                  state.persistence.pendingMutationCount === nextPersistence.pendingMutationCount &&
+                  state.persistence.acceptedThroughSeq === nextPersistence.acceptedThroughSeq
+                ) {
+                  return state;
+                }
+
+                return { persistence: nextPersistence };
+              });
+            },
         setBlocking(blocking) {
-          set({ blocking });
-        },
+              set((state) => {
+                if (
+                  state.blocking.active === blocking.active &&
+                  state.blocking.reason === blocking.reason &&
+                  state.blocking.timeRemaining === blocking.timeRemaining
+                ) {
+                  return state;
+                }
+
+                return { blocking };
+              });
+            },
       };
 
       return {

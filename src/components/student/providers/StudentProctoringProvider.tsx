@@ -11,7 +11,7 @@ import { saveStudentAuditEvent } from '@student/application/studentAttemptFacade
 import { ExamConfig, ViolationSeverity } from '../../../types';
 import { isAppleMobileDevice } from '../appleMobileDevice';
 import { useStudentAttempt } from './StudentAttemptProvider';
-import { useStudentRuntime } from './StudentRuntimeProvider';
+import { useStudentRuntime, useStudentRuntimeSession } from './StudentRuntimeProvider';
 import { useStudentTranslationGuard } from './useStudentTranslationGuard';
 
 interface ProctoringContextValue {
@@ -84,7 +84,7 @@ export function ProctoringProvider({
   scheduleId,
   enabled = true,
 }: ProctoringProviderProps) {
-  const { state: runtimeState, actions: runtimeActions } = useStudentRuntime();
+  const { state: runtimeState, actions: runtimeActions } = useStudentRuntimeSession();
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
   const shouldPreventTranslation = config.security.preventTranslation !== false;
   const cooldownByTypeRef = useRef<Record<string, number>>({});

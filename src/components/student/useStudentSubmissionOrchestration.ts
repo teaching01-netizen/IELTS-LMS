@@ -33,6 +33,31 @@ interface UseStudentSubmissionOrchestrationOptions {
   };
 }
 
+function waitForRetry(signal: AbortSignal, delayMs: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+
+    let timerId: number | null = null;
+    const onAbort = () => {
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
+      signal.removeEventListener('abort', onAbort);
+      resolve(false);
+    };
+
+    timerId = window.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      timerId = null;
+      resolve(true);
+    }, delayMs);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
 export function useStudentSubmissionOrchestration({
   runtimeState,
   runtimeStateRef,
@@ -49,9 +74,17 @@ export function useStudentSubmissionOrchestration({
   const moduleSubmitFingerprintRef = useRef<string | null>(null);
   const runtimeFinalSubmitRef = useRef<string | null>(null);
   const finalSubmitInFlightRef = useRef<Promise<void> | null>(null);
+  const cancellationControllerRef = useRef(new AbortController());
+  const cancellationSignal = cancellationControllerRef.current.signal;
   const [finalSubmitStatus, setFinalSubmitStatus] = useState<
     'idle' | 'submitting' | 'retrying' | 'failed'
   >('idle');
+
+  useEffect(() => {
+    return () => {
+      cancellationControllerRef.current.abort();
+    };
+  }, []);
 
   const flushAndSubmitCurrentModuleWithRetry = useCallback(
     async (fingerprint: string) => {
@@ -70,29 +103,47 @@ export function useStudentSubmissionOrchestration({
         let attemptIndex = 0;
 
         while (true) {
+          if (cancellationSignal.aborted) {
+            return;
+          }
+
           const latestState = runtimeStateRef.current;
-          if (latestState.phase !== 'exam') {
+          if (latestState.phase !== 'exam' || latestState.currentModule !== moduleKey) {
             return;
           }
 
-          if (latestState.currentModule !== moduleKey) {
-            return;
+          let flushed: boolean;
+          if (submissionCommands) {
+            const barrierResult = await submissionCommands.flushBarrier();
+            if (cancellationSignal.aborted) {
+              return;
+            }
+            flushed = barrierResult.kind === 'ready';
+          } else {
+            reconcileLiveAnswerCacheNow();
+            commitWritingDraft();
+            if (cancellationSignal.aborted) {
+              return;
+            }
+            flushed = await attemptActions.flushPending();
+            if (cancellationSignal.aborted) {
+              return;
+            }
           }
 
-          const flushed = submissionCommands
-            ? (await submissionCommands.flushBarrier()).kind === 'ready'
-            : await (async () => {
-                reconcileLiveAnswerCacheNow();
-                commitWritingDraft();
-                return attemptActions.flushPending();
-              })();
           if (flushed) {
             runtimeActions.transitionBlocking('syncing_reconnect', false);
             runtimeActions.transitionBlocking('offline', false);
+            if (cancellationSignal.aborted) {
+              return;
+            }
             runtimeActions.submitModule();
             return;
           }
 
+          if (cancellationSignal.aborted) {
+            return;
+          }
           if (!navigator.onLine) {
             runtimeActions.transitionBlocking('offline', true);
           } else {
@@ -101,10 +152,9 @@ export function useStudentSubmissionOrchestration({
 
           const backoffMs = Math.min(30_000, 1_000 * 2 ** attemptIndex);
           attemptIndex += 1;
-
-          await new Promise<void>((resolve) => {
-            window.setTimeout(() => resolve(), backoffMs);
-          });
+          if (!(await waitForRetry(cancellationSignal, backoffMs))) {
+            return;
+          }
         }
       })();
 
@@ -119,6 +169,7 @@ export function useStudentSubmissionOrchestration({
     },
     [
       attemptActions,
+      cancellationSignal,
       commitWritingDraft,
       reconcileLiveAnswerCacheNow,
       runtimeActions,
@@ -128,6 +179,10 @@ export function useStudentSubmissionOrchestration({
   );
 
   useEffect(() => {
+    if (cancellationSignal.aborted) {
+      return;
+    }
+
     if (!runtimeState.runtimeBacked) {
       runtimeFinalSubmitRef.current = null;
       finalSubmitInFlightRef.current = null;
@@ -142,25 +197,20 @@ export function useStudentSubmissionOrchestration({
       return;
     }
 
-    if (shouldRenderPostExam) {
+    if (shouldRenderPostExam || !attemptId) {
       return;
     }
 
-    if (!attemptId) {
+    if (runtimeFinalSubmitRef.current === attemptId || finalSubmitInFlightRef.current) {
       return;
     }
 
-    if (runtimeFinalSubmitRef.current === attemptId) {
-      return;
-    }
-
-    if (finalSubmitInFlightRef.current) {
-      return;
-    }
-
-    finalSubmitInFlightRef.current = (async () => {
+    const promise = (async () => {
       const maxAttempts = 6;
       for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex += 1) {
+        if (cancellationSignal.aborted) {
+          return;
+        }
         setFinalSubmitStatus(attemptIndex === 0 ? 'submitting' : 'retrying');
 
         try {
@@ -169,32 +219,46 @@ export function useStudentSubmissionOrchestration({
             : await (async () => {
                 reconcileLiveAnswerCacheNow();
                 commitWritingDraft();
+                if (cancellationSignal.aborted) {
+                  return false;
+                }
                 return attemptActions.submitAttempt();
               })();
+          if (cancellationSignal.aborted) {
+            return;
+          }
           if (submitted) {
             runtimeFinalSubmitRef.current = attemptId;
             setFinalSubmitStatus('idle');
             return;
           }
         } catch {
-          // ignore and retry
+          if (cancellationSignal.aborted) {
+            return;
+          }
         }
 
         const backoffMs = Math.min(30_000, 1_000 * 2 ** attemptIndex);
-        await new Promise<void>((resolve) => {
-          window.setTimeout(() => resolve(), backoffMs);
-        });
+        if (!(await waitForRetry(cancellationSignal, backoffMs))) {
+          return;
+        }
       }
 
-      setFinalSubmitStatus('failed');
+      if (!cancellationSignal.aborted) {
+        setFinalSubmitStatus('failed');
+      }
     })();
 
-    void finalSubmitInFlightRef.current.finally(() => {
-      finalSubmitInFlightRef.current = null;
+    finalSubmitInFlightRef.current = promise;
+    void promise.finally(() => {
+      if (finalSubmitInFlightRef.current === promise) {
+        finalSubmitInFlightRef.current = null;
+      }
     });
   }, [
     attemptActions,
     attemptId,
+    cancellationSignal,
     commitWritingDraft,
     reconcileLiveAnswerCacheNow,
     runtimeCompletionVerified,

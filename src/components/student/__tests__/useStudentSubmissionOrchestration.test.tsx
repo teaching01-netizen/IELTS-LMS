@@ -93,4 +93,56 @@ describe('useStudentSubmissionOrchestration', () => {
       expect(result.current.finalSubmitStatus).toBe('idle');
     });
   });
+  it('cancels module retries after unmount', async () => {
+    vi.useFakeTimers();
+    const flushPending = vi.fn().mockResolvedValue(false);
+    const transitionBlocking = vi.fn();
+    const submitModule = vi.fn();
+    const runtimeStateRef = {
+      current: {
+        phase: 'exam' as const,
+        currentModule: 'reading' as const,
+      },
+    };
+
+    const { result, unmount } = renderHook(() =>
+      useStudentSubmissionOrchestration({
+        runtimeState: {
+          runtimeBacked: false,
+          runtimeStatus: null,
+          currentModule: 'reading',
+        },
+        runtimeStateRef,
+        attemptId: null,
+        runtimeCompletionVerified: false,
+        shouldRenderPostExam: false,
+        reconcileLiveAnswerCacheNow: vi.fn(),
+        commitWritingDraft: vi.fn(),
+        attemptActions: {
+          flushPending,
+          submitAttempt: vi.fn(),
+        },
+        runtimeActions: {
+          transitionBlocking,
+          submitModule,
+        },
+      }),
+    );
+
+    let retryPromise: Promise<void> | undefined;
+    await act(async () => {
+      retryPromise = result.current.flushAndSubmitCurrentModuleWithRetry('auto:reading');
+      await Promise.resolve();
+    });
+
+    unmount();
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60 * 1000);
+      await retryPromise;
+    });
+
+    expect(flushPending).toHaveBeenCalledTimes(1);
+    expect(submitModule).not.toHaveBeenCalled();
+    expect(transitionBlocking).toHaveBeenCalledTimes(1);
+  });
 });

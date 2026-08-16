@@ -11,7 +11,7 @@ import React, {
 import { countAnsweredQuestions, countQuestionSlots } from '@student/application/studentExamContentFacade';
 import { useProctoring } from './StudentProctoringProvider';
 import { useStudentAttempt } from './StudentAttemptProvider';
-import { useStudentRuntime } from './StudentRuntimeProvider';
+import { useStudentRuntime, useStudentRuntimeSession } from './StudentRuntimeProvider';
 import { saveStudentAuditEvent } from '@student/application/studentAttemptFacade';
 import { useStudentUI } from './StudentUIProvider';
 
@@ -130,7 +130,7 @@ function isScreenshotShortcut(event: KeyboardEvent): boolean {
 }
 
 export function KeyboardProvider({ children }: KeyboardProviderProps) {
-  const { state: runtimeState, actions: runtimeActions, examState } = useStudentRuntime();
+  const { state: runtimeState, actions: runtimeActions, examState } = useStudentRuntimeSession();
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
   const { actions: uiActions } = useStudentUI();
   const { handleViolation } = useProctoring();

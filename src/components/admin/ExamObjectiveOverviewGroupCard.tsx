@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import {
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
+  LoaderCircle,
   XCircle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -108,7 +108,17 @@ export function ExamObjectiveOverviewGroupCard({
   const detailsId = `${headingId}-details`;
 
   return (
-    <section className="border-b border-gray-200 last:border-b-0" aria-labelledby={headingId}>
+    <section
+      className={`relative border-b border-gray-200 last:border-b-0 ${pending ? 'bg-blue-50/40' : ''}`}
+      aria-labelledby={headingId}
+      aria-busy={pending}
+    >
+      {pending ? (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 w-1 rounded-r-full bg-blue-600/70 motion-safe:animate-pulse"
+        />
+      ) : null}
       <div className="px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
           <div className="min-w-0 flex-1">
@@ -197,19 +207,24 @@ export function ExamObjectiveOverviewGroupCard({
             type="button"
             disabled={pending}
             onClick={() => onRequestResult(group, false)}
-            className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-[3px] border border-rose-300 bg-white px-3 text-xs font-semibold text-rose-800 transition-colors hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-300 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
+            className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-[3px] border border-rose-300 bg-white px-3 text-xs font-semibold text-rose-800 transition-[scale,background-color,border-color] duration-150 ease-out hover:bg-rose-50 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-rose-300 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
           >
             <XCircle size={15} aria-hidden="true" /> Keep incorrect
           </button>
-          {pending ? <span className="text-xs text-gray-500" aria-live="polite">Saving…</span> : null}
+          {pending ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600" aria-live="polite">
+              <LoaderCircle size={13} className="animate-spin" aria-hidden="true" />
+              Saving…
+            </span>
+          ) : null}
           <button
             type="button"
             aria-expanded={expanded}
             aria-controls={detailsId}
             onClick={() => setExpanded((current) => !current)}
-            className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-[3px] px-2 text-xs font-semibold text-blue-800 transition-colors hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2"
+            className="ml-auto inline-flex min-h-8 items-center gap-1.5 rounded-[3px] px-2 text-xs font-semibold text-blue-800 transition-[scale,background-color] duration-150 ease-out hover:bg-blue-50 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2"
           >
-            {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
+            <ChevronRight size={15} aria-hidden="true" className={`transition-transform duration-150 ease-out ${expanded ? 'rotate-90' : ''}`} />
             {expanded
               ? 'Hide students and questions'
               : `View ${studentCount} ${studentCount === 1 ? 'student' : 'students'} and ${questionCount} ${questionCount === 1 ? 'question' : 'questions'}`}

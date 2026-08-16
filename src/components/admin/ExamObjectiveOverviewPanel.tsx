@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileCheck2, LoaderCircle } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCoalescedReload } from '../../hooks/useCoalescedReload';
+import { motion } from 'motion/react';
+import { AlertTriangle, CheckCircle2, FileCheck2, FileText, Filter, Layers, LoaderCircle, Users } from 'lucide-react';
 import { Button, Dialog } from '@components/ui';
 import type { ExamState } from '../../types';
 import type {
@@ -23,6 +25,7 @@ import {
 } from './examObjectiveOverviewUtils';
 import { resolveObjectiveGradingVersionId } from './gradingReviewUtils';
 import { notifyObjectiveGradingUpdated, subscribeObjectiveGradingUpdates } from '../../utils/objectiveGradingSync';
+import { useOptionalAuthSession } from '../../features/auth/authSession';
 import { ExamObjectiveOverviewGroupCard } from './ExamObjectiveOverviewGroupCard';
 import { ObjectiveIntegrityAuditSection } from './ObjectiveIntegrityAuditSection';
 
@@ -36,6 +39,13 @@ type ExamObjectiveResultFilter = 'all' | 'correct' | 'incorrect';
 interface PendingGroupDecision {
   readonly group: ExamObjectiveOverviewGroup;
   readonly isCorrect: boolean;
+}
+
+interface OptimisticGroupDecision {
+  readonly isCorrect: boolean;
+  readonly actorId: string;
+  readonly actorName: string;
+  readonly updatedAt: string;
 }
 
 function splitAnswerKeyVariants(value: string): string[] {
@@ -107,99 +117,141 @@ export function ExamObjectiveOverviewPanel({
   const [integrityOverview, setIntegrityOverview] = useState<ObjectiveIntegrityOverview | null>(null);
   const [integrityError, setIntegrityError] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<readonly GradingScheduleObjectiveOverrideRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [pendingGroupIds, setPendingGroupIds] = useState<Set<string>>(() => new Set());
   const [pendingDecision, setPendingDecision] = useState<PendingGroupDecision | null>(null);
+  const [optimisticDecisions, setOptimisticDecisions] = useState<ReadonlyMap<string, OptimisticGroupDecision>>(
+    () => new Map(),
+  );
   const [resultFilter, setResultFilter] = useState<ExamObjectiveResultFilter>('incorrect');
-  const loadRequestId = useRef(0);
+  const { loading, inFlight, reload: runReload } = useCoalescedReload(true);
+  const { session: authSession } = useOptionalAuthSession() ?? {};
 
-  const loadOverview = useCallback(async () => {
-    const requestId = loadRequestId.current + 1;
-    loadRequestId.current = requestId;
-    setLoading(true);
-    setError(null);
-    setIntegrityOverview(null);
-    setIntegrityError(null);
-    setOverrides([]);
-    try {
-      const [nextSubmissions, sourceResult, integrityResult, overridesResult] = await Promise.all([
-        gradingRepository.getSubmissionsBySession(session.id),
-        session.scheduleId
-          ? gradingService.getObjectiveGradingSource(session.scheduleId)
-          : Promise.resolve(null),
-        session.scheduleId
-          ? gradingService.getObjectiveIntegrityOverview(session.scheduleId)
-          : Promise.resolve(null),
-        session.scheduleId
-          ? gradingService.getObjectiveOverrides(session.scheduleId)
-          : Promise.resolve(null),
-      ]);
-      const versionId = resolveObjectiveGradingVersionId(
-        session.publishedVersionId,
-        sourceResult?.success ? sourceResult.data?.draftVersionId : null,
-      );
-      const examVersion = versionId ? await examRepository.getVersionById(versionId) : null;
-      const nextBundles = await Promise.all(
-        nextSubmissions.map(async (submission) => ({
-          submission: { id: submission.id, studentName: submission.studentName },
-          sections: await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id),
-        })),
-      );
-      if (loadRequestId.current !== requestId) return;
-      setBundles(nextBundles);
-      setExamState(examVersion?.contentSnapshot ?? null);
-      setSubmissionCount(nextBundles.length);
-      if (integrityResult?.success && integrityResult.data) {
-        setIntegrityOverview(integrityResult.data);
-      } else if (integrityResult && !integrityResult.success) {
-        setIntegrityError(integrityResult.error ?? 'Failed to load persisted integrity audit.');
+  const loadOverview = useCallback((background = false, force = false): Promise<void> => {
+    return runReload(async (isStale, isBackground) => {
+      setError(null);
+      if (!isBackground) {
+        setIntegrityOverview(null);
+        setIntegrityError(null);
+        setOverrides([]);
       }
-      if (overridesResult?.success && overridesResult.data) {
-        setOverrides(overridesResult.data);
+      try {
+        const [nextSubmissions, sourceResult, integrityResult, overridesResult] = await Promise.all([
+          gradingRepository.getSubmissionsBySession(session.id),
+          session.scheduleId
+            ? gradingService.getObjectiveGradingSource(session.scheduleId)
+            : Promise.resolve(null),
+          session.scheduleId
+            ? gradingService.getObjectiveIntegrityOverview(session.scheduleId)
+            : Promise.resolve(null),
+          session.scheduleId
+            ? gradingService.getObjectiveOverrides(session.scheduleId)
+            : Promise.resolve(null),
+        ]);
+        const versionId = resolveObjectiveGradingVersionId(
+          session.publishedVersionId,
+          sourceResult?.success ? sourceResult.data?.draftVersionId : null,
+        );
+        const examVersion = versionId ? await examRepository.getVersionById(versionId) : null;
+        const nextBundles = await Promise.all(
+          nextSubmissions.map(async (submission) => ({
+            submission: { id: submission.id, studentName: submission.studentName },
+            sections: await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id),
+          })),
+        );
+        if (isStale()) return;
+        setBundles(nextBundles);
+        setExamState(examVersion?.contentSnapshot ?? null);
+        setSubmissionCount(nextBundles.length);
+        if (integrityResult?.success && integrityResult.data) {
+          setIntegrityOverview(integrityResult.data);
+        } else if (integrityResult && !integrityResult.success) {
+          setIntegrityError(integrityResult.error ?? 'Failed to load persisted integrity audit.');
+        }
+        if (overridesResult?.success && overridesResult.data) {
+          setOverrides(overridesResult.data);
+        }
+      } catch (loadError) {
+        if (isStale()) return;
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load overall answer results.');
       }
-    } catch (loadError) {
-      if (loadRequestId.current !== requestId) return;
-      setError(loadError instanceof Error ? loadError.message : 'Failed to load overall answer results.');
-    } finally {
-      if (loadRequestId.current === requestId) {
-        setLoading(false);
-      }
-    }
-  }, [session.id, session.publishedVersionId, session.scheduleId]);
+    }, { background, force });
+  }, [runReload, session.id, session.publishedVersionId, session.scheduleId]);
 
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
 
+  // Refresh in the background so an external update never collapses the list
+  // into a loading skeleton — only the initial mount shows one.
   useEffect(() => subscribeObjectiveGradingUpdates(session.examId, () => {
-    void loadOverview();
+    void loadOverview(true);
   }), [loadOverview, session.examId]);
 
   const rows = useMemo(() => buildExamObjectiveOverviewRows(bundles, { examState }), [bundles, examState]);
   const groups = useMemo(() => groupExamObjectiveOverviewRows(rows), [rows]);
   const groupStatuses = useMemo(() => new Map(
-    groups.map((group) => [group.groupId, getGroupStatus(group)] as const),
-  ), [groups]);
+    groups.map((group) => {
+      const optimistic = optimisticDecisions.get(group.groupId);
+      const status = optimistic
+        ? (optimistic.isCorrect ? 'correct' : 'incorrect')
+        : getGroupStatus(group);
+      return [group.groupId, status] as const;
+    }),
+  ), [groups, optimisticDecisions]);
   const groupCounts = useMemo(() => {
     const counts: Record<ExamObjectiveOverviewGroupStatus, number> = {
       correct: 0,
       incorrect: 0,
     };
     for (const group of groups) {
-      counts[getGroupStatus(group)] += 1;
+      const status = groupStatuses.get(group.groupId) ?? getGroupStatus(group);
+      counts[status] += 1;
     }
     return {
       all: groups.length,
       correct: counts.correct,
       incorrect: counts.incorrect,
     };
-  }, [groups]);
+  }, [groupStatuses, groups]);
+  const optimisticOverrideRows = useMemo(() => {
+    const rows: GradingScheduleObjectiveOverrideRow[] = [];
+    for (const group of groups) {
+      const decision = optimisticDecisions.get(group.groupId);
+      if (!decision) continue;
+      for (const change of buildScheduleOverrideRequests(group, decision.isCorrect)) {
+        rows.push({
+          scheduleId: session.scheduleId,
+          questionId: change.questionId,
+          overrideJson: {
+            correctAnswer: change.request.correctAnswer,
+            acceptedAnswers: change.request.acceptedAnswers,
+            excludedAnswers: change.request.excludedAnswers ?? [],
+            correctOptionIds: change.request.correctOptionIds ?? [],
+            scoringRule: change.request.scoringRule,
+            maxScore: change.request.maxScore,
+          },
+          updatedByActorId: decision.actorId,
+          updatedByActorName: decision.actorName,
+          updatedAt: decision.updatedAt,
+        });
+      }
+    }
+    return rows;
+  }, [groups, optimisticDecisions, session.scheduleId]);
+  // Optimistic rows first so they win `find`-based decision resolution over
+  // the previously saved server rows for the same question.
+  const displayOverrides = useMemo(
+    () => [...optimisticOverrideRows, ...overrides],
+    [optimisticOverrideRows, overrides],
+  );
   const visibleGroups = useMemo(() => groups.filter((group) => {
+    // Keep a group that is being saved visible so its pending state stays in view.
+    if (pendingGroupIds.has(group.groupId)) return true;
     const status = groupStatuses.get(group.groupId) ?? 'incorrect';
     return groupMatchesFilter(status, resultFilter);
-  }), [groupStatuses, groups, resultFilter]);
+  }), [groupStatuses, groups, pendingGroupIds, resultFilter]);
 
   const handleRequestGroupResult = (group: ExamObjectiveOverviewGroup, isCorrect: boolean) => {
     setError(null);
@@ -210,8 +262,20 @@ export function ExamObjectiveOverviewPanel({
   const handleConfirmGroupResult = async () => {
     if (!pendingDecision) return;
     const { group, isCorrect } = pendingDecision;
+    const now = new Date().toISOString();
+    const optimisticDecision: OptimisticGroupDecision = {
+      isCorrect,
+      actorId: authSession?.user?.id ?? '',
+      actorName: authSession?.user?.displayName || 'You',
+      updatedAt: now,
+    };
+
+    // Apply the decision immediately, then reconcile with the server below.
     setPendingGroupIds((current) => new Set(current).add(group.groupId));
+    setOptimisticDecisions((current) => new Map(current).set(group.groupId, optimisticDecision));
+    setPendingDecision(null);
     setError(null);
+    setSuccessMessage(null);
     try {
       for (const change of buildScheduleOverrideRequests(group, isCorrect)) {
         const result = await gradingService.upsertObjectiveOverride(
@@ -231,15 +295,36 @@ export function ExamObjectiveOverviewPanel({
 
       const studentCount = new Set(group.rows.map((row) => row.submissionId)).size;
       const questionCount = new Set(group.rows.map((row) => row.questionId)).size;
-      await loadOverview();
+      // Notify first: the same-tab subscription starts the background reload,
+      // which the await below shares instead of starting a second fetch. The
+      // optimistic rows bridge the gap, so the list never flashes a skeleton.
+      const reloadBeforeSave = inFlight.current;
       notifyObjectiveGradingUpdated(session.examId);
+      const reloadPromise = loadOverview(true);
+      await reloadPromise;
+      // If the shared reload began before the save finished, its data may
+      // predate the new override — refetch to guarantee post-save truth.
+      if (reloadPromise === reloadBeforeSave) {
+        await loadOverview(true, true);
+      }
+      // Server truth has replaced the optimistic rows; drop the local decision.
+      setOptimisticDecisions((current) => {
+        const next = new Map(current);
+        next.delete(group.groupId);
+        return next;
+      });
       setSuccessMessage(
         isCorrect
           ? `Added “${group.studentAnswer}” to the answer key for ${questionCount} ${questionCount === 1 ? 'question' : 'questions'} and regraded ${studentCount} ${studentCount === 1 ? 'student' : 'students'}.`
           : `Kept “${group.studentAnswer}” incorrect for the exam and regraded ${studentCount} ${studentCount === 1 ? 'student' : 'students'}.`,
       );
-      setPendingDecision(null);
     } catch (overrideError) {
+      // Revert the optimistic update so the card reflects the saved state again.
+      setOptimisticDecisions((current) => {
+        const next = new Map(current);
+        next.delete(group.groupId);
+        return next;
+      });
       setError(overrideError instanceof Error ? overrideError.message : 'Failed to update answer correctness.');
     } finally {
       setPendingGroupIds((current) => {
@@ -250,7 +335,6 @@ export function ExamObjectiveOverviewPanel({
     }
   };
 
-  const pendingMutation = pendingDecision ? pendingGroupIds.has(pendingDecision.group.groupId) : false;
   const pendingQuestionCount = pendingDecision
     ? new Set(pendingDecision.group.rows.map((row) => row.questionId)).size
     : 0;
@@ -273,9 +357,23 @@ export function ExamObjectiveOverviewPanel({
             </div>
             <div>
               <h2 className="text-base font-bold text-gray-900">Overall exam answer check</h2>
-              <p className="mt-1 text-sm text-gray-600">
-                {submissionCount} {submissionCount === 1 ? 'student' : 'students'} · {groups.length} answer {groups.length === 1 ? 'group' : 'groups'} · {rows.length} answer {rows.length === 1 ? 'entry' : 'entries'}
-              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-gray-600">
+                <span className="inline-flex items-center gap-1.5">
+                  <Users size={13} className="text-gray-500" aria-hidden="true" />
+                  <span className="font-semibold tabular-nums text-gray-900">{submissionCount}</span>
+                  {submissionCount === 1 ? 'student' : 'students'}
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Layers size={13} className="text-gray-500" aria-hidden="true" />
+                  <span className="font-semibold tabular-nums text-gray-900">{groups.length}</span>
+                  answer {groups.length === 1 ? 'group' : 'groups'}
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <FileText size={13} className="text-gray-500" aria-hidden="true" />
+                  <span className="font-semibold tabular-nums text-gray-900">{rows.length}</span>
+                  answer {rows.length === 1 ? 'entry' : 'entries'}
+                </span>
+              </div>
             </div>
           </div>
           <div role="group" aria-label="Filter answer groups" className="flex flex-wrap gap-1 rounded-md bg-white/70 p-1">
@@ -293,10 +391,10 @@ export function ExamObjectiveOverviewPanel({
                   type="button"
                   aria-pressed={isSelected}
                   onClick={() => setResultFilter(option.value)}
-                  className={`inline-flex min-h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-1 ${buttonClass}`}
+                  className={`inline-flex min-h-8 items-center gap-1.5 rounded-[3px] px-2.5 text-xs font-semibold transition-[scale,background-color,color] duration-150 ease-out active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-1 ${buttonClass}`}
                 >
                   {option.label}
-                  <span className={`rounded-sm px-1.5 py-0.5 text-[10px] ${badgeClass}`}>
+                  <span className={`rounded-sm px-1.5 py-0.5 text-[10px] transition-colors duration-150 ease-out ${badgeClass}`}>
                     {option.count}
                   </span>
                 </button>
@@ -313,7 +411,7 @@ export function ExamObjectiveOverviewPanel({
       {successMessage ? (
         <div className="flex items-start justify-between gap-3 border-b border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 sm:px-6" role="status" aria-live="polite">
           <span className="flex items-start gap-2"><CheckCircle2 size={17} className="mt-0.5 shrink-0" aria-hidden="true" /> {successMessage}</span>
-          <button type="button" onClick={() => setSuccessMessage(null)} className="shrink-0 rounded-sm px-2 py-1 text-xs font-semibold hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300" aria-label="Dismiss save confirmation">
+          <button type="button" onClick={() => setSuccessMessage(null)} className="shrink-0 rounded-sm px-2 py-1 text-xs font-semibold transition-[scale,background-color] duration-150 ease-out hover:bg-emerald-100 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-emerald-300" aria-label="Dismiss save confirmation">
             Dismiss
           </button>
         </div>
@@ -322,30 +420,61 @@ export function ExamObjectiveOverviewPanel({
       {error ? (
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 sm:px-6" role="alert">
           <span className="flex items-center gap-2"><AlertTriangle size={16} aria-hidden="true" /> {error}</span>
-          <button type="button" onClick={() => void loadOverview()} className="min-h-9 rounded-md border border-rose-300 bg-white px-3 py-1 text-xs font-semibold hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-300 focus:ring-offset-2">
+          <button type="button" onClick={() => void loadOverview()} className="min-h-9 rounded-md border border-rose-300 bg-white px-3 py-1 text-xs font-semibold transition-[scale,background-color,border-color] duration-150 ease-out hover:bg-rose-100 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-rose-300 focus:ring-offset-2">
             Retry
           </button>
         </div>
       ) : null}
 
       {loading ? (
-        <div className="flex items-center gap-2 px-4 py-8 text-sm text-gray-600 sm:px-6" role="status" aria-live="polite">
-          <LoaderCircle size={16} className="animate-spin" aria-hidden="true" /> Loading typed answer exceptions...
+        <div className="px-4 py-8 sm:px-6" role="status" aria-live="polite">
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />
+            Loading typed answer exceptions...
+          </div>
+          <div className="mt-5 max-w-2xl space-y-3" aria-hidden="true">
+            <div className="h-16 animate-pulse rounded-lg bg-gray-100/80" />
+            <div className="h-16 animate-pulse rounded-lg bg-gray-100/60" />
+            <div className="h-16 animate-pulse rounded-lg bg-gray-100/80" />
+          </div>
         </div>
       ) : rows.length === 0 ? (
-        <div className="px-4 py-8 text-sm text-gray-600 sm:px-6">No typed answers differ from their key only by letter case or whitespace.</div>
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, ease: 'easeOut' }}
+          className="px-4 py-12 text-center sm:px-6"
+        >
+          <div className="mx-auto flex max-w-sm flex-col items-center gap-2.5">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-100">
+              <FileCheck2 size={22} aria-hidden="true" />
+            </div>
+            <p className="mt-1 text-sm font-semibold text-gray-900">All typed answers check out</p>
+            <p className="text-sm text-gray-600">No typed answers differ from their key only by letter case or whitespace.</p>
+          </div>
+        </motion.div>
       ) : visibleGroups.length === 0 ? (
-        <div className="px-4 py-10 text-center sm:px-6">
-          <p className="text-sm font-semibold text-gray-800">No answer groups match this filter.</p>
-          <p className="mt-1 text-sm text-gray-600">Choose “All” to see every answer variation in this exam session.</p>
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, ease: 'easeOut' }}
+          className="px-4 py-12 text-center sm:px-6"
+        >
+          <div className="mx-auto flex max-w-sm flex-col items-center gap-2.5">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-100">
+              <Filter size={22} aria-hidden="true" />
+            </div>
+            <p className="mt-1 text-sm font-semibold text-gray-900">No answer groups match this filter</p>
+            <p className="text-sm text-gray-600">Choose “All” to see every answer variation in this exam session.</p>
+          </div>
+        </motion.div>
       ) : (
         <div>
           {visibleGroups.map((group) => (
             <ExamObjectiveOverviewGroupCard
               key={group.groupId}
               group={group}
-              overrides={overrides}
+              overrides={displayOverrides}
               onStudentSelect={onStudentSelect}
               onRequestResult={handleRequestGroupResult}
               pending={pendingGroupIds.has(group.groupId)}
@@ -365,23 +494,18 @@ export function ExamObjectiveOverviewPanel({
 
       <Dialog
         isOpen={Boolean(pendingDecision)}
-        onClose={() => {
-          if (!pendingMutation) setPendingDecision(null);
-        }}
+        onClose={() => setPendingDecision(null)}
         title={pendingDecision?.isCorrect ? 'Mark this answer correct for the whole exam?' : 'Keep this answer incorrect for the whole exam?'}
         size="md"
-        preventCloseOnOverlayClick={pendingMutation}
-        closeOnEscape={!pendingMutation}
         footer={(
           <>
-            <Button type="button" variant="secondary" size="sm" disabled={pendingMutation} onClick={() => setPendingDecision(null)}>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setPendingDecision(null)}>
               Cancel
             </Button>
             <Button
               type="button"
               variant={pendingDecision?.isCorrect ? 'primary' : 'danger'}
               size="sm"
-              isLoading={pendingMutation}
               onClick={() => void handleConfirmGroupResult()}
             >
               {pendingDecision?.isCorrect ? 'Accept and regrade' : 'Keep incorrect and regrade'}

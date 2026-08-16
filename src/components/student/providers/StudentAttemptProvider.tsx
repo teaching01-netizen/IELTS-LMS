@@ -43,7 +43,7 @@ import type {
   StudentPreCheckResult,
 } from '../../../types/studentAttempt';
 import { emitAnswerMutationDebugLog } from '../answerMutationDebug';
-import { useStudentRuntime } from './StudentRuntimeProvider';
+import { useStudentRuntime, useStudentRuntimeSession, useStudentRuntimeLiveRef } from './StudentRuntimeProvider';
 import { isVerifiedTerminalStudentState } from './verifiedTerminalState';
 
 interface StudentAttemptState {
@@ -307,7 +307,8 @@ export function StudentAttemptProvider({
   attemptSnapshot = null,
   persistenceEnabled = true,
 }: StudentAttemptProviderProps) {
-  const { state: runtimeState, actions: runtimeActions } = useStudentRuntime();
+  const { state: runtimeState, actions: runtimeActions } = useStudentRuntimeSession();
+  const runtimeLiveRef = useStudentRuntimeLiveRef();
   const setRuntimeAttemptSyncState = runtimeActions.setAttemptSyncState;
   const [attempt, setAttempt] = useState<StudentAttempt | null>(attemptSnapshot);
   const [pendingMutationCount, setPendingMutationCount] = useState(0);
@@ -485,7 +486,7 @@ export function StudentAttemptProvider({
     const isObjectiveMutation =
       mutationType === 'answer' || mutationType === 'flag' || mutationType === 'writing_answer';
     const runtimeModule =
-      runtimeState.runtimeSnapshot?.currentSectionKey ?? runtimeState.currentModule ?? null;
+      runtimeLiveRef.current.runtimeSnapshot?.currentSectionKey ?? runtimeLiveRef.current.currentModule ?? null;
     const authoritativeModule = runtimeModule ?? currentAttempt.currentModule;
     const existingModule = isObjectiveMutation ? (payload as { module?: unknown }).module : undefined;
     const payloadWithModule: StudentAttemptMutationPayload<StudentAttemptMutationType> =
@@ -497,12 +498,12 @@ export function StudentAttemptProvider({
           }
         : payload;
     const reportedRemaining =
-      runtimeState.runtimeSnapshot?.currentSectionRemainingSeconds ??
-      runtimeState.displayTimeRemaining ??
-      runtimeState.timeRemaining;
+      runtimeLiveRef.current.runtimeSnapshot?.currentSectionRemainingSeconds ??
+      runtimeLiveRef.current.displayTimeRemaining ??
+      runtimeLiveRef.current.timeRemaining;
     const forceImmediateDurability =
       isObjectiveMutation &&
-      runtimeState.phase === 'exam' &&
+      runtimeLiveRef.current.phase === 'exam' &&
       Number.isFinite(reportedRemaining) &&
       reportedRemaining >= 0 &&
       reportedRemaining <= BOUNDARY_IMMEDIATE_DURABILITY_THRESHOLD_SECONDS;
@@ -547,14 +548,10 @@ export function StudentAttemptProvider({
     }
   }, [
     persistenceEnabled,
-    runtimeState.currentModule,
-    runtimeState.displayTimeRemaining,
-    runtimeState.phase,
-    runtimeState.runtimeSnapshot,
-    runtimeState.timeRemaining,
+    runtimeLiveRef,
     scheduleFlush,
     setPendingMutations,
-    syncAttemptState,
+    syncAttemptState
   ]);
 
   const flushPending = useCallback(async () => {

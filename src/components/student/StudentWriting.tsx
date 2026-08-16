@@ -3,15 +3,17 @@ import { ExamState } from '../../types';
 import { Check, X } from 'lucide-react';
 import { getWritingTaskContent } from '../../utils/writingTaskUtils';
 import { saveStudentAuditEvent } from '@student/application/studentAttemptFacade';
-import { getImageUrlCandidates } from '../../utils/imageUrl';
 import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
-import { StudentZoomableMedia } from './StudentZoomableMedia';
 import { useSplitPaneResize } from './useSplitPaneResize';
 import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 import { StudentSplitPaneResizer } from './StudentSplitPaneResizer';
-import { RichTextHighlighter } from './RichTextHighlighter';
+import { WritingPromptPane, WritingResponsePane } from './StudentWritingPanes';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentLayoutMode } from './layout/studentLayoutMode';
+
+import { useStudentRuntimeClock } from './providers/StudentRuntimeProvider';
+
+
 
 interface StudentWritingProps {
   state: ExamState;
@@ -132,6 +134,7 @@ export function StudentWriting({
   const isTabletMode = Boolean(tabletMode);
   const isCompactLayout = layoutMode === 'compact';
   const attemptContext = useOptionalStudentAttempt();
+  const runtimeClock = useStudentRuntimeClock();
   const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
   const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
   const writingConfig = state.config.sections.writing;
@@ -408,12 +411,12 @@ export function StudentWriting({
       const target = event.currentTarget as HTMLTextAreaElement | null;
       const newValue = target ? readEditorPlainText(target) : '';
       const previousValue = previousValueRef.current;
-      
+
       const textLength = newValue.length;
       const previousTextLength = previousValue.length;
       const textChange = Math.abs(textLength - previousTextLength);
       const timeSinceKeydown = Date.now() - lastKeydownRef.current;
-      
+
       if (textChange > 50 && timeSinceKeydown > 500) {
         saveStudentAuditEvent(
           resolvedSessionId,
@@ -427,7 +430,7 @@ export function StudentWriting({
           resolvedStudentId,
         );
       }
-      
+
       previousValueRef.current = newValue;
     };
 
@@ -486,41 +489,32 @@ export function StudentWriting({
     };
   }, [activeTaskId, attemptContext, commitDraftText, resolvedSessionId, resolvedStudentId]);
 
-  if (!currentTask) {
-    return null;
-  }
+  const handleEditorCompositionEnd = useCallback(() => {
+      const editor = editorRef.current;
+      if (!editor) {
+        return;
+      }
 
-  const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
-  const currentPrompt = currentTaskContent?.prompt ?? '';
-  const currentPromptContainsMarkup = /<[^>]+>/.test(currentPrompt);
-  const minWords = currentTask.minWords || 150;
-  const currentChart = currentTaskContent?.chart;
+      clearScheduledDraftCommit();
+      commitDraftText(activeTaskId, readEditorPlainText(editor));
+    }, [activeTaskId, clearScheduledDraftCommit, commitDraftText]);
+  const handleEditorFocus = useCallback(() => {
+      editorHasFocusRef.current = true;
+      setIsEditorFocused(true);
+    }, []);
+  const handleEditorBlur = useCallback(() => {
+      editorHasFocusRef.current = false;
+      setIsEditorFocused(false);
+      const editor = editorRef.current;
+      if (!editor) {
+        return;
+      }
 
-  const wordCount = previewText.trim() === '' ? 0 : previewText.trim().split(/\s+/).length;
-
-  const isWordCountMet = wordCount >= minWords;
-  const isWordCountWarning = wordCount > 0 && wordCount < minWords && wordCount >= minWords * 0.9;
-
-  // Word count guidance
-  const optimalMin = currentTask.optimalMin || Math.ceil(minWords * 1.1);
-  const optimalMax = currentTask.optimalMax || Math.ceil(minWords * 1.5);
-  const isOptimal = wordCount >= optimalMin && wordCount <= optimalMax;
-  const isOverLength = currentTask.maxWords && wordCount > currentTask.maxWords;
-  const resolvedTimeRemaining = timeRemaining ?? writingConfig.duration * 60;
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const totalTime = writingConfig.duration * 60;
-  const progressPercent = Math.max(0, Math.min(100, ((totalTime - resolvedTimeRemaining) / totalTime) * 100));
-
-  const isTimeCritical = resolvedTimeRemaining <= 300;
-  const isTimeWarning = resolvedTimeRemaining <= 600;
-
-  const handleEditorInput = () => {
+      clearScheduledDraftCommit();
+      const committed = commitDraftText(activeTaskId, readEditorPlainText(editor));
+      writeEditorPlainText(editor, committed);
+    }, [activeTaskId, clearScheduledDraftCommit, commitDraftText]);
+  const handleEditorInput = useCallback(() => {
     if (editorRef.current) {
       const textContent = readEditorPlainText(editorRef.current);
       liveDraftsByTaskRef.current = {
@@ -535,9 +529,8 @@ export function StudentWriting({
       );
       scheduleDraftCommit(activeTaskId, textContent);
     }
-  };
-
-  const blockWritingEditorInteraction = (
+  }, [activeTaskId, registerLiveWritingAnswer, scheduleDraftCommit]);
+  const blockWritingEditorInteraction = useCallback((
     event:
       | React.ClipboardEvent<HTMLTextAreaElement>
       | React.DragEvent<HTMLTextAreaElement>
@@ -557,12 +550,39 @@ export function StudentWriting({
         resolvedStudentId,
       );
     }
-  };
+  }, [resolvedSessionId, resolvedStudentId]);
 
-  const blockMediaSaveInteraction = (event: React.SyntheticEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
+  if (!currentTask) {
+    return null;
+  }
+
+  const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
+  const currentPrompt = currentTaskContent?.prompt ?? '';
+  const currentPromptContainsMarkup = /<[^>]+>/.test(currentPrompt);
+  const minWords = currentTask.minWords || 150;
+  const currentChart = currentTaskContent?.chart;
+
+  const wordCount = previewText.trim() === '' ? 0 : previewText.trim().split(/\s+/).length;
+
+  const isWordCountMet = wordCount >= minWords;
+  const isWordCountWarning = wordCount > 0 && wordCount < minWords && wordCount >= minWords * 0.9;
+
+  // Word count guidance
+  const optimalMin = currentTask.optimalMin || Math.ceil(minWords * 1.1);
+  const optimalMax = currentTask.optimalMax || Math.ceil(minWords * 1.5);
+  const isOptimal = wordCount >= optimalMin && wordCount <= optimalMax;
+  const isOverLength = Boolean(currentTask.maxWords && wordCount > currentTask.maxWords);
+  const resolvedTimeRemaining = timeRemaining ?? (runtimeClock ?? writingConfig.duration * 60);
+
+
+
+  const totalTime = writingConfig.duration * 60;
+  const progressPercent = Math.max(0, Math.min(100, ((totalTime - resolvedTimeRemaining) / totalTime) * 100));
+
+  const isTimeCritical = resolvedTimeRemaining <= 300;
+  const isTimeWarning = resolvedTimeRemaining <= 600;
+
+
 
   const handleSubmitClick = () => {
     commitEditorDraft();
@@ -612,93 +632,25 @@ export function StudentWriting({
             isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
           }`}
         >
-        {!isCompactLayout || activeCompactPane === 'prompt' ? (
-          <div
-            className={`h-full flex flex-col relative ${
-              isTabletMode
-                ? 'w-[var(--writing-prompt-pane-width)] min-w-[48px] border-r border-gray-200'
-                : 'min-w-[260px] md:min-w-[280px] lg:w-[var(--writing-prompt-pane-width)] lg:min-w-[300px]'
-            }`}
-            onFocusCapture={() => {
-              lastFocusedPaneRef.current = 'prompt';
-            }}
-          >
-          {/* Timer Bar */}
-          <div className={`h-1.5 flex-shrink-0 transition-all ${isTimeCritical ? 'bg-red-600' : isTimeWarning ? 'bg-amber-700' : 'bg-blue-800'}`} style={{ width: `${progressPercent}%` }} />
-
-          <div
-            ref={promptPaneRef}
-            data-student-zoom-scroll
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
-            style={{
-              fontSize: 'var(--student-passage-font-size)',
-              lineHeight: 'var(--student-passage-line-height)',
-            }}
-          >
-            <div className="flex items-center justify-between mb-4 md:mb-6">
-              <h2 className="font-bold" style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
-                {currentTask.label}
-              </h2>
-              <div className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest ${
-                isTimeCritical
-                  ? 'bg-red-100 text-red-700 animate-pulse'
-                  : isTimeWarning
-                    ? 'bg-amber-100 text-amber-700'
-                    : 'bg-blue-100 text-blue-700'
-              }`}>
-                {formatTime(resolvedTimeRemaining)}
-              </div>
-            </div>
-            {currentChart && (
-              <div
-                className="mb-5 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm"
-                onContextMenu={blockMediaSaveInteraction}
-                onDragStart={blockMediaSaveInteraction}
-                onDrop={blockMediaSaveInteraction}
-              >
-                <p className="text-[length:var(--student-meta-font-size)] font-black text-gray-400 uppercase tracking-[0.22em] mb-3">
-                  Stimulus Chart
-                </p>
-                {currentChart.imageSrc ? (
-                  <StudentZoomableMedia
-                    sources={getImageUrlCandidates(currentChart.imageSrc)}
-                    alt={currentChart.title}
-                    label={currentChart.title}
-                    hint="Tap to zoom the chart"
-                    className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
-                  />
-                ) : (
-                  <div className="flex items-end gap-3 h-44">
-                    {currentChart.values.map((value, index) => (
-                      <div key={`${currentChart.labels[index]}-${value}`} className="flex-1 text-center">
-                        <div className="mx-auto rounded-t-2xl bg-blue-500" style={{ height: `${Math.max(16, value * 12)}px` }} />
-                        <p className="text-[length:var(--student-meta-font-size)] font-semibold text-gray-500 mt-2">
-                          {currentChart.labels[index]}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            
-            <div
-              data-testid="writing-task-prompt"
-              className="student-stimulus-content max-w-none text-gray-900 whitespace-break-spaces break-words [overflow-wrap:anywhere]"
-            >
-              <RichTextHighlighter
-                key={currentTask.id}
-                content={currentPrompt}
-                contentType={currentPromptContainsMarkup ? 'html' : 'text'}
-                enabled={highlightEnabled}
-                highlightColor={highlightColor}
-                highlightClassName={highlightClassName}
-                highlightSurfaceId={`writing:prompt:${currentTask.id}`}
-              />
-            </div>
-          </div>
-          </div>
-        ) : null}
+        {(!isCompactLayout || activeCompactPane === 'prompt') ? (
+                <WritingPromptPane
+  isTabletMode={isTabletMode}
+  currentTaskId={activeTaskId}
+  currentTaskLabel={currentTask.label}
+  currentChart={currentChart}
+  currentPrompt={currentPrompt}
+  currentPromptContainsMarkup={currentPromptContainsMarkup}
+  resolvedTimeRemaining={resolvedTimeRemaining}
+  isTimeCritical={isTimeCritical}
+  isTimeWarning={isTimeWarning}
+  progressPercent={progressPercent}
+  highlightEnabled={highlightEnabled}
+  highlightColor={highlightColor}
+  highlightClassName={highlightClassName}
+  promptPaneRef={promptPaneRef}
+  lastFocusedPaneRef={lastFocusedPaneRef}
+/>
+              ) : null}
         {!isCompactLayout ? (
           <StudentSplitPaneResizer
             isTabletMode={isTabletMode}
@@ -710,95 +662,29 @@ export function StudentWriting({
           />
         ) : null}
 
-        {!isCompactLayout || activeCompactPane === 'response' ? (
-          <div
-            className={`h-full flex flex-col relative ${
-              isTabletMode
-                ? 'w-[var(--writing-editor-pane-width)] min-w-[48px]'
-                : 'min-w-[280px] md:min-w-[320px] lg:w-[var(--writing-editor-pane-width)]'
-            }`}
-            onFocusCapture={() => {
-              lastFocusedPaneRef.current = 'response';
-            }}
-        >
-          <div className="flex-1 overflow-hidden flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 animate-in slide-in-from-right-4 duration-300">
-            <div className="relative flex flex-1 min-h-0 w-full flex-col">
-              <div
-                className={`flex flex-col gap-2 border-b border-gray-200 bg-gray-50 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-600 sm:flex-row sm:items-center sm:justify-between ${
-                  isTabletMode ? 'pl-8 pr-3' : 'px-3'
-                }`}
-              >
-                <span>Writing Response</span>
-                <div className="flex items-center gap-2" aria-label="Current word count">
-                  <span className="text-[length:var(--student-meta-font-size)] font-bold text-gray-400 uppercase tracking-widest">
-                    Word Count
-                  </span>
-                  <span className={`text-lg font-black leading-none ${
-                    isOptimal ? 'text-green-800' :
-                    isOverLength ? 'text-red-800' :
-                    isWordCountMet ? 'text-blue-800' :
-                    isWordCountWarning ? 'text-amber-950' : 'text-gray-900'
-                  }`}>
-                    {wordCount}
-                  </span>
-                </div>
-              </div>
-              {showEditorPlaceholder && (
-                  <div
-                    className={`pointer-events-none absolute top-14 md:top-16 lg:top-20 text-base md:text-lg leading-relaxed text-gray-400 font-serif select-none ${
-                      isTabletMode ? 'left-8 md:left-8 lg:left-8' : 'left-4 md:left-6 lg:left-8'
-                    }`}
-                  >
-                    Write your answer here…
-                  </div>
-              )}
-              <textarea
-                ref={editorRef}
-                defaultValue={currentText}
-                onChange={handleEditorInput}
-                onCompositionEnd={() => {
-                  if (editorRef.current) {
-                    clearScheduledDraftCommit();
-                    commitDraftText(activeTaskId, readEditorPlainText(editorRef.current));
-                  }
-                }}
-                aria-label="Writing response"
-                  onFocus={() => {
-                    editorHasFocusRef.current = true;
-                    setIsEditorFocused(true);
-                  }}
-                  onBlur={() => {
-                    editorHasFocusRef.current = false;
-                    setIsEditorFocused(false);
-                    if (editorRef.current) {
-                      clearScheduledDraftCommit();
-                      const committed = commitDraftText(activeTaskId, readEditorPlainText(editorRef.current));
-                      writeEditorPlainText(editorRef.current, committed);
-                    }
-                  }}
-                  onPaste={blockWritingEditorInteraction}
-                  onCopy={blockWritingEditorInteraction}
-                  onCut={blockWritingEditorInteraction}
-                  onDrop={blockWritingEditorInteraction}
-                  onContextMenu={blockWritingEditorInteraction}
-                className={`flex-1 w-full text-base md:text-lg leading-relaxed text-gray-800 font-serif overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
-                  isTabletMode
-                    ? 'pt-4 pr-4 pb-4 pl-8 md:pt-6 md:pr-6 md:pb-6 md:pl-8 lg:pt-8 lg:pr-8 lg:pb-8 lg:pl-8'
-                    : 'p-4 md:p-6 lg:p-8'
-                } h-full min-h-0 resize-none whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
-                data-student-zoom-scroll
-                spellCheck={!security.preventAutocorrect}
-                autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
-                autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
-              />
-              </div>
-	          </div>
-
-          </div>
-        ) : null}
+        {(!isCompactLayout || activeCompactPane === 'response') ? (
+                <WritingResponsePane
+                  isTabletMode={isTabletMode}
+                  activeTaskId={activeTaskId}
+                  currentText={currentText}
+                  showEditorPlaceholder={showEditorPlaceholder}
+                  wordCount={wordCount}
+                  isOptimal={isOptimal}
+                  isOverLength={isOverLength}
+                  isWordCountMet={isWordCountMet}
+                  isWordCountWarning={isWordCountWarning}
+                  editorRef={editorRef}
+                  security={security}
+                  onEditorInput={handleEditorInput}
+                  onCommitEditorDraft={handleEditorCompositionEnd}
+                  onEditorFocus={handleEditorFocus}
+                  onEditorBlur={handleEditorBlur}
+                  blockWritingEditorInteraction={blockWritingEditorInteraction}
+                  lastFocusedPaneRef={lastFocusedPaneRef}
+                />
+              ) : null}
         </div>
       </div>
-
       <footer
         className="student-exam-footer flex"
         role="contentinfo"
@@ -835,7 +721,6 @@ export function StudentWriting({
           ) : null}
         </div>
       </footer>
-
       {/* Submission Review Modal */}
       {showReviewModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

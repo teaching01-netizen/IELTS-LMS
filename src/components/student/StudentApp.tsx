@@ -4,17 +4,17 @@ import { Button } from '../ui/Button';
 import { AccessibilitySettings } from './AccessibilitySettings';
 import { StudentExamPhaseRenderer } from './StudentExamPhaseRenderer';
 import { StudentExamWorkspaceSession } from './StudentExamWorkspaceSession';
-import { StudentHeader } from './StudentHeader';
-import { CompactStudentHeader } from './layout/CompactStudentHeader';
+import './StudentHeader';
+import './layout/CompactStudentHeader';
 import { StudentExamShell } from './layout/StudentExamShell';
 import { StudentExamViewport } from './layout/StudentExamViewport';
 import { useStudentExamViewport } from './layout/useStudentExamViewport';
 import { useStudentExamPageLock } from './layout/useStudentExamPageLock';
 import { useStudentFocusedControlVisibility } from './layout/useStudentFocusedControlVisibility';
 import { useStudentLayoutEnvironment } from './layout/useStudentLayoutEnvironment';
-import { SubmitConfirmation } from './SubmitConfirmation';
+import './SubmitConfirmation';
 import { WarningOverlay } from './WarningOverlay';
-import { useStudentAutoSubmitBoundary } from './useStudentAutoSubmitBoundary';
+import './useStudentAutoSubmitBoundary';
 import {
   canDecreaseStudentPassageReadability,
   canIncreaseStudentPassageReadability,
@@ -23,10 +23,10 @@ import {
 } from './accessibilityScale';
 import { StudentHighlightSelectionManagerProvider } from './highlightSelectionManager';
 import { useStudentSubmissionOrchestration } from './useStudentSubmissionOrchestration';
-import { shouldOfferTimeExtension } from './timeExtensionPolicy';
+import './timeExtensionPolicy';
 import { useStudentWarningVisibility } from './useStudentWarningVisibility';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
-import { useStudentRuntime } from './providers/StudentRuntimeProvider';
+import { useStudentRuntime, useStudentRuntimeSession } from './providers/StudentRuntimeProvider';
 import { useStudentUI } from './providers/StudentUIProvider';
 import { useKeyboardSubmitHandler } from './providers/StudentKeyboardProvider';
 import { useExamCommands } from '@student/hooks/exam-session/useExamCommands';
@@ -39,6 +39,10 @@ import { emitAnswerMutationDebugLog } from './answerMutationDebug';
 import { isStudentHighlightToolContextActive } from './studentHighlightToolContext';
 import { installExamPageZoomGuard } from './examPageZoomGuard';
 import type { StudentAnswerMutationMeta, StudentAnswerValue } from '../../types/studentAttempt';
+
+import { StudentExamHeaderClock } from "./StudentExamHeaderClock";
+import { StudentExamClockEffects } from "./StudentExamClockEffects";
+import { StudentExamTimeRemaining } from "./StudentExamTimeRemaining";
 
 function getBlockingCopy(reason: ReturnType<typeof useStudentRuntime>['state']['blocking']['reason']) {
   switch (reason) {
@@ -134,7 +138,12 @@ export function StudentApp({
   allowExitDuringExam = false,
 }: StudentAppProps) {
   void allowExitDuringExam;
-  const { state: runtimeState, actions: runtimeActions, examState, onExit } = useStudentRuntime();
+  const {
+    state: runtimeState,
+    actions: runtimeActions,
+    examState: examState,
+    onExit: onExit
+  } = useStudentRuntimeSession();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
   const examSessionCommands = useExamCommands();
   const examSessionStore = useStudentExamSessionStore();
@@ -163,7 +172,7 @@ export function StudentApp({
   );
   useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
-  const { resetHighlightTool, setShowTimeExtensionRequest } = uiActions;
+  const { resetHighlightTool } = uiActions;
   const timeExtensionReason =
     typeof uiState.timeExtensionReason === 'string' ? uiState.timeExtensionReason : '';
   const timeExtensionDialogRef = useRef<HTMLDialogElement>(null);
@@ -189,7 +198,7 @@ export function StudentApp({
       ['--student-passage-h1-font-size' as string]: studentTypography.passageH1FontSize,
       ['--student-passage-h2-font-size' as string]: studentTypography.passageH2FontSize,
       ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
-      ['--student-passage-line-height' as string]: studentTypography.passageLineHeight,
+      ['--student-passage-line-height' as string]: studentTypography.passageLineHeight
     }) as React.CSSProperties,
     [studentTypography, tabletMode, uiState.accessibilitySettings.zoom],
   );
@@ -218,37 +227,6 @@ export function StudentApp({
     uiActionsRef.current = uiActions;
   }, [attemptActions, attemptFlags, examSessionCommands, runtimeActions, runtimeState, uiActions]);
 
-  useEffect(() => {
-    examSessionCommands.setPhase(runtimeState.phase);
-    examSessionCommands.setNavigation(runtimeState.currentModule, runtimeState.currentQuestionId);
-    examSessionCommands.setRuntimeSnapshot(
-      runtimeState.runtimeSnapshot,
-      runtimeState.displayTimeRemaining ?? null,
-    );
-    examSessionCommands.setPersistence({
-      syncState: runtimeState.attemptSyncState,
-      pendingMutationCount: attemptState.attempt?.recovery.pendingMutationCount ?? 0,
-      acceptedThroughSeq: attemptState.attempt?.recovery.serverAcceptedThroughSeq ?? 0,
-    });
-    examSessionCommands.setBlocking({
-      active: runtimeState.blocking.active,
-      reason: runtimeState.blocking.reason,
-      timeRemaining: runtimeState.blocking.timeRemaining,
-    });
-  }, [
-    attemptState.attempt?.recovery.pendingMutationCount,
-    attemptState.attempt?.recovery.serverAcceptedThroughSeq,
-    examSessionCommands,
-    runtimeState.attemptSyncState,
-    runtimeState.blocking.active,
-    runtimeState.blocking.reason,
-    runtimeState.blocking.timeRemaining,
-    runtimeState.currentModule,
-    runtimeState.currentQuestionId,
-    runtimeState.displayTimeRemaining,
-    runtimeState.phase,
-    runtimeState.runtimeSnapshot,
-  ]);
   const reconcileLiveAnswerCacheNow = useCallback(() => {
     latestAnswersRef.current = liveObjectiveAnswersRef.current;
   }, []);
@@ -419,33 +397,6 @@ export function StudentApp({
       preventTranslation: examState.config.security.preventTranslation,
     },
   });
-
-  useStudentAutoSubmitBoundary({
-    effectivePhase,
-    autoSubmitEnabled: examState.config.progression.autoSubmit,
-    runtimeState: {
-      blockingActive: runtimeState.blocking.active,
-      displayTimeRemaining: runtimeState.displayTimeRemaining ?? null,
-      runtimeBacked: runtimeState.runtimeBacked,
-      runtimeStatus: runtimeState.runtimeStatus,
-      currentModule: runtimeState.currentModule,
-      runtimeSnapshot: runtimeState.runtimeSnapshot,
-    },
-    flushAndSubmitCurrentModuleWithRetry,
-  });
-
-  const shouldShowTimeExtension = shouldOfferTimeExtension({
-    config: examState.config,
-    phase: effectivePhase,
-    runtimeBacked: runtimeState.runtimeBacked,
-    displayTimeRemaining: runtimeState.displayTimeRemaining,
-  });
-
-  useEffect(() => {
-    if (shouldShowTimeExtension) {
-      setShowTimeExtensionRequest(true);
-    }
-  }, [shouldShowTimeExtension, setShowTimeExtensionRequest]);
 
   useEffect(() => {
     const dialog = timeExtensionDialogRef.current;
@@ -676,14 +627,14 @@ export function StudentApp({
   }
 
   return (
-      <StudentExamShell
-        layoutMode={layoutMode}
-        highContrast={uiState.accessibilitySettings.highContrast}
-        touchMode={tabletMode}
-        style={studentShellStyle}
-        keyboardOpen={examViewportActive ? examViewport.keyboardOpen : false}
-        examHeight={examViewportActive ? examViewport.stableExamHeight : null}
-      >
+    <StudentExamShell
+      layoutMode={layoutMode}
+      highContrast={uiState.accessibilitySettings.highContrast}
+      touchMode={tabletMode}
+      style={studentShellStyle}
+      keyboardOpen={examViewportActive ? examViewport.keyboardOpen : false}
+      examHeight={examViewportActive ? examViewport.stableExamHeight : null}
+    >{<StudentExamClockEffects effectivePhase={effectivePhase} autoSubmitEnabled={examState.config.progression.autoSubmit} config={examState.config} flushAndSubmitCurrentModuleWithRetry={flushAndSubmitCurrentModuleWithRetry} />}
       <style>{`
         input:-webkit-autofill,
         input:-webkit-autofill:hover,
@@ -702,10 +653,10 @@ export function StudentApp({
         Skip to main content
       </a>
       {layoutMode === 'compact' ? (
-        <CompactStudentHeader
+        <StudentExamHeaderClock
+          compact={true}
           moduleLabel={`${runtimeState.currentModule.charAt(0).toUpperCase()}${runtimeState.currentModule.slice(1)}`}
           testTakerId={attemptState.attempt?.candidateId ?? undefined}
-          timeRemaining={runtimeState.displayTimeRemaining}
           autoSaveStatus={autoSaveStatus}
           highlightEnabled={highlightEnabled}
           highlightToolMode={uiState.accessibilitySettings.highlightToolMode}
@@ -714,12 +665,12 @@ export function StudentApp({
           onSelectHighlightColor={uiActions.setHighlightColor}
           onSelectEraseMode={uiActions.toggleEraseMode}
           onOpenAccessibility={openAccessibility}
-          onOpenNavigator={showNavigatorForModule ? openNavigator : undefined}
-        />
+          onOpenNavigator={showNavigatorForModule ? openNavigator : undefined} />
       ) : (
-        <StudentHeader
+        <StudentExamHeaderClock
+          compact={false}
+          moduleLabel={runtimeState.currentModule.charAt(0).toUpperCase() + runtimeState.currentModule.slice(1)}
           testTakerId={attemptState.attempt?.candidateId ?? undefined}
-          timeRemaining={runtimeState.displayTimeRemaining}
           autoSaveStatus={autoSaveStatus}
           highlightEnabled={highlightEnabled}
           highlightToolMode={uiState.accessibilitySettings.highlightToolMode}
@@ -730,10 +681,8 @@ export function StudentApp({
           tabletMode={tabletMode}
           onOpenAccessibility={openAccessibility}
           onOpenNavigator={showNavigatorForModule ? openNavigator : undefined}
-          isExamActive={effectivePhase === 'exam'}
-        />
+          isExamActive={effectivePhase === 'exam'} />
       )}
-
       <StudentExamViewport>
         <StudentHighlightSelectionManagerProvider>
           <StudentExamWorkspaceSession
@@ -768,10 +717,8 @@ export function StudentApp({
           />
         </StudentHighlightSelectionManagerProvider>
       </StudentExamViewport>
-
       {blockingOverlay}
       {finalSubmitOverlay}
-
       {examState.config.progression.showWarnings ? (
         <WarningOverlay
           isOpen={warningOpen}
@@ -785,7 +732,6 @@ export function StudentApp({
           }}
         />
       ) : null}
-
       {shouldShowScreenshotWarning ? (
         <WarningOverlay
           isOpen
@@ -801,7 +747,6 @@ export function StudentApp({
           }}
         />
       ) : null}
-
       {examState.config.progression.showWarnings ? (
         <WarningOverlay
           isOpen={shouldShowTabSwitchWarning}
@@ -816,7 +761,6 @@ export function StudentApp({
           }}
         />
       ) : null}
-
       {examState.config.progression.showWarnings ? (
         <WarningOverlay
           isOpen={shouldShowTranslationWarning}
@@ -831,7 +775,6 @@ export function StudentApp({
           }}
         />
       ) : null}
-
       {examState.config.progression.showWarnings ? (
         <WarningOverlay
           isOpen={shouldShowSecondaryScreenWarning}
@@ -846,18 +789,14 @@ export function StudentApp({
           }}
         />
       ) : null}
-
-      <SubmitConfirmation
+      <StudentExamTimeRemaining
         isOpen={uiState.showSubmitConfirm}
         onClose={() => uiActions.setShowSubmitConfirm(false)}
         onConfirm={confirmModuleSubmit}
         answeredCount={answeredCount}
         totalQuestions={totalQuestions}
         flaggedCount={Object.values(attemptFlags).filter(Boolean).length}
-        timeRemaining={runtimeState.displayTimeRemaining}
-        unansweredSubmissionPolicy={unansweredSubmissionPolicy}
-      />
-
+        unansweredSubmissionPolicy={unansweredSubmissionPolicy} />
       <dialog
         ref={timeExtensionDialogRef}
         onClose={() => uiActions.setShowTimeExtensionRequest(false)}
@@ -897,7 +836,6 @@ export function StudentApp({
           <Button type="button" onClick={handleTimeExtensionRequest}>Request +5 Minutes</Button>
         </div>
       </dialog>
-
       <AccessibilitySettings
         isOpen={uiState.showAccessibility}
         onClose={() => uiActions.setShowAccessibility(false)}
@@ -906,6 +844,6 @@ export function StudentApp({
         onFontSizeChange={uiActions.setFontSize}
         onHighContrastToggle={uiActions.toggleHighContrast}
       />
-      </StudentExamShell>
+    </StudentExamShell>
   );
 }

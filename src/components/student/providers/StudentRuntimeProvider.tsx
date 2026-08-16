@@ -122,6 +122,17 @@ interface RuntimeContextValue {
 
 const RuntimeContext = createContext<RuntimeContextValue | null>(null);
 
+type RuntimeStableState = Omit<RuntimeState, 'displayTimeRemaining'>;
+interface RuntimeStableContextValue {
+  state: RuntimeStableState;
+  actions: RuntimeActions;
+  examState: ExamState;
+  onExit: () => void;
+}
+const RuntimeStableContext = createContext<RuntimeStableContextValue | null>(null);
+const RuntimeClockContext = createContext<number | undefined>(undefined);
+const RuntimeLiveContext = createContext<React.MutableRefObject<RuntimeState> | null>(null);
+
 interface StudentRuntimeProviderProps {
   children: ReactNode;
   state: ExamState;
@@ -1090,6 +1101,71 @@ export function StudentRuntimeProvider({
     dispatch({ type: 'set_attempt_sync_state', state: nextState });
   }, []);
 
+  const stableState = useMemo<RuntimeStableState>(() => ({
+    ...runtimeState,
+    allQuestions,
+    blocking,
+    runtimeBacked,
+    runtimeStatus,
+    runtimeSnapshot: runtimeBacked ? runtimeSnapshot : null,
+    submitRequiresConfirmation,
+  }), [
+    allQuestions,
+    blocking,
+    runtimeBacked,
+    runtimeSnapshot,
+    runtimeState,
+    runtimeStatus,
+    submitRequiresConfirmation,
+  ]);
+  const stableValue = useMemo<RuntimeStableContextValue>(() => ({
+    state: stableState,
+    actions: {
+      setPhase,
+      setCurrentModule,
+      setCurrentQuestionId,
+      setTimeRemaining,
+      resetElapsedTime,
+      submitModule,
+      startExam,
+      addViolation,
+      clearViolations,
+      pauseExam,
+      terminateExam,
+      transitionBlocking,
+      setAttemptSyncState,
+    },
+    examState: state,
+    onExit,
+  }), [
+    addViolation,
+    clearViolations,
+    onExit,
+    pauseExam,
+    resetElapsedTime,
+    setAttemptSyncState,
+    setCurrentModule,
+    setCurrentQuestionId,
+    setPhase,
+    setTimeRemaining,
+    stableState,
+    startExam,
+    state,
+    submitModule,
+    terminateExam,
+    transitionBlocking,
+  ]);
+  const runtimeLiveRef = useRef<RuntimeState>({
+    ...stableState,
+    displayTimeRemaining,
+  });
+  useLayoutEffect(() => {
+    runtimeLiveRef.current = {
+      ...stableState,
+      displayTimeRemaining,
+    };
+  }, [displayTimeRemaining, stableState]);
+
   const value = useMemo<RuntimeContextValue>(() => ({
     state: {
       ...runtimeState,
@@ -1144,7 +1220,17 @@ export function StudentRuntimeProvider({
     terminateExam,
   ]);
 
-  return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
+  return (
+      <RuntimeContext.Provider value={value}>
+        <RuntimeStableContext.Provider value={stableValue}>
+          <RuntimeClockContext.Provider value={displayTimeRemaining}>
+            <RuntimeLiveContext.Provider value={runtimeLiveRef}>
+              {children}
+            </RuntimeLiveContext.Provider>
+          </RuntimeClockContext.Provider>
+        </RuntimeStableContext.Provider>
+      </RuntimeContext.Provider>
+    );
 }
 
 export function useStudentRuntime() {
@@ -1153,4 +1239,45 @@ export function useStudentRuntime() {
     throw new Error('useStudentRuntime must be used within StudentRuntimeProvider');
   }
   return context;
+}
+
+function useRuntimeStableContext(): RuntimeStableContextValue {
+  const context = useContext(RuntimeStableContext);
+  if (!context) {
+    throw new Error('useRuntimeStableContext must be used within StudentRuntimeProvider');
+  }
+  return context;
+}
+
+export function useStudentRuntimeState(): RuntimeStableState {
+  return useRuntimeStableContext().state;
+}
+
+export function useStudentRuntimeActions(): RuntimeActions {
+  return useRuntimeStableContext().actions;
+}
+
+export function useStudentRuntimeExamState(): ExamState {
+  return useRuntimeStableContext().examState;
+}
+
+export function useStudentRuntimeMeta(): { examState: ExamState; onExit: () => void } {
+  const context = useRuntimeStableContext();
+  return { examState: context.examState, onExit: context.onExit };
+}
+
+export function useStudentRuntimeClock(): number | undefined {
+  return useContext(RuntimeClockContext);
+}
+
+export function useStudentRuntimeLiveRef(): React.MutableRefObject<RuntimeState> {
+  const ref = useContext(RuntimeLiveContext);
+  if (!ref) {
+    throw new Error('useStudentRuntimeLiveRef must be used within StudentRuntimeProvider');
+  }
+  return ref;
+}
+
+export function useStudentRuntimeSession(): RuntimeStableContextValue {
+  return useRuntimeStableContext();
 }
