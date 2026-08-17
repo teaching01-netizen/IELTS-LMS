@@ -43,7 +43,11 @@ import type {
   StudentPreCheckResult,
 } from '../../../types/studentAttempt';
 import { emitAnswerMutationDebugLog } from '../answerMutationDebug';
-import { useStudentRuntime, useStudentRuntimeSession, useStudentRuntimeLiveRef } from './StudentRuntimeProvider';
+import {
+  useStudentRuntime,
+  useStudentRuntimeSession,
+  useStudentRuntimeLiveRef,
+} from './StudentRuntimeProvider';
 import { isVerifiedTerminalStudentState } from './verifiedTerminalState';
 
 interface StudentAttemptState {
@@ -58,7 +62,7 @@ interface StudentAttemptActions {
   persistAnswer: (
     questionId: string,
     answer: StudentAnswerValue,
-    meta?: StudentAnswerMutationMeta,
+    meta?: StudentAnswerMutationMeta
   ) => void;
   persistWritingAnswer: (taskId: string, text: string) => void;
   persistFlag: (questionId: string, flagged: boolean) => void;
@@ -66,14 +70,11 @@ interface StudentAttemptActions {
   persistPosition: (
     currentModule: ModuleType,
     currentQuestionId: string | null,
-    phase: StudentAttempt['phase'],
+    phase: StudentAttempt['phase']
   ) => void;
   recordPreCheckResult: (result: StudentPreCheckResult) => Promise<void>;
   recordNetworkStatus: (status: 'offline' | 'online', timestamp?: string) => Promise<void>;
-  recordHeartbeat: (
-    type: HeartbeatEventType,
-    payload?: Record<string, unknown>,
-  ) => Promise<void>;
+  recordHeartbeat: (type: HeartbeatEventType, payload?: Record<string, unknown>) => Promise<void>;
   acknowledgeProctorWarning: (warningId: string) => Promise<void>;
   submitAttempt: () => Promise<boolean>;
   setDeviceFingerprintHash: (hash: string) => Promise<void>;
@@ -107,8 +108,7 @@ type AttemptPatch = Omit<Partial<StudentAttempt>, 'integrity' | 'recovery'> & {
 };
 
 const StudentAttemptContext = createContext<StudentAttemptContextValue | null>(null);
-const StudentAttemptControlContext =
-  createContext<StudentAttemptControlContextValue | null>(null);
+const StudentAttemptControlContext = createContext<StudentAttemptControlContextValue | null>(null);
 const ANSWER_DURABLE_WRITE_DEBOUNCE_MS = 100;
 const BOUNDARY_IMMEDIATE_DURABILITY_THRESHOLD_SECONDS = 20;
 
@@ -178,7 +178,7 @@ function isEditableDomTarget(target: EventTarget | null): boolean {
 
 function mergeViolationsById(
   localViolations: Violation[],
-  remoteViolations: Violation[],
+  remoteViolations: Violation[]
 ): Violation[] {
   const merged = new Map<string, Violation>();
   for (const violation of localViolations) {
@@ -189,7 +189,7 @@ function mergeViolationsById(
   }
 
   return [...merged.values()].sort(
-    (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
+    (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
   );
 }
 
@@ -225,7 +225,7 @@ function mergeAttempt(attempt: StudentAttempt, patch: AttemptPatch): StudentAtte
 
 function shouldPreferLocalAttemptState(
   localAttempt: StudentAttempt,
-  incomingAttempt: StudentAttempt,
+  incomingAttempt: StudentAttempt
 ): boolean {
   const localAcceptedSeq = localAttempt.recovery.serverAcceptedThroughSeq ?? 0;
   const incomingAcceptedSeq = incomingAttempt.recovery.serverAcceptedThroughSeq ?? 0;
@@ -264,7 +264,8 @@ function shouldPreferLocalAttemptState(
 
   const hasLocalMutationSignal =
     Boolean(localAttempt.recovery.lastLocalMutationAt) ||
-    localAttempt.recovery.pendingMutationCount > 0;
+    localAttempt.recovery.pendingMutationCount > 0 ||
+    localAttempt.recovery.finalSubmissionPending;
   if (hasLocalMutationSignal) {
     return true;
   }
@@ -314,7 +315,7 @@ export function StudentAttemptProvider({
   const [pendingMutationCount, setPendingMutationCount] = useState(0);
   const attemptRef = useRef<StudentAttempt | null>(attemptSnapshot);
   const controlScheduleIdRef = useRef<string | undefined>(
-    scheduleId ?? attemptSnapshot?.scheduleId,
+    scheduleId ?? attemptSnapshot?.scheduleId
   );
   const controlAttemptIdRef = useRef<string | undefined>(attemptSnapshot?.id);
   const observedPositionRef = useRef<string>(
@@ -322,7 +323,7 @@ export function StudentAttemptProvider({
       phase: attemptSnapshot?.phase ?? 'pre-check',
       currentModule: attemptSnapshot?.currentModule ?? 'listening',
       currentQuestionId: attemptSnapshot?.currentQuestionId ?? null,
-    }),
+    })
   );
   const observedViolationsRef = useRef<string>(JSON.stringify(attemptSnapshot?.violations ?? []));
   const objectiveFlushTimeoutRef = useRef<number | null>(null);
@@ -332,86 +333,97 @@ export function StudentAttemptProvider({
   const backgroundSubmitInFlightRef = useRef<Promise<void> | null>(null);
   const durabilityMirrorRef = useRef<PendingMutationDurabilityMirror | null>(null);
 
-  const syncAttemptState = useCallback((nextAttempt: StudentAttempt) => {
-    attemptRef.current = nextAttempt;
-    controlScheduleIdRef.current = scheduleId ?? nextAttempt.scheduleId;
-    controlAttemptIdRef.current = nextAttempt.id;
-    setAttempt(nextAttempt);
-    setRuntimeAttemptSyncState(nextAttempt.recovery.syncState);
-  }, [scheduleId, setRuntimeAttemptSyncState]);
+  const syncAttemptState = useCallback(
+    (nextAttempt: StudentAttempt) => {
+      attemptRef.current = nextAttempt;
+      controlScheduleIdRef.current = scheduleId ?? nextAttempt.scheduleId;
+      controlAttemptIdRef.current = nextAttempt.id;
+      setAttempt(nextAttempt);
+      setRuntimeAttemptSyncState(nextAttempt.recovery.syncState);
+    },
+    [scheduleId, setRuntimeAttemptSyncState]
+  );
 
   useEffect(() => {
     controlScheduleIdRef.current = scheduleId ?? attemptRef.current?.scheduleId;
     controlAttemptIdRef.current = attemptRef.current?.id;
   }, [attempt, scheduleId]);
 
-  const setStorageDurabilityBlocking = useCallback((active: boolean) => {
-    if (active) {
-      if (runtimeState.blocking.reason !== 'storage_unavailable') {
-        runtimeActions.transitionBlocking('storage_unavailable', true);
+  const setStorageDurabilityBlocking = useCallback(
+    (active: boolean) => {
+      if (active) {
+        if (runtimeState.blocking.reason !== 'storage_unavailable') {
+          runtimeActions.transitionBlocking('storage_unavailable', true);
+        }
+        return;
       }
-      return;
-    }
 
-    if (runtimeState.blocking.reason === 'storage_unavailable') {
-      runtimeActions.transitionBlocking('storage_unavailable', false);
-    }
-  }, [runtimeActions, runtimeState.blocking.reason]);
+      if (runtimeState.blocking.reason === 'storage_unavailable') {
+        runtimeActions.transitionBlocking('storage_unavailable', false);
+      }
+    },
+    [runtimeActions, runtimeState.blocking.reason]
+  );
 
-  const recordPendingMutationPersistenceError = useCallback((
-    error: unknown,
-    pendingMutationCountForError: number,
-    fallbackAttempt: StudentAttempt,
-    source: DurablePersistTriggerSource,
-    durablePersistResult: 'failed' | 'checkpoint_failed' = 'failed',
-  ) => {
-    const erroredAttempt = mergeAttempt(attemptRef.current ?? fallbackAttempt, {
-      recovery: {
-        syncState: 'error',
-        pendingMutationCount: pendingMutationCountForError,
-      },
-    });
-    syncAttemptState(erroredAttempt);
-    setStorageDurabilityBlocking(true);
-    emitStudentObservabilityMetric(
-      'student_pending_persist_failure_total',
-      withStudentObservabilityDimensions({
-        scheduleId: scheduleId ?? fallbackAttempt.scheduleId,
-        attemptId: fallbackAttempt.id,
-        endpoint: '/v1/student/sessions/:scheduleId/mutations:pending',
-        statusCode: null,
-        reason: error instanceof Error ? error.message : 'pending_mirror_persist_failed',
-        syncState: 'error',
-        lifecycleEventSource: source,
-        durablePersistResult,
-        browserEngine: detectBrowserEngine(),
-        platform:
-          typeof navigator !== 'undefined'
-            ? (
-                (navigator as Navigator & {
-                  userAgentData?: {
-                    platform?: string;
-                  };
-        }).userAgentData?.platform ?? navigator.platform
-              )
-            : 'unknown',
-        deviceClass: detectClientDeviceClass(),
-        pendingMutationAgeMs: pendingMutationOldestAgeMs(durabilityMirrorRef.current?.getPendingMutations() ?? []),
-        pendingMutationCount: pendingMutationCountForError,
-      }),
-    );
-    void saveStudentAuditEvent(
-      scheduleId ?? fallbackAttempt.scheduleId,
-      'PERSISTENCE_STORAGE_ERROR',
-      {
-        message: error instanceof Error ? error.message : 'Failed to persist pending mutations',
-        pendingMutationCount: pendingMutationCountForError,
-        lifecycleEventSource: source,
-        durablePersistResult,
-      },
-      fallbackAttempt.id,
-    );
-  }, [scheduleId, setStorageDurabilityBlocking, syncAttemptState]);
+  const recordPendingMutationPersistenceError = useCallback(
+    (
+      error: unknown,
+      pendingMutationCountForError: number,
+      fallbackAttempt: StudentAttempt,
+      source: DurablePersistTriggerSource,
+      durablePersistResult: 'failed' | 'checkpoint_failed' = 'failed'
+    ) => {
+      const erroredAttempt = mergeAttempt(attemptRef.current ?? fallbackAttempt, {
+        recovery: {
+          syncState: 'error',
+          pendingMutationCount: pendingMutationCountForError,
+        },
+      });
+      syncAttemptState(erroredAttempt);
+      setStorageDurabilityBlocking(true);
+      emitStudentObservabilityMetric(
+        'student_pending_persist_failure_total',
+        withStudentObservabilityDimensions({
+          scheduleId: scheduleId ?? fallbackAttempt.scheduleId,
+          attemptId: fallbackAttempt.id,
+          endpoint: '/v1/student/sessions/:scheduleId/mutations:pending',
+          statusCode: null,
+          reason: error instanceof Error ? error.message : 'pending_mirror_persist_failed',
+          syncState: 'error',
+          lifecycleEventSource: source,
+          durablePersistResult,
+          browserEngine: detectBrowserEngine(),
+          platform:
+            typeof navigator !== 'undefined'
+              ? ((
+                  navigator as Navigator & {
+                    userAgentData?: {
+                      platform?: string;
+                    };
+                  }
+                ).userAgentData?.platform ?? navigator.platform)
+              : 'unknown',
+          deviceClass: detectClientDeviceClass(),
+          pendingMutationAgeMs: pendingMutationOldestAgeMs(
+            durabilityMirrorRef.current?.getPendingMutations() ?? []
+          ),
+          pendingMutationCount: pendingMutationCountForError,
+        })
+      );
+      void saveStudentAuditEvent(
+        scheduleId ?? fallbackAttempt.scheduleId,
+        'PERSISTENCE_STORAGE_ERROR',
+        {
+          message: error instanceof Error ? error.message : 'Failed to persist pending mutations',
+          pendingMutationCount: pendingMutationCountForError,
+          lifecycleEventSource: source,
+          durablePersistResult,
+        },
+        fallbackAttempt.id
+      );
+    },
+    [scheduleId, setStorageDurabilityBlocking, syncAttemptState]
+  );
 
   if (!durabilityMirrorRef.current) {
     durabilityMirrorRef.current = new PendingMutationDurabilityMirror({
@@ -431,21 +443,23 @@ export function StudentAttemptProvider({
     durabilityMirrorRef.current?.flushAnswerDurableMirrorNow(source);
   }, []);
 
-  const setPendingMutations = useCallback((
-    nextMutations: StudentAttemptMutation[],
-    options?: {
-      durableWriteMode?: 'immediate' | 'debounced';
-      includesAnswerMutation?: boolean;
-      awaitPersistence?: boolean;
-      source?: DurablePersistTriggerSource;
+  const setPendingMutations = useCallback(
+    (
+      nextMutations: StudentAttemptMutation[],
+      options?: {
+        durableWriteMode?: 'immediate' | 'debounced';
+        includesAnswerMutation?: boolean;
+        awaitPersistence?: boolean;
+        source?: DurablePersistTriggerSource;
+      }
+    ): Promise<boolean> | void => {
+      return durabilityMirrorRef.current?.setPendingMutations(nextMutations, options);
     },
-  ): Promise<boolean> | void => {
-    return durabilityMirrorRef.current?.setPendingMutations(nextMutations, options);
-  }, []);
+    []
+  );
 
   const scheduleFlush = useCallback((kind: 'objective' | 'writing', delayMs: number) => {
-    const timeoutRef =
-      kind === 'writing' ? writingFlushTimeoutRef : objectiveFlushTimeoutRef;
+    const timeoutRef = kind === 'writing' ? writingFlushTimeoutRef : objectiveFlushTimeoutRef;
 
     if (timeoutRef.current) {
       window.clearTimeout(timeoutRef.current);
@@ -456,103 +470,104 @@ export function StudentAttemptProvider({
     }, delayMs);
   }, []);
 
-  const applyPatch = useCallback(async (
-    patch: AttemptPatch,
-    mutationType: StudentAttemptMutationType,
-    delayMs: number,
-    payload: StudentAttemptMutationPayload<StudentAttemptMutationType>,
-  ) => {
-    const currentAttempt = attemptRef.current;
-    if (!currentAttempt) {
-      return;
-    }
+  const applyPatch = useCallback(
+    async (
+      patch: AttemptPatch,
+      mutationType: StudentAttemptMutationType,
+      delayMs: number,
+      payload: StudentAttemptMutationPayload<StudentAttemptMutationType>
+    ) => {
+      const currentAttempt = attemptRef.current;
+      if (!currentAttempt) {
+        return;
+      }
 
-    const timestamp = new Date().toISOString();
-    if (!persistenceEnabled) {
+      const timestamp = new Date().toISOString();
+      if (!persistenceEnabled) {
+        const nextAttempt = mergeAttempt(currentAttempt, {
+          ...patch,
+          recovery: {
+            ...patch.recovery,
+            lastLocalMutationAt: timestamp,
+            lastPersistedAt: timestamp,
+            pendingMutationCount: 0,
+            syncState: 'idle',
+          },
+        });
+        syncAttemptState(nextAttempt);
+        return;
+      }
+
+      const isObjectiveMutation =
+        mutationType === 'answer' || mutationType === 'flag' || mutationType === 'writing_answer';
+      const runtimeModule =
+        runtimeLiveRef.current.runtimeSnapshot?.currentSectionKey ??
+        runtimeLiveRef.current.currentModule ??
+        null;
+      const authoritativeModule = runtimeModule ?? currentAttempt.currentModule;
+      const existingModule = isObjectiveMutation
+        ? (payload as { module?: unknown }).module
+        : undefined;
+      const payloadWithModule: StudentAttemptMutationPayload<StudentAttemptMutationType> =
+        isObjectiveMutation &&
+        (typeof existingModule !== 'string' || existingModule.trim().length === 0)
+          ? {
+              ...payload,
+              module: authoritativeModule,
+            }
+          : payload;
+      const reportedRemaining =
+        runtimeLiveRef.current.runtimeSnapshot?.currentSectionRemainingSeconds ??
+        runtimeLiveRef.current.displayTimeRemaining ??
+        runtimeLiveRef.current.timeRemaining;
+      const forceImmediateDurability =
+        isObjectiveMutation &&
+        runtimeLiveRef.current.phase === 'exam' &&
+        Number.isFinite(reportedRemaining) &&
+        reportedRemaining >= 0 &&
+        reportedRemaining <= BOUNDARY_IMMEDIATE_DURABILITY_THRESHOLD_SECONDS;
+      const mutation: StudentAttemptMutation = {
+        id: generateId('mutation'),
+        attemptId: currentAttempt.id,
+        scheduleId: currentAttempt.scheduleId,
+        timestamp,
+        type: mutationType,
+        payload: payloadWithModule,
+      } as StudentAttemptMutation;
+      const enqueue = buildQueuedMutationUpdate({
+        currentAttempt,
+        pending: durabilityMirrorRef.current?.getPendingMutations() ?? [],
+        mutation,
+        patchSyncState: patch.recovery?.syncState,
+        online: navigator.onLine,
+        flushDelayMs: forceImmediateDurability ? 0 : delayMs,
+        forceImmediateDurability,
+      });
+      setPendingMutations(enqueue.nextPendingMutations, {
+        durableWriteMode: enqueue.durableWriteMode,
+        includesAnswerMutation: enqueue.includesAnswerMutation,
+        source: 'mutation',
+      });
+
+      const syncState: AttemptSyncState = enqueue.syncState;
       const nextAttempt = mergeAttempt(currentAttempt, {
         ...patch,
         recovery: {
           ...patch.recovery,
           lastLocalMutationAt: timestamp,
-          lastPersistedAt: timestamp,
-          pendingMutationCount: 0,
-          syncState: 'idle',
+          pendingMutationCount: enqueue.nextPendingMutations.length,
+          syncState,
         },
       });
+
       syncAttemptState(nextAttempt);
-      return;
-    }
 
-    const isObjectiveMutation =
-      mutationType === 'answer' || mutationType === 'flag' || mutationType === 'writing_answer';
-    const runtimeModule =
-      runtimeLiveRef.current.runtimeSnapshot?.currentSectionKey ?? runtimeLiveRef.current.currentModule ?? null;
-    const authoritativeModule = runtimeModule ?? currentAttempt.currentModule;
-    const existingModule = isObjectiveMutation ? (payload as { module?: unknown }).module : undefined;
-    const payloadWithModule: StudentAttemptMutationPayload<StudentAttemptMutationType> =
-      isObjectiveMutation &&
-      (typeof existingModule !== 'string' || existingModule.trim().length === 0)
-        ? {
-            ...payload,
-            module: authoritativeModule,
-          }
-        : payload;
-    const reportedRemaining =
-      runtimeLiveRef.current.runtimeSnapshot?.currentSectionRemainingSeconds ??
-      runtimeLiveRef.current.displayTimeRemaining ??
-      runtimeLiveRef.current.timeRemaining;
-    const forceImmediateDurability =
-      isObjectiveMutation &&
-      runtimeLiveRef.current.phase === 'exam' &&
-      Number.isFinite(reportedRemaining) &&
-      reportedRemaining >= 0 &&
-      reportedRemaining <= BOUNDARY_IMMEDIATE_DURABILITY_THRESHOLD_SECONDS;
-    const mutation: StudentAttemptMutation = {
-      id: generateId('mutation'),
-      attemptId: currentAttempt.id,
-      scheduleId: currentAttempt.scheduleId,
-      timestamp,
-      type: mutationType,
-      payload: payloadWithModule,
-    } as StudentAttemptMutation;
-    const enqueue = buildQueuedMutationUpdate({
-      currentAttempt,
-      pending: durabilityMirrorRef.current?.getPendingMutations() ?? [],
-      mutation,
-      patchSyncState: patch.recovery?.syncState,
-      online: navigator.onLine,
-      flushDelayMs: forceImmediateDurability ? 0 : delayMs,
-      forceImmediateDurability,
-    });
-    setPendingMutations(enqueue.nextPendingMutations, {
-      durableWriteMode: enqueue.durableWriteMode,
-      includesAnswerMutation: enqueue.includesAnswerMutation,
-      source: 'mutation',
-    });
-
-    const syncState: AttemptSyncState = enqueue.syncState;
-    const nextAttempt = mergeAttempt(currentAttempt, {
-      ...patch,
-      recovery: {
-        ...patch.recovery,
-        lastLocalMutationAt: timestamp,
-        pendingMutationCount: enqueue.nextPendingMutations.length,
-        syncState,
-      },
-    });
-
-    syncAttemptState(nextAttempt);
-
-    if (enqueue.flush) {
-      scheduleFlush(enqueue.flush.kind, enqueue.flush.delayMs);
-    }
-  }, [
-    persistenceEnabled,
-    runtimeLiveRef,
-    scheduleFlush,
-    setPendingMutations,
-    syncAttemptState
-  ]);
+      if (enqueue.flush) {
+        scheduleFlush(enqueue.flush.kind, enqueue.flush.delayMs);
+      }
+    },
+    [persistenceEnabled, runtimeLiveRef, scheduleFlush, setPendingMutations, syncAttemptState]
+  );
 
   const flushPending = useCallback(async () => {
     if (flushInFlightRef.current) {
@@ -586,12 +601,14 @@ export function StudentAttemptProvider({
               endpoint: 'mutations:batch',
               reason: 'ATTEMPT_SUBMITTED',
               syncState: attempt.recovery.syncState,
-            }),
+            })
           );
         },
         saveAttempt: (attempt) => studentAttemptRepository.saveAttempt(attempt),
-        clearPendingMutations: (attemptId) => studentAttemptRepository.clearPendingMutations(attemptId),
-        getAttemptsByScheduleId: (scheduleId) => studentAttemptRepository.getAttemptsByScheduleId(scheduleId),
+        clearPendingMutations: (attemptId) =>
+          studentAttemptRepository.clearPendingMutations(attemptId),
+        getAttemptsByScheduleId: (scheduleId) =>
+          studentAttemptRepository.getAttemptsByScheduleId(scheduleId),
       });
 
       return outbox.flushNow();
@@ -695,11 +712,11 @@ export function StudentAttemptProvider({
               proctorUpdatedBy: attemptSnapshot.proctorUpdatedBy,
               lastWarningId: attemptSnapshot.lastWarningId ?? currentAttempt.lastWarningId,
               lastAcknowledgedWarningId:
-                currentAttempt.lastAcknowledgedWarningId
-                ?? attemptSnapshot.lastAcknowledgedWarningId,
+                currentAttempt.lastAcknowledgedWarningId ??
+                attemptSnapshot.lastAcknowledgedWarningId,
               violations: mergeViolationsById(
                 currentAttempt.violations ?? [],
-                attemptSnapshot.violations ?? [],
+                attemptSnapshot.violations ?? []
               ),
               recovery: {
                 ...currentAttempt.recovery,
@@ -732,15 +749,13 @@ export function StudentAttemptProvider({
     const shouldKeepLocalAttempt =
       sameAttempt &&
       !!currentAttempt &&
-      (
-        (durabilityMirrorRef.current?.getPendingMutations().length ?? 0) > 0 ||
-        shouldPreferLocalAttemptState(currentAttempt, attemptSnapshot)
-      );
+      ((durabilityMirrorRef.current?.getPendingMutations().length ?? 0) > 0 ||
+        shouldPreferLocalAttemptState(currentAttempt, attemptSnapshot));
 
     if (shouldKeepLocalAttempt && currentAttempt) {
       const mergedViolations = mergeViolationsById(
         currentAttempt.violations ?? [],
-        attemptSnapshot.violations ?? [],
+        attemptSnapshot.violations ?? []
       );
 
       const mergedAttempt = mergeAttempt(currentAttempt, {
@@ -782,9 +797,7 @@ export function StudentAttemptProvider({
     setRuntimeAttemptSyncState(attemptSnapshot.recovery.syncState);
 
     void (async () => {
-      let pendingMutations = await studentAttemptRepository.getPendingMutations(
-        attemptSnapshot.id,
-      );
+      let pendingMutations = await studentAttemptRepository.getPendingMutations(attemptSnapshot.id);
       if (cancelled) {
         return;
       }
@@ -815,18 +828,18 @@ export function StudentAttemptProvider({
               browserEngine: detectBrowserEngine(),
               platform:
                 typeof navigator !== 'undefined'
-                  ? (
-                      (navigator as Navigator & {
+                  ? ((
+                      navigator as Navigator & {
                         userAgentData?: {
                           platform?: string;
                         };
-                      }).userAgentData?.platform ?? navigator.platform
-                    )
+                      }
+                    ).userAgentData?.platform ?? navigator.platform)
                   : 'unknown',
               deviceClass: detectClientDeviceClass(),
               pendingMutationAgeMs: pendingMutationOldestAgeMs(checkpointMutations),
               pendingMutationCount: checkpointMutations.length,
-            }),
+            })
           );
         }
       }
@@ -991,318 +1004,356 @@ export function StudentAttemptProvider({
     };
   }, []);
 
-  const persistAnswer = useCallback((
-    questionId: string,
-    answer: StudentAnswerValue,
-    meta?: StudentAnswerMutationMeta,
-  ) => {
-    const payload: StudentAttemptMutationPayload<'answer'> = { questionId, value: answer };
-    if (meta?.interactionType === 'typing' || meta?.interactionType === 'discrete') {
-      payload.interactionType = meta.interactionType;
-    }
-    if (typeof meta?.slotIndex === 'number' && Number.isInteger(meta.slotIndex) && meta.slotIndex >= 0) {
-      payload.slotIndex = meta.slotIndex;
-    }
-    if (typeof meta?.slotId === 'string' && meta.slotId.trim()) {
-      payload.slotId = meta.slotId;
-    }
-    if (typeof meta?.slotCount === 'number' && Number.isInteger(meta.slotCount) && meta.slotCount > 0) {
-      payload.slotCount = meta.slotCount;
-    }
-    emitAnswerMutationDebugLog('StudentAttemptProvider.persistAnswer', {
-      questionId,
-      answer,
-      mutationMeta: meta ?? null,
-      payload,
-    });
+  const persistAnswer = useCallback(
+    (questionId: string, answer: StudentAnswerValue, meta?: StudentAnswerMutationMeta) => {
+      const payload: StudentAttemptMutationPayload<'answer'> = { questionId, value: answer };
+      if (meta?.interactionType === 'typing' || meta?.interactionType === 'discrete') {
+        payload.interactionType = meta.interactionType;
+      }
+      if (
+        typeof meta?.slotIndex === 'number' &&
+        Number.isInteger(meta.slotIndex) &&
+        meta.slotIndex >= 0
+      ) {
+        payload.slotIndex = meta.slotIndex;
+      }
+      if (typeof meta?.slotId === 'string' && meta.slotId.trim()) {
+        payload.slotId = meta.slotId;
+      }
+      if (
+        typeof meta?.slotCount === 'number' &&
+        Number.isInteger(meta.slotCount) &&
+        meta.slotCount > 0
+      ) {
+        payload.slotCount = meta.slotCount;
+      }
+      emitAnswerMutationDebugLog('StudentAttemptProvider.persistAnswer', {
+        questionId,
+        answer,
+        mutationMeta: meta ?? null,
+        payload,
+      });
 
-    void applyPatch(
-      {
-        answers: {
-          [questionId]: answer,
+      void applyPatch(
+        {
+          answers: {
+            [questionId]: answer,
+          },
         },
-      },
-      'answer',
-      400,
-      payload,
-    );
-  }, [applyPatch]);
+        'answer',
+        400,
+        payload
+      );
+    },
+    [applyPatch]
+  );
 
-  const persistWritingAnswer = useCallback((taskId: string, text: string) => {
-    void applyPatch(
-      {
-        writingAnswers: {
-          [taskId]: text,
+  const persistWritingAnswer = useCallback(
+    (taskId: string, text: string) => {
+      void applyPatch(
+        {
+          writingAnswers: {
+            [taskId]: text,
+          },
         },
-      },
-      'writing_answer',
-      1_500,
-      { taskId, value: text },
-    );
-  }, [applyPatch]);
+        'writing_answer',
+        1_500,
+        { taskId, value: text }
+      );
+    },
+    [applyPatch]
+  );
 
-  const persistFlag = useCallback((questionId: string, flagged: boolean) => {
-    void applyPatch(
-      {
-        flags: {
-          [questionId]: flagged,
+  const persistFlag = useCallback(
+    (questionId: string, flagged: boolean) => {
+      void applyPatch(
+        {
+          flags: {
+            [questionId]: flagged,
+          },
         },
-      },
-      'flag',
-      400,
-      { questionId, value: flagged },
-    );
-  }, [applyPatch]);
+        'flag',
+        400,
+        { questionId, value: flagged }
+      );
+    },
+    [applyPatch]
+  );
 
-  const persistViolation = useCallback((violation: Violation) => {
-    const currentAttempt = attemptRef.current;
-    if (!currentAttempt) {
-      return;
-    }
+  const persistViolation = useCallback(
+    (violation: Violation) => {
+      const currentAttempt = attemptRef.current;
+      if (!currentAttempt) {
+        return;
+      }
 
-    const nextViolations = currentAttempt.violations.some((candidate) => candidate.id === violation.id)
-      ? currentAttempt.violations
-      : [...currentAttempt.violations, violation];
+      const nextViolations = currentAttempt.violations.some(
+        (candidate) => candidate.id === violation.id
+      )
+        ? currentAttempt.violations
+        : [...currentAttempt.violations, violation];
 
-    void applyPatch(
-      {
-        violations: nextViolations,
-      },
-      'violation',
-      400,
-      {
-        violationId: violation.id,
-        violationType: violation.type,
-        violations: nextViolations,
-      },
-    );
-  }, [applyPatch]);
+      void applyPatch(
+        {
+          violations: nextViolations,
+        },
+        'violation',
+        400,
+        {
+          violationId: violation.id,
+          violationType: violation.type,
+          violations: nextViolations,
+        }
+      );
+    },
+    [applyPatch]
+  );
 
-  const persistPosition = useCallback((
-    currentModule: ModuleType,
-    currentQuestionId: string | null,
-    phase: StudentAttempt['phase'],
-  ) => {
-    void applyPatch(
-      {
-        currentModule,
-        currentQuestionId,
-        phase,
-      },
-      'position',
-      400,
-      {
-        currentModule,
-        currentQuestionId,
-        phase,
-      },
-    );
-  }, [applyPatch]);
+  const persistPosition = useCallback(
+    (
+      currentModule: ModuleType,
+      currentQuestionId: string | null,
+      phase: StudentAttempt['phase']
+    ) => {
+      void applyPatch(
+        {
+          currentModule,
+          currentQuestionId,
+          phase,
+        },
+        'position',
+        400,
+        {
+          currentModule,
+          currentQuestionId,
+          phase,
+        }
+      );
+    },
+    [applyPatch]
+  );
 
-  const recordPreCheckResult = useCallback(async (result: StudentPreCheckResult) => {
-    const currentAttempt = attemptRef.current;
-    if (!currentAttempt) {
-      throw new Error('Missing student attempt context.');
-    }
+  const recordPreCheckResult = useCallback(
+    async (result: StudentPreCheckResult) => {
+      const currentAttempt = attemptRef.current;
+      if (!currentAttempt) {
+        throw new Error('Missing student attempt context.');
+      }
 
-    if (!persistenceEnabled) {
-      syncAttemptState(
-        mergeAttempt(currentAttempt, {
-          integrity: {
+      if (!persistenceEnabled) {
+        syncAttemptState(
+          mergeAttempt(currentAttempt, {
+            integrity: {
+              preCheck: result,
+            },
+            recovery: {
+              syncState: 'idle',
+              pendingMutationCount: 0,
+            },
+          })
+        );
+        return;
+      }
+
+      const resolvedScheduleId = scheduleId ?? currentAttempt.scheduleId;
+      const precheckIdempotencyKey = [
+        currentAttempt.id,
+        ensureClientSessionIdForAttempt(currentAttempt),
+        result.completedAt,
+      ].join(':');
+
+      try {
+        const persisted = await backendPost<any>(
+          `/v1/student/sessions/${resolvedScheduleId}/precheck`,
+          {
+            studentKey: currentAttempt.studentKey,
+            candidateId: currentAttempt.candidateId,
+            candidateName: currentAttempt.candidateName,
+            candidateEmail: currentAttempt.candidateEmail,
+            clientSessionId: ensureClientSessionIdForAttempt(currentAttempt),
             preCheck: result,
+            deviceFingerprintHash: currentAttempt.integrity.deviceFingerprintHash ?? undefined,
           },
+          {
+            retries: 0,
+            headers: {
+              'Idempotency-Key': precheckIdempotencyKey,
+            },
+          }
+        );
+        const nextAttempt = mapBackendStudentAttempt(persisted);
+        // The pre-check POST is authoritative in runtime-backed delivery. Any locally queued
+        // mutations generated during the pre-check UI can be safely discarded to avoid replaying
+        // overlapping mutation sequences during bootstrap/polling races.
+        await studentAttemptRepository.clearPendingMutations(nextAttempt.id);
+        await studentAttemptRepository.saveAttempt(nextAttempt);
+        syncAttemptState(nextAttempt);
+      } catch (error) {
+        syncAttemptState(
+          mergeAttempt(currentAttempt, {
+            recovery: {
+              syncState: 'error',
+            },
+          })
+        );
+        throw error instanceof Error ? error : new Error('Failed to save system check.');
+      }
+
+      await saveStudentAuditEvent(resolvedScheduleId, 'PRECHECK_COMPLETED', {
+        completedAt: result.completedAt,
+        checks: result.checks,
+        acknowledgedSafariLimitation: result.acknowledgedSafariLimitation,
+      });
+
+      if (result.acknowledgedSafariLimitation) {
+        await saveStudentAuditEvent(resolvedScheduleId, 'PRECHECK_WARNING_ACKNOWLEDGED', {
+          completedAt: result.completedAt,
+        });
+      }
+    },
+    [applyPatch, persistenceEnabled, scheduleId, syncAttemptState]
+  );
+
+  const recordNetworkStatus = useCallback(
+    async (status: 'offline' | 'online', timestamp = new Date().toISOString()) => {
+      await applyPatch(
+        {
+          integrity:
+            status === 'offline'
+              ? {
+                  lastDisconnectAt: timestamp,
+                }
+              : {
+                  lastReconnectAt: timestamp,
+                },
           recovery: {
-            syncState: 'idle',
-            pendingMutationCount: 0,
-          },
-        }),
-      );
-      return;
-    }
-
-    const resolvedScheduleId = scheduleId ?? currentAttempt.scheduleId;
-    const precheckIdempotencyKey = [
-      currentAttempt.id,
-      ensureClientSessionIdForAttempt(currentAttempt),
-      result.completedAt,
-    ].join(':');
-
-    try {
-      const persisted = await backendPost<any>(
-        `/v1/student/sessions/${resolvedScheduleId}/precheck`,
-        {
-          studentKey: currentAttempt.studentKey,
-          candidateId: currentAttempt.candidateId,
-          candidateName: currentAttempt.candidateName,
-          candidateEmail: currentAttempt.candidateEmail,
-          clientSessionId: ensureClientSessionIdForAttempt(currentAttempt),
-          preCheck: result,
-          deviceFingerprintHash: currentAttempt.integrity.deviceFingerprintHash ?? undefined,
-        },
-        {
-          retries: 0,
-          headers: {
-            'Idempotency-Key': precheckIdempotencyKey,
+            syncState: status === 'offline' ? 'offline' : 'syncing_reconnect',
           },
         },
+        'network',
+        0,
+        {
+          status,
+          timestamp,
+        }
       );
-      const nextAttempt = mapBackendStudentAttempt(persisted);
-      // The pre-check POST is authoritative in runtime-backed delivery. Any locally queued
-      // mutations generated during the pre-check UI can be safely discarded to avoid replaying
-      // overlapping mutation sequences during bootstrap/polling races.
-      await studentAttemptRepository.clearPendingMutations(nextAttempt.id);
+    },
+    [applyPatch]
+  );
+
+  const recordHeartbeat = useCallback(
+    async (type: HeartbeatEventType, payload?: Record<string, unknown>) => {
+      if (!persistenceEnabled) {
+        return;
+      }
+
+      const currentAttempt = attemptRef.current;
+      if (!currentAttempt) {
+        return;
+      }
+
+      const heartbeatEvent = buildStudentHeartbeatEvent(
+        currentAttempt.id,
+        currentAttempt.scheduleId,
+        type,
+        payload
+      );
+      await studentAttemptRepository.saveHeartbeatEvent(heartbeatEvent);
+    },
+    [persistenceEnabled]
+  );
+
+  const acknowledgeProctorWarning = useCallback(
+    async (warningId: string) => {
+      const currentAttempt = attemptRef.current;
+      if (!currentAttempt || currentAttempt.lastAcknowledgedWarningId === warningId) {
+        return;
+      }
+
+      const nextAttempt = mergeAttempt(currentAttempt, {
+        lastAcknowledgedWarningId: warningId,
+        proctorStatus:
+          currentAttempt.proctorStatus === 'warned' ? 'active' : currentAttempt.proctorStatus,
+        proctorUpdatedAt: new Date().toISOString(),
+        proctorUpdatedBy: 'Candidate',
+      });
+
+      if (!persistenceEnabled) {
+        syncAttemptState(nextAttempt);
+        return;
+      }
+
       await studentAttemptRepository.saveAttempt(nextAttempt);
       syncAttemptState(nextAttempt);
-    } catch (error) {
-      syncAttemptState(
-        mergeAttempt(currentAttempt, {
-          recovery: {
-            syncState: 'error',
-          },
-        }),
-      );
-      throw error instanceof Error ? error : new Error('Failed to save system check.');
-    }
-
-    await saveStudentAuditEvent(resolvedScheduleId, 'PRECHECK_COMPLETED', {
-      completedAt: result.completedAt,
-      checks: result.checks,
-      acknowledgedSafariLimitation: result.acknowledgedSafariLimitation,
-    });
-
-    if (result.acknowledgedSafariLimitation) {
-      await saveStudentAuditEvent(resolvedScheduleId, 'PRECHECK_WARNING_ACKNOWLEDGED', {
-        completedAt: result.completedAt,
-      });
-    }
-  }, [applyPatch, persistenceEnabled, scheduleId, syncAttemptState]);
-
-  const recordNetworkStatus = useCallback(async (
-    status: 'offline' | 'online',
-    timestamp = new Date().toISOString(),
-  ) => {
-    await applyPatch(
-      {
-        integrity:
-          status === 'offline'
-            ? {
-                lastDisconnectAt: timestamp,
-              }
-            : {
-                lastReconnectAt: timestamp,
-              },
-        recovery: {
-          syncState: status === 'offline' ? 'offline' : 'syncing_reconnect',
+      await saveStudentAuditEvent(
+        scheduleId,
+        'ALERT_ACKNOWLEDGED',
+        {
+          warningId,
         },
-      },
-      'network',
-      0,
-      {
-        status,
-        timestamp,
-      },
-    );
-  }, [applyPatch]);
+        currentAttempt.id
+      );
+    },
+    [persistenceEnabled, scheduleId, syncAttemptState]
+  );
 
-  const recordHeartbeat = useCallback(async (
-    type: HeartbeatEventType,
-    payload?: Record<string, unknown>,
-  ) => {
-    if (!persistenceEnabled) {
-      return;
-    }
-
-    const currentAttempt = attemptRef.current;
-    if (!currentAttempt) {
-      return;
-    }
-
-    const heartbeatEvent = buildStudentHeartbeatEvent(
-      currentAttempt.id,
-      currentAttempt.scheduleId,
-      type,
-      payload,
-    );
-    await studentAttemptRepository.saveHeartbeatEvent(heartbeatEvent);
-  }, [persistenceEnabled]);
-
-  const acknowledgeProctorWarning = useCallback(async (warningId: string) => {
-    const currentAttempt = attemptRef.current;
-    if (!currentAttempt || currentAttempt.lastAcknowledgedWarningId === warningId) {
-      return;
-    }
-
-    const nextAttempt = mergeAttempt(currentAttempt, {
-      lastAcknowledgedWarningId: warningId,
-      proctorStatus:
-        currentAttempt.proctorStatus === 'warned' ? 'active' : currentAttempt.proctorStatus,
-      proctorUpdatedAt: new Date().toISOString(),
-      proctorUpdatedBy: 'Candidate',
-    });
-
-    if (!persistenceEnabled) {
-      syncAttemptState(nextAttempt);
-      return;
-    }
-
-    await studentAttemptRepository.saveAttempt(nextAttempt);
-    syncAttemptState(nextAttempt);
-    await saveStudentAuditEvent(
-      scheduleId,
-      'ALERT_ACKNOWLEDGED',
-      {
-        warningId,
-      },
-      currentAttempt.id,
-    );
-  }, [persistenceEnabled, scheduleId, syncAttemptState]);
-
-  const scheduleBackgroundSubmitRetry = useCallback((seedAttempt: StudentAttempt) => {
-    if (!persistenceEnabled) {
-      return;
-    }
-
-    if (backgroundSubmitInFlightRef.current) {
-      return;
-    }
-
-    const retryWindowMs = 60 * 60 * 1000;
-    const startedAtMs = Date.now();
-
-    const promise = (async () => {
-      let retryDelayMs = 5_000;
-
-      while (Date.now() - startedAtMs <= retryWindowMs) {
-        if (!navigator.onLine) {
-          await new Promise<void>((resolve) => {
-            window.setTimeout(resolve, retryDelayMs);
-          });
-          retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
-          continue;
-        }
-
-        const candidateAttempt = attemptRef.current ?? seedAttempt;
-        try {
-          const submittedAttempt = await studentAttemptRepository.submitAttempt(candidateAttempt);
-          syncAttemptState(submittedAttempt);
-          void queryClient.invalidateQueries();
-          return;
-        } catch {
-          await new Promise<void>((resolve) => {
-            window.setTimeout(resolve, retryDelayMs);
-          });
-          retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
-        }
+  const scheduleBackgroundSubmitRetry = useCallback(
+    (seedAttempt: StudentAttempt) => {
+      if (!persistenceEnabled) {
+        return;
       }
-    })();
 
-    backgroundSubmitInFlightRef.current = promise;
-    void promise.finally(() => {
-      if (backgroundSubmitInFlightRef.current === promise) {
-        backgroundSubmitInFlightRef.current = null;
+      if (backgroundSubmitInFlightRef.current) {
+        return;
       }
-    });
-  }, [persistenceEnabled, syncAttemptState]);
+
+      const retryWindowMs = 60 * 60 * 1000;
+      const startedAtMs = Date.now();
+
+      const promise = (async () => {
+        let retryDelayMs = 5_000;
+
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, retryDelayMs);
+        });
+
+        while (Date.now() - startedAtMs <= retryWindowMs) {
+          if (!navigator.onLine) {
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, retryDelayMs);
+            });
+            retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
+            continue;
+          }
+
+          const candidateAttempt = attemptRef.current ?? seedAttempt;
+          try {
+            const submittedAttempt = await studentAttemptRepository.submitAttempt(candidateAttempt);
+            syncAttemptState(mergeAttempt(submittedAttempt, {
+              recovery: {
+                finalSubmissionPending: false,
+              },
+            }));
+            void queryClient.invalidateQueries();
+            return;
+          } catch {
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, retryDelayMs);
+            });
+            retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
+          }
+        }
+      })();
+
+      backgroundSubmitInFlightRef.current = promise;
+      void promise.finally(() => {
+        if (backgroundSubmitInFlightRef.current === promise) {
+          backgroundSubmitInFlightRef.current = null;
+        }
+      });
+    },
+    [persistenceEnabled, syncAttemptState]
+  );
 
   const submitAttempt = useCallback(async (): Promise<boolean> => {
     const currentAttempt = attemptRef.current;
@@ -1312,6 +1363,7 @@ export function StudentAttemptProvider({
 
     const latestAttempt = attemptRef.current ?? currentAttempt;
     if (!persistenceEnabled) {
+      // Preview mode intentionally completes locally; production submissions must use the server receipt path below.
       const submittedAttempt = mergeAttempt(latestAttempt, {
         phase: 'post-exam',
         submittedAt: new Date().toISOString(),
@@ -1327,21 +1379,25 @@ export function StudentAttemptProvider({
 
     try {
       const submittedAttempt = await studentAttemptRepository.submitAttempt(latestAttempt);
-      runtimeActions.setPhase('post-exam');
-      syncAttemptState(submittedAttempt);
-      void queryClient.invalidateQueries();
-      return true;
-    } catch {
-      const optimisticSubmittedAttempt = mergeAttempt(latestAttempt, {
-        phase: 'post-exam',
-        submittedAt: latestAttempt.submittedAt ?? new Date().toISOString(),
+      const confirmedAttempt = mergeAttempt(submittedAttempt, {
         recovery: {
-          syncState: 'syncing_reconnect',
+          finalSubmissionPending: false,
         },
       });
       runtimeActions.setPhase('post-exam');
-      syncAttemptState(optimisticSubmittedAttempt);
-      scheduleBackgroundSubmitRetry(optimisticSubmittedAttempt);
+      syncAttemptState(confirmedAttempt);
+      void queryClient.invalidateQueries();
+      return true;
+    } catch {
+      const pendingAttempt = mergeAttempt(latestAttempt, {
+        recovery: {
+          finalSubmissionPending: true,
+          syncState: 'syncing_reconnect',
+        },
+      });
+      syncAttemptState(pendingAttempt);
+      scheduleBackgroundSubmitRetry(pendingAttempt);
+      return false;
     }
 
     return true;
@@ -1354,20 +1410,23 @@ export function StudentAttemptProvider({
     flushAnswerDurableMirrorNow('dom_rescue_commit');
   }, [flushAnswerDurableMirrorNow, persistenceEnabled]);
 
-  const setDeviceFingerprintHash = useCallback(async (hash: string) => {
-    await applyPatch(
-      {
-        integrity: {
-          deviceFingerprintHash: hash,
+  const setDeviceFingerprintHash = useCallback(
+    async (hash: string) => {
+      await applyPatch(
+        {
+          integrity: {
+            deviceFingerprintHash: hash,
+          },
         },
-      },
-      'device_fingerprint',
-      0,
-      {
-        hash,
-      },
-    );
-  }, [applyPatch]);
+        'device_fingerprint',
+        0,
+        {
+          hash,
+        }
+      );
+    },
+    [applyPatch]
+  );
 
   const flushHeartbeatEvents = useCallback(async () => {
     if (!persistenceEnabled) {
@@ -1404,50 +1463,53 @@ export function StudentAttemptProvider({
     await studentAttemptRepository.saveAttempt(nextAttempt).catch(() => {});
   }, [persistenceEnabled, syncAttemptState]);
 
-  const value = useMemo<StudentAttemptContextValue>(() => ({
-    state: {
-      attempt,
-      attemptId: attempt?.id ?? null,
-      lastLocalMutationAt: attempt?.recovery.lastLocalMutationAt ?? null,
-      lastPersistedAt: attempt?.recovery.lastPersistedAt ?? null,
-      pendingMutationCount,
-    },
-    actions: {
-      persistAnswer,
-      persistWritingAnswer,
-      persistFlag,
-      persistViolation,
-      persistPosition,
-      recordPreCheckResult,
-      recordNetworkStatus,
-      recordHeartbeat,
+  const value = useMemo<StudentAttemptContextValue>(
+    () => ({
+      state: {
+        attempt,
+        attemptId: attempt?.id ?? null,
+        lastLocalMutationAt: attempt?.recovery.lastLocalMutationAt ?? null,
+        lastPersistedAt: attempt?.recovery.lastPersistedAt ?? null,
+        pendingMutationCount,
+      },
+      actions: {
+        persistAnswer,
+        persistWritingAnswer,
+        persistFlag,
+        persistViolation,
+        persistPosition,
+        recordPreCheckResult,
+        recordNetworkStatus,
+        recordHeartbeat,
+        acknowledgeProctorWarning,
+        submitAttempt,
+        setDeviceFingerprintHash,
+        flushPending,
+        flushAnswerDurabilityNow,
+        flushHeartbeatEvents,
+        dismissDroppedMutationsBanner,
+      },
+    }),
+    [
       acknowledgeProctorWarning,
+      attempt,
+      flushPending,
+      pendingMutationCount,
+      persistAnswer,
+      persistFlag,
+      persistPosition,
+      persistViolation,
+      persistWritingAnswer,
+      recordHeartbeat,
+      recordNetworkStatus,
+      recordPreCheckResult,
       submitAttempt,
       setDeviceFingerprintHash,
-      flushPending,
-      flushAnswerDurabilityNow,
       flushHeartbeatEvents,
+      flushAnswerDurabilityNow,
       dismissDroppedMutationsBanner,
-    },
-  }), [
-    acknowledgeProctorWarning,
-    attempt,
-    flushPending,
-    pendingMutationCount,
-    persistAnswer,
-    persistFlag,
-    persistPosition,
-    persistViolation,
-    persistWritingAnswer,
-    recordHeartbeat,
-    recordNetworkStatus,
-    recordPreCheckResult,
-    submitAttempt,
-    setDeviceFingerprintHash,
-    flushHeartbeatEvents,
-    flushAnswerDurabilityNow,
-    dismissDroppedMutationsBanner,
-  ]);
+    ]
+  );
 
   const controlValue = useMemo<StudentAttemptControlContextValue>(
     () => ({
@@ -1455,14 +1517,12 @@ export function StudentAttemptProvider({
       getAttemptId: () => controlAttemptIdRef.current,
       flushAnswerDurabilityNow,
     }),
-    [flushAnswerDurabilityNow],
+    [flushAnswerDurabilityNow]
   );
 
   return (
     <StudentAttemptControlContext.Provider value={controlValue}>
-      <StudentAttemptContext.Provider value={value}>
-        {children}
-      </StudentAttemptContext.Provider>
+      <StudentAttemptContext.Provider value={value}>{children}</StudentAttemptContext.Provider>
     </StudentAttemptControlContext.Provider>
   );
 }

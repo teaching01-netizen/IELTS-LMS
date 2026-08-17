@@ -1,14 +1,13 @@
-export const EXAM_VIEWPORT_CONTENT =
-  'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
-
-const SAFARI_GESTURE_EVENTS = ['gesturestart', 'gesturechange', 'gestureend'] as const;
+export const EXAM_VIEWPORT_CONTENT = "width=device-width, initial-scale=1, viewport-fit=cover";
 
 /**
- * Guards native page zoom during the exam lifecycle only.
+ * Manages the exam viewport meta without disabling native browser/pinch zoom.
  *
- * This guard owns the locked viewport meta and Safari gesture/multi-touch
- * prevention. Viewport *height* is owned by `useStudentExamViewport` (which
- * publishes `--student-exam-height` on the shell) and the document page lock
+ * This is intentionally a *no-op* for zoom: it must NOT emit `maximum-scale`
+ * or `user-scalable=no`, and it must NOT prevent multi-touch, gesture, or
+ * pinch events. Native page zoom is preserved for accessibility. Viewport
+ * *height* is owned by `useStudentExamViewport` (which publishes
+ * `--student-exam-height` on the shell) and the document page lock
  * (`html/body.student-exam-active`) is owned by `useStudentExamPageLock`.
  */
 export function installExamPageZoomGuard(targetDocument: Document): () => void {
@@ -16,35 +15,13 @@ export function installExamPageZoomGuard(targetDocument: Document): () => void {
   const createdViewport = viewport === null;
 
   if (!viewport) {
-    viewport = targetDocument.createElement('meta');
-    viewport.name = 'viewport';
+    viewport = targetDocument.createElement("meta");
+    viewport.name = "viewport";
     targetDocument.head.appendChild(viewport);
   }
 
-  const originalContent = viewport.getAttribute('content');
-  viewport.setAttribute('content', EXAM_VIEWPORT_CONTENT);
-
-  const preventGesture = (event: Event) => {
-    event.preventDefault();
-  };
-
-  const preventMultiTouchMove = (event: Event) => {
-    const touchEvent = event as TouchEvent;
-    if (touchEvent.touches.length >= 2) {
-      event.preventDefault();
-    }
-  };
-
-  targetDocument.addEventListener('touchmove', preventMultiTouchMove, {
-    capture: true,
-    passive: false,
-  });
-  for (const eventName of SAFARI_GESTURE_EVENTS) {
-    targetDocument.addEventListener(eventName, preventGesture, {
-      capture: true,
-      passive: false,
-    });
-  }
+  const originalContent = viewport.getAttribute("content");
+  viewport.setAttribute("content", EXAM_VIEWPORT_CONTENT);
 
   let cleanedUp = false;
   return () => {
@@ -53,17 +30,12 @@ export function installExamPageZoomGuard(targetDocument: Document): () => void {
     }
     cleanedUp = true;
 
-    targetDocument.removeEventListener('touchmove', preventMultiTouchMove, true);
-    for (const eventName of SAFARI_GESTURE_EVENTS) {
-      targetDocument.removeEventListener(eventName, preventGesture, true);
-    }
-
     if (createdViewport) {
       viewport.remove();
     } else if (originalContent === null) {
-      viewport.removeAttribute('content');
+      viewport.removeAttribute("content");
     } else {
-      viewport.setAttribute('content', originalContent);
+      viewport.setAttribute("content", originalContent);
     }
   };
 }

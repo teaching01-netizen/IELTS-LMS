@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { countAnsweredQuestions, countQuestionSlots } from '@student/application/studentExamContentFacade';
+import {
+  countAnsweredQuestions,
+  countQuestionSlots,
+} from '@student/application/studentExamContentFacade';
 import { Button } from '../ui/Button';
 import { AccessibilitySettings } from './AccessibilitySettings';
 import { StudentExamPhaseRenderer } from './StudentExamPhaseRenderer';
@@ -32,19 +35,23 @@ import { useKeyboardSubmitHandler } from './providers/StudentKeyboardProvider';
 import { useExamCommands } from '@student/hooks/exam-session/useExamCommands';
 import { useStudentExamSessionStore } from '@student/hooks/exam-session/StudentExamSessionProvider';
 import { createStudentSubmissionCommands } from '@student/application/exam-session/submissionCommands';
-import { isRuntimeStructurallyCompleted, isVerifiedTerminalStudentState } from './providers/verifiedTerminalState';
+import {
+  isRuntimeStructurallyCompleted,
+  isVerifiedTerminalStudentState,
+} from './providers/verifiedTerminalState';
 import { resolveObjectiveAnswerUpdate } from './resolveObjectiveAnswerUpdate';
 import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
 import { emitAnswerMutationDebugLog } from './answerMutationDebug';
 import { isStudentHighlightToolContextActive } from './studentHighlightToolContext';
-import { installExamPageZoomGuard } from './examPageZoomGuard';
 import type { StudentAnswerMutationMeta, StudentAnswerValue } from '../../types/studentAttempt';
 
-import { StudentExamHeaderClock } from "./StudentExamHeaderClock";
-import { StudentExamClockEffects } from "./StudentExamClockEffects";
-import { StudentExamTimeRemaining } from "./StudentExamTimeRemaining";
+import { StudentExamHeaderClock } from './StudentExamHeaderClock';
+import { StudentExamClockEffects } from './StudentExamClockEffects';
+import { StudentExamTimeRemaining } from './StudentExamTimeRemaining';
 
-function getBlockingCopy(reason: ReturnType<typeof useStudentRuntime>['state']['blocking']['reason']) {
+function getBlockingCopy(
+  reason: ReturnType<typeof useStudentRuntime>['state']['blocking']['reason']
+) {
   switch (reason) {
     case 'cohort_paused':
       return {
@@ -71,7 +78,8 @@ function getBlockingCopy(reason: ReturnType<typeof useStudentRuntime>['state']['
     case 'waiting_for_advance':
       return {
         title: 'Waiting for cohort advance',
-        message: 'The proctor is preparing the next section. Please wait for the cohort to advance.',
+        message:
+          'The proctor is preparing the next section. Please wait for the cohort to advance.',
         badge: 'Waiting',
         contextLabel: 'Cohort Runtime',
       };
@@ -142,7 +150,7 @@ export function StudentApp({
     state: runtimeState,
     actions: runtimeActions,
     examState: examState,
-    onExit: onExit
+    onExit: onExit,
   } = useStudentRuntimeSession();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
   const examSessionCommands = useExamCommands();
@@ -157,18 +165,18 @@ export function StudentApp({
   const autoSaveStatus =
     runtimeState.attemptSyncState === 'syncing_reconnect'
       ? 'syncing'
-      : runtimeState.attemptSyncState === 'error' || runtimeState.attemptSyncState === 'idle'
+      : runtimeState.attemptSyncState === 'idle'
         ? null
         : runtimeState.attemptSyncState;
   const canIncreasePassageReadability = canIncreaseStudentPassageReadability(
-    uiState.accessibilitySettings.passageReadabilityLevel,
+    uiState.accessibilitySettings.passageReadabilityLevel
   );
   const canDecreasePassageReadability = canDecreaseStudentPassageReadability(
-    uiState.accessibilitySettings.passageReadabilityLevel,
+    uiState.accessibilitySettings.passageReadabilityLevel
   );
   const studentTypography = useMemo(
     () => getStudentTypographyScale(uiState.accessibilitySettings.fontSize),
-    [uiState.accessibilitySettings.fontSize],
+    [uiState.accessibilitySettings.fontSize]
   );
   useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
@@ -178,29 +186,36 @@ export function StudentApp({
   const timeExtensionDialogRef = useRef<HTMLDialogElement>(null);
   const highlightColor = uiState.accessibilitySettings.highlightColor;
   const highlightEnabled = true;
-  const attemptAnswers = useMemo(() => attemptState.attempt?.answers ?? {}, [attemptState.attempt?.answers]);
+  const attemptAnswers = useMemo(
+    () => attemptState.attempt?.answers ?? {},
+    [attemptState.attempt?.answers]
+  );
   const attemptWritingAnswers = useMemo(
     () => attemptState.attempt?.writingAnswers ?? {},
-    [attemptState.attempt?.writingAnswers],
+    [attemptState.attempt?.writingAnswers]
   );
-  const attemptFlags = useMemo(() => attemptState.attempt?.flags ?? {}, [attemptState.attempt?.flags]);
+  const attemptFlags = useMemo(
+    () => attemptState.attempt?.flags ?? {},
+    [attemptState.attempt?.flags]
+  );
   const studentShellStyle = useMemo(
-    () => ({
-      zoom: tabletMode ? 1 : uiState.accessibilitySettings.zoom,
-      fontSize: studentTypography.rootFontSize,
-      lineHeight: studentTypography.lineHeight,
-      ['--student-meta-font-size' as string]: studentTypography.metaFontSize,
-      ['--student-chip-font-size' as string]: studentTypography.chipFontSize,
-      ['--student-control-font-size' as string]: studentTypography.controlFontSize,
-      ['--student-preview-font-size' as string]: studentTypography.previewFontSize,
-      ['--student-passage-font-size' as string]: studentTypography.passageFontSize,
-      ['--student-passage-title-font-size' as string]: studentTypography.passageTitleFontSize,
-      ['--student-passage-h1-font-size' as string]: studentTypography.passageH1FontSize,
-      ['--student-passage-h2-font-size' as string]: studentTypography.passageH2FontSize,
-      ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
-      ['--student-passage-line-height' as string]: studentTypography.passageLineHeight
-    }) as React.CSSProperties,
-    [studentTypography, tabletMode, uiState.accessibilitySettings.zoom],
+    () =>
+      ({
+        zoom: tabletMode ? 1 : uiState.accessibilitySettings.zoom,
+        fontSize: studentTypography.rootFontSize,
+        lineHeight: studentTypography.lineHeight,
+        ['--student-meta-font-size' as string]: studentTypography.metaFontSize,
+        ['--student-chip-font-size' as string]: studentTypography.chipFontSize,
+        ['--student-control-font-size' as string]: studentTypography.controlFontSize,
+        ['--student-preview-font-size' as string]: studentTypography.previewFontSize,
+        ['--student-passage-font-size' as string]: studentTypography.passageFontSize,
+        ['--student-passage-title-font-size' as string]: studentTypography.passageTitleFontSize,
+        ['--student-passage-h1-font-size' as string]: studentTypography.passageH1FontSize,
+        ['--student-passage-h2-font-size' as string]: studentTypography.passageH2FontSize,
+        ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
+        ['--student-passage-line-height' as string]: studentTypography.passageLineHeight,
+      }) as React.CSSProperties,
+    [studentTypography, tabletMode, uiState.accessibilitySettings.zoom]
   );
   const runtimeStateRef = useRef(runtimeState);
   const runtimeActionsRef = useRef(runtimeActions);
@@ -214,9 +229,7 @@ export function StudentApp({
   const writingDraftCommitRef = useRef<(() => void) | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
-  const [warningSeverity, setWarningSeverity] = useState<'medium' | 'high' | 'critical'>(
-    'medium',
-  );
+  const [warningSeverity, setWarningSeverity] = useState<'medium' | 'high' | 'critical'>('medium');
 
   useLayoutEffect(() => {
     runtimeStateRef.current = runtimeState;
@@ -232,8 +245,9 @@ export function StudentApp({
   }, []);
   const latestPendingWarning = useMemo(() => {
     const warnings =
-      attemptState.attempt?.violations.filter((violation) => violation.type === 'PROCTOR_WARNING') ??
-      [];
+      attemptState.attempt?.violations.filter(
+        (violation) => violation.type === 'PROCTOR_WARNING'
+      ) ?? [];
     const latestWarning = warnings[warnings.length - 1];
     if (!latestWarning) {
       return null;
@@ -252,7 +266,7 @@ export function StudentApp({
         attempt: attemptState.attempt,
         runtimeSnapshot: runtimeState.runtimeSnapshot,
       }),
-    [attemptState.attempt, runtimeState.runtimeSnapshot],
+    [attemptState.attempt, runtimeState.runtimeSnapshot]
   );
   const shouldRenderPostExam =
     verifiedTerminalState !== 'not_terminal' ||
@@ -260,17 +274,15 @@ export function StudentApp({
   const effectivePhase =
     runtimeState.phase === 'post-exam' && !shouldRenderPostExam ? 'exam' : runtimeState.phase;
   const runtimeCompletionVerified = isRuntimeStructurallyCompleted(runtimeState.runtimeSnapshot);
+  const runtimeSubmissionPending =
+    runtimeState.runtimeBacked &&
+    runtimeState.runtimeStatus === 'completed' &&
+    runtimeCompletionVerified &&
+    verifiedTerminalState === 'not_terminal';
   const examViewportActive = effectivePhase === 'exam';
   const examViewport = useStudentExamViewport(examViewportActive);
   useStudentExamPageLock(examViewportActive);
   useStudentFocusedControlVisibility(examViewportActive && examViewport.keyboardOpen);
-
-  useEffect(() => {
-    if (!examViewportActive) {
-      return;
-    }
-    return installExamPageZoomGuard(document);
-  }, [examViewportActive]);
 
   useEffect(() => {
     latestAnswersRef.current = attemptAnswers;
@@ -300,39 +312,33 @@ export function StudentApp({
           submit: attemptActions.submitAttempt,
         },
       }),
-    [
-      attemptActions,
-      commitWritingDraft,
-      examSessionStore,
-      reconcileLiveAnswerCacheNow,
-    ],
+    [attemptActions, commitWritingDraft, examSessionStore, reconcileLiveAnswerCacheNow]
   );
 
-  const {
-    finalSubmitStatus,
-    flushAndSubmitCurrentModuleWithRetry,
-  } = useStudentSubmissionOrchestration({
-    runtimeState: {
-      runtimeBacked: runtimeState.runtimeBacked,
-      runtimeStatus: runtimeState.runtimeStatus,
-      currentModule: runtimeState.currentModule,
-    },
-    runtimeStateRef,
-    attemptId: attemptState.attemptId,
-    runtimeCompletionVerified,
-    shouldRenderPostExam,
-    reconcileLiveAnswerCacheNow,
-    commitWritingDraft,
-    attemptActions: {
-      flushPending: attemptActions.flushPending,
-      submitAttempt: attemptActions.submitAttempt,
-    },
-    runtimeActions: {
-      transitionBlocking: runtimeActions.transitionBlocking,
-      submitModule: runtimeActions.submitModule,
-    },
-    submissionCommands,
-  });
+  const { finalSubmitStatus, flushAndSubmitCurrentModuleWithRetry } =
+    useStudentSubmissionOrchestration({
+      runtimeState: {
+        runtimeBacked: runtimeState.runtimeBacked,
+        runtimeStatus: runtimeState.runtimeStatus,
+        currentModule: runtimeState.currentModule,
+      },
+      runtimeStateRef,
+      attemptId: attemptState.attemptId,
+      finalSubmissionPending: attemptState.attempt?.recovery.finalSubmissionPending ?? false,
+      runtimeCompletionVerified,
+      shouldRenderPostExam: shouldRenderPostExam && !runtimeSubmissionPending,
+      reconcileLiveAnswerCacheNow,
+      commitWritingDraft,
+      attemptActions: {
+        flushPending: attemptActions.flushPending,
+        submitAttempt: attemptActions.submitAttempt,
+      },
+      runtimeActions: {
+        transitionBlocking: runtimeActions.transitionBlocking,
+        submitModule: runtimeActions.submitModule,
+      },
+      submissionCommands,
+    });
   const flushAndSubmitCurrentModuleWithRetryRef = useRef(flushAndSubmitCurrentModuleWithRetry);
   useLayoutEffect(() => {
     flushAndSubmitCurrentModuleWithRetryRef.current = flushAndSubmitCurrentModuleWithRetry;
@@ -368,7 +374,7 @@ export function StudentApp({
 
     setWarningMessage(latestPendingWarning.description);
     setWarningSeverity(
-      latestPendingWarning.severity === 'low' ? 'medium' : latestPendingWarning.severity,
+      latestPendingWarning.severity === 'low' ? 'medium' : latestPendingWarning.severity
     );
     setWarningOpen(true);
   }, [latestPendingWarning]);
@@ -424,7 +430,8 @@ export function StudentApp({
 
   const answeredCount = countAnsweredQuestions(runtimeState.allQuestions, attemptAnswers);
   const totalQuestions = countQuestionSlots(runtimeState.allQuestions);
-  const unansweredSubmissionPolicy = examState.config.progression.unansweredSubmissionPolicy ?? 'confirm';
+  const unansweredSubmissionPolicy =
+    examState.config.progression.unansweredSubmissionPolicy ?? 'confirm';
   const submitRequiresConfirmation =
     effectivePhase === 'exam' &&
     (runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening') &&
@@ -445,10 +452,10 @@ export function StudentApp({
     runtimeActionsRef.current.submitModule();
   }, [reconcileLiveAnswerCacheNow]);
 
-  useEffect(() => registerSubmitHandler(performModuleSubmit), [
-    performModuleSubmit,
-    registerSubmitHandler,
-  ]);
+  useEffect(
+    () => registerSubmitHandler(performModuleSubmit),
+    [performModuleSubmit, registerSubmitHandler]
+  );
 
   const handleModuleSubmit = useCallback(async () => {
     if (submitRequiresConfirmation) {
@@ -464,35 +471,34 @@ export function StudentApp({
     await performModuleSubmit();
   }, [performModuleSubmit]);
 
-  const handleAnswerChange = useCallback((
-    questionId: string,
-    answer: StudentAnswerValue,
-    meta?: StudentAnswerMutationMeta,
-  ) => {
-    if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
-      return;
-    }
-    const currentValue = latestAnswersRef.current[questionId];
-    const resolvedAnswer = resolveObjectiveAnswerUpdate(currentValue, answer, meta);
-    emitAnswerMutationDebugLog('StudentApp.handleAnswerChange', {
-      questionId,
-      incomingAnswer: answer,
-      currentValue,
-      resolvedAnswer,
-      mutationMeta: meta ?? null,
-    });
+  const handleAnswerChange = useCallback(
+    (questionId: string, answer: StudentAnswerValue, meta?: StudentAnswerMutationMeta) => {
+      if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
+        return;
+      }
+      const currentValue = latestAnswersRef.current[questionId];
+      const resolvedAnswer = resolveObjectiveAnswerUpdate(currentValue, answer, meta);
+      emitAnswerMutationDebugLog('StudentApp.handleAnswerChange', {
+        questionId,
+        incomingAnswer: answer,
+        currentValue,
+        resolvedAnswer,
+        mutationMeta: meta ?? null,
+      });
 
-    latestAnswersRef.current = {
-      ...latestAnswersRef.current,
-      [questionId]: resolvedAnswer,
-    };
-    liveObjectiveAnswersRef.current = {
-      ...liveObjectiveAnswersRef.current,
-      [questionId]: resolvedAnswer,
-    };
-    examSessionCommandsRef.current.setObjectiveAnswer(questionId, resolvedAnswer, meta);
-    attemptActionsRef.current.persistAnswer(questionId, resolvedAnswer, meta);
-  }, []);
+      latestAnswersRef.current = {
+        ...latestAnswersRef.current,
+        [questionId]: resolvedAnswer,
+      };
+      liveObjectiveAnswersRef.current = {
+        ...liveObjectiveAnswersRef.current,
+        [questionId]: resolvedAnswer,
+      };
+      examSessionCommandsRef.current.setObjectiveAnswer(questionId, resolvedAnswer, meta);
+      attemptActionsRef.current.persistAnswer(questionId, resolvedAnswer, meta);
+    },
+    []
+  );
 
   const handleFlagToggle = useCallback((questionId: string) => {
     if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
@@ -510,7 +516,7 @@ export function StudentApp({
         [questionId]: value,
       };
     },
-    [],
+    []
   );
 
   const registerLiveWritingAnswer = useCallback((taskId: string, text: string) => {
@@ -582,7 +588,6 @@ export function StudentApp({
     runtimeState.runtimeBacked &&
     runtimeState.runtimeStatus === 'completed' &&
     runtimeCompletionVerified &&
-    !shouldRenderPostExam &&
     finalSubmitStatus !== 'idle' ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
         <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8 text-center">
@@ -634,7 +639,15 @@ export function StudentApp({
       style={studentShellStyle}
       keyboardOpen={examViewportActive ? examViewport.keyboardOpen : false}
       examHeight={examViewportActive ? examViewport.stableExamHeight : null}
-    >{<StudentExamClockEffects effectivePhase={effectivePhase} autoSubmitEnabled={examState.config.progression.autoSubmit} config={examState.config} flushAndSubmitCurrentModuleWithRetry={flushAndSubmitCurrentModuleWithRetry} />}
+    >
+      {
+        <StudentExamClockEffects
+          effectivePhase={effectivePhase}
+          autoSubmitEnabled={examState.config.progression.autoSubmit}
+          config={examState.config}
+          flushAndSubmitCurrentModuleWithRetry={flushAndSubmitCurrentModuleWithRetry}
+        />
+      }
       <style>{`
         input:-webkit-autofill,
         input:-webkit-autofill:hover,
@@ -665,11 +678,14 @@ export function StudentApp({
           onSelectHighlightColor={uiActions.setHighlightColor}
           onSelectEraseMode={uiActions.toggleEraseMode}
           onOpenAccessibility={openAccessibility}
-          onOpenNavigator={showNavigatorForModule ? openNavigator : undefined} />
+          onOpenNavigator={showNavigatorForModule ? openNavigator : undefined}
+        />
       ) : (
         <StudentExamHeaderClock
           compact={false}
-          moduleLabel={runtimeState.currentModule.charAt(0).toUpperCase() + runtimeState.currentModule.slice(1)}
+          moduleLabel={
+            runtimeState.currentModule.charAt(0).toUpperCase() + runtimeState.currentModule.slice(1)
+          }
           testTakerId={attemptState.attempt?.candidateId ?? undefined}
           autoSaveStatus={autoSaveStatus}
           highlightEnabled={highlightEnabled}
@@ -681,7 +697,8 @@ export function StudentApp({
           tabletMode={tabletMode}
           onOpenAccessibility={openAccessibility}
           onOpenNavigator={showNavigatorForModule ? openNavigator : undefined}
-          isExamActive={effectivePhase === 'exam'} />
+          isExamActive={effectivePhase === 'exam'}
+        />
       )}
       <StudentExamViewport>
         <StudentHighlightSelectionManagerProvider>
@@ -695,7 +712,7 @@ export function StudentApp({
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
             passageReadabilityLabel={getStudentPassageReadabilityLabel(
-              uiState.accessibilitySettings.passageReadabilityLevel,
+              uiState.accessibilitySettings.passageReadabilityLevel
             )}
             canIncreasePassageReadability={canIncreasePassageReadability}
             canDecreasePassageReadability={canDecreasePassageReadability}
@@ -796,7 +813,8 @@ export function StudentApp({
         answeredCount={answeredCount}
         totalQuestions={totalQuestions}
         flaggedCount={Object.values(attemptFlags).filter(Boolean).length}
-        unansweredSubmissionPolicy={unansweredSubmissionPolicy} />
+        unansweredSubmissionPolicy={unansweredSubmissionPolicy}
+      />
       <dialog
         ref={timeExtensionDialogRef}
         onClose={() => uiActions.setShowTimeExtensionRequest(false)}
@@ -807,8 +825,8 @@ export function StudentApp({
           Request Time Extension
         </h2>
         <p className="text-sm text-gray-700 leading-6 mb-4">
-          You have 5 minutes remaining. If you need additional time due to accessibility
-          needs, you may request an extension.
+          You have 5 minutes remaining. If you need additional time due to accessibility needs, you
+          may request an extension.
         </p>
         <div className="mb-4">
           <label
@@ -830,10 +848,16 @@ export function StudentApp({
           </span>
         </div>
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="secondary" onClick={() => uiActions.setShowTimeExtensionRequest(false)}>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => uiActions.setShowTimeExtensionRequest(false)}
+          >
             Cancel
           </Button>
-          <Button type="button" onClick={handleTimeExtensionRequest}>Request +5 Minutes</Button>
+          <Button type="button" onClick={handleTimeExtensionRequest}>
+            Request +5 Minutes
+          </Button>
         </div>
       </dialog>
       <AccessibilitySettings

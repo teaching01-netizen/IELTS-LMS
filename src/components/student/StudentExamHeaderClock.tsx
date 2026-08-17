@@ -9,7 +9,7 @@ interface StudentExamHeaderClockProps {
   compact: boolean;
   moduleLabel: string;
   testTakerId?: string | undefined;
-  autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | null | undefined;
+  autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | 'error' | null | undefined;
   highlightEnabled?: boolean | undefined;
   highlightToolMode?: StudentHighlightToolMode | undefined;
   highlightColor?: StudentHighlightColor | undefined;

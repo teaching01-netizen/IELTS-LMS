@@ -95,6 +95,7 @@ function createPreviewAttemptSnapshot(
       lastHeartbeatStatus: 'ok',
     },
     recovery: {
+      finalSubmissionPending: false,
       lastRecoveredAt: null,
       lastLocalMutationAt: null,
       lastPersistedAt: null,

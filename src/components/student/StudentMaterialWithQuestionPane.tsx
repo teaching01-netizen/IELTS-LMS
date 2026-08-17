@@ -1,11 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
-import type { QuestionAnswer, QuestionBlock } from '../../types';
-import type { StudentQuestionDescriptor } from '@student/application/studentExamContentFacade';
-import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
-import type { StudentHighlightColor } from './highlightPalette';
-import type { StudentLayoutMode } from './layout/studentLayoutMode';
-import { StudentQuestionPanel } from './StudentQuestionPanel';
-import { StudentSplitPaneResizer } from './StudentSplitPaneResizer';
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import type { QuestionAnswer, QuestionBlock } from "../../types";
+import type { StudentQuestionDescriptor } from "@student/application/studentExamContentFacade";
+import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
+import type { StudentHighlightColor } from "./highlightPalette";
+import type { StudentLayoutMode } from "./layout/studentLayoutMode";
+import { StudentQuestionPanel } from "./StudentQuestionPanel";
+import { StudentSplitPaneResizer } from "./StudentSplitPaneResizer";
 
 interface StudentMaterialWithQuestionPaneProps {
   isTabletMode: boolean;
@@ -13,8 +13,10 @@ interface StudentMaterialWithQuestionPaneProps {
   workspaceRef: React.RefObject<HTMLDivElement | null>;
   splitPaneStyle: React.CSSProperties | undefined;
   leftWidth: number;
-  onDividerPointerDown: ((event: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => void);
-  onDividerKeyDown: ((event: React.KeyboardEvent<HTMLDivElement>) => void);
+  onDividerPointerDown: (
+    event: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
+  ) => void;
+  onDividerKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
   workspaceTestId: string;
   dividerAriaLabel: string;
   dividerTestId: string;
@@ -26,7 +28,7 @@ interface StudentMaterialWithQuestionPaneProps {
     onAnswerChange: (
       questionId: string,
       answer: QuestionAnswer,
-      meta?: StudentAnswerMutationMeta,
+      meta?: StudentAnswerMutationMeta
     ) => void;
     currentQuestionId: string | null;
     onNavigate: (id: string) => void;
@@ -43,18 +45,20 @@ interface StudentMaterialWithQuestionPaneProps {
     renderBlockInstruction: (instruction: string, blockId: string) => React.ReactNode;
     expandedQuestionGapClassName?: string | undefined;
     hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
+    hideStepper?: boolean | undefined;
+    shouldFocusQuestion?: (() => boolean) | undefined;
   };
 }
 
-type CompactPane = 'material' | 'questions';
+type CompactPane = "material" | "questions";
 
 function findScrollOwner(root: HTMLElement | null): HTMLElement | null {
-  return root?.querySelector<HTMLElement>('[data-student-zoom-scroll]') ?? root;
+  return root?.querySelector<HTMLElement>("[data-student-zoom-scroll]") ?? root;
 }
 
 export function StudentMaterialWithQuestionPane({
   isTabletMode,
-  layoutMode = 'wide',
+  layoutMode = "wide",
   workspaceRef,
   splitPaneStyle,
   leftWidth,
@@ -66,36 +70,40 @@ export function StudentMaterialWithQuestionPane({
   materialPane,
   questionPanel,
 }: StudentMaterialWithQuestionPaneProps) {
-  const isCompact = layoutMode === 'compact';
-  const [activeCompactPane, setActiveCompactPane] = useState<CompactPane>('material');
-  const lastFocusedPaneRef = useRef<CompactPane>('material');
+  const isCompact = layoutMode === "compact";
+  const [activeCompactPane, setActiveCompactPane] = useState<CompactPane>("material");
+  const lastFocusedPaneRef = useRef<CompactPane>("material");
   const previousCompactRef = useRef(isCompact);
+  const previousQuestionIdRef = useRef(questionPanel.currentQuestionId);
   const materialPaneRef = useRef<HTMLDivElement>(null);
   const questionPaneRef = useRef<HTMLDivElement>(null);
   const materialScrollTopRef = useRef(0);
   const questionScrollTopRef = useRef(0);
 
-  const saveCompactScrollPosition = () => {
+  const saveCompactScrollPosition = useCallback(() => {
     const owner = findScrollOwner(
-      activeCompactPane === 'material' ? materialPaneRef.current : questionPaneRef.current,
+      activeCompactPane === "material" ? materialPaneRef.current : questionPaneRef.current
     );
-    if (activeCompactPane === 'material') {
+    if (activeCompactPane === "material") {
       materialScrollTopRef.current = owner?.scrollTop ?? 0;
     } else {
       questionScrollTopRef.current = owner?.scrollTop ?? 0;
     }
-  };
+  }, [activeCompactPane]);
 
-  const selectCompactPane = (nextPane: CompactPane) => {
-    if (nextPane === activeCompactPane) {
+  const selectCompactPane = useCallback(
+    (nextPane: CompactPane) => {
+      if (nextPane === activeCompactPane) {
+        lastFocusedPaneRef.current = nextPane;
+        return;
+      }
+
       lastFocusedPaneRef.current = nextPane;
-      return;
-    }
-
-    lastFocusedPaneRef.current = nextPane;
-    saveCompactScrollPosition();
-    setActiveCompactPane(nextPane);
-  };
+      saveCompactScrollPosition();
+      setActiveCompactPane(nextPane);
+    },
+    [activeCompactPane, saveCompactScrollPosition]
+  );
 
   useEffect(() => {
     if (isCompact && !previousCompactRef.current) {
@@ -106,15 +114,50 @@ export function StudentMaterialWithQuestionPane({
 
   useEffect(() => {
     if (!isCompact) {
+      previousQuestionIdRef.current = questionPanel.currentQuestionId;
+      return;
+    }
+
+    const nextId = questionPanel.currentQuestionId;
+    const previousId = previousQuestionIdRef.current;
+    previousQuestionIdRef.current = nextId;
+
+    if (nextId !== null && previousId !== null && nextId !== previousId) {
+      selectCompactPane("questions");
+    }
+  }, [questionPanel.currentQuestionId, isCompact, selectCompactPane]);
+
+  useEffect(() => {
+    if (!isCompact) {
+      previousQuestionIdRef.current = questionPanel.currentQuestionId;
+      return;
+    }
+
+    const previousId = previousQuestionIdRef.current;
+    if (
+      previousId === null &&
+      questionPanel.currentQuestionId !== null &&
+      previousId !== questionPanel.currentQuestionId
+    ) {
+      previousQuestionIdRef.current = questionPanel.currentQuestionId;
+      return;
+    }
+    previousQuestionIdRef.current = questionPanel.currentQuestionId;
+  }, [questionPanel.currentQuestionId, isCompact]);
+
+  useEffect(() => {
+    if (!isCompact) {
       return;
     }
 
     const owner = findScrollOwner(
-      activeCompactPane === 'material' ? materialPaneRef.current : questionPaneRef.current,
+      activeCompactPane === "material" ? materialPaneRef.current : questionPaneRef.current
     );
     if (owner) {
       owner.scrollTop =
-        activeCompactPane === 'material' ? materialScrollTopRef.current : questionScrollTopRef.current;
+        activeCompactPane === "material"
+          ? materialScrollTopRef.current
+          : questionScrollTopRef.current;
     }
   }, [activeCompactPane, isCompact]);
 
@@ -140,6 +183,8 @@ export function StudentMaterialWithQuestionPane({
       renderBlockInstruction={questionPanel.renderBlockInstruction}
       expandedQuestionGapClassName={questionPanel.expandedQuestionGapClassName}
       hideDiagramReferenceForBlock={questionPanel.hideDiagramReferenceForBlock}
+      hideStepper={questionPanel.hideStepper ?? isCompact}
+      shouldFocusQuestion={questionPanel.shouldFocusQuestion}
     />
   );
 
@@ -155,26 +200,26 @@ export function StudentMaterialWithQuestionPane({
             <button
               type="button"
               className="student-touch-target flex-1 rounded-sm border border-gray-300 px-3 text-sm font-semibold text-gray-900"
-              aria-pressed={activeCompactPane === 'material'}
-              onClick={() => selectCompactPane('material')}
+              aria-pressed={activeCompactPane === "material"}
+              onClick={() => selectCompactPane("material")}
             >
-              Show passage
+              Passage
             </button>
             <button
               type="button"
               className="student-touch-target flex-1 rounded-sm border border-gray-300 px-3 text-sm font-semibold text-gray-900"
-              aria-pressed={activeCompactPane === 'questions'}
-              onClick={() => selectCompactPane('questions')}
+              aria-pressed={activeCompactPane === "questions"}
+              onClick={() => selectCompactPane("questions")}
             >
-              Show questions
+              Questions
             </button>
           </div>
-          {activeCompactPane === 'material' ? (
+          {activeCompactPane === "material" ? (
             <div
               ref={materialPaneRef}
               className="min-h-0 flex-1 overflow-hidden"
               onFocusCapture={() => {
-                lastFocusedPaneRef.current = 'material';
+                lastFocusedPaneRef.current = "material";
               }}
             >
               {materialPane}
@@ -184,7 +229,7 @@ export function StudentMaterialWithQuestionPane({
               ref={questionPaneRef}
               className="min-h-0 flex-1 overflow-hidden"
               onFocusCapture={() => {
-                lastFocusedPaneRef.current = 'questions';
+                lastFocusedPaneRef.current = "questions";
               }}
             >
               {questionPanelElement}
@@ -194,7 +239,7 @@ export function StudentMaterialWithQuestionPane({
       ) : (
         <div
           className={`relative flex flex-1 overflow-hidden border-t border-gray-300 ${
-            isTabletMode ? 'flex-row' : 'flex-col md:flex-row'
+            isTabletMode ? "flex-row" : "flex-col md:flex-row"
           }`}
           ref={workspaceRef}
           style={splitPaneStyle}
@@ -203,7 +248,7 @@ export function StudentMaterialWithQuestionPane({
           <div
             className="contents"
             onFocusCapture={() => {
-              lastFocusedPaneRef.current = 'material';
+              lastFocusedPaneRef.current = "material";
             }}
           >
             {materialPane}
@@ -219,7 +264,7 @@ export function StudentMaterialWithQuestionPane({
           <div
             className="contents"
             onFocusCapture={() => {
-              lastFocusedPaneRef.current = 'questions';
+              lastFocusedPaneRef.current = "questions";
             }}
           >
             {questionPanelElement}

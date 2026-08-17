@@ -22,7 +22,7 @@ import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 interface StudentHeaderProps {
   testTakerId?: string | undefined;
   timeRemaining?: number | undefined;
-  autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | null | undefined;
+  autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | 'error' | null | undefined;
   highlightEnabled?: boolean | undefined;
   highlightToolMode?: StudentHighlightToolMode | undefined;
   highlightColor?: StudentHighlightColor | undefined;
@@ -403,6 +403,11 @@ export function StudentHeader({
               <>
                 <Wifi size={10} className="text-amber-600" />
                 <span className="text-amber-700">Offline</span>
+              </>
+            ) : autoSaveStatus === 'error' ? (
+              <>
+                <RefreshCw size={10} className="text-red-600" />
+                <span className="text-red-700">Not synced — retrying</span>
               </>
             ) : (
               <>

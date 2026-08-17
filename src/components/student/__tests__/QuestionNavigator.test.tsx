@@ -59,7 +59,7 @@ describe('QuestionNavigator', () => {
         currentQuestionId={null}
         onNavigate={() => {}}
         onClose={() => {}}
-      />,
+      />
     );
     expect(screen.getByText('Question Navigator')).toBeInTheDocument();
   });
@@ -73,7 +73,7 @@ describe('QuestionNavigator', () => {
         currentQuestionId={null}
         onNavigate={() => {}}
         onClose={() => {}}
-      />,
+      />
     );
     expect(screen.getByText(/Answered/)).toBeInTheDocument();
     expect(screen.getByText(/Unanswered/)).toBeInTheDocument();
@@ -88,7 +88,7 @@ describe('QuestionNavigator', () => {
         currentQuestionId={null}
         onNavigate={() => {}}
         onClose={() => {}}
-      />,
+      />
     );
     expect(screen.getByText(/Flagged \(2\)/)).toBeInTheDocument();
   });
@@ -102,10 +102,10 @@ describe('QuestionNavigator', () => {
         currentQuestionId={null}
         onNavigate={() => {}}
         onClose={() => {}}
-      />,
+      />
     );
 
-    expect(screen.getByRole('button', { name: '1' })).toHaveClass('bg-amber-100');
+    expect(screen.getByRole('button', { name: /Question 1/ })).toHaveClass('bg-amber-100');
 
     rerender(
       <QuestionNavigator
@@ -115,13 +115,13 @@ describe('QuestionNavigator', () => {
         currentQuestionId={null}
         onNavigate={() => {}}
         onClose={() => {}}
-      />,
+      />
     );
 
-    expect(screen.getByRole('button', { name: '1' })).toHaveClass(
+    expect(screen.getByRole('button', { name: /Question 1/ })).toHaveClass(
       'bg-amber-100',
       'text-amber-800',
-      'border-amber-300',
+      'border-amber-300'
     );
   });
 
@@ -135,7 +135,7 @@ describe('QuestionNavigator', () => {
         currentQuestionId={null}
         onNavigate={() => {}}
         onClose={onClose}
-      />,
+      />
     );
     fireEvent.click(screen.getByLabelText('Close question navigator'));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -172,7 +172,6 @@ describe('QuestionNavigator', () => {
     expect(trigger).toHaveFocus();
   });
 
-
   it('calls onNavigate when a question button is clicked', () => {
     const onNavigate = vi.fn();
     render(
@@ -183,9 +182,9 @@ describe('QuestionNavigator', () => {
         currentQuestionId={null}
         onNavigate={onNavigate}
         onClose={() => {}}
-      />,
+      />
     );
-    fireEvent.click(screen.getByRole('button', { name: '1' }));
+    fireEvent.click(screen.getByRole('button', { name: /Question 1/ }));
     expect(onNavigate).toHaveBeenCalledWith('q1');
   });
 
@@ -198,7 +197,7 @@ describe('QuestionNavigator', () => {
         currentQuestionId={null}
         onNavigate={() => {}}
         onClose={() => {}}
-      />,
+      />
     );
     expect(screen.getByText('Passage 1')).toBeInTheDocument();
     expect(screen.getByText('Passage 2')).toBeInTheDocument();
@@ -213,7 +212,7 @@ describe('QuestionNavigator', () => {
         currentQuestionId={null}
         onNavigate={() => {}}
         onClose={() => {}}
-      />,
+      />
     );
 
     const passageHeading = screen.getByText('Passage 1');
@@ -235,7 +234,7 @@ describe('QuestionNavigator', () => {
         currentQuestionId={null}
         onNavigate={() => {}}
         onClose={() => {}}
-      />,
+      />
     );
     expect(HTMLDialogElement.prototype.showModal).toHaveBeenCalled();
   });

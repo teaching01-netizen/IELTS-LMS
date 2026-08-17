@@ -18,6 +18,7 @@ interface UseStudentSubmissionOrchestrationOptions {
   runtimeState: RuntimeStateSnapshot;
   runtimeStateRef: { current: RuntimeStateRefValue };
   attemptId: string | null;
+  finalSubmissionPending: boolean;
   runtimeCompletionVerified: boolean;
   shouldRenderPostExam: boolean;
   reconcileLiveAnswerCacheNow: () => void;
@@ -62,6 +63,7 @@ export function useStudentSubmissionOrchestration({
   runtimeState,
   runtimeStateRef,
   attemptId,
+  finalSubmissionPending,
   runtimeCompletionVerified,
   shouldRenderPostExam,
   reconcileLiveAnswerCacheNow,
@@ -197,7 +199,7 @@ export function useStudentSubmissionOrchestration({
       return;
     }
 
-    if (shouldRenderPostExam || !attemptId) {
+    if ((!finalSubmissionPending && shouldRenderPostExam) || !attemptId) {
       return;
     }
 
@@ -261,6 +263,7 @@ export function useStudentSubmissionOrchestration({
     cancellationSignal,
     commitWritingDraft,
     reconcileLiveAnswerCacheNow,
+    finalSubmissionPending,
     runtimeCompletionVerified,
     runtimeState.runtimeBacked,
     runtimeState.runtimeStatus,

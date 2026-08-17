@@ -137,6 +137,12 @@ interface BackendStudentAttempt {
   submittedAt?: string | null | undefined;
   integrity?: Partial<StudentAttempt['integrity']> | null | undefined;
   recovery?: Partial<StudentAttempt['recovery']> | null | undefined;
+  proctorStatus?: StudentAttempt['proctorStatus'] | null | undefined;
+  proctorNote?: string | null | undefined;
+  proctorUpdatedAt?: string | null | undefined;
+  proctorUpdatedBy?: string | null | undefined;
+  lastWarningId?: string | null | undefined;
+  lastAcknowledgedWarningId?: string | null | undefined;
   createdAt: string;
   updatedAt: string;
 }
@@ -464,17 +470,11 @@ function setJsonArrayInStorage<T>(key: string, data: T[]): void {
 }
 
 function submittedAtForAttempt(attempt: StudentAttempt): string | null {
-  const finalSubmission = (attempt as {
-    finalSubmission?: { submittedAt?: string | null | undefined } | null | undefined;
-  }).finalSubmission;
-  return attempt.submittedAt ?? finalSubmission?.submittedAt ?? null;
+  return attempt.submittedAt ?? attempt.finalSubmission?.submittedAt ?? null;
 }
 
 function submissionIdForAttempt(attempt: StudentAttempt): string | null {
-  const finalSubmission = (attempt as {
-    finalSubmission?: { submissionId?: string | null | undefined } | null | undefined;
-  }).finalSubmission;
-  return finalSubmission?.submissionId ?? null;
+  return attempt.finalSubmission?.submissionId ?? null;
 }
 
 export function compactSubmittedAttempt(
@@ -943,6 +943,8 @@ function preserveNewerAcceptedLocalState(
       clientSessionId:
         localAttempt.recovery.clientSessionId ?? incomingAttempt.recovery.clientSessionId,
       syncState: localAttempt.recovery.syncState,
+      finalSubmissionPending:
+        localAttempt.recovery.finalSubmissionPending || incomingAttempt.recovery.finalSubmissionPending,
     },
   };
 }
@@ -1349,7 +1351,10 @@ function mutationWatermarkKey(attemptId: string, clientSessionId: string): strin
   return `${attemptId}:${clientSessionId}`;
 }
 
-export function mapBackendStudentAttempt(payload: BackendStudentAttempt): StudentAttempt {
+export function mapBackendStudentAttempt(
+  payload: BackendStudentAttempt,
+  receipt?: Pick<BackendSubmitResponse, 'submissionId' | 'submittedAt'>,
+): StudentAttempt {
   rememberAttemptSchedule(payload.id, payload.scheduleId);
 
   // Backend may omit `answers`/`writingAnswers`/`flags` after submission and only return them
@@ -1357,6 +1362,23 @@ export function mapBackendStudentAttempt(payload: BackendStudentAttempt): Studen
   const answers = payload.answers ?? payload.finalSubmission?.answers ?? {};
   const writingAnswers = payload.writingAnswers ?? payload.finalSubmission?.writingAnswers ?? {};
   const flags = payload.flags ?? payload.finalSubmission?.flags ?? {};
+
+  const finalSubmission = payload.finalSubmission?.submissionId && payload.finalSubmission.submittedAt
+    ? {
+        submissionId: payload.finalSubmission.submissionId,
+        submittedAt: payload.finalSubmission.submittedAt,
+        ...(payload.finalSubmission.answers ? { answers: payload.finalSubmission.answers } : {}),
+        ...(payload.finalSubmission.writingAnswers
+          ? { writingAnswers: payload.finalSubmission.writingAnswers }
+          : {}),
+        ...(payload.finalSubmission.flags ? { flags: payload.finalSubmission.flags } : {}),
+      }
+    : receipt
+      ? {
+          submissionId: receipt.submissionId,
+          submittedAt: receipt.submittedAt,
+        }
+      : null;
 
   return normalizeStudentAttempt({
     id: payload.id,
@@ -1376,13 +1398,14 @@ export function mapBackendStudentAttempt(payload: BackendStudentAttempt): Studen
     writingAnswers,
     flags,
     violations: payload.violationsSnapshot ?? [],
-    submittedAt: payload.submittedAt ?? null,
-    proctorStatus: 'active',
-    proctorNote: null,
-    proctorUpdatedAt: null,
-    proctorUpdatedBy: null,
-    lastWarningId: null,
-    lastAcknowledgedWarningId: null,
+    submittedAt: payload.submittedAt ?? payload.finalSubmission?.submittedAt ?? receipt?.submittedAt ?? null,
+    ...(finalSubmission ? { finalSubmission } : {}),
+    proctorStatus: payload.proctorStatus ?? 'active',
+    proctorNote: payload.proctorNote ?? null,
+    proctorUpdatedAt: payload.proctorUpdatedAt ?? null,
+    proctorUpdatedBy: payload.proctorUpdatedBy ?? null,
+    lastWarningId: payload.lastWarningId ?? null,
+    lastAcknowledgedWarningId: payload.lastAcknowledgedWarningId ?? null,
     integrity: {
       preCheck: payload.integrity?.preCheck ?? null,
       deviceFingerprintHash: payload.integrity?.deviceFingerprintHash ?? null,
@@ -1396,6 +1419,7 @@ export function mapBackendStudentAttempt(payload: BackendStudentAttempt): Studen
       lastHeartbeatStatus: payload.integrity?.lastHeartbeatStatus ?? 'idle',
     },
     recovery: {
+      finalSubmissionPending: payload.recovery?.finalSubmissionPending ?? false,
       lastRecoveredAt: payload.recovery?.lastRecoveredAt ?? null,
       lastLocalMutationAt: payload.recovery?.lastLocalMutationAt ?? null,
       lastPersistedAt: payload.recovery?.lastPersistedAt ?? null,
@@ -1599,6 +1623,7 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
         lastHeartbeatStatus: 'idle',
       },
       recovery: {
+        finalSubmissionPending: false,
         lastRecoveredAt: null,
         lastLocalMutationAt: null,
         lastPersistedAt: null,
@@ -2454,7 +2479,10 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
       response = await submitOnce(attemptForSubmit);
     }
 
-    const submittedAttempt = mapBackendStudentAttempt(response.attempt);
+    const submittedAttempt = mapBackendStudentAttempt(response.attempt, {
+      submissionId: response.submissionId,
+      submittedAt: response.submittedAt,
+    });
     clearAttemptCredentialFromAdapter(attemptForSubmit);
     await this.cache.saveAttempt(submittedAttempt);
     await this.cache.clearPendingMutations(attempt.id);

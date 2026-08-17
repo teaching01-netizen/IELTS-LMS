@@ -36,6 +36,7 @@ function makeAttempt(overrides?: Partial<StudentAttempt>): StudentAttempt {
       lastHeartbeatStatus: 'idle',
     },
     recovery: {
+      finalSubmissionPending: false,
       lastRecoveredAt: null,
       lastLocalMutationAt: null,
       lastPersistedAt: null,

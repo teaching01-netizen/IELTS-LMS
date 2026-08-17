@@ -105,7 +105,8 @@ export function normalizeStudentAttempt(attempt: StudentAttempt): StudentAttempt
     writingAnswers: attempt.writingAnswers ?? {},
     flags: attempt.flags ?? {},
     violations: attempt.violations ?? [],
-    submittedAt: attempt.submittedAt ?? null,
+    submittedAt: attempt.submittedAt ?? attempt.finalSubmission?.submittedAt ?? null,
+    finalSubmission: attempt.finalSubmission ?? null,
     proctorStatus: deriveProctorStatus(attempt),
     proctorNote: attempt.proctorNote ?? null,
     proctorUpdatedAt: attempt.proctorUpdatedAt ?? null,
@@ -122,6 +123,7 @@ export function normalizeStudentAttempt(attempt: StudentAttempt): StudentAttempt
       lastHeartbeatStatus: attempt.integrity?.lastHeartbeatStatus ?? 'idle',
     },
     recovery: {
+      finalSubmissionPending: attempt.recovery?.finalSubmissionPending ?? false,
       lastRecoveredAt: attempt.recovery?.lastRecoveredAt ?? null,
       lastLocalMutationAt: attempt.recovery?.lastLocalMutationAt ?? null,
       lastPersistedAt: attempt.recovery?.lastPersistedAt ?? null,

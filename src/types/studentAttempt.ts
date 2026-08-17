@@ -51,6 +51,14 @@ export interface StudentPreCheckResult {
   checks: StudentPreCheckCheckResult[];
 }
 
+export interface StudentFinalSubmissionReceipt {
+  submissionId: string;
+  submittedAt: string;
+  answers?: StudentAttempt['answers'] | undefined;
+  writingAnswers?: StudentAttempt['writingAnswers'] | undefined;
+  flags?: StudentAttempt['flags'] | undefined;
+}
+
 export interface StudentAttempt {
   id: string;
   scheduleId: string;
@@ -76,6 +84,7 @@ export interface StudentAttempt {
   lastWarningId: string | null;
   lastAcknowledgedWarningId: string | null;
   submittedAt?: string | null;
+  finalSubmission?: StudentFinalSubmissionReceipt | null;
   integrity: {
     preCheck: StudentPreCheckResult | null;
     deviceFingerprintHash: string | null;
@@ -86,6 +95,7 @@ export interface StudentAttempt {
     lastHeartbeatStatus: 'idle' | 'ok' | 'lost';
   };
   recovery: {
+    finalSubmissionPending: boolean;
     lastRecoveredAt: string | null;
     lastLocalMutationAt: string | null;
     lastPersistedAt: string | null;

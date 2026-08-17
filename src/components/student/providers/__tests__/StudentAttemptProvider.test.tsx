@@ -948,39 +948,26 @@ describe('StudentAttemptProvider', () => {
       .toBe('second');
   });
 
-  it('still marks submission complete when immediate submit sync fails', async () => {
-    Object.defineProperty(window.navigator, 'onLine', {
-      configurable: true,
-      value: false,
-    });
-    vi.mocked(studentAttemptRepository.saveAttempt).mockRejectedValueOnce(new Error('persist failed'));
+  it('keeps completion unconfirmed when the immediate submit request fails', async () => {
+    vi.mocked(studentAttemptRepository.submitAttempt).mockRejectedValueOnce(new Error('submit unavailable'));
 
-    const { result } = renderHook(() => useStudentAttempt(), { wrapper: createWrapper() });
-
-    await act(async () => {
-      await Promise.resolve();
-    });
+    const { result } = renderHook(
+      () => ({
+        attempt: useStudentAttempt(),
+        runtime: useStudentRuntime(),
+      }),
+      { wrapper: createWrapper() },
+    );
 
     await act(async () => {
-      result.current.actions.persistAnswer('q1', 'A');
-    });
-
-    await waitFor(() => {
-      expect(result.current.state.pendingMutationCount).toBeGreaterThan(0);
-    });
-
-    Object.defineProperty(window.navigator, 'onLine', {
-      configurable: true,
-      value: true,
-    });
-
-    await act(async () => {
-      const submitted = await result.current.actions.submitAttempt();
-      expect(submitted).toBe(true);
+      const submitted = await result.current.attempt.actions.submitAttempt();
+      expect(submitted).toBe(false);
     });
 
     expect(studentAttemptRepository.submitAttempt).toHaveBeenCalled();
-    expect(result.current.state.attempt?.phase).toBe('post-exam');
+    expect(result.current.attempt.state.attempt?.submittedAt).toBeUndefined();
+    expect(result.current.attempt.state.attempt?.phase).toBe('exam');
+    expect(result.current.runtime.state.phase).toBe('exam');
   });
 
   it('does not drop pending mutations when the attempt credential is missing', async () => {

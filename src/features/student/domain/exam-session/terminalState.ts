@@ -31,9 +31,5 @@ export function getVerifiedTerminalState(input: {
     return 'completed';
   }
 
-  if (isRuntimeStructurallyCompleted(input.runtime)) {
-    return 'completed';
-  }
-
   return 'not_terminal';
 }

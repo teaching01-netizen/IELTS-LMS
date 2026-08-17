@@ -16,12 +16,15 @@ import {
   getStudentQuestionsForModule,
   type StudentQuestionDescriptor,
 } from '@student/application/studentExamContentFacade';
-import type { ExamState, ModuleType, Violation, ViolationSeverity, QuestionAnswer } from '../../../types';
-import type { ExamSessionRuntime, RuntimeStatus } from '../../../types/domain';
 import type {
-  AttemptSyncState,
-  StudentAttempt,
-} from '../../../types/studentAttempt';
+  ExamState,
+  ModuleType,
+  Violation,
+  ViolationSeverity,
+  QuestionAnswer,
+} from '../../../types';
+import type { ExamSessionRuntime, RuntimeStatus } from '../../../types/domain';
+import type { AttemptSyncState, StudentAttempt } from '../../../types/studentAttempt';
 import {
   emitStudentObservabilityMetric,
   withStudentObservabilityDimensions,
@@ -104,7 +107,7 @@ interface RuntimeActions {
     severity: ViolationSeverity,
     description: string,
     violationId?: string,
-    timestamp?: string,
+    timestamp?: string
   ) => void;
   clearViolations: () => void;
   pauseExam: () => void;
@@ -171,7 +174,12 @@ type RuntimeAction =
   | { type: 'set_time_remaining'; time: number }
   | { type: 'reset_elapsed_time' }
   | { type: 'tick' }
-  | { type: 'start_exam'; firstModule: ModuleType; firstQuestionId: string | null; durationSeconds: number }
+  | {
+      type: 'start_exam';
+      firstModule: ModuleType;
+      firstQuestionId: string | null;
+      durationSeconds: number;
+    }
   | {
       type: 'submit_module';
       runtimeBacked: boolean;
@@ -195,7 +203,7 @@ type RuntimeAction =
   | { type: 'set_attempt_sync_state'; state: AttemptSyncState };
 
 function getDroppedMutationMarker(
-  dropped: StudentAttempt['recovery']['lastDroppedMutations'],
+  dropped: StudentAttempt['recovery']['lastDroppedMutations']
 ): string | null {
   if (!dropped) {
     return null;
@@ -206,7 +214,7 @@ function getDroppedMutationMarker(
 
 function getRuntimeSectionExtensionMinutes(
   runtimeSnapshot: ExamSessionRuntime | null,
-  sectionKey: string | null,
+  sectionKey: string | null
 ): number | null {
   if (!runtimeSnapshot || !sectionKey) {
     return null;
@@ -261,7 +269,7 @@ function deriveBlockingState(
   waitingForCohortAdvance: boolean,
   proctorStatus: StudentAttempt['proctorStatus'],
   blockingReasonOverride: RuntimeReducerState['blockingReasonOverride'],
-  timeRemainingSeconds: number,
+  timeRemainingSeconds: number
 ): RuntimeBlockingState {
   return deriveStudentBlockingState({
     runtimeBacked,
@@ -276,7 +284,7 @@ function deriveBlockingState(
 function getInitialPhase(
   runtimeBacked: boolean,
   runtimeSnapshot: ExamSessionRuntime | null,
-  attemptSnapshot: StudentAttempt | null,
+  attemptSnapshot: StudentAttempt | null
 ): ExamPhase {
   return deriveStudentPhase({
     attempt: attemptSnapshot,
@@ -289,7 +297,7 @@ function createInitialRuntimeState(
   examState: ExamState,
   runtimeBacked: boolean,
   runtimeSnapshot: ExamSessionRuntime | null,
-  attemptSnapshot: StudentAttempt | null,
+  attemptSnapshot: StudentAttempt | null
 ): RuntimeReducerState {
   const enabledModules = getEnabledModules(examState.config);
   const firstModule =
@@ -300,7 +308,7 @@ function createInitialRuntimeState(
   const firstQuestionId = getFirstQuestionIdForModule(examState, firstModule);
   const attemptQuestionId =
     !runtimeBacked || attemptSnapshot?.currentModule === firstModule
-      ? attemptSnapshot?.currentQuestionId ?? null
+      ? (attemptSnapshot?.currentQuestionId ?? null)
       : null;
   const initialPhase = getInitialPhase(runtimeBacked, runtimeSnapshot, attemptSnapshot);
   const nonRuntimeSectionDurationMinutes = examState.config.sections[firstModule]?.duration ?? 0;
@@ -308,7 +316,7 @@ function createInitialRuntimeState(
     ? Math.max(0, nonRuntimeSectionDurationMinutes * 60)
     : 0;
   const blockingMachine = createBlockingMachineState(
-    attemptSnapshot?.proctorStatus === 'paused' ? 'proctor_paused' : null,
+    attemptSnapshot?.proctorStatus === 'paused' ? 'proctor_paused' : null
   );
 
   return {
@@ -316,12 +324,15 @@ function createInitialRuntimeState(
     currentModule: firstModule,
     currentQuestionId: attemptQuestionId ?? (runtimeBacked ? firstQuestionId : null),
     timeRemaining: runtimeBacked
-      ? runtimeSnapshot?.currentSectionRemainingSeconds ?? 0
+      ? (runtimeSnapshot?.currentSectionRemainingSeconds ?? 0)
       : initialPhase === 'exam'
         ? nonRuntimeSectionDurationSeconds
         : 0,
     currentSectionExtensionMinutes: runtimeBacked
-      ? getRuntimeSectionExtensionMinutes(runtimeSnapshot, runtimeSnapshot?.currentSectionKey ?? firstModule)
+      ? getRuntimeSectionExtensionMinutes(
+          runtimeSnapshot,
+          runtimeSnapshot?.currentSectionKey ?? firstModule
+        )
       : null,
     elapsedTime: 0,
     submittedModules: [],
@@ -367,10 +378,7 @@ function mergeViolations(snapshot: Violation[], local: Violation[]): Violation[]
   return merged;
 }
 
-function runtimeReducer(
-  state: RuntimeReducerState,
-  action: RuntimeAction,
-): RuntimeReducerState {
+function runtimeReducer(state: RuntimeReducerState, action: RuntimeAction): RuntimeReducerState {
   switch (action.type) {
     case 'hydrate_runtime': {
       if (!action.snapshot) {
@@ -421,18 +429,17 @@ function runtimeReducer(
       const nextSubmittedAt = state.submittedAt ?? action.snapshot.submittedAt ?? null;
       const nextBlockingMachine = syncProctorBlockingMachine(
         state.blockingMachine,
-        nextProctorStatus,
+        nextProctorStatus
       );
-      const terminalVerified =
-        nextProctorStatus === 'terminated' ||
-        Boolean(nextSubmittedAt) ||
-        isRuntimeStructurallyCompleted(action.runtimeSnapshot);
-      const runtimeIsActive = action.runtimeSnapshot?.status === 'live' || action.runtimeSnapshot?.status === 'paused';
-      const nextPhase =
-        terminalVerified
-          ? 'post-exam'
-          : action.runtimeBacked && !runtimeIsActive && action.snapshot.integrity.preCheck?.completedAt
-            ? 'lobby'
+      const terminalVerified = nextProctorStatus === 'terminated' || Boolean(nextSubmittedAt);
+      const runtimeIsActive =
+        action.runtimeSnapshot?.status === 'live' || action.runtimeSnapshot?.status === 'paused';
+      const nextPhase = terminalVerified
+        ? 'post-exam'
+        : action.runtimeBacked &&
+            !runtimeIsActive &&
+            action.snapshot.integrity.preCheck?.completedAt
+          ? 'lobby'
           : action.snapshot.phase === 'post-exam'
             ? action.runtimeBacked
               ? state.phase === 'pre-check'
@@ -465,21 +472,19 @@ function runtimeReducer(
     }
     case 'hydrate_attempt': {
       const runtimeModule = action.runtimeBacked
-        ? action.runtimeSnapshot?.currentSectionKey ?? null
+        ? (action.runtimeSnapshot?.currentSectionKey ?? null)
         : null;
       const nextCurrentModule = runtimeModule ?? action.snapshot.currentModule;
       const moduleChanged = nextCurrentModule !== state.currentModule;
       const nextCurrentQuestionId = action.runtimeBacked
         ? moduleChanged
           ? action.runtimeFirstQuestionId
-          : state.currentQuestionId ?? action.runtimeFirstQuestionId
+          : (state.currentQuestionId ?? action.runtimeFirstQuestionId)
         : action.snapshot.currentQuestionId;
       const nextSubmittedAt = state.submittedAt ?? action.snapshot.submittedAt ?? null;
       const terminalVerified =
-        action.snapshot.proctorStatus === 'terminated' ||
-        Boolean(nextSubmittedAt) ||
-        isRuntimeStructurallyCompleted(action.runtimeSnapshot);
-      const runtimeStatus = action.runtimeBacked ? action.runtimeSnapshot?.status ?? null : null;
+        action.snapshot.proctorStatus === 'terminated' || Boolean(nextSubmittedAt);
+      const runtimeStatus = action.runtimeBacked ? (action.runtimeSnapshot?.status ?? null) : null;
       const shouldPromoteToExamPhase =
         action.runtimeBacked &&
         !terminalVerified &&
@@ -490,19 +495,19 @@ function runtimeReducer(
         ? 'post-exam'
         : shouldPromoteToExamPhase
           ? 'exam'
-        : completedPreCheckInRuntimeBackedFlow
-          ? 'lobby'
-        : action.snapshot.phase === 'post-exam'
-          ? action.runtimeBacked
-            ? state.phase === 'pre-check'
-              ? 'pre-check'
-              : 'exam'
-            : 'post-exam'
-          : action.snapshot.phase;
+          : completedPreCheckInRuntimeBackedFlow
+            ? 'lobby'
+            : action.snapshot.phase === 'post-exam'
+              ? action.runtimeBacked
+                ? state.phase === 'pre-check'
+                  ? 'pre-check'
+                  : 'exam'
+                : 'post-exam'
+              : action.snapshot.phase;
       const mergedViolations = mergeViolations(action.snapshot.violations, state.violations);
       const nextBlockingMachine = syncProctorBlockingMachine(
         state.blockingMachine,
-        action.snapshot.proctorStatus,
+        action.snapshot.proctorStatus
       );
 
       if (
@@ -577,10 +582,7 @@ function runtimeReducer(
       };
     case 'submit_module': {
       if (action.runtimeBacked) {
-        const terminalVerified =
-          state.proctorStatus === 'terminated' ||
-          Boolean(state.submittedAt) ||
-          action.runtimeStructurallyCompleted;
+        const terminalVerified = state.proctorStatus === 'terminated' || Boolean(state.submittedAt);
 
         if (terminalVerified && action.runtimeStatus === 'completed') {
           return {
@@ -662,7 +664,7 @@ function runtimeReducer(
       const nextBlockingMachine = transitionBlockingMachine(
         state.blockingMachine,
         action.reason,
-        action.active,
+        action.active
       );
       if (state.blockingReasonOverride === nextBlockingMachine.current) {
         return state;
@@ -698,7 +700,7 @@ export function StudentRuntimeProvider({
   const enabledModules = useMemo(() => getEnabledModules(state.config), [state.config]);
   const [runtimeState, dispatch] = useReducer(
     runtimeReducer,
-    createInitialRuntimeState(state, runtimeBacked, runtimeSnapshot, attemptSnapshot),
+    createInitialRuntimeState(state, runtimeBacked, runtimeSnapshot, attemptSnapshot)
   );
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [derivedClockNowMs, setDerivedClockNowMs] = useState(() => Date.now());
@@ -709,12 +711,12 @@ export function StudentRuntimeProvider({
   const lastHydratedAttemptRef = useRef<string | null>(
     attemptSnapshot
       ? `${attemptSnapshot.id}:${attemptSnapshot.updatedAt}:${getDroppedMutationMarker(attemptSnapshot.recovery.lastDroppedMutations) ?? ''}`
-      : null,
+      : null
   );
   const lastHydratedProctorRef = useRef<string | null>(null);
   const lastHydratedAttemptIdRef = useRef<string | null>(attemptSnapshot?.id ?? null);
   const lastDroppedReconcileMarkerRef = useRef<string | null>(
-    getDroppedMutationMarker(attemptSnapshot?.recovery.lastDroppedMutations ?? null),
+    getDroppedMutationMarker(attemptSnapshot?.recovery.lastDroppedMutations ?? null)
   );
 
   useEffect(() => {
@@ -751,10 +753,7 @@ export function StudentRuntimeProvider({
       return;
     }
 
-    if (
-      runtimeState.attemptSyncState !== 'idle' &&
-      runtimeState.attemptSyncState !== 'saved'
-    ) {
+    if (runtimeState.attemptSyncState !== 'idle' && runtimeState.attemptSyncState !== 'saved') {
       return;
     }
 
@@ -786,7 +785,7 @@ export function StudentRuntimeProvider({
           syncState: runtimeState.attemptSyncState,
           answerInvariantEnabled,
           answerInvariantSource: 'runtime_provider',
-        }),
+        })
       );
     }
     dispatch({
@@ -818,18 +817,19 @@ export function StudentRuntimeProvider({
 
     const nextModule =
       runtimeSnapshot?.currentSectionKey ?? enabledModules[0] ?? runtimeState.currentModule;
-    const latestSubmittedModule = runtimeState.submittedModules[runtimeState.submittedModules.length - 1] ?? null;
+    const latestSubmittedModule =
+      runtimeState.submittedModules[runtimeState.submittedModules.length - 1] ?? null;
     const submittedIndex =
       latestSubmittedModule !== null ? enabledModules.indexOf(latestSubmittedModule) : -1;
     const expectedLocalModule =
-      submittedIndex >= 0 ? enabledModules[submittedIndex + 1] ?? null : null;
+      submittedIndex >= 0 ? (enabledModules[submittedIndex + 1] ?? null) : null;
     const preserveLocalAdvance =
       latestSubmittedModule !== null &&
       runtimeSnapshot?.currentSectionKey === latestSubmittedModule &&
       runtimeState.currentModule === expectedLocalModule;
     const currentSectionExtensionMinutes = getRuntimeSectionExtensionMinutes(
       runtimeSnapshot,
-      runtimeSnapshot.currentSectionKey ?? nextModule,
+      runtimeSnapshot.currentSectionKey ?? nextModule
     );
     const sameSection = nextModule === runtimeState.currentModule;
     const reportedRemaining = runtimeSnapshot.currentSectionRemainingSeconds;
@@ -838,9 +838,7 @@ export function StudentRuntimeProvider({
       (runtimeState.currentSectionExtensionMinutes === null ||
         currentSectionExtensionMinutes > runtimeState.currentSectionExtensionMinutes);
     const nonMonotonicJump =
-      sameSection &&
-      reportedRemaining > runtimeState.timeRemaining &&
-      !extensionIncreased;
+      sameSection && reportedRemaining > runtimeState.timeRemaining && !extensionIncreased;
     if (nonMonotonicJump) {
       emitStudentObservabilityMetric(
         'student_timer_non_monotonic_jump_total',
@@ -854,7 +852,7 @@ export function StudentRuntimeProvider({
           currentSectionKey: runtimeSnapshot.currentSectionKey ?? null,
           previousRemainingSeconds: runtimeState.timeRemaining,
           reportedRemainingSeconds: reportedRemaining,
-        }),
+        })
       );
     }
     dispatch({
@@ -968,7 +966,7 @@ export function StudentRuntimeProvider({
 
   const allQuestions = useMemo(
     () => getStudentQuestionsForModule(state, runtimeState.currentModule),
-    [runtimeState.currentModule, state],
+    [runtimeState.currentModule, state]
   );
   const blocking = useMemo(
     () =>
@@ -978,7 +976,7 @@ export function StudentRuntimeProvider({
         runtimeState.waitingForCohortAdvance,
         runtimeState.proctorStatus,
         runtimeState.blockingReasonOverride,
-        runtimeState.timeRemaining,
+        runtimeState.timeRemaining
       ),
     [
       runtimeBacked,
@@ -987,41 +985,45 @@ export function StudentRuntimeProvider({
       runtimeState.blockingReasonOverride,
       runtimeState.timeRemaining,
       runtimeState.waitingForCohortAdvance,
-    ],
+    ]
   );
-  const runtimeStatus = runtimeBacked ? runtimeSnapshot?.status ?? 'not_started' : null;
-  const displayTimeRemaining = runtimeState.phase === 'exam'
-    ? runtimeBacked
-      ? resolveRuntimeDisplayRemainingSeconds({
-          runtimeBacked,
-          runtimeSnapshot,
-          phase: runtimeState.phase,
-          fallbackSeconds: runtimeState.timeRemaining,
-          clockOffsetMs,
-          nowMs: derivedClockNowMs,
-        }) ?? runtimeState.timeRemaining
-      : runtimeState.timeRemaining
-    : undefined;
+  const runtimeStatus = runtimeBacked ? (runtimeSnapshot?.status ?? 'not_started') : null;
+  const displayTimeRemaining =
+    runtimeState.phase === 'exam'
+      ? runtimeBacked
+        ? (resolveRuntimeDisplayRemainingSeconds({
+            runtimeBacked,
+            runtimeSnapshot,
+            phase: runtimeState.phase,
+            fallbackSeconds: runtimeState.timeRemaining,
+            clockOffsetMs,
+            nowMs: derivedClockNowMs,
+          }) ?? runtimeState.timeRemaining)
+        : runtimeState.timeRemaining
+      : undefined;
   const submitRequiresConfirmation = false;
 
   const setPhase = useCallback((phase: ExamPhase) => {
     dispatch({ type: 'set_phase', phase });
   }, []);
 
-  const setCurrentModule = useCallback((module: ModuleType) => {
-    if (
-      state.config.progression.lockAfterSubmit &&
-      runtimeState.submittedModules.includes(module)
-    ) {
-      return;
-    }
+  const setCurrentModule = useCallback(
+    (module: ModuleType) => {
+      if (
+        state.config.progression.lockAfterSubmit &&
+        runtimeState.submittedModules.includes(module)
+      ) {
+        return;
+      }
 
-    dispatch({
-      type: 'set_current_module',
-      module,
-      firstQuestionId: getFirstQuestionIdForModule(state, module),
-    });
-  }, [runtimeState.submittedModules, state]);
+      dispatch({
+        type: 'set_current_module',
+        module,
+        firstQuestionId: getFirstQuestionIdForModule(state, module),
+      });
+    },
+    [runtimeState.submittedModules, state]
+  );
 
   const setCurrentQuestionId = useCallback((id: string | null) => {
     dispatch({ type: 'set_current_question_id', id });
@@ -1059,24 +1061,34 @@ export function StudentRuntimeProvider({
       nextQuestionId: nextModule ? getFirstQuestionIdForModule(state, nextModule) : null,
       nextDurationSeconds: nextModule ? state.config.sections[nextModule].duration * 60 : 0,
     });
-  }, [enabledModules, runtimeBacked, runtimeSnapshot, runtimeState.currentModule, runtimeStatus, state]);
+  }, [
+    enabledModules,
+    runtimeBacked,
+    runtimeSnapshot,
+    runtimeState.currentModule,
+    runtimeStatus,
+    state,
+  ]);
 
-  const addViolation = useCallback((
-    type: string,
-    severity: ViolationSeverity,
-    description: string,
-    violationId?: string,
-    timestamp?: string,
-  ) => {
-    dispatch({
-      type: 'add_violation',
-      violationType: type,
-      severity,
-      description,
-      ...(violationId ? { violationId } : {}),
-      ...(timestamp ? { timestamp } : {}),
-    });
-  }, []);
+  const addViolation = useCallback(
+    (
+      type: string,
+      severity: ViolationSeverity,
+      description: string,
+      violationId?: string,
+      timestamp?: string
+    ) => {
+      dispatch({
+        type: 'add_violation',
+        violationType: type,
+        severity,
+        description,
+        ...(violationId ? { violationId } : {}),
+        ...(timestamp ? { timestamp } : {}),
+      });
+    },
+    []
+  );
 
   const clearViolations = useCallback(() => {
     dispatch({ type: 'clear_violations' });
@@ -1090,10 +1102,7 @@ export function StudentRuntimeProvider({
     dispatch({ type: 'terminate_exam' });
   }, []);
 
-  const transitionBlocking = useCallback((
-    reason: ManagedBlockingReason,
-    active = true,
-  ) => {
+  const transitionBlocking = useCallback((reason: ManagedBlockingReason, active = true) => {
     dispatch({ type: 'transition_blocking', reason, active });
   }, []);
 
@@ -1101,60 +1110,66 @@ export function StudentRuntimeProvider({
     dispatch({ type: 'set_attempt_sync_state', state: nextState });
   }, []);
 
-  const stableState = useMemo<RuntimeStableState>(() => ({
-    ...runtimeState,
-    allQuestions,
-    blocking,
-    runtimeBacked,
-    runtimeStatus,
-    runtimeSnapshot: runtimeBacked ? runtimeSnapshot : null,
-    submitRequiresConfirmation,
-  }), [
-    allQuestions,
-    blocking,
-    runtimeBacked,
-    runtimeSnapshot,
-    runtimeState,
-    runtimeStatus,
-    submitRequiresConfirmation,
-  ]);
-  const stableValue = useMemo<RuntimeStableContextValue>(() => ({
-    state: stableState,
-    actions: {
-      setPhase,
-      setCurrentModule,
-      setCurrentQuestionId,
-      setTimeRemaining,
-      resetElapsedTime,
-      submitModule,
-      startExam,
+  const stableState = useMemo<RuntimeStableState>(
+    () => ({
+      ...runtimeState,
+      allQuestions,
+      blocking,
+      runtimeBacked,
+      runtimeStatus,
+      runtimeSnapshot: runtimeBacked ? runtimeSnapshot : null,
+      submitRequiresConfirmation,
+    }),
+    [
+      allQuestions,
+      blocking,
+      runtimeBacked,
+      runtimeSnapshot,
+      runtimeState,
+      runtimeStatus,
+      submitRequiresConfirmation,
+    ]
+  );
+  const stableValue = useMemo<RuntimeStableContextValue>(
+    () => ({
+      state: stableState,
+      actions: {
+        setPhase,
+        setCurrentModule,
+        setCurrentQuestionId,
+        setTimeRemaining,
+        resetElapsedTime,
+        submitModule,
+        startExam,
+        addViolation,
+        clearViolations,
+        pauseExam,
+        terminateExam,
+        transitionBlocking,
+        setAttemptSyncState,
+      },
+      examState: state,
+      onExit,
+    }),
+    [
       addViolation,
       clearViolations,
+      onExit,
       pauseExam,
+      resetElapsedTime,
+      setAttemptSyncState,
+      setCurrentModule,
+      setCurrentQuestionId,
+      setPhase,
+      setTimeRemaining,
+      stableState,
+      startExam,
+      state,
+      submitModule,
       terminateExam,
       transitionBlocking,
-      setAttemptSyncState,
-    },
-    examState: state,
-    onExit,
-  }), [
-    addViolation,
-    clearViolations,
-    onExit,
-    pauseExam,
-    resetElapsedTime,
-    setAttemptSyncState,
-    setCurrentModule,
-    setCurrentQuestionId,
-    setPhase,
-    setTimeRemaining,
-    stableState,
-    startExam,
-    state,
-    submitModule,
-    terminateExam,
-    transitionBlocking,
-  ]);
+    ]
+  );
   const runtimeLiveRef = useRef<RuntimeState>({
     ...stableState,
     displayTimeRemaining,
@@ -1166,71 +1181,74 @@ export function StudentRuntimeProvider({
     };
   }, [displayTimeRemaining, stableState]);
 
-  const value = useMemo<RuntimeContextValue>(() => ({
-    state: {
-      ...runtimeState,
+  const value = useMemo<RuntimeContextValue>(
+    () => ({
+      state: {
+        ...runtimeState,
+        allQuestions,
+        blocking,
+        displayTimeRemaining,
+        runtimeBacked,
+        runtimeStatus,
+        runtimeSnapshot: runtimeBacked ? runtimeSnapshot : null,
+        submitRequiresConfirmation,
+      },
+      actions: {
+        setPhase,
+        setCurrentModule,
+        setCurrentQuestionId,
+        setTimeRemaining,
+        resetElapsedTime,
+        submitModule,
+        startExam,
+        addViolation,
+        clearViolations,
+        pauseExam,
+        terminateExam,
+        transitionBlocking,
+        setAttemptSyncState,
+      },
+      examState: state,
+      onExit,
+    }),
+    [
+      addViolation,
       allQuestions,
       blocking,
-      displayTimeRemaining,
-      runtimeBacked,
-      runtimeStatus,
-      runtimeSnapshot: runtimeBacked ? runtimeSnapshot : null,
-      submitRequiresConfirmation,
-    },
-    actions: {
-      setPhase,
-      setCurrentModule,
-      setCurrentQuestionId,
-      setTimeRemaining,
-      resetElapsedTime,
-      submitModule,
-      startExam,
-      addViolation,
       clearViolations,
       pauseExam,
-      terminateExam,
-      transitionBlocking,
+      displayTimeRemaining,
+      onExit,
+      resetElapsedTime,
+      runtimeBacked,
+      runtimeSnapshot,
+      runtimeState,
+      runtimeStatus,
       setAttemptSyncState,
-    },
-    examState: state,
-    onExit,
-  }), [
-    addViolation,
-    allQuestions,
-    blocking,
-    clearViolations,
-    pauseExam,
-    displayTimeRemaining,
-    onExit,
-    resetElapsedTime,
-    runtimeBacked,
-    runtimeSnapshot,
-    runtimeState,
-    runtimeStatus,
-    setAttemptSyncState,
-    transitionBlocking,
-    setCurrentModule,
-    setCurrentQuestionId,
-    setPhase,
-    setTimeRemaining,
-    startExam,
-    state,
-    submitModule,
-    submitRequiresConfirmation,
-    terminateExam,
-  ]);
+      transitionBlocking,
+      setCurrentModule,
+      setCurrentQuestionId,
+      setPhase,
+      setTimeRemaining,
+      startExam,
+      state,
+      submitModule,
+      submitRequiresConfirmation,
+      terminateExam,
+    ]
+  );
 
   return (
-      <RuntimeContext.Provider value={value}>
-        <RuntimeStableContext.Provider value={stableValue}>
-          <RuntimeClockContext.Provider value={displayTimeRemaining}>
-            <RuntimeLiveContext.Provider value={runtimeLiveRef}>
-              {children}
-            </RuntimeLiveContext.Provider>
-          </RuntimeClockContext.Provider>
-        </RuntimeStableContext.Provider>
-      </RuntimeContext.Provider>
-    );
+    <RuntimeContext.Provider value={value}>
+      <RuntimeStableContext.Provider value={stableValue}>
+        <RuntimeClockContext.Provider value={displayTimeRemaining}>
+          <RuntimeLiveContext.Provider value={runtimeLiveRef}>
+            {children}
+          </RuntimeLiveContext.Provider>
+        </RuntimeClockContext.Provider>
+      </RuntimeStableContext.Provider>
+    </RuntimeContext.Provider>
+  );
 }
 
 export function useStudentRuntime() {

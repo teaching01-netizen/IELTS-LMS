@@ -22,14 +22,14 @@ export interface RuntimeReconciliationInput {
 }
 
 export function reconcileRuntimeSnapshot(input: RuntimeReconciliationInput): RuntimePosition {
-  const terminalVerified = isRuntimeStructurallyCompleted(input.incoming);
-  if (input.preserveLocalAdvance && !terminalVerified) {
+  const runtimeStructurallyCompleted = isRuntimeStructurallyCompleted(input.incoming);
+  if (input.preserveLocalAdvance && !runtimeStructurallyCompleted) {
     return input.current;
   }
 
   const moduleChanged = input.nextModule !== input.current.currentModule;
   const runtimeIsActive = input.incoming.status === 'live' || input.incoming.status === 'paused';
-  const nextPhase = terminalVerified
+  const nextPhase = runtimeStructurallyCompleted
     ? STUDENT_EXAM_PHASE.POST_EXAM
     : runtimeIsActive
       ? STUDENT_EXAM_PHASE.EXAM
@@ -55,6 +55,6 @@ export function reconcileRuntimeSnapshot(input: RuntimeReconciliationInput): Run
     timeRemaining: nextTimeRemaining,
     currentSectionExtensionMinutes: nextExtension,
     waitingForCohortAdvance:
-      input.current.waitingForCohortAdvance && !moduleChanged && !terminalVerified,
+      input.current.waitingForCohortAdvance && !moduleChanged && !runtimeStructurallyCompleted,
   };
 }

@@ -30,6 +30,7 @@ export function QuestionNavigator({
 }: QuestionNavigatorProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const restoreTriggerFocusRef = useRef(true);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -46,46 +47,57 @@ export function QuestionNavigator({
       if (dialog.open) {
         dialog.close();
       }
-      queueMicrotask(() => previousActiveElementRef.current?.focus());
+      if (restoreTriggerFocusRef.current) {
+        queueMicrotask(() => previousActiveElementRef.current?.focus());
+      }
     };
   }, []);
 
-  const dedupeGroupedScoringSlots = React.useCallback(
-    (items: StudentQuestionDescriptor[]) => {
-      const seen = new Set<string>();
-      const out: StudentQuestionDescriptor[] = [];
-      for (const item of items) {
-        const key =
-          typeof item.rootId === 'string' && item.rootId.includes('::group::')
-            ? item.rootId
-            : item.id;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push(item);
-      }
-      return out;
-    },
-    [],
-  );
+  const dedupeGroupedScoringSlots = React.useCallback((items: StudentQuestionDescriptor[]) => {
+    const seen = new Set<string>();
+    const out: StudentQuestionDescriptor[] = [];
+    for (const item of items) {
+      const key =
+        typeof item.rootId === 'string' && item.rootId.includes('::group::')
+          ? item.rootId
+          : item.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
+    }
+    return out;
+  }, []);
 
   const totalQuestions = countQuestionSlots(questions);
   const answeredCount = countAnsweredQuestions(questions, answers);
   const flaggedCount = Object.values(flags).filter(Boolean).length;
   const partiallyAnsweredCount = questions.reduce(
     (count, question) =>
-      count + (isQuestionAnswered(question, answers) && !isQuestionFullyAnswered(question, answers) ? 1 : 0),
-    0,
+      count +
+      (isQuestionAnswered(question, answers) && !isQuestionFullyAnswered(question, answers)
+        ? 1
+        : 0),
+    0
   );
 
-  const groups = questions.reduce<Record<string, StudentQuestionDescriptor[]>>((result, question) => {
-    const existingGroup = result[question.groupId];
-    if (existingGroup) {
-      existingGroup.push(question);
-    } else {
-      result[question.groupId] = [question];
-    }
-    return result;
-  }, {});
+  const groups = questions.reduce<Record<string, StudentQuestionDescriptor[]>>(
+    (result, question) => {
+      const existingGroup = result[question.groupId];
+      if (existingGroup) {
+        existingGroup.push(question);
+      } else {
+        result[question.groupId] = [question];
+      }
+      return result;
+    },
+    {}
+  );
+
+  const navigateToQuestion = (id: string) => {
+    restoreTriggerFocusRef.current = false;
+    onNavigate(id);
+    onClose();
+  };
 
   const dialog = (
     <dialog
@@ -156,21 +168,24 @@ export function QuestionNavigator({
                   <button
                     type="button"
                     key={question.id}
-                    onClick={() => onNavigate(question.id)}
+                    onClick={() => navigateToQuestion(question.id)}
+                    aria-label={`Question ${getQuestionNumberLabel(questions, question.id)}${isCurrent ? ', current' : isFullyComplete ? ', complete' : isAnswered ? ', answered' : isFlagged ? ', flagged' : ', not answered'}`}
                     className={`
                       relative h-11 md:h-12 rounded-md border border-transparent flex items-center justify-center text-[length:var(--student-control-font-size)] font-medium transition-colors
-                      ${isCurrent
-                        ? 'bg-blue-800 text-white border-blue-800 hover:bg-blue-700'
-                        : isFlagged
-                          ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200'
-                          : isFullyComplete
-                            ? 'bg-green-800 text-white hover:bg-green-900'
-                            : isAnswered
-                              ? 'bg-green-200 text-green-900 hover:bg-green-300'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
+                      ${
+                        isCurrent
+                          ? 'bg-blue-800 text-white border-blue-800 hover:bg-blue-700'
+                          : isFlagged
+                            ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200'
+                            : isFullyComplete
+                              ? 'bg-green-800 text-white hover:bg-green-900'
+                              : isAnswered
+                                ? 'bg-green-200 text-green-900 hover:bg-green-300'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }
                     `}
                   >
-                    {getQuestionNumberLabel(questions, question.id)}
+                    <span aria-hidden="true">{getQuestionNumberLabel(questions, question.id)}</span>
                     {isFlagged ? (
                       <div className="absolute -top-1 md:-top-1.5 -right-1 md:-right-1.5 w-3.5 md:w-4 h-3.5 md:h-4 bg-amber-500 rounded-full flex items-center justify-center shadow-sm">
                         <Flag size={6} className="text-white fill-white" />

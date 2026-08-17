@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 import {
   ClassificationBlock,
   ClozeBlock,
@@ -23,18 +23,18 @@ import {
   TableCompletionBlock,
   TFNGBlock,
   TFNGQuestion,
-} from '../../types';
-import { ProtectedInput } from './ProtectedInput';
-import { StudentQuestionText } from './StudentQuestionText';
-import { StudentQuestionNumber } from './StudentQuestionNumber';
-import { stripBoldMarkdown } from '../../utils/boldMarkdown';
-import { getImageUrlCandidates } from '../../utils/imageUrl';
-import { StudentZoomableMedia } from './StudentZoomableMedia';
-import type { StudentHighlightColor } from './highlightPalette';
-import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
-import { TableCompletionSlotCell } from './TableCompletionSlotCell';
-import { emitAnswerMutationDebugLog } from './answerMutationDebug';
-import { getMultiSelectSelectionLimit } from '../../utils/multiSelectMcq';
+} from "../../types";
+import { ProtectedInput } from "./ProtectedInput";
+import { StudentQuestionText } from "./StudentQuestionText";
+import { StudentQuestionNumber } from "./StudentQuestionNumber";
+import { stripBoldMarkdown } from "../../utils/boldMarkdown";
+import { getImageUrlCandidates } from "../../utils/imageUrl";
+import { StudentZoomableMedia } from "./StudentZoomableMedia";
+import type { StudentHighlightColor } from "./highlightPalette";
+import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
+import { TableCompletionSlotCell } from "./TableCompletionSlotCell";
+import { emitAnswerMutationDebugLog } from "./answerMutationDebug";
+import { getMultiSelectSelectionLimit } from "../../utils/multiSelectMcq";
 
 interface QuestionRendererProps {
   question:
@@ -62,10 +62,12 @@ interface QuestionRendererProps {
   compactPane?: boolean | undefined;
   highlightEnabled?: boolean | undefined;
   highlightColor?: StudentHighlightColor | undefined;
-  security?: {
-    preventAutofill: boolean;
-    preventAutocorrect: boolean;
-  } | undefined;
+  security?:
+    | {
+        preventAutofill: boolean;
+        preventAutocorrect: boolean;
+      }
+    | undefined;
   sessionId?: string | undefined;
   studentId?: string | undefined;
   hideDiagramReference?: boolean | undefined;
@@ -96,8 +98,12 @@ export function QuestionRenderer({
 }: QuestionRendererProps) {
   const stringArrayAnswer = Array.isArray(answer) ? answer : [];
   const isCompactPane = tabletMode && compactPane;
-  const fieldIndentClass = tabletMode ? 'ml-0' : 'ml-9';
-  const inputWidthClass = isCompactPane ? 'w-full min-w-0 max-w-full' : tabletMode ? 'max-w-full' : 'max-w-md';
+  const fieldIndentClass = tabletMode ? "ml-0" : "ml-9";
+  const inputWidthClass = isCompactPane
+    ? "w-full min-w-0 max-w-full"
+    : tabletMode
+      ? "max-w-full"
+      : "max-w-md";
   const getHighlightSurfaceId = (ownerId: string, slot: string) =>
     `question:${block.id}:${ownerId}:${slot}`;
 
@@ -108,7 +114,7 @@ export function QuestionRenderer({
     }
     const seen = new Set<number>();
     for (const value of slotNumbers) {
-      if (typeof value !== 'number' || !Number.isFinite(value)) {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
         continue;
       }
       if (seen.has(value)) {
@@ -120,10 +126,10 @@ export function QuestionRenderer({
   }, [slotNumbers]);
   const getSlotNumber = (index: number, fallback: number) => slotNumbers?.[index] ?? fallback;
   const getSlotAriaLabelSuffix = (slotIndex: number) =>
-    hasDuplicateSlotNumbers ? ` (blank ${slotIndex + 1})` : '';
+    hasDuplicateSlotNumbers ? ` (blank ${slotIndex + 1})` : "";
   const getSlotClassName = (slotId: string) => {
-    const activeClass = currentQuestionId === slotId ? 'ring-2 ring-blue-800 ring-offset-2' : '';
-    const flaggedClass = flags[slotId] ? 'border-amber-300 bg-amber-50' : 'border-transparent';
+    const activeClass = currentQuestionId === slotId ? "ring-2 ring-blue-800 ring-offset-2" : "";
+    const flaggedClass = flags[slotId] ? "border-amber-300 bg-amber-50" : "border-transparent";
     return `rounded-lg border p-2 transition-colors ${activeClass} ${flaggedClass}`;
   };
 
@@ -138,11 +144,11 @@ export function QuestionRenderer({
         onClick={() => onToggleFlag(slotId)}
         className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
           flags[slotId]
-            ? 'border-amber-700 bg-amber-700 text-white'
-            : 'border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700'
+            ? "border-amber-700 bg-amber-700 text-white"
+            : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700"
         }`}
-        aria-label={flags[slotId] ? 'Unflag question' : 'Flag question'}
-        title={flags[slotId] ? 'Unflag question' : 'Flag question'}
+        aria-label={flags[slotId] ? "Unflag question" : "Flag question"}
+        title={flags[slotId] ? "Unflag question" : "Flag question"}
       >
         <span aria-hidden="true" className="text-sm">
           ⚑
@@ -153,9 +159,9 @@ export function QuestionRenderer({
 
   const updateIndexedAnswer = (index: number, value: string, total: number, slotId?: string) => {
     const next = Array.from({ length: total }, (_, candidateIndex) =>
-      candidateIndex === index ? value : (stringArrayAnswer[candidateIndex] ?? ''),
+      candidateIndex === index ? value : (stringArrayAnswer[candidateIndex] ?? "")
     );
-    emitAnswerMutationDebugLog('QuestionRenderer.updateIndexedAnswer', {
+    emitAnswerMutationDebugLog("QuestionRenderer.updateIndexedAnswer", {
       blockType: block.type,
       blockId: block.id,
       slotIndex: index,
@@ -170,7 +176,7 @@ export function QuestionRenderer({
       slotId,
       slotCount: total,
       slotValue: value,
-      interactionType: 'typing',
+      interactionType: "typing",
     });
     registerLiveAnswer?.({ value: next });
   };
@@ -186,24 +192,23 @@ export function QuestionRenderer({
     value: string,
     changeValue: (nextValue: string) => void,
     extraCopy?: string,
-    extraCopyPosition: 'top' | 'bottom' = 'bottom',
+    extraCopyPosition: "top" | "bottom" = "bottom"
   ) => (
-    <div id={`question-${slotId}`} className={getSlotClassName(slotId)}>
-      {extraCopy && extraCopyPosition === 'top' ? (
+    <div id={`question-${slotId}`} tabIndex={-1} className={getSlotClassName(slotId)}>
+      {extraCopy && extraCopyPosition === "top" ? (
         <StudentQuestionText
           as="p"
           className="mb-2 text-[length:var(--student-meta-font-size)] font-medium text-gray-600"
           text={extraCopy}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
-          highlightSurfaceId={getHighlightSurfaceId(slotId, 'extra-copy-top')}
+          highlightSurfaceId={getHighlightSurfaceId(slotId, "extra-copy-top")}
         />
       ) : null}
-      <div className={isCompactPane ? 'flex flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
-        <StudentQuestionNumber
-          number={slotNumber}
-          isActive={currentQuestionId === slotId}
-        />
+      <div
+        className={isCompactPane ? "flex flex-col items-stretch gap-2" : "flex items-center gap-3"}
+      >
+        <StudentQuestionNumber number={slotNumber} isActive={currentQuestionId === slotId} />
         <ProtectedInput
           type="text"
           name={slotId}
@@ -218,40 +223,38 @@ export function QuestionRenderer({
         />
         {renderFlagButton(slotId)}
       </div>
-      {extraCopy && extraCopyPosition === 'bottom' ? (
+      {extraCopy && extraCopyPosition === "bottom" ? (
         <StudentQuestionText
           as="p"
-          className={`mt-2 text-sm text-gray-600 ${tabletMode ? 'pl-0' : 'pl-11'}`}
+          className={`mt-2 text-sm text-gray-600 ${tabletMode ? "pl-0" : "pl-11"}`}
           text={extraCopy}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
-          highlightSurfaceId={getHighlightSurfaceId(slotId, 'extra-copy-bottom')}
+          highlightSurfaceId={getHighlightSurfaceId(slotId, "extra-copy-bottom")}
         />
       ) : null}
     </div>
   );
 
   const renderTFNG = (tfngBlock: TFNGBlock, q: TFNGQuestion) => {
-    const options = tfngBlock.mode === 'TFNG' ? (['T', 'F', 'NG'] as const) : (['Y', 'N', 'NG'] as const);
+    const options =
+      tfngBlock.mode === "TFNG" ? (["T", "F", "NG"] as const) : (["Y", "N", "NG"] as const);
     const labels =
-      tfngBlock.mode === 'TFNG'
-        ? { T: 'TRUE', F: 'FALSE', NG: 'NOT GIVEN' }
-        : { Y: 'YES', N: 'NO', NG: 'NOT GIVEN' };
+      tfngBlock.mode === "TFNG"
+        ? { T: "TRUE", F: "FALSE", NG: "NOT GIVEN" }
+        : { Y: "YES", N: "NO", NG: "NOT GIVEN" };
 
     return (
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3 items-start">
-          <StudentQuestionNumber
-            number={number}
-            isActive={isActive}
-          />
+          <StudentQuestionNumber number={number} isActive={isActive} />
           <StudentQuestionText
             as="span"
             className="leading-relaxed text-gray-900"
             text={q.statement}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
-            highlightSurfaceId={getHighlightSurfaceId(q.id, 'statement')}
+            highlightSurfaceId={getHighlightSurfaceId(q.id, "statement")}
           />
         </legend>
         <div className={`${fieldIndentClass} flex flex-col gap-3`}>
@@ -264,7 +267,9 @@ export function QuestionRenderer({
                 onChange={() => commitAnswerChange(option)}
                 className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              <span className="text-sm uppercase text-gray-900">{labels[option as keyof typeof labels]}</span>
+              <span className="text-sm uppercase text-gray-900">
+                {labels[option as keyof typeof labels]}
+              </span>
             </label>
           ))}
         </div>
@@ -277,23 +282,21 @@ export function QuestionRenderer({
     return (
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <StudentQuestionNumber
-            number={number}
-          />
+          <StudentQuestionNumber number={number} />
           <StudentQuestionText
             as="span"
             className="text-gray-800"
             text={q.prompt}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
-            highlightSurfaceId={getHighlightSurfaceId(q.id, 'prompt')}
+            highlightSurfaceId={getHighlightSurfaceId(q.id, "prompt")}
           />
         </div>
         <div className={`${fieldIndentClass} mt-2`}>
           <ProtectedInput
             type="text"
             name={q.id}
-            value={typeof answer === 'string' ? answer : ''}
+            value={typeof answer === "string" ? answer : ""}
             onChange={(event) => commitAnswerChange(event.target.value)}
             className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
             placeholder="Enter answer..."
@@ -310,20 +313,25 @@ export function QuestionRenderer({
   const renderMatching = (matchingBlock: MatchingBlock, q: MatchingQuestion) => (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-4">
-          <StudentQuestionNumber
-            number={number}
-          />
-        <StudentQuestionText as="span" className="font-medium text-gray-800 text-[length:var(--student-control-font-size)]" text={`Paragraph ${q.paragraphLabel}`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'paragraph-label')} />
+        <StudentQuestionNumber number={number} />
+        <StudentQuestionText
+          as="span"
+          className="font-medium text-gray-800 text-[length:var(--student-control-font-size)]"
+          text={`Paragraph ${q.paragraphLabel}`}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+          highlightSurfaceId={getHighlightSurfaceId(q.id, "paragraph-label")}
+        />
 
         <select
-          value={typeof answer === 'string' ? answer : ''}
+          value={typeof answer === "string" ? answer : ""}
           onChange={(event) => commitAnswerChange(event.target.value)}
-          className={`flex-1 rounded-md border-2 border-gray-300 px-3 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0 max-w-full' : tabletMode ? 'max-w-full' : 'max-w-xs'}`}
+          className={`flex-1 rounded-md border-2 border-gray-300 px-3 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? "w-full min-w-0 max-w-full" : tabletMode ? "max-w-full" : "max-w-xs"}`}
           aria-label={`Heading selection for question ${number}`}
         >
           <option value="">Choose heading…</option>
           {matchingBlock.headings?.map((heading, index) => {
-            const roman = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'][index];
+            const roman = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"][index];
             return (
               <option key={heading.id} value={roman}>
                 {roman}. {stripBoldMarkdown(heading.text)}
@@ -343,33 +351,31 @@ export function QuestionRenderer({
       if (selectedOptions.includes(optionId)) {
         commitAnswerChange(
           selectedOptions.filter((candidate) => candidate !== optionId),
-          { arrayUpdateMode: 'replace', interactionType: 'discrete' },
+          { arrayUpdateMode: "replace", interactionType: "discrete" }
         );
         return;
       }
 
       if (selectedOptions.length < selectionLimit) {
-        commitAnswerChange(
-          [...selectedOptions, optionId],
-          { arrayUpdateMode: 'replace', interactionType: 'discrete' },
-        );
+        commitAnswerChange([...selectedOptions, optionId], {
+          arrayUpdateMode: "replace",
+          interactionType: "discrete",
+        });
       }
     };
 
     return (
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3">
-          <StudentQuestionNumber
-            number={blockNum}
+          <StudentQuestionNumber number={blockNum} />
+          <StudentQuestionText
+            as="span"
+            className="text-gray-800"
+            text={mcqBlock.stem || "Select the correct options:"}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+            highlightSurfaceId={getHighlightSurfaceId(mcqBlock.id, "stem")}
           />
-        <StudentQuestionText
-          as="span"
-          className="text-gray-800"
-          text={mcqBlock.stem || 'Select the correct options:'}
-          highlightEnabled={highlightEnabled}
-          highlightColor={highlightColor}
-          highlightSurfaceId={getHighlightSurfaceId(mcqBlock.id, 'stem')}
-        />
         </legend>
         <div className={`${fieldIndentClass} space-y-3`}>
           {mcqBlock.options?.map((option, index) => {
@@ -382,10 +388,10 @@ export function QuestionRenderer({
                 key={option.id}
                 className={`flex cursor-pointer items-start gap-3 rounded-md border-2 p-3 transition-colors ${
                   isSelected
-                    ? 'border-blue-500 bg-blue-50'
+                    ? "border-blue-500 bg-blue-50"
                     : isDisabled
-                      ? 'cursor-not-allowed border-gray-200 opacity-50'
-                      : 'border-gray-200 hover:border-blue-300'
+                      ? "cursor-not-allowed border-gray-200 opacity-50"
+                      : "border-gray-200 hover:border-blue-300"
                 }`}
               >
                 <input
@@ -398,20 +404,49 @@ export function QuestionRenderer({
                 />
                 <div
                   className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border ${
-                    isSelected ? 'border-blue-600 bg-blue-600' : 'border-gray-400 bg-white'
+                    isSelected ? "border-blue-600 bg-blue-600" : "border-gray-400 bg-white"
                   }`}
                 >
-                  {isSelected ? <div className="h-3 w-3 bg-white" style={{ clipPath: 'polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%)' }}></div> : null}
+                  {isSelected ? (
+                    <div
+                      className="h-3 w-3 bg-white"
+                      style={{
+                        clipPath: "polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%)",
+                      }}
+                    ></div>
+                  ) : null}
                 </div>
                 <div className="flex gap-2">
-                  <StudentQuestionText as="span" className="font-bold text-gray-700" text={`${letter}.`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(`${mcqBlock.id}:${option.id}`, 'option-letter')} />
-                  <StudentQuestionText as="span" className="text-gray-800" text={option.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(`${mcqBlock.id}:${option.id}`, 'option-text')} />
+                  <StudentQuestionText
+                    as="span"
+                    className="font-bold text-gray-700"
+                    text={`${letter}.`}
+                    highlightEnabled={highlightEnabled}
+                    highlightColor={highlightColor}
+                    highlightSurfaceId={getHighlightSurfaceId(
+                      `${mcqBlock.id}:${option.id}`,
+                      "option-letter"
+                    )}
+                  />
+                  <StudentQuestionText
+                    as="span"
+                    className="text-gray-800"
+                    text={option.text}
+                    highlightEnabled={highlightEnabled}
+                    highlightColor={highlightColor}
+                    highlightSurfaceId={getHighlightSurfaceId(
+                      `${mcqBlock.id}:${option.id}`,
+                      "option-text"
+                    )}
+                  />
                 </div>
               </label>
             );
           })}
         </div>
-        <div className={`${fieldIndentClass} text-[length:var(--student-meta-font-size)] font-medium text-gray-500`}>
+        <div
+          className={`${fieldIndentClass} text-[length:var(--student-meta-font-size)] font-medium text-gray-500`}
+        >
           Selections: {selectedOptions.length}/{selectionLimit} required
         </div>
       </fieldset>
@@ -421,23 +456,28 @@ export function QuestionRenderer({
   const renderMap = (mapBlock: MapBlock, q: MapQuestion, num: number) => (
     <div className="flex flex-col gap-4">
       <StudentZoomableMedia
-        sources={getImageUrlCandidates(mapBlock.assetUrl ?? '')}
+        sources={getImageUrlCandidates(mapBlock.assetUrl ?? "")}
         alt="Map reference"
         label="Map reference image"
         hint="Tap to zoom the map"
       />
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <StudentQuestionNumber
-            number={num}
+          <StudentQuestionNumber number={num} />
+          <StudentQuestionText
+            as="span"
+            className="text-gray-800"
+            text={`Label ${q.label}`}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+            highlightSurfaceId={getHighlightSurfaceId(q.id, "label")}
           />
-          <StudentQuestionText as="span" className="text-gray-800" text={`Label ${q.label}`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'label')} />
         </div>
         <div className={`${fieldIndentClass} mt-2`}>
           <ProtectedInput
             type="text"
             name={q.id}
-            value={typeof answer === 'string' ? answer : ''}
+            value={typeof answer === "string" ? answer : ""}
             onChange={(event) => commitAnswerChange(event.target.value)}
             className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
             placeholder="Enter label..."
@@ -454,27 +494,26 @@ export function QuestionRenderer({
   const renderSingleMCQ = (
     mcqBlock: SingleMCQBlock,
     blockNum: number,
-    questionLevel: SingleMCQQuestion | null,
+    questionLevel: SingleMCQQuestion | null
   ) => {
-    const stem = questionLevel?.stem || mcqBlock.stem || 'Select the correct option:';
-    const options = Array.isArray(questionLevel?.options) && questionLevel.options.length > 0
-      ? questionLevel.options
-      : mcqBlock.options ?? [];
+    const stem = questionLevel?.stem || mcqBlock.stem || "Select the correct option:";
+    const options =
+      Array.isArray(questionLevel?.options) && questionLevel.options.length > 0
+        ? questionLevel.options
+        : (mcqBlock.options ?? []);
     const inputGroupName = questionLevel ? `q-${questionLevel.id}` : `q-${mcqBlock.id}`;
 
     return (
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3">
-          <StudentQuestionNumber
-            number={blockNum}
-          />
+          <StudentQuestionNumber number={blockNum} />
           <StudentQuestionText
             as="span"
             className="text-gray-800"
             text={stem}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
-            highlightSurfaceId={getHighlightSurfaceId(questionLevel?.id ?? mcqBlock.id, 'stem')}
+            highlightSurfaceId={getHighlightSurfaceId(questionLevel?.id ?? mcqBlock.id, "stem")}
           />
         </legend>
         <div className={`${fieldIndentClass} space-y-3`}>
@@ -490,14 +529,27 @@ export function QuestionRenderer({
                   className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
                 <div className="flex gap-2">
-                  <StudentQuestionText as="span" className="font-bold text-gray-700" text={`${letter}.`} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(`${questionLevel?.id ?? mcqBlock.id}:${option.id}`, 'option-letter')} />
+                  <StudentQuestionText
+                    as="span"
+                    className="font-bold text-gray-700"
+                    text={`${letter}.`}
+                    highlightEnabled={highlightEnabled}
+                    highlightColor={highlightColor}
+                    highlightSurfaceId={getHighlightSurfaceId(
+                      `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
+                      "option-letter"
+                    )}
+                  />
                   <StudentQuestionText
                     as="span"
                     className="text-gray-800"
                     text={option.text}
                     highlightEnabled={highlightEnabled}
                     highlightColor={highlightColor}
-                    highlightSurfaceId={getHighlightSurfaceId(`${questionLevel?.id ?? mcqBlock.id}:${option.id}`, 'option-text')}
+                    highlightSurfaceId={getHighlightSurfaceId(
+                      `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
+                      "option-text"
+                    )}
                   />
                 </div>
               </label>
@@ -513,17 +565,21 @@ export function QuestionRenderer({
     return (
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <StudentQuestionNumber
-            number={num}
-            isActive={isActive}
+          <StudentQuestionNumber number={num} isActive={isActive} />
+          <StudentQuestionText
+            as="span"
+            className="text-gray-800"
+            text={q.prompt}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+            highlightSurfaceId={getHighlightSurfaceId(q.id, "prompt")}
           />
-          <StudentQuestionText as="span" className="text-gray-800" text={q.prompt} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, 'prompt')} />
         </div>
         <div className={`${fieldIndentClass} mt-2`}>
           <ProtectedInput
             type="text"
             name={q.id}
-            value={typeof answer === 'string' ? answer : ''}
+            value={typeof answer === "string" ? answer : ""}
             onChange={(event) => commitAnswerChange(event.target.value)}
             className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
             placeholder="Enter answer..."
@@ -537,7 +593,10 @@ export function QuestionRenderer({
     );
   };
 
-  const renderSentenceCompletion = (sentenceBlock: SentenceCompletionBlock, q: SentenceCompletionQuestion) => {
+  const renderSentenceCompletion = (
+    sentenceBlock: SentenceCompletionBlock,
+    q: SentenceCompletionQuestion
+  ) => {
     void sentenceBlock;
     const parts = q.sentence.split(/_{2,}/);
     const blanks = q.blanks.length;
@@ -547,42 +606,49 @@ export function QuestionRenderer({
         <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
           {parts.map((part, index) => (
             <React.Fragment key={`${q.id}-${index}`}>
-              <StudentQuestionText as="span" text={part} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(q.id, `sentence-segment-${index}`)} />
-              {index < blanks ? (
-                (() => {
-                  const slotId = getSlotId(index, `${q.id}:${index}`);
-                  const slotNumber = getSlotNumber(index, number + index);
-                  const ariaSuffix = getSlotAriaLabelSuffix(index);
-                  return (
-                <span
-                  id={`question-${slotId}`}
-                  className={`mx-1 inline-flex items-center gap-2 rounded-lg border px-2 py-1 align-middle ${getSlotClassName(
-                    slotId,
-                  )}`}
-                >
-                  <StudentQuestionNumber
-                    number={slotNumber}
-                    isActive={currentQuestionId === slotId}
-                  />
-                  <ProtectedInput
-                    type="text"
-                    name={slotId}
-                    value={stringArrayAnswer[index] ?? ''}
-                    onChange={(event) =>
-                      updateIndexedAnswer(index, event.target.value, blanks, slotId)
-                    }
-                    className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0' : 'w-28'} ${tabletMode && !isCompactPane ? 'max-w-full' : ''}`}
-                    placeholder="Answer..."
-                    security={security}
-                    sessionId={sessionId}
-                    studentId={studentId}
-                    aria-label={`Answer for question ${slotNumber}${ariaSuffix}`}
-                  />
-                  {renderFlagButton(slotId)}
-                </span>
-                  );
-                })()
-              ) : null}
+              <StudentQuestionText
+                as="span"
+                text={part}
+                highlightEnabled={highlightEnabled}
+                highlightColor={highlightColor}
+                highlightSurfaceId={getHighlightSurfaceId(q.id, `sentence-segment-${index}`)}
+              />
+              {index < blanks
+                ? (() => {
+                    const slotId = getSlotId(index, `${q.id}:${index}`);
+                    const slotNumber = getSlotNumber(index, number + index);
+                    const ariaSuffix = getSlotAriaLabelSuffix(index);
+                    return (
+                      <span
+                        id={`question-${slotId}`}
+                        tabIndex={-1}
+                        className={`mx-1 inline-flex items-center gap-2 rounded-lg border px-2 py-1 align-middle ${getSlotClassName(
+                          slotId
+                        )}`}
+                      >
+                        <StudentQuestionNumber
+                          number={slotNumber}
+                          isActive={currentQuestionId === slotId}
+                        />
+                        <ProtectedInput
+                          type="text"
+                          name={slotId}
+                          value={stringArrayAnswer[index] ?? ""}
+                          onChange={(event) =>
+                            updateIndexedAnswer(index, event.target.value, blanks, slotId)
+                          }
+                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
+                          placeholder="Answer..."
+                          security={security}
+                          sessionId={sessionId}
+                          studentId={studentId}
+                          aria-label={`Answer for question ${slotNumber}${ariaSuffix}`}
+                        />
+                        {renderFlagButton(slotId)}
+                      </span>
+                    );
+                  })()
+                : null}
             </React.Fragment>
           ))}
         </div>
@@ -599,47 +665,49 @@ export function QuestionRenderer({
         <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
           {parts.map((part, index) => (
             <React.Fragment key={`${noteQuestion.id}-${index}`}>
-              <StudentQuestionText as="span" text={part} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(noteQuestion.id, `note-segment-${index}`)} />
-              {index < blanks ? (
-                (() => {
-                  const slotId = getSlotId(index, `${noteQuestion.id}:${index}`);
-                  const slotNumber = getSlotNumber(index, number + index);
-                  const ariaSuffix = getSlotAriaLabelSuffix(index);
-                  return (
-                <span
-                  id={`question-${slotId}`}
-                  className={`mx-1 inline-flex items-center gap-2 rounded-lg border px-2 py-1 align-middle ${getSlotClassName(
-                    slotId,
-                  )}`}
-                >
-                  <StudentQuestionNumber
-                    number={slotNumber}
-                    isActive={currentQuestionId === slotId}
-                  />
-                  <ProtectedInput
-                    type="text"
-                    name={slotId}
-                    value={stringArrayAnswer[index] ?? ''}
-                    onChange={(event) =>
-                      updateIndexedAnswer(
-                        index,
-                        event.target.value,
-                        blanks,
-                        slotId,
-                      )
-                    }
-                    className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0' : 'w-28'} ${tabletMode && !isCompactPane ? 'max-w-full' : ''}`}
-                    placeholder="Answer..."
-                    security={security}
-                    sessionId={sessionId}
-                    studentId={studentId}
-                    aria-label={`Answer for question ${slotNumber}${ariaSuffix}`}
-                  />
-                  {renderFlagButton(slotId)}
-                </span>
-                  );
-                })()
-              ) : null}
+              <StudentQuestionText
+                as="span"
+                text={part}
+                highlightEnabled={highlightEnabled}
+                highlightColor={highlightColor}
+                highlightSurfaceId={getHighlightSurfaceId(noteQuestion.id, `note-segment-${index}`)}
+              />
+              {index < blanks
+                ? (() => {
+                    const slotId = getSlotId(index, `${noteQuestion.id}:${index}`);
+                    const slotNumber = getSlotNumber(index, number + index);
+                    const ariaSuffix = getSlotAriaLabelSuffix(index);
+                    return (
+                      <span
+                        id={`question-${slotId}`}
+                        tabIndex={-1}
+                        className={`mx-1 inline-flex items-center gap-2 rounded-lg border px-2 py-1 align-middle ${getSlotClassName(
+                          slotId
+                        )}`}
+                      >
+                        <StudentQuestionNumber
+                          number={slotNumber}
+                          isActive={currentQuestionId === slotId}
+                        />
+                        <ProtectedInput
+                          type="text"
+                          name={slotId}
+                          value={stringArrayAnswer[index] ?? ""}
+                          onChange={(event) =>
+                            updateIndexedAnswer(index, event.target.value, blanks, slotId)
+                          }
+                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
+                          placeholder="Answer..."
+                          security={security}
+                          sessionId={sessionId}
+                          studentId={studentId}
+                          aria-label={`Answer for question ${slotNumber}${ariaSuffix}`}
+                        />
+                        {renderFlagButton(slotId)}
+                      </span>
+                    );
+                  })()
+                : null}
             </React.Fragment>
           ))}
         </div>
@@ -654,16 +722,16 @@ export function QuestionRenderer({
           {renderTextField(
             getSlotId(index, `${diagramBlock.id}:${label.id}`),
             getSlotNumber(index, number + index),
-            stringArrayAnswer[index] ?? '',
+            stringArrayAnswer[index] ?? "",
             (nextValue) =>
               updateIndexedAnswer(
                 index,
                 nextValue,
                 diagramBlock.labels.length,
-                getSlotId(index, `${diagramBlock.id}:${label.id}`),
+                getSlotId(index, `${diagramBlock.id}:${label.id}`)
               ),
             label.prompt?.trim() || `Label ${index + 1}`,
-            'top',
+            "top"
           )}
         </React.Fragment>
       ))}
@@ -671,7 +739,7 @@ export function QuestionRenderer({
   );
 
   const renderDiagramLabeling = (diagramBlock: DiagramLabelingBlock) => {
-    const sources = getImageUrlCandidates(diagramBlock.imageUrl ?? '');
+    const sources = getImageUrlCandidates(diagramBlock.imageUrl ?? "");
     const hasImage = Boolean(sources[0]);
 
     if (hideDiagramReference) {
@@ -691,7 +759,9 @@ export function QuestionRenderer({
             />
           ) : (
             <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-              <div className="p-6 text-center text-sm text-gray-500">Diagram image URL is missing or inaccessible.</div>
+              <div className="p-6 text-center text-sm text-gray-500">
+                Diagram image URL is missing or inaccessible.
+              </div>
             </div>
           )}
         </div>
@@ -711,23 +781,23 @@ export function QuestionRenderer({
         renderTextField(
           getSlotId(index, `${flowChartBlock.id}:${step.id}`),
           getSlotNumber(index, number + index),
-          stringArrayAnswer[index] ?? '',
+          stringArrayAnswer[index] ?? "",
           (nextValue) =>
             updateIndexedAnswer(
               index,
               nextValue,
               flowChartBlock.steps.length,
-              getSlotId(index, `${flowChartBlock.id}:${step.id}`),
+              getSlotId(index, `${flowChartBlock.id}:${step.id}`)
             ),
-          step.label,
-        ),
+          step.label
+        )
       )}
     </div>
   );
 
   const renderTableCompletion = (tableBlock: TableCompletionBlock) => {
     type TableSlot = {
-      cell: TableCompletionBlock['cells'][number];
+      cell: TableCompletionBlock["cells"][number];
       index: number;
       slotId: string;
       placeholderIndex: number;
@@ -736,7 +806,7 @@ export function QuestionRenderer({
     const slotsByCoordinate = new Map<string, TableSlot[]>();
     for (const [index, cell] of tableBlock.cells.entries()) {
       const placeholderIndex =
-        typeof cell.placeholderIndex === 'number' &&
+        typeof cell.placeholderIndex === "number" &&
         Number.isInteger(cell.placeholderIndex) &&
         cell.placeholderIndex >= 0
           ? cell.placeholderIndex
@@ -758,7 +828,7 @@ export function QuestionRenderer({
       <div className="overflow-x-auto rounded-2xl border border-gray-200">
         <table
           className={`w-full border-collapse text-[length:var(--student-control-font-size)] ${
-            isCompactPane ? 'min-w-[360px]' : 'min-w-[480px]'
+            isCompactPane ? "min-w-[360px]" : "min-w-[480px]"
           }`}
         >
           <thead className="bg-gray-50">
@@ -798,7 +868,10 @@ export function QuestionRenderer({
                           text={cellValue}
                           highlightEnabled={highlightEnabled}
                           highlightColor={highlightColor}
-                          highlightSurfaceId={getHighlightSurfaceId(tableBlock.id, `cell-${rowIndex}-${cellIndex}`)}
+                          highlightSurfaceId={getHighlightSurfaceId(
+                            tableBlock.id,
+                            `cell-${rowIndex}-${cellIndex}`
+                          )}
                         />
                       </td>
                     );
@@ -806,26 +879,26 @@ export function QuestionRenderer({
 
                   const promptSegmentsFromText = cellValue.split(placeholderPattern);
                   const placeholderCountFromText = Math.max(0, promptSegmentsFromText.length - 1);
-                  const placeholderCount = Math.max(
-                    1,
-                    placeholderCountFromText,
-                    slots.length,
-                  );
+                  const placeholderCount = Math.max(1, placeholderCountFromText, slots.length);
                   const promptSegments =
-                    placeholderCountFromText > 0 ? promptSegmentsFromText : [cellValue, ''];
+                    placeholderCountFromText > 0 ? promptSegmentsFromText : [cellValue, ""];
                   while (promptSegments.length < placeholderCount + 1) {
-                    promptSegments.push('');
+                    promptSegments.push("");
                   }
 
                   const orderedSlots = [...slots].sort((left, right) => left.index - right.index);
                   const slotByPlaceholderPosition: Array<TableSlot | null> = Array.from(
                     { length: placeholderCount },
-                    () => null,
+                    () => null
                   );
                   const usedSlotIds = new Set<string>();
                   for (const slot of orderedSlots) {
                     const index = slot.placeholderIndex;
-                    if (index >= 0 && index < placeholderCount && !slotByPlaceholderPosition[index]) {
+                    if (
+                      index >= 0 &&
+                      index < placeholderCount &&
+                      !slotByPlaceholderPosition[index]
+                    ) {
                       slotByPlaceholderPosition[index] = slot;
                       usedSlotIds.add(slot.slotId);
                     }
@@ -834,7 +907,9 @@ export function QuestionRenderer({
                     if (usedSlotIds.has(slot.slotId)) {
                       continue;
                     }
-                    const openIndex = slotByPlaceholderPosition.findIndex((value) => value === null);
+                    const openIndex = slotByPlaceholderPosition.findIndex(
+                      (value) => value === null
+                    );
                     if (openIndex < 0) {
                       break;
                     }
@@ -847,11 +922,11 @@ export function QuestionRenderer({
                     if (!slot) {
                       return null;
                     }
-                    const promptPrefixText = (promptSegments[0] ?? '').trimEnd();
+                    const promptPrefixText = (promptSegments[0] ?? "").trimEnd();
                     const promptSuffixText =
                       promptSegments.length > 1
-                        ? promptSegments.slice(1).join(' ').trimStart()
-                        : '';
+                        ? promptSegments.slice(1).join(" ").trimStart()
+                        : "";
 
                     return (
                       <TableCompletionSlotCell
@@ -863,7 +938,7 @@ export function QuestionRenderer({
                         promptPrefixText={promptPrefixText}
                         promptSuffixText={promptSuffixText}
                         slotNumber={getSlotNumber(slot.index, number + slot.index)}
-                        answerValue={stringArrayAnswer[slot.index] ?? ''}
+                        answerValue={stringArrayAnswer[slot.index] ?? ""}
                         ariaLabel={`Answer for question ${getSlotNumber(slot.index, number + slot.index)}`}
                         highlightEnabled={highlightEnabled}
                         highlightColor={highlightColor}
@@ -875,7 +950,7 @@ export function QuestionRenderer({
                             slot.index,
                             nextValue,
                             tableBlock.cells.length,
-                            slot.slotId,
+                            slot.slotId
                           )
                         }
                         renderFlagButton={renderFlagButton}
@@ -884,16 +959,18 @@ export function QuestionRenderer({
                   }
 
                   const isActive = orderedSlots.some(
-                    (candidate) => candidate.slotId === currentQuestionId,
+                    (candidate) => candidate.slotId === currentQuestionId
                   );
-                  const isFlagged = orderedSlots.some((candidate) => Boolean(flags[candidate.slotId]));
+                  const isFlagged = orderedSlots.some((candidate) =>
+                    Boolean(flags[candidate.slotId])
+                  );
 
                   return (
                     <td
                       key={`cell-${rowIndex}-${cellIndex}`}
                       className={`border border-gray-200 px-3 py-2 align-top ${
-                        isActive ? 'ring-2 ring-blue-800 ring-inset' : ''
-                      } ${isFlagged ? 'bg-amber-50' : ''}`}
+                        isActive ? "ring-2 ring-blue-800 ring-inset" : ""
+                      } ${isFlagged ? "bg-amber-50" : ""}`}
                     >
                       <div className="space-y-2">
                         <div className="text-[length:var(--student-control-font-size)] text-gray-800 [white-space:pre-wrap]">
@@ -912,11 +989,15 @@ export function QuestionRenderer({
                                   text={segment}
                                   highlightEnabled={highlightEnabled}
                                   highlightColor={highlightColor}
-                                  highlightSurfaceId={getHighlightSurfaceId(tableBlock.id, `cell-${rowIndex}-${cellIndex}-segment-${segmentIndex}`)}
+                                  highlightSurfaceId={getHighlightSurfaceId(
+                                    tableBlock.id,
+                                    `cell-${rowIndex}-${cellIndex}-segment-${segmentIndex}`
+                                  )}
                                 />
                                 {segmentIndex < placeholderCount && slot ? (
                                   <span
                                     id={`question-${slot.slotId}`}
+                                    tabIndex={-1}
                                     className="mx-1 inline-flex items-center gap-2 align-middle"
                                   >
                                     <StudentQuestionNumber
@@ -927,13 +1008,13 @@ export function QuestionRenderer({
                                       <ProtectedInput
                                         type="text"
                                         name={slot.slotId}
-                                        value={stringArrayAnswer[slot.index] ?? ''}
+                                        value={stringArrayAnswer[slot.index] ?? ""}
                                         onChange={(event) =>
                                           updateIndexedAnswer(
                                             slot.index,
                                             event.target.value,
                                             tableBlock.cells.length,
-                                            slot.slotId,
+                                            slot.slotId
                                           )
                                         }
                                         className="w-full min-w-0 rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
@@ -978,27 +1059,49 @@ export function QuestionRenderer({
           const slotId = getSlotId(index, `${classificationBlock.id}:${item.id}`);
           const slotNumber = getSlotNumber(index, number + index);
           return (
-            <div key={item.id} id={`question-${slotId}`} className={getSlotClassName(slotId)}>
-              <div className={`flex flex-col gap-3 ${isCompactPane ? '' : 'md:flex-row md:items-center'}`}>
+            <div
+              key={item.id}
+              id={`question-${slotId}`}
+              tabIndex={-1}
+              className={getSlotClassName(slotId)}
+            >
+              <div
+                className={`flex flex-col gap-3 ${isCompactPane ? "" : "md:flex-row md:items-center"}`}
+              >
                 <div className="flex items-start gap-3 md:flex-1">
                   <StudentQuestionNumber
                     number={slotNumber}
                     isActive={currentQuestionId === slotId}
                   />
-                  <StudentQuestionText as="span" className="text-gray-800" text={item.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(slotId, 'item-text')} />
+                  <StudentQuestionText
+                    as="span"
+                    className="text-gray-800"
+                    text={item.text}
+                    highlightEnabled={highlightEnabled}
+                    highlightColor={highlightColor}
+                    highlightSurfaceId={getHighlightSurfaceId(slotId, "item-text")}
+                  />
                 </div>
-                <div className={isCompactPane ? 'flex w-full flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
+                <div
+                  className={
+                    isCompactPane
+                      ? "flex w-full flex-col items-stretch gap-2"
+                      : "flex items-center gap-3"
+                  }
+                >
                   <select
-                    value={typeof stringArrayAnswer[index] === 'string' ? stringArrayAnswer[index] : ''}
+                    value={
+                      typeof stringArrayAnswer[index] === "string" ? stringArrayAnswer[index] : ""
+                    }
                     onChange={(event) =>
                       updateIndexedAnswer(
                         index,
                         event.target.value,
                         classificationBlock.items.length,
-                        slotId,
+                        slotId
                       )
                     }
-                    className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0' : 'min-w-[11rem]'}`}
+                    className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"}`}
                     aria-label={`Category selection for question ${slotNumber}`}
                   >
                     <option value="">Choose category…</option>
@@ -1025,27 +1128,49 @@ export function QuestionRenderer({
           const slotId = getSlotId(index, `${matchingFeaturesBlock.id}:${feature.id}`);
           const slotNumber = getSlotNumber(index, number + index);
           return (
-            <div key={feature.id} id={`question-${slotId}`} className={getSlotClassName(slotId)}>
-              <div className={`flex flex-col gap-3 ${isCompactPane ? '' : 'md:flex-row md:items-center'}`}>
+            <div
+              key={feature.id}
+              id={`question-${slotId}`}
+              tabIndex={-1}
+              className={getSlotClassName(slotId)}
+            >
+              <div
+                className={`flex flex-col gap-3 ${isCompactPane ? "" : "md:flex-row md:items-center"}`}
+              >
                 <div className="flex items-start gap-3 md:flex-1">
                   <StudentQuestionNumber
                     number={slotNumber}
                     isActive={currentQuestionId === slotId}
                   />
-                  <StudentQuestionText as="span" className="text-gray-800" text={feature.text} highlightEnabled={highlightEnabled} highlightColor={highlightColor} highlightSurfaceId={getHighlightSurfaceId(slotId, 'feature-text')} />
+                  <StudentQuestionText
+                    as="span"
+                    className="text-gray-800"
+                    text={feature.text}
+                    highlightEnabled={highlightEnabled}
+                    highlightColor={highlightColor}
+                    highlightSurfaceId={getHighlightSurfaceId(slotId, "feature-text")}
+                  />
                 </div>
-                <div className={isCompactPane ? 'flex w-full flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
+                <div
+                  className={
+                    isCompactPane
+                      ? "flex w-full flex-col items-stretch gap-2"
+                      : "flex items-center gap-3"
+                  }
+                >
                   <select
-                    value={typeof stringArrayAnswer[index] === 'string' ? stringArrayAnswer[index] : ''}
+                    value={
+                      typeof stringArrayAnswer[index] === "string" ? stringArrayAnswer[index] : ""
+                    }
                     onChange={(event) =>
                       updateIndexedAnswer(
                         index,
                         event.target.value,
                         matchingFeaturesBlock.features.length,
-                        slotId,
+                        slotId
                       )
                     }
-                    className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? 'w-full min-w-0' : 'min-w-[11rem]'}`}
+                    className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"}`}
                     aria-label={`Matching selection for question ${slotNumber}`}
                   >
                     <option value="">Choose match…</option>
@@ -1067,28 +1192,45 @@ export function QuestionRenderer({
 
   return (
     <div className="relative">
-      {block.type === 'TFNG' && question ? renderTFNG(block as TFNGBlock, question as TFNGQuestion) : null}
-      {block.type === 'CLOZE' && question ? renderCloze(block as ClozeBlock, question as ClozeQuestion) : null}
-      {block.type === 'MATCHING' && question ? renderMatching(block as MatchingBlock, question as MatchingQuestion) : null}
-      {block.type === 'MULTI_MCQ' ? renderMultiMCQ(block as MultiMCQBlock, number) : null}
-      {block.type === 'MAP' && question ? renderMap(block as MapBlock, question as MapQuestion, number) : null}
-      {block.type === 'SINGLE_MCQ'
+      {block.type === "TFNG" && question
+        ? renderTFNG(block as TFNGBlock, question as TFNGQuestion)
+        : null}
+      {block.type === "CLOZE" && question
+        ? renderCloze(block as ClozeBlock, question as ClozeQuestion)
+        : null}
+      {block.type === "MATCHING" && question
+        ? renderMatching(block as MatchingBlock, question as MatchingQuestion)
+        : null}
+      {block.type === "MULTI_MCQ" ? renderMultiMCQ(block as MultiMCQBlock, number) : null}
+      {block.type === "MAP" && question
+        ? renderMap(block as MapBlock, question as MapQuestion, number)
+        : null}
+      {block.type === "SINGLE_MCQ"
         ? renderSingleMCQ(block as SingleMCQBlock, number, question as SingleMCQQuestion | null)
         : null}
-      {block.type === 'SHORT_ANSWER' && question
+      {block.type === "SHORT_ANSWER" && question
         ? renderShortAnswer(block as ShortAnswerBlock, question as ShortAnswerQuestion, number)
         : null}
-      {block.type === 'SENTENCE_COMPLETION' && question
-        ? renderSentenceCompletion(block as SentenceCompletionBlock, question as SentenceCompletionQuestion)
+      {block.type === "SENTENCE_COMPLETION" && question
+        ? renderSentenceCompletion(
+            block as SentenceCompletionBlock,
+            question as SentenceCompletionQuestion
+          )
         : null}
-      {block.type === 'DIAGRAM_LABELING' ? renderDiagramLabeling(block as DiagramLabelingBlock) : null}
-      {block.type === 'FLOW_CHART' ? renderFlowChart(block as FlowChartBlock) : null}
-      {block.type === 'TABLE_COMPLETION' ? renderTableCompletion(block as TableCompletionBlock) : null}
-      {block.type === 'NOTE_COMPLETION' && question
+      {block.type === "DIAGRAM_LABELING"
+        ? renderDiagramLabeling(block as DiagramLabelingBlock)
+        : null}
+      {block.type === "FLOW_CHART" ? renderFlowChart(block as FlowChartBlock) : null}
+      {block.type === "TABLE_COMPLETION"
+        ? renderTableCompletion(block as TableCompletionBlock)
+        : null}
+      {block.type === "NOTE_COMPLETION" && question
         ? renderNoteCompletion(question as NoteCompletionQuestion)
         : null}
-      {block.type === 'CLASSIFICATION' ? renderClassification(block as ClassificationBlock) : null}
-      {block.type === 'MATCHING_FEATURES' ? renderMatchingFeatures(block as MatchingFeaturesBlock) : null}
+      {block.type === "CLASSIFICATION" ? renderClassification(block as ClassificationBlock) : null}
+      {block.type === "MATCHING_FEATURES"
+        ? renderMatchingFeatures(block as MatchingFeaturesBlock)
+        : null}
     </div>
   );
 }

@@ -213,6 +213,7 @@ export const StudentQuestionBlockSection = React.memo(
                   key={question.id}
                   id={!inlineFlags && flagId ? `question-${flagId}` : undefined}
                   className={`relative ${tabletMode ? 'space-y-2' : ''}`}
+                  tabIndex={-1}
                 >
                   {onToggleFlag && flagId && !inlineFlags ? (
                     <FlagButton
@@ -262,7 +263,7 @@ export const StudentQuestionBlockSection = React.memo(
               );
             })
           ) : (
-            <div key={block.id} className="relative">
+            <div key={block.id} className="relative" tabIndex={-1}>
               {onToggleFlag && singleBlockQuestion ? (
                 <FlagButton
                   flagged={Boolean(flags[singleBlockQuestion.id])}

@@ -1,12 +1,12 @@
-import React from 'react';
-import type { QuestionAnswer } from '../../types';
-import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
-import type { StudentQuestionDescriptor } from '@student/application/studentExamContentFacade';
-import { ProtectedInput } from './ProtectedInput';
-import { Flag } from 'lucide-react';
-import { StudentQuestionText } from './StudentQuestionText';
-import { StudentQuestionNumber } from './StudentQuestionNumber';
-import type { StudentHighlightColor } from './highlightPalette';
+import React from "react";
+import type { QuestionAnswer } from "../../types";
+import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
+import type { StudentQuestionDescriptor } from "@student/application/studentExamContentFacade";
+import { ProtectedInput } from "./ProtectedInput";
+import { Flag } from "lucide-react";
+import { StudentQuestionText } from "./StudentQuestionText";
+import { StudentQuestionNumber } from "./StudentQuestionNumber";
+import type { StudentHighlightColor } from "./highlightPalette";
 
 interface SubAnswerTreeQuestionListProps {
   questions: StudentQuestionDescriptor[];
@@ -20,7 +20,7 @@ interface SubAnswerTreeQuestionListProps {
   onAnswerChange: (
     answerKey: string,
     answer: QuestionAnswer,
-    meta?: StudentAnswerMutationMeta,
+    meta?: StudentAnswerMutationMeta
   ) => void;
 }
 
@@ -44,7 +44,7 @@ export function SubAnswerTreeQuestionList({
   }> = [];
 
   questions.forEach((question) => {
-    if (!question.rootId || typeof question.rootNumber !== 'number') {
+    if (!question.rootId || typeof question.rootNumber !== "number") {
       return;
     }
 
@@ -53,14 +53,14 @@ export function SubAnswerTreeQuestionList({
       groups.push({
         rootId: question.rootId,
         rootNumber: question.rootNumber,
-        prompt: '',
+        prompt: "",
         leaves: [],
       });
     }
     const group = groups[rootOrder.get(question.rootId)!];
     if (!group) return;
     if (!group.prompt) {
-      const prompt = typeof question.treePrompt === 'string' ? question.treePrompt.trim() : '';
+      const prompt = typeof question.treePrompt === "string" ? question.treePrompt.trim() : "";
       if (prompt) {
         group.prompt = prompt;
       }
@@ -79,7 +79,7 @@ export function SubAnswerTreeQuestionList({
       return (left.numberLabel ?? String(left.rootNumber)).localeCompare(
         right.numberLabel ?? String(right.rootNumber),
         undefined,
-        { numeric: true },
+        { numeric: true }
       );
     });
   });
@@ -97,14 +97,14 @@ export function SubAnswerTreeQuestionList({
                 text={group.prompt}
                 highlightEnabled={highlightEnabled}
                 highlightColor={highlightColor}
-                highlightSurfaceId={`question:${questions[0]?.blockId ?? 'unknown'}:${group.rootId}:root-prompt`}
+                highlightSurfaceId={`question:${questions[0]?.blockId ?? "unknown"}:${group.rootId}:root-prompt`}
               />
             </div>
           ) : null}
-          <div className={`${tabletMode ? 'ml-0' : 'ml-9'} space-y-2`}>
+          <div className={`${tabletMode ? "ml-0" : "ml-9"} space-y-2`}>
             {group.leaves.map((leaf) => {
               const slotId = leaf.id;
-              const value = typeof answers[slotId] === 'string' ? (answers[slotId] as string) : '';
+              const value = typeof answers[slotId] === "string" ? (answers[slotId] as string) : "";
               const isCurrent = currentQuestionId === slotId;
               const isFlagged = Boolean(flags[slotId]);
               const showLeafNumber = group.leaves.length > 1;
@@ -116,16 +116,18 @@ export function SubAnswerTreeQuestionList({
                 <div
                   key={slotId}
                   id={`question-${slotId}`}
+                  tabIndex={-1}
                   className={`rounded-lg p-1 transition-colors ${
-                    isCurrent ? 'ring-2 ring-blue-800 ring-offset-2' : ''
-                  } ${isFlagged ? 'bg-amber-50' : ''}`}
+                    isCurrent ? "ring-2 ring-blue-800 ring-offset-2" : ""
+                  } ${isFlagged ? "bg-amber-50" : ""}`}
                 >
-                  <div className={tabletMode ? 'flex flex-col items-stretch gap-2' : 'flex items-center gap-3'}>
+                  <div
+                    className={
+                      tabletMode ? "flex flex-col items-stretch gap-2" : "flex items-center gap-3"
+                    }
+                  >
                     {showLeafNumber ? (
-                      <StudentQuestionNumber
-                        number={displayNumber}
-                        isActive={isCurrent}
-                      />
+                      <StudentQuestionNumber number={displayNumber} isActive={isCurrent} />
                     ) : null}
                     <div className="flex-1">
                       <ProtectedInput
@@ -135,7 +137,7 @@ export function SubAnswerTreeQuestionList({
                         value={value}
                         onChange={(event) =>
                           onAnswerChange(slotId, event.target.value, {
-                            interactionType: 'typing',
+                            interactionType: "typing",
                           })
                         }
                         className="w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
@@ -147,14 +149,14 @@ export function SubAnswerTreeQuestionList({
                       <button
                         type="button"
                         onClick={() => onToggleFlag(slotId)}
-                        className={`inline-flex ${tabletMode ? 'h-8 w-8' : 'h-9 w-9'} items-center justify-center rounded-full border transition-colors ${
+                        className={`inline-flex ${tabletMode ? "h-8 w-8" : "h-9 w-9"} items-center justify-center rounded-full border transition-colors ${
                           isFlagged
-                            ? 'border-amber-700 bg-amber-700 text-white'
-                            : 'border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700'
+                            ? "border-amber-700 bg-amber-700 text-white"
+                            : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700"
                         }`}
-                        aria-label={isFlagged ? 'Unflag question' : 'Flag question'}
+                        aria-label={isFlagged ? "Unflag question" : "Flag question"}
                       >
-                        <Flag size={14} className={isFlagged ? 'fill-current' : ''} />
+                        <Flag size={14} className={isFlagged ? "fill-current" : ""} />
                       </button>
                     ) : null}
                   </div>

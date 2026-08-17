@@ -1,7 +1,6 @@
 import type { ExamSessionRuntime } from '../../../../types/domain';
 import type { StudentAttempt } from '../../../../types/studentAttempt';
 import { STUDENT_EXAM_PHASE, type StudentExamPhase } from './studentExamPhase';
-import { isRuntimeStructurallyCompleted } from './terminalState';
 
 export interface DeriveStudentPhaseInput {
   readonly attempt: StudentAttempt | null;
@@ -11,9 +10,7 @@ export interface DeriveStudentPhaseInput {
 
 export function deriveStudentPhase(input: DeriveStudentPhaseInput): StudentExamPhase {
   const verifiedTerminal =
-    input.attempt?.proctorStatus === 'terminated' ||
-    Boolean(input.attempt?.submittedAt) ||
-    isRuntimeStructurallyCompleted(input.runtime);
+    input.attempt?.proctorStatus === 'terminated' || Boolean(input.attempt?.submittedAt);
 
   if (verifiedTerminal) {
     return STUDENT_EXAM_PHASE.POST_EXAM;

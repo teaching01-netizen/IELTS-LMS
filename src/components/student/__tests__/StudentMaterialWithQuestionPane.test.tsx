@@ -5,7 +5,7 @@ import { StudentMaterialWithQuestionPane } from '../StudentMaterialWithQuestionP
 
 function renderPane(
   layoutMode: 'compact' | 'wide' = 'compact',
-  materialPane: React.ReactNode = <div data-testid="material-content">Passage</div>,
+  materialPane: React.ReactNode = <div data-testid="material-content">Passage</div>
 ) {
   return render(
     <StudentMaterialWithQuestionPane
@@ -37,7 +37,7 @@ function renderPane(
         getBlockStartQuestionNumber: () => 1,
         renderBlockInstruction: () => null,
       }}
-    />,
+    />
   );
 }
 
@@ -48,12 +48,12 @@ describe('StudentMaterialWithQuestionPane', () => {
     expect(screen.getByTestId('material-content')).toBeVisible();
     expect(screen.queryByTestId('question-content')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show questions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Questions' }));
 
     expect(screen.queryByTestId('material-content')).not.toBeInTheDocument();
     expect(screen.getByTestId('question-content')).toBeVisible();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show passage' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Passage' }));
     expect(screen.getByTestId('material-content')).toBeVisible();
   });
 
@@ -70,15 +70,15 @@ describe('StudentMaterialWithQuestionPane', () => {
         }}
       >
         Passage
-      </div>,
+      </div>
     );
 
     const initialMaterialScroll = materialScrollNodes[0];
     expect(initialMaterialScroll).toBeDefined();
     initialMaterialScroll.scrollTop = 137;
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show questions' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Show passage' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Questions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Passage' }));
 
     const restoredMaterialScroll = materialScrollNodes[materialScrollNodes.length - 1];
     expect(restoredMaterialScroll).not.toBe(initialMaterialScroll);

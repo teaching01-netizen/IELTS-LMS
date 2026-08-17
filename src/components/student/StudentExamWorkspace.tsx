@@ -1,16 +1,16 @@
-import React from 'react';
-import type { ExamState, ModuleType, QuestionAnswer } from '../../types';
-import type { StudentQuestionDescriptor } from '@student/application/studentExamContentFacade';
-import { QuestionNavigator } from './QuestionNavigator';
-import { WritingTaskNavigator } from './WritingTaskNavigator';
-import { StudentFooter } from './StudentFooter';
-import { StudentListening } from './StudentListening';
-import { StudentReading } from './StudentReading';
-import { StudentSpeaking } from './StudentSpeaking';
-import { StudentWriting } from './StudentWriting';
-import type { StudentHighlightColor } from './highlightPalette';
-import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
-import type { StudentLayoutMode } from './layout/studentLayoutMode';
+import React from "react";
+import type { ExamState, ModuleType, QuestionAnswer } from "../../types";
+import type { StudentQuestionDescriptor } from "@student/application/studentExamContentFacade";
+import { QuestionNavigator } from "./QuestionNavigator";
+import { WritingTaskNavigator } from "./WritingTaskNavigator";
+import { StudentFooter } from "./StudentFooter";
+import { StudentListening } from "./StudentListening";
+import { StudentReading } from "./StudentReading";
+import { StudentSpeaking } from "./StudentSpeaking";
+import { StudentWriting } from "./StudentWriting";
+import type { StudentHighlightColor } from "./highlightPalette";
+import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
+import type { StudentLayoutMode } from "./layout/studentLayoutMode";
 
 export interface StudentExamWorkspaceProps {
   currentModule: ModuleType;
@@ -24,7 +24,7 @@ export interface StudentExamWorkspaceProps {
   layoutMode?: StudentLayoutMode | undefined;
   showSubmitControls: boolean;
   contentZoom: number;
-  displayTimeRemaining?: number | undefined
+  displayTimeRemaining?: number | undefined;
   highlightEnabled: boolean;
   highlightColor: StudentHighlightColor;
   highlightClassName?: string;
@@ -40,7 +40,7 @@ export interface StudentExamWorkspaceProps {
   onObjectiveAnswerChange: (
     questionId: string,
     answer: QuestionAnswer,
-    meta?: StudentAnswerMutationMeta,
+    meta?: StudentAnswerMutationMeta
   ) => void;
   onFlagToggle: (id: string) => void;
   onWritingChange: (taskId: string, text: string) => void;
@@ -64,7 +64,7 @@ export function StudentExamWorkspace({
   writingAnswers,
   flags,
   tabletMode,
-  layoutMode = 'wide',
+  layoutMode = "wide",
   showSubmitControls,
   contentZoom,
   displayTimeRemaining,
@@ -97,7 +97,7 @@ export function StudentExamWorkspace({
         className="student-exam-main flex-1 overflow-hidden relative flex flex-col"
         role="main"
       >
-        {currentModule === 'reading' ? (
+        {currentModule === "reading" ? (
           <StudentReading
             state={examState}
             answers={answers}
@@ -122,7 +122,7 @@ export function StudentExamWorkspace({
           />
         ) : null}
 
-        {currentModule === 'listening' ? (
+        {currentModule === "listening" ? (
           <StudentListening
             state={examState}
             answers={answers}
@@ -147,7 +147,7 @@ export function StudentExamWorkspace({
           />
         ) : null}
 
-        {currentModule === 'writing' ? (
+        {currentModule === "writing" ? (
           <StudentWriting
             state={examState}
             writingAnswers={writingAnswers}
@@ -168,7 +168,7 @@ export function StudentExamWorkspace({
           />
         ) : null}
 
-        {currentModule === 'speaking' ? (
+        {currentModule === "speaking" ? (
           <StudentSpeaking
             state={examState}
             onSubmit={onModuleSubmit}
@@ -178,7 +178,7 @@ export function StudentExamWorkspace({
         ) : null}
       </main>
 
-      {(currentModule === 'reading' || currentModule === 'listening') ? (
+      {currentModule === "reading" || currentModule === "listening" ? (
         <StudentFooter
           questions={allQuestions}
           currentQuestionId={currentQuestionId}
@@ -195,7 +195,7 @@ export function StudentExamWorkspace({
       ) : null}
 
       {showNavigator ? (
-        currentModule === 'writing' ? (
+        currentModule === "writing" ? (
           <WritingTaskNavigator
             tasks={examState.config.sections.writing.tasks ?? []}
             writingAnswers={writingAnswers}
