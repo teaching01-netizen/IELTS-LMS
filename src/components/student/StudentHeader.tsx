@@ -19,6 +19,9 @@ import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
 import { getStudentHighlightPaletteEntry, studentHighlightPalette, type StudentHighlightColor } from './highlightPalette';
 import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 
+const pressClassName =
+  'transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]';
+
 interface StudentHeaderProps {
   testTakerId?: string | undefined;
   timeRemaining?: number | undefined;
@@ -227,7 +230,7 @@ export function StudentHeader({
             <button
               type="button"
               onClick={onZoomOut}
-              className="flex h-10 w-10 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+              className={`flex h-10 w-10 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
               aria-label="Zoom out"
               title="Zoom out"
             >
@@ -244,7 +247,7 @@ export function StudentHeader({
             <button
               type="button"
               onClick={onZoomIn}
-              className="flex h-10 w-10 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+              className={`flex h-10 w-10 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
               aria-label="Zoom in"
               title="Zoom in"
             >
@@ -253,7 +256,7 @@ export function StudentHeader({
             <button
               type="button"
               onClick={onZoomReset}
-              className="flex h-10 w-10 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+              className={`flex h-10 w-10 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
               aria-label="Reset zoom"
               title="Reset zoom"
             >
@@ -289,7 +292,7 @@ export function StudentHeader({
       >
         {timeRemaining !== undefined ? (
           <div className="flex items-center gap-1.5 md:gap-2 lg:gap-3 flex-shrink-0">
-            <div className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-semibold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? 'bg-red-100 border-red-700 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-900'}`}>
+            <div className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-semibold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? 'student-timer-urgent bg-red-100 border-red-700 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-900'}`}>
               <Clock size={14} className={timeRemaining < 300 ? 'text-red-900' : 'text-gray-700'} />
               <span
                 className="font-mono"
@@ -313,7 +316,7 @@ export function StudentHeader({
             <button
               type="button"
               onClick={onToggleHighlightMode}
-              className={`flex min-h-11 items-center gap-1.5 rounded-l-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
+              className={`${pressClassName} flex min-h-11 items-center gap-1.5 rounded-l-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
                 highlightToolMode === 'highlight'
                   ? 'border-blue-700 bg-blue-50 text-blue-950'
                   : 'border-gray-300 bg-white text-gray-800'
@@ -329,7 +332,7 @@ export function StudentHeader({
               ref={highlightOptionsTriggerRef}
               type="button"
               onClick={() => setShowHighlightOptions((open) => !open)}
-              className="flex min-h-11 min-w-11 items-center justify-center rounded-r-sm border border-l-0 border-gray-300 bg-white text-gray-800 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
+              className={`${pressClassName} flex min-h-11 min-w-11 items-center justify-center rounded-r-sm border border-l-0 border-gray-300 bg-white text-gray-800 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700`}
               aria-label="Choose highlight color"
               aria-expanded={showHighlightOptions}
             >
@@ -353,7 +356,7 @@ export function StudentHeader({
                       onSelectHighlightColor?.(entry.id);
                       closeHighlightOptions();
                     }}
-                    className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700"
+                    className={`${pressClassName} flex min-h-11 w-full items-center gap-2 rounded-sm px-3 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700`}
                     aria-label={entry.label}
                   >
                     <span className={`h-5 w-5 rounded-sm border border-gray-500 ${entry.swatchClassName}`} aria-hidden="true" />
@@ -377,7 +380,7 @@ export function StudentHeader({
           <button
             type="button"
             onClick={onSelectEraseMode}
-            className={`flex min-h-11 min-w-11 shrink-0 items-center gap-1.5 rounded-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
+            className={`${pressClassName} flex min-h-11 min-w-11 shrink-0 items-center gap-1.5 rounded-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
               highlightToolMode === 'erase'
                 ? 'border-blue-700 bg-blue-50 text-blue-950'
                 : 'border-gray-300 bg-white text-gray-800'
@@ -427,7 +430,7 @@ export function StudentHeader({
                   onClick={() => {
                     setShowTabletZoomControls((open) => !open);
                   }}
-                  className="flex min-w-[5.75rem] items-center justify-center gap-1 rounded-sm border border-gray-200 bg-white px-2.5 py-1.5 text-[length:var(--student-control-font-size)] font-medium text-gray-700 transition-colors hover:border-gray-300 hover:bg-gray-100"
+                  className={`flex min-w-[5.75rem] items-center justify-center gap-1 rounded-sm border border-gray-200 bg-white px-2.5 py-1.5 text-[length:var(--student-control-font-size)] font-medium text-gray-700 ${pressClassName} hover:border-gray-300 hover:bg-gray-100`}
                   aria-expanded={showTabletZoomControls}
                   aria-label="Open zoom controls"
                   title="Open zoom controls"
@@ -454,7 +457,7 @@ export function StudentHeader({
                 <button
                   type="button"
                   onClick={onZoomOut}
-                  className="flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                  className={`flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
                   aria-label="Zoom out"
                   title="Zoom out"
                 >
@@ -471,7 +474,7 @@ export function StudentHeader({
                 <button
                   type="button"
                   onClick={onZoomIn}
-                  className="flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                  className={`flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
                   aria-label="Zoom in"
                   title="Zoom in"
                 >
@@ -480,7 +483,7 @@ export function StudentHeader({
                 <button
                   type="button"
                   onClick={onZoomReset}
-                  className="flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                  className={`flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
                   aria-label="Reset zoom"
                   title="Reset zoom"
                 >
@@ -494,7 +497,7 @@ export function StudentHeader({
           <button
             type="button"
             onClick={onOpenAccessibility}
-            className="p-2 md:p-2.5 rounded-sm flex-shrink-0"
+            className={`${pressClassName} p-2 md:p-2.5 rounded-sm flex-shrink-0`}
             aria-label="Open accessibility settings"
           >
             <Contrast size={16} strokeWidth={2} />
@@ -504,7 +507,7 @@ export function StudentHeader({
           <button
             type="button"
             onClick={onOpenNavigator}
-            className="flex items-center gap-1 md:gap-1.5 px-2.5 md:px-3 py-1.5 md:py-2 rounded-sm bg-gray-50 text-gray-900 font-medium text-[length:var(--student-control-font-size)]"
+            className={`${pressClassName} flex items-center gap-1 md:gap-1.5 px-2.5 md:px-3 py-1.5 md:py-2 rounded-sm bg-gray-50 text-gray-900 font-medium text-[length:var(--student-control-font-size)]`}
             aria-label="Open question navigator"
           >
             <LayoutGrid size={16} strokeWidth={2} />

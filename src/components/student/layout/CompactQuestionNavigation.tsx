@@ -18,8 +18,7 @@ interface CompactQuestionNavigationProps {
   readonly showSubmitButton: boolean;
 }
 
-const navigationButtonClassName =
-  'student-touch-target flex items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40';
+const navigationButtonClassName = `student-touch-target flex items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-900 hover:bg-gray-50 transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40`;
 
 export function CompactQuestionNavigation({
   questions,
@@ -68,7 +67,7 @@ export function CompactQuestionNavigation({
 
       <button
         type="button"
-        className="student-touch-target flex min-w-0 flex-1 items-center justify-center gap-2 rounded-sm px-2 text-sm font-semibold text-gray-900 hover:bg-gray-50"
+        className="student-touch-target flex min-w-0 flex-1 items-center justify-center gap-2 rounded-sm px-2 text-sm font-semibold text-gray-900 transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] hover:bg-gray-50"
         onClick={(event) => {
           event.currentTarget.focus();
           onOpenNavigator?.();
@@ -98,7 +97,7 @@ export function CompactQuestionNavigation({
       {showSubmitButton ? (
         <button
           type="button"
-          className="student-touch-target rounded-sm bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
+          className="student-touch-target rounded-sm bg-primary px-3 text-sm font-semibold text-primary-foreground transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] hover:bg-primary-hover"
           onClick={onSubmit}
           data-student-primary-touch-target
         >

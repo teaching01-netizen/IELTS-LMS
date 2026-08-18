@@ -106,7 +106,7 @@ export function QuestionNavigator({
         event.preventDefault();
         onClose();
       }}
-      className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col p-0 backdrop:bg-black/50"
+      className="student-question-navigator bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col p-0 backdrop:bg-black/50"
       aria-labelledby="question-navigator-title"
       aria-modal="true"
     >
@@ -117,7 +117,7 @@ export function QuestionNavigator({
         <button
           type="button"
           onClick={onClose}
-          className="student-touch-target flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100"
+          className="student-touch-target flex items-center justify-center rounded-md text-gray-500 transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] hover:bg-gray-100"
           aria-label="Close question navigator"
         >
           <X size={18} />
@@ -171,17 +171,17 @@ export function QuestionNavigator({
                     onClick={() => navigateToQuestion(question.id)}
                     aria-label={`Question ${getQuestionNumberLabel(questions, question.id)}${isCurrent ? ', current' : isFullyComplete ? ', complete' : isAnswered ? ', answered' : isFlagged ? ', flagged' : ', not answered'}`}
                     className={`
-                      relative h-11 md:h-12 rounded-md border border-transparent flex items-center justify-center text-[length:var(--student-control-font-size)] font-medium transition-colors
+                      relative h-11 md:h-12 rounded-md border border-transparent flex items-center justify-center text-[length:var(--student-control-font-size)] font-medium transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]
                       ${
                         isCurrent
-                          ? 'bg-blue-800 text-white border-blue-800 hover:bg-blue-700'
+                          ? 'bg-blue-800 text-white border-blue-800 hover:bg-blue-700 active:bg-blue-800'
                           : isFlagged
-                            ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200'
+                            ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200 active:bg-amber-300'
                             : isFullyComplete
-                              ? 'bg-green-800 text-white hover:bg-green-900'
+                              ? 'bg-green-800 text-white hover:bg-green-900 active:bg-green-950'
                               : isAnswered
-                                ? 'bg-green-200 text-green-900 hover:bg-green-300'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                ? 'bg-green-200 text-green-900 hover:bg-green-300 active:bg-green-400'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'
                       }
                     `}
                   >

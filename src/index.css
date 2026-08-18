@@ -250,6 +250,11 @@
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
     }
+
+    dialog::backdrop {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 
   /* Accessibility: High contrast mode support */
@@ -473,6 +478,72 @@
   [data-student-highlight-selection="true"] [data-highlighted="true"]::-moz-selection {
     background-color: var(--student-highlight-selection-color);
     color: inherit;
+  }
+
+  /* Exam surface entrances: dialogs and overlays fade in with a short rise. */
+  @keyframes student-surface-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes student-sheet-in {
+    from {
+      opacity: 0;
+      transform: translateY(32px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes student-backdrop-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .student-question-navigator[open] {
+    animation: student-surface-in 200ms ease-out;
+  }
+
+  .student-confirmation-surface {
+    animation: student-surface-in 200ms ease-out;
+  }
+
+  .student-tools-sheet[open] {
+    animation: student-sheet-in 200ms ease-out;
+  }
+
+  .student-question-navigator[open]::backdrop {
+    animation: student-backdrop-in 200ms ease-out;
+  }
+
+  .student-tools-sheet[open]::backdrop {
+    animation: student-backdrop-in 200ms ease-out;
+  }
+
+  /* One-shot urgency cue for the exam timer under five minutes. */
+  @keyframes student-urgent-cue {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(190, 18, 60, 0);
+    }
+    50% {
+      box-shadow: 0 0 0 4px rgba(190, 18, 60, 0.12);
+    }
+  }
+
+  .student-timer-urgent {
+    animation: student-urgent-cue 2s ease-out 1;
   }
 
   .student-translation-guard-active [data-student-highlightable="true"],

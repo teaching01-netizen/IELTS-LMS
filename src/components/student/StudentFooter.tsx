@@ -11,6 +11,9 @@ import type { StudentAnswer } from './providers/StudentRuntimeProvider';
 import type { StudentLayoutMode } from './layout/studentLayoutMode';
 import { CompactQuestionNavigation } from './layout/CompactQuestionNavigation';
 
+const pressClassName =
+  'transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]';
+
 interface StudentFooterProps {
   questions: StudentQuestionDescriptor[];
   currentQuestionId: string | null;
@@ -133,14 +136,14 @@ export function StudentFooter({
                       <button
                         key={targetQuestionId}
                         onClick={() => onNavigate(targetQuestionId)}
-                        className={`relative text-[length:var(--student-chip-font-size)] flex items-center justify-center min-w-[1.6rem] md:min-w-[1.8rem] lg:min-w-[2rem] h-6 md:h-7 lg:h-8 px-1 md:px-1.5 rounded-sm font-bold border ${
+                        className={`${pressClassName} relative text-[length:var(--student-chip-font-size)] flex items-center justify-center min-w-[1.6rem] md:min-w-[1.8rem] lg:min-w-[2rem] h-6 md:h-7 lg:h-8 px-1 md:px-1.5 rounded-sm font-bold border ${
                           isCurrent
-                            ? 'bg-blue-800 border-blue-800 text-white'
+                            ? 'bg-blue-800 border-blue-800 text-white hover:bg-blue-700'
                             : isFlagged
-                              ? 'bg-amber-100 border-amber-700 text-amber-900'
+                              ? 'bg-amber-100 border-amber-700 text-amber-900 hover:bg-amber-200'
                               : isAnswered
-                                ? 'bg-green-200 border-green-700 text-green-900'
-                                : 'bg-white border-gray-100 text-gray-700'
+                                ? 'bg-green-200 border-green-700 text-green-900 hover:bg-green-300'
+                                : 'bg-white border-gray-100 text-gray-700 hover:bg-gray-100'
                         }`}
                         aria-label={displayLabel}
                       >
@@ -163,11 +166,11 @@ export function StudentFooter({
                   }}
                   aria-label={`Jump to Part ${partNumber}`}
                   title={`Click to jump to Part ${partNumber}`}
-                  className="flex items-center gap-1 md:gap-1.5 rounded-sm px-1 py-0.5 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+                  className={`${pressClassName} flex items-center gap-1 md:gap-1.5 rounded-sm px-1 py-0.5 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60`}
                 >
                   <div className="w-8 md:w-10 lg:w-12 h-1 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
                     <div
-                      className="h-full bg-blue-800"
+                      className="h-full bg-blue-800 transition-[width] duration-300 ease-out"
                       style={{
                         width: `${Math.max(0, Math.min(100, groupProgressPct))}%`,
                       }}

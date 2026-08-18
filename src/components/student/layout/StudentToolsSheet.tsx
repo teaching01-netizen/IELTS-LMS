@@ -120,7 +120,7 @@ export function StudentToolsSheet({ open, onClose, children }: StudentToolsSheet
         </h2>
         <button
           type="button"
-          className="student-touch-target flex items-center justify-center rounded-sm text-gray-700 hover:bg-gray-100"
+          className="student-touch-target flex items-center justify-center rounded-sm text-gray-700 transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] hover:bg-gray-100"
           aria-label="Close exam tools"
           onClick={onClose}
         >
