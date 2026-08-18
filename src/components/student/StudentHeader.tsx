@@ -217,12 +217,12 @@ export function StudentHeader({
           className="fixed z-[90] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-2xl"
           style={tabletZoomControlsStyle}
         >
-          <div className="mb-2 text-[length:var(--student-meta-font-size)] font-black uppercase tracking-[0.18em] text-gray-500">
+          <div className="mb-2 text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-[0.18em] text-gray-500">
             Zoom
           </div>
           <div
             data-testid="zoom-controls"
-            className="flex w-full items-center gap-1 rounded-sm border border-gray-200 bg-gray-50 p-1"
+            className="flex w-full items-center gap-1 rounded-sm p-1"
           >
             <button
               type="button"
@@ -235,7 +235,7 @@ export function StudentHeader({
             </button>
             <div
               data-testid="zoom-percent"
-              className="flex-1 px-1 text-center text-sm font-bold text-gray-700 tabular-nums"
+              className="flex-1 px-1 text-center text-sm font-semibold text-gray-700 tabular-nums"
               aria-live="polite"
               aria-label={zoomPercent !== null ? `Zoom level ${zoomPercent}%` : undefined}
             >
@@ -266,7 +266,7 @@ export function StudentHeader({
 
   return (
     <header
-      className="student-wide-header border-b border-gray-200 bg-white grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 md:gap-3 px-3 md:px-4 lg:px-6 flex-shrink-0 z-10 shadow-sm"
+      className="student-wide-header border-b border-gray-200 bg-white grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 md:gap-3 px-3 md:px-4 lg:px-6 flex-shrink-0 z-10"
       role="banner"
     >
       <div className="flex items-center gap-3 md:gap-4 lg:gap-6 min-w-0 justify-self-start">
@@ -274,10 +274,10 @@ export function StudentHeader({
           <div className="text-gray-900 font-black text-lg md:text-xl lg:text-2xl tracking-tighter" style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif' }}>IELTS</div>
         </div>
         <div className="flex flex-col min-w-0 hidden sm:flex">
-          <div className="font-bold text-[length:var(--student-meta-font-size)] text-gray-600 uppercase tracking-widest">
+          <div className="font-semibold text-[length:var(--student-meta-font-size)] text-gray-600 uppercase tracking-widest">
             Test taker ID
           </div>
-          <div className="text-[length:var(--student-control-font-size)] font-bold text-gray-900 truncate">
+          <div className="text-[length:var(--student-control-font-size)] font-semibold text-gray-900 truncate">
             {testTakerId ?? '—'}
           </div>
         </div>
@@ -289,7 +289,7 @@ export function StudentHeader({
       >
         {timeRemaining !== undefined ? (
           <div className="flex items-center gap-1.5 md:gap-2 lg:gap-3 flex-shrink-0">
-            <div className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-bold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border-2 rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? 'bg-red-100 border-red-700 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-900'}`}>
+            <div className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-semibold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? 'bg-red-100 border-red-700 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-900'}`}>
               <Clock size={14} className={timeRemaining < 300 ? 'text-red-900' : 'text-gray-700'} />
               <span
                 className="font-mono"
@@ -313,9 +313,9 @@ export function StudentHeader({
             <button
               type="button"
               onClick={onToggleHighlightMode}
-              className={`flex min-h-11 items-center gap-1.5 rounded-l-sm border px-2.5 text-[length:var(--student-control-font-size)] font-bold focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
+              className={`flex min-h-11 items-center gap-1.5 rounded-l-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
                 highlightToolMode === 'highlight'
-                  ? 'border-blue-700 bg-blue-50 text-blue-950 shadow-inner'
+                  ? 'border-blue-700 bg-blue-50 text-blue-950'
                   : 'border-gray-300 bg-white text-gray-800'
               }`}
               aria-pressed={highlightToolMode === 'highlight'}
@@ -377,9 +377,9 @@ export function StudentHeader({
           <button
             type="button"
             onClick={onSelectEraseMode}
-            className={`flex min-h-11 min-w-11 shrink-0 items-center gap-1.5 rounded-sm border px-2.5 text-[length:var(--student-control-font-size)] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
+            className={`flex min-h-11 min-w-11 shrink-0 items-center gap-1.5 rounded-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
               highlightToolMode === 'erase'
-                ? 'border-blue-700 bg-blue-50 text-blue-950 shadow-inner'
+                ? 'border-blue-700 bg-blue-50 text-blue-950'
                 : 'border-gray-300 bg-white text-gray-800'
             }`}
             aria-pressed={highlightToolMode === 'erase'}
@@ -390,7 +390,7 @@ export function StudentHeader({
           </button>
         ) : null}
         {autoSaveStatus && (
-          <div className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-wider hidden sm:flex">
+          <div className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wider hidden sm:flex">
             {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (
               <>
                 <LoadingMark size="xs" className="bg-gray-300" />
@@ -427,7 +427,7 @@ export function StudentHeader({
                   onClick={() => {
                     setShowTabletZoomControls((open) => !open);
                   }}
-                  className="flex min-w-[5.75rem] items-center justify-center gap-1 rounded-sm border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-[length:var(--student-control-font-size)] font-bold text-gray-700 transition-colors hover:border-gray-300 hover:bg-gray-100"
+                  className="flex min-w-[5.75rem] items-center justify-center gap-1 rounded-sm border border-gray-200 bg-white px-2.5 py-1.5 text-[length:var(--student-control-font-size)] font-medium text-gray-700 transition-colors hover:border-gray-300 hover:bg-gray-100"
                   aria-expanded={showTabletZoomControls}
                   aria-label="Open zoom controls"
                   title="Open zoom controls"
@@ -435,7 +435,7 @@ export function StudentHeader({
                   <Plus size={14} strokeWidth={2.2} />
                   <span>Zoom</span>
                   {zoomPercent !== null ? (
-                    <span className="rounded-full bg-white px-1.5 py-0.5 text-[length:var(--student-meta-font-size)] font-black tabular-nums text-gray-700">
+                    <span className="rounded-full bg-white px-1.5 py-0.5 text-[length:var(--student-meta-font-size)] font-semibold tabular-nums text-gray-700">
                       {zoomPercent}%
                     </span>
                   ) : null}
@@ -449,7 +449,7 @@ export function StudentHeader({
             {showZoomControls ? (
               <div
                 data-testid="zoom-controls"
-                className="flex w-[11.5rem] shrink-0 items-center gap-1 rounded-sm border border-gray-200 bg-gray-50 p-1"
+                className="flex w-[11.5rem] shrink-0 items-center gap-1 rounded-sm p-1"
               >
                 <button
                   type="button"
@@ -462,7 +462,7 @@ export function StudentHeader({
                 </button>
                 <div
                   data-testid="zoom-percent"
-                  className="w-12 shrink-0 px-1 text-center text-[length:var(--student-meta-font-size)] font-bold text-gray-700 tabular-nums"
+                  className="w-12 shrink-0 px-1 text-center text-[length:var(--student-meta-font-size)] font-semibold text-gray-700 tabular-nums"
                   aria-live="polite"
                   aria-label={zoomPercent !== null ? `Zoom level ${zoomPercent}%` : undefined}
                 >
@@ -504,7 +504,7 @@ export function StudentHeader({
           <button
             type="button"
             onClick={onOpenNavigator}
-            className="flex items-center gap-1 md:gap-1.5 px-2.5 md:px-3 py-1.5 md:py-2 rounded-sm bg-gray-50 text-gray-900 font-bold text-[length:var(--student-control-font-size)]"
+            className="flex items-center gap-1 md:gap-1.5 px-2.5 md:px-3 py-1.5 md:py-2 rounded-sm bg-gray-50 text-gray-900 font-medium text-[length:var(--student-control-font-size)]"
             aria-label="Open question navigator"
           >
             <LayoutGrid size={16} strokeWidth={2} />

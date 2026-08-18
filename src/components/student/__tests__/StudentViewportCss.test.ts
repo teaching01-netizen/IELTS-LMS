@@ -35,14 +35,21 @@ describe('student exam viewport shell CSS', () => {
     expect(css).not.toContain('--student-exam-footer-clearance');
   });
 
-  it('keeps the footer visual pill while preventing a full-width tray', () => {
+  it('keeps the footer a flat in-flow rail without a floating pill or tray', () => {
     const footerRule = css.match(/^\s*\.student-exam-footer\s*\{([^}]*)\}/m)?.[1];
+    const keyboardRule = css.match(
+      /^\s*\.student-exam-shell\[data-student-keyboard-open='true'\]\s+\.student-exam-footer\s*\{([^}]*)\}/m,
+    )?.[1];
 
-    expect(footerRule).toMatch(/background:\s*#fff\s*;/);
+    expect(footerRule).toMatch(/background:\s*var\(--color-exam-surface\)\s*;/);
     expect(footerRule).toMatch(/max-inline-size:\s*96rem\s*;/);
-    expect(footerRule).toMatch(/border-radius:\s*9999px\s*;/);
-    expect(footerRule).toMatch(/box-shadow:/);
+    expect(footerRule).toMatch(/border-radius:\s*0\.375rem\s*;/);
+    expect(footerRule).not.toMatch(/box-shadow\s*:/);
     expect(footerRule).not.toMatch(/width:\s*100%\s*;/);
+    // The rail stays in the grid flow while the software keyboard is open:
+    // visibility is hidden but the `auto` row is never collapsed.
+    expect(keyboardRule).toMatch(/visibility:\s*hidden\s*;/);
+    expect(keyboardRule).not.toMatch(/display:\s*none\s*;/);
   });
 
   it('keeps question stepper clearance local to its workspace', () => {

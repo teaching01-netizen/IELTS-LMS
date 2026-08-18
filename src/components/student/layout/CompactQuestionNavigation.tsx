@@ -68,7 +68,7 @@ export function CompactQuestionNavigation({
 
       <button
         type="button"
-        className="student-touch-target flex min-w-0 flex-1 items-center justify-center gap-2 rounded-sm px-2 text-sm font-bold text-gray-900 hover:bg-gray-50"
+        className="student-touch-target flex min-w-0 flex-1 items-center justify-center gap-2 rounded-sm px-2 text-sm font-semibold text-gray-900 hover:bg-gray-50"
         onClick={(event) => {
           event.currentTarget.focus();
           onOpenNavigator?.();
@@ -98,7 +98,7 @@ export function CompactQuestionNavigation({
       {showSubmitButton ? (
         <button
           type="button"
-          className="student-touch-target rounded-sm bg-blue-800 px-3 text-sm font-bold text-white hover:bg-blue-700"
+          className="student-touch-target rounded-sm bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
           onClick={onSubmit}
           data-student-primary-touch-target
         >

@@ -191,7 +191,7 @@ export function StudentFooter({
           })}
         </div>
         <div className="flex flex-shrink-0 items-center rounded-sm bg-gray-50 px-2 py-1 md:px-2.5">
-          <span className="text-[length:var(--student-chip-font-size)] font-black text-gray-900">
+          <span className="text-[length:var(--student-chip-font-size)] font-semibold tabular-nums text-gray-900">
             {answeredCount}/{totalQuestions}
           </span>
         </div>
@@ -199,7 +199,7 @@ export function StudentFooter({
           <Button
             variant={hasUnanswered ? 'warning' : 'primary'}
             size="sm"
-            className="min-w-[4.25rem] flex-shrink-0 shadow-md md:min-w-[5rem]"
+            className="min-w-[4.25rem] flex-shrink-0 md:min-w-[5rem]"
             onClick={onSubmit}
           >
             Finish

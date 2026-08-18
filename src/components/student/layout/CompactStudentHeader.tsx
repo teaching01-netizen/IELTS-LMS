@@ -65,7 +65,7 @@ export function CompactStudentHeader({
 
   return (
     <header
-      className="student-compact-header flex flex-shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-3 shadow-sm"
+      className="student-compact-header flex flex-shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-3"
       role="banner"
       data-testid="student-compact-header"
     >
@@ -74,14 +74,14 @@ export function CompactStudentHeader({
           <span className="flex-shrink-0 border-2 border-gray-900 px-1.5 py-0.5 text-lg font-black tracking-tighter text-gray-900">
             IELTS
           </span>
-          <span className="truncate text-sm font-bold text-gray-700">{moduleLabel}</span>
+          <span className="truncate text-sm font-semibold text-gray-700">{moduleLabel}</span>
         </div>
         <span className="sr-only">Test taker ID {testTakerId ?? "—"}</span>
       </div>
 
       {timeRemaining !== undefined ? (
         <div
-          className={`flex min-h-10 flex-shrink-0 items-center gap-1.5 rounded-sm border-2 px-2 text-sm font-bold ${
+          className={`flex min-h-10 flex-shrink-0 items-center gap-1.5 rounded-sm border px-2 text-sm font-semibold ${
             timeRemaining < 300
               ? "border-red-700 bg-red-100 text-red-900"
               : "border-gray-200 bg-gray-50 text-gray-900"
@@ -102,7 +102,7 @@ export function CompactStudentHeader({
 
       {autoSaveStatus ? (
         <span
-          className={`flex min-h-8 max-w-28 flex-shrink-0 items-center justify-center rounded-sm px-1.5 text-[10px] font-black uppercase tracking-tight ${
+          className={`flex min-h-8 max-w-28 flex-shrink-0 items-center justify-center rounded-sm px-1.5 text-[10px] font-semibold uppercase tracking-tight ${
             autoSaveStatus === "saved"
               ? "text-green-900"
               : autoSaveStatus === "offline"

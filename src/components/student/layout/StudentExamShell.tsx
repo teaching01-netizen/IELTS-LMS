@@ -35,7 +35,7 @@ export function StudentExamShell({
 
   return (
     <div
-      className={`student-exam-shell w-full min-h-0 bg-exam-canvas font-sans text-foreground transition-all ${
+      className={`student-exam-shell w-full min-h-0 bg-exam-canvas font-sans text-foreground ${
         highContrast ? 'high-contrast' : ''
       } ${getStudentLayoutModeClassName(layoutMode)}`}
       data-student-layout-mode={layoutMode}
