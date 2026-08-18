@@ -1,7 +1,7 @@
 import React, { useId, useMemo } from 'react';
 import { parseBoldMarkdown, parseRichMarkdown } from '../../utils/boldMarkdown';
 import { escapeHtml } from './highlight/htmlEscape';
-import { type StudentHighlightColor } from './highlightPalette';
+import { defaultStudentHighlightColor, getStudentHighlightColorValue, type StudentHighlightColor } from './highlightPalette';
 import { HighlightableSurface } from './HighlightableSurface';
 import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';
 import { useOptionalStudentUI, type StudentHighlightToolMode } from './providers/StudentUIProvider';
@@ -33,6 +33,10 @@ export function FormattedText({
   const studentUI = useOptionalStudentUI();
   const resolvedHighlightToolMode =
     highlightToolMode ?? studentUI?.state.accessibilitySettings.highlightToolMode ?? 'off';
+  const selectionTintColor =
+    highlightEnabled && resolvedHighlightToolMode === 'highlight'
+      ? getStudentHighlightColorValue(highlightColor ?? defaultStudentHighlightColor)
+      : undefined;
   const Tag = as as any;
   const shouldSplitParagraphs = as === 'div' && /\n\n/.test(text);
   const paragraphTexts = useMemo(() => {
@@ -102,6 +106,7 @@ export function FormattedText({
         html={renderedHtml}
         hint={hint}
         suppressTouchCallout={suppressTouchCallout}
+        highlightSelectionColor={selectionTintColor}
       />
     );
   }

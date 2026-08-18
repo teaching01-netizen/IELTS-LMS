@@ -8,6 +8,7 @@ interface HighlightableSurfaceProps {
   containerRef?: RefObject<HTMLElement | null> | undefined;
   hint?: string | null | undefined;
   suppressTouchCallout?: boolean | undefined;
+  highlightSelectionColor?: string | undefined;
 }
 
 export function HighlightableSurface({
@@ -17,12 +18,21 @@ export function HighlightableSurface({
   containerRef,
   hint = null,
   suppressTouchCallout = false,
+  highlightSelectionColor,
 }: HighlightableSurfaceProps) {
   const Tag = as as any;
   // If this object identity changes on every render, React may re-apply innerHTML
   // even when the string is unchanged, which can blow away the browser's current
   // text selection (blue highlight) when the toolbar toggles visibility.
   const innerHtml = useMemo(() => ({ __html: html }), [html]);
+  const surfaceStyle: React.CSSProperties = {
+    WebkitUserSelect: 'text',
+    userSelect: 'text',
+    touchAction: 'auto',
+    ...(highlightSelectionColor
+      ? ({ ['--student-highlight-selection-color' as string]: highlightSelectionColor } as React.CSSProperties)
+      : {}),
+  };
 
   return (
     <>
@@ -30,8 +40,9 @@ export function HighlightableSurface({
         ref={containerRef as any}
         className={className}
         data-student-highlightable="true"
+        data-student-highlight-selection={highlightSelectionColor ? 'true' : undefined}
         data-student-question-callout-protected={suppressTouchCallout ? 'true' : undefined}
-        style={{ WebkitUserSelect: 'text', userSelect: 'text', touchAction: 'auto' }}
+        style={surfaceStyle}
         dangerouslySetInnerHTML={innerHtml}
       />
       {hint ? (

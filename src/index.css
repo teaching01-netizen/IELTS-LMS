@@ -461,6 +461,20 @@
     color: inherit;
   }
 
+  /* While the highlight tool is active, text selection on surfaces where a
+     selection creates a highlight previews the active highlight color. */
+  [data-student-highlight-selection="true"]::selection,
+  [data-student-highlight-selection="true"] [data-highlighted="true"]::selection {
+    background-color: var(--student-highlight-selection-color);
+    color: inherit;
+  }
+
+  [data-student-highlight-selection="true"]::-moz-selection,
+  [data-student-highlight-selection="true"] [data-highlighted="true"]::-moz-selection {
+    background-color: var(--student-highlight-selection-color);
+    color: inherit;
+  }
+
   .student-translation-guard-active [data-student-highlightable="true"],
   .student-translation-guard-active [data-student-highlightable="true"] * {
     -webkit-touch-callout: none;

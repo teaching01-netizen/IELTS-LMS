@@ -107,3 +107,38 @@ describe('FormattedText paragraph structure', () => {
     expect(paragraphs.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('highlight tool selection tint via FormattedText', () => {
+  it('marks highlightable question copy with the active selection tint', () => {
+    const { container } = render(
+      <FormattedText
+        as="span"
+        text="Question copy"
+        highlightEnabled
+        highlightToolMode="highlight"
+        highlightColor="blue"
+        suppressTouchCallout
+      />,
+    );
+
+    const surface = container.querySelector('[data-student-highlightable="true"]') as HTMLElement;
+    expect(surface).not.toBeNull();
+    expect(surface).toHaveAttribute('data-student-highlight-selection', 'true');
+    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#bae6fd');
+  });
+
+  it('leaves plain non-highlightable copy without any tint marker', () => {
+    const { container } = render(
+      <FormattedText
+        as="span"
+        text="Question copy"
+        highlightEnabled={false}
+        highlightToolMode="highlight"
+        highlightColor="green"
+        suppressTouchCallout
+      />,
+    );
+
+    expect(container.querySelector('[data-student-highlight-selection]')).toBeNull();
+  });
+});

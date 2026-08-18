@@ -2,7 +2,7 @@ import React, { useId, useMemo } from 'react';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { escapeHtml } from './highlight/htmlEscape';
 import { HighlightableSurface } from './HighlightableSurface';
-import { type StudentHighlightColor } from './highlightPalette';
+import { defaultStudentHighlightColor, getStudentHighlightColorValue, type StudentHighlightColor } from './highlightPalette';
 import { useHighlightSurfaceV2 } from './useHighlightSurfaceV2';
 import { useOptionalStudentUI, type StudentHighlightToolMode } from './providers/StudentUIProvider';
 
@@ -31,6 +31,10 @@ export function RichTextHighlighter({
   const studentUI = useOptionalStudentUI();
   const resolvedHighlightToolMode =
     highlightToolMode ?? studentUI?.state.accessibilitySettings.highlightToolMode ?? 'off';
+  const selectionTintColor =
+    enabled && resolvedHighlightToolMode === 'highlight'
+      ? getStudentHighlightColorValue(highlightColor ?? defaultStudentHighlightColor)
+      : undefined;
   const initialHtml = useMemo(
     () => (contentType === 'html' ? sanitizeHtml(content) : escapeHtml(content)),
     [content, contentType],
@@ -60,6 +64,7 @@ export function RichTextHighlighter({
       className={className}
       html={renderedHtml}
       hint={hint}
+      highlightSelectionColor={selectionTintColor}
     />
   );
 }
