@@ -25,13 +25,13 @@ export function Button({
   className = '',
   ...props
 }: ButtonProps) {
-  const baseStyles = 'inline-flex items-center justify-center font-bold transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed rounded-[3px] tracking-tight';
+  const baseStyles = 'inline-flex items-center justify-center font-semibold transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed rounded-[3px] tracking-tight';
 
   const variants = {
-    primary: 'bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active focus:ring-blue-500 shadow-sm',
+    primary: 'bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active focus:ring-ring',
     secondary: 'bg-gray-200 text-gray-700 hover:bg-gray-100 active:bg-gray-300 focus:ring-gray-300',
-    danger: 'bg-destructive text-destructive-foreground hover:bg-destructive-hover active:bg-destructive-active focus:ring-red-500 shadow-sm',
-    warning: 'bg-amber-700 text-gray-900 hover:bg-amber-600 active:bg-amber-800 focus:ring-amber-400 shadow-sm',
+    danger: 'bg-destructive text-destructive-foreground hover:bg-destructive-hover active:bg-destructive-active focus:ring-red-500',
+    warning: 'bg-amber-700 text-gray-900 hover:bg-amber-600 active:bg-amber-800 focus:ring-amber-400',
     ghost: 'bg-transparent text-primary hover:bg-blue-200 active:bg-blue-300 focus:ring-blue-400',
     outline: 'bg-transparent text-primary border-2 border-primary hover:bg-blue-200 active:bg-blue-300 focus:ring-blue-400',
   };
