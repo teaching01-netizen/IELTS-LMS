@@ -23,7 +23,6 @@ export function StudentExamSessionProvider({
   useEffect(() => {
     const actions = store.getState().actions;
     actions.setPhase(seed.phase);
-    actions.setNavigation(seed.currentModule, seed.currentQuestionId);
     actions.setRuntimeSnapshot(seed.runtimeSnapshot, seed.displayTimeRemaining);
     actions.setPersistence({
       syncState: seed.syncState,
@@ -39,8 +38,6 @@ export function StudentExamSessionProvider({
     seed.blocking?.active,
     seed.blocking?.reason,
     seed.blocking?.timeRemaining,
-    seed.currentModule,
-    seed.currentQuestionId,
     seed.displayTimeRemaining,
     seed.phase,
     seed.runtimeSnapshot,

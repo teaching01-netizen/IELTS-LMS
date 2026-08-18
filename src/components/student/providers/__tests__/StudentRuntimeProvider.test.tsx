@@ -271,6 +271,51 @@ describe('StudentRuntimeProvider', () => {
     expect(result.current.state.violations).toEqual(hydratedAttempt.violations);
   });
 
+  it('keeps the local current question when a non-runtime attempt rehydrates with a stale position', () => {
+    const staleAttempt: StudentAttempt = {
+      ...baseAttempt,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    let captured: ReturnType<typeof useStudentRuntime> | null = null;
+    function RuntimeCapture() {
+      captured = useStudentRuntime();
+      return <div data-testid="current-question">{captured.state.currentQuestionId ?? 'null'}</div>;
+    }
+
+    const { rerender } = render(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={staleAttempt}
+      >
+        <RuntimeCapture />
+      </StudentRuntimeProvider>,
+    );
+
+    expect(screen.getByTestId('current-question')).toHaveTextContent('task-2');
+
+    // The student navigates within the section; the local position is authoritative.
+    act(() => {
+      captured?.actions.setCurrentQuestionId('task-1');
+    });
+    expect(screen.getByTestId('current-question')).toHaveTextContent('task-1');
+
+    // A later attempt snapshot still carries the older persisted position (the
+    // position mutation has not been flushed to the server yet). Re-hydrating
+    // must not warp the student back to the stale question in the same section.
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={{ ...staleAttempt, updatedAt: '2026-01-01T00:00:30.000Z' }}
+      >
+        <RuntimeCapture />
+      </StudentRuntimeProvider>,
+    );
+
+    expect(screen.getByTestId('current-question')).toHaveTextContent('task-1');
+  });
+
   it('treats reconnect/device continuity transitions as non-blocking runtime signals', () => {
     const { result } = renderRuntime();
 

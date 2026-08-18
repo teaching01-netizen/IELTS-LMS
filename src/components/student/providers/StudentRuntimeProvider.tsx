@@ -476,11 +476,14 @@ function runtimeReducer(state: RuntimeReducerState, action: RuntimeAction): Runt
         : null;
       const nextCurrentModule = runtimeModule ?? action.snapshot.currentModule;
       const moduleChanged = nextCurrentModule !== state.currentModule;
-      const nextCurrentQuestionId = action.runtimeBacked
-        ? moduleChanged
-          ? action.runtimeFirstQuestionId
-          : (state.currentQuestionId ?? action.runtimeFirstQuestionId)
-        : action.snapshot.currentQuestionId;
+      // The student's navigation is authoritative within the same module. A
+      // re-hydration can carry a stale persisted position (the position mutation
+      // may still be in flight), which must not warp the student back.
+      const nextCurrentQuestionId = moduleChanged
+        ? (action.runtimeFirstQuestionId ?? action.snapshot.currentQuestionId)
+        : (state.currentQuestionId ??
+            action.runtimeFirstQuestionId ??
+            action.snapshot.currentQuestionId);
       const nextSubmittedAt = state.submittedAt ?? action.snapshot.submittedAt ?? null;
       const terminalVerified =
         action.snapshot.proctorStatus === 'terminated' || Boolean(nextSubmittedAt);
