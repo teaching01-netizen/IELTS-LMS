@@ -28,7 +28,7 @@ describe('highlight tool selection tint CSS', () => {
 
   it('keeps the static blue selection fallback for untinted contexts', () => {
     expect(css).toMatch(
-      /\[data-highlighted=["']true["']\]::selection[^{]*\{[^}]*background-color:\s*rgba\(\s*59,\s*130,\s*246,\s*0\.35\s*\)/s,
+      /\[data-highlighted=["']true["']\]::selection[^{]*\{[^}]*background-color:\s*rgba\(\s*35,\s*131,\s*226,\s*0\.35\s*\)/s,
     );
   });
 

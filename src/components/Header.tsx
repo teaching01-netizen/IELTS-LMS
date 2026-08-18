@@ -108,7 +108,7 @@ export function Header({
         ) : null}
         <button
           onClick={onReturnToAdmin}
-          className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 shadow-sm"
+          className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
         >
           Admin Portal
         </button>

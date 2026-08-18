@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AlertTriangle, CheckCircle, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 
@@ -37,9 +37,30 @@ export function SubmitConfirmation({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    panelRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
+
   return (
-    <div className="student-confirmation-surface absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+    <div
+      className="student-confirmation-surface absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="submit-confirmation-title"
+    >
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        className="bg-white rounded-lg shadow-xl w-full max-w-md focus:outline-none"
+      >
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200">
           <div className="flex items-center gap-2 md:gap-3">
             {hasUnanswered ? (
@@ -51,11 +72,11 @@ export function SubmitConfirmation({
                 <CheckCircle size={20} className="text-green-600" />
               </div>
             )}
-            <h2 className="text-lg md:text-xl font-bold text-gray-900">
+            <h2 id="submit-confirmation-title" className="text-lg md:text-xl font-bold text-gray-900">
               {hasUnanswered ? 'Confirm Submission' : 'Ready to Submit?'}
             </h2>
           </div>
-          <button onClick={onClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors">
+          <button onClick={onClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors" aria-label="Close confirmation">
             <X size={18} />
           </button>
         </div>
@@ -100,8 +121,8 @@ export function SubmitConfirmation({
           )}
 
           {hasFlagged && (
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm text-blue-800">
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-800">
                 <strong>Note:</strong> You have {flaggedCount} flagged question{flaggedCount !== 1 ? 's' : ''} that you may want to review before submitting.
               </p>
             </div>
@@ -110,7 +131,7 @@ export function SubmitConfirmation({
           {timeRemaining !== undefined && timeRemaining > 0 && (
             <div className="flex items-center justify-center gap-2 text-sm text-gray-600">
               <span>Time remaining:</span>
-              <span className="font-mono font-bold">{formatTime(timeRemaining)}</span>
+              <span className="font-semibold tabular-nums">{formatTime(timeRemaining)}</span>
             </div>
           )}
 

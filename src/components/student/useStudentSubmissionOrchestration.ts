@@ -180,30 +180,8 @@ export function useStudentSubmissionOrchestration({
     ],
   );
 
-  useEffect(() => {
-    if (cancellationSignal.aborted) {
-      return;
-    }
-
-    if (!runtimeState.runtimeBacked) {
-      runtimeFinalSubmitRef.current = null;
-      finalSubmitInFlightRef.current = null;
-      setFinalSubmitStatus('idle');
-      return;
-    }
-
-    if (runtimeState.runtimeStatus !== 'completed' || !runtimeCompletionVerified) {
-      runtimeFinalSubmitRef.current = null;
-      finalSubmitInFlightRef.current = null;
-      setFinalSubmitStatus('idle');
-      return;
-    }
-
-    if ((!finalSubmissionPending && shouldRenderPostExam) || !attemptId) {
-      return;
-    }
-
-    if (runtimeFinalSubmitRef.current === attemptId || finalSubmitInFlightRef.current) {
+  const runFinalSubmitLoop = useCallback(() => {
+    if (finalSubmitInFlightRef.current) {
       return;
     }
 
@@ -263,16 +241,58 @@ export function useStudentSubmissionOrchestration({
     cancellationSignal,
     commitWritingDraft,
     reconcileLiveAnswerCacheNow,
+    submissionCommands,
+  ]);
+
+  useEffect(() => {
+    if (cancellationSignal.aborted) {
+      return;
+    }
+
+    if (!runtimeState.runtimeBacked) {
+      runtimeFinalSubmitRef.current = null;
+      finalSubmitInFlightRef.current = null;
+      setFinalSubmitStatus('idle');
+      return;
+    }
+
+    if (runtimeState.runtimeStatus !== 'completed' || !runtimeCompletionVerified) {
+      runtimeFinalSubmitRef.current = null;
+      finalSubmitInFlightRef.current = null;
+      setFinalSubmitStatus('idle');
+      return;
+    }
+
+    if ((!finalSubmissionPending && shouldRenderPostExam) || !attemptId) {
+      return;
+    }
+
+    if (runtimeFinalSubmitRef.current === attemptId) {
+      return;
+    }
+
+    runFinalSubmitLoop();
+  }, [
+    attemptId,
+    cancellationSignal,
     finalSubmissionPending,
+    runFinalSubmitLoop,
     runtimeCompletionVerified,
     runtimeState.runtimeBacked,
     runtimeState.runtimeStatus,
     shouldRenderPostExam,
-    submissionCommands,
   ]);
+
+  const retryFinalSubmit = useCallback(() => {
+    if (runtimeFinalSubmitRef.current || finalSubmitInFlightRef.current) {
+      return;
+    }
+    runFinalSubmitLoop();
+  }, [runFinalSubmitLoop]);
 
   return {
     finalSubmitStatus,
     flushAndSubmitCurrentModuleWithRetry,
+    retryFinalSubmit,
   };
 }

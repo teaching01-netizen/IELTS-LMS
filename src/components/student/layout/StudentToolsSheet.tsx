@@ -105,7 +105,7 @@ export function StudentToolsSheet({ open, onClose, children }: StudentToolsSheet
   return (
     <dialog
       ref={dialogRef}
-      className="student-tools-sheet fixed inset-x-0 bottom-0 m-0 max-h-[min(80vh,40rem)] w-full max-w-none overflow-y-auto rounded-t-2xl border border-gray-200 bg-white p-4 pb-[max(1rem,var(--student-safe-bottom))] shadow-2xl backdrop:bg-gray-900/50"
+      className="student-tools-sheet fixed inset-x-0 bottom-0 m-0 max-h-[min(80vh,40rem)] w-full max-w-none overflow-y-auto rounded-t-xl border border-gray-200 bg-white p-4 pb-[max(1rem,var(--student-safe-bottom))] shadow-xl backdrop:bg-gray-900/50"
       aria-labelledby="student-tools-title"
       aria-modal="true"
       data-testid="student-tools-sheet"

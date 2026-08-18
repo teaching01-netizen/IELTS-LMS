@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, ShieldAlert, XOctagon } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { motion } from 'motion/react';
@@ -26,6 +26,7 @@ export function WarningOverlay({
   showCountdown = true,
 }: WarningOverlayProps) {
   const [countdown, setCountdown] = useState(30);
+  const primaryButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (isOpen && showCountdown && countdown > 0) {
@@ -42,27 +43,42 @@ export function WarningOverlay({
     if (isOpen) setCountdown(30);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const timer = window.setTimeout(() => primaryButtonRef.current?.focus(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      previouslyFocused?.focus?.();
+    };
+  }, [isOpen]);
+
   const severityConfig = {
     medium: {
-      icon: <AlertTriangle size={64} className="text-amber-500" />,
+      icon: <AlertTriangle size={40} className="text-amber-500" />,
       title: 'ATTENTION',
       bg: 'bg-amber-50',
       border: 'border-amber-500',
       text: 'text-amber-900',
+      countdownFill: 'bg-amber-600',
     },
     high: {
-      icon: <ShieldAlert size={64} className="text-orange-600 animate-pulse" />,
+      icon: <ShieldAlert size={40} className="text-orange-600" />,
       title: 'WARNING — FINAL NOTICE',
       bg: 'bg-orange-50',
       border: 'border-orange-500',
       text: 'text-orange-900',
+      countdownFill: 'bg-orange-600',
     },
     critical: {
-      icon: <XOctagon size={64} className="text-red-600" />,
+      icon: <XOctagon size={40} className="text-red-600" />,
       title: 'EXAM PAUSED',
       bg: 'bg-red-50',
       border: 'border-red-500',
       text: 'text-red-900',
+      countdownFill: 'bg-red-600',
     },
   };
 
@@ -72,15 +88,21 @@ export function WarningOverlay({
 
   if (appearance === 'blackout') {
     return (
-      <div className="fixed inset-0 z-[220] bg-black flex items-center justify-center p-6" role="dialog" aria-modal="true">
-        <div className="w-full max-w-xl rounded-2xl border border-white/20 bg-black/80 px-8 py-10 text-center shadow-2xl">
-          <p className="text-xs font-bold uppercase tracking-[0.3em] text-white/70 mb-4">Security Hold</p>
-          <h2 className="text-3xl font-black text-white mb-6">Screen Capture Blocked</h2>
+      <div
+        className="fixed inset-0 z-[220] bg-black flex items-center justify-center p-6"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="warning-blackout-title"
+      >
+        <div className="w-full max-w-xl rounded-xl border border-white/20 bg-black/80 px-8 py-10 text-center shadow-xl">
+          <p className="text-xs font-semibold uppercase tracking-wide text-white/70 mb-4">Security Hold</p>
+          <h2 id="warning-blackout-title" className="text-2xl font-bold text-white mb-6">Screen Capture Blocked</h2>
           <p className="text-base leading-relaxed text-white/90 mb-8">{message}</p>
           <Button
             variant="primary"
             size="lg"
-            className="h-14 px-10 text-base font-bold uppercase tracking-[0.2em]"
+            ref={primaryButtonRef}
+            className="h-12 px-8 text-base font-semibold"
             onClick={onAcknowledge}
           >
             Continue Exam
@@ -91,7 +113,12 @@ export function WarningOverlay({
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="warning-overlay-title"
+    >
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -101,29 +128,30 @@ export function WarningOverlay({
       <motion.div 
         initial={{ scale: 0.9, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
-        className={`relative w-full max-w-xl ${config.bg} rounded-3xl shadow-2xl overflow-hidden border-4 ${config.border}`}
+        className={`relative w-full max-w-xl ${config.bg} rounded-xl shadow-xl overflow-hidden border ${config.border}`}
       >
-        <div className="p-12 text-center flex flex-col items-center">
-          <div className="mb-8">{config.icon}</div>
+        <div className="p-8 md:p-12 text-center flex flex-col items-center">
+          <div className="mb-6">{config.icon}</div>
           
-          <h2 className={`text-4xl font-black mb-6 tracking-tight ${config.text}`}>
+          <h2 id="warning-overlay-title" className={`text-2xl md:text-3xl font-bold mb-5 tracking-tight ${config.text}`}>
             {config.title}
           </h2>
           
-          <div className="bg-white/50 rounded-2xl p-8 mb-10 border border-black/5 shadow-inner">
-            <p className="text-lg font-medium text-gray-800 leading-relaxed">
+          <div className="bg-white/70 rounded-lg p-6 mb-8 border border-black/5">
+            <p className="text-base md:text-lg font-medium text-gray-800 leading-relaxed">
               {message}
             </p>
           </div>
 
           {severity !== 'critical' ? (
-            <div className="w-full space-y-6">
+            <div className="w-full space-y-5">
               {actionButton ? (
                 <Button 
                   variant={severity === 'high' ? 'warning' : 'primary'} 
                   size="lg" 
                   fullWidth 
-                  className="h-16 text-xl font-bold uppercase tracking-widest rounded-2xl shadow-lg"
+                  ref={primaryButtonRef}
+                  className="h-12 text-base font-semibold rounded-lg shadow-sm"
                   onClick={actionButton.onClick}
                 >
                   {actionButton.label}
@@ -133,7 +161,8 @@ export function WarningOverlay({
                   variant={severity === 'high' ? 'warning' : 'primary'} 
                   size="lg" 
                   fullWidth 
-                  className="h-16 text-xl font-bold uppercase tracking-widest rounded-2xl shadow-lg"
+                  ref={primaryButtonRef}
+                  className="h-12 text-base font-semibold rounded-lg shadow-sm"
                   onClick={onAcknowledge}
                 >
                   I Understand
@@ -144,11 +173,11 @@ export function WarningOverlay({
                 <div className="flex items-center justify-center gap-2">
                   <div className="h-1.5 w-32 bg-gray-200 rounded-full overflow-hidden">
                     <div 
-                      className="h-full bg-blue-600 transition-all duration-1000 linear"
+                      className={`h-full ${config.countdownFill} transition-all duration-1000 linear`}
                       style={{ width: `${(countdown / 30) * 100}%` }}
                     ></div>
                   </div>
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide" aria-live="polite">
                     Auto-dismiss in: {countdown}s
                   </p>
                 </div>
@@ -156,7 +185,7 @@ export function WarningOverlay({
             </div>
           ) : (
             <div className="flex flex-col items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-red-200 animate-pulse" aria-hidden="true" />
+              <div className="w-10 h-10 rounded-full bg-red-200 animate-pulse" aria-hidden="true" />
               <span className="sr-only">Waiting…</span>
               <p className="text-sm font-bold text-red-700 uppercase tracking-widest">
                 Waiting for proctor to resume...

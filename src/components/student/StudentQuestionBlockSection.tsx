@@ -177,7 +177,7 @@ export const StudentQuestionBlockSection = React.memo(
       <div className={`${deferredClassName} ${blockSpacingClassName}`.trim()}>
         <div className={answerCompact ? 'mb-2' : 'mb-3 md:mb-4'}>
           {numberedBlockStart !== numberedBlockEnd ? (
-            <h3 className={`font-bold text-gray-900 break-words [overflow-wrap:anywhere] ${answerCompact ? 'mb-1 text-sm md:text-base' : 'mb-1 md:mb-2 text-base md:text-lg'}`}>
+            <h3 className={`font-bold tracking-tight text-gray-900 break-words [overflow-wrap:anywhere] ${answerCompact ? 'mb-1 text-sm md:text-base' : 'mb-1 md:mb-2 text-lg md:text-xl'}`}>
               Questions {formatQuestionRange(numberedBlockStart, numberedBlockEnd)}
             </h3>
           ) : null}

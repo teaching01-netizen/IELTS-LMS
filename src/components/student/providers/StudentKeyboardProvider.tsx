@@ -326,6 +326,21 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
         return;
       }
 
+      if (runtimeStateRef.current.blocking.active) {
+        return;
+      }
+
+      if (editingTarget) {
+        if (
+          allowedEditingKeys.has(event.key) ||
+          (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey)
+        ) {
+          return;
+        }
+
+        return;
+      }
+
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault();
         void (async () => {
@@ -357,17 +372,6 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
 
           runtimeActionsRef.current.submitModule();
         })();
-        return;
-      }
-
-      if (editingTarget) {
-        if (
-          allowedEditingKeys.has(event.key) ||
-          (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey)
-        ) {
-          return;
-        }
-
         return;
       }
 

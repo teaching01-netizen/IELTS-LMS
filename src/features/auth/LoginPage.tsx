@@ -46,17 +46,17 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full">
-        <div className="bg-white rounded-lg shadow-xl p-8">
+        <div className="bg-white border border-border rounded-lg shadow-lg p-8">
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">IELTS Proctoring System</h1>
-            <p className="text-gray-600">Sign in to access your dashboard</p>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2 tracking-tight">IELTS Proctoring System</h1>
+            <p className="text-sm text-gray-500">Sign in to access your dashboard</p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-6">
+          <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">
                 Email Address
               </label>
               <input
@@ -66,12 +66,12 @@ export function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 placeholder="you@example.com"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-gray-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-600/25 focus:border-blue-600"
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">
                 Password
               </label>
               <input
@@ -81,7 +81,7 @@ export function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-gray-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-600/25 focus:border-blue-600"
               />
             </div>
 
@@ -94,22 +94,22 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-150 ease-in-out"
+              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-600/40 focus:ring-offset-2 transition duration-150 ease-in-out"
             >
               {isSubmitting ? 'Signing In...' : 'Sign In'}
             </button>
           </form>
 
           <div className="mt-6 space-y-2 text-center">
-            <p className="text-sm text-gray-500">
+            <p className="text-xs text-gray-400">
               Use a provisioned staff or student account. Cookie session and CSRF headers are established after sign-in.
             </p>
             <div className="flex items-center justify-center gap-3 text-sm">
-              <Link to="/password/reset" className="font-medium text-blue-700 hover:text-blue-800">
+              <Link to="/password/reset" className="font-medium text-blue-600 hover:text-blue-700">
                 Forgot password?
               </Link>
               <span className="text-gray-300">|</span>
-              <Link to="/activate" className="font-medium text-blue-700 hover:text-blue-800">
+              <Link to="/activate" className="font-medium text-blue-600 hover:text-blue-700">
                 Activate account
               </Link>
             </div>

@@ -384,7 +384,7 @@ export function ProctoringProvider({
       const now = Date.now();
       
       // Deduplicate bursts of events.
-      if (now - lastTabSwitchTime < tabSwitchDedupeWindowMs) {
+      if (now - lastTabSwitchTime <= tabSwitchDedupeWindowMs) {
         return;
       }
       lastTabSwitchTime = now;

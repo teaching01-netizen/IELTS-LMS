@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Bell,
   Check,
   CheckCircle,
   ChevronDown,
@@ -273,11 +272,11 @@ export function StudentHeader({
       role="banner"
     >
       <div className="flex items-center gap-3 md:gap-4 lg:gap-6 min-w-0 justify-self-start">
-        <div className="bg-white border-2 border-gray-900 px-1.5 md:px-2 lg:px-3 py-0.5 rounded-sm flex-shrink-0">
-          <div className="text-gray-900 font-black text-lg md:text-xl lg:text-2xl tracking-tighter" style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif' }}>IELTS</div>
+        <div className="bg-white border border-gray-900 px-1.5 md:px-2 lg:px-3 py-0.5 rounded-sm flex-shrink-0">
+          <div className="text-gray-900 font-bold text-lg md:text-xl lg:text-2xl tracking-tight">IELTS</div>
         </div>
         <div className="flex flex-col min-w-0 hidden sm:flex">
-          <div className="font-semibold text-[length:var(--student-meta-font-size)] text-gray-600 uppercase tracking-widest">
+          <div className="font-semibold text-[length:var(--student-meta-font-size)] text-gray-600 uppercase tracking-wide">
             Test taker ID
           </div>
           <div className="text-[length:var(--student-control-font-size)] font-semibold text-gray-900 truncate">
@@ -318,7 +317,7 @@ export function StudentHeader({
               onClick={onToggleHighlightMode}
               className={`${pressClassName} flex min-h-11 items-center gap-1.5 rounded-l-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
                 highlightToolMode === 'highlight'
-                  ? 'border-blue-700 bg-blue-50 text-blue-950'
+                  ? 'border-blue-700 bg-blue-50 text-blue-900'
                   : 'border-gray-300 bg-white text-gray-800'
               }`}
               aria-pressed={highlightToolMode === 'highlight'}
@@ -382,7 +381,7 @@ export function StudentHeader({
             onClick={onSelectEraseMode}
             className={`${pressClassName} flex min-h-11 min-w-11 shrink-0 items-center gap-1.5 rounded-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
               highlightToolMode === 'erase'
-                ? 'border-blue-700 bg-blue-50 text-blue-950'
+                ? 'border-blue-700 bg-blue-50 text-blue-900'
                 : 'border-gray-300 bg-white text-gray-800'
             }`}
             aria-pressed={highlightToolMode === 'erase'}
@@ -393,7 +392,11 @@ export function StudentHeader({
           </button>
         ) : null}
         {autoSaveStatus && (
-          <div className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wider hidden sm:flex">
+          <div
+            className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide"
+            role="status"
+            aria-live="polite"
+          >
             {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (
               <>
                 <LoadingMark size="xs" className="bg-gray-300" />
@@ -457,7 +460,7 @@ export function StudentHeader({
                 <button
                   type="button"
                   onClick={onZoomOut}
-                  className={`flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
+                  className={`flex min-h-10 min-w-10 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
                   aria-label="Zoom out"
                   title="Zoom out"
                 >
@@ -474,7 +477,7 @@ export function StudentHeader({
                 <button
                   type="button"
                   onClick={onZoomIn}
-                  className={`flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
+                  className={`flex min-h-10 min-w-10 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
                   aria-label="Zoom in"
                   title="Zoom in"
                 >
@@ -483,7 +486,7 @@ export function StudentHeader({
                 <button
                   type="button"
                   onClick={onZoomReset}
-                  className={`flex h-9 w-9 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
+                  className={`flex min-h-10 min-w-10 items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 ${pressClassName}`}
                   aria-label="Reset zoom"
                   title="Reset zoom"
                 >
@@ -497,7 +500,7 @@ export function StudentHeader({
           <button
             type="button"
             onClick={onOpenAccessibility}
-            className={`${pressClassName} p-2 md:p-2.5 rounded-sm flex-shrink-0`}
+            className={`${pressClassName} p-2.5 rounded-sm flex-shrink-0`}
             aria-label="Open accessibility settings"
           >
             <Contrast size={16} strokeWidth={2} />
@@ -507,7 +510,7 @@ export function StudentHeader({
           <button
             type="button"
             onClick={onOpenNavigator}
-            className={`${pressClassName} flex items-center gap-1 md:gap-1.5 px-2.5 md:px-3 py-1.5 md:py-2 rounded-sm bg-gray-50 text-gray-900 font-medium text-[length:var(--student-control-font-size)]`}
+            className={`${pressClassName} flex items-center gap-1 md:gap-1.5 px-3 py-2.5 rounded-sm bg-gray-50 text-gray-900 font-medium text-[length:var(--student-control-font-size)]`}
             aria-label="Open question navigator"
           >
             <LayoutGrid size={16} strokeWidth={2} />
@@ -515,15 +518,10 @@ export function StudentHeader({
           </button>
         )}
         {!isExamActive && (
-          <>
-            <button type="button" className="p-2 md:p-2.5 rounded-sm relative hidden sm:block" aria-label="Connection status: Online">
-              <Wifi size={16} strokeWidth={2} />
-              <div className="absolute top-1 md:top-1.5 right-1 md:right-1.5 w-1.5 md:w-2 h-1.5 md:h-2 bg-green-600 rounded-full border-2 border-white"></div>
-            </button>
-            <button type="button" className="p-2 md:p-2.5 rounded-sm hidden sm:block" aria-label="Notifications">
-              <Bell size={16} strokeWidth={2} />
-            </button>
-          </>
+          <div className="hidden sm:flex items-center gap-1.5 text-[length:var(--student-meta-font-size)] font-semibold text-gray-500">
+            <Wifi size={14} strokeWidth={2} />
+            Online
+          </div>
         )}
       </div>
     </header>

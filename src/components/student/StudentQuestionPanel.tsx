@@ -101,7 +101,7 @@ export function StudentQuestionPanel({
       className={`relative flex h-full min-w-0 flex-col min-h-0 ${tabletMode ? "w-[var(--question-pane-width)] min-w-[48px]" : "w-full md:min-w-[320px] lg:w-[var(--question-pane-width)]"}`}
     >
       <div
-        className={`flex-1 overflow-y-auto break-words [overflow-wrap:anywhere] ${
+        className={`student-question-scroll flex-1 overflow-y-auto break-words [overflow-wrap:anywhere] ${
           answerCompact
             ? "p-2.5 md:p-3 space-y-4 md:space-y-5"
             : "p-4 md:p-5 lg:p-8 space-y-6 md:space-y-8"
@@ -151,20 +151,20 @@ export function StudentQuestionPanel({
           <button
             type="button"
             onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
-            className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? "bg-black hover:bg-gray-800 text-white" : "bg-gray-100 text-gray-300 cursor-not-allowed"}`}
+            className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? "bg-gray-900 hover:bg-gray-800 text-white" : "bg-gray-100 text-gray-300 cursor-not-allowed"}`}
             aria-label="Previous question"
             disabled={!hasPrev}
           >
-            <ArrowLeft size={16} strokeWidth={3} />
+            <ArrowLeft size={16} strokeWidth={2} />
           </button>
           <button
             type="button"
             onClick={() => nextQuestion && onNavigate(nextQuestion.id)}
-            className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? "bg-black hover:bg-gray-800 text-white" : "bg-gray-800 text-gray-500 cursor-not-allowed"}`}
+            className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? "bg-gray-900 hover:bg-gray-800 text-white" : "bg-gray-100 text-gray-300 cursor-not-allowed"}`}
             aria-label="Next question"
             disabled={!hasNext}
           >
-            <ArrowRight size={16} strokeWidth={3} />
+            <ArrowRight size={16} strokeWidth={2} />
           </button>
         </div>
       ) : null}

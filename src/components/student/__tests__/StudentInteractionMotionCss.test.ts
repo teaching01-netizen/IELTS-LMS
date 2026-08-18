@@ -52,7 +52,7 @@ describe('student interaction motion CSS', () => {
 
   it('declares the one-shot timer urgency cue (2s, exactly one iteration)', () => {
     expect(css).toMatch(
-      /@keyframes\s+student-urgent-cue\s*\{\s*0%,\s*100%\s*\{\s*box-shadow:\s*0\s+0\s+0\s+0\s+rgba\(190,\s*18,\s*60,\s*0\);\s*\}\s*50%\s*\{\s*box-shadow:\s*0\s+0\s+0\s+4px\s+rgba\(190,\s*18,\s*60,\s*0\.12\);\s*\}\s*\}/,
+      /@keyframes\s+student-urgent-cue\s*\{\s*0%,\s*100%\s*\{\s*box-shadow:\s*0\s+0\s+0\s+0\s+rgba\(212,\s*76,\s*71,\s*0\);\s*\}\s*50%\s*\{\s*box-shadow:\s*0\s+0\s+0\s+4px\s+rgba\(212,\s*76,\s*71,\s*0\.12\);\s*\}\s*\}/,
     );
     expect(css).toMatch(
       /\.student-timer-urgent\s*\{\s*animation:\s*student-urgent-cue\s+2s\s+ease-out\s+1\s*;\s*\}/,

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { ExamConfig } from '../../types';
 import { useExamCommands } from '@student/hooks/exam-session/useExamCommands';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
@@ -25,6 +25,7 @@ export function StudentExamClockEffects({
   const { state: attemptState } = useStudentAttempt();
   const examSessionCommands = useExamCommands();
   const { actions: uiActions } = useStudentUI();
+  const timeExtensionOfferFiredRef = useRef(false);
 
   useEffect(() => {
     examSessionCommands.setPhase(runtimeState.phase);
@@ -79,7 +80,12 @@ export function StudentExamClockEffects({
       runtimeBacked: runtimeState.runtimeBacked,
       displayTimeRemaining,
     })) {
-      uiActions.setShowTimeExtensionRequest(true);
+      if (!timeExtensionOfferFiredRef.current) {
+        timeExtensionOfferFiredRef.current = true;
+        uiActions.setShowTimeExtensionRequest(true);
+      }
+    } else {
+      timeExtensionOfferFiredRef.current = false;
     }
   }, [config, displayTimeRemaining, effectivePhase, runtimeState.runtimeBacked, uiActions]);
 

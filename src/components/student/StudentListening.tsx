@@ -13,6 +13,7 @@ import { isInstructionReferencePlacement } from "../../utils/referenceImagePlace
 import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
 import { hasHtmlMarkup } from "./normalizeReadingPassageText";
 import { StudentMaterialWithQuestionPane } from "./StudentMaterialWithQuestionPane";
+import { StudentModuleEmptyState } from "./StudentModuleEmptyState";
 import type { StudentLayoutMode } from "./layout/studentLayoutMode";
 
 const emptyCaptionTrackUrl = "data:text/vtt;charset=utf-8,WEBVTT%0A%0A";
@@ -309,7 +310,7 @@ export function StudentListening({
   );
 
   if (!activePart) {
-    return null;
+    return <StudentModuleEmptyState label="Listening" />;
   }
   return (
     <StudentMaterialWithQuestionPane

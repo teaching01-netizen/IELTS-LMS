@@ -7,6 +7,7 @@ import { useOptionalStudentAttempt } from './providers/StudentAttemptProvider';
 import { useSplitPaneResize } from './useSplitPaneResize';
 import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 import { StudentSplitPaneResizer } from './StudentSplitPaneResizer';
+import { StudentModuleEmptyState } from './StudentModuleEmptyState';
 import { WritingPromptPane, WritingResponsePane } from './StudentWritingPanes';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentLayoutMode } from './layout/studentLayoutMode';
@@ -553,7 +554,7 @@ export function StudentWriting({
   }, [resolvedSessionId, resolvedStudentId]);
 
   if (!currentTask) {
-    return null;
+    return <StudentModuleEmptyState label="Writing" />;
   }
 
   const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
@@ -724,7 +725,7 @@ export function StudentWriting({
       {/* Submission Review Modal */}
       {showReviewModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="p-6 border-b border-gray-200">
               <h2 className="text-xl font-bold text-gray-900">Review Your Responses</h2>
               <p className="text-sm text-gray-500 mt-1">Please review your answers before submitting.</p>

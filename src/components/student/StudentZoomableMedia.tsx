@@ -43,6 +43,8 @@ export function StudentZoomableMedia({
   const [fitScale, setFitScale] = useState(1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const triggerButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const currentSource = normalizedSources[sourceIndex] ?? '';
   const hasMultipleSources = normalizedSources.length > 1;
@@ -64,7 +66,31 @@ export function StudentZoomableMedia({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setIsOpen(false);
+        handleClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) {
+        return;
+      }
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) {
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) {
+        return;
+      }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
 
@@ -130,6 +156,7 @@ export function StudentZoomableMedia({
 
   const handleClose = () => {
     setIsOpen(false);
+    window.setTimeout(() => triggerButtonRef.current?.focus(), 0);
   };
 
   const handleImageError = () => {
@@ -180,7 +207,8 @@ export function StudentZoomableMedia({
         type="button"
         onClick={handleOpen}
         onContextMenu={handleContextMenu}
-        className={`group relative block w-full overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 text-left ${className ?? ''}`}
+        ref={triggerButtonRef}
+        className={`group relative block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 text-left ${className ?? ''}`}
         aria-label={label}
       >
         <div className="relative">
@@ -211,7 +239,8 @@ export function StudentZoomableMedia({
 
       {isOpen ? (
         <div
-          className="fixed inset-0 z-[70] bg-gray-950/80 backdrop-blur-sm p-3 md:p-6"
+          ref={dialogRef}
+          className="fixed inset-0 z-[70] bg-gray-900/80 backdrop-blur-sm p-3 md:p-6"
           role="dialog"
           aria-modal="true"
           aria-label={`${label} zoomed view`}
@@ -219,13 +248,13 @@ export function StudentZoomableMedia({
           onContextMenu={handleContextMenu}
         >
           <div
-            className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
+            className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-xl"
             onClick={(event) => event.stopPropagation()}
             onContextMenu={handleContextMenu}
           >
             <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3 md:px-6">
               <div className="min-w-0">
-                <div className="text-[length:var(--student-meta-font-size)] font-black uppercase tracking-[0.24em] text-gray-500">
+                <div className="text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide text-gray-600">
                   Zoomed View
                 </div>
                 <div className="truncate text-[length:var(--student-control-font-size)] font-bold text-gray-900">

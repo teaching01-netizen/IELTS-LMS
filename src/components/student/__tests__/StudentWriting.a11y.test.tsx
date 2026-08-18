@@ -572,7 +572,7 @@ describe('StudentWriting a11y', () => {
       />,
     );
 
-    const stimulus = screen.getByText(/stimulus chart/i).closest('.rounded-3xl');
+    const stimulus = screen.getByText(/stimulus chart/i).closest('.rounded-xl');
     if (!stimulus) {
       throw new Error('Expected stimulus chart container');
     }

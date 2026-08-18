@@ -27,6 +27,7 @@ import {
 import { ProtectedInput } from "./ProtectedInput";
 import { StudentQuestionText } from "./StudentQuestionText";
 import { StudentQuestionNumber } from "./StudentQuestionNumber";
+import { Check, Flag } from "lucide-react";
 import { stripBoldMarkdown } from "../../utils/boldMarkdown";
 import { getImageUrlCandidates } from "../../utils/imageUrl";
 import { StudentZoomableMedia } from "./StudentZoomableMedia";
@@ -142,7 +143,7 @@ export function QuestionRenderer({
       <button
         type="button"
         onClick={() => onToggleFlag(slotId)}
-        className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
+        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
           flags[slotId]
             ? "border-amber-700 bg-amber-700 text-white"
             : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700"
@@ -150,9 +151,7 @@ export function QuestionRenderer({
         aria-label={flags[slotId] ? "Unflag question" : "Flag question"}
         title={flags[slotId] ? "Unflag question" : "Flag question"}
       >
-        <span aria-hidden="true" className="text-sm">
-          ⚑
-        </span>
+        <Flag size={14} aria-hidden="true" className={flags[slotId] ? "fill-current" : ""} />
       </button>
     );
   };
@@ -214,7 +213,7 @@ export function QuestionRenderer({
           name={slotId}
           value={value}
           onChange={(event) => changeValue(event.target.value)}
-          className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
+          className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${inputWidthClass}`}
           placeholder="Enter answer..."
           security={security}
           sessionId={sessionId}
@@ -265,7 +264,7 @@ export function QuestionRenderer({
                 name={`q-${q.id}`}
                 checked={answer === option}
                 onChange={() => commitAnswerChange(option)}
-                className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+                className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-600"
               />
               <span className="text-sm uppercase text-gray-900">
                 {labels[option as keyof typeof labels]}
@@ -298,7 +297,7 @@ export function QuestionRenderer({
             name={q.id}
             value={typeof answer === "string" ? answer : ""}
             onChange={(event) => commitAnswerChange(event.target.value)}
-            className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
+            className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${inputWidthClass}`}
             placeholder="Enter answer..."
             security={security}
             sessionId={sessionId}
@@ -326,7 +325,7 @@ export function QuestionRenderer({
         <select
           value={typeof answer === "string" ? answer : ""}
           onChange={(event) => commitAnswerChange(event.target.value)}
-          className={`flex-1 rounded-md border-2 border-gray-300 px-3 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? "w-full min-w-0 max-w-full" : tabletMode ? "max-w-full" : "max-w-xs"}`}
+          className={`flex-1 rounded-md border border-gray-300 px-3 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0 max-w-full" : tabletMode ? "max-w-full" : "max-w-xs"}`}
           aria-label={`Heading selection for question ${number}`}
         >
           <option value="">Choose heading…</option>
@@ -386,7 +385,7 @@ export function QuestionRenderer({
             return (
               <label
                 key={option.id}
-                className={`flex cursor-pointer items-start gap-3 rounded-md border-2 p-3 transition-colors ${
+                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
                   isSelected
                     ? "border-blue-500 bg-blue-50"
                     : isDisabled
@@ -408,12 +407,7 @@ export function QuestionRenderer({
                   }`}
                 >
                   {isSelected ? (
-                    <div
-                      className="h-3 w-3 bg-white"
-                      style={{
-                        clipPath: "polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%)",
-                      }}
-                    ></div>
+                    <Check size={14} strokeWidth={3} className="text-white" aria-hidden="true" />
                   ) : null}
                 </div>
                 <div className="flex gap-2">
@@ -479,7 +473,7 @@ export function QuestionRenderer({
             name={q.id}
             value={typeof answer === "string" ? answer : ""}
             onChange={(event) => commitAnswerChange(event.target.value)}
-            className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
+            className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${inputWidthClass}`}
             placeholder="Enter label..."
             security={security}
             sessionId={sessionId}
@@ -581,7 +575,7 @@ export function QuestionRenderer({
             name={q.id}
             value={typeof answer === "string" ? answer : ""}
             onChange={(event) => commitAnswerChange(event.target.value)}
-            className={`w-full rounded-md border-2 border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${inputWidthClass}`}
+            className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${inputWidthClass}`}
             placeholder="Enter answer..."
             security={security}
             sessionId={sessionId}
@@ -637,7 +631,7 @@ export function QuestionRenderer({
                           onChange={(event) =>
                             updateIndexedAnswer(index, event.target.value, blanks, slotId)
                           }
-                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
+                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
                           placeholder="Answer..."
                           security={security}
                           sessionId={sessionId}
@@ -661,7 +655,7 @@ export function QuestionRenderer({
     const blanks = noteQuestion.blanks.length;
 
     return (
-      <div className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+      <div className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
         <div className="leading-8 text-gray-900 [white-space:pre-wrap]">
           {parts.map((part, index) => (
             <React.Fragment key={`${noteQuestion.id}-${index}`}>
@@ -696,7 +690,7 @@ export function QuestionRenderer({
                           onChange={(event) =>
                             updateIndexedAnswer(index, event.target.value, blanks, slotId)
                           }
-                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
+                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
                           placeholder="Answer..."
                           security={security}
                           sessionId={sessionId}
@@ -758,15 +752,15 @@ export function QuestionRenderer({
               imageClassName="max-h-[48dvh]"
             />
           ) : (
-            <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
+            <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
               <div className="p-6 text-center text-sm text-gray-500">
                 Diagram image URL is missing or inaccessible.
               </div>
             </div>
           )}
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-[length:var(--student-meta-font-size)] font-black uppercase tracking-[0.18em] text-gray-500">
+        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide text-gray-600">
             Answers
           </div>
           {renderDiagramFallbackFields(diagramBlock)}
@@ -825,7 +819,7 @@ export function QuestionRenderer({
     const placeholderPattern = /_{2,}/g;
 
     return (
-      <div className="overflow-x-auto rounded-2xl border border-gray-200">
+      <div className="overflow-x-auto rounded-lg border border-gray-200">
         <table
           className={`w-full border-collapse text-[length:var(--student-control-font-size)] ${
             isCompactPane ? "min-w-[360px]" : "min-w-[480px]"
@@ -1017,7 +1011,7 @@ export function QuestionRenderer({
                                             slot.slotId
                                           )
                                         }
-                                        className="w-full min-w-0 rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                        className="w-full min-w-0 rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25"
                                         placeholder="Enter answer..."
                                         security={security}
                                         sessionId={sessionId}
@@ -1101,7 +1095,7 @@ export function QuestionRenderer({
                         slotId
                       )
                     }
-                    className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"}`}
+                    className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"}`}
                     aria-label={`Category selection for question ${slotNumber}`}
                   >
                     <option value="">Choose category…</option>
@@ -1170,7 +1164,7 @@ export function QuestionRenderer({
                         slotId
                       )
                     }
-                    className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"}`}
+                    className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"}`}
                     aria-label={`Matching selection for question ${slotNumber}`}
                   >
                     <option value="">Choose match…</option>

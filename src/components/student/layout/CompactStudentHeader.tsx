@@ -70,7 +70,7 @@ export function CompactStudentHeader({
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="flex-shrink-0 border-2 border-gray-900 px-1.5 py-0.5 text-lg font-black tracking-tighter text-gray-900">
+          <span className="flex-shrink-0 border border-gray-900 px-1.5 py-0.5 text-lg font-bold tracking-tight text-gray-900">
             IELTS
           </span>
           <span className="truncate text-sm font-semibold text-gray-700">{moduleLabel}</span>

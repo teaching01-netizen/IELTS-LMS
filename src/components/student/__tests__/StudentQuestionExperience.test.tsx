@@ -63,9 +63,9 @@ describe('student question experience', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: '1' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '2-4' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '5' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /question 1/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /question 2-4/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /question 5/i })).toBeInTheDocument();
   });
 
   it('does not show decorative category tags for classification questions', () => {
@@ -998,7 +998,7 @@ describe('student question experience', () => {
     );
 
     const image = screen.getByAltText('Uploaded diagram');
-    const mediaWrapper = image.closest('.overflow-hidden.rounded-2xl');
+    const mediaWrapper = image.closest('.overflow-hidden.rounded-lg');
     expect(mediaWrapper).not.toBeNull();
   });
 

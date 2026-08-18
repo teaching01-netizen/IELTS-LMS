@@ -360,7 +360,7 @@ describe("StudentApp runtime-backed mode", () => {
       />
     );
 
-    await screen.findByRole("timer", { name: /time remaining/i });
+    await screen.findByRole("timer", { name: "Time remaining" });
     expect(screen.getByRole("button", { name: "Highlight" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose highlight color" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Erase highlights" })).toBeInTheDocument();
@@ -387,7 +387,7 @@ describe("StudentApp runtime-backed mode", () => {
       />
     );
 
-    await screen.findByRole("timer", { name: /time remaining/i });
+    await screen.findByRole("timer", { name: "Time remaining" });
     expect(screen.getByRole("button", { name: "Highlight" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose highlight color" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Erase highlights" })).toBeInTheDocument();

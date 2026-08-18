@@ -18,6 +18,7 @@ import {
 } from "./normalizeReadingPassageText";
 import { isInstructionReferencePlacement } from "../../utils/referenceImagePlacement";
 import { StudentMaterialWithQuestionPane } from "./StudentMaterialWithQuestionPane";
+import { StudentModuleEmptyState } from "./StudentModuleEmptyState";
 import type { StudentLayoutMode } from "./layout/studentLayoutMode";
 
 interface StudentReadingProps {
@@ -99,13 +100,13 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
       data-student-zoom-scroll
     >
       <h2
-        className={`${materialCompact ? "mb-2" : "mb-4 md:mb-6"} font-bold leading-tight text-gray-950 break-words`}
+        className={`student-passage-measure ${materialCompact ? "mb-2" : "mb-4 md:mb-6"} font-bold leading-tight tracking-tight text-gray-900 break-words`}
         style={{ fontSize: "var(--student-passage-title-font-size)" }}
       >
         {passageTitle}
       </h2>
       <div
-        className={`${materialCompact ? "space-y-3" : "space-y-5"} break-normal text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7`}
+        className={`student-passage-measure ${materialCompact ? "space-y-3" : "space-y-5"} break-normal text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-[0.5em] [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7`}
       >
         {highlightEnabled ? (
           <FormattedText
@@ -257,11 +258,11 @@ export function StudentReading({
     (instruction: string, blockId: string) => {
       return (
         <div
-          className={`rounded-lg border border-gray-200 bg-gray-50 ${answerCompact ? "px-2 py-1.5" : "px-3 py-2"}`}
+          className={`rounded-lg border border-gray-200 bg-gray-50 ${answerCompact ? "px-3 py-2" : "px-4 py-3"}`}
         >
           <StudentQuestionText
             as="p"
-            className={`${answerCompact ? "text-xs md:text-sm" : "text-sm md:text-base"} leading-relaxed text-gray-800 break-words [overflow-wrap:anywhere]`}
+            className="text-gray-800 break-words [overflow-wrap:anywhere]"
             text={instruction}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
@@ -344,7 +345,7 @@ export function StudentReading({
   );
 
   if (!activePassage) {
-    return null;
+    return <StudentModuleEmptyState label="Reading" />;
   }
 
   return (
@@ -361,6 +362,7 @@ export function StudentReading({
       dividerTestId="reading-pane-resizer"
       materialPane={
         <ReadingPassagePane
+          key={activePassage.id}
           passageId={activePassage.id}
           passageTitle={activePassage.title}
           materialCompact={materialCompact}

@@ -22,7 +22,7 @@ describe('StudentFooter', () => {
     expect(footer).toHaveClass('student-exam-footer');
   });
 
-  it('keeps overall progress in the question row and omits the Finish button', () => {
+  it('keeps overall progress in the question row and shows the Finish button on tablets', () => {
     render(
       <StudentFooter
         questions={[
@@ -60,7 +60,7 @@ describe('StudentFooter', () => {
     const row = screen.getByTestId('student-footer-row');
     expect(row).toHaveClass('overflow-x-auto');
     expect(within(row).getByText('0/2')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /finish/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /finish/i })).toBeInTheDocument();
   });
 
   it('navigates when selecting a question chip', () => {
@@ -99,7 +99,7 @@ describe('StudentFooter', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '2' }));
+    fireEvent.click(screen.getByRole('button', { name: /question 2/i }));
     expect(onNavigate).toHaveBeenCalledWith('q2');
   });
 
@@ -204,9 +204,9 @@ describe('StudentFooter', () => {
     );
 
     expect(screen.getByText('0/1')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: '1' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /question 1, not answered/i })).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole('button', { name: '1' }));
+    fireEvent.click(screen.getByRole('button', { name: /question 1/i }));
     expect(onNavigate).toHaveBeenCalledWith('sentence-q1:blank-1');
   });
 });

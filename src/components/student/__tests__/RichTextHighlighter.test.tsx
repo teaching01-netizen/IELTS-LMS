@@ -149,7 +149,7 @@ describe('highlight tool selection tint', () => {
 
     const surface = surfaceOf(container);
     expect(surface).toHaveAttribute('data-student-highlight-selection', 'true');
-    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#a7f3d0');
+    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#dcebe1');
   });
 
   it('turns the selection tint on and off through the real provider actions', () => {
@@ -164,7 +164,7 @@ describe('highlight tool selection tint', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Paint green' }));
     expect(surface).toHaveAttribute('data-student-highlight-selection', 'true');
-    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#a7f3d0');
+    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#dcebe1');
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset tool' }));
     expect(surface).not.toHaveAttribute('data-student-highlight-selection');
@@ -232,7 +232,7 @@ describe('highlight tool selection tint adversarials', () => {
 
     const surface = surfaceOf(container);
     expect(surface).toHaveAttribute('data-student-highlight-selection', 'true');
-    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#fde68a');
+    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#f3e6c8');
   });
 
   it('updates the tint color when the student switches colors mid-session', () => {
@@ -244,9 +244,9 @@ describe('highlight tool selection tint adversarials', () => {
 
     const surface = surfaceOf(container);
     fireEvent.click(screen.getByRole('button', { name: 'Green' }));
-    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#a7f3d0');
+    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#dcebe1');
     fireEvent.click(screen.getByRole('button', { name: 'Blue' }));
-    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#bae6fd');
+    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#d9e9f8');
   });
 
   it('prefers the surface color prop over the provider color so preview matches paint', () => {
@@ -259,6 +259,6 @@ describe('highlight tool selection tint adversarials', () => {
     const surface = surfaceOf(container);
     fireEvent.click(screen.getByRole('button', { name: 'Paint green' }));
     expect(surface).toHaveAttribute('data-student-highlight-selection', 'true');
-    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#ddd6fe');
+    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#eae3f0');
   });
 });

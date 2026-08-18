@@ -4,6 +4,7 @@ import {
   countQuestionSlots,
 } from '@student/application/studentExamContentFacade';
 import { Button } from '../ui/Button';
+import { AlertTriangle } from 'lucide-react';
 import { AccessibilitySettings } from './AccessibilitySettings';
 import { StudentExamPhaseRenderer } from './StudentExamPhaseRenderer';
 import { StudentExamWorkspaceSession } from './StudentExamWorkspaceSession';
@@ -214,6 +215,8 @@ export function StudentApp({
         ['--student-passage-h2-font-size' as string]: studentTypography.passageH2FontSize,
         ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
         ['--student-passage-line-height' as string]: studentTypography.passageLineHeight,
+        ['--student-question-font-size' as string]: studentTypography.questionFontSize,
+        ['--student-question-line-height' as string]: studentTypography.questionLineHeight,
       }) as React.CSSProperties,
     [studentTypography, tabletMode, uiState.accessibilitySettings.zoom]
   );
@@ -230,6 +233,9 @@ export function StudentApp({
   const [warningOpen, setWarningOpen] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
   const [warningSeverity, setWarningSeverity] = useState<'medium' | 'high' | 'critical'>('medium');
+  const blockingOverlayRef = useRef<HTMLDivElement | null>(null);
+  const finalSubmitOverlayRef = useRef<HTMLDivElement | null>(null);
+  const submitConfirmModuleRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     runtimeStateRef.current = runtimeState;
@@ -315,7 +321,7 @@ export function StudentApp({
     [attemptActions, commitWritingDraft, examSessionStore, reconcileLiveAnswerCacheNow]
   );
 
-  const { finalSubmitStatus, flushAndSubmitCurrentModuleWithRetry } =
+  const { finalSubmitStatus, flushAndSubmitCurrentModuleWithRetry, retryFinalSubmit } =
     useStudentSubmissionOrchestration({
       runtimeState: {
         runtimeBacked: runtimeState.runtimeBacked,
@@ -364,6 +370,33 @@ export function StudentApp({
     runtimeState.currentModule,
     uiState.accessibilitySettings.highlightToolMode,
     uiState.showSubmitConfirm,
+  ]);
+
+  useEffect(() => {
+    uiActionsRef.current.setShowSubmitConfirm(false);
+    uiActionsRef.current.setShowNavigator(false);
+  }, [runtimeState.currentModule]);
+
+  useEffect(() => {
+    if (runtimeState.blocking.active && blockingCopy) {
+      blockingOverlayRef.current?.focus();
+    }
+  }, [blockingCopy, runtimeState.blocking.active]);
+
+  useEffect(() => {
+    if (
+      runtimeState.runtimeBacked &&
+      runtimeState.runtimeStatus === 'completed' &&
+      runtimeCompletionVerified &&
+      finalSubmitStatus !== 'idle'
+    ) {
+      finalSubmitOverlayRef.current?.focus();
+    }
+  }, [
+    finalSubmitStatus,
+    runtimeCompletionVerified,
+    runtimeState.runtimeBacked,
+    runtimeState.runtimeStatus,
   ]);
 
   useEffect(() => {
@@ -459,6 +492,7 @@ export function StudentApp({
 
   const handleModuleSubmit = useCallback(async () => {
     if (submitRequiresConfirmation) {
+      submitConfirmModuleRef.current = runtimeStateRef.current.currentModule;
       uiActionsRef.current.setShowSubmitConfirm(true);
       return;
     }
@@ -468,6 +502,9 @@ export function StudentApp({
 
   const confirmModuleSubmit = useCallback(async () => {
     uiActionsRef.current.setShowSubmitConfirm(false);
+    if (submitConfirmModuleRef.current !== runtimeStateRef.current.currentModule) {
+      return;
+    }
     await performModuleSubmit();
   }, [performModuleSubmit]);
 
@@ -564,11 +601,18 @@ export function StudentApp({
   const blockingOverlay =
     runtimeState.blocking.active && blockingCopy ? (
       <div className="fixed inset-0 z-40 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
-        <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8 text-center">
-          <p className="text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-[0.3em] text-gray-500 mb-3">
+        <div
+          ref={blockingOverlayRef}
+          tabIndex={-1}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="blocking-overlay-title"
+          className="max-w-md w-full bg-white rounded-lg border border-gray-200 shadow-xl p-6 md:p-8 text-center"
+        >
+          <p className="text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide text-gray-500 mb-3">
             {blockingCopy.contextLabel}
           </p>
-          <h2 className="text-2xl font-black text-gray-900 mb-3">{blockingCopy.title}</h2>
+          <h2 id="blocking-overlay-title" className="text-2xl font-black text-gray-900 mb-3">{blockingCopy.title}</h2>
           <p className="text-sm text-gray-700 leading-6">
             {runtimeState.proctorNote ?? blockingCopy.message}
           </p>
@@ -590,11 +634,18 @@ export function StudentApp({
     runtimeCompletionVerified &&
     finalSubmitStatus !== 'idle' ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
-        <div className="max-w-md w-full bg-white rounded-sm border border-gray-100 shadow-2xl p-6 md:p-8 text-center">
-          <p className="text-[length:var(--student-meta-font-size)] font-bold uppercase tracking-[0.3em] text-gray-500 mb-3">
+        <div
+          ref={finalSubmitOverlayRef}
+          tabIndex={-1}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="final-submit-overlay-title"
+          className="max-w-md w-full bg-white rounded-lg border border-gray-200 shadow-xl p-6 md:p-8 text-center"
+        >
+          <p className="text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide text-gray-500 mb-3">
             Submission
           </p>
-          <h2 className="text-2xl font-black text-gray-900 mb-3">Submitting your exam</h2>
+          <h2 id="final-submit-overlay-title" className="text-2xl font-black text-gray-900 mb-3">Submitting your exam</h2>
           <p className="text-sm text-gray-700 leading-6">
             {finalSubmitStatus === 'failed'
               ? 'We could not confirm submission yet. Stay on this page and check your connection.'
@@ -612,9 +663,46 @@ export function StudentApp({
               Do not close
             </div>
           </div>
+          {finalSubmitStatus === 'failed' ? (
+            <div className="mt-6 flex flex-col items-stretch gap-2">
+              <Button variant="primary" onClick={retryFinalSubmit} className="h-11 text-base font-semibold">
+                Retry Submission
+              </Button>
+              <p className="text-xs text-gray-500 leading-5">
+                Your answers are safe on this device. If submission keeps failing, contact your proctor.
+              </p>
+            </div>
+          ) : null}
         </div>
       </div>
     ) : null;
+
+  const droppedMutations = attemptState.attempt?.recovery.lastDroppedMutations ?? null;
+  const droppedMutationsBanner = droppedMutations ? (
+    <div
+      role="status"
+      className="fixed inset-x-0 bottom-20 z-30 flex justify-center px-4 pointer-events-none"
+    >
+      <div className="pointer-events-auto w-full max-w-lg rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 shadow-xl flex items-start gap-3">
+        <AlertTriangle size={16} className="text-amber-700 mt-0.5 flex-shrink-0" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-amber-900">Some answers could not be saved</p>
+          <p className="mt-0.5 text-xs leading-5 text-amber-800">
+            {droppedMutations.count} change{droppedMutations.count === 1 ? '' : 's'}{' '}
+            {droppedMutations.count === 1 ? 'was' : 'were'} not recorded. Check with your proctor
+            if you think an answer is missing.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void attemptActions.dismissDroppedMutationsBanner()}
+          className="flex-shrink-0 text-xs font-bold text-amber-900 hover:underline"
+        >
+          Got it
+        </button>
+      </div>
+    </div>
+  ) : null;
 
   if (shouldRenderPostExam || effectivePhase !== 'exam') {
     return (
@@ -734,6 +822,7 @@ export function StudentApp({
           />
         </StudentHighlightSelectionManagerProvider>
       </StudentExamViewport>
+      {droppedMutationsBanner}
       {blockingOverlay}
       {finalSubmitOverlay}
       {examState.config.progression.showWarnings ? (
@@ -855,7 +944,7 @@ export function StudentApp({
           >
             Cancel
           </Button>
-          <Button type="button" onClick={handleTimeExtensionRequest}>
+          <Button type="button" onClick={handleTimeExtensionRequest} disabled={!timeExtensionReason.trim()}>
             Request +5 Minutes
           </Button>
         </div>

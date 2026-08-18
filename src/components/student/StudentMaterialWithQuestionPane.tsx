@@ -204,7 +204,7 @@ export function StudentMaterialWithQuestionPane({
               type="button"
               className={`${paneTabClassName} ${
                 activeCompactPane === "material"
-                  ? "border-blue-700 bg-blue-50 text-blue-950 active:bg-blue-100"
+                  ? "border-blue-700 bg-blue-50 text-blue-900 active:bg-blue-100"
                   : "border-gray-300 bg-white text-gray-900"
               }`}
               aria-pressed={activeCompactPane === "material"}
@@ -216,7 +216,7 @@ export function StudentMaterialWithQuestionPane({
               type="button"
               className={`${paneTabClassName} ${
                 activeCompactPane === "questions"
-                  ? "border-blue-700 bg-blue-50 text-blue-950 active:bg-blue-100"
+                  ? "border-blue-700 bg-blue-50 text-blue-900 active:bg-blue-100"
                   : "border-gray-300 bg-white text-gray-900"
               }`}
               aria-pressed={activeCompactPane === "questions"}

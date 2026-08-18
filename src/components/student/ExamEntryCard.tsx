@@ -39,7 +39,7 @@ export function ExamEntryCard({
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-gray-50 p-3 sm:p-4 md:p-6 lg:p-8">
-      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-sm border border-gray-100 bg-white shadow-[0_8px_24px_rgba(9,30,66,0.08)]">
+      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl">
         <div className="flex-shrink-0 border-b border-gray-200 px-3 py-4 sm:px-4 md:px-6 lg:px-10 lg:py-8">
           <h2 className="text-xl font-bold tracking-tight text-gray-900 md:text-2xl">
             Waiting for the exam to start
@@ -48,18 +48,18 @@ export function ExamEntryCard({
         <div className="flex-1 space-y-6 overflow-y-auto p-4 md:p-6 lg:p-10">
           <section aria-label="Exam details" className="space-y-3">
             <div>
-              <p className="text-xs font-bold uppercase tracking-widest text-gray-600">Exam</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Exam</p>
               <p className="font-bold text-gray-900">{examTitle}</p>
             </div>
             {candidateName ? (
               <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-gray-600">Candidate</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Candidate</p>
                 <p className="font-bold text-gray-900">{candidateName}</p>
               </div>
             ) : null}
             {candidateId ? (
               <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-gray-600">Candidate ID</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Candidate ID</p>
                 <p className="text-gray-900">{candidateId}</p>
               </div>
             ) : null}

@@ -80,13 +80,13 @@ export function AccessibilitySettings({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="rounded-lg shadow-xl w-full max-w-md"
+      className="rounded-lg shadow-xl w-full max-w-md backdrop:bg-black/50"
       aria-labelledby="accessibility-title"
     >
       <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200">
         <div className="flex items-center gap-2 md:gap-3">
-          <div className="p-1.5 md:p-2 bg-purple-100 rounded-lg">
-            <Contrast size={20} className="text-purple-600" />
+          <div className="p-1.5 md:p-2 bg-gray-100 rounded-lg">
+            <Contrast size={20} className="text-gray-700" />
           </div>
           <h2 id="accessibility-title" className="text-lg md:text-xl font-bold text-gray-900">Accessibility</h2>
         </div>
@@ -111,14 +111,14 @@ export function AccessibilitySettings({
                 onClick={() => onFontSizeChange(size.value)}
                 aria-pressed={fontSize === size.value}
                 data-testid={`font-size-option-${size.value}`}
-                className={`rounded-xl border-2 p-4 text-left transition-all ${
+                className={`rounded-lg border p-4 text-left transition-all ${
                   fontSize === size.value
-                    ? 'bg-blue-50 border-blue-500 text-blue-900 shadow-sm ring-1 ring-blue-200'
+                    ? 'bg-blue-50 border-blue-600 text-gray-900'
                     : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50'
                 }`}
                 style={{ fontSize: size.preview }}
               >
-                <span className="block text-[0.72rem] font-black uppercase tracking-[0.22em] text-gray-500">
+                <span className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
                   {size.label}
                 </span>
                 <span
@@ -146,7 +146,7 @@ export function AccessibilitySettings({
             <button
               type="button"
               onClick={onHighContrastToggle}
-              className={`relative w-12 h-6 rounded-full transition-colors ${
+              className={`relative w-12 h-6 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
                 highContrast ? 'bg-blue-600' : 'bg-gray-300'
               }`}
               role="switch"

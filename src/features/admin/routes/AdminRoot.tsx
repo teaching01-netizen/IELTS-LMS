@@ -57,24 +57,24 @@ export function AdminRoot() {
           />
         ) : null}
         <aside
-          className={`fixed inset-y-0 left-0 z-30 flex flex-col bg-blue-900 text-blue-100 shadow-xl transition-all duration-300 md:relative md:inset-auto md:z-20 md:translate-x-0 ${
+          className={`fixed inset-y-0 left-0 z-30 flex flex-col bg-gray-50 text-gray-900 border-r border-border transition-all duration-300 md:relative md:inset-auto md:z-20 md:translate-x-0 ${
             sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:w-16'
           }`}
           role="navigation"
           aria-label="Admin navigation"
         >
-          <div className="h-14 flex items-center justify-between px-4 border-b border-blue-800 bg-blue-900/50">
+          <div className="h-14 flex items-center justify-between px-4 border-b border-border">
             {sidebarOpen ? (
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 bg-white text-blue-900 rounded-sm flex items-center justify-center font-bold text-xs">
+                <div className="w-7 h-7 bg-gray-900 text-white rounded-sm flex items-center justify-center font-bold text-xs">
                   IP
                 </div>
-                <span className="font-bold text-white tracking-tight">IELTS Platform</span>
+                <span className="font-bold text-gray-900 tracking-tight">IELTS Platform</span>
               </div>
             ) : null}
             <button
               onClick={() => setSidebarOpen((open) => !open)}
-              className="p-1 hover:bg-blue-800 rounded-sm text-blue-300 transition-colors"
+              className="p-1 hover:bg-gray-200 rounded-sm text-gray-600 transition-colors"
               aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
             >
               <Menu size={20} />
@@ -91,25 +91,25 @@ export function AdminRoot() {
                   <button
                     key={item.id}
                     onClick={() => navigate(item.path)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all ${
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
                       isActive
-                        ? 'bg-blue-800 text-white shadow-sm'
-                        : 'hover:bg-blue-800/50 hover:text-white text-blue-200'
+                        ? 'bg-gray-200 text-gray-900 font-medium'
+                        : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
                     }`}
                     title={!sidebarOpen ? item.label : undefined}
                     aria-current={isActive ? 'page' : undefined}
                   >
-                    <Icon size={18} className={isActive ? 'text-white' : 'text-blue-300'} />
+                    <Icon size={18} className={isActive ? 'text-gray-900' : 'text-gray-500'} />
                     {sidebarOpen ? <span className="text-sm font-medium">{item.label}</span> : null}
                   </button>
                 );
               })}
 
               <div className="pt-6 pb-2 px-1">
-                <div className={`h-px bg-blue-800 mb-6 ${!sidebarOpen ? 'mx-auto w-8' : ''}`}></div>
+                <div className={`h-px bg-border mb-6 ${!sidebarOpen ? 'mx-auto w-8' : ''}`}></div>
                 <button
                   onClick={() => navigate('/proctor')}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-all border border-amber-500/20 shadow-sm"
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-md bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors border border-amber-200"
                   title={!sidebarOpen ? 'Live Proctoring' : undefined}
                 >
                   <ShieldCheck size={18} />
@@ -123,10 +123,10 @@ export function AdminRoot() {
             </nav>
           </div>
 
-          <div className="p-4 border-t border-blue-800 bg-blue-950/30">
+          <div className="p-4 border-t border-border">
             <button
               onClick={() => navigate('/')}
-              className="w-full flex items-center justify-center gap-2 bg-blue-800/50 hover:bg-blue-800 text-white py-2 rounded-md text-sm font-medium transition-all border border-blue-700/30"
+              className="w-full flex items-center justify-center gap-2 bg-gray-200/70 hover:bg-gray-200 text-gray-700 py-2 rounded-md text-sm font-medium transition-colors"
             >
               {sidebarOpen ? 'Exit Admin' : 'Exit'}
             </button>
@@ -135,7 +135,7 @@ export function AdminRoot() {
 
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           <header
-            className="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-3 sm:px-6 flex-shrink-0 z-10 shadow-sm"
+            className="h-14 bg-white border-b border-border flex items-center justify-between px-3 sm:px-6 flex-shrink-0 z-10"
             role="banner"
           >
             <div className="flex items-center gap-4 flex-1">
@@ -152,7 +152,7 @@ export function AdminRoot() {
                 <input
                   type="text"
                   placeholder="Search resources, students, exams..."
-                  className="w-full pl-10 pr-4 py-1.5 bg-gray-50 border border-gray-100 rounded-sm text-sm focus:bg-white focus:border-blue-700 focus:ring-2 focus:ring-blue-100 outline-none transition-all placeholder:text-gray-400"
+                  className="w-full pl-10 pr-4 py-1.5 bg-gray-100 border border-transparent rounded-md text-sm focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 outline-none transition-all placeholder:text-gray-400"
                   aria-label="Search resources, students, exams"
                 />
               </div>

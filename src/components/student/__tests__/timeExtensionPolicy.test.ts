@@ -30,4 +30,32 @@ describe('shouldOfferTimeExtension', () => {
       }),
     ).toBe(true);
   });
+
+  it('still offers an extension when the 5-minute mark is skipped (e.g. 4:40 remaining)', () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+    config.delivery.allowedExtensionMinutes = [5, 10];
+
+    expect(
+      shouldOfferTimeExtension({
+        config,
+        phase: 'exam',
+        runtimeBacked: false,
+        displayTimeRemaining: 280,
+      }),
+    ).toBe(true);
+  });
+
+  it('does not offer an extension once time has expired', () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+    config.delivery.allowedExtensionMinutes = [5, 10];
+
+    expect(
+      shouldOfferTimeExtension({
+        config,
+        phase: 'exam',
+        runtimeBacked: false,
+        displayTimeRemaining: 0,
+      }),
+    ).toBe(false);
+  });
 });

@@ -66,11 +66,11 @@ describe('student interaction motion class contracts', () => {
       );
       const row = screen.getByTestId('student-footer-row');
 
-      const current = within(row).getByRole('button', { name: '1' });
-      const answered = within(row).getByRole('button', { name: '2' });
-      const answered2 = within(row).getByRole('button', { name: '3' });
-      const flagged = within(row).getByRole('button', { name: '4' });
-      const unanswered = within(row).getByRole('button', { name: '5' });
+      const current = within(row).getByRole('button', { name: /question 1/i });
+      const answered = within(row).getByRole('button', { name: /question 2/i });
+      const answered2 = within(row).getByRole('button', { name: /question 3/i });
+      const flagged = within(row).getByRole('button', { name: /question 4/i });
+      const unanswered = within(row).getByRole('button', { name: /question 5/i });
 
       expect(current).toHaveClass(pressRecipe);
       expect(current).toHaveClass('bg-blue-800', 'border-blue-800', 'text-white', 'hover:bg-blue-700');
@@ -84,7 +84,7 @@ describe('student interaction motion class contracts', () => {
       expect(answered2).toHaveClass('hover:bg-green-300');
 
       expect(unanswered).toHaveClass(pressRecipe);
-      expect(unanswered).toHaveClass('bg-white', 'border-gray-100', 'hover:bg-gray-100');
+      expect(unanswered).toHaveClass('bg-white', 'border-gray-200', 'hover:bg-gray-100');
     });
 
     it('keeps the state color contract while adding motion (regression guard)', () => {
@@ -98,8 +98,8 @@ describe('student interaction motion class contracts', () => {
         />,
       );
       const row = screen.getByTestId('student-footer-row');
-      const current = within(row).getByRole('button', { name: '1' });
-      const answered = within(row).getByRole('button', { name: '2' });
+      const current = within(row).getByRole('button', { name: /question 1/i });
+      const answered = within(row).getByRole('button', { name: /question 2/i });
 
       expect(current).toHaveClass('bg-blue-800', 'text-white');
       expect(answered).toHaveClass('bg-green-200', 'text-green-900');
@@ -331,14 +331,14 @@ describe('student interaction motion class contracts', () => {
       const questions = screen.getByRole('button', { name: 'Questions' });
 
       expect(passage).toHaveClass(pressRecipe, 'student-touch-target');
-      expect(passage).toHaveClass('border-blue-700', 'bg-blue-50', 'text-blue-950', 'active:bg-blue-100');
+      expect(passage).toHaveClass('border-blue-700', 'bg-blue-50', 'text-blue-900', 'active:bg-blue-100');
 
       expect(questions).toHaveClass(pressRecipe, 'student-touch-target');
       expect(questions).toHaveClass('border-gray-300', 'bg-white', 'text-gray-900');
 
       fireEvent.click(questions);
       expect(questions).toHaveAttribute('aria-pressed', 'true');
-      expect(questions).toHaveClass('border-blue-700', 'bg-blue-50', 'text-blue-950', 'active:bg-blue-100');
+      expect(questions).toHaveClass('border-blue-700', 'bg-blue-50', 'text-blue-900', 'active:bg-blue-100');
       expect(questions).not.toHaveClass('border-gray-300');
       expect(passage).toHaveAttribute('aria-pressed', 'false');
       expect(passage).toHaveClass('border-gray-300', 'bg-white', 'text-gray-900');
@@ -376,10 +376,10 @@ describe('student interaction motion class contracts', () => {
 
       expect(screen.getByRole('dialog', { name: 'Question Navigator' })).toHaveClass('student-question-navigator');
 
-      const current = screen.getByRole('button', { name: 'Question 1, current' });
+      const current = screen.getByRole('button', { name: 'Question 1, current, not answered' });
       const answered = screen.getByRole('button', { name: 'Question 2-3, answered' });
       const complete = screen.getByRole('button', { name: 'Question 4-5, complete' });
-      const flagged = screen.getByRole('button', { name: 'Question 6, flagged' });
+      const flagged = screen.getByRole('button', { name: 'Question 6, not answered, flagged' });
       const unanswered = screen.getByRole('button', { name: 'Question 7, not answered' });
 
       for (const chip of [current, complete, flagged, answered, unanswered]) {
@@ -388,7 +388,7 @@ describe('student interaction motion class contracts', () => {
       }
 
       expect(current).toHaveClass('bg-blue-800', 'hover:bg-blue-700', 'active:bg-blue-800');
-      expect(complete).toHaveClass('bg-green-800', 'hover:bg-green-900', 'active:bg-green-950');
+      expect(complete).toHaveClass('bg-green-800', 'hover:bg-green-900', 'active:bg-green-900');
       expect(flagged).toHaveClass('bg-amber-100', 'hover:bg-amber-200', 'active:bg-amber-300');
       expect(answered).toHaveClass('bg-green-200', 'hover:bg-green-300', 'active:bg-green-400');
       expect(unanswered).toHaveClass('bg-gray-100', 'hover:bg-gray-200', 'active:bg-gray-300');

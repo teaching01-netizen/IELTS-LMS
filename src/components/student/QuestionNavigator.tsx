@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Flag, X } from 'lucide-react';
+import { Check, Flag, X } from 'lucide-react';
 import {
   countAnsweredQuestions,
   countQuestionSlots,
@@ -79,6 +79,7 @@ export function QuestionNavigator({
         : 0),
     0
   );
+  const fullyAnsweredCount = answeredCount - partiallyAnsweredCount;
 
   const groups = questions.reduce<Record<string, StudentQuestionDescriptor[]>>(
     (result, question) => {
@@ -130,10 +131,10 @@ export function QuestionNavigator({
           <span>Current</span>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2">
-          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-green-800 rounded-sm flex items-center justify-center text-white text-[length:var(--student-meta-font-size)]">
-            ✓
+          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-green-800 rounded-sm flex items-center justify-center text-white">
+            <Check size={10} strokeWidth={3.5} aria-hidden="true" />
           </div>
-          <span>Answered ({answeredCount})</span>
+          <span>Fully answered ({fullyAnsweredCount})</span>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2">
           <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-green-200 rounded-sm border border-green-700"></div>
@@ -169,7 +170,7 @@ export function QuestionNavigator({
                     type="button"
                     key={question.id}
                     onClick={() => navigateToQuestion(question.id)}
-                    aria-label={`Question ${getQuestionNumberLabel(questions, question.id)}${isCurrent ? ', current' : isFullyComplete ? ', complete' : isAnswered ? ', answered' : isFlagged ? ', flagged' : ', not answered'}`}
+                    aria-label={`Question ${getQuestionNumberLabel(questions, question.id)}${isCurrent ? ', current' : ''}${isFullyComplete ? ', complete' : isAnswered ? ', answered' : ', not answered'}${isFlagged ? ', flagged' : ''}`}
                     className={`
                       relative h-11 md:h-12 rounded-md border border-transparent flex items-center justify-center text-[length:var(--student-control-font-size)] font-medium transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]
                       ${
@@ -178,7 +179,7 @@ export function QuestionNavigator({
                           : isFlagged
                             ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200 active:bg-amber-300'
                             : isFullyComplete
-                              ? 'bg-green-800 text-white hover:bg-green-900 active:bg-green-950'
+                              ? 'bg-green-800 text-white hover:bg-green-900 active:bg-green-900'
                               : isAnswered
                                 ? 'bg-green-200 text-green-900 hover:bg-green-300 active:bg-green-400'
                                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'

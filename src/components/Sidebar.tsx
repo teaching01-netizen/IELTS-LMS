@@ -52,10 +52,10 @@ export function Sidebar({
     <div className="w-56 bg-gray-50 border-r border-gray-100 flex flex-col h-full flex-shrink-0 shadow-sm">
       <div className="p-4 pt-6">
         <div className="flex items-center gap-3 px-2 mb-6">
-          <div className="w-8 h-8 bg-blue-800 rounded-sm flex items-center justify-center text-white font-bold text-xs shadow-md shadow-blue-100">IB</div>
+          <div className="w-8 h-8 bg-gray-900 rounded-sm flex items-center justify-center text-white font-bold text-xs">IB</div>
           <div>
             <h1 className="font-bold text-sm text-gray-900 leading-tight">IELTS Builder</h1>
-            <p className="text-[10px] text-gray-500 font-bold tracking-widest uppercase">Content Authoring</p>
+            <p className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Content Authoring</p>
           </div>
         </div>
       </div>
@@ -70,9 +70,9 @@ export function Sidebar({
               <button
                 key={mod.id}
                 onClick={() => setState({ ...state, activeModule: mod.id })}
-                className={`w-full flex items-center px-3 py-3 text-sm font-semibold transition-all rounded-md group relative ${
+                className={`w-full flex items-center px-3 py-3 text-sm font-semibold transition-colors rounded-md group relative ${
                   isActive 
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-100' 
+                    ? 'bg-gray-200 text-gray-900' 
                     : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                 }`}
                 aria-current={isActive ? 'page' : undefined}
@@ -80,16 +80,11 @@ export function Sidebar({
                 <Icon 
                   size={18} 
                   className={`transition-colors ${
-                    isActive ? 'text-white' : mod.color + ' group-hover:text-gray-900'
+                    isActive ? 'text-gray-900' : mod.color + ' group-hover:text-gray-900'
                   }`} 
                 />
                 <span className="flex-1 text-left ml-3">{mod.label}</span>
-                {isActive && (
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-blue-600 rounded-r-full" />
-                )}
-                <span className={`text-[10px] font-mono opacity-0 group-hover:opacity-100 transition-opacity ${
-                  isActive ? 'text-white/70' : 'text-gray-400'
-                }`}>
+                <span className={`text-[10px] font-mono opacity-0 group-hover:opacity-100 transition-opacity text-gray-400`}>
                   ⌘{mod.shortcut}
                 </span>
               </button>

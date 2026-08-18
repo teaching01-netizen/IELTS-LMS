@@ -14,7 +14,9 @@ export function shouldOfferTimeExtension({
   return (
     !runtimeBacked &&
     phase === 'exam' &&
-    displayTimeRemaining === 300 &&
+    displayTimeRemaining !== undefined &&
+    displayTimeRemaining > 0 &&
+    displayTimeRemaining <= 300 &&
     Array.isArray(config.delivery.allowedExtensionMinutes) &&
     config.delivery.allowedExtensionMinutes.includes(5)
   );

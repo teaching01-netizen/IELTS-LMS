@@ -143,9 +143,10 @@ export function StudentFooter({
                               ? 'bg-amber-100 border-amber-700 text-amber-900 hover:bg-amber-200'
                               : isAnswered
                                 ? 'bg-green-200 border-green-700 text-green-900 hover:bg-green-300'
-                                : 'bg-white border-gray-100 text-gray-700 hover:bg-gray-100'
+                                : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
                         }`}
-                        aria-label={displayLabel}
+                        aria-label={`Question ${displayLabel}${isCurrent ? ', current' : ''}${isFlagged ? ', flagged' : ''}${isAnswered ? ', answered' : ', not answered'}`}
+                        aria-current={isCurrent ? 'true' : undefined}
                       >
                         {displayLabel}
                         {isFlagged && !isCurrent ? (
@@ -166,7 +167,7 @@ export function StudentFooter({
                   }}
                   aria-label={`Jump to Part ${partNumber}`}
                   title={`Click to jump to Part ${partNumber}`}
-                  className={`${pressClassName} flex items-center gap-1 md:gap-1.5 rounded-sm px-1 py-0.5 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60`}
+                  className={`${pressClassName} flex items-center gap-1 md:gap-1.5 rounded-sm px-1 py-0.5 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60`}
                 >
                   <div className="w-8 md:w-10 lg:w-12 h-1 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
                     <div
@@ -198,7 +199,7 @@ export function StudentFooter({
             {answeredCount}/{totalQuestions}
           </span>
         </div>
-        {showSubmitButton && !tabletMode ? (
+        {showSubmitButton ? (
           <Button
             variant={hasUnanswered ? 'warning' : 'primary'}
             size="sm"

@@ -25,6 +25,8 @@ export interface StudentTypographyScale {
   passageH2FontSize: string;
   passageH3FontSize: string;
   passageLineHeight: string;
+  questionFontSize: string;
+  questionLineHeight: string;
 }
 
 const STUDENT_TYPOGRAPHY_SCALE: Record<StudentFontSize, StudentTypographyScale> = {
@@ -42,6 +44,8 @@ const STUDENT_TYPOGRAPHY_SCALE: Record<StudentFontSize, StudentTypographyScale> 
     passageH2FontSize: 'clamp(1.1rem, 1.05rem + 0.14vw, 1.26rem)',
     passageH3FontSize: 'clamp(1rem, 0.96rem + 0.12vw, 1.14rem)',
     passageLineHeight: '1.62',
+    questionFontSize: 'clamp(0.98rem, 0.96rem + 0.08vw, 1.06rem)',
+    questionLineHeight: '1.62',
   },
   normal: {
     rootFontSize: 'clamp(16.5px, 1.03rem + 0.18vw, 18.25px)',
@@ -57,6 +61,8 @@ const STUDENT_TYPOGRAPHY_SCALE: Record<StudentFontSize, StudentTypographyScale> 
     passageH2FontSize: 'clamp(1.2rem, 1.15rem + 0.16vw, 1.38rem)',
     passageH3FontSize: 'clamp(1.08rem, 1.03rem + 0.13vw, 1.24rem)',
     passageLineHeight: '1.72',
+    questionFontSize: 'clamp(1.08rem, 1.04rem + 0.12vw, 1.22rem)',
+    questionLineHeight: '1.72',
   },
   large: {
     rootFontSize: 'clamp(18.5px, 1.14rem + 0.22vw, 21px)',
@@ -72,6 +78,8 @@ const STUDENT_TYPOGRAPHY_SCALE: Record<StudentFontSize, StudentTypographyScale> 
     passageH2FontSize: 'clamp(1.36rem, 1.29rem + 0.19vw, 1.58rem)',
     passageH3FontSize: 'clamp(1.22rem, 1.16rem + 0.15vw, 1.4rem)',
     passageLineHeight: '1.82',
+    questionFontSize: 'clamp(1.2rem, 1.14rem + 0.14vw, 1.36rem)',
+    questionLineHeight: '1.82',
   },
 };
 

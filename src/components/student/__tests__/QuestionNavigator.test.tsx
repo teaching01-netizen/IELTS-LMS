@@ -75,7 +75,7 @@ describe('QuestionNavigator', () => {
         onClose={() => {}}
       />
     );
-    expect(screen.getByText(/Answered/)).toBeInTheDocument();
+    expect(screen.getByText(/Fully answered/)).toBeInTheDocument();
     expect(screen.getByText(/Unanswered/)).toBeInTheDocument();
   });
 

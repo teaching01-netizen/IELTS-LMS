@@ -33,8 +33,8 @@ export function Select({
   const baseStyles = 'h-10 px-3 text-sm border rounded-sm transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-40 disabled:cursor-not-allowed appearance-none bg-white';
   
   const stateStyles = error
-    ? 'border-red-700 text-gray-900 focus:ring-red-500 focus:border-red-700'
-    : 'border-gray-200 text-gray-900 focus:ring-blue-500 focus:border-blue-800';
+    ? 'border-red-600 text-gray-900 focus:ring-red-600/25 focus:border-red-600'
+    : 'border-gray-200 text-gray-900 focus:ring-blue-600/25 focus:border-blue-600';
   
   const widthStyle = fullWidth ? 'w-full' : '';
 

@@ -2,7 +2,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  /* Notion font stack: Inter (brand type) over Notion's system-ui fallback */
+  --font-sans: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
   /* Typography Scale - Consistent visual hierarchy */
@@ -13,7 +14,7 @@
   --font-size-xl: 1.25rem;   /* 20px - Headings */
   --font-size-2xl: 1.5rem;   /* 24px - Section titles */
   --font-size-3xl: 1.875rem; /* 30px - Page titles */
-  
+
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
@@ -38,66 +39,134 @@
   --spacing-10: 2.5rem;  /* 40px */
   --spacing-12: 3rem;    /* 48px */
 
-  /* Atlassian Design System Color Palette */
-  /* Blue */
-  --color-blue-900: #0747A6; /* B500 */
-  --color-blue-800: #0052CC; /* B400 */
-  --color-blue-700: #0065FF; /* B300 */
-  --color-blue-600: #2684FF; /* B200 */
-  --color-blue-500: #4C9AFF; /* B100 */
-  --color-blue-400: #7AB2FF;
-  --color-blue-300: #B3D4FF; /* B75 */
-  --color-blue-200: #DEEBFF; /* B50 */
-  --color-blue-100: #E6EFFC;
-  --color-blue-50: #F0F5FF;
+  /* Notion Design System Color Palette — warm neutrals, low chroma */
+  /* Neutral (Notion gray ramp: #37352F text → #F7F7F5 canvas) */
+  --color-gray-900: #37352F; /* Primary text */
+  --color-gray-800: #3F3D3A;
+  --color-gray-700: #4C4A47;
+  --color-gray-600: #5F5E5B;
+  --color-gray-500: #787774; /* Secondary text */
+  --color-gray-400: #9B9A97; /* Tertiary text */
+  --color-gray-300: #C7C5C3;
+  --color-gray-200: #E3E3E0; /* Button gray, strong borders */
+  --color-gray-100: #EFEFEC; /* Hover */
+  --color-gray-50: #F7F7F5;  /* Canvas, sidebar */
 
-  /* Neutral */
-  --color-gray-900: #172B4D; /* N800 - Text */
-  --color-gray-800: #253858; /* N700 */
-  --color-gray-700: #42526E; /* N600 */
-  --color-gray-600: #5E6C84; /* N500 - Secondary Text */
-  --color-gray-500: #7A869A; /* N400 */
-  --color-gray-400: #97A0AF; /* N300 */
-  --color-gray-300: #A5ADBA; /* N200 */
-  --color-gray-200: #C1C7D0; /* N100 */
-  --color-gray-100: #DFE1E6; /* N40 - Borders */
-  --color-gray-50: #F4F5F7;  /* N20 - Backgrounds */
+  /* Blue (Notion blue #2383E2) */
+  --color-blue-900: #12488A;
+  --color-blue-800: #185BAA;
+  --color-blue-700: #1D6FC7;
+  --color-blue-600: #2383E2; /* Notion blue - primary */
+  --color-blue-500: #2E8BDD;
+  --color-blue-400: #4F9CE0;
+  --color-blue-300: #84B8E8;
+  --color-blue-200: #B3D3F1;
+  --color-blue-100: #D9E9F8;
+  --color-blue-50: #EEF5FC;
 
-  /* Success (Green) */
-  --color-green-900: #006644;
-  --color-green-800: #00875A;
-  --color-green-700: #36B37E; /* G400 */
-  --color-green-600: #57D9A3;
-  --color-green-500: #79F2C0;
-  --color-green-100: #E3FCEF;
+  /* Green (Notion green #448361) */
+  --color-green-900: #204130;
+  --color-green-800: #28513B;
+  --color-green-700: #316247;
+  --color-green-600: #3A7453;
+  --color-green-500: #448361;
+  --color-green-400: #5E9B79;
+  --color-green-300: #8FBAA1;
+  --color-green-200: #B9D6C3;
+  --color-green-100: #DCEBE1;
+  --color-green-50: #EEF5F0;
 
-  /* Danger (Red) */
-  --color-red-900: #BF2600;
-  --color-red-800: #DE350B;
-  --color-red-700: #FF5630; /* R400 */
-  --color-red-600: #FF7452;
-  --color-red-500: #FF8F73;
-  --color-red-100: #FFEBE6;
+  /* Danger (Notion red #D44C47) */
+  --color-red-900: #672522;
+  --color-red-800: #84302D;
+  --color-red-700: #A03532;
+  --color-red-600: #BC403C;
+  --color-red-500: #D44C47;
+  --color-red-400: #D56E6A;
+  --color-red-300: #DE9794;
+  --color-red-200: #EBBEBC;
+  --color-red-100: #F5DEDD;
+  --color-red-50: #FBEFEF;
 
-  /* Warning (Yellow) */
-  --color-amber-900: #FF8B00;
-  --color-amber-800: #FF991F;
-  --color-amber-700: #FFAB00; /* Y400 */
-  --color-amber-600: #FFC400;
-  --color-amber-500: #FFE380;
-  --color-amber-100: #FFFAE6;
+  /* Warning (Notion yellow #CB912F) */
+  --color-amber-900: #593F12;
+  --color-amber-800: #785519;
+  --color-amber-700: #966A20;
+  --color-amber-600: #B47F27;
+  --color-amber-500: #CB912F;
+  --color-amber-400: #D5A34A;
+  --color-amber-300: #DEB467;
+  --color-amber-200: #E8CD95;
+  --color-amber-100: #F3E6C8;
+  --color-amber-50: #FAF3E6;
+
+  /* Orange (Notion orange #D9730D) */
+  --color-orange-900: #6E3A06;
+  --color-orange-800: #824407;
+  --color-orange-700: #A0550A;
+  --color-orange-600: #BE650B;
+  --color-orange-500: #D9730D;
+  --color-orange-400: #E08B3C;
+  --color-orange-300: #E8AB6F;
+  --color-orange-200: #EAC8A7;
+  --color-orange-100: #F5E4D3;
+
+  /* Purple (Notion purple #9065B0) */
+  --color-purple-900: #5A3C70;
+  --color-purple-800: #6A4885;
+  --color-purple-700: #7D569C;
+  --color-purple-600: #9065B0;
+  --color-purple-500: #A275BD;
+  --color-purple-400: #A983C6;
+  --color-purple-300: #C4A9D8;
+  --color-purple-200: #D5C7E2;
+  --color-purple-100: #EAE3F0;
+
+  /* Pink (Notion pink #C14C8A) */
+  --color-pink-900: #7C2F58;
+  --color-pink-800: #933A68;
+  --color-pink-700: #AB4079;
+  --color-pink-600: #C14C8A;
+  --color-pink-500: #CE639B;
+  --color-pink-400: #D171A8;
+  --color-pink-300: #E0A1C5;
+  --color-pink-200: #EDBFD9;
+  --color-pink-100: #F6DFEC;
+
+  /* Brown (Notion brown #9F6B53) */
+  --color-brown-900: #6B4635;
+  --color-brown-800: #81543F;
+  --color-brown-700: #8A5C46;
+  --color-brown-600: #9F6B53;
+  --color-brown-500: #B0816A;
+  --color-brown-400: #BB8F7A;
+  --color-brown-300: #CFB1A1;
+  --color-brown-200: #DFC9C0;
+  --color-brown-100: #EFE4DF;
+
+  /* Teal (Notion teal family #428694) */
+  --color-emerald-900: #264E55;
+  --color-emerald-800: #2F6068;
+  --color-emerald-700: #39747F;
+  --color-emerald-600: #428694;
+  --color-emerald-500: #4B9494;
+  --color-emerald-400: #589C9C;
+  --color-emerald-300: #7BAFAF;
+  --color-emerald-200: #A7CBCB;
+  --color-emerald-100: #D3E5E5;
+  --color-emerald-50: #EAF2F2;
 
   /* Semantic Aliases */
-  --color-primary: var(--color-blue-800);
-  --color-success: var(--color-green-800);
-  --color-warning: var(--color-amber-800);
-  --color-danger: var(--color-red-800);
+  --color-primary: var(--color-blue-600);
+  --color-success: var(--color-green-600);
+  --color-warning: var(--color-amber-600);
+  --color-danger: var(--color-red-600);
   --color-info: var(--color-blue-700);
-  
+
   /* Hierarchy Colors - Visual hierarchy through color */
-  --color-hierarchy-primary: var(--color-blue-800);      /* Primary actions, main headings */
+  --color-hierarchy-primary: var(--color-blue-600);      /* Primary actions, main headings */
   --color-hierarchy-secondary: var(--color-gray-700);     /* Secondary text, labels */
-  --color-hierarchy-tertiary: var(--color-gray-500);     /* Captions, hints */
+  --color-hierarchy-tertiary: var(--color-gray-500);      /* Captions, hints */
   --color-hierarchy-disabled: var(--color-gray-300);      /* Disabled states */
   --color-hierarchy-border: var(--color-gray-200);       /* Borders, dividers */
   --color-hierarchy-background: var(--color-gray-50);    /* Section backgrounds */
@@ -113,27 +182,29 @@
   --color-popover: #ffffff;
   --color-popover-foreground: var(--color-gray-900);
   --color-primary-hover: var(--color-blue-700);
-  --color-primary-active: var(--color-blue-900);
+  --color-primary-active: var(--color-blue-800);
   --color-primary-foreground: #ffffff;
-  --color-secondary: var(--color-gray-200);
-  --color-secondary-foreground: var(--color-gray-700);
+  --color-secondary: var(--color-gray-100);
+  --color-secondary-foreground: var(--color-gray-800);
   --color-muted: var(--color-gray-50);
-  --color-muted-foreground: var(--color-gray-600);
+  --color-muted-foreground: var(--color-gray-500);
   --color-accent: var(--color-gray-100);
-  --color-accent-foreground: var(--color-gray-700);
-  --color-destructive: var(--color-red-800);
-  --color-destructive-hover: var(--color-red-700);
-  --color-destructive-active: var(--color-red-900);
+  --color-accent-foreground: var(--color-gray-800);
+  --color-destructive: var(--color-red-600);
+  --color-destructive-hover: var(--color-red-500);
+  --color-destructive-active: var(--color-red-700);
   --color-destructive-foreground: #ffffff;
-  --color-border: var(--color-gray-100);
-  --color-border-strong: var(--color-gray-200);
-  --color-input: var(--color-gray-300);
+  /* Notion hairline border (rgba(55,53,47,0.09)) and strong border (rgba(55,53,47,0.16)) */
+  --color-border: #E6E5E1;
+  --color-border-strong: #D3D1CB;
+  /* Notion input border (rgba(15,15,15,0.15)) */
+  --color-input: #D9D9D7;
   --color-ring: var(--color-blue-600);
 
   /* Surface roles */
   --color-canvas: var(--color-gray-50);
   --color-surface: #ffffff;
-  --color-surface-subtle: var(--color-gray-50);
+  --color-surface-subtle: var(--color-gray-100);
 
   /* Student exam semantic states (identity: blue=current, green=answered,
      amber=flagged, red=critical, gray=inactive/structural). */
@@ -149,11 +220,16 @@
   --color-exam-control-border-focus: var(--color-blue-600);
   --color-exam-input-surface: #ffffff;
 
-  /* Atlassian Styling */
-  --radius-sm: 3px;
-  --radius-md: 3px;
-  --radius-lg: 3px;
-  --radius-xl: 3px;
+  /* Notion Styling — small radii, hairline borders, layered soft shadows */
+  --radius-sm: 3px;   /* Buttons, chips */
+  --radius-md: 4px;   /* Inputs, nav items */
+  --radius-lg: 6px;   /* Menus, popovers, cards */
+  --radius-xl: 10px;  /* Dialogs, sheets */
+
+  --shadow-sm: 0 1px 2px rgba(15, 15, 15, 0.06);
+  --shadow-md: 0 0 0 1px rgba(15, 15, 15, 0.05), 0 3px 6px rgba(15, 15, 15, 0.1);
+  --shadow-lg: 0 0 0 1px rgba(15, 15, 15, 0.05), 0 3px 6px rgba(15, 15, 15, 0.1), 0 9px 24px rgba(15, 15, 15, 0.2);
+  --shadow-xl: 0 0 0 1px rgba(15, 15, 15, 0.06), 0 6px 14px rgba(15, 15, 15, 0.12), 0 16px 48px rgba(15, 15, 15, 0.25);
 }
 
 :root {
@@ -174,6 +250,10 @@
   --student-safe-left: env(safe-area-inset-left, 0px);
   --student-header-height: var(--student-header-height-wide);
   --student-bottom-bar-height: var(--student-bottom-bar-height-wide);
+  /* Notion-style readability measures: content columns never exceed a
+     comfortable line length, even on wide panes or after resizing. */
+  --student-passage-measure: 68ch;
+  --student-question-measure: 74ch;
 }
 
 @layer base {
@@ -202,17 +282,17 @@
   .btn-primary {
     @apply bg-primary text-primary-foreground hover:bg-primary-hover transition-colors px-4 py-2 rounded-sm font-medium;
   }
-  
+
   .card-base {
-    @apply bg-surface border border-border rounded-sm shadow-sm overflow-hidden;
+    @apply bg-surface border border-border rounded-lg shadow-sm overflow-hidden;
   }
 
   @keyframes pulse-subtle {
     0%, 100% {
-      box-shadow: 0 0 0 0 rgba(0, 82, 204, 0);
+      box-shadow: 0 0 0 0 rgba(35, 131, 226, 0);
     }
     50% {
-      box-shadow: 0 0 0 4px rgba(0, 82, 204, 0.1);
+      box-shadow: 0 0 0 4px rgba(35, 131, 226, 0.1);
     }
   }
 
@@ -440,6 +520,50 @@
     display: flex;
   }
 
+  /* Question column follows the passage readability scale (size + leading),
+     so stems, options, and labels stay comfortable at every font setting. */
+  .student-exam-shell .student-question-scroll {
+    font-size: var(--student-question-font-size);
+    line-height: var(--student-question-line-height);
+  }
+
+  /* Reading measure: passage and question columns never exceed a comfortable
+     line length, even on wide panes or after resizing the split. */
+  .student-exam-shell .student-passage-measure {
+    max-width: var(--student-passage-measure);
+  }
+
+  .student-exam-shell .student-question-scroll > * {
+    max-width: var(--student-question-measure);
+  }
+
+  /* Quiet scrollbars inside exam scroll surfaces: thin, translucent, and
+     invisible until used so reading stays distraction-free. */
+  .student-exam-shell [data-student-zoom-scroll] {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(55, 53, 47, 0.25) transparent;
+  }
+
+  .student-exam-shell [data-student-zoom-scroll]::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .student-exam-shell [data-student-zoom-scroll]::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .student-exam-shell [data-student-zoom-scroll]::-webkit-scrollbar-thumb {
+    background-color: rgba(55, 53, 47, 0.18);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  .student-exam-shell [data-student-zoom-scroll]::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(55, 53, 47, 0.32);
+  }
+
   .student-reading-passage-pane,
   .student-reading-question-pane,
   .student-writing-prompt-pane,
@@ -457,12 +581,12 @@
 
   /* Keep native text selection readable on top of custom highlight marks. */
   [data-highlighted="true"]::selection {
-    background-color: rgba(59, 130, 246, 0.35);
+    background-color: rgba(35, 131, 226, 0.35);
     color: inherit;
   }
 
   [data-highlighted="true"]::-moz-selection {
-    background-color: rgba(59, 130, 246, 0.35);
+    background-color: rgba(35, 131, 226, 0.35);
     color: inherit;
   }
 
@@ -535,10 +659,10 @@
   /* One-shot urgency cue for the exam timer under five minutes. */
   @keyframes student-urgent-cue {
     0%, 100% {
-      box-shadow: 0 0 0 0 rgba(190, 18, 60, 0);
+      box-shadow: 0 0 0 0 rgba(212, 76, 71, 0);
     }
     50% {
-      box-shadow: 0 0 0 4px rgba(190, 18, 60, 0.12);
+      box-shadow: 0 0 0 4px rgba(212, 76, 71, 0.12);
     }
   }
 
