@@ -29,9 +29,9 @@ async function openActiveStudentExam(page: Page, projectName: string) {
   await completePreCheckIfPresent(page);
   await startLobbyIfPresent(page);
   await openStudentSessionWithRetry(page, manifest.student.scheduleId, wcode);
-  const showQuestions = page.getByRole('button', { name: 'Show questions' });
-  if (await showQuestions.isVisible().catch(() => false)) {
-    await showQuestions.click();
+  const questionsTab = page.getByRole('button', { name: 'Questions', exact: true });
+  if (await questionsTab.isVisible().catch(() => false)) {
+    await questionsTab.click();
   }
 }
 
@@ -345,10 +345,15 @@ test.describe('student viewport layout acceptance', () => {
       await openActiveStudentExam(page, `${testInfo.project.name}:dynamic-resize`);
       const answer = page.getByLabel('Answer for question 1');
       await answer.fill(manifest.student.expectedAnswer);
+      await answer.blur();
       const initial = await expectContainedExamLayout(page);
 
       await page.setViewportSize({ width: 390, height: 620 });
       await waitForStudentViewportHeight(page);
+      await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
+        'data-student-keyboard-open',
+        'false',
+      );
       await expect
         .poll(async () => (await measureVisualViewport(page)).height, {
           timeout: 10_000,
@@ -384,16 +389,32 @@ test.describe('student viewport layout acceptance', () => {
       await openActiveStudentExam(page, `${testInfo.project.name}:keyboard`);
       const answer = page.getByLabel('Answer for question 1');
       await answer.fill(manifest.student.expectedAnswer);
+      const shell = page.getByTestId('student-exam-shell');
+      const shellHeightBefore = await shell.evaluate((element) =>
+        Math.round(element.getBoundingClientRect().height),
+      );
 
+      // A meaningful shrink while the answer is focused is a software keyboard:
+      // the shell height must freeze so the footer never moves upward.
       await page.setViewportSize({ width: 390, height: 360 });
-      await waitForStudentViewportHeight(page);
-      await answer.focus();
+      await expect(shell).toHaveAttribute('data-student-keyboard-open', 'true');
+      await expect
+        .poll(async () =>
+          shell.evaluate((element) => Math.round(element.getBoundingClientRect().height)),
+        )
+        .toBe(shellHeightBefore);
+      await expect(page.locator('.student-exam-footer')).toBeHidden();
       await expect(answer).toBeFocused();
-      const shortViewport = await expectContainedExamLayout(page);
-      expect(shortViewport.main.height).toBeGreaterThan(0);
+      await expect(answer).toHaveValue(manifest.student.expectedAnswer);
       await expect(page.getByRole('timer', { name: 'Time remaining' })).toBeVisible();
+
+      // Closing the keyboard restores the identical layout.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(shell).toHaveAttribute('data-student-keyboard-open', 'false');
+      await waitForStudentViewportHeight(page);
       await expect(page.locator('.student-exam-footer')).toBeVisible();
       await expect(answer).toHaveValue(manifest.student.expectedAnswer);
+      await expectContainedExamLayout(page);
     } finally {
       await context.close();
     }
@@ -554,7 +575,7 @@ test.describe('student viewport layout acceptance', () => {
       });
       expect(questionScrollState.maxScrollTop).toBeGreaterThan(0);
 
-      await page.getByRole('button', { name: 'Show passage' }).click();
+      await page.getByRole('button', { name: 'Passage', exact: true }).click();
       const materialScroll = page.locator('[data-student-zoom-scroll]').first();
       const materialScrollState = await materialScroll.evaluate((element) => {
         const scrollOwner = element as HTMLElement;
@@ -564,13 +585,13 @@ test.describe('student viewport layout acceptance', () => {
       });
       expect(materialScrollState.maxScrollTop).toBeGreaterThan(0);
 
-      await page.getByRole('button', { name: 'Show questions' }).click();
+      await page.getByRole('button', { name: 'Questions', exact: true }).click();
       await expect(answer).toHaveValue(manifest.student.expectedAnswer);
       await expect
         .poll(async () => questionScroll.evaluate((element) => (element as HTMLElement).scrollTop))
         .toBe(questionScrollState.scrollTop);
 
-      await page.getByRole('button', { name: 'Show passage' }).click();
+      await page.getByRole('button', { name: 'Passage', exact: true }).click();
       await expect
         .poll(async () => materialScroll.evaluate((element) => (element as HTMLElement).scrollTop))
         .toBe(materialScrollState.scrollTop);

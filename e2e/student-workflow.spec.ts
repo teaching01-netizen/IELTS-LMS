@@ -51,10 +51,10 @@ test.describe('Student LRW workflow', () => {
     await completePreCheckIfPresent(page);
     await startLobbyIfPresent(page);
     await openStudentSessionWithRetry(page, manifest.student.scheduleId, wcode);
-    const showQuestions = page.getByRole('button', { name: 'Show questions' });
-    if (await showQuestions.isVisible().catch(() => false)) {
-      await showQuestions.click();
-      await expect(showQuestions).toHaveAttribute('aria-pressed', 'true');
+    const questionsTab = page.getByRole('button', { name: 'Questions', exact: true });
+    if (await questionsTab.isVisible().catch(() => false)) {
+      await questionsTab.click();
+      await expect(questionsTab).toHaveAttribute('aria-pressed', 'true');
     }
     await expect(page.getByLabel('Answer for question 1')).toBeVisible({ timeout: 30_000 });
 
@@ -124,7 +124,7 @@ test.describe('Student LRW workflow', () => {
     expect(geometry.targetRects.length).toBeGreaterThan(0);
     expect(geometry.targetRects.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
 
-    await page.getByRole('button', { name: 'Show questions' }).click();
+    await page.getByRole('button', { name: 'Questions', exact: true }).click();
     await expectCompactTouchTargets(page);
     const answerField = page.getByLabel('Answer for question 1');
     await answerField.fill('');
@@ -141,15 +141,15 @@ test.describe('Student LRW workflow', () => {
       .toBe('saved');
 
     await expect(page.getByLabel('Answer for question 1')).toHaveValue(manifest.student.expectedAnswer);
-    await page.getByRole('button', { name: 'Show passage' }).click();
+    await page.getByRole('button', { name: 'Passage', exact: true }).click();
     await expect(page.getByTestId('listening-split-workspace')).toBeVisible();
     await expect(page.getByLabel('Answer for question 1')).toHaveCount(0);
     await expectCompactTouchTargets(page);
-    await page.getByRole('button', { name: 'Show questions' }).click();
+    await page.getByRole('button', { name: 'Questions', exact: true }).click();
     await expect(page.getByLabel('Answer for question 1')).toHaveValue(manifest.student.expectedAnswer);
     await expectCompactTouchTargets(page);
 
-    await page.getByRole('button', { name: 'Show passage' }).click();
+    await page.getByRole('button', { name: 'Passage', exact: true }).click();
     await page.setViewportSize({ width: 800, height: 360 });
     await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
       'data-student-layout-mode',
@@ -161,7 +161,7 @@ test.describe('Student LRW workflow', () => {
       'data-student-layout-mode',
       'compact',
     );
-    await page.getByRole('button', { name: 'Show questions' }).click();
+    await page.getByRole('button', { name: 'Questions', exact: true }).click();
     await expect(page.getByLabel('Answer for question 1')).toHaveValue(manifest.student.expectedAnswer);
 
     await page.getByRole('button', { name: 'Open exam tools' }).click();
@@ -213,7 +213,7 @@ test.describe('Student LRW workflow', () => {
       'medium',
     );
     await expect(page.getByTestId('student-compact-header')).not.toBeVisible();
-    await expect(page.getByRole('button', { name: 'Show questions' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Questions', exact: true })).toHaveCount(0);
     await expectCompactTouchTargets(page);
 
     const geometry = await page.evaluate(() => ({

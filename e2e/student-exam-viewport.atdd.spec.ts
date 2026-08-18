@@ -102,9 +102,9 @@ async function openActiveStudentExam(page: Page, projectName: string) {
   await completePreCheckIfPresent(page);
   await startLobbyIfPresent(page);
   await openStudentSessionWithRetry(page, manifest.student.scheduleId, wcode);
-  const showQuestions = page.getByRole('button', { name: 'Show questions' });
-  if (await showQuestions.isVisible().catch(() => false)) {
-    await showQuestions.click();
+  const questionsTab = page.getByRole('button', { name: 'Questions', exact: true });
+  if (await questionsTab.isVisible().catch(() => false)) {
+    await questionsTab.click();
   }
 }
 
