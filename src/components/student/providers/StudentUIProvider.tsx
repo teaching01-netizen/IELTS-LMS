@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, ReactNode } from 'react';
 import { defaultStudentHighlightColor, type StudentHighlightColor } from '../highlightPalette';
 import {
   DEFAULT_STUDENT_PASSAGE_READABILITY_LEVEL,
@@ -6,6 +6,14 @@ import {
   type StudentFontSize,
   type StudentPassageReadabilityLevel,
 } from '../accessibilityScale';
+import {
+  DEFAULT_STUDENT_PLAYBACK_RATE,
+  STUDENT_PLAYBACK_RATES,
+  loadStudentAccessibilityPreferences,
+  saveStudentAccessibilityPreferences,
+  clearStudentAccessibilityPreferences,
+  type StudentPlaybackRate,
+} from '../accessibilityPreferences';
 
 export type StudentHighlightToolMode = 'off' | 'highlight' | 'erase';
 
@@ -22,6 +30,7 @@ interface UIState {
     highContrast: boolean;
     zoom: number;
     passageReadabilityLevel: StudentPassageReadabilityLevel;
+    playbackRate: StudentPlaybackRate;
     highlightToolMode: StudentHighlightToolMode;
     highlightColor: StudentHighlightColor;
   };
@@ -43,6 +52,9 @@ interface UIActions {
   increasePassageReadability: () => void;
   decreasePassageReadability: () => void;
   resetPassageReadability: () => void;
+  setPassageReadabilityLevel: (level: StudentPassageReadabilityLevel) => void;
+  setPlaybackRate: (rate: StudentPlaybackRate) => void;
+  resetAccessibilitySettings: () => void;
   toggleHighlightMode: () => void;
   toggleEraseMode: () => void;
   setHighlightToolMode: (mode: StudentHighlightToolMode) => void;
@@ -59,9 +71,11 @@ const UIContext = createContext<UIContextValue | null>(null);
 
 interface UIProviderProps {
   children: ReactNode;
+  /** Storage key for persisted accessibility preferences; omitted = session-only. */
+  storageKey?: string | undefined;
 }
 
-export function StudentUIProvider({ children }: UIProviderProps) {
+export function StudentUIProvider({ children, storageKey }: UIProviderProps) {
   const [showNavigator, setShowNavigator] = useState(false);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showAccessibility, setShowAccessibility] = useState(false);
@@ -69,14 +83,41 @@ export function StudentUIProvider({ children }: UIProviderProps) {
   const [timeExtensionReason, setTimeExtensionReasonState] = useState('');
   const [timeExtensionGranted, setTimeExtensionGranted] = useState(false);
   const [timeExtensionMinutes, setTimeExtensionMinutes] = useState(0);
-  const [accessibilitySettings, setAccessibilitySettings] = useState({
-    fontSize: 'normal' as StudentFontSize,
-    highContrast: false,
-    zoom: 1,
-    passageReadabilityLevel: DEFAULT_STUDENT_PASSAGE_READABILITY_LEVEL,
-    highlightToolMode: 'off' as StudentHighlightToolMode,
-    highlightColor: defaultStudentHighlightColor,
+  const [accessibilitySettings, setAccessibilitySettings] = useState(() => {
+    const stored = storageKey
+      ? loadStudentAccessibilityPreferences(storageKey)
+      : undefined;
+    return {
+      fontSize: stored?.fontSize ?? ('normal' as StudentFontSize),
+      highContrast: stored?.highContrast ?? false,
+      zoom: stored?.zoom ?? 1,
+      passageReadabilityLevel:
+        stored?.passageReadabilityLevel ?? DEFAULT_STUDENT_PASSAGE_READABILITY_LEVEL,
+      playbackRate: stored?.playbackRate ?? DEFAULT_STUDENT_PLAYBACK_RATE,
+      highlightToolMode: 'off' as StudentHighlightToolMode,
+      highlightColor: defaultStudentHighlightColor,
+    };
   });
+
+  useEffect(() => {
+    if (!storageKey) {
+      return;
+    }
+    saveStudentAccessibilityPreferences(storageKey, {
+      fontSize: accessibilitySettings.fontSize,
+      highContrast: accessibilitySettings.highContrast,
+      zoom: accessibilitySettings.zoom,
+      passageReadabilityLevel: accessibilitySettings.passageReadabilityLevel,
+      playbackRate: accessibilitySettings.playbackRate,
+    });
+  }, [
+    accessibilitySettings.fontSize,
+    accessibilitySettings.highContrast,
+    accessibilitySettings.passageReadabilityLevel,
+    accessibilitySettings.playbackRate,
+    accessibilitySettings.zoom,
+    storageKey,
+  ]);
 
   const grantTimeExtension = useCallback((minutes: number) => {
     setTimeExtensionGranted(true);
@@ -99,20 +140,21 @@ export function StudentUIProvider({ children }: UIProviderProps) {
 
   const setZoom = useCallback((zoom: number) => {
     const clamped = Math.min(1.5, Math.max(0.85, zoom));
-    setAccessibilitySettings(prev => ({ ...prev, zoom: clamped }));
+    const rounded = Math.round(clamped * 100) / 100;
+    setAccessibilitySettings(prev => ({ ...prev, zoom: rounded }));
   }, []);
 
   const zoomIn = useCallback(() => {
     setAccessibilitySettings((prev) => ({
       ...prev,
-      zoom: Math.min(1.5, Math.max(0.85, prev.zoom + 0.1)),
+      zoom: Math.min(1.5, Math.max(0.85, Math.round((prev.zoom + 0.1) * 100) / 100)),
     }));
   }, []);
 
   const zoomOut = useCallback(() => {
     setAccessibilitySettings((prev) => ({
       ...prev,
-      zoom: Math.min(1.5, Math.max(0.85, prev.zoom - 0.1)),
+      zoom: Math.min(1.5, Math.max(0.85, Math.round((prev.zoom - 0.1) * 100) / 100)),
     }));
   }, []);
 
@@ -140,6 +182,36 @@ export function StudentUIProvider({ children }: UIProviderProps) {
       passageReadabilityLevel: DEFAULT_STUDENT_PASSAGE_READABILITY_LEVEL,
     }));
   }, []);
+
+  const setPassageReadabilityLevel = useCallback((level: StudentPassageReadabilityLevel) => {
+    setAccessibilitySettings((prev) => ({
+      ...prev,
+      passageReadabilityLevel: clampStudentPassageReadabilityLevel(level),
+    }));
+  }, []);
+
+  const setPlaybackRate = useCallback((rate: StudentPlaybackRate) => {
+    setAccessibilitySettings((prev) => ({
+      ...prev,
+      playbackRate: STUDENT_PLAYBACK_RATES.includes(rate)
+        ? rate
+        : DEFAULT_STUDENT_PLAYBACK_RATE,
+    }));
+  }, []);
+
+  const resetAccessibilitySettings = useCallback(() => {
+    setAccessibilitySettings((prev) => ({
+      ...prev,
+      fontSize: 'normal' as StudentFontSize,
+      highContrast: false,
+      zoom: 1,
+      passageReadabilityLevel: DEFAULT_STUDENT_PASSAGE_READABILITY_LEVEL,
+      playbackRate: DEFAULT_STUDENT_PLAYBACK_RATE,
+    }));
+    if (storageKey) {
+      clearStudentAccessibilityPreferences(storageKey);
+    }
+  }, [storageKey]);
 
   const toggleHighlightMode = useCallback(() => {
     setAccessibilitySettings((prev) => ({
@@ -207,6 +279,9 @@ export function StudentUIProvider({ children }: UIProviderProps) {
     increasePassageReadability,
     decreasePassageReadability,
     resetPassageReadability,
+    setPassageReadabilityLevel,
+    setPlaybackRate,
+    resetAccessibilitySettings,
     toggleHighlightMode,
     toggleEraseMode,
     setHighlightToolMode,
@@ -216,12 +291,15 @@ export function StudentUIProvider({ children }: UIProviderProps) {
     decreasePassageReadability,
     grantTimeExtension,
     increasePassageReadability,
+    resetAccessibilitySettings,
     resetHighlightTool,
     resetPassageReadability,
     resetZoom,
     setFontSize,
     setHighlightColor,
     setHighlightToolMode,
+    setPassageReadabilityLevel,
+    setPlaybackRate,
     setShowAccessibility,
     setShowNavigator,
     setShowSubmitConfirm,

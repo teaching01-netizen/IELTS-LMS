@@ -14,6 +14,7 @@ import { StudentNetworkProvider } from './providers/StudentNetworkProvider';
 import { ProctoringProvider } from './providers/StudentProctoringProvider';
 import { StudentRuntimeProvider } from './providers/StudentRuntimeProvider';
 import { StudentUIProvider } from './providers/StudentUIProvider';
+import { getStudentAccessibilityStorageKey } from './accessibilityPreferences';
 import { StudentHighlightPersistenceProvider } from './highlightV2Persistence';
 
 interface StudentAppWrapperProps {
@@ -96,7 +97,9 @@ export function StudentAppWrapper({
       key={highlightPersistenceNamespace}
       namespace={highlightPersistenceNamespace}
     >
-      <StudentUIProvider>
+      <StudentUIProvider
+        storageKey={getStudentAccessibilityStorageKey(scheduleId, sessionCandidateId)}
+      >
         <KeyboardProvider>
           <StudentApp
             showSubmitControls={showSubmitControls}

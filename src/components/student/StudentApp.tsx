@@ -20,9 +20,7 @@ import './SubmitConfirmation';
 import { WarningOverlay } from './WarningOverlay';
 import './useStudentAutoSubmitBoundary';
 import {
-  canDecreaseStudentPassageReadability,
-  canIncreaseStudentPassageReadability,
-  getStudentPassageReadabilityLabel,
+  getStudentPassageReadabilityGeometry,
   getStudentTypographyScale,
 } from './accessibilityScale';
 import { StudentHighlightSelectionManagerProvider } from './highlightSelectionManager';
@@ -169,15 +167,16 @@ export function StudentApp({
       : runtimeState.attemptSyncState === 'idle'
         ? null
         : runtimeState.attemptSyncState;
-  const canIncreasePassageReadability = canIncreaseStudentPassageReadability(
-    uiState.accessibilitySettings.passageReadabilityLevel
-  );
-  const canDecreasePassageReadability = canDecreaseStudentPassageReadability(
-    uiState.accessibilitySettings.passageReadabilityLevel
-  );
   const studentTypography = useMemo(
     () => getStudentTypographyScale(uiState.accessibilitySettings.fontSize),
     [uiState.accessibilitySettings.fontSize]
+  );
+  const passageReadabilityGeometry = useMemo(
+    () =>
+      getStudentPassageReadabilityGeometry(
+        uiState.accessibilitySettings.passageReadabilityLevel
+      ),
+    [uiState.accessibilitySettings.passageReadabilityLevel]
   );
   useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
@@ -214,11 +213,15 @@ export function StudentApp({
         ['--student-passage-h1-font-size' as string]: studentTypography.passageH1FontSize,
         ['--student-passage-h2-font-size' as string]: studentTypography.passageH2FontSize,
         ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
-        ['--student-passage-line-height' as string]: studentTypography.passageLineHeight,
+        ['--student-passage-line-height' as string]: (
+          Number.parseFloat(studentTypography.passageLineHeight) *
+          passageReadabilityGeometry.lineHeightFactor
+        ).toFixed(2),
+        ['--student-passage-measure' as string]: passageReadabilityGeometry.measure,
         ['--student-question-font-size' as string]: studentTypography.questionFontSize,
         ['--student-question-line-height' as string]: studentTypography.questionLineHeight,
       }) as React.CSSProperties,
-    [studentTypography, tabletMode, uiState.accessibilitySettings.zoom]
+    [passageReadabilityGeometry, studentTypography, tabletMode, uiState.accessibilitySettings.zoom]
   );
   const runtimeStateRef = useRef(runtimeState);
   const runtimeActionsRef = useRef(runtimeActions);
@@ -799,11 +802,7 @@ export function StudentApp({
             contentZoom={uiState.accessibilitySettings.zoom}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
-            passageReadabilityLabel={getStudentPassageReadabilityLabel(
-              uiState.accessibilitySettings.passageReadabilityLevel
-            )}
-            canIncreasePassageReadability={canIncreasePassageReadability}
-            canDecreasePassageReadability={canDecreasePassageReadability}
+            playbackRate={uiState.accessibilitySettings.playbackRate}
             showNavigator={uiState.showNavigator}
             security={examState.config.security}
             onNavigate={handleNavigate}
@@ -814,9 +813,7 @@ export function StudentApp({
             onRegisterWritingDraftCommit={registerWritingDraftCommit}
             onRegisterLiveObjectiveAnswer={registerLiveObjectiveAnswer}
             onRegisterLiveWritingAnswer={registerLiveWritingAnswer}
-            onIncreasePassageReadability={uiActions.increasePassageReadability}
-            onDecreasePassageReadability={uiActions.decreasePassageReadability}
-            onResetPassageReadability={uiActions.resetPassageReadability}
+            onPlaybackRateChange={uiActions.setPlaybackRate}
             onOpenNavigator={openNavigator}
             onCloseNavigator={closeNavigator}
           />
@@ -954,8 +951,15 @@ export function StudentApp({
         onClose={() => uiActions.setShowAccessibility(false)}
         fontSize={uiState.accessibilitySettings.fontSize}
         highContrast={uiState.accessibilitySettings.highContrast}
+        zoom={uiState.accessibilitySettings.zoom}
+        passageReadabilityLevel={uiState.accessibilitySettings.passageReadabilityLevel}
+        playbackRate={uiState.accessibilitySettings.playbackRate}
         onFontSizeChange={uiActions.setFontSize}
         onHighContrastToggle={uiActions.toggleHighContrast}
+        onZoomChange={uiActions.setZoom}
+        onPassageReadabilityChange={uiActions.setPassageReadabilityLevel}
+        onPlaybackRateChange={uiActions.setPlaybackRate}
+        onResetDefaults={uiActions.resetAccessibilitySettings}
       />
     </StudentExamShell>
   );

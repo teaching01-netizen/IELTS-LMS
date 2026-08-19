@@ -128,9 +128,7 @@ function renderWorkspace(module: 'reading' | 'listening' | 'writing' | 'speaking
       highlightEnabled={false}
       highlightColor="yellow"
       highlightClassName=""
-      passageReadabilityLabel="Comfort"
-      canIncreasePassageReadability
-      canDecreasePassageReadability
+      playbackRate={1}
       showNavigator
       onNavigate={onNavigate}
       onObjectiveAnswerChange={vi.fn()}
@@ -140,9 +138,7 @@ function renderWorkspace(module: 'reading' | 'listening' | 'writing' | 'speaking
       onRegisterWritingDraftCommit={vi.fn()}
       onRegisterLiveObjectiveAnswer={vi.fn()}
       onRegisterLiveWritingAnswer={vi.fn()}
-      onIncreasePassageReadability={vi.fn()}
-      onDecreasePassageReadability={vi.fn()}
-      onResetPassageReadability={vi.fn()}
+      onPlaybackRateChange={vi.fn()}
       onCloseNavigator={onCloseNavigator}
       security={createExamState().config.security ?? {
         tabSwitchRule: 'warn',

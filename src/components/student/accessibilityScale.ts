@@ -11,6 +11,35 @@ const STUDENT_PASSAGE_READABILITY_LABELS: Record<StudentPassageReadabilityLevel,
   2: 'Extra Large',
 };
 
+export interface StudentPassageReadabilityGeometry {
+  /** Multiplier applied to the base passage line height. */
+  lineHeightFactor: number;
+  /** Maximum line measure (column width) for long-form reading surfaces. */
+  measure: string;
+}
+
+/**
+ * Reading-comfort geometry is orthogonal to text size: text size controls
+ * font scale, comfort controls line height and column width. Long-form
+ * surfaces (reading passages, listening transcripts, writing stimuli)
+ * consume these through --student-passage-line-height and
+ * --student-passage-measure.
+ */
+const STUDENT_PASSAGE_READABILITY_GEOMETRY: Record<
+  StudentPassageReadabilityLevel,
+  StudentPassageReadabilityGeometry
+> = {
+  0: { lineHeightFactor: 0.95, measure: '74ch' },
+  1: { lineHeightFactor: 1, measure: '68ch' },
+  2: { lineHeightFactor: 1.08, measure: '60ch' },
+};
+
+export function getStudentPassageReadabilityGeometry(
+  level: StudentPassageReadabilityLevel,
+): StudentPassageReadabilityGeometry {
+  return STUDENT_PASSAGE_READABILITY_GEOMETRY[clampStudentPassageReadabilityLevel(level)];
+}
+
 export interface StudentTypographyScale {
   rootFontSize: string;
   lineHeight: number;

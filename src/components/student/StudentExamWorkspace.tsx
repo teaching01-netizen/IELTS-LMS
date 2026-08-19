@@ -11,6 +11,7 @@ import { StudentWriting } from "./StudentWriting";
 import type { StudentHighlightColor } from "./highlightPalette";
 import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
 import type { StudentLayoutMode } from "./layout/studentLayoutMode";
+import type { StudentPlaybackRate } from "./accessibilityPreferences";
 
 export interface StudentExamWorkspaceProps {
   currentModule: ModuleType;
@@ -28,9 +29,7 @@ export interface StudentExamWorkspaceProps {
   highlightEnabled: boolean;
   highlightColor: StudentHighlightColor;
   highlightClassName?: string;
-  passageReadabilityLabel: string;
-  canIncreasePassageReadability: boolean;
-  canDecreasePassageReadability: boolean;
+  playbackRate: StudentPlaybackRate;
   showNavigator: boolean;
   security: {
     preventAutofill: boolean;
@@ -48,9 +47,7 @@ export interface StudentExamWorkspaceProps {
   onRegisterWritingDraftCommit: (commitDraft: (() => void) | null) => void;
   onRegisterLiveObjectiveAnswer: (questionId: string, value: QuestionAnswer) => void;
   onRegisterLiveWritingAnswer: (taskId: string, text: string) => void;
-  onIncreasePassageReadability: () => void;
-  onDecreasePassageReadability: () => void;
-  onResetPassageReadability: () => void;
+  onPlaybackRateChange: (rate: StudentPlaybackRate) => void;
   onCloseNavigator: () => void;
   onOpenNavigator?: (() => void) | undefined;
 }
@@ -71,9 +68,7 @@ export function StudentExamWorkspace({
   highlightEnabled,
   highlightColor,
   highlightClassName,
-  passageReadabilityLabel,
-  canIncreasePassageReadability,
-  canDecreasePassageReadability,
+  playbackRate,
   showNavigator,
   security,
   onNavigate,
@@ -84,9 +79,7 @@ export function StudentExamWorkspace({
   onRegisterWritingDraftCommit,
   onRegisterLiveObjectiveAnswer,
   onRegisterLiveWritingAnswer,
-  onIncreasePassageReadability,
-  onDecreasePassageReadability,
-  onResetPassageReadability,
+  onPlaybackRateChange,
   onCloseNavigator,
   onOpenNavigator,
 }: StudentExamWorkspaceProps) {
@@ -112,12 +105,6 @@ export function StudentExamWorkspace({
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
-            onIncreasePassageReadability={onIncreasePassageReadability}
-            onDecreasePassageReadability={onDecreasePassageReadability}
-            onResetPassageReadability={onResetPassageReadability}
-            passageReadabilityLabel={passageReadabilityLabel}
-            canIncreasePassageReadability={canIncreasePassageReadability}
-            canDecreasePassageReadability={canDecreasePassageReadability}
             registerLiveAnswer={onRegisterLiveObjectiveAnswer}
           />
         ) : null}
@@ -137,12 +124,8 @@ export function StudentExamWorkspace({
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
-            onIncreasePassageReadability={onIncreasePassageReadability}
-            onDecreasePassageReadability={onDecreasePassageReadability}
-            onResetPassageReadability={onResetPassageReadability}
-            passageReadabilityLabel={passageReadabilityLabel}
-            canIncreasePassageReadability={canIncreasePassageReadability}
-            canDecreasePassageReadability={canDecreasePassageReadability}
+            playbackRate={playbackRate}
+            onPlaybackRateChange={onPlaybackRateChange}
             registerLiveAnswer={onRegisterLiveObjectiveAnswer}
           />
         ) : null}

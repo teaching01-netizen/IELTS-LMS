@@ -157,12 +157,6 @@ describe('Listening/Writing stimulus readability controls', () => {
         onAnswerChange={() => {}}
         currentQuestionId="lq1"
         onNavigate={() => {}}
-        onIncreasePassageReadability={onIncrease}
-        onDecreasePassageReadability={onDecrease}
-        onResetPassageReadability={onReset}
-        passageReadabilityLabel="Comfort"
-        canIncreasePassageReadability
-        canDecreasePassageReadability
       />,
     );
 
@@ -188,12 +182,6 @@ describe('Listening/Writing stimulus readability controls', () => {
         onSubmit={() => {}}
         currentQuestionId="task1"
         onNavigate={() => {}}
-        onIncreasePassageReadability={vi.fn()}
-        onDecreasePassageReadability={vi.fn()}
-        onResetPassageReadability={vi.fn()}
-        passageReadabilityLabel="Extra Large"
-        canIncreasePassageReadability={false}
-        canDecreasePassageReadability={false}
       />,
     );
 

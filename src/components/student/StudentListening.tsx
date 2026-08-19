@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import { DiagramLabelingBlock, ExamState, QuestionAnswer } from "../../types";
 import { Play, Pause, SkipBack, SkipForward, Volume2 } from "lucide-react";
 import { getBlockQuestionCount } from "../../utils/examUtils";
+import { STUDENT_PLAYBACK_RATES, type StudentPlaybackRate } from "./accessibilityPreferences";
 import { getStudentQuestionsForModule } from "@student/application/studentExamContentFacade";
 import { RichTextHighlighter } from "./RichTextHighlighter";
 import { StudentQuestionText } from "./StudentQuestionText";
@@ -36,12 +37,8 @@ interface StudentListeningProps {
   tabletMode?: boolean | undefined;
   layoutMode?: StudentLayoutMode | undefined;
   contentZoom?: number | undefined;
-  onIncreasePassageReadability?: (() => void) | undefined;
-  onDecreasePassageReadability?: (() => void) | undefined;
-  onResetPassageReadability?: (() => void) | undefined;
-  passageReadabilityLabel?: string | undefined;
-  canIncreasePassageReadability?: boolean | undefined;
-  canDecreasePassageReadability?: boolean | undefined;
+  playbackRate?: StudentPlaybackRate | undefined;
+  onPlaybackRateChange?: ((rate: StudentPlaybackRate) => void) | undefined;
   registerLiveAnswer?: ((answerKey: string, value: QuestionAnswer) => void) | undefined;
 }
 
@@ -74,20 +71,10 @@ export function StudentListening({
   tabletMode = false,
   layoutMode = "wide",
   contentZoom = 1,
-  onIncreasePassageReadability,
-  onDecreasePassageReadability,
-  onResetPassageReadability,
-  passageReadabilityLabel,
-  canIncreasePassageReadability,
-  canDecreasePassageReadability,
+  playbackRate = 1,
+  onPlaybackRateChange,
   registerLiveAnswer,
 }: StudentListeningProps) {
-  void onIncreasePassageReadability;
-  void onDecreasePassageReadability;
-  void onResetPassageReadability;
-  void passageReadabilityLabel;
-  void canIncreasePassageReadability;
-  void canDecreasePassageReadability;
   const isTabletMode = Boolean(tabletMode);
   const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
   const supportsCssZoom =
@@ -221,6 +208,22 @@ export function StudentListening({
 
     audio.volume = volume / 100;
   }, [volume]);
+
+  const applyPlaybackRate = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || !canPlayAudio) {
+      return;
+    }
+
+    const safeRate = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
+    if (audio.playbackRate !== safeRate) {
+      audio.playbackRate = safeRate;
+    }
+  }, [canPlayAudio, playbackRate]);
+
+  useEffect(() => {
+    applyPlaybackRate();
+  }, [activePart?.audioUrl, applyPlaybackRate]);
 
   useEffect(() => {
     setIsPlaying(false);
@@ -358,7 +361,10 @@ export function StudentListening({
               onPause={() => setIsPlaying(false)}
               onEnded={() => setIsPlaying(false)}
               onTimeUpdate={syncProgressFromAudio}
-              onLoadedMetadata={syncProgressFromAudio}
+              onLoadedMetadata={() => {
+                syncProgressFromAudio();
+                applyPlaybackRate();
+              }}
             >
               <track
                 kind="captions"
@@ -449,6 +455,28 @@ export function StudentListening({
                     aria-label="Audio volume"
                     disabled={!canPlayAudio}
                   />
+                </div>
+                <div className="h-3 md:h-4 w-px bg-gray-300 hidden sm:block"></div>
+                <div className="flex items-center gap-1" role="group" aria-label="Playback speed">
+                  {STUDENT_PLAYBACK_RATES.map((rate) => {
+                    const isActive = Math.abs(playbackRate - rate) < 0.001;
+                    return (
+                      <button
+                        key={rate}
+                        type="button"
+                        onClick={() => onPlaybackRateChange?.(rate)}
+                        aria-pressed={isActive}
+                        disabled={!canPlayAudio}
+                        className={`px-2 py-1 rounded-md text-[length:var(--student-meta-font-size)] font-semibold border transition-[scale,background-color,border-color,opacity] duration-150 ease-out active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 ${
+                          isActive
+                            ? "bg-blue-50 text-blue-900 border-blue-600"
+                            : "border-transparent text-gray-600 hover:bg-gray-200"
+                        }`}
+                      >
+                        {rate}×
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>

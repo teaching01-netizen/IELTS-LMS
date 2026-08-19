@@ -115,12 +115,6 @@ describe('StudentReading passage readability controls', () => {
         onAnswerChange={() => {}}
         currentQuestionId="q1"
         onNavigate={() => {}}
-        onIncreasePassageReadability={onIncrease}
-        onDecreasePassageReadability={onDecrease}
-        onResetPassageReadability={onReset}
-        passageReadabilityLabel="Comfort"
-        canIncreasePassageReadability
-        canDecreasePassageReadability
       />,
     );
 
@@ -142,12 +136,6 @@ describe('StudentReading passage readability controls', () => {
         onAnswerChange={() => {}}
         currentQuestionId="q1"
         onNavigate={() => {}}
-        onIncreasePassageReadability={vi.fn()}
-        onDecreasePassageReadability={vi.fn()}
-        onResetPassageReadability={vi.fn()}
-        passageReadabilityLabel="Extra Large"
-        canIncreasePassageReadability={false}
-        canDecreasePassageReadability={false}
       />,
     );
 

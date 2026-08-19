@@ -349,14 +349,37 @@
     }
   }
 
-  /* Accessibility: High contrast mode support */
-  @media (prefers-contrast: more) {
-    .high-contrast {
-      --color-gray-900: #000000;
-      --color-gray-50: #FFFFFF;
-      --color-blue-800: #0000FF;
-      --color-blue-700: #0000FF;
-    }
+  /* Accessibility: High contrast mode support. The .high-contrast class is
+     applied to the exam shell when the student toggles it on. Tailwind v4
+     utilities resolve through these variables, so remapping them re-themes
+     the whole exam subtree without touching utility classes. */
+  .high-contrast {
+    --color-gray-950: #000000;
+    --color-gray-900: #000000;
+    --color-gray-800: #101010;
+    --color-gray-700: #1f1f1f;
+    --color-gray-600: #2e2e2e;
+    --color-gray-500: #3d3d3d;
+    --color-gray-400: #525252;
+    --color-gray-300: #737373;
+    --color-gray-200: #a3a3a3;
+    --color-gray-100: #e5e5e5;
+    --color-gray-50: #ffffff;
+    --color-blue-800: #0000cc;
+    --color-blue-700: #0000dd;
+    --color-blue-600: #0000ee;
+    --color-green-800: #005a00;
+    --color-amber-800: #8a5a00;
+    --color-exam-canvas: #ffffff;
+    --color-exam-surface: #ffffff;
+    --color-exam-surface-subtle: #ffffff;
+    --color-exam-divider: #a3a3a3;
+    --color-exam-divider-strong: #3d3d3d;
+    --color-exam-control-border: #3d3d3d;
+    --color-exam-control-border-focus: #0000ee;
+    --color-exam-input-surface: #ffffff;
+    --color-input: #3d3d3d;
+    --color-ring: #0000ee;
   }
 
   /* Accessibility: no-scrollbar with justification */
@@ -396,6 +419,22 @@
     touch-action: manipulation;
     padding-left: var(--student-safe-left);
     padding-right: var(--student-safe-right);
+  }
+
+  /* Windows / forced-colors: map structural exam colors to system pairs so
+     the exam stays legible under OS-level high contrast. Sits after the shell
+     layout rule so the first .student-exam-shell block remains the layout
+     definition. */
+  @media (forced-colors: active) {
+    .student-exam-shell {
+      --color-exam-divider: CanvasText;
+      --color-exam-divider-strong: CanvasText;
+      --color-exam-control-border: CanvasText;
+      --color-exam-control-border-focus: Highlight;
+      --color-exam-question-current: Highlight;
+      --color-exam-question-answered: Highlight;
+      --color-exam-question-flagged: Highlight;
+    }
   }
 
   .student-exam-shell[data-student-layout-mode='compact'] {

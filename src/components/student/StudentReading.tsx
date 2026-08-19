@@ -39,12 +39,6 @@ interface StudentReadingProps {
   tabletMode?: boolean | undefined;
   layoutMode?: StudentLayoutMode | undefined;
   contentZoom?: number | undefined;
-  onIncreasePassageReadability?: (() => void) | undefined;
-  onDecreasePassageReadability?: (() => void) | undefined;
-  onResetPassageReadability?: (() => void) | undefined;
-  passageReadabilityLabel?: string | undefined;
-  canIncreasePassageReadability?: boolean | undefined;
-  canDecreasePassageReadability?: boolean | undefined;
   registerLiveAnswer?: ((answerKey: string, value: QuestionAnswer) => void) | undefined;
 }
 
@@ -158,20 +152,8 @@ export function StudentReading({
   tabletMode = false,
   layoutMode = "wide",
   contentZoom = 1,
-  onIncreasePassageReadability,
-  onDecreasePassageReadability,
-  onResetPassageReadability,
-  passageReadabilityLabel,
-  canIncreasePassageReadability,
-  canDecreasePassageReadability,
   registerLiveAnswer,
 }: StudentReadingProps) {
-  void onIncreasePassageReadability;
-  void onDecreasePassageReadability;
-  void onResetPassageReadability;
-  void passageReadabilityLabel;
-  void canIncreasePassageReadability;
-  void canDecreasePassageReadability;
   const isTabletMode = Boolean(tabletMode);
   const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
   const supportsCssZoom =

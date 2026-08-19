@@ -165,3 +165,142 @@ describe('StudentUIProvider highlight tool state', () => {
     expect(context!.state.accessibilitySettings.highlightColor).toBe('blue');
   });
 });
+
+describe('StudentUIProvider persisted accessibility preferences', () => {
+  const storageKey = 'student-accessibility:test:probe';
+
+  function Probe({ onContext }: { onContext: (context: ReturnType<typeof useStudentUI>) => void }) {
+    onContext(useStudentUI());
+    return null;
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('loads persisted preferences as the initial state', () => {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        fontSize: 'large',
+        highContrast: true,
+        zoom: 1.3,
+        passageReadabilityLevel: 2,
+        playbackRate: 1.25,
+      }),
+    );
+
+    let context: ReturnType<typeof useStudentUI> | null = null;
+    render(
+      <StudentUIProvider storageKey={storageKey}>
+        <Probe onContext={(value) => { context = value; }} />
+      </StudentUIProvider>,
+    );
+
+    const settings = context!.state.accessibilitySettings;
+    expect(settings.fontSize).toBe('large');
+    expect(settings.highContrast).toBe(true);
+    expect(settings.zoom).toBe(1.3);
+    expect(settings.passageReadabilityLevel).toBe(2);
+    expect(settings.playbackRate).toBe(1.25);
+  });
+
+  it('falls back to defaults when stored data is corrupt', () => {
+    window.localStorage.setItem(storageKey, '{not json');
+
+    let context: ReturnType<typeof useStudentUI> | null = null;
+    render(
+      <StudentUIProvider storageKey={storageKey}>
+        <Probe onContext={(value) => { context = value; }} />
+      </StudentUIProvider>,
+    );
+
+    const settings = context!.state.accessibilitySettings;
+    expect(settings.fontSize).toBe('normal');
+    expect(settings.highContrast).toBe(false);
+    expect(settings.zoom).toBe(1);
+    expect(settings.passageReadabilityLevel).toBe(DEFAULT_STUDENT_PASSAGE_READABILITY_LEVEL);
+    expect(settings.playbackRate).toBe(1);
+  });
+
+  it('persists preference changes to localStorage', () => {
+    let context: ReturnType<typeof useStudentUI> | null = null;
+    render(
+      <StudentUIProvider storageKey={storageKey}>
+        <Probe onContext={(value) => { context = value; }} />
+      </StudentUIProvider>,
+    );
+
+    act(() => context!.actions.setFontSize('large'));
+    act(() => context!.actions.setPlaybackRate(1.5));
+    act(() => context!.actions.setPassageReadabilityLevel(0));
+
+    const stored = JSON.parse(window.localStorage.getItem(storageKey)!) as Record<string, unknown>;
+    expect(stored.fontSize).toBe('large');
+    expect(stored.playbackRate).toBe(1.5);
+    expect(stored.passageReadabilityLevel).toBe(0);
+  });
+
+  it('resetAccessibilitySettings restores defaults and persists them', () => {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({ fontSize: 'large', highContrast: true, zoom: 1.4, passageReadabilityLevel: 2, playbackRate: 1.5 }),
+    );
+
+    let context: ReturnType<typeof useStudentUI> | null = null;
+    render(
+      <StudentUIProvider storageKey={storageKey}>
+        <Probe onContext={(value) => { context = value; }} />
+      </StudentUIProvider>,
+    );
+
+    act(() => context!.actions.resetAccessibilitySettings());
+
+    const settings = context!.state.accessibilitySettings;
+    expect(settings.fontSize).toBe('normal');
+    expect(settings.highContrast).toBe(false);
+    expect(settings.zoom).toBe(1);
+    expect(settings.playbackRate).toBe(1);
+
+    const stored = JSON.parse(window.localStorage.getItem(storageKey)!) as Record<string, unknown>;
+    expect(stored.fontSize).toBe('normal');
+    expect(stored.highContrast).toBe(false);
+    expect(stored.zoom).toBe(1);
+    expect(stored.playbackRate).toBe(1);
+  });
+
+  it('never touches storage when no storageKey is provided', () => {
+    const setItemSpy = vi.spyOn(window.localStorage, 'setItem');
+    const removeItemSpy = vi.spyOn(window.localStorage, 'removeItem');
+
+    let context: ReturnType<typeof useStudentUI> | null = null;
+    render(
+      <StudentUIProvider>
+        <Probe onContext={(value) => { context = value; }} />
+      </StudentUIProvider>,
+    );
+
+    act(() => context!.actions.setFontSize('small'));
+
+    expect(setItemSpy).not.toHaveBeenCalled();
+    expect(removeItemSpy).not.toHaveBeenCalled();
+
+    setItemSpy.mockRestore();
+    removeItemSpy.mockRestore();
+  });
+
+  it('normalizes zoom values to two decimals', () => {
+    let context: ReturnType<typeof useStudentUI> | null = null;
+    render(
+      <StudentUIProvider storageKey={storageKey}>
+        <Probe onContext={(value) => { context = value; }} />
+      </StudentUIProvider>,
+    );
+
+    act(() => context!.actions.setZoom(1.0999999999999999));
+    expect(context!.state.accessibilitySettings.zoom).toBe(1.1);
+
+    act(() => context!.actions.setZoom(0.849));
+    expect(context!.state.accessibilitySettings.zoom).toBe(0.85);
+  });
+});
