@@ -1323,7 +1323,12 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-2 capitalize">{activeSection}</h2>
               {activeSection !== 'writing' && sectionsLoading && (
-                <p className="text-sm text-gray-500">Loading section answers...</p>
+                <div role="status" aria-live="polite" className="mt-3 space-y-3">
+                  <p className="sr-only text-sm text-gray-500">Loading section answers...</p>
+                  <div className="h-24 animate-pulse rounded-lg bg-gray-100" />
+                  <div className="h-24 animate-pulse rounded-lg bg-gray-100/70" />
+                  <div className="h-24 animate-pulse rounded-lg bg-gray-100" />
+                </div>
               )}
               {sectionsError && activeSection !== 'writing' && (
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
@@ -1338,7 +1343,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 </div>
               )}
               {activeSection === 'writing' && writingLoading && (
-                <p className="text-sm text-gray-500">Loading writing payload...</p>
+                <div role="status" aria-live="polite" className="mt-3 space-y-3">
+                  <p className="sr-only text-sm text-gray-500">Loading writing payload...</p>
+                  <div className="h-24 animate-pulse rounded-lg bg-gray-100" />
+                  <div className="h-24 animate-pulse rounded-lg bg-gray-100/70" />
+                </div>
               )}
               {currentSectionSubmission && (
                 <div className="flex items-center gap-2 text-sm text-gray-500">

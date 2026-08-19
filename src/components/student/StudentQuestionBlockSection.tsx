@@ -51,7 +51,8 @@ function FlagButton({
       <div className="flex justify-end">
         <button
           onClick={onClick}
-          className={`inline-flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition-all ${
+          aria-pressed={flagged}
+          className={`inline-flex h-10 w-10 items-center justify-center rounded-full border shadow-sm transition-[scale,background-color,border-color] duration-150 ease-out active:scale-[0.96] ${
             flagged
               ? 'bg-amber-700 text-white border-amber-700'
               : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
@@ -67,7 +68,8 @@ function FlagButton({
   return (
     <button
       onClick={onClick}
-      className={`absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-sm ${
+      aria-pressed={flagged}
+      className={`absolute top-0 right-0 w-10 h-10 rounded-full flex items-center justify-center transition-[scale,background-color,border-color] duration-150 ease-out active:scale-[0.96] z-10 shadow-sm ${
         flagged
           ? 'bg-amber-700 text-white'
           : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'

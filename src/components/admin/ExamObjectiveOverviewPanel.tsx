@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCoalescedReload } from '../../hooks/useCoalescedReload';
 import { motion } from 'motion/react';
-import { AlertTriangle, CheckCircle2, FileCheck2, FileText, Filter, Layers, LoaderCircle, Users } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileCheck2, FileText, Filter, Layers, Users } from 'lucide-react';
 import { Button, Dialog } from '@components/ui';
 import type { ExamState } from '../../types';
 import type {
@@ -428,11 +428,8 @@ export function ExamObjectiveOverviewPanel({
 
       {loading ? (
         <div className="px-4 py-8 sm:px-6" role="status" aria-live="polite">
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />
-            Loading typed answer exceptions...
-          </div>
-          <div className="mt-5 max-w-2xl space-y-3" aria-hidden="true">
+          <p className="sr-only">Loading typed answer exceptions...</p>
+          <div className="max-w-2xl space-y-3" aria-hidden="true">
             <div className="h-16 animate-pulse rounded-lg bg-gray-100/80" />
             <div className="h-16 animate-pulse rounded-lg bg-gray-100/60" />
             <div className="h-16 animate-pulse rounded-lg bg-gray-100/80" />

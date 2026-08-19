@@ -18,7 +18,7 @@ export const MIN_HEIGHTS = {
 
 // Animation timing
 export const TIMING = {
-  TOAST_DURATION_MS: 2000,
+  TOAST_DURATION_MS: 4000,
 } as const;
 
 // Character height calculations (for text areas)

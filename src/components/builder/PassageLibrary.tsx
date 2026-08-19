@@ -3,6 +3,7 @@ import { PassageLibraryItem, Passage } from '../../types';
 import { passageLibraryService } from '../../features/content-library/infrastructure/libraryGateway';
 import { Search, Filter, Grid, List, BookOpen, Clock, FileText } from 'lucide-react';
 import { CollectionLoadingSkeleton } from '../ui/CollectionLoadingSkeleton';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 
 interface PassageLibraryProps {
   onAddToExam: (passage: Passage) => void;
@@ -25,6 +26,7 @@ export function PassageLibrary({ onAddToExam, onClose }: PassageLibraryProps) {
 
   const [allPassages, setAllPassages] = useState<PassageLibraryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const showSkeleton = useDelayedLoading(isLoading);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -200,10 +202,12 @@ export function PassageLibrary({ onAddToExam, onClose }: PassageLibraryProps) {
       {/* Passage List */}
       <div className="flex-1 overflow-auto p-4 bg-gray-50">
         {isLoading ? (
-          <div role="status" aria-live="polite" aria-busy="true">
-            <span className="sr-only">Loading passages…</span>
-            <CollectionLoadingSkeleton variant={viewMode} />
-          </div>
+          showSkeleton ? (
+            <div role="status" aria-live="polite" aria-busy="true">
+              <span className="sr-only">Loading passages…</span>
+              <CollectionLoadingSkeleton variant={viewMode} />
+            </div>
+          ) : null
         ) : loadError ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
             <FileText size={48} className="mb-4 text-gray-300" />

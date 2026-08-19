@@ -5,6 +5,7 @@ import { questionBankService } from '../../features/content-library/infrastructu
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { CollectionLoadingSkeleton } from '../ui/CollectionLoadingSkeleton';
+import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 
 interface QuestionBankLibraryProps {
   onSelectQuestion: (item: QuestionBankItem) => void;
@@ -18,6 +19,7 @@ export function QuestionBankLibrary({ onSelectQuestion, onClose }: QuestionBankL
 
   const [allQuestions, setAllQuestions] = useState<QuestionBankItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const showSkeleton = useDelayedLoading(isLoading);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -208,10 +210,12 @@ export function QuestionBankLibrary({ onSelectQuestion, onClose }: QuestionBankL
       {/* Question List */}
       <div className="flex-1 overflow-y-auto p-6">
         {isLoading ? (
-          <div role="status" aria-live="polite" aria-busy="true">
-            <span className="sr-only">Loading questions…</span>
-            <CollectionLoadingSkeleton variant={viewMode} />
-          </div>
+          showSkeleton ? (
+            <div role="status" aria-live="polite" aria-busy="true">
+              <span className="sr-only">Loading questions…</span>
+              <CollectionLoadingSkeleton variant={viewMode} />
+            </div>
+          ) : null
         ) : loadError ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
             <Search size={48} className="mb-4 text-gray-300" />

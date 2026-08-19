@@ -278,8 +278,31 @@ export function ExportBuilderDialog({
       </div>
 
       {dialogLoading ? (
-        <div className="rounded-md border border-gray-200 bg-white px-4 py-12 text-center text-sm text-gray-500">
-          Loading students…
+        <div className="grid gap-4 lg:grid-cols-[minmax(15rem,0.9fr)_minmax(20rem,1.25fr)_minmax(22rem,1.15fr)]" role="status" aria-live="polite">
+          <p className="sr-only">Loading students…</p>
+          <div className="min-w-0 rounded-md border border-gray-200 bg-white p-4">
+            <div className="h-6 w-24 animate-pulse rounded bg-gray-100" />
+            <div className="mt-4 space-y-3">
+              <div className="h-9 animate-pulse rounded-md bg-gray-100" />
+              <div className="h-9 animate-pulse rounded-md bg-gray-100/70" />
+              <div className="h-9 animate-pulse rounded-md bg-gray-100" />
+            </div>
+          </div>
+          <div className="min-w-0 rounded-md border border-gray-200 bg-white p-4">
+            <div className="h-6 w-20 animate-pulse rounded bg-gray-100" />
+            <div className="mt-4 space-y-2">
+              <div className="h-10 animate-pulse rounded-md bg-gray-100" />
+              <div className="h-10 animate-pulse rounded-md bg-gray-100/70" />
+              <div className="h-10 animate-pulse rounded-md bg-gray-100" />
+              <div className="h-10 animate-pulse rounded-md bg-gray-100/70" />
+            </div>
+          </div>
+          <div className="min-w-0 space-y-4">
+            <div className="rounded-md border border-gray-200 bg-white p-4">
+              <div className="h-6 w-28 animate-pulse rounded bg-gray-100" />
+              <div className="mt-4 h-28 animate-pulse rounded-md bg-gray-100" />
+            </div>
+          </div>
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(15rem,0.9fr)_minmax(20rem,1.25fr)_minmax(22rem,1.15fr)]">

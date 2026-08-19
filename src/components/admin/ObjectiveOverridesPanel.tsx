@@ -456,11 +456,8 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
           </div>
           {loading ? (
             <div className="px-1 py-4" role="status" aria-live="polite">
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
-                Loading objective questions…
-              </div>
-              <div className="mt-4 grid gap-2 md:grid-cols-2" aria-hidden="true">
+              <p className="sr-only">Loading objective questions…</p>
+              <div className="grid gap-2 md:grid-cols-2" aria-hidden="true">
                 <div className="space-y-2">
                   <div className="h-9 animate-pulse rounded-md bg-gray-100" />
                   <div className="h-9 animate-pulse rounded-md bg-gray-100/70" />

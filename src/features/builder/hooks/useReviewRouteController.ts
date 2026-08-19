@@ -105,7 +105,10 @@ export function useReviewRouteController(
         return;
       }
 
-      await examAuthoringFacade.lifecycle.publishExam(examId, 'System', notes);
+      const result = await examAuthoringFacade.lifecycle.publishExam(examId, 'System', notes);
+      if (!result.success) {
+        throw new Error(result.error ?? 'Could not publish the exam. Please try again.');
+      }
       await loadExam();
     },
     [examId, loadExam],
@@ -143,7 +146,10 @@ export function useReviewRouteController(
         return;
       }
 
-      await examAuthoringFacade.lifecycle.schedulePublish(examId, 'System', scheduledTime);
+      const result = await examAuthoringFacade.lifecycle.schedulePublish(examId, 'System', scheduledTime);
+      if (!result.success) {
+        throw new Error(result.error ?? 'Could not schedule the exam. Please try again.');
+      }
       await loadExam();
     },
     [examId, loadExam],
@@ -155,7 +161,10 @@ export function useReviewRouteController(
         return;
       }
 
-      await examAuthoringFacade.lifecycle.unpublishExam(examId, 'System', reason);
+      const result = await examAuthoringFacade.lifecycle.unpublishExam(examId, 'System', reason);
+      if (!result.success) {
+        throw new Error(result.error ?? 'Could not unpublish the exam. Please try again.');
+      }
       await loadExam();
     },
     [examId, loadExam],

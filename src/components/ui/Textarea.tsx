@@ -24,8 +24,8 @@ export function Textarea({
   const baseStyles = 'px-3 py-2 text-sm border rounded-sm transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-40 disabled:cursor-not-allowed';
   
   const stateStyles = error
-    ? 'border-red-700 text-gray-900 focus:ring-red-500 focus:border-red-700 bg-white'
-    : 'border-gray-200 text-gray-900 focus:ring-blue-500 focus:border-blue-800 bg-white';
+    ? 'border-red-600 text-gray-900 focus:ring-red-600/25 focus:border-red-600 bg-white'
+    : 'border-gray-200 text-gray-900 focus:ring-blue-600/25 focus:border-blue-600 bg-white';
   
   const resizeStyles = {
     none: 'resize-none',

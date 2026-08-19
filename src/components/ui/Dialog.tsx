@@ -129,7 +129,7 @@ export function Dialog({
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className={`relative w-full ${sizes[size]} bg-white rounded-sm shadow-[0_8px_16px_-4px_rgba(9,30,66,0.25),0_0_1px_rgba(9,30,66,0.31)] overflow-hidden flex flex-col ${className}`}
+            className={`relative w-full ${sizes[size]} bg-white rounded-xl shadow-xl overflow-hidden flex flex-col ${className}`}
             role="document"
           >
             {title && (
@@ -138,7 +138,7 @@ export function Dialog({
                 {showCloseButton && (
                   <button
                     onClick={onClose}
-                    className="p-1 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="p-1 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     aria-label="Close dialog"
                   >
                     <X size={20} />

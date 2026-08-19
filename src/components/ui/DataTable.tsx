@@ -98,7 +98,9 @@ export function DataTable<T>({
             <tr
               key={index}
               className={`border-b border-gray-50 transition-colors ${
-                onRowClick ? 'hover:bg-gray-50 cursor-pointer' : ''
+                onRowClick
+                  ? 'hover:bg-gray-50 cursor-pointer focus-visible:bg-gray-50 focus-visible:outline-2 focus-visible:outline-blue-600/60 focus-visible:-outline-offset-2'
+                  : ''
               }`}
               onClick={onRowClick ? () => onRowClick(row, index) : undefined}
               onKeyDown={onRowClick ? (e) => handleKeyDown(e, row, index) : undefined}

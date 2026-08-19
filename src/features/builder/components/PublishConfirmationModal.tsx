@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Dialog } from '../../../components/ui/Dialog';
-import { CheckCircle2, Circle, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, Circle, AlertTriangle, LoaderCircle } from 'lucide-react';
 import type { PublishReadiness } from '../../../types/domain';
 
 interface PublishConfirmationModalProps {
@@ -32,6 +32,33 @@ export function PublishConfirmationModal({
 }: PublishConfirmationModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const [isPending, setIsPending] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+
+  const handleConfirm = async () => {
+    if (isPending) {
+      return;
+    }
+    setIsPending(true);
+    setPublishError(null);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (error) {
+      setPublishError(
+        error instanceof Error ? error.message : 'Could not publish the exam. Please try again.',
+      );
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  const handleClose = () => {
+    if (isPending) {
+      return;
+    }
+    onClose();
+  };
 
   // Focus trap for modal
   useEffect(() => {
@@ -78,7 +105,7 @@ export function PublishConfirmationModal({
 
     // Handle ESC key to close modal
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !isPending) {
         onClose();
       }
     };
@@ -92,8 +119,7 @@ export function PublishConfirmationModal({
       // Restore focus to previously active element
       previousActiveElementRef.current?.focus();
     };
-  }, [isOpen, onClose]);
-
+  }, [isOpen, onClose, isPending]);
   const allPrerequisitesMet =
     prerequisites.validationPassed &&
     prerequisites.contentReviewed &&
@@ -108,42 +134,55 @@ export function PublishConfirmationModal({
   return (
     <Dialog
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title={modalTitle}
       size="sm"
       footer={
         <>
           {(mode === 'republish' || (requireSchedule && !prerequisites.isScheduled)) && (
             <button
+              disabled={isPending}
               onClick={() => {
                 onClose();
                 onSetSchedule();
               }}
-              className="px-4 py-2 text-sm font-semibold text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm font-semibold text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
             >
               {scheduleLabel}
             </button>
           )}
           <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            disabled={isPending}
+            onClick={handleClose}
+            className="px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
           <button
-            onClick={() => {
-              onConfirm();
-              onClose();
-            }}
-            disabled={!allPrerequisitesMet}
-            className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+            onClick={() => void handleConfirm()}
+            disabled={!allPrerequisitesMet || isPending}
+            className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            {confirmLabel}
+            {isPending ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : null}
+            {isPending
+              ? mode === 'republish'
+                ? 'Republishing…'
+                : 'Publishing…'
+              : confirmLabel}
           </button>
         </>
       }
     >
       <div className="space-y-4">
+        {publishError ? (
+          <div
+            role="alert"
+            className="flex items-start gap-2 p-3 bg-red-50 rounded-lg border border-red-200 text-sm text-red-800"
+          >
+            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
+            <span>{publishError}</span>
+          </div>
+        ) : null}
         <div>
           <p className="text-sm font-medium text-gray-900 mb-3">{checklistTitle}</p>
           <div className="space-y-2">

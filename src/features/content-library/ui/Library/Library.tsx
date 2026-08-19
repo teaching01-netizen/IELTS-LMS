@@ -1,6 +1,7 @@
 import { BookOpen, HelpCircle } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { CollectionLoadingSkeleton } from '@components/ui';
+import { useDelayedLoading } from '../../../../hooks/useDelayedLoading';
 import {
   useClearLibraryPassagesMutation,
   useClearLibraryQuestionsMutation,
@@ -43,6 +44,7 @@ export function Library() {
   const passages = useMemo(() => passagesQuery.data ?? [], [passagesQuery.data]);
   const questions = useMemo(() => questionsQuery.data ?? [], [questionsQuery.data]);
   const isLoading = passagesQuery.isLoading || questionsQuery.isLoading;
+  const showSkeleton = useDelayedLoading(isLoading);
   const queryError = passagesQuery.error ?? questionsQuery.error;
 
   const passageTopics = useMemo(

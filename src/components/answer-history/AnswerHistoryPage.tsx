@@ -450,6 +450,7 @@ export function AnswerHistoryPage({
         </div>
       ) : null}
 
+      {!isLoading ? (
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_340px]">
         <section className="rounded-xl border border-gray-200 bg-white p-4">
           <div className="relative mb-3">
@@ -735,9 +736,36 @@ export function AnswerHistoryPage({
           ) : null}
         </section>
       </div>
+      ) : null}
 
       {isLoading ? (
-        <div className="text-sm text-gray-500">Loading answer history...</div>
+        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_340px]" role="status" aria-live="polite">
+          <p className="sr-only">Loading answer history...</p>
+          <section className="rounded-xl border border-gray-200 bg-white p-4">
+            <div className="mb-3 h-9 animate-pulse rounded-md bg-gray-100" />
+            <div className="space-y-3">
+              <div className="h-12 animate-pulse rounded-md bg-gray-100" />
+              <div className="h-12 animate-pulse rounded-md bg-gray-100/70" />
+              <div className="h-12 animate-pulse rounded-md bg-gray-100" />
+              <div className="h-12 animate-pulse rounded-md bg-gray-100/70" />
+            </div>
+          </section>
+          <section className="rounded-xl border border-gray-200 bg-white p-4">
+            <div className="h-5 w-40 animate-pulse rounded bg-gray-100" />
+            <div className="mt-4 space-y-3">
+              <div className="h-14 animate-pulse rounded-md bg-gray-100" />
+              <div className="h-14 animate-pulse rounded-md bg-gray-100/70" />
+              <div className="h-14 animate-pulse rounded-md bg-gray-100" />
+            </div>
+          </section>
+          <section className="rounded-xl border border-gray-200 bg-white p-4">
+            <div className="h-5 w-32 animate-pulse rounded bg-gray-100" />
+            <div className="mt-4 space-y-3">
+              <div className="h-16 animate-pulse rounded-md bg-gray-100" />
+              <div className="h-16 animate-pulse rounded-md bg-gray-100/70" />
+            </div>
+          </section>
+        </div>
       ) : null}
     </div>
   );

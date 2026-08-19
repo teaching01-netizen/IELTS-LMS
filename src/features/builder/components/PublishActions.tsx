@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Archive, ArrowRight, Calendar, CheckCircle2, Circle, Edit, Unlock } from 'lucide-react';
+import { Archive, ArrowRight, Calendar, CheckCircle2, Circle, Edit, LoaderCircle, Unlock } from 'lucide-react';
 import type { PublishReadiness } from '../../../types/domain';
 import { PublishConfirmationModal } from './PublishConfirmationModal';
 
@@ -13,12 +13,12 @@ interface PublishSuccessState {
 interface PublishActionsProps {
   canPublish: boolean;
   publishReadiness?: PublishReadiness;
-  onPublish: (notes?: string) => void;
+  onPublish: (notes?: string) => Promise<void>;
   onRepublishLatestDraft?: () => Promise<{ success: boolean; error?: string } | void>;
-  onSchedulePublish: (scheduledTime: string) => void;
+  onSchedulePublish: (scheduledTime: string) => Promise<void>;
   scheduledTime?: string;
   onOpenSchedulingWorkflow?: (() => void) | undefined;
-  onUnpublish: (reason?: string) => void;
+  onUnpublish: (reason?: string) => Promise<void>;
   onArchive?: (() => void) | undefined;
   onNavigateToConfig?: () => void;
   onNavigateToBuilder?: () => void;
@@ -60,6 +60,42 @@ export function PublishActions({
   const [linkCopied, setLinkCopied] = useState(false);
   const [isRepublishing, setIsRepublishing] = useState(false);
   const [republishError, setRepublishError] = useState<string | null>(null);
+  const [isScheduling, setIsScheduling] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [isUnpublishing, setIsUnpublishing] = useState(false);
+  const [unpublishError, setUnpublishError] = useState<string | null>(null);
+
+  const confirmSchedule = async () => {
+    if (isScheduling) {
+      return;
+    }
+    setIsScheduling(true);
+    setScheduleError(null);
+    try {
+      await onSchedulePublish(scheduledTime);
+      setScheduledTime('');
+      setShowSchedule(false);
+    } catch (error) {
+      setScheduleError(error instanceof Error ? error.message : 'Could not schedule the exam. Please try again.');
+    } finally {
+      setIsScheduling(false);
+    }
+  };
+
+  const handleUnpublish = async () => {
+    if (isUnpublishing) {
+      return;
+    }
+    setIsUnpublishing(true);
+    setUnpublishError(null);
+    try {
+      await onUnpublish();
+    } catch (error) {
+      setUnpublishError(error instanceof Error ? error.message : 'Could not unpublish the exam. Please try again.');
+    } finally {
+      setIsUnpublishing(false);
+    }
+  };
 
   const isValidationPassed = publishReadiness?.canPublish ?? false;
   const isContentReviewed = true;
@@ -325,13 +361,17 @@ export function PublishActions({
               aria-label="Scheduled time"
             />
             <button
-              onClick={() => onSchedulePublish(scheduledTime)}
-              disabled={!scheduledTime}
-              className="w-full px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none"
+              onClick={() => void confirmSchedule()}
+              disabled={!scheduledTime || isScheduling}
+              className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2"
               aria-label="Confirm schedule"
             >
-              Confirm Schedule
+              {isScheduling ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : null}
+              {isScheduling ? 'Scheduling…' : 'Confirm Schedule'}
             </button>
+            {scheduleError ? (
+              <p role="alert" className="text-xs text-red-700">{scheduleError}</p>
+            ) : null}
           </div>
         )}
 
@@ -350,12 +390,17 @@ export function PublishActions({
 
         <div className="pt-4 border-t border-slate-100 space-y-3">
           <button
-            onClick={() => onUnpublish()}
-            className="w-full px-4 py-2.5 bg-amber-50 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100 transition-all duration-200 flex items-center justify-center gap-2 border border-amber-200"
+            onClick={() => void handleUnpublish()}
+            disabled={isUnpublishing}
+            className="w-full px-4 py-2.5 bg-amber-50 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100 transition-all duration-200 flex items-center justify-center gap-2 border border-amber-200 disabled:opacity-60 disabled:cursor-not-allowed"
             aria-label="Unpublish exam"
           >
-            <Unlock size={16} aria-hidden="true" /> Unpublish
+            {isUnpublishing ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Unlock size={16} aria-hidden="true" />}
+            {isUnpublishing ? 'Unpublishing…' : <span>Unpublish</span>}
           </button>
+          {unpublishError ? (
+            <p role="alert" className="text-xs text-red-700">{unpublishError}</p>
+          ) : null}
 
           {onArchive && (
             <button
@@ -374,8 +419,7 @@ export function PublishActions({
           mode="publish"
           requireSchedule={true}
           onConfirm={async () => {
-            onPublish(publishNotes);
-            setShowConfirmModal(false);
+            await onPublish(publishNotes);
           }}
           onSetSchedule={() => {
             setShowConfirmModal(false);
@@ -482,13 +526,17 @@ export function PublishActions({
               aria-label="Scheduled time"
             />
             <button
-              onClick={() => onSchedulePublish(scheduledTime)}
-              disabled={!scheduledTime}
-              className="w-full px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none"
+              onClick={() => void confirmSchedule()}
+              disabled={!scheduledTime || isScheduling}
+              className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2"
               aria-label="Confirm schedule"
             >
-              Confirm Schedule
+              {isScheduling ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : null}
+              {isScheduling ? 'Scheduling…' : 'Confirm Schedule'}
             </button>
+            {scheduleError ? (
+              <p role="alert" className="text-xs text-red-700">{scheduleError}</p>
+            ) : null}
           </div>
         )}
       </div>
@@ -499,8 +547,7 @@ export function PublishActions({
         mode="publish"
         requireSchedule={true}
         onConfirm={async () => {
-          onPublish(publishNotes);
-          setShowConfirmModal(false);
+          await onPublish(publishNotes);
         }}
         onSetSchedule={() => {
           setShowConfirmModal(false);

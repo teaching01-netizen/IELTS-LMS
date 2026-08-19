@@ -380,7 +380,7 @@ export function StudentListening({
                   type="button"
                   onClick={() => void togglePlayback()}
                   disabled={!canPlayAudio}
-                  className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 shadow-md flex-shrink-0"
+                  className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-blue-600 text-white flex items-center justify-center transition-[scale,background-color,opacity] duration-150 ease-out hover:bg-blue-700 active:scale-[0.96] shadow-md flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                   aria-label={isPlaying ? "Pause audio" : "Play audio"}
                 >
                   {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-1" />}
@@ -418,7 +418,7 @@ export function StudentListening({
                   <button
                     type="button"
                     onClick={() => adjustCurrentTime(-10)}
-                    className="p-2 md:p-2.5 hover:bg-gray-200 rounded-full"
+                    className="p-2 md:p-2.5 rounded-full transition-[scale,background-color,opacity] duration-150 ease-out hover:bg-gray-200 active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
                     title="Rewind 10s"
                     disabled={!canPlayAudio}
                     aria-label="Rewind 10 seconds"
@@ -428,7 +428,7 @@ export function StudentListening({
                   <button
                     type="button"
                     onClick={() => adjustCurrentTime(10)}
-                    className="p-2 md:p-2.5 hover:bg-gray-200 rounded-full"
+                    className="p-2 md:p-2.5 rounded-full transition-[scale,background-color,opacity] duration-150 ease-out hover:bg-gray-200 active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
                     title="Forward 10s"
                     disabled={!canPlayAudio}
                     aria-label="Forward 10 seconds"
@@ -445,7 +445,7 @@ export function StudentListening({
                     max="100"
                     value={volume}
                     onChange={(event) => setVolume(Number.parseInt(event.target.value, 10))}
-                    className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:opacity-40 disabled:cursor-not-allowed"
                     aria-label="Audio volume"
                     disabled={!canPlayAudio}
                   />

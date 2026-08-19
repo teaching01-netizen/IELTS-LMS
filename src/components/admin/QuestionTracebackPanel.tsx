@@ -348,8 +348,7 @@ export function QuestionTracebackPanel({
             </p>
           </div>
         </div>
-        {examLoading ? <span className="shrink-0 text-xs font-medium text-gray-600">Loading exam...</span> : null}
-      </div>
+        </div>
 
       {examError ? (
         <div className="px-6 py-5 border-b border-gray-200 bg-red-50 text-sm text-red-800" role="alert">
@@ -370,6 +369,16 @@ export function QuestionTracebackPanel({
       {overrideError ? (
         <div className="border-b border-rose-200 bg-rose-50 px-6 py-3 text-sm text-rose-800" role="alert">
           {overrideError}
+        </div>
+      ) : null}
+
+      {examLoading ? (
+        <div className="space-y-4 p-4 md:p-6" role="status" aria-live="polite">
+          <p className="sr-only">Loading exam...</p>
+          <div className="h-14 animate-pulse rounded-xl bg-gray-100" />
+          <div className="h-14 animate-pulse rounded-xl bg-gray-100/70" />
+          <div className="h-14 animate-pulse rounded-xl bg-gray-100" />
+          <div className="h-14 animate-pulse rounded-xl bg-gray-100/70" />
         </div>
       ) : null}
 

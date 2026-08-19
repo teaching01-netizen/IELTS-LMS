@@ -310,6 +310,18 @@
     *:focus:not(:focus-visible) {
       outline: none;
     }
+
+    /* Notion-style text selection tint; exam highlight surfaces keep their
+       own selection colors via higher-specificity rules below. */
+    ::selection {
+      background-color: rgba(35, 131, 226, 0.22);
+      color: inherit;
+    }
+
+    ::-moz-selection {
+      background-color: rgba(35, 131, 226, 0.22);
+      color: inherit;
+    }
   }
 
   /* Accessibility: Skip link for keyboard users */

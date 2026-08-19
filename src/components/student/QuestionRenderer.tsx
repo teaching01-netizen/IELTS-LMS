@@ -143,12 +143,13 @@ export function QuestionRenderer({
       <button
         type="button"
         onClick={() => onToggleFlag(slotId)}
-        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
+        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border transition-[scale,background-color,border-color] duration-150 ease-out active:scale-[0.96] ${
           flags[slotId]
             ? "border-amber-700 bg-amber-700 text-white"
             : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700"
         }`}
         aria-label={flags[slotId] ? "Unflag question" : "Flag question"}
+        aria-pressed={flags[slotId]}
         title={flags[slotId] ? "Unflag question" : "Flag question"}
       >
         <Flag size={14} aria-hidden="true" className={flags[slotId] ? "fill-current" : ""} />
@@ -258,7 +259,14 @@ export function QuestionRenderer({
         </legend>
         <div className={`${fieldIndentClass} flex flex-col gap-3`}>
           {options.map((option) => (
-            <label key={option} className="flex items-center gap-3 cursor-pointer">
+            <label
+              key={option}
+              className={`flex items-center gap-3 cursor-pointer rounded-md border p-3 transition-colors ${
+                answer === option
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-gray-200 hover:border-blue-300"
+              }`}
+            >
               <input
                 type="radio"
                 name={`q-${q.id}`}
@@ -385,11 +393,11 @@ export function QuestionRenderer({
             return (
               <label
                 key={option.id}
-                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
+                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-600/40 peer-focus-visible:border-blue-400 ${
                   isSelected
                     ? "border-blue-500 bg-blue-50"
                     : isDisabled
-                      ? "cursor-not-allowed border-gray-200 opacity-50"
+                      ? "cursor-not-allowed border-gray-200 opacity-50 peer-focus-visible:ring-0"
                       : "border-gray-200 hover:border-blue-300"
                 }`}
               >
@@ -514,7 +522,14 @@ export function QuestionRenderer({
           {options.map((option, index) => {
             const letter = String.fromCharCode(65 + index);
             return (
-              <label key={option.id} className="flex cursor-pointer items-start gap-3">
+              <label
+                key={option.id}
+                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
+                  answer === option.id
+                    ? "border-blue-500 bg-blue-50"
+                    : "border-gray-200 hover:border-blue-300"
+                }`}
+              >
                 <input
                   type="radio"
                   name={inputGroupName}
