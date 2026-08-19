@@ -45,4 +45,28 @@ describe('useUndoRedo', () => {
     expect(result.current.canRedo).toBe(false);
     expect(result.current.lastActionLabel).toBe('Branch');
   });
+
+  it('caps the undo stack at the configured limit', () => {
+    const { result } = renderHook(() => useUndoRedo({ count: 0 }, { limit: 2 }));
+
+    act(() => {
+      result.current.setState({ count: 1 }, 'Step 1');
+      result.current.setState({ count: 2 }, 'Step 2');
+      result.current.setState({ count: 3 }, 'Step 3');
+    });
+
+    expect(result.current.state.count).toBe(3);
+    expect(result.current.undoStackLabels).toEqual(['Step 1', 'Step 2']);
+
+    act(() => {
+      result.current.undo();
+    });
+    expect(result.current.state.count).toBe(2);
+
+    act(() => {
+      result.current.undo();
+    });
+    expect(result.current.state.count).toBe(1);
+    expect(result.current.canUndo).toBe(false);
+  });
 });

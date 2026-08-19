@@ -23,15 +23,28 @@ const metricTone = {
   red: 'text-red-700 bg-red-50 border-red-100',
 };
 
-export function StimulusPane({
-  passage,
-  state,
-  setState,
-}: {
+interface StimulusPaneProps {
   passage: Passage;
   state: ExamState;
   setState: (next: ExamState | ((previous: ExamState) => ExamState)) => void | Promise<void>;
-}) {
+}
+
+function areStimulusPanePropsEqual(previous: StimulusPaneProps, next: StimulusPaneProps) {
+  return (
+    previous.passage.id === next.passage.id
+    && previous.passage.content === next.passage.content
+    && previous.passage.images === next.passage.images
+    && previous.passage.wordCount === next.passage.wordCount
+    && previous.state.config.standards.passageWordCount === next.state.config.standards.passageWordCount
+    && previous.setState === next.setState
+  );
+}
+
+export const StimulusPane = React.memo(function StimulusPane({
+  passage,
+  state,
+  setState,
+}: StimulusPaneProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [isImageEditorOpen, setIsImageEditorOpen] = useState(false);
   const passageWordCount = state.config.standards.passageWordCount;
@@ -278,4 +291,4 @@ export function StimulusPane({
       />
     </>
   );
-}
+}, areStimulusPanePropsEqual);

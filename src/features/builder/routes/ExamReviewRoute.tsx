@@ -6,7 +6,7 @@ import { PublishActions } from '../components/PublishActions';
 import { ValidationSummary } from '../components/ValidationSummary';
 import { useReviewRouteController } from '../hooks/useReviewRouteController';
 import { Exam } from '../../../types';
-import { LoadingSurface } from '@components/ui';
+import { ErrorSurface, LoadingSurface } from '@components/ui';
 
 export function ExamReviewRoute() {
   const { examId } = useParams<{ examId: string }>();
@@ -21,9 +21,14 @@ export function ExamReviewRoute() {
 
   if (controller.error) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-red-600">Error: {controller.error}</div>
-      </div>
+      <ErrorSurface
+        title="Review load failed"
+        description={controller.error}
+        actionLabel="Retry"
+        onAction={() => {
+          void controller.reload();
+        }}
+      />
     );
   }
 
@@ -121,7 +126,10 @@ export function ExamReviewRoute() {
                   onRepublishLatestDraft={controller.handleRepublishLatestDraft}
                   onSchedulePublish={controller.handleSchedulePublish}
                   scheduledTime={scheduledTime}
-                  onOpenSchedulingWorkflow={() => setShowScheduleModal(true)}
+                  onOpenSchedulingWorkflow={() => {
+                    setShowScheduleModal(true);
+                    void controller.loadScheduleContent();
+                  }}
                   onUnpublish={controller.handleUnpublish}
                   publishSuccess={publishSuccess}
                   hasUnpublishedDraftChanges={hasUnpublishedDraftChanges}

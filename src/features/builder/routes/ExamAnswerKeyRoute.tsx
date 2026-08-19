@@ -4,8 +4,8 @@ import { ArrowLeft } from 'lucide-react';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { Header } from '@components/Header';
 import { useBuilderRouteController } from '@builder/hooks/useBuilderRouteController';
+import { useBuilderAutosave } from '@builder/hooks/useBuilderAutosave';
 import type { ExamState, ModuleType } from '../../../types';
-import { createLatestOnlyAsyncRunner, type LatestOnlyAsyncRunner } from '../../../utils/latestOnlyAsync';
 import { AcceptedAnswersEditor } from '@components/blocks/AcceptedAnswersEditor';
 import { resolveAcceptedAnswers } from '../../../utils/acceptedAnswers';
 import { applyAnswerKeyEdit, buildAnswerKeyRows, type AnswerKeyRow } from '../utils/answerKeyOverview';
@@ -23,19 +23,15 @@ export function ExamAnswerKeyRoute() {
   const controller = useBuilderRouteController(examId);
 
   const [localState, setLocalState] = useState<ExamState | null>(null);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [search, setSearch] = useState('');
   const [moduleFilter, setModuleFilter] = useState<'all' | Extract<ModuleType, 'reading' | 'listening'>>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
 
   const localStateRef = useRef<ExamState | null>(null);
-  const debouncedAutosaveRef = useRef<number | null>(null);
-  const pendingAutosaveRef = useRef<{ state: ExamState; requestId: number } | null>(null);
-  const latestSaveRequestIdRef = useRef(0);
   const handleUpdateExamContentRef = useRef(controller.handleUpdateExamContent);
-  const saveRunnerRef = useRef<LatestOnlyAsyncRunner<{ state: ExamState; requestId: number }> | null>(
-    null,
-  );
+  const { status: saveStatus, scheduleAutosave, flushNow: flushAutosaveNow } = useBuilderAutosave({
+    save: (nextState) => handleUpdateExamContentRef.current(nextState),
+  });
 
   useEffect(() => {
     handleUpdateExamContentRef.current = controller.handleUpdateExamContent;
@@ -45,46 +41,8 @@ export function ExamAnswerKeyRoute() {
     if (controller.state) {
       setLocalState(controller.state);
       localStateRef.current = controller.state;
-      setSaveStatus('saved');
     }
   }, [controller.state]);
-
-  if (!saveRunnerRef.current) {
-    saveRunnerRef.current = createLatestOnlyAsyncRunner(async ({ state: nextState, requestId }) => {
-      setSaveStatus('saving');
-      try {
-        await handleUpdateExamContentRef.current(nextState);
-        if (requestId === latestSaveRequestIdRef.current) {
-          setSaveStatus('saved');
-        }
-      } catch {
-        if (requestId === latestSaveRequestIdRef.current) {
-          setSaveStatus('error');
-        }
-        throw new Error('Save failed');
-      }
-    });
-  }
-
-  const scheduleAutosave = (nextState: ExamState) => {
-    const requestId = ++latestSaveRequestIdRef.current;
-    pendingAutosaveRef.current = { state: nextState, requestId };
-    setSaveStatus('unsaved');
-
-    if (debouncedAutosaveRef.current) {
-      window.clearTimeout(debouncedAutosaveRef.current);
-    }
-
-    debouncedAutosaveRef.current = window.setTimeout(() => {
-      const pending = pendingAutosaveRef.current;
-      if (!pending) {
-        return;
-      }
-      saveRunnerRef.current?.enqueue(pending);
-      pendingAutosaveRef.current = null;
-      debouncedAutosaveRef.current = null;
-    }, 350);
-  };
 
   const updateLocalState = (next: ExamState | ((previous: ExamState) => ExamState)) => {
     const base = localStateRef.current;
@@ -99,16 +57,8 @@ export function ExamAnswerKeyRoute() {
     const next = localStateRef.current;
     if (!next) return false;
 
-    const requestId = ++latestSaveRequestIdRef.current;
-    if (debouncedAutosaveRef.current) {
-      window.clearTimeout(debouncedAutosaveRef.current);
-      debouncedAutosaveRef.current = null;
-    }
-    pendingAutosaveRef.current = null;
-
-    saveRunnerRef.current?.enqueue({ state: next, requestId });
-    await saveRunnerRef.current?.idle();
-    return !saveRunnerRef.current?.lastError;
+    const result = await flushAutosaveNow(next);
+    return result.ok;
   };
 
   const handleReturnToBuilder = () => {
@@ -206,7 +156,16 @@ export function ExamAnswerKeyRoute() {
   }
 
   if (controller.error) {
-    return <ErrorSurface title="Answer key load failed" description={controller.error} />;
+    return (
+      <ErrorSurface
+        title="Answer key load failed"
+        description={controller.error}
+        actionLabel="Retry"
+        onAction={() => {
+          void controller.reload();
+        }}
+      />
+    );
   }
 
   if (!localState) {

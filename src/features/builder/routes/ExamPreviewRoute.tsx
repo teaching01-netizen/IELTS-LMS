@@ -126,6 +126,10 @@ export function ExamPreviewRoute() {
       <ErrorSurface
         title="Preview load failed"
         description={controller.error}
+        actionLabel="Retry"
+        onAction={() => {
+          void controller.reload();
+        }}
       />
     );
   }

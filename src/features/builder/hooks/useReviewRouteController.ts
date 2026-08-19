@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { examAuthoringFacade } from '../../exam-authoring/api/examAuthoringFacade';
 import type { ExamState } from '../../../types';
@@ -24,6 +24,8 @@ export interface ReviewRouteController {
   handleRestoreVersion: (versionId: string) => Promise<void>;
   handleNavigateToBuilder: (field?: string) => void;
   handleOpenScheduling: () => void;
+  /** Loads the draft content snapshot only when scheduling UI opens. */
+  loadScheduleContent: () => Promise<void>;
   handleCreateSchedule: (schedule: ExamSchedule) => Promise<void>;
   handleBackToAdmin: () => void;
   reload: () => Promise<void>;
@@ -43,6 +45,8 @@ export function useReviewRouteController(
   );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const examRef = useRef<ExamEntity | undefined>(undefined);
+  const loadedDraftVersionIdRef = useRef<string | null>(null);
 
   const loadExam = useCallback(async () => {
     if (!examId) {
@@ -60,19 +64,14 @@ export function useReviewRouteController(
         throw new Error('Exam not found');
       }
 
-      const examState = entity.currentDraftVersionId
-        ? await examAuthoringFacade.repository
-            .getVersionById(entity.currentDraftVersionId)
-            .then(v => v?.contentSnapshot ?? null)
-        : null;
       const [allVersions, allSchedules, readiness] = await Promise.all([
         examAuthoringFacade.repository.getVersionSummaries(examId),
         examAuthoringFacade.repository.getSchedulesByExam(examId),
         examAuthoringFacade.lifecycle.getPublishReadiness(examId),
       ]);
 
+      examRef.current = entity;
       setExam(entity);
-      setState(examState ? examAuthoringFacade.hydrateExamState(examState) : null);
       setVersions(allVersions);
       setSchedules(allSchedules);
       setPublishReadiness(readiness);
@@ -86,6 +85,19 @@ export function useReviewRouteController(
   useEffect(() => {
     void loadExam();
   }, [loadExam]);
+
+  const loadScheduleContent = useCallback(async () => {
+    const entity = examRef.current;
+    const versionId = entity?.currentDraftVersionId ?? entity?.currentPublishedVersionId ?? null;
+    if (!versionId || loadedDraftVersionIdRef.current === versionId) {
+      return;
+    }
+
+    const version = await examAuthoringFacade.repository.getVersionById(versionId);
+    const snapshot = version?.contentSnapshot ?? null;
+    setState(snapshot ? examAuthoringFacade.hydrateExamState(snapshot) : null);
+    loadedDraftVersionIdRef.current = versionId;
+  }, []);
 
   const handlePublish = useCallback(
     async (notes?: string) => {
@@ -211,6 +223,7 @@ export function useReviewRouteController(
     handleRestoreVersion,
     handleNavigateToBuilder,
     handleOpenScheduling,
+    loadScheduleContent,
     handleCreateSchedule,
     handleBackToAdmin,
     reload: loadExam,

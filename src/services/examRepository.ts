@@ -17,6 +17,7 @@ import {
   CohortControlEvent,
 } from '../types/domain';
 import { Exam, SessionAuditLog, SessionNote, ViolationRule } from '../types';
+import { createTtlLruCache } from '../utils/ttlLruCache';
 import {
   backendDelete,
   backendGet,
@@ -68,6 +69,8 @@ export interface IExamRepository {
   getSchedulesByExam(examId: string): Promise<ExamSchedule[]>;
   saveSchedule(schedule: ExamSchedule): Promise<void>;
   deleteSchedule(id: string): Promise<void>;
+  /** Drops the cached schedule list so the next read refetches. */
+  clearScheduleCache(): void;
 
   // Runtime operations
   getRuntimeByScheduleId(scheduleId: string): Promise<ExamSessionRuntime | null>;
@@ -100,6 +103,23 @@ export interface IExamRepository {
 
 
 export class BackendExamRepository implements IExamRepository {
+  private static readonly ALL_SCHEDULES_CACHE_KEY = '__all_schedules__';
+
+  /**
+   * Version payloads are append-only (saveVersion is unsupported), so a
+   * bounded TTL cache is safe and dedupes the same draft being fetched by
+   * the builder, review, and publish-readiness paths within one flow.
+   */
+  private readonly versionCache = createTtlLruCache<string, ExamVersion | null>({
+    maxEntries: 50,
+    ttlMs: 30 * 60 * 1000,
+  });
+
+  private readonly schedulesCache = createTtlLruCache<string, ExamSchedule[]>({
+    maxEntries: 1,
+    ttlMs: 60 * 1000,
+  });
+
   async getAllExamsWithLegacyMigration(): Promise<ExamEntity[]> {
     return this.getAllExams();
   }
@@ -148,11 +168,19 @@ export class BackendExamRepository implements IExamRepository {
   }
 
   async getVersionById(id: string): Promise<ExamVersion | null> {
+    const cached = this.versionCache.get(id);
+    if (cached !== undefined) {
+      return cached;
+    }
+
     try {
       const version = await backendGet<any>(`/v1/versions/${id}`);
-      return mapBackendExamVersion(version);
+      const mapped = mapBackendExamVersion(version);
+      this.versionCache.set(id, mapped);
+      return mapped;
     } catch (error) {
       if (isBackendNotFound(error)) {
+        this.versionCache.set(id, null);
         return null;
       }
 
@@ -200,8 +228,15 @@ export class BackendExamRepository implements IExamRepository {
   }
 
   async getAllSchedules(): Promise<ExamSchedule[]> {
+    const cached = this.schedulesCache.get(BackendExamRepository.ALL_SCHEDULES_CACHE_KEY);
+    if (cached !== undefined) {
+      return cached;
+    }
+
     const schedules = await backendGet<any[]>('/v1/schedules');
-    return schedules.map(mapBackendSchedule);
+    const mapped = schedules.map(mapBackendSchedule);
+    this.schedulesCache.set(BackendExamRepository.ALL_SCHEDULES_CACHE_KEY, mapped);
+    return mapped;
   }
 
   async getSchedulesByExam(examId: string): Promise<ExamSchedule[]> {
@@ -214,18 +249,24 @@ export class BackendExamRepository implements IExamRepository {
 
     if (revision === undefined) {
       await backendPost('/v1/schedules', buildCreateSchedulePayload(schedule));
-      return;
+    } else {
+      await backendPatch(
+        `/v1/schedules/${schedule.id}`,
+        buildUpdateSchedulePayload(schedule, revision),
+      );
     }
 
-    await backendPatch(
-      `/v1/schedules/${schedule.id}`,
-      buildUpdateSchedulePayload(schedule, revision),
-    );
+    this.schedulesCache.delete(BackendExamRepository.ALL_SCHEDULES_CACHE_KEY);
   }
 
   async deleteSchedule(id: string): Promise<void> {
     await backendDelete(`/v1/schedules/${id}`);
     clearScheduleRevision(id);
+    this.schedulesCache.delete(BackendExamRepository.ALL_SCHEDULES_CACHE_KEY);
+  }
+
+  clearScheduleCache(): void {
+    this.schedulesCache.delete(BackendExamRepository.ALL_SCHEDULES_CACHE_KEY);
   }
 
   async getRuntimeByScheduleId(scheduleId: string): Promise<ExamSessionRuntime | null> {

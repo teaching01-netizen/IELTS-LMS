@@ -8,7 +8,7 @@ import { StandardsTab } from '../components/StandardsTab';
 import { TimingTab } from '../components/TimingTab';
 import type { ConfigTab } from '../components/ExamConfigTabs';
 import { useConfigRouteController } from '../hooks/useConfigRouteController';
-import { LoadingSurface } from '@components/ui';
+import { ErrorSurface, LoadingSurface } from '@components/ui';
 
 export function ExamConfigRoute() {
   const { examId } = useParams<{ examId: string }>();
@@ -21,9 +21,14 @@ export function ExamConfigRoute() {
 
   if (controller.error) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-red-600">Error: {controller.error}</div>
-      </div>
+      <ErrorSurface
+        title="Configuration load failed"
+        description={controller.error}
+        actionLabel="Retry"
+        onAction={() => {
+          void controller.reload();
+        }}
+      />
     );
   }
 
@@ -92,16 +97,18 @@ export function ExamConfigRoute() {
             <div className="flex gap-3">
               <button
                 onClick={controller.handleSaveConfig}
-                className="px-5 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-all duration-200"
+                disabled={controller.isSaving}
+                className="px-5 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Saves your current work. You can continue editing."
               >
-                Save Draft
+                {controller.isSaving ? 'Saving…' : 'Save Draft'}
               </button>
               <button
                 onClick={() => {
                   void controller.handleNavigateToBuilder();
                 }}
-                className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md"
+                disabled={controller.isSaving}
+                className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Proceed to the builder phase to add exam content."
               >
                 Start Building →

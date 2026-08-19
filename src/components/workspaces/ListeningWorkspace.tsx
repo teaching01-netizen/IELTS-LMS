@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ExamState, ListeningPart, QuestionBlock } from '../../types';
 import { QuestionBuilderPane } from '../QuestionBuilderPane';
 import { Play, Square, Rewind, FastForward, Volume2, MapPin, Plus, Trash2, Link as LinkIcon, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -9,7 +9,7 @@ import { ListeningPartListSidebar } from '../listening/ListeningPartListSidebar'
 
 interface ListeningWorkspaceProps {
   state: ExamState;
-  setState: (state: ExamState) => void;
+  setState: (next: ExamState | ((previous: ExamState) => ExamState)) => void;
 }
 
 export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps) {
@@ -51,6 +51,50 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
   useEffect(() => {
     localStorage.setItem('listening-question-focus-mode', isQuestionFocusMode.toString());
   }, [isQuestionFocusMode]);
+
+  const setStateRef = useRef(setState);
+  useEffect(() => {
+    setStateRef.current = setState;
+  }, [setState]);
+
+  // Recover from a dangling activeListeningPartId (e.g. after a part delete).
+  // This heals state in an effect instead of calling setState during render.
+  useEffect(() => {
+    if (state.listening.parts.length === 0) return;
+    if (state.listening.parts.some((part) => part.id === state.activeListeningPartId)) return;
+
+    const fallbackPartId = state.listening.parts[0]!.id;
+    setStateRef.current((previous) =>
+      previous.activeListeningPartId === fallbackPartId ? previous : { ...previous, activeListeningPartId: fallbackPartId },
+    );
+  }, [state.activeListeningPartId, state.listening.parts]);
+
+  /**
+   * Stable callback for the memoized QuestionBuilderPane. The parent routes pass
+   * an inline arrow that changes identity on every render; without a stable
+   * handle, the pane memo boundary never skips while editing blocks.
+   */
+  const updateBlocks = useCallback(
+    (nextBlocks: React.SetStateAction<QuestionBlock[]>) => {
+      setStateRef.current((previous) => {
+        const previousActivePart = previous.listening.parts.find(
+          (part) => part.id === previous.activeListeningPartId,
+        );
+        if (!previousActivePart) {
+          return previous;
+        }
+
+        const resolvedBlocks =
+          typeof nextBlocks === 'function' ? nextBlocks(previousActivePart.blocks) : nextBlocks;
+
+        const newParts = previous.listening.parts.map((part) =>
+          part.id === previousActivePart.id ? { ...part, blocks: resolvedBlocks } : part,
+        );
+        return { ...previous, listening: { ...previous.listening, parts: newParts } };
+      });
+    },
+    [],
+  );
 
   const activePart = state.listening.parts.find(p => p.id === state.activeListeningPartId);
   const handlePartSelect = (partId: string) => {
@@ -114,10 +158,7 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
       );
     }
 
-    const fallbackPartId = state.listening.parts[0]?.id;
-    if (fallbackPartId) {
-      setState({ ...state, activeListeningPartId: fallbackPartId });
-    }
+    // Dangling activeListeningPartId: the recovery effect above heals it.
     return null;
   }
 
@@ -136,17 +177,6 @@ export function ListeningWorkspace({ state, setState }: ListeningWorkspaceProps)
       startNumber += getBlockQuestionCount(block);
     }
   }
-
-  const updateBlocks: React.Dispatch<React.SetStateAction<QuestionBlock[]>> = (value) => {
-    const currentBlocks =
-      state.listening.parts.find((part) => part.id === activePart.id)?.blocks ?? [];
-    const nextBlocks = typeof value === 'function' ? value(currentBlocks) : value;
-
-    const newParts = state.listening.parts.map(p => 
-      p.id === activePart.id ? { ...p, blocks: nextBlocks } : p
-    );
-    setState({ ...state, listening: { ...state.listening, parts: newParts } });
-  };
 
   const updatePart = (updates: Partial<ListeningPart>) => {
     const newParts = state.listening.parts.map(p => 

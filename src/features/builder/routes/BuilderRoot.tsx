@@ -10,10 +10,10 @@ import { BandScoreMatrix } from '@components/scoring/BandScoreMatrix';
 import { GradingWorkspace } from '@components/scoring/GradingWorkspace';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { useBuilderRouteController } from '@builder/hooks/useBuilderRouteController';
+import { useBuilderAutosave } from '@builder/hooks/useBuilderAutosave';
 import { useUndoRedo } from '../../../hooks/useUndoRedo';
 import { useKeyboardShortcuts } from '../../../hooks/useKeyboardShortcuts';
 import type { ExamState, GradeHistoryEntry } from '../../../types';
-import { createLatestOnlyAsyncRunner, type LatestOnlyAsyncRunner } from '../../../utils/latestOnlyAsync';
 import {
   DEFAULT_LISTENING_BAND_TABLE,
   DEFAULT_READING_ACADEMIC_BAND_TABLE,
@@ -177,7 +177,7 @@ export function BuilderRoot() {
     handleUpdateExamContent,
     reload,
   } = useBuilderRouteController(examId);
-  const history = useUndoRedo<ExamState | null>(null, { initialLabel: 'Loaded exam' });
+  const history = useUndoRedo<ExamState | null>(null, { initialLabel: 'Loaded exam', limit: 50 });
   const [initializedExamId, setInitializedExamId] = useState<string | undefined>(undefined);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isScoringOpen, setIsScoringOpen] = useState(false);
@@ -186,17 +186,8 @@ export function BuilderRoot() {
     return saved === 'true';
   });
   const [toasts, setToasts] = useState<GlobalToastItem[]>([]);
-  const [saveStatus, setSaveStatus] = useState<'unsaved' | 'saving' | 'saved' | 'error'>('saved');
   const currentStateRef = useRef<ExamState | null>(null);
-  const debouncedAutosaveRef = useRef<number | null>(null);
-  const pendingAutosaveStateRef = useRef<ExamState | null>(null);
-  const pendingAutosaveRequestIdRef = useRef<number | null>(null);
-  const latestSaveRequestIdRef = useRef(0);
   const handleUpdateExamContentRef = useRef(handleUpdateExamContent);
-  const pushToastRef = useRef<(toast: Omit<GlobalToastItem, 'id'>) => void>(() => {});
-  const saveRunnerRef = useRef<LatestOnlyAsyncRunner<{ state: ExamState; requestId: number }> | null>(
-    null,
-  );
 
   useEffect(() => {
     if (examId !== initializedExamId) {
@@ -329,62 +320,50 @@ export function BuilderRoot() {
     setToasts((current) => current.filter((toast) => toast.id !== id));
   };
 
-  useEffect(() => {
-    pushToastRef.current = pushToast;
-  }, [pushToast]);
+  const {
+    status: saveStatus,
+    scheduleAutosave,
+    flushNow: flushAutosaveNow,
+    retry: retrySave,
+  } = useBuilderAutosave({
+    save: (nextState) => handleUpdateExamContentRef.current(nextState),
+    onError: (error) => {
+      pushToast({
+        variant: 'error',
+        title: 'Save failed',
+        message: error instanceof Error ? error.message : 'Latest change could not be saved.',
+        actionLabel: 'Retry',
+        onAction: () => {
+          const latest = currentStateRef.current;
+          if (latest) {
+            retrySave(latest);
+          }
+        },
+      });
+    },
+  });
 
-  if (!saveRunnerRef.current) {
-    saveRunnerRef.current = createLatestOnlyAsyncRunner(async ({ state: nextState, requestId }) => {
-      setSaveStatus('saving');
-      try {
-        await handleUpdateExamContentRef.current(nextState);
-        if (requestId === latestSaveRequestIdRef.current) {
-          setSaveStatus('saved');
-        }
-      } catch (error) {
-        if (requestId === latestSaveRequestIdRef.current) {
-          setSaveStatus('error');
-          pushToastRef.current({
-            variant: 'error',
-            title: 'Save failed',
-            message: error instanceof Error ? error.message : 'Latest change could not be saved.',
-            actionLabel: 'Retry',
-            onAction: () => {
-              const latest = currentStateRef.current;
-              if (latest) {
-                const retryRequestId = ++latestSaveRequestIdRef.current;
-                saveRunnerRef.current?.enqueue({ state: latest, requestId: retryRequestId });
-              }
-            },
-          });
-        }
-        throw error;
-      }
-    });
-  }
-
-  const scheduleAutosave = (nextState: ExamState) => {
-    const requestId = ++latestSaveRequestIdRef.current;
-    pendingAutosaveStateRef.current = nextState;
-    pendingAutosaveRequestIdRef.current = requestId;
-    setSaveStatus('unsaved');
-
-    if (debouncedAutosaveRef.current) {
-      window.clearTimeout(debouncedAutosaveRef.current);
+  const saveDraftNow = async () => {
+    const nextState = currentStateRef.current;
+    if (!nextState) {
+      return false;
     }
 
-    debouncedAutosaveRef.current = window.setTimeout(() => {
-      const pending = pendingAutosaveStateRef.current;
-      const pendingRequestId = pendingAutosaveRequestIdRef.current;
-      if (!pending || pendingRequestId === null) {
-        return;
-      }
+    const result = await flushAutosaveNow(nextState);
 
-      saveRunnerRef.current?.enqueue({ state: pending, requestId: pendingRequestId });
-      pendingAutosaveStateRef.current = null;
-      pendingAutosaveRequestIdRef.current = null;
-      debouncedAutosaveRef.current = null;
-    }, 350);
+    if (!result.ok) {
+      return false;
+    }
+
+    if (result.isLatest) {
+      pushToast({
+        variant: 'success',
+        title: 'Saved',
+        message: 'All changes saved.',
+        timestamp: nowLabel(),
+      });
+    }
+    return true;
   };
 
   const updateBuilderState = (
@@ -433,40 +412,6 @@ export function BuilderRoot() {
       message: history.redoStackLabels[0] ?? 'Restored change',
       timestamp: nowLabel(),
     });
-  };
-
-  const saveDraftNow = async () => {
-    const nextState = currentStateRef.current;
-    if (!nextState) {
-      return false;
-    }
-
-    const requestId = ++latestSaveRequestIdRef.current;
-
-    if (debouncedAutosaveRef.current) {
-      window.clearTimeout(debouncedAutosaveRef.current);
-      debouncedAutosaveRef.current = null;
-    }
-
-    pendingAutosaveStateRef.current = null;
-    pendingAutosaveRequestIdRef.current = null;
-
-    saveRunnerRef.current?.enqueue({ state: nextState, requestId });
-    await saveRunnerRef.current?.idle();
-
-    if (saveRunnerRef.current?.lastError) {
-      return false;
-    }
-
-    if (requestId === latestSaveRequestIdRef.current) {
-      pushToast({
-        variant: 'success',
-        title: 'Saved',
-        message: 'All changes saved.',
-        timestamp: nowLabel(),
-      });
-    }
-    return true;
   };
 
   const handleOpenPreview = () => {

@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { ExamState, Passage, PassageMetadata } from '../types';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { ExamState, Passage, PassageMetadata, QuestionBlock } from '../types';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { StimulusPane } from './StimulusPane';
 import { QuestionBuilderPane } from './QuestionBuilderPane';
@@ -11,32 +11,7 @@ import { PassageListSidebar } from './passage/PassageListSidebar';
 import { PassageMetadataEditor } from './passage/PassageMetadataEditor';
 import { passageLibraryService } from '../features/content-library/infrastructure/libraryGateway';
 import { createId } from '../utils/idUtils';
-import { TIMING } from '../constants/uiConstants';
 import { countWords } from '../utils/builderEnhancements';
-
-function WorkspaceSkeleton({ progress }: { progress: number }) {
-  return (
-    <div className="flex-1 bg-gray-50 p-8 animate-in fade-in duration-200">
-      <div className="mb-6">
-        <span className="sr-only">Loading modules… {progress}%</span>
-        <div className="h-3 w-48 rounded bg-gray-200 animate-pulse mb-3" aria-hidden="true" />
-        <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
-          <div className="h-full rounded-full bg-blue-600 transition-all duration-200" style={{ width: `${progress}%` }} />
-        </div>
-      </div>
-      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="space-y-4">
-          <div className="h-12 rounded-2xl bg-white border border-gray-100" />
-          <div className="h-[520px] rounded-[28px] bg-white border border-gray-100" />
-        </div>
-        <div className="space-y-4">
-          <div className="h-12 rounded-2xl bg-white border border-gray-100" />
-          <div className="h-[520px] rounded-[28px] bg-white border border-gray-100" />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function Workspace({
   state,
@@ -45,8 +20,6 @@ export function Workspace({
   state: ExamState;
   setState: (next: ExamState | ((previous: ExamState) => ExamState)) => void | Promise<void>;
 }) {
-  const [progress, setProgress] = useState(34);
-  const [isTransitioning, setIsTransitioning] = useState(true);
   const [editingPassageId, setEditingPassageId] = useState<string | null>(null);
   const [isPassageListCollapsed, setIsPassageListCollapsed] = useState(() => {
     const saved = localStorage.getItem('workspace-passage-list-collapsed');
@@ -65,20 +38,41 @@ export function Workspace({
     return saved === 'true';
   });
 
+  const setStateRef = useRef(setState);
   useEffect(() => {
-    setIsTransitioning(true);
-    setProgress(TIMING.PROGRESS_INITIAL_VALUE);
-    const progressTimer = window.setTimeout(() => setProgress(TIMING.PROGRESS_SECONDARY_VALUE), TIMING.PROGRESS_INITIAL_DELAY_MS);
-    const doneTimer = window.setTimeout(() => {
-      setProgress(100);
-      setIsTransitioning(false);
-    }, TIMING.PROGRESS_INITIAL_DELAY_MS + TIMING.PROGRESS_SECONDARY_DELAY_MS);
+    setStateRef.current = setState;
+  }, [setState]);
 
-    return () => {
-      window.clearTimeout(progressTimer);
-      window.clearTimeout(doneTimer);
-    };
-  }, [state.activeModule]);
+  /**
+   * Stable callback for memoized children (StimulusPane, QuestionBuilderPane,
+   * workspaces). The parent routes pass an inline arrow that changes identity
+   * on every render; without a stable handle, memo boundaries never skip.
+   */
+  const stableSetState = useCallback(
+    (next: ExamState | ((previous: ExamState) => ExamState)) => {
+      void setStateRef.current(next);
+    },
+    [],
+  );
+
+  const updateBlocks = useCallback((nextBlocks: React.SetStateAction<QuestionBlock[]>) => {
+    void setStateRef.current((previous) => {
+      const previousActivePassage = previous.reading.passages.find(
+        (passage) => passage.id === previous.activePassageId,
+      );
+      if (!previousActivePassage) {
+        return previous;
+      }
+
+      const resolvedBlocks =
+        typeof nextBlocks === 'function' ? nextBlocks(previousActivePassage.blocks) : nextBlocks;
+
+      const newPassages = previous.reading.passages.map((passage) =>
+        passage.id === previousActivePassage.id ? { ...passage, blocks: resolvedBlocks } : passage,
+      );
+      return { ...previous, reading: { ...previous.reading, passages: newPassages } };
+    });
+  }, []);
 
   useEffect(() => {
     // Consolidate all localStorage persistence into a single effect
@@ -89,6 +83,18 @@ export function Workspace({
   }, [isPassageListCollapsed, isQuestionBuilderCollapsed, isStimulusPaneCollapsed, isQuestionFocusMode]);
 
   const activePassage = state.reading.passages.find((passage) => passage.id === state.activePassageId);
+
+  // Recover from a dangling activePassageId (e.g. after a passage delete).
+  // This heals state in an effect instead of calling setState during render.
+  useEffect(() => {
+    if (state.reading.passages.length === 0) return;
+    if (state.reading.passages.some((passage) => passage.id === state.activePassageId)) return;
+
+    const fallbackPassageId = state.reading.passages[0]!.id;
+    setStateRef.current((previous) =>
+      previous.activePassageId === fallbackPassageId ? previous : { ...previous, activePassageId: fallbackPassageId },
+    );
+  }, [state.activePassageId, state.reading.passages]);
 
   const startNumber = useMemo(() => {
     if (!activePassage) return 1;
@@ -107,22 +113,18 @@ export function Workspace({
     return num;
   }, [state.reading.passages, activePassage]);
 
-  if (isTransitioning) {
-    return <WorkspaceSkeleton progress={progress} />;
-  }
-
   if (state.activeModule === 'listening') {
-    return <ListeningWorkspace state={state} setState={(next) => void setState(next)} />;
+    return <ListeningWorkspace state={state} setState={stableSetState} />;
   }
   if (state.activeModule === 'writing') {
-    return <WritingWorkspace state={state} setState={(next) => void setState(next)} />;
+    return <WritingWorkspace state={state} setState={stableSetState} />;
   }
   if (state.activeModule === 'speaking') {
-    return <SpeakingWorkspace state={state} setState={(next) => void setState(next)} />;
+    return <SpeakingWorkspace state={state} setState={stableSetState} />;
   }
 
   const handlePassageAdd = () => {
-    void setState((previous) => {
+    void stableSetState((previous) => {
       const newPassage: Passage = {
         id: createId('passage'),
         title: `Passage ${previous.reading.passages.length + 1}`,
@@ -161,40 +163,13 @@ export function Workspace({
       );
     }
 
-    const fallbackPassageId = state.reading.passages[0]?.id;
-    if (fallbackPassageId) {
-      void setState((previous) =>
-        previous.activePassageId === fallbackPassageId
-          ? previous
-          : { ...previous, activePassageId: fallbackPassageId },
-      );
-      return <WorkspaceSkeleton progress={100} />;
-    }
-
+    // The recovery effect above re-selects the first passage; nothing to
+    // render until it commits.
     return null;
   }
 
-  const updateBlocks = (nextBlocks: React.SetStateAction<typeof activePassage.blocks>) => {
-    void setState((previous) => {
-      const previousActivePassage = previous.reading.passages.find(
-        (passage) => passage.id === previous.activePassageId,
-      );
-      if (!previousActivePassage) {
-        return previous;
-      }
-
-      const resolvedBlocks =
-        typeof nextBlocks === 'function' ? nextBlocks(previousActivePassage.blocks) : nextBlocks;
-
-      const newPassages = previous.reading.passages.map((passage) =>
-        passage.id === previousActivePassage.id ? { ...passage, blocks: resolvedBlocks } : passage,
-      );
-      return { ...previous, reading: { ...previous.reading, passages: newPassages } };
-    });
-  };
-
   const handlePassageSelect = (passageId: string) => {
-    void setState((previous) =>
+    void stableSetState((previous) =>
       previous.activePassageId === passageId ? previous : { ...previous, activePassageId: passageId },
     );
   };
@@ -206,7 +181,7 @@ export function Workspace({
       setEditingPassageId(null);
     }
 
-    void setState((previous) => {
+    void stableSetState((previous) => {
       const newPassages = previous.reading.passages.filter((p) => p.id !== passageId);
       if (newPassages.length === previous.reading.passages.length) {
         return previous;
@@ -224,7 +199,7 @@ export function Workspace({
   };
 
   const handlePassageReorder = (fromIndex: number, toIndex: number) => {
-    void setState((previous) => {
+    void stableSetState((previous) => {
       const newPassages = [...previous.reading.passages];
       const [removed] = newPassages.splice(fromIndex, 1);
       if (!removed) {
@@ -244,7 +219,7 @@ export function Workspace({
     const passageId = editingPassageId;
     if (!passageId) return;
 
-    void setState((previous) => {
+    void stableSetState((previous) => {
       const passage = previous.reading.passages.find((p) => p.id === passageId);
       if (!passage) {
         return previous;
@@ -353,7 +328,7 @@ export function Workspace({
 
       {/* Stimulus Pane (Center) */}
       <div className={`flex-shrink-0 transition-all duration-300 ease-in-out ${isQuestionFocusMode || isStimulusPaneCollapsed ? 'w-0 overflow-hidden' : 'flex-1 min-w-0'}`}>
-        <StimulusPane passage={activePassage} state={state} setState={setState} />
+        <StimulusPane passage={activePassage} state={state} setState={stableSetState} />
       </div>
 
       {!isQuestionFocusMode && (

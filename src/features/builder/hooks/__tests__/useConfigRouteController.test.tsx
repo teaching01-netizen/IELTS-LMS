@@ -256,4 +256,120 @@ describe('useConfigRouteController', () => {
 
     confirmSpy.mockRestore();
   });
+
+  it('reuses the loaded exam and version when saving config', async () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+    const currentState = createInitialExamState('Mock IELTS Exam', 'Academic');
+    currentState.config = config;
+
+    mockGetExamById.mockResolvedValue({
+      id: 'exam-1',
+      currentDraftVersionId: 'ver-1',
+    });
+    mockGetVersionById.mockResolvedValue({
+      id: 'ver-1',
+      configSnapshot: config,
+      contentSnapshot: currentState,
+    });
+    mockSaveDraft.mockResolvedValue({ success: true });
+
+    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.handleUpdateConfig({
+        ...config,
+        general: { ...config.general, title: 'Updated Exam Title' },
+      });
+      await result.current.handleSaveConfig();
+    });
+
+    // Initial load + post-save reload; no redundant pre-save refetch.
+    expect(mockGetExamById).toHaveBeenCalledTimes(2);
+    expect(mockGetVersionById).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores overlapping save clicks while a save is in flight', async () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+    const currentState = createInitialExamState('Mock IELTS Exam', 'Academic');
+    currentState.config = config;
+
+    mockGetExamById.mockResolvedValue({
+      id: 'exam-1',
+      currentDraftVersionId: 'ver-1',
+    });
+    mockGetVersionById.mockResolvedValue({
+      id: 'ver-1',
+      configSnapshot: config,
+      contentSnapshot: currentState,
+    });
+
+    let resolveSave!: (value: { success: boolean }) => void;
+    mockSaveDraft.mockImplementation(
+      () => new Promise<{ success: boolean }>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+
+    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      const first = result.current.handleSaveConfig();
+      const second = result.current.handleSaveConfig();
+      resolveSave({ success: true });
+      await Promise.all([first, second]);
+    });
+
+    expect(mockSaveDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('tracks isSaving while a draft save is in flight', async () => {
+    const config = createDefaultConfig('Academic', 'Academic');
+    const currentState = createInitialExamState('Mock IELTS Exam', 'Academic');
+    currentState.config = config;
+
+    mockGetExamById.mockResolvedValue({
+      id: 'exam-1',
+      currentDraftVersionId: 'ver-1',
+    });
+    mockGetVersionById.mockResolvedValue({
+      id: 'ver-1',
+      configSnapshot: config,
+      contentSnapshot: currentState,
+    });
+
+    let resolveSave!: (value: { success: boolean }) => void;
+    mockSaveDraft.mockImplementation(
+      () => new Promise<{ success: boolean }>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+
+    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    let savePromise: Promise<void>;
+    act(() => {
+      savePromise = result.current.handleSaveConfig();
+    });
+
+    expect(result.current.isSaving).toBe(true);
+
+    await act(async () => {
+      resolveSave({ success: true });
+      await savePromise;
+    });
+
+    expect(result.current.isSaving).toBe(false);
+  });
 });

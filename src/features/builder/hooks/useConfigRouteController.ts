@@ -1,22 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { examAuthoringFacade } from '../../exam-authoring/api/examAuthoringFacade';
 import type { ExamConfig } from '../../../types';
-import type { ExamEntity } from '../../../types/domain';
+import type { ExamEntity, ExamVersion } from '../../../types/domain';
 import { syncConfigWithStandards } from '../../../constants/examDefaults';
-
-export interface ConfigValidationResult {
-  isValid: boolean;
-  errors: Array<{ field: string; message: string }>;
-  warnings: Array<{ field: string; message: string }>;
-}
 
 export interface ConfigRouteController {
   error: string | null;
   exam: ExamEntity | undefined;
   isLoading: boolean;
+  isSaving: boolean;
   config: ExamConfig | undefined;
-  validation: ConfigValidationResult;
   handleUpdateConfig: (config: ExamConfig) => Promise<void>;
   handleSaveConfig: () => Promise<boolean>;
   handleNavigateToBuilder: () => Promise<void>;
@@ -34,12 +28,10 @@ export function useConfigRouteController(
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
-
-  const validation: ConfigValidationResult = {
-    isValid: true,
-    errors: [],
-    warnings: [],
-  };
+  const [isSaving, setIsSaving] = useState(false);
+  const examRef = useRef<ExamEntity | undefined>(undefined);
+  const versionRef = useRef<ExamVersion | null>(null);
+  const isSavingRef = useRef(false);
 
   const loadExam = useCallback(async () => {
     if (!examId) {
@@ -58,6 +50,7 @@ export function useConfigRouteController(
       }
 
       setExam(entity);
+      examRef.current = entity;
 
       const versionId = entity.currentDraftVersionId ?? entity.currentPublishedVersionId;
       if (!versionId) {
@@ -68,6 +61,7 @@ export function useConfigRouteController(
 
       const currentVersion = await examAuthoringFacade.repository.getVersionById(versionId);
       if (currentVersion) {
+        versionRef.current = currentVersion;
         setConfig(currentVersion.configSnapshot);
         setIsDirty(false);
       } else {
@@ -102,34 +96,39 @@ export function useConfigRouteController(
       return false;
     }
 
-    const entity = await examAuthoringFacade.repository.getExamById(examId);
-    const versionId = entity?.currentDraftVersionId ?? entity?.currentPublishedVersionId;
-    if (!versionId) {
+    if (isSavingRef.current) {
+      return false;
+    }
+
+    const entity = examRef.current;
+    const version = versionRef.current;
+    if (!entity || !version) {
       setError('Current draft version not found');
       return false;
     }
 
-    const version = await examAuthoringFacade.repository.getVersionById(versionId);
-    if (!version) {
-      setError('Current draft version not found');
-      return false;
+    isSavingRef.current = true;
+    setIsSaving(true);
+    try {
+      const nextContent = examAuthoringFacade.hydrateExamState({
+        ...version.contentSnapshot,
+        config,
+      });
+
+      const result = await examAuthoringFacade.lifecycle.saveDraft(examId, nextContent, 'System');
+      if (!result.success) {
+        setError(result.error ?? 'Failed to save draft');
+        return false;
+      }
+
+      setIsDirty(false);
+      await loadExam();
+      return true;
+    } finally {
+      isSavingRef.current = false;
+      setIsSaving(false);
     }
-
-    const nextContent = examAuthoringFacade.hydrateExamState({
-      ...version.contentSnapshot,
-      config,
-    });
-
-    const result = await examAuthoringFacade.lifecycle.saveDraft(examId, nextContent, 'System');
-    if (!result.success) {
-      setError(result.error ?? 'Failed to save draft');
-      return false;
-    }
-
-    setIsDirty(false);
-    await loadExam();
-    return true;
-  }, [examId, config, loadExam]);
+  }, [config, examId, loadExam]);
 
   const handleNavigateToBuilder = useCallback(async () => {
     if (!examId) {
@@ -153,8 +152,8 @@ export function useConfigRouteController(
     error,
     exam,
     isLoading,
+    isSaving,
     config,
-    validation,
     handleUpdateConfig,
     handleSaveConfig,
     handleNavigateToBuilder,

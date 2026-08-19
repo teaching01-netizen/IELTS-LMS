@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { QuestionBlock, QuestionType, TFNGBlock as TFNGBlockType, ClozeBlock as ClozeBlockType, MatchingBlock as MatchingBlockType, MapBlock as MapBlockType, MultiMCQBlock as MultiMCQBlockType, SingleMCQBlock as SingleMCQBlockType, ShortAnswerBlock as ShortAnswerBlockType, SentenceCompletionBlock as SentenceCompletionBlockType, DiagramLabelingBlock as DiagramLabelingBlockType, FlowChartBlock as FlowChartBlockType, TableCompletionBlock as TableCompletionBlockType, NoteCompletionBlock as NoteCompletionBlockType, ClassificationBlock as ClassificationBlockType, MatchingFeaturesBlock as MatchingFeaturesBlockType, QuestionBankItem } from '../types';
 import { Plus, X, Search, Library } from 'lucide-react';
 import { TFNGBlock } from './blocks/TFNGBlock';
@@ -29,6 +29,25 @@ interface BlockWithNumbers {
 }
 
 type UpdateBlocks = React.Dispatch<React.SetStateAction<QuestionBlock[]>>;
+
+const NO_BLOCK_ERRORS: Array<{ field: string; message: string }> = [];
+
+// Memoized block editors: sibling blocks skip re-renders when another block
+// changes, as long as the pane passes stable callbacks and error arrays.
+const MemoTFNGBlock = React.memo(TFNGBlock);
+const MemoClozeBlock = React.memo(ClozeBlock);
+const MemoMatchingBlock = React.memo(MatchingBlock);
+const MemoMapLabelingBlock = React.memo(MapLabelingBlock);
+const MemoMultiSelectMCQBlock = React.memo(MultiSelectMCQBlock);
+const MemoSingleMCQBlock = React.memo(SingleMCQBlock);
+const MemoShortAnswerBlock = React.memo(ShortAnswerBlock);
+const MemoSentenceCompletionBlock = React.memo(SentenceCompletionBlock);
+const MemoDiagramLabelingBlock = React.memo(DiagramLabelingBlock);
+const MemoFlowChartBlock = React.memo(FlowChartBlock);
+const MemoTableCompletionBlock = React.memo(TableCompletionBlock);
+const MemoNoteCompletionBlock = React.memo(NoteCompletionBlock);
+const MemoClassificationBlock = React.memo(ClassificationBlock);
+const MemoMatchingFeaturesBlock = React.memo(MatchingFeaturesBlock);
 
 const INLINE_ADD_SUPPORTED_BLOCK_TYPES = new Set<QuestionType>([
   'TFNG',
@@ -67,7 +86,7 @@ function clearSubAnswerData(block: QuestionBlock): QuestionBlock {
   return next as unknown as QuestionBlock;
 }
 
-export function QuestionBuilderPane({
+export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
   blocks,
   title,
   updateBlocks,
@@ -94,7 +113,7 @@ export function QuestionBuilderPane({
   
   const getBlockErrors = (blockId: string) => {
     const blockError = errors.find(e => e.blockId === blockId);
-    return blockError?.errors || [];
+    return blockError?.errors || NO_BLOCK_ERRORS;
   };
 
   const blocksWithNumbers: BlockWithNumbers[] = [];
@@ -109,38 +128,45 @@ export function QuestionBuilderPane({
     currentNumber += count;
   }
 
-  const updateBlock = (updatedBlock: QuestionBlock) => {
-    updateBlocks((currentBlocks) =>
-      currentBlocks.map((block) => (block.id === updatedBlock.id ? updatedBlock : block)),
-    );
-  };
+  const updateBlock = useCallback(
+    (updatedBlock: QuestionBlock) => {
+      updateBlocks((currentBlocks) =>
+        currentBlocks.map((block) => (block.id === updatedBlock.id ? updatedBlock : block)),
+      );
+    },
+    [updateBlocks],
+  );
 
-  const deleteBlock = (blockId: string) => {
-    if (selectedBlockId === blockId) {
-      setSelectedBlockId(null);
-    }
-    updateBlocks((currentBlocks) => currentBlocks.filter((block) => block.id !== blockId));
-  };
+  const deleteBlock = useCallback(
+    (blockId: string) => {
+      setSelectedBlockId((current) => (current === blockId ? null : current));
+      updateBlocks((currentBlocks) => currentBlocks.filter((block) => block.id !== blockId));
+    },
+    [updateBlocks],
+  );
 
-  const moveBlock = (blockId: string, direction: 'up' | 'down') => {
-    updateBlocks((currentBlocks) => {
-      const index = currentBlocks.findIndex((block) => block.id === blockId);
-      if (index < 0) return currentBlocks;
-      if (direction === 'up' && index === 0) return currentBlocks;
-      if (direction === 'down' && index === currentBlocks.length - 1) return currentBlocks;
+  const moveBlock = useCallback(
+    (blockId: string, direction: 'up' | 'down') => {
+      updateBlocks((currentBlocks) => {
+        const index = currentBlocks.findIndex((block) => block.id === blockId);
+        if (index < 0) return currentBlocks;
+        if (direction === 'up' && index === 0) return currentBlocks;
+        if (direction === 'down' && index === currentBlocks.length - 1) return currentBlocks;
 
-      const newBlocks = [...currentBlocks];
-      const swapIndex = direction === 'up' ? index - 1 : index + 1;
-      const currentBlock = newBlocks[index];
-      const swapBlock = newBlocks[swapIndex];
-      if (!currentBlock || !swapBlock) {
-        return currentBlocks;
-      }
-      newBlocks[index] = swapBlock;
-      newBlocks[swapIndex] = currentBlock;
-      return newBlocks;
-    });
-  };
+        const newBlocks = [...currentBlocks];
+        const swapIndex = direction === 'up' ? index - 1 : index + 1;
+        const currentBlock = newBlocks[index];
+        const swapBlock = newBlocks[swapIndex];
+        if (!currentBlock || !swapBlock) {
+          return currentBlocks;
+        }
+        newBlocks[index] = swapBlock;
+        newBlocks[swapIndex] = currentBlock;
+        return newBlocks;
+      });
+    },
+    [updateBlocks],
+  );
 
   const handleSelectQuestion = (item: QuestionBankItem) => {
     setSelectedQuestionItem(item);
@@ -476,7 +502,7 @@ export function QuestionBuilderPane({
     switch (block.type) {
       case 'TFNG':
         blockContent = (
-          <TFNGBlock
+          <MemoTFNGBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -490,7 +516,7 @@ export function QuestionBuilderPane({
         break;
       case 'CLOZE':
         blockContent = (
-          <ClozeBlock
+          <MemoClozeBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -504,7 +530,7 @@ export function QuestionBuilderPane({
         break;
       case 'MATCHING':
         blockContent = (
-          <MatchingBlock
+          <MemoMatchingBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -518,7 +544,7 @@ export function QuestionBuilderPane({
         break;
       case 'MAP':
         blockContent = (
-          <MapLabelingBlock
+          <MemoMapLabelingBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -532,7 +558,7 @@ export function QuestionBuilderPane({
         break;
       case 'MULTI_MCQ':
         blockContent = (
-          <MultiSelectMCQBlock
+          <MemoMultiSelectMCQBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -546,7 +572,7 @@ export function QuestionBuilderPane({
         break;
       case 'SINGLE_MCQ':
         blockContent = (
-          <SingleMCQBlock
+          <MemoSingleMCQBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -560,7 +586,7 @@ export function QuestionBuilderPane({
         break;
       case 'SHORT_ANSWER':
         blockContent = (
-          <ShortAnswerBlock
+          <MemoShortAnswerBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -574,7 +600,7 @@ export function QuestionBuilderPane({
         break;
       case 'SENTENCE_COMPLETION':
         blockContent = (
-          <SentenceCompletionBlock
+          <MemoSentenceCompletionBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -588,7 +614,7 @@ export function QuestionBuilderPane({
         break;
       case 'DIAGRAM_LABELING':
         blockContent = (
-          <DiagramLabelingBlock
+          <MemoDiagramLabelingBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -602,7 +628,7 @@ export function QuestionBuilderPane({
         break;
       case 'FLOW_CHART':
         blockContent = (
-          <FlowChartBlock
+          <MemoFlowChartBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -616,7 +642,7 @@ export function QuestionBuilderPane({
         break;
       case 'TABLE_COMPLETION':
         blockContent = (
-          <TableCompletionBlock
+          <MemoTableCompletionBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -630,7 +656,7 @@ export function QuestionBuilderPane({
         break;
       case 'NOTE_COMPLETION':
         blockContent = (
-          <NoteCompletionBlock
+          <MemoNoteCompletionBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -644,7 +670,7 @@ export function QuestionBuilderPane({
         break;
       case 'CLASSIFICATION':
         blockContent = (
-          <ClassificationBlock
+          <MemoClassificationBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -658,7 +684,7 @@ export function QuestionBuilderPane({
         break;
       case 'MATCHING_FEATURES':
         blockContent = (
-          <MatchingFeaturesBlock
+          <MemoMatchingFeaturesBlock
             key={block.id}
             block={block}
             startNum={startNum}
@@ -831,4 +857,4 @@ export function QuestionBuilderPane({
       )}
     </div>
   );
-}
+});
