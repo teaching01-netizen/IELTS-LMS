@@ -137,7 +137,7 @@ export function createStudentExamStore(seed: StudentExamStoreSeed): StudentExamS
               ...state.attempt,
               flags: {
                 ...state.attempt.flags,
-                [questionId]: !state.attempt.flags[questionId],
+                [questionId]: !(state.attempt.flags[questionId] ?? false),
               },
             },
           }));

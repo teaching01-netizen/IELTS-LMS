@@ -1117,9 +1117,11 @@ export function StudentRuntimeProvider({
   // When runtimeBacked=true, the clock is deadline-derived via RuntimeClockContext and
   // should not invalidate stable consumers. Spread still copies the current values
   // but deps intentionally omit timeRemaining/elapsedTime so a per-second deadline tick
-  // does not recompute stableState. Fallback (!runtimeBacked) reducer tick intentionally
-  // does not use this path for wall-clock; if it ever does, stable will stay stale by design
-  // and clock consumers must read via useStudentRuntimeClock().
+  // does not recompute stableState. NOTE: blocking derives from timeRemaining
+  // (blocking:974), so in fallback (!runtimeBacked) the tick still invalidates
+  // stableState 1 Hz via blocking — isolation only holds for the runtimeBacked path
+  // where timeRemaining is static. If fallback isolation is needed, split blocking
+  // into clock-free vs clock-dependent parts.
   const stableState = useMemo<RuntimeStableState>(
     () => ({
       ...runtimeState,

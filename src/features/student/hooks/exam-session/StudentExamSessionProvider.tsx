@@ -26,7 +26,7 @@ export function StudentExamSessionProvider({
   // live slices (phase/runtime/persistence/blocking) without remount — do NOT duplicate wrapper key.
   // The effect intentionally does not sync identity/navigation/attempt (seed-of-truth at mount).
   useEffect(() => {
-    if (process.env['NODE_ENV'] !== 'production') {
+    if (import.meta.env.DEV) {
       const expected = getStudentExamScopeKey(seed);
       const actual = store.getState().identity.scopeKey;
       if (actual !== expected) {

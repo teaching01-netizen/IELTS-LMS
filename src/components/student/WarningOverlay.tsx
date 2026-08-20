@@ -28,6 +28,7 @@ export function WarningOverlay({
   const [countdown, setCountdown] = useState(30);
   const primaryButtonRef = useRef<HTMLButtonElement | null>(null);
   const onAcknowledgeRef = useRef(onAcknowledge);
+  const hasResetRef = useRef(false);
 
   useEffect(() => {
     onAcknowledgeRef.current = onAcknowledge;
@@ -43,13 +44,21 @@ export function WarningOverlay({
     return () => clearInterval(timer);
   }, [isOpen, showCountdown, severity]);
 
-  // Reset countdown when opened
+  // Reset countdown when opened; guard acknowledge in same tick
   useEffect(() => {
-    if (isOpen) setCountdown(30);
+    if (isOpen) {
+      setCountdown(30);
+      hasResetRef.current = true;
+      const t = window.setTimeout(() => { hasResetRef.current = false; }, 0);
+      return () => window.clearTimeout(t);
+    } else {
+      hasResetRef.current = false;
+      return;
+    }
   }, [isOpen]);
 
   useEffect(() => {
-    if (isOpen && showCountdown && severity !== 'critical' && countdown === 0) {
+    if (isOpen && showCountdown && severity !== 'critical' && countdown === 0 && !hasResetRef.current) {
       onAcknowledgeRef.current();
     }
   }, [isOpen, showCountdown, severity, countdown]);

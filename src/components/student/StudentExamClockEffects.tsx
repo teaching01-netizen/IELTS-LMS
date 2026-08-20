@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { ExamConfig } from '../../types';
+import type { ExamConfig, ModuleType } from '../../types';
 import type { ExamSessionRuntime } from '../../types/domain';
 import { useExamCommands } from '@student/hooks/exam-session/useExamCommands';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
@@ -42,7 +42,7 @@ export function StudentExamClockEffects({
     acceptedThroughSeq: number;
   } | null>(null);
   const lastPhaseRef = useRef<string | null>(null);
-  const lastNavigationRef = useRef<{ module: string; questionId: string | null } | null>(null);
+  const lastNavigationRef = useRef<{ module: ModuleType; questionId: string | null } | null>(null);
   const lastBlockingRef = useRef<{
     active: boolean;
     reason: typeof runtimeState.blocking.reason;
@@ -87,7 +87,7 @@ export function StudentExamClockEffects({
       examSessionCommands.setPhase(runtimeState.phase);
     }
 
-    const nextNav = {
+    const nextNav: { module: ModuleType; questionId: string | null } = {
       module: runtimeState.currentModule,
       questionId: runtimeState.currentQuestionId,
     };
@@ -97,7 +97,7 @@ export function StudentExamClockEffects({
       lastNavigationRef.current.questionId !== nextNav.questionId
     ) {
       lastNavigationRef.current = nextNav;
-      examSessionCommands.setNavigation(nextNav.module as never, nextNav.questionId);
+      examSessionCommands.setNavigation(nextNav.module, nextNav.questionId);
     }
 
     const nextBlocking = {

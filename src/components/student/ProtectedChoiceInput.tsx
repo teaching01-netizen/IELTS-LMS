@@ -22,10 +22,28 @@ export function ProtectedChoiceInput({ type, onLiveCheckedChange, ...inputProps 
   const flushAnswerDurabilityNowRef = useRef(() => attemptControls?.flushAnswerDurabilityNow());
 
   useEffect(() => {
+    flushAnswerDurabilityNowRef.current = () => attemptControls?.flushAnswerDurabilityNow();
+  }, [attemptControls]);
+
+  useEffect(() => {
     onChangeRef.current = userOnChange;
     controlledCheckedRef.current = inputProps.checked;
-    flushAnswerDurabilityNowRef.current = () => attemptControls?.flushAnswerDurabilityNow();
-  }, [attemptControls, inputProps.checked, userOnChange]);
+    // FIX-02: server hydration — discard stale checked rescue state so blur/commit
+    // does not replay pre-disconnect checked over the fresh server value.
+    // Intentionally deps exclude attemptControls to avoid clearing on unrelated
+    // persistence churn.
+    if (deferredRescueTimerRef.current !== null) {
+      window.clearTimeout(deferredRescueTimerRef.current);
+      deferredRescueTimerRef.current = null;
+    }
+    lastRescuedDomCheckedRef.current = null;
+    const el = inputRef.current;
+    if (el) {
+      latestDomCheckedRef.current = el.checked;
+    } else if (typeof inputProps.checked === 'boolean') {
+      latestDomCheckedRef.current = inputProps.checked;
+    }
+  }, [inputProps.checked, userOnChange]);
 
   useEffect(() => {
     const input = inputRef.current;

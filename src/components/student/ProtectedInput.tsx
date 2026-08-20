@@ -43,11 +43,16 @@ export function ProtectedInput({
   const flushAnswerDurabilityNowRef = useRef(flushAnswerDurabilityNow);
 
   useEffect(() => {
+    flushAnswerDurabilityNowRef.current = flushAnswerDurabilityNow;
+  }, [attemptControls]);
+
+  useEffect(() => {
     onChangeRef.current = userOnChange;
     controlledValueRef.current = inputProps.value;
-    flushAnswerDurabilityNowRef.current = flushAnswerDurabilityNow;
     // FIX-02: server hydration — discard stale DOM rescue state so blur/commit
     // does not replay pre-disconnect text over the fresh server value.
+    // Intentionally deps exclude attemptControls to avoid clearing on unrelated
+    // persistence churn (which would suppress a legitimate deferred blur-commit).
     if (deferredRescueTimerRef.current !== null) {
       window.clearTimeout(deferredRescueTimerRef.current);
       deferredRescueTimerRef.current = null;
@@ -61,7 +66,7 @@ export function ProtectedInput({
     } else {
       latestDomValueRef.current = String(inputProps.value ?? '');
     }
-  }, [attemptControls, inputProps.value, userOnChange]);
+  }, [inputProps.value, userOnChange]);
 
   useEffect(() => {
     const input = inputRef.current;

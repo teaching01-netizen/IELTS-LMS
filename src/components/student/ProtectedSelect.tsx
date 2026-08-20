@@ -18,11 +18,16 @@ export function ProtectedSelect({ ...selectProps }: ProtectedSelectProps) {
   const flushAnswerDurabilityNowRef = useRef(() => attemptControls?.flushAnswerDurabilityNow());
 
   useEffect(() => {
+    flushAnswerDurabilityNowRef.current = () => attemptControls?.flushAnswerDurabilityNow();
+  }, [attemptControls]);
+
+  useEffect(() => {
     onChangeRef.current = userOnChange;
     controlledValueRef.current = selectProps.value;
-    flushAnswerDurabilityNowRef.current = () => attemptControls?.flushAnswerDurabilityNow();
     // FIX-02: server hydration — discard stale rescue state so commitAll/blur
     // cannot replay pre-disconnect DOM value over the fresh server value.
+    // Intentionally deps exclude attemptControls to avoid clearing on unrelated
+    // persistence churn (which would suppress a legitimate deferred blur-commit).
     if (deferredRescueTimerRef.current !== null) {
       window.clearTimeout(deferredRescueTimerRef.current);
       deferredRescueTimerRef.current = null;
@@ -37,8 +42,10 @@ export function ProtectedSelect({ ...selectProps }: ProtectedSelectProps) {
       !Array.isArray(selectProps.value)
     ) {
       latestDomValueRef.current = String(selectProps.value);
+    } else {
+      latestDomValueRef.current = '';
     }
-  }, [attemptControls, selectProps.value, userOnChange]);
+  }, [selectProps.value, userOnChange]);
 
   useEffect(() => {
     const select = selectRef.current;
