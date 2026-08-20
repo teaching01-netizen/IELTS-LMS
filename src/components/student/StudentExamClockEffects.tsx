@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ExamConfig } from '../../types';
+import type { ExamSessionRuntime } from '../../types/domain';
 import { useExamCommands } from '@student/hooks/exam-session/useExamCommands';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
 import { useStudentRuntimeClock, useStudentRuntimeState } from './providers/StudentRuntimeProvider';
@@ -27,23 +28,92 @@ export function StudentExamClockEffects({
   const { actions: uiActions } = useStudentUI();
   const timeExtensionOfferFiredRef = useRef(false);
 
+  // Clock-bridge writes: per-tick work is coalesced through setRuntimeSnapshot
+  // so Zustand subscribers keyed on other slices are not invalidated every second.
+  // Phase/navigation/persistence are considered non-clock state and are synced outside
+  // the per-second path; only blocking is compared via the snapshot/equality guard below
+  // when its value actually changes. Ref-guarded effects avoid re-firing when actions
+  // identity is stable but tick values propagate.
+  const lastClockSnapshotRef = useRef<ExamSessionRuntime | null | undefined>(undefined);
+  const lastClockDisplayRef = useRef<number | null | undefined>(undefined);
+  const lastAttemptPersistenceRef = useRef<{
+    syncState: typeof runtimeState.attemptSyncState;
+    pendingMutationCount: number;
+    acceptedThroughSeq: number;
+  } | null>(null);
+  const lastPhaseRef = useRef<string | null>(null);
+  const lastNavigationRef = useRef<{ module: string; questionId: string | null } | null>(null);
+  const lastBlockingRef = useRef<{
+    active: boolean;
+    reason: typeof runtimeState.blocking.reason;
+    timeRemaining: number;
+  } | null>(null);
+
   useEffect(() => {
-    examSessionCommands.setPhase(runtimeState.phase);
-    examSessionCommands.setNavigation(runtimeState.currentModule, runtimeState.currentQuestionId);
-    examSessionCommands.setRuntimeSnapshot(
-      runtimeState.runtimeSnapshot,
-      displayTimeRemaining ?? null,
-    );
-    examSessionCommands.setPersistence({
+    // Tick-path: coalesced single write. Store's setRuntimeSnapshot bails out via
+    // reference+value equality when unchanged, so this is safe to call every second
+    // and will not fan out unless snapshot/displayTimeRemaining actually change.
+    const nextDisplay = displayTimeRemaining ?? null;
+    if (
+      lastClockSnapshotRef.current !== runtimeState.runtimeSnapshot ||
+      lastClockDisplayRef.current !== nextDisplay
+    ) {
+      lastClockSnapshotRef.current = runtimeState.runtimeSnapshot;
+      lastClockDisplayRef.current = nextDisplay;
+      examSessionCommands.setRuntimeSnapshot(runtimeState.runtimeSnapshot, nextDisplay);
+    }
+
+    // Non-clock slices: only write when their inputs actually change (ref-guarded).
+    // This prevents the previous pattern of 4 unconditional writes per tick.
+    const nextPending = attemptState.attempt?.recovery.pendingMutationCount ?? 0;
+    const nextAccepted = attemptState.attempt?.recovery.serverAcceptedThroughSeq ?? 0;
+    const nextPersistence = {
       syncState: runtimeState.attemptSyncState,
-      pendingMutationCount: attemptState.attempt?.recovery.pendingMutationCount ?? 0,
-      acceptedThroughSeq: attemptState.attempt?.recovery.serverAcceptedThroughSeq ?? 0,
-    });
-    examSessionCommands.setBlocking({
+      pendingMutationCount: nextPending,
+      acceptedThroughSeq: nextAccepted,
+    };
+    if (
+      !lastAttemptPersistenceRef.current ||
+      lastAttemptPersistenceRef.current.syncState !== nextPersistence.syncState ||
+      lastAttemptPersistenceRef.current.pendingMutationCount !== nextPersistence.pendingMutationCount ||
+      lastAttemptPersistenceRef.current.acceptedThroughSeq !== nextPersistence.acceptedThroughSeq
+    ) {
+      lastAttemptPersistenceRef.current = nextPersistence;
+      examSessionCommands.setPersistence(nextPersistence);
+    }
+
+    if (lastPhaseRef.current !== runtimeState.phase) {
+      lastPhaseRef.current = runtimeState.phase;
+      examSessionCommands.setPhase(runtimeState.phase);
+    }
+
+    const nextNav = {
+      module: runtimeState.currentModule,
+      questionId: runtimeState.currentQuestionId,
+    };
+    if (
+      !lastNavigationRef.current ||
+      lastNavigationRef.current.module !== nextNav.module ||
+      lastNavigationRef.current.questionId !== nextNav.questionId
+    ) {
+      lastNavigationRef.current = nextNav;
+      examSessionCommands.setNavigation(nextNav.module as never, nextNav.questionId);
+    }
+
+    const nextBlocking = {
       active: runtimeState.blocking.active,
       reason: runtimeState.blocking.reason,
       timeRemaining: runtimeState.blocking.timeRemaining,
-    });
+    };
+    if (
+      !lastBlockingRef.current ||
+      lastBlockingRef.current.active !== nextBlocking.active ||
+      lastBlockingRef.current.reason !== nextBlocking.reason ||
+      lastBlockingRef.current.timeRemaining !== nextBlocking.timeRemaining
+    ) {
+      lastBlockingRef.current = nextBlocking;
+      examSessionCommands.setBlocking(nextBlocking);
+    }
   }, [
     attemptState.attempt?.recovery.pendingMutationCount,
     attemptState.attempt?.recovery.serverAcceptedThroughSeq,

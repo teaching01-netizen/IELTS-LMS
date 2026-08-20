@@ -1113,6 +1113,13 @@ export function StudentRuntimeProvider({
     dispatch({ type: 'set_attempt_sync_state', state: nextState });
   }, []);
 
+  // Stable context excludes wall-clock tick fields (timeRemaining/elapsedTime).
+  // When runtimeBacked=true, the clock is deadline-derived via RuntimeClockContext and
+  // should not invalidate stable consumers. Spread still copies the current values
+  // but deps intentionally omit timeRemaining/elapsedTime so a per-second deadline tick
+  // does not recompute stableState. Fallback (!runtimeBacked) reducer tick intentionally
+  // does not use this path for wall-clock; if it ever does, stable will stay stale by design
+  // and clock consumers must read via useStudentRuntimeClock().
   const stableState = useMemo<RuntimeStableState>(
     () => ({
       ...runtimeState,
@@ -1128,7 +1135,19 @@ export function StudentRuntimeProvider({
       blocking,
       runtimeBacked,
       runtimeSnapshot,
-      runtimeState,
+      runtimeState.attemptSyncState,
+      runtimeState.blockingMachine,
+      runtimeState.blockingReasonOverride,
+      runtimeState.currentModule,
+      runtimeState.currentQuestionId,
+      runtimeState.currentSectionExtensionMinutes,
+      runtimeState.phase,
+      runtimeState.proctorNote,
+      runtimeState.proctorStatus,
+      runtimeState.submittedAt,
+      runtimeState.submittedModules,
+      runtimeState.violations,
+      runtimeState.waitingForCohortAdvance,
       runtimeStatus,
       submitRequiresConfirmation,
     ]
