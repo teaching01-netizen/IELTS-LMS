@@ -132,13 +132,12 @@ export function createStudentExamStore(seed: StudentExamStoreSeed): StudentExamS
           }));
         },
         toggleFlag(questionId) {
-          const current = get().attempt.flags[questionId] ?? false;
           set((state) => ({
             attempt: {
               ...state.attempt,
               flags: {
                 ...state.attempt.flags,
-                [questionId]: !current,
+                [questionId]: !state.attempt.flags[questionId],
               },
             },
           }));

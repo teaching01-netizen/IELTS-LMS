@@ -111,8 +111,8 @@ export function createStudentAnswerCommands(
       );
     },
     async toggleFlag(questionId) {
-      const current = context.store.getState().attempt.flags[questionId] ?? false;
       context.store.getState().actions.toggleFlag(questionId);
+      const nextValue = context.store.getState().attempt.flags[questionId] ?? false;
       const base = buildMutationBase(context);
       await enqueue(
         context,
@@ -120,7 +120,7 @@ export function createStudentAnswerCommands(
           ? {
               ...base,
               type: 'flag',
-              payload: { questionId, value: !current, module: context.module },
+              payload: { questionId, value: nextValue, module: context.module },
             }
           : null,
       );

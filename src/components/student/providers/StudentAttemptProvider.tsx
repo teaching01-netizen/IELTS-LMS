@@ -312,6 +312,8 @@ export function StudentAttemptProvider({
   const runtimeLiveRef = useStudentRuntimeLiveRef();
   const setRuntimeAttemptSyncState = runtimeActions.setAttemptSyncState;
   const [attempt, setAttempt] = useState<StudentAttempt | null>(attemptSnapshot);
+  // Source of truth for UI pending badge is the durability mirror via onPendingMutationCountChange.
+  // attempt.recovery.pendingMutationCount is persisted for recovery but not used for badge display.
   const [pendingMutationCount, setPendingMutationCount] = useState(0);
   const attemptRef = useRef<StudentAttempt | null>(attemptSnapshot);
   const controlScheduleIdRef = useRef<string | undefined>(
@@ -629,9 +631,15 @@ export function StudentAttemptProvider({
     syncAttemptState,
   ]);
 
+  // Keep flushPending stable via refs: flushPending reads attemptRef/durabilityMirrorRef (not snapshot closure).
+  // Assign synchronously so timeouts always call latest flushPending without stale attemptId.
+  flushPendingRef.current = flushPending;
+
+  // Cancellation on attempt switch: drop in-flight flush promise so next flush uses new attempt.
+  // Mirror reset is handled by the hydration effect below; this just clears the in-flight gate.
   useEffect(() => {
-    flushPendingRef.current = flushPending;
-  }, [flushPending]);
+    flushInFlightRef.current = null;
+  }, [attemptSnapshot?.id]);
 
   useEffect(() => {
     const handleFocusOut = (event: FocusEvent) => {

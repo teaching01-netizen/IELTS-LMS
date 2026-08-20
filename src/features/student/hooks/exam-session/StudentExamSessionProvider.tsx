@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { useStore } from 'zustand';
 import {
   createStudentExamStore,
+  getStudentExamScopeKey,
   type StudentExamSessionState,
   type StudentExamStore,
   type StudentExamStoreSeed,
@@ -20,7 +21,21 @@ export function StudentExamSessionProvider({
 }: StudentExamSessionProviderProps) {
   const [store] = useState(() => createStudentExamStore(seed));
 
+  // Invariant: store scope is fixed at creation; remount on scope change is enforced by the
+  // wrapper via key={sessionScopeKey} (StudentAppWrapper.tsx:132). This effect only syncs
+  // live slices (phase/runtime/persistence/blocking) without remount — do NOT duplicate wrapper key.
+  // The effect intentionally does not sync identity/navigation/attempt (seed-of-truth at mount).
   useEffect(() => {
+    if (process.env['NODE_ENV'] !== 'production') {
+      const expected = getStudentExamScopeKey(seed);
+      const actual = store.getState().identity.scopeKey;
+      if (actual !== expected) {
+        console.warn(
+          `[StudentExamSessionProvider] scopeKey mismatch: store=${actual} seed=${expected}. ` +
+            `Ensure wrapper key={sessionScopeKey} remounts provider on scope change.`,
+        );
+      }
+    }
     const actions = store.getState().actions;
     actions.setPhase(seed.phase);
     actions.setRuntimeSnapshot(seed.runtimeSnapshot, seed.displayTimeRemaining);
