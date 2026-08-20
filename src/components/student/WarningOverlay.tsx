@@ -27,21 +27,32 @@ export function WarningOverlay({
 }: WarningOverlayProps) {
   const [countdown, setCountdown] = useState(30);
   const primaryButtonRef = useRef<HTMLButtonElement | null>(null);
+  const onAcknowledgeRef = useRef(onAcknowledge);
 
   useEffect(() => {
-    if (isOpen && showCountdown && countdown > 0) {
-      const timer = setInterval(() => setCountdown(prev => prev - 1), 1000);
-      return () => clearInterval(timer);
-    } else if (isOpen && showCountdown && countdown === 0) {
-      onAcknowledge();
-    }
-    return undefined;
-  }, [isOpen, countdown, onAcknowledge, showCountdown]);
+    onAcknowledgeRef.current = onAcknowledge;
+  }, [onAcknowledge]);
+
+  // FIX-02: single interval per open lifetime; do not recreate on every tick.
+  // deps intentionally exclude `countdown` to avoid recreating the timer each second.
+  useEffect(() => {
+    if (!isOpen || !showCountdown || severity === 'critical') return;
+    const timer = setInterval(() => {
+      setCountdown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isOpen, showCountdown, severity]);
 
   // Reset countdown when opened
   useEffect(() => {
     if (isOpen) setCountdown(30);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && showCountdown && severity !== 'critical' && countdown === 0) {
+      onAcknowledgeRef.current();
+    }
+  }, [isOpen, showCountdown, severity, countdown]);
 
   useEffect(() => {
     if (!isOpen) {

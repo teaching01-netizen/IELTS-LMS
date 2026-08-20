@@ -21,6 +21,23 @@ export function ProtectedSelect({ ...selectProps }: ProtectedSelectProps) {
     onChangeRef.current = userOnChange;
     controlledValueRef.current = selectProps.value;
     flushAnswerDurabilityNowRef.current = () => attemptControls?.flushAnswerDurabilityNow();
+    // FIX-02: server hydration — discard stale rescue state so commitAll/blur
+    // cannot replay pre-disconnect DOM value over the fresh server value.
+    if (deferredRescueTimerRef.current !== null) {
+      window.clearTimeout(deferredRescueTimerRef.current);
+      deferredRescueTimerRef.current = null;
+    }
+    lastRescuedDomValueRef.current = null;
+    const el = selectRef.current;
+    if (el) {
+      latestDomValueRef.current = el.value;
+    } else if (
+      selectProps.value !== undefined &&
+      selectProps.value !== null &&
+      !Array.isArray(selectProps.value)
+    ) {
+      latestDomValueRef.current = String(selectProps.value);
+    }
   }, [attemptControls, selectProps.value, userOnChange]);
 
   useEffect(() => {

@@ -46,6 +46,21 @@ export function ProtectedInput({
     onChangeRef.current = userOnChange;
     controlledValueRef.current = inputProps.value;
     flushAnswerDurabilityNowRef.current = flushAnswerDurabilityNow;
+    // FIX-02: server hydration — discard stale DOM rescue state so blur/commit
+    // does not replay pre-disconnect text over the fresh server value.
+    if (deferredRescueTimerRef.current !== null) {
+      window.clearTimeout(deferredRescueTimerRef.current);
+      deferredRescueTimerRef.current = null;
+    }
+    lastRescuedDomValueRef.current = null;
+    const el = inputRef.current;
+    if (el) {
+      latestDomValueRef.current = el.value;
+    } else if (typeof inputProps.value === 'string') {
+      latestDomValueRef.current = inputProps.value;
+    } else {
+      latestDomValueRef.current = String(inputProps.value ?? '');
+    }
   }, [attemptControls, inputProps.value, userOnChange]);
 
   useEffect(() => {
