@@ -14,6 +14,7 @@ use ielts_backend_api::{router::build_router, state::AppState};
 use ielts_backend_application::{
     builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
 };
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::{
     attempt::{StudentBootstrapRequest, StudentSubmitRequest},
     auth::UserRole,
@@ -21,10 +22,7 @@ use ielts_backend_domain::{
     grading::StartReviewRequest,
     schedule::{CreateScheduleRequest, RuntimeCommandAction, RuntimeCommandRequest},
 };
-use ielts_backend_infrastructure::{
-    actor_context::{ActorContext, ActorRole},
-    config::AppConfig,
-};
+use ielts_backend_infrastructure::config::AppConfig;
 
 use mysql::create_authenticated_user;
 
@@ -815,10 +813,9 @@ async fn shared_sentence_grading_contract_preserves_slot_results_for_permutation
     let session_detail = app
         .clone()
         .oneshot(
-            auth.with_auth(Request::builder().uri(format!(
-                "/api/v1/grading/sessions/{}",
-                schedule.id
-            )))
+            auth.with_auth(
+                Request::builder().uri(format!("/api/v1/grading/sessions/{}", schedule.id)),
+            )
             .body(Body::empty())
             .unwrap(),
         )
@@ -854,13 +851,13 @@ async fn shared_sentence_grading_contract_preserves_slot_results_for_permutation
         .expect("question results");
     let slot_results = question_results
         .iter()
-        .filter(|result| {
-            result["questionId"] == "q-slot:b1" || result["questionId"] == "q-slot:b2"
-        })
+        .filter(|result| result["questionId"] == "q-slot:b1" || result["questionId"] == "q-slot:b2")
         .collect::<Vec<_>>();
 
     assert_eq!(slot_results.len(), 2);
-    assert!(slot_results.iter().all(|result| result["isCorrect"] == true));
+    assert!(slot_results
+        .iter()
+        .all(|result| result["isCorrect"] == true));
     assert_eq!(slot_results[0]["questionId"], "q-slot:b1");
     assert_eq!(slot_results[1]["questionId"], "q-slot:b2");
 
@@ -1345,22 +1342,18 @@ async fn grading_objective_overrides_apply_strict_matching_and_regrade_immediate
 
     // Upsert an override to accept the student's lower-case response and award 2 points.
     let override_response = app
-	        .clone()
-	        .oneshot(
-	            auth.with_csrf(
-	                Request::builder()
-	                    .method("PUT")
-	                    .uri(format!(
-	                        "/api/v1/grading/schedules/{}/objective-overrides/{}",
-	                        schedule.id, "q-reading-1"
-	                    )),
-	            )
-	            .header("content-type", "application/json")
-	            .body(Body::from(
-	                json!({
-	                    "correctAnswer": "alpha answer",
-	                    "acceptedAnswers": [],
-	                    "scoringRule": "TWO_WORDS",
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder().method("PUT").uri(format!(
+                "/api/v1/grading/schedules/{}/objective-overrides/{}",
+                schedule.id, "q-reading-1"
+            )))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                        "correctAnswer": "alpha answer",
+                        "acceptedAnswers": [],
+                        "scoringRule": "TWO_WORDS",
                     "maxScore": 2,
                     "reason": "Answer key correction for schedule"
                 })
@@ -1557,25 +1550,32 @@ async fn grading_objective_regrade_latest_draft_updates_objective_scores_for_sch
     let regrade = app
         .clone()
         .oneshot(
-            auth.with_csrf(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!(
-                        "/api/v1/grading/schedules/{}/objective-regrade-latest-draft",
-                        schedule.id
-                    )),
-            )
+            auth.with_csrf(Request::builder().method("POST").uri(format!(
+                "/api/v1/grading/schedules/{}/objective-regrade-latest-draft",
+                schedule.id
+            )))
             .header("content-type", "application/json")
-            .body(Body::from(json!({ "reason": "Use latest draft" }).to_string()))
+            .body(Body::from(
+                json!({ "reason": "Use latest draft" }).to_string(),
+            ))
             .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(regrade.status(), StatusCode::OK);
     let regrade_json = json_body(regrade).await;
-    assert_eq!(regrade_json["data"]["draftVersionId"], json!(draft_version_id));
-    assert_eq!(regrade_json["data"]["regradeReport"]["attemptsScanned"], json!(1));
-    assert_eq!(regrade_json["data"]["regradeReport"]["sectionsUpdated"], json!(2));
+    assert_eq!(
+        regrade_json["data"]["draftVersionId"],
+        json!(draft_version_id)
+    );
+    assert_eq!(
+        regrade_json["data"]["regradeReport"]["attemptsScanned"],
+        json!(1)
+    );
+    assert_eq!(
+        regrade_json["data"]["regradeReport"]["sectionsUpdated"],
+        json!(2)
+    );
 
     // After regrade, the stored objective totals should reflect the latest draft answer key (both incorrect).
     let section_detail = app

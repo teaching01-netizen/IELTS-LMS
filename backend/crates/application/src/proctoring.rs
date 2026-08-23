@@ -1,4 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::schedule::{
     AlertAckRequest, AttemptCommandRequest, CompleteExamRequest, DegradedLiveState,
     ExamSessionRuntime, ExtendSectionRequest, PresenceAction, ProctorAlert, ProctorPresence,
@@ -7,11 +8,8 @@ use ielts_backend_domain::schedule::{
     ViolationRule,
 };
 use ielts_backend_infrastructure::{
-    actor_context::{ActorContext, ActorRole},
-    authorization::AuthorizationService,
-    live_mode::LiveModeService,
-    live_update_bus::LiveUpdateBusRepository,
-    outbox::OutboxRepository,
+    authorization::AuthorizationService, live_mode::LiveModeService,
+    live_update_bus::LiveUpdateBusRepository, outbox::OutboxRepository,
 };
 use serde_json::{json, Value};
 use sqlx::{FromRow, MySql, MySqlPool, QueryBuilder};
@@ -19,9 +17,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
 
-use crate::delivery::{
-    auto_submit_schedule_attempts_in_tx, force_finalize_attempt_if_pending, DeliveryError,
-};
+use crate::attempt_tx::{auto_submit_schedule_attempts_in_tx, force_finalize_attempt_if_pending};
 use crate::scheduling::{SchedulingError, SchedulingService};
 
 #[derive(Error, Debug)]
@@ -465,7 +461,7 @@ impl ProctoringService {
         .bind(runtime.id)
         .fetch_all(tx.as_mut())
         .await
-        .map_err(ProctoringError::from)?;
+        .map_err(|error| ProctoringError::Conflict(error.to_string()))?;
         let active_index = sections
             .iter()
             .position(|section| section.section_key == active_section_key)
@@ -561,14 +557,7 @@ impl ProctoringService {
             .await?;
 
             auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, completion_reason)
-                .await
-                .map_err(|error| match error {
-                    DeliveryError::Database(db) => ProctoringError::Database(db),
-                    DeliveryError::Conflict { message, .. }
-                    | DeliveryError::Validation(message)
-                    | DeliveryError::Internal(message) => ProctoringError::Validation(message),
-                    DeliveryError::NotFound => ProctoringError::NotFound,
-                })?;
+                .await?;
         }
 
         insert_control_event(
@@ -859,15 +848,7 @@ impl ProctoringService {
         .execute(&mut *tx)
         .await?;
 
-        auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, "proctor_complete")
-            .await
-            .map_err(|error| match error {
-                DeliveryError::Database(db) => ProctoringError::Database(db),
-                DeliveryError::Conflict { message, .. }
-                | DeliveryError::Validation(message)
-                | DeliveryError::Internal(message) => ProctoringError::Validation(message),
-                DeliveryError::NotFound => ProctoringError::NotFound,
-            })?;
+        auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, "proctor_complete").await?;
 
         insert_control_event(
             &mut tx,
@@ -1254,7 +1235,7 @@ impl ProctoringService {
         .bind(runtime.id)
         .fetch_all(tx.as_mut())
         .await
-        .map_err(ProctoringError::from)?;
+        .map_err(|error| ProctoringError::Conflict(error.to_string()))?;
 
         let mut active_index = sections
             .iter()
@@ -1413,14 +1394,7 @@ impl ProctoringService {
             .execute(tx.as_mut())
             .await?;
             auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, completion_reason)
-                .await
-                .map_err(|error| match error {
-                    DeliveryError::Database(db) => ProctoringError::Database(db),
-                    DeliveryError::Conflict { message, .. }
-                    | DeliveryError::Validation(message)
-                    | DeliveryError::Internal(message) => ProctoringError::Validation(message),
-                    DeliveryError::NotFound => ProctoringError::NotFound,
-                })?;
+                .await?;
             insert_audit_log(
                 &mut tx,
                 schedule_id,

@@ -10,6 +10,7 @@ use ielts_backend_application::{
     delivery::{DeliveryService, MutationBatchResponseMode},
     scheduling::SchedulingService,
 };
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::{
     attempt::{
         MutationCommand, MutationEnvelope, MutationType, StudentBootstrapRequest,
@@ -18,7 +19,6 @@ use ielts_backend_domain::{
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
     schedule::CreateScheduleRequest,
 };
-use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 
 const DELIVERY_MIGRATIONS: &[&str] = &[
     "0001_roles.sql",

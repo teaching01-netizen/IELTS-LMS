@@ -2,8 +2,8 @@ use serde_json::Value;
 use sqlx::MySqlPool;
 use uuid::Uuid;
 
+use ielts_backend_domain::actor_context::ActorContext;
 use ielts_backend_domain::grading::{ReleaseEvent, ResultsAnalytics, StudentResult};
-use ielts_backend_infrastructure::actor_context::ActorContext;
 
 use crate::grading::{GradingError, GradingService};
 

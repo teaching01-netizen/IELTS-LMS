@@ -31,10 +31,8 @@ use ielts_backend_domain::{
     },
 };
 
-use ielts_backend_infrastructure::{
-    actor_context::{ActorContext, ActorRole},
-    config::AppConfig,
-};
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
+use ielts_backend_infrastructure::config::AppConfig;
 use mysql::{assign_staff_to_schedule, create_authenticated_user};
 
 const PROCTOR_MIGRATIONS: &[&str] = &[

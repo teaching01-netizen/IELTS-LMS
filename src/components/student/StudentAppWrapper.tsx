@@ -2,7 +2,7 @@ import React from 'react';
 import type { ExamState } from '../../types';
 import type { ExamSessionRuntime } from '../../types/domain';
 import type { StudentAttempt } from '../../types/studentAttempt';
-import type { StudentAnswerInvariantRollout } from '../../features/student/hooks/useStudentSessionRouteData';
+import type { StudentAnswerInvariantRollout } from '../../features/student/contracts';
 import { StudentApp } from './StudentApp';
 import { KeyboardProvider } from './providers/StudentKeyboardProvider';
 import { StudentAttemptProvider } from './providers/StudentAttemptProvider';

@@ -1,4 +1,4 @@
-import { get, post } from '../app/api/apiClient';
+import { apiClient, get, post } from '../app/api/apiClient';
 
 type BackendEnvelope<T> = {
   success: boolean;
@@ -154,3 +154,27 @@ class AuthService {
 }
 
 export const authService = new AuthService();
+
+/**
+ * Sync session credentials onto the shared transport (CSRF header).
+ * Session state stays owned by the auth feature; only the services layer
+ * is allowed to touch the raw API client.
+ */
+export function applyAuthTransportSession(session: AuthSession | null): void {
+  if (session) {
+    apiClient.setCsrfToken(session.csrfToken);
+    return;
+  }
+
+  apiClient.clearCsrfToken();
+}
+
+/**
+ * Register the global 401 handler on the shared transport.
+ * Accepts the subset of the handler context the auth feature relies on.
+ */
+export function registerAuthUnauthorizedHandler(
+  handler: ((context: { endpoint: string }) => void) | null,
+): void {
+  apiClient.setUnauthorizedHandler(handler);
+}

@@ -1,19 +1,18 @@
 use chrono::{DateTime, Duration, Utc};
+use ielts_backend_domain::actor_context::ActorContext;
 use ielts_backend_domain::schedule::{
     validate_email, validate_wcode, CreateScheduleRequest, DeliveryMode, ExamSchedule,
     ExamSessionRuntime, RecurrenceType, RuntimeCommandAction, RuntimeCommandEvent,
     RuntimeCommandRequest, RuntimeSectionState, RuntimeStatus, ScheduleRegistration,
     ScheduleSectionPlanEntry, ScheduleStatus, SectionRuntimeStatus, UpdateScheduleRequest,
 };
-use ielts_backend_infrastructure::{
-    actor_context::ActorContext, authorization::AuthorizationService,
-};
+use ielts_backend_infrastructure::authorization::AuthorizationService;
 use serde_json::Value;
 use sqlx::{FromRow, MySql, MySqlPool};
 use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
 
-use crate::delivery::{auto_submit_schedule_attempts_in_tx, DeliveryError};
+use crate::attempt_tx::auto_submit_schedule_attempts_in_tx;
 
 #[derive(Error, Debug)]
 pub enum SchedulingError {
@@ -236,8 +235,8 @@ impl SchedulingService {
         // Other roles can only see schedules from their organization
         let query = if matches!(
             ctx.role,
-            ielts_backend_infrastructure::actor_context::ActorRole::Admin
-                | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+            ielts_backend_domain::actor_context::ActorRole::Admin
+                | ielts_backend_domain::actor_context::ActorRole::AdminObserver
         ) {
             "SELECT * FROM exam_schedules ORDER BY start_time ASC, created_at DESC"
         } else if let Some(ref org_id) = ctx.organization_id {
@@ -827,15 +826,7 @@ impl SchedulingService {
         .execute(&mut *tx)
         .await?;
 
-        auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, completion_reason)
-            .await
-            .map_err(|error| match error {
-                DeliveryError::Database(db) => SchedulingError::Database(db),
-                DeliveryError::Conflict { message, .. }
-                | DeliveryError::Validation(message)
-                | DeliveryError::Internal(message) => SchedulingError::Validation(message),
-                DeliveryError::NotFound => SchedulingError::NotFound,
-            })?;
+        auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, completion_reason).await?;
 
         insert_control_event(
             &mut tx,
@@ -933,7 +924,7 @@ impl SchedulingService {
             .get_schedule(
                 &ActorContext::new(
                     Uuid::nil().to_string(),
-                    ielts_backend_infrastructure::actor_context::ActorRole::Admin,
+                    ielts_backend_domain::actor_context::ActorRole::Admin,
                 ),
                 schedule_id,
             )
@@ -997,7 +988,8 @@ impl SchedulingService {
         self.get_schedule(ctx, schedule_id).await?;
 
         let user_id_str = user_id.to_string();
-        let metadata = merge_registration_metadata(None, nickname.as_deref(), ielts_course.as_deref());
+        let metadata =
+            merge_registration_metadata(None, nickname.as_deref(), ielts_course.as_deref());
 
         if let Some(row) = self
             .load_registration_by_wcode(schedule_id, &normalized_wcode)
@@ -1403,7 +1395,7 @@ impl From<RuntimeSectionRow> for RuntimeSectionState {
 fn system_actor() -> ActorContext {
     ActorContext::new(
         Uuid::nil().to_string(),
-        ielts_backend_infrastructure::actor_context::ActorRole::Admin,
+        ielts_backend_domain::actor_context::ActorRole::Admin,
     )
 }
 

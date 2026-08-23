@@ -1,7 +1,7 @@
 use sqlx::{MySql, MySqlPool, Transaction};
 use uuid::Uuid;
 
-use crate::actor_context::ActorContext;
+use ielts_backend_domain::actor_context::ActorContext;
 
 pub async fn begin_scoped_transaction<'a>(
     pool: &'a MySqlPool,

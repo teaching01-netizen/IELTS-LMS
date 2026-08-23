@@ -9,11 +9,11 @@ use chrono::{DateTime, Utc};
 use cookie::time::{Duration as CookieDuration, OffsetDateTime};
 use ielts_backend_application::auth::{AuthError, AuthService};
 use ielts_backend_application::scheduling::SchedulingService;
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::auth::{
     AccountActivationRequest, LoginRequest, PasswordResetCompleteRequest, PasswordResetRequest,
     SessionResponse, StudentEntryRequest,
 };
-use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 use serde::Serialize;
 use uuid::Uuid;
 

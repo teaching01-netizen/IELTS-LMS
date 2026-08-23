@@ -84,4 +84,45 @@ describe('frontend module boundaries', () => {
             .join('\n')}`,
     ).toEqual([]);
   });
+
+  it('blocks raw API-client imports from feature modules', () => {
+    // The HTTP transport is owned by src/services; features must consume
+    // service functions instead of importing the shared client directly.
+    const featuresRoot = path.resolve('src/features');
+    const violations: ImportViolation[] = [];
+
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!sourceFileExtensions.has(path.extname(entry.name))) {
+          continue;
+        }
+        const relativePath = path.relative('.', full).replaceAll(path.sep, '/');
+        if (shouldSkipFile(relativePath)) {
+          continue;
+        }
+        const content = fs.readFileSync(full, 'utf-8');
+        for (const match of content.matchAll(importPattern)) {
+          const specifier = match[1] ?? '';
+          if (/apiClient/.test(specifier) && specifier.includes('/app/api/')) {
+            violations.push({ file: relativePath, specifier });
+          }
+        }
+      }
+    };
+
+    walk(featuresRoot);
+    expect(
+      violations,
+      violations.length === 0
+        ? ''
+        : `features must import transport only via src/services:\n${violations
+            .map((v) => `  ${v.file} -> ${v.specifier}`)
+            .join('\n')}`,
+    ).toEqual([]);
+  });
 });

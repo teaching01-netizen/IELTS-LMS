@@ -36,7 +36,7 @@ pub struct ExamEntityWithPermissions {
 }
 
 fn to_exam_with_permissions(
-    ctx: &ielts_backend_infrastructure::actor_context::ActorContext,
+    ctx: &ielts_backend_domain::actor_context::ActorContext,
     exam: ExamEntity,
 ) -> ExamEntityWithPermissions {
     // NOTE: Exam routes already enforce staff-only access (Admin/Builder).
@@ -44,9 +44,9 @@ fn to_exam_with_permissions(
     // to enable/disable publish workflows (e.g., "Create New Exam Copy").
     let can_modify = matches!(
         ctx.role,
-        ielts_backend_infrastructure::actor_context::ActorRole::Admin
-            | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
-            | ielts_backend_infrastructure::actor_context::ActorRole::Builder
+        ielts_backend_domain::actor_context::ActorRole::Admin
+            | ielts_backend_domain::actor_context::ActorRole::AdminObserver
+            | ielts_backend_domain::actor_context::ActorRole::Builder
     ) || exam
         .organization_id
         .as_ref()

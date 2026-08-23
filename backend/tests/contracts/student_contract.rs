@@ -16,6 +16,7 @@ use ielts_backend_application::{
     grading::{GradingProjectionRequest, GradingService},
     scheduling::SchedulingService,
 };
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::{
     attempt::{
         HeartbeatEventType, MutationCommand, MutationType, StudentAuditLogRequest,
@@ -29,7 +30,6 @@ use ielts_backend_domain::{
     },
 };
 use ielts_backend_infrastructure::{
-    actor_context::{ActorContext, ActorRole},
     auth::{sign_attempt_token, AttemptTokenClaims},
     config::AppConfig,
 };
@@ -414,22 +414,22 @@ async fn precheck_derives_identity_from_enrollment_not_request_body() {
         json["data"]["integrity"]["preCheck"]["completedAt"],
         "2026-01-10T08:50:00Z"
     );
-    let db_integrity: serde_json::Value = sqlx::query_scalar(
-        "SELECT integrity FROM student_attempts WHERE schedule_id = ?",
-    )
-    .bind(schedule_id.to_string())
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
+    let db_integrity: serde_json::Value =
+        sqlx::query_scalar("SELECT integrity FROM student_attempts WHERE schedule_id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     assert_eq!(db_integrity["deviceFingerprintHash"], "fp-mallory-device");
     assert_eq!(db_integrity["preCheck"]["checks"][0]["id"], "browser");
 
     // The response returns the authoritative attempt (same persisted row).
-    let row_id: String = sqlx::query_scalar("SELECT id FROM student_attempts WHERE schedule_id = ?")
-        .bind(schedule_id.to_string())
-        .fetch_one(database.pool())
-        .await
-        .unwrap();
+    let row_id: String =
+        sqlx::query_scalar("SELECT id FROM student_attempts WHERE schedule_id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     assert_eq!(json["data"]["id"], row_id);
 
     database.shutdown().await;
@@ -500,13 +500,12 @@ async fn precheck_retry_after_timeout_keeps_attempt_singular() {
     assert_eq!(retry_json["data"]["id"], attempt_id);
     assert_eq!(retry_json["data"], first_json["data"]);
 
-    let attempt_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM student_attempts WHERE schedule_id = ?",
-    )
-    .bind(schedule_id.to_string())
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
+    let attempt_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM student_attempts WHERE schedule_id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     assert_eq!(attempt_count, 1, "retry must not create a second attempt");
 
     let audit_count: i64 = sqlx::query_scalar(
@@ -596,13 +595,12 @@ async fn precheck_concurrent_identical_requests_yield_one_logical_result() {
     );
     assert_eq!(first_json["data"], second_json["data"]);
 
-    let attempt_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM student_attempts WHERE schedule_id = ?",
-    )
-    .bind(schedule_id.to_string())
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
+    let attempt_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM student_attempts WHERE schedule_id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     assert_eq!(attempt_count, 1, "race must leave exactly one attempt row");
 
     let audit_count: i64 = sqlx::query_scalar(
@@ -680,13 +678,12 @@ async fn precheck_does_not_start_runtime_or_expose_section_state() {
     // Pre-check must not start the exam runtime: no runtime row exists at
     // all (the runtime row is only created by the proctor's StartRuntime
     // command; until then the API synthesizes a "not_started" runtime).
-    let runtime_row_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM exam_session_runtimes WHERE schedule_id = ?",
-    )
-    .bind(schedule_id.to_string())
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
+    let runtime_row_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM exam_session_runtimes WHERE schedule_id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     assert_eq!(
         runtime_row_count, 0,
         "pre-check must not create or start the runtime row"
@@ -826,9 +823,7 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -897,9 +892,7 @@ async fn sentence_completion_student_answers_remain_array_backed_per_question() 
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -931,7 +924,10 @@ async fn sentence_completion_student_answers_remain_array_backed_per_question() 
     let status = response.status();
     let json = json_body(response).await;
     assert_eq!(status, StatusCode::OK, "sentence mutation response: {json}");
-    assert_eq!(json["data"]["attempt"]["answers"]["r-sentence-q1"], json!(["first", "second"]));
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["r-sentence-q1"],
+        json!(["first", "second"])
+    );
 
     database.shutdown().await;
 }
@@ -967,9 +963,7 @@ async fn mutation_batch_returns_full_commit_payload() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -1161,9 +1155,7 @@ async fn mutation_batch_idempotency_replay_returns_stable_response_and_hash_mism
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     let uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
     let request = json!({
         "attemptId": attempt_id.clone(),
@@ -1262,7 +1254,10 @@ async fn mutation_batch_idempotency_replay_returns_stable_response_and_hash_mism
             .fetch_one(database.pool())
             .await
             .unwrap();
-    assert_eq!(answers["q1"], "B", "the batch applied both mutations in order");
+    assert_eq!(
+        answers["q1"], "B",
+        "the batch applied both mutations in order"
+    );
 
     // Same key with a DIFFERENT batch: 409 hash-mismatch conflict, and the
     // rejected batch must not change any persisted state.
@@ -1288,13 +1283,12 @@ async fn mutation_batch_idempotency_replay_returns_stable_response_and_hash_mism
         conflict_json["error"]["message"],
         "Idempotency-Key does not match the original request."
     );
-    let mutation_rows_after_conflict: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?",
-    )
-    .bind(&attempt_id)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
+    let mutation_rows_after_conflict: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     assert_eq!(mutation_rows_after_conflict, 2);
 
     database.shutdown().await;
@@ -1305,7 +1299,8 @@ async fn mutation_batch_idempotency_replay_returns_stable_response_and_hash_mism
 // the accepted mutation-sequence watermark (`serverAcceptedThroughSeq`), and
 // the server's persisted answers, revision, and mutation rows are preserved.
 #[tokio::test]
-async fn mutation_batch_revision_conflict_reports_latest_revision_and_watermark_and_preserves_server_answers() {
+async fn mutation_batch_revision_conflict_reports_latest_revision_and_watermark_and_preserves_server_answers(
+) {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -1325,9 +1320,7 @@ async fn mutation_batch_revision_conflict_reports_latest_revision_and_watermark_
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     let uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
 
     // Accepted batch: q1 = "A", revision N -> N+1, watermark -> 1.
@@ -1423,8 +1416,7 @@ async fn mutation_batch_revision_conflict_reports_latest_revision_and_watermark_
         "conflict must report the accepted mutation-sequence watermark"
     );
     assert_eq!(
-        conflict_json["error"]["details"]["activeSessionId"],
-        client_session_id,
+        conflict_json["error"]["details"]["activeSessionId"], client_session_id,
         "conflict must identify the session that owns the accepted state"
     );
 
@@ -1470,7 +1462,8 @@ async fn mutation_batch_revision_conflict_reports_latest_revision_and_watermark_
 // re-sends the same batch after (possibly) never seeing the response —
 // returns the stable cached response and changes nothing in the database.
 #[tokio::test]
-async fn mutation_batch_same_key_identical_batch_applies_once_and_retry_after_timeout_does_not_duplicate() {
+async fn mutation_batch_same_key_identical_batch_applies_once_and_retry_after_timeout_does_not_duplicate(
+) {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -1490,9 +1483,7 @@ async fn mutation_batch_same_key_identical_batch_applies_once_and_retry_after_ti
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     let uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
     let request = json!({
         "attemptId": attempt_id.clone(),
@@ -1542,14 +1533,21 @@ async fn mutation_batch_same_key_identical_batch_applies_once_and_retry_after_ti
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(per_id_rows, 1, "the same mutation id must be applied at most once");
+    assert_eq!(
+        per_id_rows, 1,
+        "the same mutation id must be applied at most once"
+    );
     let stored_revision: i32 =
         sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
             .bind(&attempt_id)
             .fetch_one(database.pool())
             .await
             .unwrap();
-    assert_eq!(stored_revision, base_revision + 1, "revision advanced exactly once");
+    assert_eq!(
+        stored_revision,
+        base_revision + 1,
+        "revision advanced exactly once"
+    );
 
     // Retry after the "timeout": identical body, same key — stable response,
     // no duplicate answer write.
@@ -1568,7 +1566,10 @@ async fn mutation_batch_same_key_identical_batch_applies_once_and_retry_after_ti
             .fetch_one(database.pool())
             .await
             .unwrap();
-    assert_eq!(answers["q1"], "A", "the retry must not duplicate the answer write");
+    assert_eq!(
+        answers["q1"], "A",
+        "the retry must not duplicate the answer write"
+    );
     let per_id_rows_after_retry: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ? AND client_mutation_id = ?",
     )
@@ -1645,9 +1646,7 @@ async fn mutation_batch_duplicate_mutation_id_from_other_client_session_is_not_a
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap_a["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap_a["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     let uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
 
     // Session A accepts mutation id "shared-mut-1": revision N -> N+1.
@@ -1761,9 +1760,7 @@ async fn mutation_batch_duplicate_mutation_id_from_other_client_session_is_not_a
         .as_str()
         .unwrap()
         .to_owned();
-    let fresh_base_revision = bootstrap_c["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let fresh_base_revision = bootstrap_c["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     assert_eq!(fresh_base_revision, revision_after_a as i32);
     let session_c = app
         .oneshot(
@@ -1804,7 +1801,10 @@ async fn mutation_batch_duplicate_mutation_id_from_other_client_session_is_not_a
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(shared_rows_after_c, 1, "the unique index must reject the duplicate row");
+    assert_eq!(
+        shared_rows_after_c, 1,
+        "the unique index must reject the duplicate row"
+    );
 
     database.shutdown().await;
 }
@@ -1834,9 +1834,7 @@ async fn mutation_batch_mid_batch_database_failure_rolls_back_atomically_and_ret
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     let uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
 
     let answers_before: serde_json::Value =
@@ -1979,7 +1977,11 @@ async fn mutation_batch_mid_batch_database_failure_rolls_back_atomically_and_ret
         .unwrap();
     let retried_status = retried.status();
     let retried_json = json_body(retried).await;
-    assert_eq!(retried_status, StatusCode::OK, "retry must apply: {retried_json}");
+    assert_eq!(
+        retried_status,
+        StatusCode::OK,
+        "retry must apply: {retried_json}"
+    );
     assert_eq!(retried_json["data"]["appliedMutationCount"], 2);
     assert_eq!(retried_json["data"]["serverAcceptedThroughSeq"], 2);
     assert_eq!(retried_json["data"]["revision"], base_revision as i64 + 1);
@@ -1989,7 +1991,10 @@ async fn mutation_batch_mid_batch_database_failure_rolls_back_atomically_and_ret
             .fetch_one(database.pool())
             .await
             .unwrap();
-    assert_eq!(answers_final["q1"], "B", "the complete retried batch must be applied");
+    assert_eq!(
+        answers_final["q1"], "B",
+        "the complete retried batch must be applied"
+    );
     let rows_final: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?")
             .bind(&attempt_id)
@@ -2003,7 +2008,11 @@ async fn mutation_batch_mid_batch_database_failure_rolls_back_atomically_and_ret
             .fetch_one(database.pool())
             .await
             .unwrap();
-    assert_eq!(revision_final, base_revision + 1, "revision advanced exactly once");
+    assert_eq!(
+        revision_final,
+        base_revision + 1,
+        "revision advanced exactly once"
+    );
 
     database.shutdown().await;
 }
@@ -2317,7 +2326,8 @@ async fn student_heartbeat_does_not_resume_a_paused_runtime() {
         "Admin",
     )
     .await;
-    let (student_auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let (student_auth, student_key) =
+        create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -2332,13 +2342,12 @@ async fn student_heartbeat_does_not_resume_a_paused_runtime() {
         .as_str()
         .unwrap()
         .to_owned();
-    let (phase_before, proctor_status_before): (Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT phase, proctor_status FROM student_attempts WHERE id = ?",
-    )
-    .bind(&attempt_id)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
+    let (phase_before, proctor_status_before): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT phase, proctor_status FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     let attempt_revision_before: i32 =
         sqlx::query_scalar("SELECT revision FROM student_attempts WHERE id = ?")
             .bind(&attempt_id)
@@ -2374,9 +2383,7 @@ async fn student_heartbeat_does_not_resume_a_paused_runtime() {
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
                 .method("POST")
-                .uri(format!(
-                    "/api/v1/student/sessions/{schedule_id}/heartbeat",
-                ))
+                .uri(format!("/api/v1/student/sessions/{schedule_id}/heartbeat",))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&StudentHeartbeatRequest {
@@ -2397,8 +2404,7 @@ async fn student_heartbeat_does_not_resume_a_paused_runtime() {
 
     let after_heartbeat = admin_runtime_projection(&app, &admin_auth, schedule_id).await;
     assert_eq!(
-        after_heartbeat["data"]["status"],
-        "paused",
+        after_heartbeat["data"]["status"], "paused",
         "a student heartbeat must not resume the runtime"
     );
     assert_eq!(
@@ -2407,14 +2413,16 @@ async fn student_heartbeat_does_not_resume_a_paused_runtime() {
         "a student heartbeat must not bump the runtime revision"
     );
 
-    let (phase_after, proctor_status_after): (Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT phase, proctor_status FROM student_attempts WHERE id = ?",
-    )
-    .bind(&attempt_id)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(phase_after, phase_before, "heartbeat must not change the attempt phase");
+    let (phase_after, proctor_status_after): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT phase, proctor_status FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        phase_after, phase_before,
+        "heartbeat must not change the attempt phase"
+    );
     assert_eq!(
         proctor_status_after, proctor_status_before,
         "a cohort pause must not pause the attempt"
@@ -2454,7 +2462,8 @@ async fn cohort_pause_and_individual_pause_leave_distinct_append_only_trails() {
         "Admin",
     )
     .await;
-    let (student_auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let (student_auth, student_key) =
+        create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -2542,8 +2551,7 @@ async fn cohort_pause_and_individual_pause_leave_distinct_append_only_trails() {
     assert_eq!(proctor_status, "paused");
     let runtime_after_individual = admin_runtime_projection(&app, &admin_auth, schedule_id).await;
     assert_eq!(
-        runtime_after_individual["data"]["status"],
-        "live",
+        runtime_after_individual["data"]["status"], "live",
         "an individual pause must not pause the cohort runtime"
     );
 
@@ -2557,7 +2565,10 @@ async fn cohort_pause_and_individual_pause_leave_distinct_append_only_trails() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(student_audits, 1, "individual pause appends one STUDENT_PAUSE audit");
+    assert_eq!(
+        student_audits, 1,
+        "individual pause appends one STUDENT_PAUSE audit"
+    );
     let control_events: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM cohort_control_events WHERE schedule_id = ? AND action = 'pause_runtime'",
     )
@@ -2565,7 +2576,10 @@ async fn cohort_pause_and_individual_pause_leave_distinct_append_only_trails() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(control_events, 1, "cohort pause appends one pause_runtime control event");
+    assert_eq!(
+        control_events, 1,
+        "cohort pause appends one pause_runtime control event"
+    );
     let control_actor: String = sqlx::query_scalar(
         "SELECT actor_id FROM cohort_control_events WHERE schedule_id = ? AND action = 'pause_runtime'",
     )
@@ -2693,9 +2707,7 @@ async fn submit_finalizes_the_attempt_idempotently() {
         .await
         .unwrap();
 
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let json = json_body(response).await;
@@ -2760,9 +2772,7 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let first = app
         .clone()
@@ -2857,14 +2867,9 @@ async fn bex060_final_patch_reconciles_stale_last_seen_revision() {
     // UPDATE on exam_session_runtimes is a silent no-op); bootstrapping after
     // the start creates the attempt with phase `exam` so the submit phase
     // gate passes.
-    let (bootstrap, _client_session_id) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _client_session_id) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -2873,9 +2878,7 @@ async fn bex060_final_patch_reconciles_stale_last_seen_revision() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     assert_eq!(bootstrap["data"]["attempt"]["phase"], "exam");
 
     // Session A accepts one mutation: the attempt advances to revision + 1.
@@ -2999,14 +3002,9 @@ async fn bex060_stale_last_seen_revision_without_patch_returns_base_revision_mis
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -3015,9 +3013,7 @@ async fn bex060_stale_last_seen_revision_without_patch_returns_base_revision_mis
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let mutation_response = app
         .clone()
@@ -3069,19 +3065,21 @@ async fn bex060_stale_last_seen_revision_without_patch_returns_base_revision_mis
         json["error"]["details"]["reason"], "BASE_REVISION_MISMATCH",
         "stale revision without a patch must conflict: {json}"
     );
-    assert_eq!(json["error"]["details"]["latestRevision"].as_i64().unwrap(), revision_after_mutation);
+    assert_eq!(
+        json["error"]["details"]["latestRevision"].as_i64().unwrap(),
+        revision_after_mutation
+    );
     assert_eq!(
         persisted_revision(database.pool(), &attempt_id).await,
         revision_after_mutation,
         "conflict must not bump the revision"
     );
-    let submitted_at: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
-        "SELECT submitted_at FROM student_attempts WHERE id = ?",
-    )
-    .bind(&attempt_id)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
+    let submitted_at: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT submitted_at FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     assert!(submitted_at.is_none(), "conflict must not seal the attempt");
     assert_eq!(
         persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
@@ -3103,14 +3101,9 @@ async fn bex060_sequence_gap_without_patch_returns_final_flush_required() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -3119,9 +3112,7 @@ async fn bex060_sequence_gap_without_patch_returns_final_flush_required() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     // clientFinalSeq 2 > serverAcceptedThroughSeq 1: a pending gap.
     let (status, json) = post_submit_json(
@@ -3149,21 +3140,22 @@ async fn bex060_sequence_gap_without_patch_returns_final_flush_required() {
         attempt_revision as i64,
         "rejection must not bump the revision"
     );
-    let submitted_at: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
-        "SELECT submitted_at FROM student_attempts WHERE id = ?",
-    )
-    .bind(&attempt_id)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert!(submitted_at.is_none(), "rejection must not seal the attempt");
-    let final_submission: Option<serde_json::Value> = sqlx::query_scalar(
-        "SELECT final_submission FROM student_attempts WHERE id = ?",
-    )
-    .bind(&attempt_id)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
+    let submitted_at: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT submitted_at FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert!(
+        submitted_at.is_none(),
+        "rejection must not seal the attempt"
+    );
+    let final_submission: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT final_submission FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     assert!(final_submission.is_none());
     assert_eq!(
         persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
@@ -3231,14 +3223,9 @@ async fn bex060_missing_flush_metadata_returns_final_flush_required() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -3247,9 +3234,7 @@ async fn bex060_missing_flush_metadata_returns_final_flush_required() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_submit_json(
         &app,
@@ -3290,14 +3275,9 @@ async fn bex060_sequence_gap_reconciled_by_patch_persists_replay_incomplete() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -3306,9 +3286,7 @@ async fn bex060_sequence_gap_reconciled_by_patch_persists_replay_incomplete() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_submit_json(
         &app,
@@ -3343,7 +3321,10 @@ async fn bex060_sequence_gap_reconciled_by_patch_persists_replay_incomplete() {
         "the patch reconciles the gap in the final snapshot"
     );
     assert_eq!(final_submission["finalFlush"]["clientFinalSeq"], 2);
-    assert_eq!(final_submission["finalFlush"]["serverAcceptedThroughSeq"], 1);
+    assert_eq!(
+        final_submission["finalFlush"]["serverAcceptedThroughSeq"],
+        1
+    );
     assert_eq!(
         final_submission["finalFlush"]["replayIncomplete"], true,
         "replayIncomplete records the reconciled gap"
@@ -3381,9 +3362,7 @@ async fn submit_rejects_missing_seq_without_final_patch() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -3434,9 +3413,7 @@ async fn bootstrap_hydrates_existing_attempt_after_crash_reconnect() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let mutation = app
         .clone()
@@ -3495,9 +3472,7 @@ async fn mutation_batch_persists_writing_answers_separately_and_tracks_current_q
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -3754,7 +3729,8 @@ async fn late_mutation_from_old_section_accepted_in_grace_then_section_mismatch_
         "Admin",
     )
     .await;
-    let (student_auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let (student_auth, student_key) =
+        create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -3793,7 +3769,10 @@ async fn late_mutation_from_old_section_accepted_in_grace_then_section_mismatch_
     )
     .await;
     assert_eq!(advance.status(), StatusCode::OK);
-    assert_eq!(json_body(advance).await["data"]["activeSectionKey"], "reading");
+    assert_eq!(
+        json_body(advance).await["data"]["activeSectionKey"],
+        "reading"
+    );
 
     let mutation_request = async |question_id: &str, mutation_id: &str, revision: i32| {
         app.clone()
@@ -3825,7 +3804,8 @@ async fn late_mutation_from_old_section_accepted_in_grace_then_section_mismatch_
 
     // (a) IMMEDIATELY after the advance the just-completed section is still in
     // the transition grace window: a late listening answer is accepted.
-    let in_grace = mutation_request("q1", "mutation-late-listening-in-grace", attempt_revision).await;
+    let in_grace =
+        mutation_request("q1", "mutation-late-listening-in-grace", attempt_revision).await;
     assert_eq!(in_grace.status(), StatusCode::OK);
     let in_grace_json = json_body(in_grace).await;
     assert_eq!(in_grace_json["data"]["appliedMutationCount"], 1);
@@ -3846,13 +3826,17 @@ async fn late_mutation_from_old_section_accepted_in_grace_then_section_mismatch_
     .await
     .expect("backdate listening actual end beyond grace");
 
-    let past_grace = mutation_request("q1", "mutation-late-listening-past-grace", revision_after_grace).await;
+    let past_grace = mutation_request(
+        "q1",
+        "mutation-late-listening-past-grace",
+        revision_after_grace,
+    )
+    .await;
     assert_eq!(past_grace.status(), StatusCode::CONFLICT);
     let past_grace_json = json_body(past_grace).await;
     assert_eq!(past_grace_json["error"]["code"], "CONFLICT");
     assert_eq!(
-        past_grace_json["error"]["details"]["reason"],
-        "SECTION_MISMATCH",
+        past_grace_json["error"]["details"]["reason"], "SECTION_MISMATCH",
         "past-grace conflict body: {past_grace_json}"
     );
     assert!(
@@ -3864,7 +3848,8 @@ async fn late_mutation_from_old_section_accepted_in_grace_then_section_mismatch_
     );
 
     // (c) The ACTIVE section stays writable in the same state.
-    let active_section = mutation_request("r1", "mutation-live-reading", revision_after_grace).await;
+    let active_section =
+        mutation_request("r1", "mutation-live-reading", revision_after_grace).await;
     assert_eq!(active_section.status(), StatusCode::OK);
     let active_section_json = json_body(active_section).await;
     assert_eq!(active_section_json["data"]["appliedMutationCount"], 1);
@@ -3956,9 +3941,7 @@ async fn mutation_batch_accepts_objective_mutations_when_runtime_paused() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     sqlx::query("UPDATE exam_session_runtimes SET status = 'paused' WHERE schedule_id = ?")
         .bind(schedule_id.to_string())
@@ -4290,12 +4273,14 @@ async fn student_cannot_advance_runtime_and_submit_does_not_unlock_next_section(
         "Admin",
     )
     .await;
-    let (student_auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
+    let (student_auth, student_key) =
+        create_student_auth(database.pool(), schedule_id, "alice").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (_bootstrap, _) = bootstrap_attempt(&app, &student_auth, schedule_id, "alice", &student_key).await;
+    let (_bootstrap, _) =
+        bootstrap_attempt(&app, &student_auth, schedule_id, "alice", &student_key).await;
     let start = admin_runtime_command(
         &app,
         &admin_auth,
@@ -4322,7 +4307,8 @@ async fn student_cannot_advance_runtime_and_submit_does_not_unlock_next_section(
     let forbidden = app
         .clone()
         .oneshot(
-            student_auth.with_csrf(Request::builder())
+            student_auth
+                .with_csrf(Request::builder())
                 .method("POST")
                 .uri(format!(
                     "/api/v1/proctor/sessions/{schedule_id}/control/end-section-now"
@@ -4373,13 +4359,12 @@ async fn student_cannot_advance_runtime_and_submit_does_not_unlock_next_section(
     assert_eq!(submit_json["data"]["attempt"]["phase"], "post-exam");
 
     // The attempt is marked complete in the DB (submitted_at set)...
-    let (phase, submitted_at): (String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
-        "SELECT phase, submitted_at FROM student_attempts WHERE id = ?",
-    )
-    .bind(&attempt_id)
-    .fetch_one(database.pool())
-    .await
-    .expect("attempt row");
+    let (phase, submitted_at): (String, Option<chrono::DateTime<Utc>>) =
+        sqlx::query_as("SELECT phase, submitted_at FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .expect("attempt row");
     assert_eq!(phase, "post-exam");
     assert!(submitted_at.is_some(), "submit must seal the attempt");
 
@@ -4394,8 +4379,14 @@ async fn student_cannot_advance_runtime_and_submit_does_not_unlock_next_section(
     assert_eq!(sections[0]["sectionKey"], "listening");
     assert_eq!(sections[0]["status"], "live");
     assert_eq!(sections[1]["sectionKey"], "reading");
-    assert_eq!(sections[1]["status"], "locked", "submit must not unlock the next section");
-    assert_eq!(data["revision"], 1, "no student action may bump the runtime revision");
+    assert_eq!(
+        sections[1]["status"], "locked",
+        "submit must not unlock the next section"
+    );
+    assert_eq!(
+        data["revision"], 1,
+        "no student action may bump the runtime revision"
+    );
 
     let (db_status, db_active, db_current): (String, Option<String>, Option<String>) = sqlx::query_as(
         "SELECT status, active_section_key, current_section_key FROM exam_session_runtimes WHERE schedule_id = ?",
@@ -4415,7 +4406,10 @@ async fn student_cannot_advance_runtime_and_submit_does_not_unlock_next_section(
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(advance_events, 0, "student actions must not append control events");
+    assert_eq!(
+        advance_events, 0,
+        "student actions must not append control events"
+    );
 
     database.shutdown().await;
 }
@@ -4694,18 +4688,22 @@ async fn read_only_session_requests_do_not_create_an_attempt_nor_expose_another_
     let session_response = app
         .clone()
         .oneshot(
-            auth_alice.with_auth(Request::builder().uri(format!(
-                "/api/v1/student/sessions/{schedule_id}?candidateId=bob"
-            )))
-            .body(Body::empty())
-            .unwrap(),
+            auth_alice
+                .with_auth(Request::builder().uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}?candidateId=bob"
+                )))
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
     let session_status = session_response.status();
     let session_json = json_body(session_response).await;
     assert_eq!(session_status, StatusCode::OK, "session: {session_json}");
-    assert_eq!(session_json["data"]["schedule"]["id"], schedule.id.to_string());
+    assert_eq!(
+        session_json["data"]["schedule"]["id"],
+        schedule.id.to_string()
+    );
     assert_eq!(
         session_json["data"]["version"]["id"],
         schedule.published_version_id.to_string()
@@ -4717,18 +4715,23 @@ async fn read_only_session_requests_do_not_create_an_attempt_nor_expose_another_
     let static_response = app
         .clone()
         .oneshot(
-            auth_alice.with_auth(Request::builder().uri(format!(
-                "/api/v1/student/sessions/{schedule_id}/static"
-            )))
-            .body(Body::empty())
-            .unwrap(),
+            auth_alice
+                .with_auth(
+                    Request::builder()
+                        .uri(format!("/api/v1/student/sessions/{schedule_id}/static")),
+                )
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
     let static_status = static_response.status();
     let static_json = json_body(static_response).await;
     assert_eq!(static_status, StatusCode::OK, "static: {static_json}");
-    assert_eq!(static_json["data"]["schedule"]["id"], schedule.id.to_string());
+    assert_eq!(
+        static_json["data"]["schedule"]["id"],
+        schedule.id.to_string()
+    );
     assert_eq!(
         static_json["data"]["version"]["id"],
         schedule.published_version_id.to_string()
@@ -4740,11 +4743,12 @@ async fn read_only_session_requests_do_not_create_an_attempt_nor_expose_another_
     let live_response = app
         .clone()
         .oneshot(
-            auth_alice.with_auth(Request::builder().uri(format!(
-                "/api/v1/student/sessions/{schedule_id}/live?candidateId=bob"
-            )))
-            .body(Body::empty())
-            .unwrap(),
+            auth_alice
+                .with_auth(Request::builder().uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}/live?candidateId=bob"
+                )))
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -4755,13 +4759,12 @@ async fn read_only_session_requests_do_not_create_an_attempt_nor_expose_another_
     assert_eq!(live_json["data"]["attempt"], serde_json::Value::Null);
 
     // None of the read-only requests created an attempt; Bob's is the only row.
-    let attempt_keys: Vec<String> = sqlx::query_scalar(
-        "SELECT student_key FROM student_attempts WHERE schedule_id = ?",
-    )
-    .bind(schedule_id.to_string())
-    .fetch_all(database.pool())
-    .await
-    .unwrap();
+    let attempt_keys: Vec<String> =
+        sqlx::query_scalar("SELECT student_key FROM student_attempts WHERE schedule_id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_all(database.pool())
+            .await
+            .unwrap();
     assert_eq!(
         attempt_keys,
         vec![bob_key],
@@ -4789,9 +4792,7 @@ async fn mutation_batch_rejects_request_body_with_another_attempt_id() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -4843,9 +4844,7 @@ async fn submit_rejects_request_body_with_another_attempt_id() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -4896,9 +4895,7 @@ async fn expired_attempt_token_is_rejected_with_unauthorized() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let expired_token = sign_attempt_token(
         &AppConfig::default(),
@@ -4970,11 +4967,12 @@ async fn student_not_enrolled_for_schedule_receives_forbidden() {
     let session_response = app
         .clone()
         .oneshot(
-            unenrolled.with_auth(Request::builder().uri(format!(
-                "/api/v1/student/sessions/{schedule_id}?candidateId=charlie"
-            )))
-            .body(Body::empty())
-            .unwrap(),
+            unenrolled
+                .with_auth(Request::builder().uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}?candidateId=charlie"
+                )))
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -4986,11 +4984,12 @@ async fn student_not_enrolled_for_schedule_receives_forbidden() {
     let live_response = app
         .clone()
         .oneshot(
-            unenrolled.with_auth(Request::builder().uri(format!(
-                "/api/v1/student/sessions/{schedule_id}/live?candidateId=charlie"
-            )))
-            .body(Body::empty())
-            .unwrap(),
+            unenrolled
+                .with_auth(Request::builder().uri(format!(
+                    "/api/v1/student/sessions/{schedule_id}/live?candidateId=charlie"
+                )))
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -5000,11 +4999,13 @@ async fn student_not_enrolled_for_schedule_receives_forbidden() {
 
     let static_response = app
         .oneshot(
-            unenrolled.with_auth(Request::builder().uri(format!(
-                "/api/v1/student/sessions/{schedule_id}/static"
-            )))
-            .body(Body::empty())
-            .unwrap(),
+            unenrolled
+                .with_auth(
+                    Request::builder()
+                        .uri(format!("/api/v1/student/sessions/{schedule_id}/static")),
+                )
+                .body(Body::empty())
+                .unwrap(),
         )
         .await
         .unwrap();
@@ -5025,8 +5026,8 @@ async fn student_not_enrolled_for_schedule_receives_forbidden() {
 // state (`activeSessionId`), so Session A's answer is preserved and no partial
 // state is persisted for Session B's stale batch.
 #[tokio::test]
-async fn mutation_batch_from_second_client_session_with_stale_base_revision_returns_conflict_and_preserves_first_client_answer()
-{
+async fn mutation_batch_from_second_client_session_with_stale_base_revision_returns_conflict_and_preserves_first_client_answer(
+) {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -5067,9 +5068,7 @@ async fn mutation_batch_from_second_client_session_with_stale_base_revision_retu
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap_a["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap_a["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     // Session A accepts q1 = "A"; the server revision and watermark advance.
     let session_a_response = app
@@ -5146,8 +5145,7 @@ async fn mutation_batch_from_second_client_session_with_stale_base_revision_retu
     );
     assert_eq!(session_b_json["error"]["code"], "CONFLICT");
     assert_eq!(
-        session_b_json["error"]["details"]["reason"],
-        "BASE_REVISION_MISMATCH",
+        session_b_json["error"]["details"]["reason"], "BASE_REVISION_MISMATCH",
         "stale batch response: {session_b_json}"
     );
     assert_eq!(
@@ -5169,8 +5167,7 @@ async fn mutation_batch_from_second_client_session_with_stale_base_revision_retu
     );
     // The conflict identifies the session that owns the accepted state.
     assert_eq!(
-        session_b_json["error"]["details"]["activeSessionId"],
-        "phone-client-1",
+        session_b_json["error"]["details"]["activeSessionId"], "phone-client-1",
         "stale batch response: {session_b_json}"
     );
 
@@ -5244,9 +5241,7 @@ async fn mutation_batch_rejected_for_stale_revision_then_replayed_latest_revisio
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap_a["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap_a["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     let batch_uri = format!("/api/v1/student/sessions/{schedule_id}/mutations:batch");
 
     // Session A accepts q1 = "A"; the server revision advances.
@@ -5305,8 +5300,7 @@ async fn mutation_batch_rejected_for_stale_revision_then_replayed_latest_revisio
     assert_eq!(stale_response.status(), StatusCode::CONFLICT);
     let stale_json = json_body(stale_response).await;
     assert_eq!(
-        stale_json["error"]["details"]["reason"],
-        "BASE_REVISION_MISMATCH",
+        stale_json["error"]["details"]["reason"], "BASE_REVISION_MISMATCH",
         "stale batch response: {stale_json}"
     );
     assert_eq!(
@@ -5402,8 +5396,8 @@ async fn mutation_batch_rejected_for_stale_revision_then_replayed_latest_revisio
 // that owns the accepted state (`activeSessionId`), without sealing the
 // attempt or overwriting the valid session's answer.
 #[tokio::test]
-async fn submit_from_second_client_session_with_stale_revision_returns_base_revision_mismatch_conflict()
-{
+async fn submit_from_second_client_session_with_stale_revision_returns_base_revision_mismatch_conflict(
+) {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -5457,9 +5451,7 @@ async fn submit_from_second_client_session_with_stale_revision_returns_base_revi
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap_a["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap_a["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let mutation_response = app
         .clone()
@@ -5523,8 +5515,7 @@ async fn submit_from_second_client_session_with_stale_revision_returns_base_revi
     let submit_json = json_body(submit_response).await;
     assert_eq!(submit_json["error"]["code"], "CONFLICT");
     assert_eq!(
-        submit_json["error"]["details"]["reason"],
-        "BASE_REVISION_MISMATCH",
+        submit_json["error"]["details"]["reason"], "BASE_REVISION_MISMATCH",
         "stale submit response: {submit_json}"
     );
     assert_eq!(
@@ -5547,14 +5538,16 @@ async fn submit_from_second_client_session_with_stale_revision_returns_base_revi
             .await
             .unwrap();
     assert_eq!(answers["q1"], "A");
-    let submitted_at: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
-        "SELECT submitted_at FROM student_attempts WHERE id = ?",
-    )
-    .bind(&attempt_id)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert!(submitted_at.is_none(), "stale submit must not seal the attempt");
+    let submitted_at: Option<chrono::DateTime<Utc>> =
+        sqlx::query_scalar("SELECT submitted_at FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert!(
+        submitted_at.is_none(),
+        "stale submit must not seal the attempt"
+    );
 
     database.shutdown().await;
 }
@@ -6088,10 +6081,7 @@ async fn post_single_mutation_batch(
 
 // A single keyed value from the persisted `answers` JSON column (or the whole
 // object when `key` is None).
-async fn persisted_answers(
-    pool: &sqlx::MySqlPool,
-    attempt_id: &str,
-) -> serde_json::Value {
+async fn persisted_answers(pool: &sqlx::MySqlPool, attempt_id: &str) -> serde_json::Value {
     sqlx::query_scalar("SELECT answers FROM student_attempts WHERE id = ?")
         .bind(attempt_id)
         .fetch_one(pool)
@@ -6099,10 +6089,7 @@ async fn persisted_answers(
         .unwrap()
 }
 
-async fn persisted_writing_answers(
-    pool: &sqlx::MySqlPool,
-    attempt_id: &str,
-) -> serde_json::Value {
+async fn persisted_writing_answers(pool: &sqlx::MySqlPool, attempt_id: &str) -> serde_json::Value {
     sqlx::query_scalar("SELECT writing_answers FROM student_attempts WHERE id = ?")
         .bind(attempt_id)
         .fetch_one(pool)
@@ -6166,9 +6153,7 @@ async fn mutation_batch_supported_command_matrix_objective_questions() {
         .as_str()
         .unwrap()
         .to_owned();
-    let mut base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let mut base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     // --- SetScalar: persisted in answers + authoritative response -----------
     let (status, json) = post_mutation_batch_json(
@@ -6281,7 +6266,10 @@ async fn mutation_batch_supported_command_matrix_objective_questions() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["data"]["attempt"]["answers"]["l-blank-2"], json!(["alpha"]));
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-blank-2"],
+        json!(["alpha"])
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_mutation_batch_json(
@@ -6414,7 +6402,10 @@ async fn mutation_batch_supported_command_matrix_objective_questions() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["data"]["attempt"]["answers"]["l-choice-1"].is_null(), true);
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-choice-1"].is_null(),
+        true
+    );
     assert_eq!(json["data"]["attempt"]["answers"]["q1"].is_null(), true);
 
     // Final DB round-trip: clears persist as explicit JSON nulls.
@@ -6464,9 +6455,7 @@ async fn mutation_batch_supported_command_matrix_writing_unicode() {
         .as_str()
         .unwrap()
         .to_owned();
-    let mut base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let mut base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     // --- SetEssayText: persisted in writingAnswers + authoritative response --
     let (status, json) = post_mutation_batch_json(
@@ -6486,7 +6475,10 @@ async fn mutation_batch_supported_command_matrix_writing_unicode() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"], "Draft 1");
+    assert_eq!(
+        json["data"]["attempt"]["writingAnswers"]["task1"],
+        "Draft 1"
+    );
     assert_eq!(json["data"]["attempt"]["answers"], json!({}));
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
@@ -6517,7 +6509,10 @@ async fn mutation_batch_supported_command_matrix_writing_unicode() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"], unicode_draft);
+    assert_eq!(
+        json["data"]["attempt"]["writingAnswers"]["task1"],
+        unicode_draft
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     let writing_answers: serde_json::Value =
@@ -6547,7 +6542,10 @@ async fn mutation_batch_supported_command_matrix_writing_unicode() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"], "");
-    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"].is_null(), false);
+    assert_eq!(
+        json["data"]["attempt"]["writingAnswers"]["task1"].is_null(),
+        false
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_mutation_batch_json(
@@ -6566,7 +6564,10 @@ async fn mutation_batch_supported_command_matrix_writing_unicode() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"].is_null(), true);
+    assert_eq!(
+        json["data"]["attempt"]["writingAnswers"]["task1"].is_null(),
+        true
+    );
 
     let writing_answers: serde_json::Value =
         sqlx::query_scalar("SELECT writing_answers FROM student_attempts WHERE id = ?")
@@ -6575,10 +6576,7 @@ async fn mutation_batch_supported_command_matrix_writing_unicode() {
             .await
             .unwrap();
     assert_eq!(writing_answers["task1"], serde_json::Value::Null);
-    assert!(writing_answers
-        .as_object()
-        .unwrap()
-        .contains_key("task1"));
+    assert!(writing_answers.as_object().unwrap().contains_key("task1"));
 
     database.shutdown().await;
 }
@@ -6620,8 +6618,7 @@ async fn bex035_question_type_round_trip_matrix() {
         bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await
     };
     assert_eq!(
-        bootstrap["data"]["attempt"]["phase"],
-        "exam",
+        bootstrap["data"]["attempt"]["phase"], "exam",
         "attempt must be phase=exam for submit"
     );
     let attempt_id = bootstrap["data"]["attempt"]["id"]
@@ -6632,9 +6629,7 @@ async fn bex035_question_type_round_trip_matrix() {
         .as_str()
         .unwrap()
         .to_owned();
-    let mut base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let mut base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let expect_ok = |status: StatusCode, json: &serde_json::Value, label: &str| {
         assert_eq!(status, StatusCode::OK, "{label} failed: {json}");
@@ -6689,7 +6684,10 @@ async fn bex035_question_type_round_trip_matrix() {
     )
     .await;
     expect_ok(status, &json, "SetChoice l-multi-1 array");
-    assert_eq!(json["data"]["attempt"]["answers"]["l-multi-1"], json!(["A", "C"]));
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-multi-1"],
+        json!(["A", "C"])
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
     let answers = persisted_answers(database.pool(), &attempt_id).await;
     assert_eq!(answers["l-multi-1"], json!(["A", "C"]));
@@ -6722,10 +6720,20 @@ async fn bex035_question_type_round_trip_matrix() {
     )
     .await;
     expect_422(status, &json, "l-multi-1 too many selections");
-    assert_eq!(json["error"]["message"], "Too many selections for this question.");
+    assert_eq!(
+        json["error"]["message"],
+        "Too many selections for this question."
+    );
     let answers = persisted_answers(database.pool(), &attempt_id).await;
-    assert_eq!(answers["l-multi-1"], json!(["C", "A"]), "rejected batch must not persist");
-    assert_eq!(persisted_revision(database.pool(), &attempt_id).await, i64::from(base_revision));
+    assert_eq!(
+        answers["l-multi-1"],
+        json!(["C", "A"]),
+        "rejected batch must not persist"
+    );
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        i64::from(base_revision)
+    );
 
     // ---- 3. True/False/Not Given (full-metadata TFNG → strict Enum) --------
     for (idx, value) in ["T", "NG"].iter().enumerate() {
@@ -6765,7 +6773,10 @@ async fn bex035_question_type_round_trip_matrix() {
         );
     }
     let answers = persisted_answers(database.pool(), &attempt_id).await;
-    assert_eq!(answers["l-tfng-1"], "NG", "rejected TFNG variant must not persist");
+    assert_eq!(
+        answers["l-tfng-1"], "NG",
+        "rejected TFNG variant must not persist"
+    );
     assert_eq!(
         persisted_revision(database.pool(), &attempt_id).await,
         i64::from(base_revision),
@@ -6836,7 +6847,10 @@ async fn bex035_question_type_round_trip_matrix() {
     )
     .await;
     expect_ok(status, &json, "SetSlot l-blank-2[0]");
-    assert_eq!(json["data"]["attempt"]["answers"]["l-blank-2"], json!(["first"]));
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-blank-2"],
+        json!(["first"])
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
     let answers = persisted_answers(database.pool(), &attempt_id).await;
     assert_eq!(answers["l-blank-2"], json!(["first"]), "partial fill shape");
@@ -6889,7 +6903,10 @@ async fn bex035_question_type_round_trip_matrix() {
     )
     .await;
     expect_ok(status, &json, "SetFlag on per-blank sub-id");
-    assert_eq!(json["data"]["attempt"]["flags"]["l-blank-2:l-blank-2:b1"], true);
+    assert_eq!(
+        json["data"]["attempt"]["flags"]["l-blank-2:l-blank-2:b1"],
+        true
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     // ---- 6. Diagram labels (DIAGRAM_LABELING → block-level ArrayText) ------
@@ -6906,7 +6923,10 @@ async fn bex035_question_type_round_trip_matrix() {
     )
     .await;
     expect_ok(status, &json, "SetSlot l-map-1[0]");
-    assert_eq!(json["data"]["attempt"]["answers"]["l-map-1"], json!(["nose"]));
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-map-1"],
+        json!(["nose"])
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_single_mutation_batch(
@@ -6933,7 +6953,10 @@ async fn bex035_question_type_round_trip_matrix() {
     )
     .await;
     expect_ok(status, &json, "ClearSlot l-map-1[1]");
-    assert_eq!(json["data"]["attempt"]["answers"]["l-map-1"], json!(["nose", null]));
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-map-1"],
+        json!(["nose", null])
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     // A SetScalar against the per-label sub-id is accepted-but-ignored (the
@@ -6952,7 +6975,10 @@ async fn bex035_question_type_round_trip_matrix() {
     // The no-op still persists as a stored mutation, so the revision advances;
     // only the applied count is 0 and the answers byte-unchanged.
     assert_eq!(json["data"]["appliedMutationCount"], 0);
-    assert_eq!(json["data"]["revision"].as_i64().unwrap(), i64::from(base_revision) + 1);
+    assert_eq!(
+        json["data"]["revision"].as_i64().unwrap(),
+        i64::from(base_revision) + 1
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
     let answers = persisted_answers(database.pool(), &attempt_id).await;
     assert_eq!(answers["l-map-1"], json!(["nose", null]));
@@ -6971,7 +6997,11 @@ async fn bex035_question_type_round_trip_matrix() {
     expect_ok(status, &json, "SetSlot l-blank-shared-1[0]");
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
     let answers = persisted_answers(database.pool(), &attempt_id).await;
-    assert_eq!(answers["l-blank-shared-1"], json!(["Apple"]), "case preserved in DB");
+    assert_eq!(
+        answers["l-blank-shared-1"],
+        json!(["Apple"]),
+        "case preserved in DB"
+    );
 
     // ---- 7. Cleared answers (explicit JSON null shapes, keys retained) -----
     // SINGLE_MCQ: set, then clear via ClearChoice.
@@ -7021,7 +7051,10 @@ async fn bex035_question_type_round_trip_matrix() {
     )
     .await;
     expect_ok(status, &json, "ClearChoice l-choice-1");
-    assert_eq!(json["data"]["attempt"]["answers"]["l-choice-1"].is_null(), true);
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-choice-1"].is_null(),
+        true
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     // Text: SetScalar then ClearScalar → explicit null, key retained.
@@ -7049,7 +7082,10 @@ async fn bex035_question_type_round_trip_matrix() {
     )
     .await;
     expect_ok(status, &json, "ClearScalar l-short-2");
-    assert_eq!(json["data"]["attempt"]["answers"]["l-short-2"].is_null(), true);
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-short-2"].is_null(),
+        true
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     // Restore a case-variant of the correct answer ("petrol") so the grading
@@ -7099,7 +7135,10 @@ async fn bex035_question_type_round_trip_matrix() {
 
     let answers = persisted_answers(database.pool(), &attempt_id).await;
     assert_eq!(answers["q1"], serde_json::Value::Null);
-    assert!(answers.as_object().unwrap().contains_key("q1"), "clear keeps the key");
+    assert!(
+        answers.as_object().unwrap().contains_key("q1"),
+        "clear keeps the key"
+    );
 
     // ---- 8. Writing tasks: separate writingAnswers map ---------------------
     start_runtime(database.pool(), schedule_id, "writing").await;
@@ -7114,7 +7153,10 @@ async fn bex035_question_type_round_trip_matrix() {
     )
     .await;
     expect_ok(status, &json, "SetEssayText task1");
-    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"], "Draft 1");
+    assert_eq!(
+        json["data"]["attempt"]["writingAnswers"]["task1"],
+        "Draft 1"
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     let unicode_draft = "第一段 引言\nsecond line 🎯\tTAB\nfinal line with emoji 🚀";
@@ -7131,7 +7173,10 @@ async fn bex035_question_type_round_trip_matrix() {
     expect_ok(status, &json, "SetEssayText task2 unicode");
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
     let writing_answers = persisted_writing_answers(database.pool(), &attempt_id).await;
-    assert_eq!(writing_answers["task2"], unicode_draft, "byte-exact unicode/multiline");
+    assert_eq!(
+        writing_answers["task2"], unicode_draft,
+        "byte-exact unicode/multiline"
+    );
 
     let (status, json) = post_single_mutation_batch(
         &app,
@@ -7144,7 +7189,10 @@ async fn bex035_question_type_round_trip_matrix() {
     )
     .await;
     expect_ok(status, &json, "ClearEssayText task1");
-    assert_eq!(json["data"]["attempt"]["writingAnswers"]["task1"].is_null(), true);
+    assert_eq!(
+        json["data"]["attempt"]["writingAnswers"]["task1"].is_null(),
+        true
+    );
     base_revision = json["data"]["revision"].as_i64().unwrap() as i32;
     let writing_answers = persisted_writing_answers(database.pool(), &attempt_id).await;
     assert_eq!(writing_answers["task1"], serde_json::Value::Null);
@@ -7205,7 +7253,11 @@ async fn bex035_question_type_round_trip_matrix() {
         .unwrap();
     let submit_status = submit.status();
     let submit_json = json_body(submit).await;
-    assert_eq!(submit_status, StatusCode::OK, "submit conflict body: {submit_json}");
+    assert_eq!(
+        submit_status,
+        StatusCode::OK,
+        "submit conflict body: {submit_json}"
+    );
     assert_eq!(submit_json["data"]["attempt"]["phase"], "post-exam");
 
     let final_submission: serde_json::Value =
@@ -7235,7 +7287,10 @@ async fn bex035_question_type_round_trip_matrix() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(sections_before, 0, "submit must not project grading synchronously");
+    assert_eq!(
+        sections_before, 0,
+        "submit must not project grading synchronously"
+    );
 
     let grading = GradingService::new(database.pool().clone());
     let report = grading
@@ -7267,30 +7322,55 @@ async fn bex035_question_type_round_trip_matrix() {
     };
 
     // Correct answers grade correct (TextAnyOf with whitespace collapse).
-    assert_eq!(result_for("l-short-1")["isCorrect"], true, "  diagram  == diagram");
+    assert_eq!(
+        result_for("l-short-1")["isCorrect"],
+        true,
+        "  diagram  == diagram"
+    );
     assert_eq!(result_for("l-tfng-1")["isCorrect"], true);
     assert_eq!(result_for("l-match-q1")["isCorrect"], true);
     // Multi-select grades as an order-insensitive set.
-    assert_eq!(result_for("l-multi-1")["isCorrect"], true, "[\"C\",\"A\"] equals set A,C");
+    assert_eq!(
+        result_for("l-multi-1")["isCorrect"],
+        true,
+        "[\"C\",\"A\"] equals set A,C"
+    );
     // Sentence slots grade per blank; cleared slots are absent → wrong. The
     // grading questionId is the same raw "{question_id}:{blank_id}" concat.
-    assert_eq!(result_for("l-blank-2:l-blank-2:b1")["isCorrect"], false, "cleared blank");
+    assert_eq!(
+        result_for("l-blank-2:l-blank-2:b1")["isCorrect"],
+        false,
+        "cleared blank"
+    );
     assert_eq!(result_for("l-blank-2:l-blank-2:b2")["isCorrect"], true);
     // Diagram labels grade per label; the cleared label is wrong.
     assert_eq!(result_for("l-map-1:l1")["isCorrect"], true);
-    assert_eq!(result_for("l-map-1:l2")["isCorrect"], false, "cleared label");
+    assert_eq!(
+        result_for("l-map-1:l2")["isCorrect"],
+        false,
+        "cleared label"
+    );
     // Shared-answer sentence folds case: "Apple" matches "apple".
-    assert_eq!(result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], true);
+    assert_eq!(
+        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"],
+        true
+    );
     // Wrong, case-variant, and cleared answers grade wrong.
     assert_eq!(
         result_for("l-short-2")["isCorrect"],
         false,
         "\"Petrol\" != \"petrol\" (plain-text grading is case-sensitive)"
     );
-    assert_eq!(result_for("l-choice-1")["isCorrect"], false, "cleared choice");
+    assert_eq!(
+        result_for("l-choice-1")["isCorrect"],
+        false,
+        "cleared choice"
+    );
     // The legacy-minimal TFNG question (q1, no answer key) has no grading spec.
     assert!(
-        question_results.iter().all(|entry| entry["questionId"] != "q1"),
+        question_results
+            .iter()
+            .all(|entry| entry["questionId"] != "q1"),
         "q1 has no correctAnswer metadata, so no grading row may exist"
     );
 
@@ -7314,8 +7394,7 @@ async fn bex070_bootstrap_attempt(
     let (bootstrap, _client_session_id) =
         bootstrap_attempt(app, &auth, schedule_id, candidate_id, &student_key).await;
     assert_eq!(
-        bootstrap["data"]["attempt"]["phase"],
-        "exam",
+        bootstrap["data"]["attempt"]["phase"], "exam",
         "attempt for {candidate_id} must be phase=exam for submit"
     );
     let attempt_id = bootstrap["data"]["attempt"]["id"]
@@ -7326,9 +7405,7 @@ async fn bex070_bootstrap_attempt(
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     (attempt_id, attempt_token, base_revision)
 }
 
@@ -7382,7 +7459,10 @@ async fn bex070_mutate_rejected(
         StatusCode::UNPROCESSABLE_ENTITY,
         "{mutation_id}: {json}"
     );
-    assert_eq!(json["error"]["code"], "VALIDATION_ERROR", "{mutation_id}: {json}");
+    assert_eq!(
+        json["error"]["code"], "VALIDATION_ERROR",
+        "{mutation_id}: {json}"
+    );
     assert_eq!(
         persisted_revision(pool, attempt_id).await,
         i64::from(base_revision),
@@ -7510,8 +7590,14 @@ async fn bex070_objective_grading_matrix() {
         .unwrap();
 
     // ---- Attempt A (alice): exact-answer cells -----------------------------
-    let (attempt_id, attempt_token, mut revision) =
-        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "alice", "w-bex070-alice").await;
+    let (attempt_id, attempt_token, mut revision) = bex070_bootstrap_attempt(
+        &app,
+        database.pool(),
+        schedule_id,
+        "alice",
+        "w-bex070-alice",
+    )
+    .await;
     revision = bex070_mutate_ok(
         &app,
         &attempt_token,
@@ -7642,18 +7728,25 @@ async fn bex070_objective_grading_matrix() {
     assert_eq!(result_for("l-match-q1")["isCorrect"], true, "Enum exact");
     assert_eq!(result_for("l-choice-1")["isCorrect"], true, "Enum exact");
     assert_eq!(
-        result_for("l-multi-1")["isCorrect"], true,
+        result_for("l-multi-1")["isCorrect"],
+        true,
         "set exact, order-insensitive [\"C\",\"A\"]"
     );
-    assert_eq!(result_for("l-blank-2:l-blank-2:b1")["isCorrect"], true, "sentence exact");
     assert_eq!(
-        result_for("l-blank-2:l-blank-2:b2")["isCorrect"], false,
+        result_for("l-blank-2:l-blank-2:b1")["isCorrect"],
+        true,
+        "sentence exact"
+    );
+    assert_eq!(
+        result_for("l-blank-2:l-blank-2:b2")["isCorrect"],
+        false,
         "sentence blank (cleared slot)"
     );
     assert_eq!(result_for("l-map-1:l1")["isCorrect"], true, "diagram exact");
     assert_eq!(result_for("l-map-1:l2")["isCorrect"], true, "diagram exact");
     assert_eq!(
-        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], true,
+        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"],
+        true,
         "shared pool exact"
     );
     assert!(
@@ -7793,25 +7886,64 @@ async fn bex070_objective_grading_matrix() {
     .await;
     let results = auto["questionResults"].as_array().unwrap();
     let result_for = |question_id: &str| bex070_result_for(results, question_id);
-    assert_eq!(result_for("l-short-1")["isCorrect"], true, "Text whitespace collapses");
-    assert_eq!(result_for("l-short-2")["isCorrect"], false, "Text case-sensitive");
-    assert_eq!(result_for("l-blank-2:l-blank-2:b1")["isCorrect"], true, "sentence whitespace collapses");
-    assert_eq!(result_for("l-blank-2:l-blank-2:b2")["isCorrect"], false, "sentence case-sensitive");
-    assert_eq!(result_for("l-map-1:l1")["isCorrect"], true, "diagram whitespace collapses");
-    assert_eq!(result_for("l-map-1:l2")["isCorrect"], false, "diagram case-sensitive");
-    assert_eq!(result_for("l-tfng-1")["isCorrect"], false, "Enum incorrect");
-    assert_eq!(result_for("l-match-q1")["isCorrect"], false, "Enum incorrect");
-    assert_eq!(result_for("l-multi-1")["isCorrect"], false, "set incorrect");
-    assert_eq!(result_for("l-choice-1")["isCorrect"], false, "Enum incorrect");
     assert_eq!(
-        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], false,
+        result_for("l-short-1")["isCorrect"],
+        true,
+        "Text whitespace collapses"
+    );
+    assert_eq!(
+        result_for("l-short-2")["isCorrect"],
+        false,
+        "Text case-sensitive"
+    );
+    assert_eq!(
+        result_for("l-blank-2:l-blank-2:b1")["isCorrect"],
+        true,
+        "sentence whitespace collapses"
+    );
+    assert_eq!(
+        result_for("l-blank-2:l-blank-2:b2")["isCorrect"],
+        false,
+        "sentence case-sensitive"
+    );
+    assert_eq!(
+        result_for("l-map-1:l1")["isCorrect"],
+        true,
+        "diagram whitespace collapses"
+    );
+    assert_eq!(
+        result_for("l-map-1:l2")["isCorrect"],
+        false,
+        "diagram case-sensitive"
+    );
+    assert_eq!(result_for("l-tfng-1")["isCorrect"], false, "Enum incorrect");
+    assert_eq!(
+        result_for("l-match-q1")["isCorrect"],
+        false,
+        "Enum incorrect"
+    );
+    assert_eq!(result_for("l-multi-1")["isCorrect"], false, "set incorrect");
+    assert_eq!(
+        result_for("l-choice-1")["isCorrect"],
+        false,
+        "Enum incorrect"
+    );
+    assert_eq!(
+        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"],
+        false,
         "shared pool: value outside pool is wrong"
     );
 
     // ---- Attempt C (carol): patch-path whitespace probes + text wrong/blank -
     // Enum/set whitespace variants are rejected at the mutation layer...
-    let (attempt_id, attempt_token, mut revision) =
-        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "carol", "w-bex070-carol").await;
+    let (attempt_id, attempt_token, mut revision) = bex070_bootstrap_attempt(
+        &app,
+        database.pool(),
+        schedule_id,
+        "carol",
+        "w-bex070-carol",
+    )
+    .await;
     bex070_mutate_rejected(
         &app,
         database.pool(),
@@ -7943,30 +8075,55 @@ async fn bex070_objective_grading_matrix() {
     assert_eq!(final_submission["answers"]["l-tfng-1"], " T ");
     let results = auto["questionResults"].as_array().unwrap();
     let result_for = |question_id: &str| bex070_result_for(results, question_id);
-    assert_eq!(result_for("l-short-1")["isCorrect"], false, "Text incorrect");
-    assert_eq!(result_for("l-short-2")["isCorrect"], false, "Text blank (cleared)");
-    assert_eq!(result_for("l-blank-2:l-blank-2:b1")["isCorrect"], false, "sentence incorrect");
-    assert_eq!(result_for("l-blank-2:l-blank-2:b2")["isCorrect"], false, "sentence incorrect");
+    assert_eq!(
+        result_for("l-short-1")["isCorrect"],
+        false,
+        "Text incorrect"
+    );
+    assert_eq!(
+        result_for("l-short-2")["isCorrect"],
+        false,
+        "Text blank (cleared)"
+    );
+    assert_eq!(
+        result_for("l-blank-2:l-blank-2:b1")["isCorrect"],
+        false,
+        "sentence incorrect"
+    );
+    assert_eq!(
+        result_for("l-blank-2:l-blank-2:b2")["isCorrect"],
+        false,
+        "sentence incorrect"
+    );
     assert_eq!(result_for("l-map-1:l1")["isCorrect"], true);
-    assert_eq!(result_for("l-map-1:l2")["isCorrect"], false, "diagram incorrect");
     assert_eq!(
-        result_for("l-tfng-1")["isCorrect"], false,
+        result_for("l-map-1:l2")["isCorrect"],
+        false,
+        "diagram incorrect"
+    );
+    assert_eq!(
+        result_for("l-tfng-1")["isCorrect"],
+        false,
         "Enum whitespace variant must grade wrong (patch path)"
     );
     assert_eq!(
-        result_for("l-match-q1")["isCorrect"], false,
+        result_for("l-match-q1")["isCorrect"],
+        false,
         "Enum whitespace variant must grade wrong (patch path)"
     );
     assert_eq!(
-        result_for("l-choice-1")["isCorrect"], false,
+        result_for("l-choice-1")["isCorrect"],
+        false,
         "Enum whitespace variant must grade wrong (patch path)"
     );
     assert_eq!(
-        result_for("l-multi-1")["isCorrect"], false,
+        result_for("l-multi-1")["isCorrect"],
+        false,
         "set whitespace variant must grade wrong (ExactSet is byte-strict)"
     );
     assert_eq!(
-        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], false,
+        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"],
+        false,
         "shared blank (unanswered)"
     );
 
@@ -8025,19 +8182,23 @@ async fn bex070_objective_grading_matrix() {
     let results = auto["questionResults"].as_array().unwrap();
     let result_for = |question_id: &str| bex070_result_for(results, question_id);
     assert_eq!(
-        result_for("l-tfng-1")["isCorrect"], false,
+        result_for("l-tfng-1")["isCorrect"],
+        false,
         "Enum case variant must grade wrong (patch path)"
     );
     assert_eq!(
-        result_for("l-choice-1")["isCorrect"], false,
+        result_for("l-choice-1")["isCorrect"],
+        false,
         "Enum case variant must grade wrong (patch path)"
     );
     assert_eq!(
-        result_for("l-multi-1")["isCorrect"], false,
+        result_for("l-multi-1")["isCorrect"],
+        false,
         "set case variant must grade wrong"
     );
     assert_eq!(
-        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"], true,
+        result_for("l-blank-shared-1:l-blank-shared-1:b1")["isCorrect"],
+        true,
         "shared pool folds case: \"APPLE\" == \"apple\""
     );
 
@@ -8105,8 +8266,14 @@ async fn bex070_shared_answer_pool_matrix() {
         .unwrap();
 
     // ---- Attempt F1 (fiona): pool values (case-folded) + duplicate ---------
-    let (attempt_id, attempt_token, mut revision) =
-        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "fiona", "w-bex070-fiona").await;
+    let (attempt_id, attempt_token, mut revision) = bex070_bootstrap_attempt(
+        &app,
+        database.pool(),
+        schedule_id,
+        "fiona",
+        "w-bex070-fiona",
+    )
+    .await;
     revision = bex070_mutate_ok(
         &app,
         &attempt_token,
@@ -8163,19 +8330,23 @@ async fn bex070_shared_answer_pool_matrix() {
     assert_eq!(results.len(), 15, "augmented snapshot spec count: {auto}");
     let result_for = |question_id: &str| bex070_result_for(results, question_id);
     assert_eq!(
-        result_for("l-blank-shared-2:b1")["isCorrect"], true,
+        result_for("l-blank-shared-2:b1")["isCorrect"],
+        true,
         "shared pool: case-folded pool value is correct"
     );
     assert_eq!(
-        result_for("l-blank-shared-2:b2")["isCorrect"], true,
+        result_for("l-blank-shared-2:b2")["isCorrect"],
+        true,
         "shared pool: second distinct pool value is correct"
     );
     assert_eq!(
-        result_for("l-blank-shared-3:b1")["isCorrect"], true,
+        result_for("l-blank-shared-3:b1")["isCorrect"],
+        true,
         "first blank consumes the only valid answer"
     );
     assert_eq!(
-        result_for("l-blank-shared-3:b2")["isCorrect"], false,
+        result_for("l-blank-shared-3:b2")["isCorrect"],
+        false,
         "duplicate consumption: repeated value must grade wrong"
     );
     // 2 (pool-2 sentence) + 1 (pool-1 first blank) — the consumed duplicate
@@ -8183,8 +8354,14 @@ async fn bex070_shared_answer_pool_matrix() {
     assert_eq!(auto["totalScore"], 3, "consumption-aware totals: {auto}");
 
     // ---- Attempt F2 (george): order independence + wrong-not-consumed ------
-    let (attempt_id, attempt_token, mut revision) =
-        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "george", "w-bex070-george").await;
+    let (attempt_id, attempt_token, mut revision) = bex070_bootstrap_attempt(
+        &app,
+        database.pool(),
+        schedule_id,
+        "george",
+        "w-bex070-george",
+    )
+    .await;
     revision = bex070_mutate_ok(
         &app,
         &attempt_token,
@@ -8240,25 +8417,35 @@ async fn bex070_shared_answer_pool_matrix() {
     let results = auto["questionResults"].as_array().unwrap();
     let result_for = |question_id: &str| bex070_result_for(results, question_id);
     assert_eq!(
-        result_for("l-blank-shared-2:b1")["isCorrect"], true,
+        result_for("l-blank-shared-2:b1")["isCorrect"],
+        true,
         "shared pool is order-independent (banana first)"
     );
     assert_eq!(
-        result_for("l-blank-shared-2:b2")["isCorrect"], true,
+        result_for("l-blank-shared-2:b2")["isCorrect"],
+        true,
         "shared pool is order-independent (apple second)"
     );
     assert_eq!(
-        result_for("l-blank-shared-3:b1")["isCorrect"], false,
+        result_for("l-blank-shared-3:b1")["isCorrect"],
+        false,
         "value outside the pool is wrong"
     );
     assert_eq!(
-        result_for("l-blank-shared-3:b2")["isCorrect"], true,
+        result_for("l-blank-shared-3:b2")["isCorrect"],
+        true,
         "a wrong value is NOT consumed; the valid answer remains available"
     );
 
     // ---- Attempt F3 (hannah): case-folded duplicate consumption ------------
-    let (attempt_id, attempt_token, mut revision) =
-        bex070_bootstrap_attempt(&app, database.pool(), schedule_id, "hannah", "w-bex070-hannah").await;
+    let (attempt_id, attempt_token, mut revision) = bex070_bootstrap_attempt(
+        &app,
+        database.pool(),
+        schedule_id,
+        "hannah",
+        "w-bex070-hannah",
+    )
+    .await;
     revision = bex070_mutate_ok(
         &app,
         &attempt_token,
@@ -8314,15 +8501,18 @@ async fn bex070_shared_answer_pool_matrix() {
     let results = auto["questionResults"].as_array().unwrap();
     let result_for = |question_id: &str| bex070_result_for(results, question_id);
     assert_eq!(
-        result_for("l-blank-shared-3:b1")["isCorrect"], true,
+        result_for("l-blank-shared-3:b1")["isCorrect"],
+        true,
         "first blank consumes \"apple\""
     );
     assert_eq!(
-        result_for("l-blank-shared-3:b2")["isCorrect"], false,
+        result_for("l-blank-shared-3:b2")["isCorrect"],
+        false,
         "case-folded repeat is still a consumed duplicate"
     );
     assert_eq!(
-        result_for("l-blank-shared-3:b2")["correctAnswer"], "apple",
+        result_for("l-blank-shared-3:b2")["correctAnswer"],
+        "apple",
         "the pool is the correctAnswer display"
     );
 
@@ -8502,9 +8692,18 @@ async fn bex071_submission_to_grading_consistency() {
     // Totals identity: sum of per-question marks equals the section totals.
     let results = auto1["questionResults"].as_array().unwrap();
     assert_eq!(results.len(), 11);
-    let awarded_sum: i64 = results.iter().map(|entry| entry["awardedScore"].as_i64().unwrap()).sum();
-    let max_sum: i64 = results.iter().map(|entry| entry["maxScore"].as_i64().unwrap()).sum();
-    assert_eq!(auto1["totalScore"], awarded_sum, "sum(awardedScore) == totalScore");
+    let awarded_sum: i64 = results
+        .iter()
+        .map(|entry| entry["awardedScore"].as_i64().unwrap())
+        .sum();
+    let max_sum: i64 = results
+        .iter()
+        .map(|entry| entry["maxScore"].as_i64().unwrap())
+        .sum();
+    assert_eq!(
+        auto1["totalScore"], awarded_sum,
+        "sum(awardedScore) == totalScore"
+    );
     assert_eq!(auto1["maxScore"], max_sum, "sum(maxScore) == maxScore");
     assert_eq!(awarded_sum, 7, "designed mix: 7 correct of 11");
     assert_eq!(max_sum, 11);
@@ -8527,7 +8726,11 @@ async fn bex071_submission_to_grading_consistency() {
         ("l-blank-2:l-blank-2:b2", false),
         ("l-map-1:l2", false),
     ] {
-        assert_eq!(result_for(question_id)["isCorrect"], expected, "{question_id}");
+        assert_eq!(
+            result_for(question_id)["isCorrect"],
+            expected,
+            "{question_id}"
+        );
     }
 
     // Writing answers remain available for manual/AI grading: the immutable
@@ -8541,7 +8744,10 @@ async fn bex071_submission_to_grading_consistency() {
     .await
     .unwrap();
     assert_eq!(writing_task.0, "writing-1");
-    assert_eq!(writing_task.1, essay, "writing answer must survive the projection");
+    assert_eq!(
+        writing_task.1, essay,
+        "writing answer must survive the projection"
+    );
     assert_eq!(writing_task.2, "needs_review");
     let writing_section: (String, serde_json::Value) = sqlx::query_as(
         "SELECT grading_status, answers FROM section_submissions WHERE submission_id = (SELECT id FROM student_submissions WHERE attempt_id = ?) AND section = 'writing'",
@@ -8600,7 +8806,10 @@ async fn bex071_submission_to_grading_consistency() {
         "section payload must stay the submitted snapshot"
     );
     let final_submission_after = persisted_final_submission(database.pool(), &attempt_id).await;
-    assert_eq!(final_submission, final_submission_after, "final snapshot is immutable");
+    assert_eq!(
+        final_submission, final_submission_after,
+        "final snapshot is immutable"
+    );
     let writing_task_after: (String, String, String) = sqlx::query_as(
         "SELECT task_id, student_text, grading_status FROM writing_task_submissions WHERE submission_id = (SELECT id FROM student_submissions WHERE attempt_id = ?)",
     )
@@ -8624,7 +8833,10 @@ async fn bex071_submission_to_grading_consistency() {
         .unwrap();
     assert!(report3.submission_rows_synced >= 1);
     let auto3 = bex071_listening_auto_results(database.pool(), &attempt_id).await;
-    assert_eq!(auto1, auto3, "re-running grading must produce the same result");
+    assert_eq!(
+        auto1, auto3,
+        "re-running grading must produce the same result"
+    );
 
     database.shutdown().await;
 }
@@ -8654,21 +8866,20 @@ async fn mutation_batch_legacy_envelope_allowlist_and_rejects() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let mut current_revision = base_revision;
-    let legacy_envelope = |id: &str, seq: i64, base_rev: i32, mutation_type: &str, payload: serde_json::Value| {
-        json!({
-            "id": id,
-            "seq": seq,
-            "timestamp": "2026-01-10T09:05:00Z",
-            "baseRevision": base_rev,
-            "mutationType": mutation_type,
-            "payload": payload
-        })
-    };
+    let legacy_envelope =
+        |id: &str, seq: i64, base_rev: i32, mutation_type: &str, payload: serde_json::Value| {
+            json!({
+                "id": id,
+                "seq": seq,
+                "timestamp": "2026-01-10T09:05:00Z",
+                "baseRevision": base_rev,
+                "mutationType": mutation_type,
+                "payload": payload
+            })
+        };
 
     // --- Allowlisted legacy commands apply (SetScalar, SetChoice, SetSlot) ---
     let (status, json) = post_mutation_batch_json(
@@ -8692,7 +8903,10 @@ async fn mutation_batch_legacy_envelope_allowlist_and_rejects() {
     assert_eq!(json["data"]["serverAcceptedThroughSeq"], 3);
     assert_eq!(json["data"]["attempt"]["answers"]["q1"], "A");
     assert_eq!(json["data"]["attempt"]["answers"]["l-choice-1"], "C");
-    assert_eq!(json["data"]["attempt"]["answers"]["l-blank-2"], json!(["legacy"]));
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["l-blank-2"],
+        json!(["legacy"])
+    );
     current_revision = json["data"]["revision"].as_i64().unwrap() as i32;
 
     // --- Non-allowlisted legacy types are rejected with the exact message ----
@@ -8791,9 +9005,7 @@ async fn mutation_batch_rejects_unknown_top_level_fields_and_malformed_commands(
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     // (a) Strict-only payload with an unknown top-level field -> 422.
     //     The strict parse rejects it (deny_unknown_fields) and the legacy
@@ -8968,9 +9180,7 @@ async fn bex040_reconnect_replay_chunked_batches_apply_in_order_without_loss() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     // The offline client composed 6 mutations (client order 1..6) while
     // disconnected; on reconnect it replays them in 2 chunks of 3 under the
@@ -8995,11 +9205,13 @@ async fn bex040_reconnect_replay_chunked_batches_apply_in_order_without_loss() {
     assert_eq!(chunk1_json["data"]["appliedMutationCount"], 3);
     assert_eq!(chunk1_json["data"]["serverAcceptedThroughSeq"], 3);
     assert_eq!(
-        chunk1_json["data"]["attempt"]["answers"]["q1"],
-        "T",
+        chunk1_json["data"]["attempt"]["answers"]["q1"], "T",
         "within-chunk latest wins (m3 after m1)"
     );
-    assert_eq!(chunk1_json["data"]["attempt"]["answers"]["l-short-1"], "diagram");
+    assert_eq!(
+        chunk1_json["data"]["attempt"]["answers"]["l-short-1"],
+        "diagram"
+    );
     assert_eq!(chunk1_json["data"]["revision"], base_revision + 1);
 
     let revision_after_chunk1 = chunk1_json["data"]["revision"].as_i64().unwrap() as i32;
@@ -9021,11 +9233,13 @@ async fn bex040_reconnect_replay_chunked_batches_apply_in_order_without_loss() {
     assert_eq!(chunk2_json["data"]["serverAcceptedThroughSeq"], 6);
     assert_eq!(chunk2_json["data"]["revision"], base_revision + 2);
     assert_eq!(
-        chunk2_json["data"]["attempt"]["answers"]["q1"],
-        "F",
+        chunk2_json["data"]["attempt"]["answers"]["q1"], "F",
         "cross-chunk latest wins (m5 seq 5 after m3 seq 3)"
     );
-    assert_eq!(chunk2_json["data"]["attempt"]["answers"]["l-short-1"], "petrol");
+    assert_eq!(
+        chunk2_json["data"]["attempt"]["answers"]["l-short-1"],
+        "petrol"
+    );
     assert_eq!(chunk2_json["data"]["attempt"]["answers"]["l-tfng-1"], "F");
     assert_eq!(
         persisted_revision(database.pool(), &attempt_id).await,
@@ -9036,10 +9250,17 @@ async fn bex040_reconnect_replay_chunked_batches_apply_in_order_without_loss() {
     // (b) the recovery watermark and pending count reflect the persisted
     // state on the response AND in the DB.
     assert_eq!(
-        chunk2_json["data"]["attempt"]["recovery"]["serverAcceptedThroughSeq"], 6
+        chunk2_json["data"]["attempt"]["recovery"]["serverAcceptedThroughSeq"],
+        6
     );
-    assert_eq!(chunk2_json["data"]["attempt"]["recovery"]["pendingMutationCount"], 0);
-    assert_eq!(chunk2_json["data"]["attempt"]["recovery"]["syncState"], "saved");
+    assert_eq!(
+        chunk2_json["data"]["attempt"]["recovery"]["pendingMutationCount"],
+        0
+    );
+    assert_eq!(
+        chunk2_json["data"]["attempt"]["recovery"]["syncState"],
+        "saved"
+    );
     assert_eq!(
         chunk2_json["data"]["attempt"]["recovery"]["clientSessionId"],
         client_session_id
@@ -9072,7 +9293,10 @@ async fn bex040_reconnect_replay_chunked_batches_apply_in_order_without_loss() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(seqs, "1,2,3,4,5,6", "watermark seqs are contiguous and in apply order");
+    assert_eq!(
+        seqs, "1,2,3,4,5,6",
+        "watermark seqs are contiguous and in apply order"
+    );
 
     // (d) partial replay: the client re-sends chunk 1 (identical ids/values)
     // after chunk 2 already committed. Dedupe must short-circuit with a 200,
@@ -9145,9 +9369,7 @@ async fn bex041_replay_across_section_transition_grace_or_structured_conflict() 
         .as_str()
         .unwrap()
         .to_owned();
-    let mut revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let mut revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     // ---- (a) TIMER EXPIRY ------------------------------------------------
     // The client composes a listening mutation while the section is live,
@@ -9214,7 +9436,10 @@ async fn bex041_replay_across_section_transition_grace_or_structured_conflict() 
         "conflict must name the offending question: {json}"
     );
     // No partial state on rejection.
-    assert_eq!(persisted_revision(database.pool(), &attempt_id).await, revision as i64);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision as i64
+    );
     assert_eq!(
         persisted_mutation_row_count(database.pool(), &attempt_id).await,
         1,
@@ -9236,7 +9461,10 @@ async fn bex041_replay_across_section_transition_grace_or_structured_conflict() 
     )
     .await;
     assert_eq!(advance.status(), StatusCode::OK);
-    assert_eq!(json_body(advance).await["data"]["activeSectionKey"], "writing");
+    assert_eq!(
+        json_body(advance).await["data"]["activeSectionKey"],
+        "writing"
+    );
     sqlx::query(
         r#"
         UPDATE exam_session_runtime_sections
@@ -9268,7 +9496,10 @@ async fn bex041_replay_across_section_transition_grace_or_structured_conflict() 
     assert_eq!(status, StatusCode::CONFLICT, "{json}");
     assert_eq!(json["error"]["code"], "CONFLICT");
     assert_eq!(json["error"]["details"]["reason"], "SECTION_MISMATCH");
-    assert_eq!(persisted_revision(database.pool(), &attempt_id).await, revision as i64);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision as i64
+    );
     assert_eq!(
         persisted_mutation_row_count(database.pool(), &attempt_id).await,
         1,
@@ -9309,14 +9540,21 @@ async fn bex041_replay_across_section_transition_grace_or_structured_conflict() 
         json["error"]["details"]["reason"], "OBJECTIVE_LOCKED",
         "cohort runtime pause must reject with OBJECTIVE_LOCKED: {json}"
     );
-    assert_eq!(persisted_revision(database.pool(), &attempt_id).await, revision as i64);
+    assert_eq!(
+        persisted_revision(database.pool(), &attempt_id).await,
+        revision as i64
+    );
     assert_eq!(
         persisted_mutation_row_count(database.pool(), &attempt_id).await,
         1,
         "runtime-pause rejection must not insert rows"
     );
     let writing_answers = persisted_writing_answers(database.pool(), &attempt_id).await;
-    assert_eq!(writing_answers, json!({}), "runtime-pause rejection must not touch writing answers");
+    assert_eq!(
+        writing_answers,
+        json!({}),
+        "runtime-pause rejection must not touch writing answers"
+    );
 
     // (c2) Individual attempt pause: the attempt's proctor_status flips to
     // 'paused' while the runtime stays live; the gate pins
@@ -9359,7 +9597,8 @@ async fn bex041_replay_across_section_transition_grace_or_structured_conflict() 
     // BASE_REVISION_MISMATCH instead of the pause reason.
     let revision_after_pause = persisted_revision(database.pool(), &attempt_id).await as i32;
     assert_eq!(
-        revision_after_pause, revision + 1,
+        revision_after_pause,
+        revision + 1,
         "individual attempt pause bumps the attempt revision once"
     );
     let (status, json) = post_mutation_batch_json(
@@ -9436,7 +9675,8 @@ async fn bex041_replay_across_section_transition_grace_or_structured_conflict() 
     assert_eq!(end.status(), StatusCode::OK);
     let revision_after_end = persisted_revision(database.pool(), &attempt_id).await as i32;
     assert_eq!(
-        revision_after_end, revision_before_end + 1,
+        revision_after_end,
+        revision_before_end + 1,
         "auto-submit on end_runtime bumps the attempt revision once"
     );
     let (status, json) = post_mutation_batch_json(
@@ -9479,11 +9719,13 @@ async fn bex041_replay_across_section_transition_grace_or_structured_conflict() 
 
     // After the grace window (backdate submitted_at) the same replay is a
     // structured ATTEMPT_SUBMITTED conflict — never a generic failure.
-    sqlx::query("UPDATE student_attempts SET submitted_at = NOW() - INTERVAL 360 SECOND WHERE id = ?")
-        .bind(&attempt_id)
-        .execute(database.pool())
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE student_attempts SET submitted_at = NOW() - INTERVAL 360 SECOND WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .execute(database.pool())
+    .await
+    .unwrap();
     let (status, json) = post_mutation_batch_json(
         &app,
         &attempt_token,
@@ -9563,9 +9805,7 @@ async fn bex042_crash_recovery_returns_attempt_and_continues_from_watermark() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     // Pre-crash: two accepted mutations under client_session_id.
     let (status, json) = post_mutation_batch_json(
@@ -9615,12 +9855,18 @@ async fn bex042_crash_recovery_returns_attempt_and_continues_from_watermark() {
     // (a) existing attempt returned (precheck/bootstrap idempotency).
     assert_eq!(rebootstrap["data"]["attempt"]["id"], attempt_id);
     assert_eq!(rebootstrap["data"]["attempt"]["answers"]["q1"], "T");
-    assert_eq!(rebootstrap["data"]["attempt"]["answers"]["l-short-1"], "diagram");
+    assert_eq!(
+        rebootstrap["data"]["attempt"]["answers"]["l-short-1"],
+        "diagram"
+    );
     // (b) current runtime section is authoritative: the live runtime row
     // drives the phase and the current section (exam/listening), not any
     // pre-crash client snapshot.
     assert_eq!(rebootstrap["data"]["attempt"]["phase"], "exam");
-    assert_eq!(rebootstrap["data"]["runtime"]["currentSectionKey"], "listening");
+    assert_eq!(
+        rebootstrap["data"]["runtime"]["currentSectionKey"],
+        "listening"
+    );
     assert_eq!(rebootstrap["data"]["attempt"]["currentModule"], "listening");
     let live_section: String = sqlx::query_scalar(
         "SELECT current_section_key FROM exam_session_runtimes WHERE schedule_id = ?",
@@ -9632,8 +9878,7 @@ async fn bex042_crash_recovery_returns_attempt_and_continues_from_watermark() {
     assert_eq!(live_section, "listening");
     // (c) server revision returned matches persisted reality.
     assert_eq!(
-        rebootstrap["data"]["attempt"]["revision"],
-        revision_before_crash,
+        rebootstrap["data"]["attempt"]["revision"], revision_before_crash,
         "re-bootstrap returns the persisted server revision"
     );
     assert_eq!(
@@ -9838,11 +10083,7 @@ async fn persisted_audit_count(pool: &sqlx::MySqlPool, attempt_id: &str) -> i64 
         .unwrap()
 }
 
-async fn persisted_audit_by_action(
-    pool: &sqlx::MySqlPool,
-    attempt_id: &str,
-    action: &str,
-) -> i64 {
+async fn persisted_audit_by_action(pool: &sqlx::MySqlPool, attempt_id: &str, action: &str) -> i64 {
     sqlx::query_scalar(
         "SELECT COUNT(*) FROM session_audit_logs WHERE target_student_id = ? AND action_type = ?",
     )
@@ -9972,26 +10213,41 @@ async fn bex050_ack_heartbeat_returns_no_attempt_and_preserves_revision_and_answ
     assert!(json["data"].get("attempt").is_none(), "{json}");
     assert!(json["data"].get("runtime").is_none(), "{json}");
     // Fresh credential: the bootstrap token is not near expiry.
-    assert!(json["data"]["refreshedAttemptCredential"].is_null(), "{json}");
+    assert!(
+        json["data"]["refreshedAttemptCredential"].is_null(),
+        "{json}"
+    );
 
     // Revision, answers, audit trail and event log are untouched.
     assert_eq!(
         persisted_revision(database.pool(), &attempt_id).await,
         revision_before
     );
-    assert_eq!(persisted_answers(database.pool(), &attempt_id).await, answers_before);
-    assert_eq!(persisted_audit_count(database.pool(), &attempt_id).await, audit_before);
+    assert_eq!(
+        persisted_answers(database.pool(), &attempt_id).await,
+        answers_before
+    );
+    assert_eq!(
+        persisted_audit_count(database.pool(), &attempt_id).await,
+        audit_before
+    );
     assert_eq!(
         persisted_heartbeat_event_count(database.pool(), &attempt_id).await,
         events_before
     );
-    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "student_network"), 0);
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "student_network"),
+        0
+    );
 
     // Integrity still records the liveness signal.
     let integrity = persisted_integrity(database.pool(), &attempt_id).await;
     assert_eq!(integrity["lastHeartbeatStatus"], "ok");
     assert_ne!(integrity["lastHeartbeatAt"], serde_json::Value::Null);
-    assert_eq!(persisted_presence_status(database.pool(), &attempt_id).await, "ok");
+    assert_eq!(
+        persisted_presence_status(database.pool(), &attempt_id).await,
+        "ok"
+    );
 
     database.shutdown().await;
 }
@@ -10050,9 +10306,15 @@ async fn bex050_full_heartbeat_returns_attempt_and_runtime_hydration() {
     .await;
     assert_eq!(status, StatusCode::OK, "{json}");
     let data = &json["data"];
-    assert!(data["attempt"].is_object(), "full mode hydrates the attempt: {json}");
+    assert!(
+        data["attempt"].is_object(),
+        "full mode hydrates the attempt: {json}"
+    );
     assert_eq!(data["attempt"]["revision"].as_i64(), Some(revision_before));
-    assert!(data["runtime"].is_object(), "full mode hydrates the runtime: {json}");
+    assert!(
+        data["runtime"].is_object(),
+        "full mode hydrates the runtime: {json}"
+    );
     let db_section = persisted_current_section_key(database.pool(), schedule_id).await;
     assert_eq!(
         data["runtime"]["currentSectionKey"].as_str(),
@@ -10066,7 +10328,10 @@ async fn bex050_full_heartbeat_returns_attempt_and_runtime_hydration() {
         persisted_revision(database.pool(), &attempt_id).await,
         revision_before
     );
-    assert_eq!(persisted_answers(database.pool(), &attempt_id).await, answers_before);
+    assert_eq!(
+        persisted_answers(database.pool(), &attempt_id).await,
+        answers_before
+    );
 
     database.shutdown().await;
 }
@@ -10129,9 +10394,15 @@ async fn bex050_heartbeat_returns_refreshed_credential_when_near_expiry() {
     .await;
     assert_eq!(status, StatusCode::OK, "{json}");
     let refreshed = json["data"]["refreshedAttemptCredential"].clone();
-    assert!(refreshed.is_object(), "near-expiry token must be refreshed: {json}");
+    assert!(
+        refreshed.is_object(),
+        "near-expiry token must be refreshed: {json}"
+    );
     let refreshed_token = refreshed["attemptToken"].as_str().unwrap().to_owned();
-    assert_ne!(refreshed_token, near_expiry_token, "refresh must rotate the token");
+    assert_ne!(
+        refreshed_token, near_expiry_token,
+        "refresh must rotate the token"
+    );
 
     // The refreshed credential authorizes a follow-up request...
     let (status, json) = post_heartbeat_json(
@@ -10151,7 +10422,10 @@ async fn bex050_heartbeat_returns_refreshed_credential_when_near_expiry() {
     .await;
     assert_eq!(status, StatusCode::OK, "{json}");
     // ...and is not immediately refreshed again (fresh exp).
-    assert!(json["data"]["refreshedAttemptCredential"].is_null(), "{json}");
+    assert!(
+        json["data"]["refreshedAttemptCredential"].is_null(),
+        "{json}"
+    );
 
     database.shutdown().await;
 }
@@ -10209,13 +10483,22 @@ async fn bex051_network_transitions_update_integrity_and_are_idempotent_under_re
         persisted_revision(database.pool(), &attempt_id).await,
         revision_before
     );
-    assert_eq!(persisted_answers(database.pool(), &attempt_id).await, answers_before);
+    assert_eq!(
+        persisted_answers(database.pool(), &attempt_id).await,
+        answers_before
+    );
     assert_eq!(
         persisted_audit_by_action(database.pool(), &attempt_id, "NETWORK_DISCONNECTED").await,
         1
     );
-    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 1);
-    assert_eq!(persisted_presence_status(database.pool(), &attempt_id).await, "lost");
+    assert_eq!(
+        persisted_heartbeat_event_count(database.pool(), &attempt_id).await,
+        1
+    );
+    assert_eq!(
+        persisted_presence_status(database.pool(), &attempt_id).await,
+        "lost"
+    );
     let (last_disconnect_at, last_reconnect_at) =
         persisted_presence_transition_times(database.pool(), &attempt_id).await;
     assert!(last_disconnect_at.is_some());
@@ -10248,7 +10531,10 @@ async fn bex051_network_transitions_update_integrity_and_are_idempotent_under_re
         persisted_revision(database.pool(), &attempt_id).await,
         revision_before
     );
-    assert_eq!(persisted_answers(database.pool(), &attempt_id).await, answers_before);
+    assert_eq!(
+        persisted_answers(database.pool(), &attempt_id).await,
+        answers_before
+    );
 
     // ---- Reconnect: status ok, lastReconnectAt set, disconnect preserved ----
     let reconnect_request = StudentHeartbeatRequest {
@@ -10274,8 +10560,14 @@ async fn bex051_network_transitions_update_integrity_and_are_idempotent_under_re
         persisted_audit_by_action(database.pool(), &attempt_id, "NETWORK_RECONNECTED").await,
         1
     );
-    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 2);
-    assert_eq!(persisted_presence_status(database.pool(), &attempt_id).await, "ok");
+    assert_eq!(
+        persisted_heartbeat_event_count(database.pool(), &attempt_id).await,
+        2
+    );
+    assert_eq!(
+        persisted_presence_status(database.pool(), &attempt_id).await,
+        "ok"
+    );
     let (last_disconnect_at, last_reconnect_at) =
         persisted_presence_transition_times(database.pool(), &attempt_id).await;
     assert!(
@@ -10296,7 +10588,10 @@ async fn bex051_network_transitions_update_integrity_and_are_idempotent_under_re
         persisted_audit_by_action(database.pool(), &attempt_id, "NETWORK_RECONNECTED").await,
         1
     );
-    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 2);
+    assert_eq!(
+        persisted_heartbeat_event_count(database.pool(), &attempt_id).await,
+        2
+    );
     assert_eq!(
         live_alert_count(&mut live_rx, &schedule.id, "network_reconnected"),
         0
@@ -10326,12 +10621,21 @@ async fn bex051_network_transitions_update_integrity_and_are_idempotent_under_re
         persisted_audit_by_action(database.pool(), &attempt_id, "HEARTBEAT_LOST").await,
         1
     );
-    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 3);
-    assert_eq!(persisted_presence_status(database.pool(), &attempt_id).await, "lost");
+    assert_eq!(
+        persisted_heartbeat_event_count(database.pool(), &attempt_id).await,
+        3
+    );
+    assert_eq!(
+        persisted_presence_status(database.pool(), &attempt_id).await,
+        "lost"
+    );
     let (last_disconnect_at, _) =
         persisted_presence_transition_times(database.pool(), &attempt_id).await;
     assert!(last_disconnect_at.is_some());
-    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "heartbeat_lost"), 1);
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "heartbeat_lost"),
+        1
+    );
 
     // ---- Lost retry: still one logical event ----
     let (status, json) =
@@ -10341,8 +10645,14 @@ async fn bex051_network_transitions_update_integrity_and_are_idempotent_under_re
         persisted_audit_by_action(database.pool(), &attempt_id, "HEARTBEAT_LOST").await,
         1
     );
-    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 3);
-    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "heartbeat_lost"), 0);
+    assert_eq!(
+        persisted_heartbeat_event_count(database.pool(), &attempt_id).await,
+        3
+    );
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "heartbeat_lost"),
+        0
+    );
 
     // Totals: exactly one audit row and one event row per transition, and the
     // attempt revision/answers were never touched.
@@ -10350,12 +10660,18 @@ async fn bex051_network_transitions_update_integrity_and_are_idempotent_under_re
         persisted_audit_count(database.pool(), &attempt_id).await,
         audit_before + 3
     );
-    assert_eq!(persisted_heartbeat_event_count(database.pool(), &attempt_id).await, 3);
+    assert_eq!(
+        persisted_heartbeat_event_count(database.pool(), &attempt_id).await,
+        3
+    );
     assert_eq!(
         persisted_revision(database.pool(), &attempt_id).await,
         revision_before
     );
-    assert_eq!(persisted_answers(database.pool(), &attempt_id).await, answers_before);
+    assert_eq!(
+        persisted_answers(database.pool(), &attempt_id).await,
+        answers_before
+    );
 
     // The single NETWORK_DISCONNECTED audit row carries the transition metadata.
     let audit_payload: serde_json::Value = sqlx::query_scalar(
@@ -10408,10 +10724,17 @@ async fn bex052_violation_delivery_is_idempotent_with_single_alert() {
 
     // First delivery: one violation record, one snapshot entry, revision +1,
     // one append-only audit row, one proctor alert.
-    let (status, json) = post_audit_json(&app, &attempt_token, schedule_id, &violation_request).await;
+    let (status, json) =
+        post_audit_json(&app, &attempt_token, schedule_id, &violation_request).await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    assert_eq!(persisted_violation_count(database.pool(), &attempt_id).await, 1);
-    assert_eq!(persisted_violation_snapshot_length(database.pool(), &attempt_id).await, 1);
+    assert_eq!(
+        persisted_violation_count(database.pool(), &attempt_id).await,
+        1
+    );
+    assert_eq!(
+        persisted_violation_snapshot_length(database.pool(), &attempt_id).await,
+        1
+    );
     let snapshot = persisted_violations_snapshot(database.pool(), &attempt_id).await;
     assert_eq!(snapshot[0]["id"], "vio-bex052-1");
     assert_eq!(
@@ -10422,15 +10745,25 @@ async fn bex052_violation_delivery_is_idempotent_with_single_alert() {
         persisted_audit_count(database.pool(), &attempt_id).await,
         audit_before + 1
     );
-    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "alert_changed"), 1);
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "alert_changed"),
+        1
+    );
 
     // Retry with the same violationId: no second violation record, no second
     // snapshot entry, no revision bump, no second proctor alert. The audit
     // log remains append-only (the retry is itself an auditable event).
-    let (status, json) = post_audit_json(&app, &attempt_token, schedule_id, &violation_request).await;
+    let (status, json) =
+        post_audit_json(&app, &attempt_token, schedule_id, &violation_request).await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    assert_eq!(persisted_violation_count(database.pool(), &attempt_id).await, 1);
-    assert_eq!(persisted_violation_snapshot_length(database.pool(), &attempt_id).await, 1);
+    assert_eq!(
+        persisted_violation_count(database.pool(), &attempt_id).await,
+        1
+    );
+    assert_eq!(
+        persisted_violation_snapshot_length(database.pool(), &attempt_id).await,
+        1
+    );
     assert_eq!(
         persisted_revision(database.pool(), &attempt_id).await,
         revision_before + 1,
@@ -10467,13 +10800,22 @@ async fn bex052_violation_delivery_is_idempotent_with_single_alert() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    assert_eq!(persisted_violation_count(database.pool(), &attempt_id).await, 2);
-    assert_eq!(persisted_violation_snapshot_length(database.pool(), &attempt_id).await, 2);
+    assert_eq!(
+        persisted_violation_count(database.pool(), &attempt_id).await,
+        2
+    );
+    assert_eq!(
+        persisted_violation_snapshot_length(database.pool(), &attempt_id).await,
+        2
+    );
     assert_eq!(
         persisted_revision(database.pool(), &attempt_id).await,
         revision_before + 2
     );
-    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "alert_changed"), 1);
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "alert_changed"),
+        1
+    );
 
     database.shutdown().await;
 }
@@ -10520,8 +10862,14 @@ async fn bex052_invalid_severity_is_ignored_and_blank_violation_id_is_rejected()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{json}");
-    assert_eq!(persisted_violation_count(database.pool(), &attempt_id).await, 0);
-    assert_eq!(persisted_violation_snapshot_length(database.pool(), &attempt_id).await, 0);
+    assert_eq!(
+        persisted_violation_count(database.pool(), &attempt_id).await,
+        0
+    );
+    assert_eq!(
+        persisted_violation_snapshot_length(database.pool(), &attempt_id).await,
+        0
+    );
     assert_eq!(
         persisted_revision(database.pool(), &attempt_id).await,
         revision_before
@@ -10531,7 +10879,10 @@ async fn bex052_invalid_severity_is_ignored_and_blank_violation_id_is_rejected()
         audit_before + 1,
         "audit log records the delivery even when the violation is ignored"
     );
-    assert_eq!(live_alert_count(&mut live_rx, &schedule.id, "alert_changed"), 0);
+    assert_eq!(
+        live_alert_count(&mut live_rx, &schedule.id, "alert_changed"),
+        0
+    );
 
     // Blank/missing violationId: 422, and the entire audit write rolls back.
     let (status, json) = post_audit_json(
@@ -10555,7 +10906,10 @@ async fn bex052_invalid_severity_is_ignored_and_blank_violation_id_is_rejected()
         audit_before + 1,
         "422 must roll back the audit append"
     );
-    assert_eq!(persisted_violation_count(database.pool(), &attempt_id).await, 0);
+    assert_eq!(
+        persisted_violation_count(database.pool(), &attempt_id).await,
+        0
+    );
     assert_eq!(
         persisted_revision(database.pool(), &attempt_id).await,
         revision_before
@@ -10569,11 +10923,8 @@ async fn bex052_student_cannot_forge_another_attempt_violation() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
-    let other_schedule = seed_schedule_with_slug(
-        database.pool(),
-        "cambridge-19-academic-delivery-forgery",
-    )
-    .await;
+    let other_schedule =
+        seed_schedule_with_slug(database.pool(), "cambridge-19-academic-delivery-forgery").await;
     let other_schedule_id = Uuid::parse_str(&other_schedule.id).unwrap();
     let (auth, student_key) = create_student_auth(database.pool(), schedule_id, "alice").await;
     let (bob_auth, bob_student_key) =
@@ -10644,9 +10995,18 @@ async fn bex052_student_cannot_forge_another_attempt_violation() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(attributed, alice_attempt_id, "violation must land on the caller's attempt");
-    assert_eq!(persisted_violation_count(database.pool(), &bob_attempt_id).await, 0);
-    assert_eq!(persisted_violation_count(database.pool(), &alice_attempt_id).await, 1);
+    assert_eq!(
+        attributed, alice_attempt_id,
+        "violation must land on the caller's attempt"
+    );
+    assert_eq!(
+        persisted_violation_count(database.pool(), &bob_attempt_id).await,
+        0
+    );
+    assert_eq!(
+        persisted_violation_count(database.pool(), &alice_attempt_id).await,
+        1
+    );
 
     database.shutdown().await;
 }
@@ -10708,10 +11068,7 @@ async fn post_submit_json(
     (status, json)
 }
 
-async fn persisted_final_submission(
-    pool: &sqlx::MySqlPool,
-    attempt_id: &str,
-) -> serde_json::Value {
+async fn persisted_final_submission(pool: &sqlx::MySqlPool, attempt_id: &str) -> serde_json::Value {
     sqlx::query_scalar("SELECT final_submission FROM student_attempts WHERE id = ?")
         .bind(attempt_id)
         .fetch_one(pool)
@@ -10776,14 +11133,9 @@ async fn bex061_matching_final_snapshot_hash_accepted() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -10792,9 +11144,7 @@ async fn bex061_matching_final_snapshot_hash_accepted() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_single_mutation_batch(
         &app,
@@ -10816,11 +11166,7 @@ async fn bex061_matching_final_snapshot_hash_accepted() {
     let html_essay = "<p>Hello &amp; welcome</p>";
     let answers = persisted_answers(database.pool(), &attempt_id).await;
     let flags = persisted_flags(database.pool(), &attempt_id).await;
-    let hash = final_snapshot_sha256(
-        &answers,
-        &json!({ "task1": html_essay }),
-        &flags,
-    );
+    let hash = final_snapshot_sha256(&answers, &json!({ "task1": html_essay }), &flags);
 
     let (status, json) = post_submit_json(
         &app,
@@ -10842,7 +11188,11 @@ async fn bex061_matching_final_snapshot_hash_accepted() {
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "matching hash must be accepted: {json}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "matching hash must be accepted: {json}"
+    );
     assert_eq!(json["data"]["attempt"]["phase"], "post-exam");
 
     let final_submission = persisted_final_submission(database.pool(), &attempt_id).await;
@@ -10874,14 +11224,9 @@ async fn bex061_mismatching_final_snapshot_hash_returns_structured_conflict() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -10890,9 +11235,7 @@ async fn bex061_mismatching_final_snapshot_hash_returns_structured_conflict() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_single_mutation_batch(
         &app,
@@ -10940,15 +11283,19 @@ async fn bex061_mismatching_final_snapshot_hash_returns_structured_conflict() {
         revision as i64,
         "hash-mismatch rejection must not bump the revision"
     );
-    assert!(persisted_submitted_at(database.pool(), &attempt_id).await.is_none());
-    let final_submission: Option<serde_json::Value> = sqlx::query_scalar(
-        "SELECT final_submission FROM student_attempts WHERE id = ?",
-    )
-    .bind(&attempt_id)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert!(final_submission.is_none(), "no final_submission write on hash mismatch");
+    assert!(persisted_submitted_at(database.pool(), &attempt_id)
+        .await
+        .is_none());
+    let final_submission: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT final_submission FROM student_attempts WHERE id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert!(
+        final_submission.is_none(),
+        "no final_submission write on hash mismatch"
+    );
     assert_eq!(
         persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
         0
@@ -10989,14 +11336,8 @@ async fn bex061_canonical_hash_key_order_unicode_and_html_stable() {
         )
         .await
         .unwrap();
-    let (bootstrap_alice, _) = bootstrap_attempt(
-        &app,
-        &auth_alice,
-        schedule_id,
-        "alice",
-        &student_key_alice,
-    )
-    .await;
+    let (bootstrap_alice, _) =
+        bootstrap_attempt(&app, &auth_alice, schedule_id, "alice", &student_key_alice).await;
     let (bootstrap_bob, _) =
         bootstrap_attempt(&app, &auth_bob, schedule_id, "bob", &student_key_bob).await;
     let alice_attempt_id = bootstrap_alice["data"]["attempt"]["id"]
@@ -11041,8 +11382,7 @@ async fn bex061_canonical_hash_key_order_unicode_and_html_stable() {
     map_order_b.insert("flags".to_owned(), flags_value.clone());
     map_order_b.insert("writingAnswers".to_owned(), writing_value.clone());
     map_order_b.insert("answers".to_owned(), answers_value.clone());
-    let canonical_order_b =
-        serde_json::to_string(&serde_json::Value::Object(map_order_b)).unwrap();
+    let canonical_order_b = serde_json::to_string(&serde_json::Value::Object(map_order_b)).unwrap();
     assert_eq!(
         canonical_order_a, canonical_order_b,
         "same logical JSON must canonicalize to the same string"
@@ -11105,7 +11445,10 @@ async fn bex061_canonical_hash_key_order_unicode_and_html_stable() {
     );
     let bob_final = persisted_final_submission(database.pool(), &bob_attempt_id).await;
     assert_eq!(bob_final["answers"]["l-short-1"], "café ☕");
-    assert_eq!(bob_final["writingAnswers"]["task1"], "<p>Hello &amp; welcome</p>");
+    assert_eq!(
+        bob_final["writingAnswers"]["task1"],
+        "<p>Hello &amp; welcome</p>"
+    );
 
     database.shutdown().await;
 }
@@ -11123,14 +11466,9 @@ async fn bex062_submit_requires_non_empty_idempotency_key() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -11139,17 +11477,15 @@ async fn bex062_submit_requires_non_empty_idempotency_key() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     let body = json!({
         "attemptId": attempt_id.clone(),
         "lastSeenRevision": attempt_revision,
         "submissionId": "submit-no-key"
     });
 
-    let (status, json) = post_submit_json(&app, &attempt_token, schedule_id, None, body.clone())
-        .await;
+    let (status, json) =
+        post_submit_json(&app, &attempt_token, schedule_id, None, body.clone()).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{json}");
     assert_eq!(json["error"]["code"], "VALIDATION_ERROR");
     assert_eq!(
@@ -11158,8 +11494,8 @@ async fn bex062_submit_requires_non_empty_idempotency_key() {
     );
 
     for (label, key) in [("empty", Some("")), ("whitespace", Some("   "))] {
-        let (status, json) = post_submit_json(&app, &attempt_token, schedule_id, key, body.clone())
-            .await;
+        let (status, json) =
+            post_submit_json(&app, &attempt_token, schedule_id, key, body.clone()).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{label}: {json}");
         assert_eq!(json["error"]["code"], "VALIDATION_ERROR", "{label}");
         assert_eq!(
@@ -11173,7 +11509,9 @@ async fn bex062_submit_requires_non_empty_idempotency_key() {
         attempt_revision as i64,
         "key rejections must not bump the revision"
     );
-    assert!(persisted_submitted_at(database.pool(), &attempt_id).await.is_none());
+    assert!(persisted_submitted_at(database.pool(), &attempt_id)
+        .await
+        .is_none());
     assert_eq!(
         persisted_audit_by_action(database.pool(), &attempt_id, "STUDENT_SUBMIT").await,
         0
@@ -11194,14 +11532,9 @@ async fn bex062_same_key_same_payload_replays_cached_receipt() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -11210,9 +11543,7 @@ async fn bex062_same_key_same_payload_replays_cached_receipt() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     let body = json!({
         "attemptId": attempt_id.clone(),
         "lastSeenRevision": attempt_revision,
@@ -11256,7 +11587,13 @@ async fn bex062_same_key_same_payload_replays_cached_receipt() {
 
     let route_key = format!("POST:/api/v1/student/sessions/{schedule_id}/submit");
     assert_eq!(
-        persisted_idempotency_count(database.pool(), &student_key, &route_key, "submit-cached-receipt").await,
+        persisted_idempotency_count(
+            database.pool(),
+            &student_key,
+            &route_key,
+            "submit-cached-receipt"
+        )
+        .await,
         1,
         "exactly one idempotency row for the key"
     );
@@ -11285,14 +11622,9 @@ async fn bex062_same_key_different_payload_returns_idempotency_conflict() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -11301,9 +11633,7 @@ async fn bex062_same_key_different_payload_returns_idempotency_conflict() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_submit_json(
         &app,
@@ -11378,14 +11708,9 @@ async fn bex062_new_key_after_submission_returns_terminal_attempt() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -11394,9 +11719,7 @@ async fn bex062_new_key_after_submission_returns_terminal_attempt() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_submit_json(
         &app,
@@ -11416,8 +11739,7 @@ async fn bex062_new_key_after_submission_returns_terminal_attempt() {
     let submission_id = json["data"]["submissionId"].as_str().unwrap().to_owned();
     let submitted_at = json["data"]["submittedAt"].as_str().unwrap().to_owned();
     let revision_after_submit = persisted_revision(database.pool(), &attempt_id).await;
-    let final_submission_before =
-        persisted_final_submission(database.pool(), &attempt_id).await;
+    let final_submission_before = persisted_final_submission(database.pool(), &attempt_id).await;
 
     // A fresh key replays the terminal attempt: same receipt, no re-grading.
     let (status, json) = post_submit_json(
@@ -11474,14 +11796,9 @@ async fn bex062_concurrent_same_key_submits_produce_single_ledger_entry() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -11490,9 +11807,7 @@ async fn bex062_concurrent_same_key_submits_produce_single_ledger_entry() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     let body = json!({
         "attemptId": attempt_id.clone(),
         "lastSeenRevision": attempt_revision,
@@ -11527,11 +11842,18 @@ async fn bex062_concurrent_same_key_submits_produce_single_ledger_entry() {
     let first_json = json_body(first).await;
     let second_status = second.status();
     let second_json = json_body(second).await;
-    assert_eq!(first_status, StatusCode::OK, "first concurrent submit: {first_json}");
-    assert_eq!(second_status, StatusCode::OK, "second concurrent submit: {second_json}");
     assert_eq!(
-        first_json["data"]["submissionId"],
-        second_json["data"]["submissionId"],
+        first_status,
+        StatusCode::OK,
+        "first concurrent submit: {first_json}"
+    );
+    assert_eq!(
+        second_status,
+        StatusCode::OK,
+        "second concurrent submit: {second_json}"
+    );
+    assert_eq!(
+        first_json["data"]["submissionId"], second_json["data"]["submissionId"],
         "both concurrent callers must receive the same receipt"
     );
     assert_eq!(
@@ -11545,7 +11867,13 @@ async fn bex062_concurrent_same_key_submits_produce_single_ledger_entry() {
     );
     let route_key = format!("POST:/api/v1/student/sessions/{schedule_id}/submit");
     assert_eq!(
-        persisted_idempotency_count(database.pool(), &student_key, &route_key, "submit-concurrent-1").await,
+        persisted_idempotency_count(
+            database.pool(),
+            &student_key,
+            &route_key,
+            "submit-concurrent-1"
+        )
+        .await,
         1,
         "exactly one idempotency row for the shared key"
     );
@@ -11557,13 +11885,12 @@ async fn bex062_concurrent_same_key_submits_produce_single_ledger_entry() {
     // The vestigial attempt_submission_ledger table is not populated by the
     // student submit path; the submission ledger is the STUDENT_SUBMIT audit
     // row + the idempotency row (see docs/failure-cases.md BEX-062).
-    let ledger_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM attempt_submission_ledger WHERE attempt_id = ?",
-    )
-    .bind(&attempt_id)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
+    let ledger_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM attempt_submission_ledger WHERE attempt_id = ?")
+            .bind(&attempt_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
     assert_eq!(ledger_count, 0);
 
     database.shutdown().await;
@@ -11581,14 +11908,9 @@ async fn bex063_mutation_inside_grace_merged_into_final_snapshot() {
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -11597,9 +11919,7 @@ async fn bex063_mutation_inside_grace_merged_into_final_snapshot() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_single_mutation_batch(
         &app,
@@ -11668,7 +11988,10 @@ async fn bex063_mutation_inside_grace_merged_into_final_snapshot() {
         final_submission["graceMerge"]["acceptedInGrace"], true,
         "grace merge must be recorded in the final snapshot"
     );
-    assert_eq!(final_submission["graceMerge"]["lastAppliedMutationCount"], 1);
+    assert_eq!(
+        final_submission["graceMerge"]["lastAppliedMutationCount"],
+        1
+    );
     assert_eq!(final_submission["graceMerge"]["mergeCount"], 1);
     assert_eq!(final_submission["graceMerge"]["appliedMutationTotal"], 1);
     assert_eq!(final_submission["graceMerge"]["graceWindowSeconds"], 300);
@@ -11704,14 +12027,9 @@ async fn bex063_mutation_outside_grace_rejected_and_accepted_replay_idempotent()
         AppConfig::default(),
         database.pool().clone(),
     ));
-    let (bootstrap, _) = start_runtime_and_rebootstrap(
-        &app,
-        database.pool(),
-        &auth,
-        schedule_id,
-        &student_key,
-    )
-    .await;
+    let (bootstrap, _) =
+        start_runtime_and_rebootstrap(&app, database.pool(), &auth, schedule_id, &student_key)
+            .await;
     let attempt_id = bootstrap["data"]["attempt"]["id"]
         .as_str()
         .unwrap()
@@ -11720,9 +12038,7 @@ async fn bex063_mutation_outside_grace_rejected_and_accepted_replay_idempotent()
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let (status, json) = post_single_mutation_batch(
         &app,
@@ -11765,23 +12081,20 @@ async fn bex063_mutation_outside_grace_rejected_and_accepted_replay_idempotent()
             "value": "grace-value"
         }]
     });
-    let (status, json) = post_mutation_batch_json(
-        &app,
-        &attempt_token,
-        schedule_id,
-        grace_body.clone(),
-    )
-    .await;
+    let (status, json) =
+        post_mutation_batch_json(&app, &attempt_token, schedule_id, grace_body.clone()).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["data"]["acceptedInGrace"], true);
     let revision_after_grace = json["data"]["revision"].as_i64().unwrap() as i32;
 
     // Backdate submitted_at 360s: the 300s grace window has closed.
-    sqlx::query("UPDATE student_attempts SET submitted_at = NOW() - INTERVAL 360 SECOND WHERE id = ?")
-        .bind(&attempt_id)
-        .execute(database.pool())
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE student_attempts SET submitted_at = NOW() - INTERVAL 360 SECOND WHERE id = ?",
+    )
+    .bind(&attempt_id)
+    .execute(database.pool())
+    .await
+    .unwrap();
 
     // A NEW mutation just outside the grace boundary is a structured
     // ATTEMPT_SUBMITTED conflict — never a generic failure.
@@ -11814,13 +12127,8 @@ async fn bex063_mutation_outside_grace_rejected_and_accepted_replay_idempotent()
 
     // Replaying the already accepted in-grace mutation stays idempotent: the
     // dedupe short-circuit runs before the submitted gate → 200 applied 0.
-    let (status, json) = post_mutation_batch_json(
-        &app,
-        &attempt_token,
-        schedule_id,
-        grace_body,
-    )
-    .await;
+    let (status, json) =
+        post_mutation_batch_json(&app, &attempt_token, schedule_id, grace_body).await;
     assert_eq!(status, StatusCode::OK, "{json}");
     assert_eq!(json["data"]["appliedMutationCount"], 0);
     assert_eq!(
@@ -11931,7 +12239,8 @@ async fn storm_submit_burst(
             Box::pin(async move {
                 let started = std::time::Instant::now();
                 let (status, json) =
-                    post_submit_json(app_ref, &s.attempt_token, schedule_id, Some(&key), body).await;
+                    post_submit_json(app_ref, &s.attempt_token, schedule_id, Some(&key), body)
+                        .await;
                 (i, status, json, started.elapsed())
             })
         })
@@ -11979,7 +12288,11 @@ async fn bex080_exam_start_fan_out_keeps_runtime_consistent() {
     }
     let distinct_attempts: std::collections::HashSet<&str> =
         students.iter().map(|s| s.attempt_id.as_str()).collect();
-    assert_eq!(distinct_attempts.len(), 8, "bootstraps must yield distinct attempt ids");
+    assert_eq!(
+        distinct_attempts.len(),
+        8,
+        "bootstraps must yield distinct attempt ids"
+    );
 
     // Fan-out: StartRuntime races 8 pollers hammering /live.
     let scheduling = SchedulingService::new(database.pool().clone());
@@ -11995,14 +12308,62 @@ async fn bex080_exam_start_fan_out_keeps_runtime_consistent() {
     let fanout_started = std::time::Instant::now();
     let (start_result, p0, p1, p2, p3, p4, p5, p6, p7) = tokio::join!(
         start_future,
-        Box::pin(fanout_live_poller(&app, &students[0].auth, schedule_id, &students[0].candidate, 240)),
-        Box::pin(fanout_live_poller(&app, &students[1].auth, schedule_id, &students[1].candidate, 240)),
-        Box::pin(fanout_live_poller(&app, &students[2].auth, schedule_id, &students[2].candidate, 240)),
-        Box::pin(fanout_live_poller(&app, &students[3].auth, schedule_id, &students[3].candidate, 240)),
-        Box::pin(fanout_live_poller(&app, &students[4].auth, schedule_id, &students[4].candidate, 240)),
-        Box::pin(fanout_live_poller(&app, &students[5].auth, schedule_id, &students[5].candidate, 240)),
-        Box::pin(fanout_live_poller(&app, &students[6].auth, schedule_id, &students[6].candidate, 240)),
-        Box::pin(fanout_live_poller(&app, &students[7].auth, schedule_id, &students[7].candidate, 240)),
+        Box::pin(fanout_live_poller(
+            &app,
+            &students[0].auth,
+            schedule_id,
+            &students[0].candidate,
+            240
+        )),
+        Box::pin(fanout_live_poller(
+            &app,
+            &students[1].auth,
+            schedule_id,
+            &students[1].candidate,
+            240
+        )),
+        Box::pin(fanout_live_poller(
+            &app,
+            &students[2].auth,
+            schedule_id,
+            &students[2].candidate,
+            240
+        )),
+        Box::pin(fanout_live_poller(
+            &app,
+            &students[3].auth,
+            schedule_id,
+            &students[3].candidate,
+            240
+        )),
+        Box::pin(fanout_live_poller(
+            &app,
+            &students[4].auth,
+            schedule_id,
+            &students[4].candidate,
+            240
+        )),
+        Box::pin(fanout_live_poller(
+            &app,
+            &students[5].auth,
+            schedule_id,
+            &students[5].candidate,
+            240
+        )),
+        Box::pin(fanout_live_poller(
+            &app,
+            &students[6].auth,
+            schedule_id,
+            &students[6].candidate,
+            240
+        )),
+        Box::pin(fanout_live_poller(
+            &app,
+            &students[7].auth,
+            schedule_id,
+            &students[7].candidate,
+            240
+        )),
     );
     let fanout_elapsed = fanout_started.elapsed();
     start_result.expect("StartRuntime must succeed under fan-out");
@@ -12012,7 +12373,11 @@ async fn bex080_exam_start_fan_out_keeps_runtime_consistent() {
     );
 
     for (student, samples) in students.iter().zip([p0, p1, p2, p3, p4, p5, p6, p7]) {
-        assert!(!samples.is_empty(), "poller for {} produced no samples", student.candidate);
+        assert!(
+            !samples.is_empty(),
+            "poller for {} produced no samples",
+            student.candidate
+        );
         assert_eq!(
             samples.last().unwrap().1["runtime"]["status"].as_str(),
             Some("live"),
@@ -12020,7 +12385,12 @@ async fn bex080_exam_start_fan_out_keeps_runtime_consistent() {
             student.candidate
         );
         for (code, data) in &samples {
-            assert_eq!(*code, StatusCode::OK, "fan-out poll for {} must stay 200", student.candidate);
+            assert_eq!(
+                *code,
+                StatusCode::OK,
+                "fan-out poll for {} must stay 200",
+                student.candidate
+            );
             assert_eq!(
                 data["attempt"]["id"].as_str(),
                 Some(student.attempt_id.as_str()),
@@ -12029,29 +12399,77 @@ async fn bex080_exam_start_fan_out_keeps_runtime_consistent() {
             let runtime = &data["runtime"];
             match runtime["status"].as_str() {
                 Some("not_started") => {
-                    assert_eq!(runtime["activeSectionKey"], serde_json::Value::Null, "{}", student.candidate);
-                    assert_eq!(runtime["currentSectionKey"], serde_json::Value::Null, "{}", student.candidate);
-                    assert_eq!(runtime["currentSectionDeadlineAt"], serde_json::Value::Null, "{}", student.candidate);
-                    assert_eq!(runtime["actualStartAt"], serde_json::Value::Null, "{}", student.candidate);
+                    assert_eq!(
+                        runtime["activeSectionKey"],
+                        serde_json::Value::Null,
+                        "{}",
+                        student.candidate
+                    );
+                    assert_eq!(
+                        runtime["currentSectionKey"],
+                        serde_json::Value::Null,
+                        "{}",
+                        student.candidate
+                    );
+                    assert_eq!(
+                        runtime["currentSectionDeadlineAt"],
+                        serde_json::Value::Null,
+                        "{}",
+                        student.candidate
+                    );
+                    assert_eq!(
+                        runtime["actualStartAt"],
+                        serde_json::Value::Null,
+                        "{}",
+                        student.candidate
+                    );
                 }
                 Some("live") => {
-                    assert!(runtime["actualStartAt"].is_string(), "live must carry actualStartAt ({})", student.candidate);
-                    assert_eq!(runtime["activeSectionKey"], "listening", "{}", student.candidate);
-                    assert_eq!(runtime["currentSectionKey"], "listening", "{}", student.candidate);
+                    assert!(
+                        runtime["actualStartAt"].is_string(),
+                        "live must carry actualStartAt ({})",
+                        student.candidate
+                    );
+                    assert_eq!(
+                        runtime["activeSectionKey"], "listening",
+                        "{}",
+                        student.candidate
+                    );
+                    assert_eq!(
+                        runtime["currentSectionKey"], "listening",
+                        "{}",
+                        student.candidate
+                    );
                     assert!(
                         runtime["currentSectionDeadlineAt"].is_string(),
                         "live must carry the section deadline (no missing deadline) for {}",
                         student.candidate
                     );
                     assert!(runtime["serverNow"].is_string(), "{}", student.candidate);
-                    assert_eq!(runtime["revision"].as_i64(), Some(1), "{}", student.candidate);
+                    assert_eq!(
+                        runtime["revision"].as_i64(),
+                        Some(1),
+                        "{}",
+                        student.candidate
+                    );
                     let sections = runtime["sections"].as_array().expect("sections array");
-                    assert_eq!(sections[0]["sectionKey"], "listening", "{}", student.candidate);
+                    assert_eq!(
+                        sections[0]["sectionKey"], "listening",
+                        "{}",
+                        student.candidate
+                    );
                     assert_eq!(sections[0]["status"], "live", "{}", student.candidate);
-                    assert_eq!(sections[1]["sectionKey"], "reading", "{}", student.candidate);
+                    assert_eq!(
+                        sections[1]["sectionKey"], "reading",
+                        "{}",
+                        student.candidate
+                    );
                     assert_eq!(sections[1]["status"], "locked", "{}", student.candidate);
                 }
-                other => panic!("poller for {} observed unexpected runtime status {other:?}", student.candidate),
+                other => panic!(
+                    "poller for {} observed unexpected runtime status {other:?}",
+                    student.candidate
+                ),
             }
         }
     }
@@ -12063,11 +12481,18 @@ async fn bex080_exam_start_fan_out_keeps_runtime_consistent() {
             .fetch_all(database.pool())
             .await
             .unwrap();
-    assert_eq!(db_attempts.len(), 8, "fan-out must not create duplicate attempts");
+    assert_eq!(
+        db_attempts.len(),
+        8,
+        "fan-out must not create duplicate attempts"
+    );
     let db_unique: std::collections::HashSet<&str> =
         db_attempts.iter().map(|s| s.as_str()).collect();
     assert_eq!(db_unique.len(), 8, "attempt ids must be distinct");
-    assert_eq!(db_unique, distinct_attempts, "DB attempts must match the bootstrapped ids");
+    assert_eq!(
+        db_unique, distinct_attempts,
+        "DB attempts must match the bootstrapped ids"
+    );
 
     database.shutdown().await;
 }
@@ -12106,9 +12531,15 @@ async fn bex080_live_rate_limits_return_structured_retry_information() {
     let retry_after = third_json["error"]["details"]["retryAfterSeconds"]
         .as_i64()
         .unwrap_or(0);
-    assert!(retry_after >= 1, "retryAfterSeconds must be a number >= 1: {third_json}");
     assert!(
-        third_json["error"]["message"].as_str().unwrap_or("").contains("Retry after"),
+        retry_after >= 1,
+        "retryAfterSeconds must be a number >= 1: {third_json}"
+    );
+    assert!(
+        third_json["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Retry after"),
         "the 429 message must carry retry guidance: {third_json}"
     );
 
@@ -12137,16 +12568,25 @@ async fn bex080_live_rate_limits_return_structured_retry_information() {
         }
     }
     let denied_json = denied.expect("the global live bucket must eventually deny");
-    assert_eq!(allowed, 51, "effective global capacity must be limit(1) + burst(50)");
+    assert_eq!(
+        allowed, 51,
+        "effective global capacity must be limit(1) + burst(50)"
+    );
     assert_eq!(denied_json["success"], false);
     assert_eq!(denied_json["error"]["code"], "RATE_LIMIT_EXCEEDED");
     assert_eq!(denied_json["error"]["details"]["scope"], "global");
     let retry_after = denied_json["error"]["details"]["retryAfterSeconds"]
         .as_i64()
         .unwrap_or(0);
-    assert!(retry_after >= 1, "retryAfterSeconds must be a number >= 1: {denied_json}");
     assert!(
-        denied_json["error"]["message"].as_str().unwrap_or("").contains("Retry after"),
+        retry_after >= 1,
+        "retryAfterSeconds must be a number >= 1: {denied_json}"
+    );
+    assert!(
+        denied_json["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Retry after"),
         "the 429 message must carry retry guidance: {denied_json}"
     );
 
@@ -12197,9 +12637,7 @@ async fn bex081_submit_storm_exactly_one_receipt_no_answer_loss() {
             .as_str()
             .unwrap()
             .to_owned();
-        let base_revision = bootstrap["data"]["attempt"]["revision"]
-            .as_i64()
-            .unwrap() as i32;
+        let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
         students.push(StormStudent {
             attempt_id,
             attempt_token,
@@ -12385,15 +12823,22 @@ async fn bex081_submit_storm_exactly_one_receipt_no_answer_loss() {
     let ((r1_status, r1_json), (r2_status, r2_json)) = tokio::join!(replay1, replay2);
     assert_eq!(r1_status, StatusCode::OK, "{r1_json}");
     assert_eq!(r2_status, StatusCode::OK, "{r2_json}");
-    assert_eq!(r1_json["data"]["submissionId"], r2_json["data"]["submissionId"]);
+    assert_eq!(
+        r1_json["data"]["submissionId"],
+        r2_json["data"]["submissionId"]
+    );
     assert_eq!(
         r1_json["data"]["submissionId"].as_str(),
         Some(original_receipt.as_str()),
         "concurrent replay must return the original receipt"
     );
     assert_eq!(
-        persisted_audit_by_action(database.pool(), &replay_student.attempt_id, "STUDENT_SUBMIT")
-            .await,
+        persisted_audit_by_action(
+            database.pool(),
+            &replay_student.attempt_id,
+            "STUDENT_SUBMIT"
+        )
+        .await,
         1,
         "replay must not add a second STUDENT_SUBMIT row"
     );
@@ -12418,11 +12863,22 @@ async fn bex081_submit_storm_exactly_one_receipt_no_answer_loss() {
     // must leave both counters at zero.
     let metrics_response = app
         .clone()
-        .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
-    assert_eq!(metrics_response.status(), StatusCode::OK, "prometheus must be enabled");
-    let metrics_body = to_bytes(metrics_response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        metrics_response.status(),
+        StatusCode::OK,
+        "prometheus must be enabled"
+    );
+    let metrics_body = to_bytes(metrics_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let metrics_text = String::from_utf8(metrics_body.to_vec()).unwrap();
     let loss_lines: Vec<&str> = metrics_text
         .lines()
@@ -12437,7 +12893,10 @@ async fn bex081_submit_storm_exactly_one_receipt_no_answer_loss() {
     );
     for line in loss_lines {
         let value = line.rsplit(' ').next().unwrap_or("");
-        assert_eq!(value, "0", "answer-loss telemetry must stay at zero: {line}");
+        assert_eq!(
+            value, "0",
+            "answer-loss telemetry must stay at zero: {line}"
+        );
     }
 
     database.shutdown().await;

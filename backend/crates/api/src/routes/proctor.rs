@@ -8,13 +8,13 @@ use ielts_backend_application::auth::AuthService;
 use ielts_backend_application::proctoring::{
     ProctorSessionDetailOptions, ProctoringError, ProctoringService,
 };
+use ielts_backend_domain::actor_context::ActorContext;
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::schedule::{
     AlertAckRequest, AttemptCommandRequest, CompleteExamRequest, ExtendSectionRequest,
     ProctorPresence, ProctorPresenceRequest, ProctorSessionDetail, ProctorSessionSummary,
     SessionAuditLog,
 };
-use ielts_backend_infrastructure::actor_context::ActorContext;
 use sqlx::query_scalar;
 use uuid::Uuid;
 

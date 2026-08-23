@@ -21,11 +21,8 @@ pub struct MediaService {
 }
 
 impl MediaService {
-    pub fn new(pool: MySqlPool) -> Self {
-        Self {
-            pool,
-            object_store: LocalObjectStore::from_env(),
-        }
+    pub fn new(pool: MySqlPool, object_store: LocalObjectStore) -> Self {
+        Self { pool, object_store }
     }
 
     pub async fn create_upload_intent(

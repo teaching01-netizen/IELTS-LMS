@@ -30,6 +30,7 @@ pub struct AppConfig {
     pub live_mode_enabled: bool,
     pub database_url: Option<String>,
     pub database_direct_url: Option<String>,
+    pub database_worker_url: Option<String>,
     pub db_pool_max_connections: u32,
     pub db_pool_acquire_timeout_ms: u64,
     pub db_pool_idle_timeout_secs: u64,
@@ -49,6 +50,7 @@ pub struct AppConfig {
     pub live_mode_notify_channel: String,
     pub storage_budget_thresholds: StorageBudgetThresholds,
     pub frontend_dist_dir: String,
+    pub media_base_url: String,
     pub auth_session_cookie_name: String,
     pub auth_csrf_cookie_name: String,
     pub auth_cookie_secure: bool,
@@ -144,6 +146,9 @@ impl AppConfig {
             database_direct_url: env::var("DATABASE_DIRECT_URL")
                 .ok()
                 .filter(|value| !value.trim().is_empty()),
+            database_worker_url: env::var("DATABASE_WORKER_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
             db_pool_max_connections: env::var("DB_POOL_MAX_CONNECTIONS")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -235,6 +240,10 @@ impl AppConfig {
                 .ok()
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or(default.frontend_dist_dir),
+            media_base_url: env::var("MEDIA_BASE_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(default.media_base_url),
             auth_session_cookie_name: env::var("AUTH_SESSION_COOKIE_NAME")
                 .ok()
                 .filter(|value| !value.trim().is_empty())
@@ -614,6 +623,7 @@ impl Default for AppConfig {
             live_mode_enabled: true,
             database_url: None,
             database_direct_url: None,
+            database_worker_url: None,
             db_pool_max_connections: 20,
             db_pool_acquire_timeout_ms: 3000,
             db_pool_idle_timeout_secs: 60,
@@ -633,6 +643,7 @@ impl Default for AppConfig {
             live_mode_notify_channel: "backend_live_wakeup".to_owned(),
             storage_budget_thresholds: StorageBudgetThresholds::default(),
             frontend_dist_dir: "/app/frontend/dist".to_owned(),
+            media_base_url: "https://media.local.invalid".to_owned(),
             auth_session_cookie_name: "__Host-session".to_owned(),
             auth_csrf_cookie_name: "__Host-csrf".to_owned(),
             auth_cookie_secure: true,

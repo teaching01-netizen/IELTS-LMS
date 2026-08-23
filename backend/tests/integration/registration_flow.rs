@@ -6,11 +6,11 @@ use serde_json::json;
 use uuid::Uuid;
 
 use ielts_backend_application::{builder::BuilderService, scheduling::SchedulingService};
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::{
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
     schedule::CreateScheduleRequest,
 };
-use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 
 const SCHEDULING_MIGRATIONS: &[&str] = &[
     "0001_roles.sql",

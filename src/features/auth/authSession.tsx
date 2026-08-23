@@ -8,17 +8,18 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import { apiClient } from '../../app/api/apiClient';
 import { queryClient } from '../../app/data/queryClient';
 import { logError } from '../../app/error/errorLogger';
 import {
+  applyAuthTransportSession,
   authService,
+  registerAuthUnauthorizedHandler,
   type AuthSession,
   type AuthUserRole,
   type StudentEntryResult,
 } from '../../services/authService';
 
-type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
+export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
 interface AuthSessionContextValue {
   session: AuthSession | null;
@@ -46,21 +47,12 @@ interface AuthSessionContextValue {
 
 const AuthSessionContext = createContext<AuthSessionContextValue | null>(null);
 
-function applySessionHeaders(session: AuthSession | null): void {
-  if (session) {
-    apiClient.setCsrfToken(session.csrfToken);
-    return;
-  }
-
-  apiClient.clearCsrfToken();
-}
-
 function setSessionState(
   nextSession: AuthSession | null,
   setSession: React.Dispatch<React.SetStateAction<AuthSession | null>>,
   setStatus: React.Dispatch<React.SetStateAction<AuthStatus>>,
 ): AuthSession | null {
-  applySessionHeaders(nextSession);
+  applyAuthTransportSession(nextSession);
   setSession(nextSession);
   setStatus(nextSession ? 'authenticated' : 'unauthenticated');
   return nextSession;
@@ -101,7 +93,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   }, [session]);
 
   useEffect(() => {
-    apiClient.setUnauthorizedHandler(({ endpoint }) => {
+    registerAuthUnauthorizedHandler(({ endpoint }) => {
       // If we are already unauthenticated, do not churn state/cache.
       if (!sessionRef.current) {
         return;
@@ -118,7 +110,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     });
 
     return () => {
-      apiClient.setUnauthorizedHandler(null);
+      registerAuthUnauthorizedHandler(null);
     };
   }, []);
 

@@ -4,6 +4,7 @@ pub mod session_context;
 pub mod submit_attempt;
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::{
     attempt::{
         AttemptPhase, HeartbeatEventType, ModuleType, MutationCommand, MutationEnvelope,
@@ -15,7 +16,6 @@ use ielts_backend_domain::{
     schedule::{ExamSchedule, ExamSessionRuntime},
 };
 use ielts_backend_infrastructure::{
-    actor_context::{ActorContext, ActorRole},
     auth::sha256_hex,
     config::AppConfig,
     idempotency::{IdempotencyLookupStatus, IdempotencyRecord, IdempotencyRepository},
@@ -28,6 +28,7 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
 
+use crate::attempt_tx::{ensure_object, merge_recovery};
 use crate::auth::{AuthService, AuthenticatedSession};
 use crate::scheduling::SchedulingService;
 
@@ -2151,70 +2152,6 @@ fn submit_route_key(schedule_id: Uuid) -> String {
     format!("POST:/api/v1/student/sessions/{schedule_id}/submit")
 }
 
-pub(crate) async fn auto_submit_schedule_attempts_in_tx(
-    connection: &mut MySqlConnection,
-    schedule_id: Uuid,
-    completion_reason: &str,
-) -> Result<(), DeliveryError> {
-    let pending_attempts = sqlx::query_as::<_, StudentAttempt>(
-        "SELECT * FROM student_attempts WHERE schedule_id = ? AND submitted_at IS NULL FOR UPDATE",
-    )
-    .bind(schedule_id.to_string())
-    .fetch_all(&mut *connection)
-    .await?;
-
-    if pending_attempts.is_empty() {
-        return Ok(());
-    }
-
-    let now = Utc::now();
-    for attempt in pending_attempts {
-        let submission_id = format!("submission-{}", Uuid::new_v4().simple());
-        let final_submission = json!({
-            "submissionId": submission_id,
-            "submittedAt": now,
-            "answers": attempt.answers,
-            "writingAnswers": attempt.writing_answers,
-            "flags": attempt.flags,
-            "completionReason": completion_reason,
-            "autoSubmission": true,
-            "proctorStatus": attempt.proctor_status.as_str(),
-            "submissionPolicy": "forced_auto_submit"
-        });
-        let recovery = merge_recovery(
-            attempt.recovery.clone().into(),
-            json!({
-                "lastPersistedAt": now,
-                "pendingMutationCount": 0,
-                "syncState": "saved"
-            }),
-        );
-
-        sqlx::query(
-            r#"
-            UPDATE student_attempts
-            SET
-                phase = ?,
-                recovery = ?,
-                final_submission = ?,
-                submitted_at = ?,
-                updated_at = NOW(),
-                revision = revision + 1
-            WHERE id = ?
-            "#,
-        )
-        .bind(AttemptPhase::PostExam)
-        .bind(recovery)
-        .bind(&final_submission)
-        .bind(now)
-        .bind(&attempt.id)
-        .execute(&mut *connection)
-        .await?;
-    }
-
-    Ok(())
-}
-
 pub async fn finalize_pending_schedule_attempts(
     pool: &MySqlPool,
     schedule_id: Uuid,
@@ -2222,74 +2159,12 @@ pub async fn finalize_pending_schedule_attempts(
     _batch_size: i64,
 ) -> Result<(), DeliveryError> {
     let mut tx = pool.begin().await?;
-    auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, completion_reason).await?;
-    tx.commit().await?;
-    Ok(())
-}
-
-pub(crate) async fn force_finalize_attempt_if_pending(
-    pool: &MySqlPool,
-    schedule_id: Uuid,
-    attempt_id: Uuid,
-    completion_reason: &str,
-) -> Result<(), DeliveryError> {
-    let mut tx = pool.begin().await?;
-    let pending_attempt = sqlx::query_as::<_, StudentAttempt>(
-        "SELECT * FROM student_attempts WHERE id = ? AND schedule_id = ? AND submitted_at IS NULL FOR UPDATE",
+    crate::attempt_tx::auto_submit_schedule_attempts_in_tx(
+        tx.as_mut(),
+        schedule_id,
+        completion_reason,
     )
-    .bind(attempt_id.to_string())
-    .bind(schedule_id.to_string())
-    .fetch_optional(tx.as_mut())
     .await?;
-
-    let Some(attempt) = pending_attempt else {
-        tx.commit().await?;
-        return Ok(());
-    };
-
-    let now = Utc::now();
-    let submission_id = format!("submission-{}", Uuid::new_v4().simple());
-    let final_submission = json!({
-        "submissionId": submission_id,
-        "submittedAt": now,
-        "answers": attempt.answers,
-        "writingAnswers": attempt.writing_answers,
-        "flags": attempt.flags,
-        "completionReason": completion_reason,
-        "autoSubmission": true,
-        "proctorStatus": attempt.proctor_status.as_str(),
-        "submissionPolicy": "forced_auto_submit"
-    });
-    let recovery = merge_recovery(
-        attempt.recovery.clone().into(),
-        json!({
-            "lastPersistedAt": now,
-            "pendingMutationCount": 0,
-            "syncState": "saved"
-        }),
-    );
-
-    sqlx::query(
-        r#"
-        UPDATE student_attempts
-        SET
-            phase = ?,
-            recovery = ?,
-            final_submission = ?,
-            submitted_at = ?,
-            updated_at = NOW(),
-            revision = revision + 1
-        WHERE id = ?
-        "#,
-    )
-    .bind(AttemptPhase::PostExam)
-    .bind(recovery)
-    .bind(&final_submission)
-    .bind(now)
-    .bind(attempt_id.to_string())
-    .execute(tx.as_mut())
-    .await?;
-
     tx.commit().await?;
     Ok(())
 }
@@ -3610,20 +3485,6 @@ fn merge_post_submit_submission_snapshot(
     merged.insert("finalFlush".to_owned(), Value::Object(final_flush));
 
     Value::Object(merged)
-}
-
-fn merge_recovery(existing: Value, patch: Value) -> Value {
-    let mut base = ensure_object(existing);
-    if let Some(patch_map) = patch.as_object() {
-        for (key, value) in patch_map {
-            base.insert(key.clone(), value.clone());
-        }
-    }
-    Value::Object(base)
-}
-
-fn ensure_object(value: Value) -> Map<String, Value> {
-    value.as_object().cloned().unwrap_or_default()
 }
 
 fn set_value(mut object: Map<String, Value>, key: String, value: Value) -> Map<String, Value> {

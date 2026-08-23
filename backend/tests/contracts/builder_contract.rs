@@ -11,13 +11,13 @@ use uuid::Uuid;
 
 use ielts_backend_api::{live_updates::LiveUpdateHub, router::build_router, state::AppState};
 use ielts_backend_application::builder::BuilderService;
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::exam::{
     CreateExamRequest, ExamEntity, ExamStatus, ExamType, PublishExamRequest, SaveDraftRequest,
     Visibility,
 };
 use ielts_backend_infrastructure::{
-    actor_context::{ActorContext, ActorRole},
     config::AppConfig,
     pool::DatabasePool,
     rate_limit::{RateLimitConfig, RateLimiter},
@@ -614,8 +614,7 @@ async fn save_draft_round_trips_shared_sentence_answer_fields() {
         .get_version(&contract_actor(), saved_version.id.clone())
         .await
         .expect("reload shared sentence draft");
-    let question = &version.content_snapshot["reading"]["passages"][0]["blocks"][0]
-        ["questions"][0];
+    let question = &version.content_snapshot["reading"]["passages"][0]["blocks"][0]["questions"][0];
 
     assert_eq!(question["acceptAnyAnswerKey"], true);
     assert_eq!(question["sharedAcceptedAnswers"], json!(["alpha", "beta"]));

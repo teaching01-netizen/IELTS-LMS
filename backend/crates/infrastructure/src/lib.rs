@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-pub mod actor_context;
 pub mod auth;
 pub mod authorization;
 pub mod cache;

@@ -1,5 +1,3 @@
-use std::env;
-
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
@@ -8,10 +6,9 @@ pub struct LocalObjectStore {
 }
 
 impl LocalObjectStore {
-    pub fn from_env() -> Self {
+    pub fn from_base_url(base_url: &str) -> Self {
         Self {
-            base_url: env::var("MEDIA_BASE_URL")
-                .unwrap_or_else(|_| "https://media.local.invalid".to_owned()),
+            base_url: base_url.to_owned(),
         }
     }
 

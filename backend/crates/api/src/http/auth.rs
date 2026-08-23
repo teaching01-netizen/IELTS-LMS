@@ -10,8 +10,8 @@ use axum::{
 use ielts_backend_application::auth::{
     AttemptAuthorization, AuthError, AuthService, AuthenticatedSession,
 };
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::auth::{User, UserRole, UserSession};
-use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 use uuid::Uuid;
 
 use crate::{http::response::ApiError, state::AppState};

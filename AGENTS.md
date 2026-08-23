@@ -22,8 +22,18 @@ Never change behavior before identifying the owning module and invariants.
 - Do not import another module's internal files.
 - Expose inter-module behavior via explicit public interfaces.
 - Keep dependency direction one-way where possible:
-  - `ui -> application -> domain`
-  - `infrastructure` implements domain/application interfaces.
+  - `api/worker -> application -> domain`
+  - `infrastructure -> domain` (shared technical services: config, crypto, telemetry, repositories for cross-cutting concerns)
+- Backend layering (declared as-built, 2026-08):
+  - `domain` owns business types and the actor/role policy concepts (`domain::actor_context`).
+  - `application` owns use cases AND their SQL (modular-monolith style). Infrastructure imports from application are a ratcheted legacy debt: `backend/tests/architecture/application_boundary_guard.rs` pins the exact allowlist. Never add a new entry without an architecture note.
+  - Shared attempt-transaction helpers live in `application::attempt_tx`, a leaf module; do not recreate scheduling/delivery cycles (enforced by the same guard test).
+  - All env access goes through `infrastructure::config::AppConfig` (plus `bin/*` composition mains). Never read env inside application/domain business logic.
+  - Infrastructure construction (pools, object stores) happens at composition roots (`api/src/state.rs`, route handlers, worker `main.rs`), never inside application service constructors.
+- Frontend layering (enforced by `src/test/architecture/frontend-module-boundaries.test.ts`):
+  - Features never import each other; consumers reach features only via `features/*/contracts`.
+  - Only `src/services` may import the raw API client; features use service functions.
+  - Feature route controllers reach services only through `features/*/infrastructure` adapters.
 
 ## Critical Invariants
 - Submitted exam answers are immutable.

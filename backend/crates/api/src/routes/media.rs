@@ -8,6 +8,7 @@ use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::grading::{
     CompleteUploadRequest, MediaAsset, UploadIntent, UploadIntentRequest,
 };
+use ielts_backend_infrastructure::object_store::LocalObjectStore;
 use uuid::Uuid;
 
 use crate::{
@@ -33,7 +34,10 @@ pub async fn create_upload(
         UserRole::Grader,
         UserRole::Student,
     ])?;
-    let service = MediaService::new(state.db_pool());
+    let service = MediaService::new(
+        state.db_pool(),
+        LocalObjectStore::from_base_url(&state.config.media_base_url),
+    );
     let upload = service.create_upload_intent(req).await?;
     Ok(ApiResponse::success_with_request_id(upload, request_id.0))
 }
@@ -53,7 +57,10 @@ pub async fn complete_upload(
         UserRole::Grader,
         UserRole::Student,
     ])?;
-    let service = MediaService::new(state.db_pool());
+    let service = MediaService::new(
+        state.db_pool(),
+        LocalObjectStore::from_base_url(&state.config.media_base_url),
+    );
     let asset = service.complete_upload(asset_id, req).await?;
     Ok(ApiResponse::success_with_request_id(asset, request_id.0))
 }
@@ -71,7 +78,10 @@ pub async fn get_asset(
         UserRole::Grader,
         UserRole::Student,
     ])?;
-    let service = MediaService::new(state.db_pool());
+    let service = MediaService::new(
+        state.db_pool(),
+        LocalObjectStore::from_base_url(&state.config.media_base_url),
+    );
     let asset = service.get_asset(asset_id).await?;
     Ok(ApiResponse::success_with_request_id(asset, request_id.0))
 }

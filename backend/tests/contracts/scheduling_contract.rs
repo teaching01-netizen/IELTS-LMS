@@ -14,16 +14,14 @@ use uuid::Uuid;
 
 use ielts_backend_api::{router::build_router, state::AppState};
 use ielts_backend_application::{builder::BuilderService, scheduling::SchedulingService};
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::{
     attempt::StudentPrecheckRequest,
     auth::UserRole,
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
     schedule::CreateScheduleRequest,
 };
-use ielts_backend_infrastructure::{
-    actor_context::{ActorContext, ActorRole},
-    config::AppConfig,
-};
+use ielts_backend_infrastructure::config::AppConfig;
 
 const SCHEDULING_MIGRATIONS: &[&str] = &[
     "0001_roles.sql",
@@ -372,12 +370,10 @@ async fn repeated_start_returns_conflict_without_duplicate_sections() {
     assert_eq!(retry.status(), StatusCode::CONFLICT);
     let retry_json = json_body(retry).await;
     assert_eq!(retry_json["error"]["code"], "CONFLICT");
-    assert!(
-        retry_json["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("Runtime already exists")
-    );
+    assert!(retry_json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Runtime already exists"));
 
     let runtime_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM exam_session_runtimes WHERE schedule_id = ?")
@@ -385,7 +381,10 @@ async fn repeated_start_returns_conflict_without_duplicate_sections() {
             .fetch_one(database.pool())
             .await
             .unwrap();
-    assert_eq!(runtime_count, 1, "a repeated start must not insert a second runtime");
+    assert_eq!(
+        runtime_count, 1,
+        "a repeated start must not insert a second runtime"
+    );
 
     let get_runtime = app
         .clone()
@@ -400,7 +399,9 @@ async fn repeated_start_returns_conflict_without_duplicate_sections() {
         .unwrap();
     assert_eq!(get_runtime.status(), StatusCode::OK);
     let runtime_json = json_body(get_runtime).await;
-    let sections = runtime_json["data"]["sections"].as_array().expect("sections");
+    let sections = runtime_json["data"]["sections"]
+        .as_array()
+        .expect("sections");
     let section_rows: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM exam_session_runtime_sections WHERE runtime_id = (SELECT id FROM exam_session_runtimes WHERE schedule_id = ?)",
     )
@@ -409,7 +410,8 @@ async fn repeated_start_returns_conflict_without_duplicate_sections() {
     .await
     .unwrap();
     assert_eq!(
-        section_rows, sections.len() as i64,
+        section_rows,
+        sections.len() as i64,
         "exactly one section row per plan entry"
     );
     let mut keys: Vec<&str> = sections
@@ -494,7 +496,10 @@ async fn pause_freezes_remaining_seconds_and_resume_accounts_for_paused_time() {
     assert_eq!(again.status(), StatusCode::OK);
     let again_json = json_body(again).await;
     assert_eq!(again_json["data"]["status"], "paused");
-    assert_eq!(again_json["data"]["revision"], 2, "no-op pause must not bump revision");
+    assert_eq!(
+        again_json["data"]["revision"], 2,
+        "no-op pause must not bump revision"
+    );
     assert_eq!(
         again_json["data"]["currentSectionRemainingSeconds"],
         serde_json::json!(frozen_remaining),
@@ -512,7 +517,10 @@ async fn pause_freezes_remaining_seconds_and_resume_accounts_for_paused_time() {
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(pause_events, 1, "the no-op pause must not append a second event");
+    assert_eq!(
+        pause_events, 1,
+        "the no-op pause must not append a second event"
+    );
 
     // Simulate 5 minutes of wall-clock time while paused: remaining seconds must
     // NOT drop by 300 (they froze at the pause moment).
@@ -625,7 +633,10 @@ async fn pause_freezes_remaining_seconds_and_resume_accounts_for_paused_time() {
         actual_start_at + Duration::minutes(30) + Duration::seconds(i64::from(accumulated_seconds))
     };
     assert!(
-        (deadline_after_resume - expected_deadline).num_seconds().abs() <= 2,
+        (deadline_after_resume - expected_deadline)
+            .num_seconds()
+            .abs()
+            <= 2,
         "deadline should match actual start + duration + accumulated pause"
     );
 
@@ -725,7 +736,13 @@ async fn proctor_end_section_now_completes_active_section_and_exposes_the_next()
         database.pool().clone(),
     ));
 
-    let start = command_request(&app, &admin, schedule_id, json!({ "action": "start_runtime" })).await;
+    let start = command_request(
+        &app,
+        &admin,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
     assert_eq!(start.status(), StatusCode::OK);
     let start_json = json_body(start).await;
     assert_eq!(start_json["data"]["activeSectionKey"], "listening");
@@ -749,7 +766,10 @@ async fn proctor_end_section_now_completes_active_section_and_exposes_the_next()
     assert_eq!(data["status"], "live");
     assert_eq!(data["activeSectionKey"], "reading");
     assert_eq!(data["currentSectionKey"], "reading");
-    assert_eq!(data["revision"], 2, "an advance must bump the runtime revision");
+    assert_eq!(
+        data["revision"], 2,
+        "an advance must bump the runtime revision"
+    );
     let remaining = data["currentSectionRemainingSeconds"]
         .as_i64()
         .expect("remaining seconds");
@@ -796,13 +816,12 @@ async fn proctor_end_section_now_completes_active_section_and_exposes_the_next()
     assert_eq!(event_actor, admin.user_id.to_string());
     assert_eq!(event_section.as_deref(), Some("listening"));
 
-    let mut audit_actions: Vec<String> = sqlx::query_scalar(
-        "SELECT action_type FROM session_audit_logs WHERE schedule_id = ?",
-    )
-    .bind(schedule_id.to_string())
-    .fetch_all(database.pool())
-    .await
-    .expect("audit trail");
+    let mut audit_actions: Vec<String> =
+        sqlx::query_scalar("SELECT action_type FROM session_audit_logs WHERE schedule_id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_all(database.pool())
+            .await
+            .expect("audit trail");
     audit_actions.sort_unstable();
     assert_eq!(audit_actions, vec!["SECTION_END", "SECTION_START"]);
 
@@ -813,7 +832,10 @@ async fn proctor_end_section_now_completes_active_section_and_exposes_the_next()
     .fetch_one(database.pool())
     .await
     .expect("listening actual end");
-    assert!(ended_at.is_some(), "listening must persist an actual end time");
+    assert!(
+        ended_at.is_some(),
+        "listening must persist an actual end time"
+    );
 
     database.shutdown().await;
 }
@@ -835,13 +857,23 @@ async fn proctor_end_section_now_steps_sections_in_plan_order_without_skipping()
         database.pool().clone(),
     ));
 
-    let start = command_request(&app, &admin, schedule_id, json!({ "action": "start_runtime" })).await;
+    let start = command_request(
+        &app,
+        &admin,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
     assert_eq!(start.status(), StatusCode::OK);
 
     // First advance: listening -> reading.
-    let first = proctor_end_section_now(&app, &admin, schedule_id, json!({ "reason": "step 1" })).await;
+    let first =
+        proctor_end_section_now(&app, &admin, schedule_id, json!({ "reason": "step 1" })).await;
     assert_eq!(first.status(), StatusCode::OK);
-    assert_eq!(json_body(first).await["data"]["activeSectionKey"], "reading");
+    assert_eq!(
+        json_body(first).await["data"]["activeSectionKey"],
+        "reading"
+    );
 
     // BEX-022: a stale expected_active_section_key on the second advance must
     // conflict instead of silently advancing from a stale client view.
@@ -864,7 +896,8 @@ async fn proctor_end_section_now_steps_sections_in_plan_order_without_skipping()
     );
 
     // Second advance: reading -> writing (must NOT skip to speaking).
-    let second = proctor_end_section_now(&app, &admin, schedule_id, json!({ "reason": "step 2" })).await;
+    let second =
+        proctor_end_section_now(&app, &admin, schedule_id, json!({ "reason": "step 2" })).await;
     assert_eq!(second.status(), StatusCode::OK);
     let second_json = json_body(second).await;
     assert_eq!(second_json["data"]["activeSectionKey"], "writing");
@@ -879,7 +912,8 @@ async fn proctor_end_section_now_steps_sections_in_plan_order_without_skipping()
     assert_eq!(second_json["data"]["sections"][3]["status"], "locked");
 
     // Third advance: writing -> speaking.
-    let third = proctor_end_section_now(&app, &admin, schedule_id, json!({ "reason": "step 3" })).await;
+    let third =
+        proctor_end_section_now(&app, &admin, schedule_id, json!({ "reason": "step 3" })).await;
     assert_eq!(third.status(), StatusCode::OK);
     let third_json = json_body(third).await;
     assert_eq!(third_json["data"]["activeSectionKey"], "speaking");
@@ -932,12 +966,21 @@ async fn proctor_end_section_now_on_last_section_auto_submits_pending_attempts()
     // A real precheck creates the pending student attempt row.
     precheck_attempt(&app, &student_auth, schedule_id, &student_key).await;
 
-    let start = command_request(&app, &admin, schedule_id, json!({ "action": "start_runtime" })).await;
+    let start = command_request(
+        &app,
+        &admin,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
     assert_eq!(start.status(), StatusCode::OK);
 
     // BEX-023: the final advance structurally completes the runtime and
     // auto-submits every pending attempt in the same transaction.
-    for (step, section) in ["listening", "reading", "writing", "speaking"].iter().enumerate() {
+    for (step, section) in ["listening", "reading", "writing", "speaking"]
+        .iter()
+        .enumerate()
+    {
         let advance = proctor_end_section_now(
             &app,
             &admin,
@@ -951,13 +994,19 @@ async fn proctor_end_section_now_on_last_section_auto_submits_pending_attempts()
     let runtime = admin_runtime_projection(&app, &admin, schedule_id).await;
     let data = &runtime["data"];
     assert_eq!(data["status"], "completed");
-    assert!(data["actualEndAt"].is_string(), "completed runtime needs an end time");
+    assert!(
+        data["actualEndAt"].is_string(),
+        "completed runtime needs an end time"
+    );
     assert_eq!(data["activeSectionKey"], serde_json::Value::Null);
     assert_eq!(data["currentSectionKey"], serde_json::Value::Null);
     assert_eq!(data["currentSectionRemainingSeconds"], 0);
     assert_eq!(data["waitingForNextSection"], false);
     for section in data["sections"].as_array().expect("sections") {
-        assert_eq!(section["status"], "completed", "all sections must be completed");
+        assert_eq!(
+            section["status"], "completed",
+            "all sections must be completed"
+        );
     }
 
     let (runtime_status, actual_end_at, active_key, current_key, remaining, waiting): (
@@ -975,7 +1024,10 @@ async fn proctor_end_section_now_on_last_section_auto_submits_pending_attempts()
     .await
     .expect("runtime row");
     assert_eq!(runtime_status, "completed");
-    assert!(actual_end_at.is_some(), "runtime must persist an actual end time");
+    assert!(
+        actual_end_at.is_some(),
+        "runtime must persist an actual end time"
+    );
     assert_eq!(active_key, None);
     assert_eq!(current_key, None);
     assert_eq!(remaining, 0);
@@ -998,7 +1050,10 @@ async fn proctor_end_section_now_on_last_section_auto_submits_pending_attempts()
     .fetch_one(database.pool())
     .await
     .expect("student attempt");
-    assert!(submitted_at.is_some(), "pending attempt must be auto-submitted");
+    assert!(
+        submitted_at.is_some(),
+        "pending attempt must be auto-submitted"
+    );
     assert_eq!(phase, "post-exam");
     let final_submission: serde_json::Value = sqlx::query_scalar(
         "SELECT final_submission FROM student_attempts WHERE schedule_id = ? AND student_key = ?",
@@ -1089,7 +1144,13 @@ async fn transient_completed_runtime_does_not_finalize_pending_attempts() {
     ));
     precheck_attempt(&app, &student_auth, schedule_id, &student_key).await;
 
-    let start = command_request(&app, &admin, schedule_id, json!({ "action": "start_runtime" })).await;
+    let start = command_request(
+        &app,
+        &admin,
+        schedule_id,
+        json!({ "action": "start_runtime" }),
+    )
+    .await;
     assert_eq!(start.status(), StatusCode::OK);
 
     // Craft a transient `completed` runtime that violates the completion
@@ -1120,7 +1181,10 @@ async fn transient_completed_runtime_does_not_finalize_pending_attempts() {
     .fetch_one(database.pool())
     .await
     .expect("listening section row");
-    assert_eq!(listening_status, "live", "premise: section data is incomplete");
+    assert_eq!(
+        listening_status, "live",
+        "premise: section data is incomplete"
+    );
 
     // BEX-023: the transient `completed` status alone must not finalize the
     // pending attempt.
@@ -1132,24 +1196,30 @@ async fn transient_completed_runtime_does_not_finalize_pending_attempts() {
     .fetch_one(database.pool())
     .await
     .expect("student attempt");
-    assert!(submitted_at.is_none(), "transient completed must not seal the attempt");
+    assert!(
+        submitted_at.is_none(),
+        "transient completed must not seal the attempt"
+    );
     assert_eq!(phase, "lobby", "attempt phase must stay untouched");
 
-    let outbox_rows: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM outbox_events WHERE aggregate_id = ?",
-    )
-    .bind(schedule_id.to_string())
-    .fetch_one(database.pool())
-    .await
-    .expect("outbox count");
-    assert_eq!(outbox_rows, 0, "no completion outbox event for the crafted state");
+    let outbox_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM outbox_events WHERE aggregate_id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_one(database.pool())
+            .await
+            .expect("outbox count");
+    assert_eq!(
+        outbox_rows, 0,
+        "no completion outbox event for the crafted state"
+    );
 
     // A proctor complete-exam on the already-completed runtime early-returns
     // the current projection and must not finalize anything either.
     let complete = app
         .clone()
         .oneshot(
-            admin.with_csrf(Request::builder())
+            admin
+                .with_csrf(Request::builder())
                 .method("POST")
                 .uri(format!(
                     "/api/v1/proctor/sessions/{schedule_id}/control/complete-exam"
@@ -1180,14 +1250,16 @@ async fn transient_completed_runtime_does_not_finalize_pending_attempts() {
     );
     assert_eq!(phase, "lobby");
 
-    let outbox_rows: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM outbox_events WHERE aggregate_id = ?",
-    )
-    .bind(schedule_id.to_string())
-    .fetch_one(database.pool())
-    .await
-    .expect("outbox count");
-    assert_eq!(outbox_rows, 0, "early return must not write a completion outbox event");
+    let outbox_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM outbox_events WHERE aggregate_id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_one(database.pool())
+            .await
+            .expect("outbox count");
+    assert_eq!(
+        outbox_rows, 0,
+        "early return must not write a completion outbox event"
+    );
 
     database.shutdown().await;
 }

@@ -1,7 +1,4 @@
-use std::{
-    env,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use ielts_backend_infrastructure::{
     config::AppConfig,
@@ -35,9 +32,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "ielts-backend-worker",
         config.otel_exporter_otlp_endpoint.as_deref(),
     )?;
-    let database_url = env::var("DATABASE_WORKER_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
+    let database_url = config
+        .database_worker_url
+        .clone()
         .or_else(|| config.database_url.clone());
     let Some(database_url) = database_url else {
         tracing::warn!("DATABASE_URL is not configured; worker exiting");

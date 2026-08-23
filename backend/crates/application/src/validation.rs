@@ -855,8 +855,8 @@ fn normalize_shared_sentence_answer(value: &str) -> String {
         '’' | '‘' | '`' => Some('\''),
         '‐' | '‑' | '‒' | '–' | '—' | '−' | '-' => Some(' '),
         '\'' => None,
-        '.' | ',' | ';' | ':' | '!' | '?' | '/' | '\\' | '(' | ')' | '[' | ']' | '{'
-        | '}' | '"' => Some(' '),
+        '.' | ',' | ';' | ':' | '!' | '?' | '/' | '\\' | '(' | ')' | '[' | ']' | '{' | '}'
+        | '"' => Some(' '),
         character => Some(character),
     }) {
         if character.is_whitespace() {
@@ -892,7 +892,10 @@ fn resolved_blank_sentence_answers(blank: &serde_json::Value) -> Vec<String> {
                 .map(str::to_owned),
         );
     }
-    if let Some(accepted_answers) = blank.get("acceptedAnswers").and_then(|value| value.as_array()) {
+    if let Some(accepted_answers) = blank
+        .get("acceptedAnswers")
+        .and_then(|value| value.as_array())
+    {
         for answer in accepted_answers.iter().filter_map(|value| value.as_str()) {
             values.extend(
                 split_shared_sentence_answer_variants(answer)
@@ -906,7 +909,9 @@ fn resolved_blank_sentence_answers(blank: &serde_json::Value) -> Vec<String> {
     values
 }
 
-fn shared_sentence_answer_key_count(question: &serde_json::Map<String, serde_json::Value>) -> usize {
+fn shared_sentence_answer_key_count(
+    question: &serde_json::Map<String, serde_json::Value>,
+) -> usize {
     let mut normalized_keys = HashSet::new();
 
     if let Some(shared_answers) = question
@@ -1935,7 +1940,10 @@ mod tests {
         let result = validate_exam_content(&content, &sentence_validation_config());
 
         assert!(
-            result.errors.iter().all(|error| !error.field.contains("correctAnswer")),
+            result
+                .errors
+                .iter()
+                .all(|error| !error.field.contains("correctAnswer")),
             "unexpected blank-answer errors: {:?}",
             result.errors
         );
@@ -1981,7 +1989,11 @@ mod tests {
 
         let result = validate_exam_content(&content, &sentence_validation_config());
 
-        assert!(result.errors.is_empty(), "unexpected errors: {:?}", result.errors);
+        assert!(
+            result.errors.is_empty(),
+            "unexpected errors: {:?}",
+            result.errors
+        );
         assert!(result.warnings.iter().any(|warning| {
             warning.field.contains("sharedAcceptedAnswers")
                 && warning.message.contains("fewer unique answer keys")

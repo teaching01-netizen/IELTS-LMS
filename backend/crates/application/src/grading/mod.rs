@@ -4,6 +4,7 @@ pub mod review_actions;
 pub mod session_queries;
 
 use chrono::{DateTime, Utc};
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::{
     grading::{
         ActorActionRequest, GradingScheduleObjectiveOverride, GradingSession, GradingSessionDetail,
@@ -16,9 +17,7 @@ use ielts_backend_domain::{
     },
     schedule::{ExamSchedule, ScheduleStatus},
 };
-use ielts_backend_infrastructure::{
-    actor_context::ActorContext, actor_context::ActorRole, authorization::AuthorizationService,
-};
+use ielts_backend_infrastructure::authorization::AuthorizationService;
 use serde_json::{json, Map, Value};
 use sqlx::{FromRow, MySql, MySqlPool, QueryBuilder};
 use std::collections::{HashMap, HashSet};
@@ -157,8 +156,8 @@ impl GradingService {
         // Other roles can only see grading sessions for their schedules
         let query = if matches!(
             ctx.role,
-            ielts_backend_infrastructure::actor_context::ActorRole::Admin
-                | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+            ielts_backend_domain::actor_context::ActorRole::Admin
+                | ielts_backend_domain::actor_context::ActorRole::AdminObserver
         ) {
             "SELECT * FROM grading_sessions ORDER BY updated_at DESC, start_time DESC, id DESC LIMIT ?"
         } else if let Some(ref schedule_id) = ctx.schedule_scope_id {
@@ -945,8 +944,8 @@ impl GradingService {
         // Other roles can only see results for their schedules
         let query = if matches!(
             ctx.role,
-            ielts_backend_infrastructure::actor_context::ActorRole::Admin
-                | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+            ielts_backend_domain::actor_context::ActorRole::Admin
+                | ielts_backend_domain::actor_context::ActorRole::AdminObserver
         ) {
             "SELECT * FROM student_results ORDER BY updated_at DESC, created_at DESC"
         } else if let Some(ref schedule_id) = ctx.schedule_scope_id {
@@ -1370,13 +1369,11 @@ impl GradingService {
             ));
         }
 
-        let exam_id: String = sqlx::query_scalar(
-            "SELECT exam_id FROM exam_schedules WHERE id = ?",
-        )
-        .bind(&schedule_id_db)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(GradingError::NotFound)?;
+        let exam_id: String = sqlx::query_scalar("SELECT exam_id FROM exam_schedules WHERE id = ?")
+            .bind(&schedule_id_db)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(GradingError::NotFound)?;
 
         let draft_version_id: Option<String> = sqlx::query_scalar(
             "SELECT CAST(current_draft_version_id AS CHAR) AS current_draft_version_id FROM exam_entities WHERE id = ?",
@@ -1508,8 +1505,13 @@ impl GradingService {
         schedule_id: Uuid,
         question_id: String,
         req: ObjectiveOverrideUpsertRequest,
-    ) -> Result<(GradingScheduleObjectiveOverride, ObjectiveAutoGradingBackfillReport), GradingError>
-    {
+    ) -> Result<
+        (
+            GradingScheduleObjectiveOverride,
+            ObjectiveAutoGradingBackfillReport,
+        ),
+        GradingError,
+    > {
         let schedule_id_db = schedule_id.to_string();
         if req.reason.trim().is_empty() {
             return Err(GradingError::Validation(
@@ -1553,13 +1555,18 @@ impl GradingService {
             scoring_rule: req.scoring_rule.clone(),
             max_score: req.max_score,
         };
-        let override_json = serde_json::to_value(&payload).map_err(|err| {
-            GradingError::Validation(format!("Invalid override payload: {err}"))
-        })?;
+        let override_json = serde_json::to_value(&payload)
+            .map_err(|err| GradingError::Validation(format!("Invalid override payload: {err}")))?;
 
         if payload.correct_answer.is_none()
-            && payload.accepted_answers.as_ref().is_none_or(|v| v.is_empty())
-            && payload.correct_option_ids.as_ref().is_none_or(|v| v.is_empty())
+            && payload
+                .accepted_answers
+                .as_ref()
+                .is_none_or(|v| v.is_empty())
+            && payload
+                .correct_option_ids
+                .as_ref()
+                .is_none_or(|v| v.is_empty())
         {
             return Err(GradingError::Validation(
                 "Override must include correctAnswer, acceptedAnswers, or correctOptionIds."
@@ -2219,21 +2226,24 @@ impl GradingService {
             };
 
             if let Some(source_version_id) = source_version_id {
-                let (source_content_snapshot, source_config_snapshot) =
-                    if let Some(cached) = objective_source_snapshot_cache.get(&source_version_id) {
-                        (cached.0.clone(), cached.1.clone())
-                    } else {
-                        let loaded: (Value, Value) = sqlx::query_as(
-                            "SELECT content_snapshot, config_snapshot FROM exam_versions WHERE id = ?",
-                        )
-                        .bind(&source_version_id)
-                        .fetch_optional(&self.pool)
-                        .await?
-                        .ok_or(GradingError::NotFound)?;
-                        objective_source_snapshot_cache
-                            .insert(source_version_id.clone(), (loaded.0.clone(), loaded.1.clone()));
-                        loaded
-                    };
+                let (source_content_snapshot, source_config_snapshot) = if let Some(cached) =
+                    objective_source_snapshot_cache.get(&source_version_id)
+                {
+                    (cached.0.clone(), cached.1.clone())
+                } else {
+                    let loaded: (Value, Value) = sqlx::query_as(
+                        "SELECT content_snapshot, config_snapshot FROM exam_versions WHERE id = ?",
+                    )
+                    .bind(&source_version_id)
+                    .fetch_optional(&self.pool)
+                    .await?
+                    .ok_or(GradingError::NotFound)?;
+                    objective_source_snapshot_cache.insert(
+                        source_version_id.clone(),
+                        (loaded.0.clone(), loaded.1.clone()),
+                    );
+                    loaded
+                };
 
                 let objective_sync = self
                     .ensure_objective_section_submissions(
@@ -3671,7 +3681,13 @@ fn apply_objective_scoring_overrides(
         if let Some(option_ids) = override_payload
             .correct_option_ids
             .as_ref()
-            .map(|values| values.iter().filter(|v| !v.is_empty()).cloned().collect::<Vec<_>>())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter(|v| !v.is_empty())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
             .filter(|values| !values.is_empty())
         {
             if option_ids.len() > 1 {
@@ -3810,8 +3826,8 @@ fn index_objective_block_scoring_specs(
                             .get("acceptAnyAnswerKey")
                             .and_then(Value::as_bool)
                             .unwrap_or(false);
-                    let shared_answers = shared_mode
-                        .then(|| resolve_shared_sentence_answers(question));
+                    let shared_answers =
+                        shared_mode.then(|| resolve_shared_sentence_answers(question));
                     if let Some(blanks) = question.get("blanks").and_then(Value::as_array) {
                         for blank in blanks {
                             let Some(blank_id) = blank.get("id").and_then(Value::as_str) else {
@@ -4018,8 +4034,8 @@ fn normalize_shared_sentence_answer_with_case(value: &str, fold_case: bool) -> S
         '’' | '‘' | '`' => Some('\''),
         '‐' | '‑' | '‒' | '–' | '—' | '−' | '-' => Some(' '),
         '\'' => None,
-        '.' | ',' | ';' | ':' | '!' | '?' | '/' | '\\' | '(' | ')' | '[' | ']' | '{'
-        | '}' | '"' => Some(' '),
+        '.' | ',' | ';' | ':' | '!' | '?' | '/' | '\\' | '(' | ')' | '[' | ']' | '{' | '}'
+        | '"' => Some(' '),
         character => Some(character),
     }) {
         if character.is_whitespace() {
@@ -4596,7 +4612,8 @@ mod tests {
 
     #[test]
     fn objective_text_matches_trims_student_answer_before_matching() {
-        let expected = ObjectiveExpectedAnswer::TextAnyOf(["NOT GIVEN".to_owned()].into_iter().collect());
+        let expected =
+            ObjectiveExpectedAnswer::TextAnyOf(["NOT GIVEN".to_owned()].into_iter().collect());
         let value = Value::String("NOT GIVEN   ".to_owned());
         assert!(expected.matches(&value, "ONE_WORD", false));
     }
@@ -4681,9 +4698,15 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             None,
         );
-        assert_eq!(results["questionResults"][0]["questionId"], "sentence-1:blank-1");
+        assert_eq!(
+            results["questionResults"][0]["questionId"],
+            "sentence-1:blank-1"
+        );
         assert_eq!(results["questionResults"][0]["isCorrect"], true);
-        assert_eq!(results["questionResults"][1]["isCorrect"], false, "absent blank");
+        assert_eq!(
+            results["questionResults"][1]["isCorrect"], false,
+            "absent blank"
+        );
     }
 
     fn shared_sentence_content_snapshot() -> Value {
@@ -4735,8 +4758,14 @@ mod tests {
         for results in [alias_results, materialized_results] {
             assert_eq!(results["totalScore"], 2);
             assert_eq!(results["maxScore"], 2);
-            assert_eq!(results["questionResults"][0]["questionId"], "sentence-1:blank-1");
-            assert_eq!(results["questionResults"][1]["questionId"], "sentence-1:blank-2");
+            assert_eq!(
+                results["questionResults"][0]["questionId"],
+                "sentence-1:blank-1"
+            );
+            assert_eq!(
+                results["questionResults"][1]["questionId"],
+                "sentence-1:blank-2"
+            );
             assert_eq!(results["questionResults"][0]["isCorrect"], true);
             assert_eq!(results["questionResults"][1]["isCorrect"], true);
         }

@@ -1,4 +1,4 @@
-use crate::actor_context::{ActorContext, ActorRole};
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use uuid::Uuid;
 
 /// Application-level authorization service

@@ -235,7 +235,12 @@ pub async fn regrade_objective_latest_draft(
     let service = grading_service(&state);
     let started = Instant::now();
     let (report, draft_version_id) = service
-        .regrade_schedule_objectives_from_latest_draft(&ctx, &principal.display_name(), schedule_id, req.reason)
+        .regrade_schedule_objectives_from_latest_draft(
+            &ctx,
+            &principal.display_name(),
+            schedule_id,
+            req.reason,
+        )
         .await?;
     state
         .telemetry

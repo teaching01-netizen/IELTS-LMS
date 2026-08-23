@@ -81,3 +81,10 @@ export interface NavigationProviderProps {
     currentSectionKey?: string;
   } | null;
 }
+
+/**
+ * Answer invariant rollout flags surfaced by the student session route.
+ * Consumers (e.g. StudentAppWrapper) must import this from contracts,
+ * not from the route-data hook internals.
+ */
+export type { StudentAnswerInvariantRollout } from '../hooks/useStudentSessionRouteData';

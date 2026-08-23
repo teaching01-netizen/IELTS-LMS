@@ -179,13 +179,9 @@ impl IdempotencyRepository {
             // winner's record and classify it by request hash instead of
             // surfacing the duplicate-key error as a 500.
             Err(err) if is_duplicate_key(&err) => {
-                if let Some(existing) = Self::lookup_with_executor(
-                    &self.pool,
-                    actor_id,
-                    route_key,
-                    idempotency_key,
-                )
-                .await?
+                if let Some(existing) =
+                    Self::lookup_with_executor(&self.pool, actor_id, route_key, idempotency_key)
+                        .await?
                 {
                     if existing.request_hash == request_hash {
                         return Ok((IdempotencyLookupStatus::Replay, existing));

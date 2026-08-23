@@ -8,12 +8,12 @@ use uuid::Uuid;
 use ielts_backend_application::{
     builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
 };
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::{
     attempt::{StudentBootstrapRequest, StudentPrecheckRequest, StudentSubmitRequest},
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
     schedule::{CreateScheduleRequest, RuntimeCommandAction, RuntimeCommandRequest},
 };
-use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 
 const DELIVERY_MIGRATIONS: &[&str] = &[
     "0001_roles.sql",

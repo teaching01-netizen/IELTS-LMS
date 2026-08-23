@@ -14,16 +14,14 @@ use ielts_backend_api::{router::build_router, state::AppState};
 use ielts_backend_application::{
     builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
 };
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::{
     attempt::{StudentBootstrapRequest, StudentSubmitRequest},
     auth::UserRole,
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
     schedule::CreateScheduleRequest,
 };
-use ielts_backend_infrastructure::{
-    actor_context::{ActorContext, ActorRole},
-    config::AppConfig,
-};
+use ielts_backend_infrastructure::config::AppConfig;
 
 use mysql::{assign_staff_to_schedule, create_authenticated_user};
 

@@ -4,10 +4,8 @@ mod mysql;
 use sqlx::query_scalar;
 use uuid::Uuid;
 
-use ielts_backend_infrastructure::{
-    actor_context::{ActorContext, ActorRole},
-    tx::begin_scoped_transaction,
-};
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
+use ielts_backend_infrastructure::tx::begin_scoped_transaction;
 
 // These tests use PostgreSQL-specific current_setting() which doesn't exist in MySQL.
 // MySQL/TiDB doesn't have the same transaction-local variable mechanism as PostgreSQL.

@@ -24,9 +24,9 @@ use crate::{
 };
 use ielts_backend_application::auth::AuthService;
 use ielts_backend_application::scheduling::SchedulingService;
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::schedule::LiveUpdateEvent;
-use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 use uuid::Uuid;
 
 #[derive(Debug)]

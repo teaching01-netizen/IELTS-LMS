@@ -11,12 +11,12 @@ use tower::ServiceExt;
 
 use ielts_backend_api::{router::build_router, state::AppState};
 use ielts_backend_application::{builder::BuilderService, scheduling::SchedulingService};
+use ielts_backend_domain::actor_context::{ActorContext, ActorRole};
 use ielts_backend_domain::{
     auth::{LoginRequest, PasswordResetRequest, StudentEntryRequest},
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
     schedule::{CreateScheduleRequest, RuntimeCommandAction, RuntimeCommandRequest},
 };
-use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 use ielts_backend_infrastructure::config::AppConfig;
 
 const AUTH_MIGRATIONS: &[&str] = &[
@@ -180,8 +180,8 @@ async fn student_entry_locks_identity_on_email_once_claimed() {
 #[tokio::test]
 async fn student_entry_requires_nickname() {
     let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
-    let schedule = seed_schedule_with_slug(database.pool(), "auth-student-entry-requires-nickname")
-        .await;
+    let schedule =
+        seed_schedule_with_slug(database.pool(), "auth-student-entry-requires-nickname").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),

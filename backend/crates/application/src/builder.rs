@@ -1,12 +1,11 @@
 use chrono::Utc;
+use ielts_backend_domain::actor_context::ActorContext;
 use ielts_backend_domain::exam::{
     CreateExamRequest, ExamEntity, ExamEvent, ExamEventAction, ExamValidationSummary, ExamVersion,
     ExamVersionMetadata, ExamVersionSummary, PublishExamRequest, SaveDraftRequest,
     UpdateExamRequest, ValidationIssue,
 };
-use ielts_backend_infrastructure::{
-    actor_context::ActorContext, authorization::AuthorizationService,
-};
+use ielts_backend_infrastructure::authorization::AuthorizationService;
 use serde_json::Value;
 use sqlx::{MySql, MySqlPool, QueryBuilder};
 use thiserror::Error;
@@ -293,8 +292,8 @@ impl BuilderService {
         // Other roles can only see exams from their organization
         let query = if matches!(
             ctx.role,
-            ielts_backend_infrastructure::actor_context::ActorRole::Admin
-                | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+            ielts_backend_domain::actor_context::ActorRole::Admin
+                | ielts_backend_domain::actor_context::ActorRole::AdminObserver
         ) {
             "SELECT * FROM exam_entities ORDER BY updated_at DESC, created_at DESC"
         } else if let Some(ref org_id) = ctx.organization_id {
