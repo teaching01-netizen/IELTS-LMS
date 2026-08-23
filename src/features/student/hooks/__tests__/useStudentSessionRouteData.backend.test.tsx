@@ -1,13 +1,15 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuthSessionProvider } from '../../../auth/authSession';
+import { AuthSessionProvider, useAuthSession, type AuthStatus } from '../../../auth/authSession';
 import { studentSessionFacade } from '@student/application/studentSessionFacade';
+import { apiClient } from '../../../../app/api/apiClient';
 import { authService, type AuthSession } from '../../../../services/authService';
 import {
   mapBackendStudentAttempt,
   studentAttemptRepository,
 } from '../../../../services/studentAttemptRepository';
+import type { StudentAttemptMutation } from '../../../../types/studentAttempt';
 import { useStudentSessionRouteData } from '../useStudentSessionRouteData';
 
 const originalFetch = global.fetch;
@@ -1587,5 +1589,194 @@ describe('useStudentSessionRouteData backend mode', () => {
     });
     expect(liveCallCount).toBeGreaterThan(callsAfterLoad + 1);
     expect(result.current.runtimeSnapshot?.status).toBe('not_started');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auth-flip DOM-preservation contract (characterization, 2026-08)
+//
+// The student exam DOM must not be torn down by auth-state churn. The only
+// legitimate teardown is: a 401 on a NON-student endpoint clears the web
+// session (authSession's 401 handler), which flips `status` to
+// 'unauthenticated', which re-fires `loadStudentData` (authStatus sits in its
+// dependency list) and routes the session through exactly one loading cycle.
+// Student endpoints (`/v1/student/*`) are exempt from that handler: they
+// authenticate with attempt credentials and routinely 401 while the attempt
+// token refreshes mid-exam.
+//
+// These tests pin BOTH sides so the exemption cannot silently regress (e.g. by
+// handing the handler a prefixed endpoint — the check is
+// `endpoint.startsWith('/v1/student/')` on the UNPREFIXED endpoint) and so the
+// teardown path stays documented as a single reload cycle that leaves the
+// durable answer mirror intact.
+// ---------------------------------------------------------------------------
+
+type AuthStatusProbeRef = { current: AuthStatus };
+
+function AuthStatusProbe({ probeRef }: { probeRef: AuthStatusProbeRef }) {
+  const { status } = useAuthSession();
+  useEffect(() => {
+    probeRef.current = status;
+  }, [probeRef, status]);
+  return null;
+}
+
+function createWrapperWithStatusProbe(probeRef: AuthStatusProbeRef) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <AuthSessionProvider>
+        <AuthStatusProbe probeRef={probeRef} />
+        {children}
+      </AuthSessionProvider>
+    );
+  };
+}
+
+function createUrlRoutedFetchMock(unauthorizedFetchPaths: string[]) {
+  const unauthorized = new Set(unauthorizedFetchPaths);
+  const paths: string[] = [];
+  let bootstrapped = false;
+  const countPaths = (fragment: string) => paths.filter((path) => path.includes(fragment)).length;
+  const mock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+    const path = String(input);
+    paths.push(path);
+    if (unauthorized.has(path)) {
+      return jsonErrorResponse('Unauthorized', 401);
+    }
+    if (path.includes('/static')) {
+      return jsonResponse(buildStaticSessionContext());
+    }
+    if (path.includes('/bootstrap')) {
+      bootstrapped = true;
+      return jsonResponse(buildBootstrapContext(buildAttempt()));
+    }
+    if (path.includes('/live')) {
+      return jsonResponse(buildLiveSessionContext(bootstrapped ? buildAttempt() : null));
+    }
+    return jsonResponse({});
+  });
+  return { mock, paths, countPaths };
+}
+
+describe('useStudentSessionRouteData auth-flip DOM preservation', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    MockWebSocket.instances = [];
+    // @ts-expect-error test shim: replace browser WebSocket with deterministic mock implementation.
+    globalThis.WebSocket = MockWebSocket;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    global.fetch = originalFetch;
+    globalThis.WebSocket = originalWebSocket;
+  });
+
+  it('keeps the exam session mounted when a /v1/student/* endpoint 401s mid-exam (exemption contract)', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    const { mock: fetchMock, paths, countPaths } = createUrlRoutedFetchMock([
+      '/api/v1/student/sessions/sched-1/submit',
+    ]);
+    global.fetch = fetchMock as typeof fetch;
+    const statusProbe: AuthStatusProbeRef = { current: 'loading' };
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapperWithStatusProbe(statusProbe),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.attemptSnapshot?.id).toBe('attempt-1');
+    });
+    expect(statusProbe.current).toBe('authenticated');
+    const staticCallsAfterLoad = countPaths('/static');
+    expect(staticCallsAfterLoad).toBe(1);
+
+    // A student endpoint 401s mid-exam — an attempt-token refresh race looks
+    // exactly like this. The auth session must ignore it: no status flip, no
+    // reload cycle, no isLoading churn — the exam DOM stays mounted.
+    await act(async () => {
+      await apiClient
+        .get('/v1/student/sessions/sched-1/submit', { retries: 0 })
+        .catch(() => undefined);
+    });
+    // Give any (broken) reload cascade a real-timer window to surface.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(paths).toContain('/api/v1/student/sessions/sched-1/submit'); // the 401 really happened
+    expect(statusProbe.current).toBe('authenticated');
+    expect(countPaths('/static')).toBe(staticCallsAfterLoad); // no reload cycle fired
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(result.current.attemptSnapshot?.id).toBe('attempt-1');
+  });
+
+  it('runs exactly one reload cycle for a non-student 401 and restores the exam with durable answers intact', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_DELIVERY', 'true');
+    vi.spyOn(authService, 'getSession').mockResolvedValue(buildAuthSession());
+    const { mock: fetchMock, countPaths } = createUrlRoutedFetchMock([
+      '/api/v1/admin/exams',
+    ]);
+    global.fetch = fetchMock as typeof fetch;
+    const statusProbe: AuthStatusProbeRef = { current: 'loading' };
+
+    const { result } = renderHook(() => useStudentSessionRouteData('sched-1', 'W250334'), {
+      wrapper: createWrapperWithStatusProbe(statusProbe),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.attemptSnapshot?.id).toBe('attempt-1');
+    });
+
+    // Durable answer mirror: what the mutation outbox holds when the student
+    // is mid-typing at the moment the web session dies.
+    const pendingAnswer: StudentAttemptMutation = {
+      id: 'mutation-seed-auth-flip',
+      attemptId: 'attempt-1',
+      scheduleId: 'sched-1',
+      timestamp: '2026-01-01T09:05:00.000Z',
+      type: 'answer',
+      payload: {
+        questionId: 'q-auth-flip',
+        value: 'D',
+        module: 'reading',
+        interactionType: 'discrete',
+      },
+    };
+    await studentAttemptRepository.savePendingMutations('attempt-1', [pendingAnswer]);
+
+    // A NON-student endpoint 401s: the web session dies. Characterization: the
+    // route tears down once (loading cycle via the loadStudentData re-fire),
+    // then the student-credential flows reload the exam from the live API.
+    await act(async () => {
+      await apiClient.get('/v1/admin/exams', { retries: 0 }).catch(() => undefined);
+    });
+
+    expect(statusProbe.current).toBe('unauthenticated');
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.attemptSnapshot?.id).toBe('attempt-1');
+    });
+    expect(result.current.error).toBeNull();
+    expect(countPaths('/static')).toBe(2); // exactly one reload cycle, not a loop
+
+    // The reload cycle's saveAttempt path replays the outbox: the seeded
+    // answer must either still sit in local pending storage or have been
+    // flushed to the backend (mutations:batch, 200) and merged back into the
+    // restored attempt. It must never be silently dropped.
+    const survivingIds = (
+      await studentAttemptRepository.getPendingMutations('attempt-1')
+    ).map((mutation) => mutation.id);
+    const stillPendingLocally = survivingIds.includes('mutation-seed-auth-flip');
+    const flushedToBackend = countPaths('mutations:batch') >= 1;
+    expect(stillPendingLocally || flushedToBackend).toBe(true);
+    expect(result.current.attemptSnapshot?.answers['q-auth-flip']).toBe('D');
   });
 });
