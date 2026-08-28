@@ -317,6 +317,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
                 exam_type: ExamType::Academic.as_str().to_owned(),
                 visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
+                provider_key: None,
+                provider_exam_type: None,
             },
         )
         .await
@@ -360,6 +362,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             PublishExamRequest {
                 publish_notes: Some("ready for revision".to_owned()),
                 revision: exam_after_draft.revision,
+                expected_draft_version_id: None,
+                expected_draft_revision: None,
             },
         )
         .await

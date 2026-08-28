@@ -51,6 +51,10 @@ pub struct ExamEntity {
     pub id: String,
     pub slug: String,
     pub title: String,
+    #[cfg_attr(feature = "sqlx", sqlx(default))]
+    pub provider_key: Option<String>,
+    #[cfg_attr(feature = "sqlx", sqlx(default))]
+    pub provider_exam_type: Option<String>,
     pub exam_type: ExamType,
     pub status: ExamStatus,
     pub visibility: Visibility,
@@ -455,6 +459,10 @@ pub struct CreateExamRequest {
     pub exam_type: String,
     pub visibility: String,
     pub organization_id: Option<String>,
+    #[serde(default)]
+    pub provider_key: Option<String>,
+    #[serde(default)]
+    pub provider_exam_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -480,6 +488,10 @@ pub struct SaveDraftRequest {
 pub struct PublishExamRequest {
     pub publish_notes: Option<String>,
     pub revision: i32,
+    #[serde(default)]
+    pub expected_draft_version_id: Option<String>,
+    #[serde(default)]
+    pub expected_draft_revision: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

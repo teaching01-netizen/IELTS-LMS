@@ -816,10 +816,9 @@ async fn shared_sentence_grading_contract_preserves_slot_results_for_permutation
     let session_detail = app
         .clone()
         .oneshot(
-            auth.with_auth(Request::builder().uri(format!(
-                "/api/v1/grading/sessions/{}",
-                schedule.id
-            )))
+            auth.with_auth(
+                Request::builder().uri(format!("/api/v1/grading/sessions/{}", schedule.id)),
+            )
             .body(Body::empty())
             .unwrap(),
         )
@@ -855,13 +854,13 @@ async fn shared_sentence_grading_contract_preserves_slot_results_for_permutation
         .expect("question results");
     let slot_results = question_results
         .iter()
-        .filter(|result| {
-            result["questionId"] == "q-slot:b1" || result["questionId"] == "q-slot:b2"
-        })
+        .filter(|result| result["questionId"] == "q-slot:b1" || result["questionId"] == "q-slot:b2")
         .collect::<Vec<_>>();
 
     assert_eq!(slot_results.len(), 2);
-    assert!(slot_results.iter().all(|result| result["isCorrect"] == true));
+    assert!(slot_results
+        .iter()
+        .all(|result| result["isCorrect"] == true));
     assert_eq!(slot_results[0]["questionId"], "q-slot:b1");
     assert_eq!(slot_results[1]["questionId"], "q-slot:b2");
 
@@ -1101,7 +1100,11 @@ async fn grading_table_completion_override_updates_persisted_student_result() {
         .iter()
         .find(|section| section["section"] == "listening")
         .and_then(|section| section["autoGradingResults"]["questionResults"].as_array())
-        .and_then(|results| results.iter().find(|result| result["questionId"] == "table-block-1:cell-1"))
+        .and_then(|results| {
+            results
+                .iter()
+                .find(|result| result["questionId"] == "table-block-1:cell-1")
+        })
         .expect("table result before override");
     assert_eq!(before_result["isCorrect"], false);
     assert_eq!(before_result["hasOverride"], false);
@@ -1109,14 +1112,10 @@ async fn grading_table_completion_override_updates_persisted_student_result() {
     let override_response = app
         .clone()
         .oneshot(
-            auth.with_csrf(
-                Request::builder()
-                    .method("PUT")
-                    .uri(format!(
-                        "/api/v1/grading/schedules/{}/objective-overrides/{}",
-                        schedule.id, "table-block-1:cell-1"
-                    )),
-            )
+            auth.with_csrf(Request::builder().method("PUT").uri(format!(
+                "/api/v1/grading/schedules/{}/objective-overrides/{}",
+                schedule.id, "table-block-1:cell-1"
+            )))
             .header("content-type", "application/json")
             .body(Body::from(
                 json!({
@@ -1163,7 +1162,11 @@ async fn grading_table_completion_override_updates_persisted_student_result() {
         .iter()
         .find(|section| section["section"] == "listening")
         .and_then(|section| section["autoGradingResults"]["questionResults"].as_array())
-        .and_then(|results| results.iter().find(|result| result["questionId"] == "table-block-1:cell-1"))
+        .and_then(|results| {
+            results
+                .iter()
+                .find(|result| result["questionId"] == "table-block-1:cell-1")
+        })
         .expect("table result after override");
     assert_eq!(after_result["studentAnswer"], "Garden hall");
     assert_eq!(after_result["correctAnswer"], "GARDEN HALL | garden hall | Garden Hall | the garden hall | The Garden Hall | THE GARDEN HALL | Garden hall");
@@ -1338,6 +1341,8 @@ async fn seed_schedule_with_content(
                 exam_type: ExamType::Academic.as_str().to_owned(),
                 visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
+                provider_key: None,
+                provider_exam_type: None,
             },
         )
         .await
@@ -1369,6 +1374,8 @@ async fn seed_schedule_with_content(
             PublishExamRequest {
                 publish_notes: Some("ready for grading contracts".to_owned()),
                 revision: exam_after_draft.revision,
+                expected_draft_version_id: None,
+                expected_draft_revision: None,
             },
         )
         .await
@@ -1550,22 +1557,18 @@ async fn grading_objective_overrides_apply_strict_matching_and_regrade_immediate
 
     // Upsert an override to accept the student's lower-case response and award 2 points.
     let override_response = app
-	        .clone()
-	        .oneshot(
-	            auth.with_csrf(
-	                Request::builder()
-	                    .method("PUT")
-	                    .uri(format!(
-	                        "/api/v1/grading/schedules/{}/objective-overrides/{}",
-	                        schedule.id, "q-reading-1"
-	                    )),
-	            )
-	            .header("content-type", "application/json")
-	            .body(Body::from(
-	                json!({
-	                    "correctAnswer": "alpha answer",
-	                    "acceptedAnswers": [],
-	                    "scoringRule": "TWO_WORDS",
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder().method("PUT").uri(format!(
+                "/api/v1/grading/schedules/{}/objective-overrides/{}",
+                schedule.id, "q-reading-1"
+            )))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                        "correctAnswer": "alpha answer",
+                        "acceptedAnswers": [],
+                        "scoringRule": "TWO_WORDS",
                     "maxScore": 2,
                     "reason": "Answer key correction for schedule"
                 })
@@ -1733,7 +1736,7 @@ async fn grading_objective_regrade_latest_draft_updates_objective_scores_for_sch
             auth.with_csrf(
                 Request::builder()
                     .method("PATCH")
-                    .uri(format!("/api/v1/exams/{}/draft", schedule.exam_id))
+                    .uri(format!("/api/v1/exams/{}/draft", schedule.exam_id)),
             )
             .header("content-type", "application/json")
             .body(Body::from(

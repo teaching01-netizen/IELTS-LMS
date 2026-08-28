@@ -13,6 +13,7 @@ import {
   ExamVersionSummary,
   VersionDiff,
 } from '../../../types/domain';
+import type { CreateExamInput } from '../../exam-authoring/api/providerContracts';
 
 /**
  * Admin navigation modes
@@ -33,11 +34,7 @@ export interface AdminRootProps {
  */
 export interface ExamOperationCallbacks {
   onEditExam: (id: string) => void;
-  onCreateExam: (
-    title: string,
-    type: 'Academic' | 'General Training',
-    preset: ExamConfig['general']['preset']
-  ) => void;
+  onCreateExam: (input: CreateExamInput) => void;
   onCloneExam?: (examId: string, newTitle: string) => Promise<void>;
   onCreateFromTemplate?: (templateId: string, newTitle: string) => Promise<void>;
 }

@@ -161,7 +161,11 @@ fn list_sessions_query_parts(
         }
         let mut sorted_ids: Vec<String> = ids.iter().cloned().collect();
         sorted_ids.sort();
-        let placeholders = sorted_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let placeholders = sorted_ids
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
         return build(
             format!("WHERE schedule_id IN ({placeholders}) AND {exclusion}{search_clause}"),
             sorted_ids,
@@ -2928,24 +2932,23 @@ impl GradingService {
             };
 
             if let Some(source_version_id) = source_version_id {
-                let (source_content_snapshot, source_config_snapshot) = if let Some(cached) =
-                    objective_source_snapshot_cache.get(&source_version_id)
-                {
-                    (cached.0.clone(), cached.1.clone())
-                } else {
-                    let loaded: (Value, Value) = sqlx::query_as(
+                let (source_content_snapshot, source_config_snapshot) =
+                    if let Some(cached) = objective_source_snapshot_cache.get(&source_version_id) {
+                        (cached.0.clone(), cached.1.clone())
+                    } else {
+                        let loaded: (Value, Value) = sqlx::query_as(
                         "SELECT content_snapshot, config_snapshot FROM exam_versions WHERE id = ?",
                     )
                     .bind(&source_version_id)
                     .fetch_optional(&self.pool)
                     .await?
                     .ok_or(GradingError::NotFound)?;
-                    objective_source_snapshot_cache.insert(
-                        source_version_id.clone(),
-                        (loaded.0.clone(), loaded.1.clone()),
-                    );
-                    loaded
-                };
+                        objective_source_snapshot_cache.insert(
+                            source_version_id.clone(),
+                            (loaded.0.clone(), loaded.1.clone()),
+                        );
+                        loaded
+                    };
 
                 let objective_sync = self
                     .ensure_objective_section_submissions(
@@ -5798,10 +5801,7 @@ mod tests {
         // the grading queue. Kept in sync with the frontend
         // `isPreviewRuntimeCohortName` contract.
         let exclusion = preview_runtime_exclusion_sql();
-        assert_eq!(
-            exclusion,
-            "cohort_name NOT LIKE '__preview_runtime__:%'",
-        );
+        assert_eq!(exclusion, "cohort_name NOT LIKE '__preview_runtime__:%'",);
         assert!(PREVIEW_RUNTIME_COHORT_PREFIX.ends_with(':'));
     }
 

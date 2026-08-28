@@ -1,4 +1,7 @@
 export {
+  backendDelete,
+  backendGet,
+  backendPatch,
   backendPost,
   buildCreateSchedulePayload,
   mapBackendSchedule,

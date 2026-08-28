@@ -1,11 +1,4 @@
-import {
-  del,
-  get,
-  patch,
-  post,
-  put,
-  type ApiRequestConfig,
-} from '../app/api/apiClient';
+import { del, get, patch, post, put, type ApiRequestConfig } from "../app/api/apiClient";
 import type {
   CohortControlEvent,
   ExamEntity,
@@ -16,25 +9,29 @@ import type {
   ExamVersionMetadata,
   ExamVersionSummary,
   SectionRuntimeState,
-} from '../types/domain';
-import type { ModuleType } from '../types';
-import { createTtlLruCache } from '../utils/ttlLruCache';
+} from "../types/domain";
+import type { ModuleType } from "../types";
+import { createTtlLruCache } from "../utils/ttlLruCache";
 
 type BackendEnvelope<T> = {
   success: boolean;
   data?: T | undefined;
-  error?: {
-    message?: string | undefined;
-  } | undefined;
+  error?:
+    | {
+        message?: string | undefined;
+      }
+    | undefined;
 };
 
 type BackendExamEntity = {
   id: string;
   slug: string;
   title: string;
-  examType: ExamEntity['type'];
-  status: ExamEntity['status'];
-  visibility: ExamEntity['visibility'];
+  providerKey?: "ielts" | "sat" | null | undefined;
+  providerExamType?: string | null | undefined;
+  examType: ExamEntity["type"];
+  status: ExamEntity["status"];
+  visibility: ExamEntity["visibility"];
   ownerId: string;
   createdAt: string;
   updatedAt: string;
@@ -57,9 +54,9 @@ type BackendExamVersion = {
   examId: string;
   versionNumber: number;
   parentVersionId?: string | null | undefined;
-  contentSnapshot: ExamVersion['contentSnapshot'];
-  configSnapshot: ExamVersion['configSnapshot'];
-  validationSnapshot?: ExamVersion['validationSnapshot'] | null | undefined;
+  contentSnapshot: ExamVersion["contentSnapshot"];
+  configSnapshot: ExamVersion["configSnapshot"];
+  validationSnapshot?: ExamVersion["validationSnapshot"] | null | undefined;
   createdBy: string;
   createdAt: string;
   publishNotes?: string | null | undefined;
@@ -73,7 +70,7 @@ type BackendExamVersionSummary = {
   examId: string;
   versionNumber: number;
   parentVersionId?: string | null | undefined;
-  validationSnapshot?: ExamVersion['validationSnapshot'] | null | undefined;
+  validationSnapshot?: ExamVersion["validationSnapshot"] | null | undefined;
   createdBy: string;
   createdAt: string;
   publishNotes?: string | null | undefined;
@@ -86,7 +83,7 @@ type BackendExamVersionMetadata = {
   examId: string;
   versionNumber: number;
   parentVersionId?: string | null | undefined;
-  validationSnapshot?: ExamVersion['validationSnapshot'] | null | undefined;
+  validationSnapshot?: ExamVersion["validationSnapshot"] | null | undefined;
   createdBy: string;
   createdAt: string;
   publishNotes?: string | null | undefined;
@@ -102,9 +99,9 @@ type BackendExamEvent = {
   examId: string;
   versionId?: string | null | undefined;
   actorId: string;
-  action: ExamEvent['action'];
-  fromState?: ExamEvent['fromState'] | null | undefined;
-  toState?: ExamEvent['toState'] | null | undefined;
+  action: ExamEvent["action"];
+  fromState?: ExamEvent["fromState"] | null | undefined;
+  toState?: ExamEvent["toState"] | null | undefined;
   payload?: Record<string, unknown> | null | undefined;
   createdAt: string;
 };
@@ -121,15 +118,15 @@ type BackendExamSchedule = {
   startTime: string;
   endTime: string;
   plannedDurationMinutes: number;
-  deliveryMode: ExamSchedule['deliveryMode'];
-  recurrenceType: 'none' | 'daily' | 'weekly' | 'monthly';
+  deliveryMode: ExamSchedule["deliveryMode"];
+  recurrenceType: "none" | "daily" | "weekly" | "monthly";
   recurrenceInterval: number;
   recurrenceEndDate?: string | null | undefined;
   bufferBeforeMinutes?: number | null | undefined;
   bufferAfterMinutes?: number | null | undefined;
   autoStart: boolean;
   autoStop: boolean;
-  status: ExamSchedule['status'];
+  status: ExamSchedule["status"];
   createdAt: string;
   createdBy: string;
   updatedAt: string;
@@ -142,14 +139,14 @@ type BackendRuntimeSectionState = {
   sectionOrder: number;
   plannedDurationMinutes: number;
   gapAfterMinutes: number;
-  status: SectionRuntimeState['status'];
+  status: SectionRuntimeState["status"];
   availableAt?: string | null | undefined;
   actualStartAt?: string | null | undefined;
   actualEndAt?: string | null | undefined;
   pausedAt?: string | null | undefined;
   accumulatedPausedSeconds: number;
   extensionMinutes: number;
-  completionReason?: SectionRuntimeState['completionReason'] | null | undefined;
+  completionReason?: SectionRuntimeState["completionReason"] | null | undefined;
   projectedStartAt?: string | null | undefined;
   projectedEndAt?: string | null | undefined;
 };
@@ -158,7 +155,7 @@ type BackendExamSessionRuntime = {
   id: string;
   scheduleId: string;
   examId: string;
-  status: ExamSessionRuntime['status'];
+  status: ExamSessionRuntime["status"];
   revision?: number | null | undefined;
   actualStartAt?: string | null | undefined;
   actualEndAt?: string | null | undefined;
@@ -185,7 +182,7 @@ const attemptSchedules = createTtlLruCache<string, string>({
 
 function envFlag(name: string): boolean {
   const env = import.meta.env as Record<string, string | boolean | undefined>;
-  return String(env[name] ?? 'false') === 'true';
+  return String(env[name] ?? "false") === "true";
 }
 
 function featureFlag(viteName: string, legacyName: string): boolean {
@@ -193,13 +190,13 @@ function featureFlag(viteName: string, legacyName: string): boolean {
 }
 
 function readCookie(name: string): string | null {
-  if (typeof document === 'undefined') {
+  if (typeof document === "undefined") {
     return null;
   }
 
   const prefix = `${name}=`;
   const match = document.cookie
-    .split(';')
+    .split(";")
     .map((entry) => entry.trim())
     .find((entry) => entry.startsWith(prefix));
 
@@ -207,10 +204,10 @@ function readCookie(name: string): string | null {
 }
 
 function hasAuthenticatedSessionCookie(): boolean {
-  const configuredName = import.meta.env['VITE_AUTH_SESSION_COOKIE_NAME'];
+  const configuredName = import.meta.env["VITE_AUTH_SESSION_COOKIE_NAME"];
   const cookieNames = [
-    typeof configuredName === 'string' ? configuredName : null,
-    '__Host-session',
+    typeof configuredName === "string" ? configuredName : null,
+    "__Host-session",
   ].filter((value): value is string => Boolean(value));
 
   return cookieNames.some((cookieName) => Boolean(readCookie(cookieName)));
@@ -218,20 +215,20 @@ function hasAuthenticatedSessionCookie(): boolean {
 
 function isBackendEnvelope<T>(value: unknown): value is BackendEnvelope<T> {
   return (
-    typeof value === 'object' &&
+    typeof value === "object" &&
     value !== null &&
-    'success' in value &&
-    typeof (value as { success?: unknown }).success === 'boolean'
+    "success" in value &&
+    typeof (value as { success?: unknown }).success === "boolean"
   );
 }
 
 function extractBackendData<T>(value: unknown): T {
   if (isBackendEnvelope<T>(value)) {
     if (!value.success) {
-      throw new Error(value.error?.message ?? 'Backend request failed');
+      throw new Error(value.error?.message ?? "Backend request failed");
     }
-    if (!('data' in value) || value.data === undefined) {
-      throw new Error('Backend response missing data payload');
+    if (!("data" in value) || value.data === undefined) {
+      throw new Error("Backend response missing data payload");
     }
     return value.data as T;
   }
@@ -241,7 +238,7 @@ function extractBackendData<T>(value: unknown): T {
 
 function compactObject<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(
-    Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined),
+    Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined)
   ) as T;
 }
 
@@ -271,9 +268,9 @@ export function isBackendGradingEnabled(): boolean {
 
 export function hasBackendStatusCode(error: unknown, statusCode: number): boolean {
   return (
-    typeof error === 'object' &&
+    typeof error === "object" &&
     error !== null &&
-    'statusCode' in error &&
+    "statusCode" in error &&
     (error as { statusCode?: unknown }).statusCode === statusCode
   );
 }
@@ -326,7 +323,7 @@ export async function backendGet<T>(endpoint: string, config?: ApiRequestConfig)
 export async function backendPost<T, TBody = unknown>(
   endpoint: string,
   body?: TBody,
-  config?: ApiRequestConfig,
+  config?: ApiRequestConfig
 ): Promise<T> {
   const response = await post<BackendEnvelope<T> | T>(endpoint, body, config);
   return extractBackendData<T>(response.data);
@@ -335,7 +332,7 @@ export async function backendPost<T, TBody = unknown>(
 export async function backendPut<T, TBody = unknown>(
   endpoint: string,
   body?: TBody,
-  config?: ApiRequestConfig,
+  config?: ApiRequestConfig
 ): Promise<T> {
   const response = await put<BackendEnvelope<T> | T>(endpoint, body, config);
   return extractBackendData<T>(response.data);
@@ -344,7 +341,7 @@ export async function backendPut<T, TBody = unknown>(
 export async function backendPatch<T, TBody = unknown>(
   endpoint: string,
   body: TBody,
-  config?: ApiRequestConfig,
+  config?: ApiRequestConfig
 ): Promise<T> {
   const response = await patch<BackendEnvelope<T> | T>(endpoint, body, config);
   return extractBackendData<T>(response.data);
@@ -357,7 +354,7 @@ export async function backendDelete(endpoint: string, config?: ApiRequestConfig)
 export async function backendDeleteWithBody<T, TBody = unknown>(
   endpoint: string,
   body?: TBody,
-  config?: ApiRequestConfig,
+  config?: ApiRequestConfig
 ): Promise<T> {
   const response = await del<BackendEnvelope<T> | T>(endpoint, {
     ...config,
@@ -366,18 +363,40 @@ export async function backendDeleteWithBody<T, TBody = unknown>(
   return extractBackendData<T>(response.data);
 }
 
-export function buildCreateExamPayload(exam: Pick<ExamEntity, 'slug' | 'title' | 'type' | 'visibility'>) {
-  return {
+export function buildCreateExamPayload(
+  exam: Pick<ExamEntity, "slug" | "title" | "type" | "visibility"> &
+    Partial<Pick<ExamEntity, "providerKey" | "providerExamType">>
+) {
+  return compactObject({
     slug: exam.slug,
     title: exam.title,
     examType: exam.type,
     visibility: exam.visibility,
+    providerKey: "providerKey" in exam ? exam.providerKey : undefined,
+    providerExamType: "providerExamType" in exam ? exam.providerExamType : undefined,
+  });
+}
+
+export function buildCreateAssessmentExamPayload(input: {
+  slug: string;
+  title: string;
+  providerKey: "sat";
+  providerExamType: "SAT";
+  visibility?: ExamEntity["visibility"];
+}) {
+  return {
+    slug: input.slug,
+    title: input.title,
+    examType: "Academic",
+    visibility: input.visibility ?? "organization",
+    providerKey: input.providerKey,
+    providerExamType: input.providerExamType,
   };
 }
 
 export function buildUpdateExamPayload(
-  exam: Pick<ExamEntity, 'title' | 'status' | 'visibility'>,
-  revision: number,
+  exam: Pick<ExamEntity, "title" | "status" | "visibility">,
+  revision: number
 ) {
   return compactObject({
     title: exam.title,
@@ -390,17 +409,17 @@ export function buildUpdateExamPayload(
 export function buildCreateSchedulePayload(
   schedule: Pick<
     ExamSchedule,
-    | 'examId'
-    | 'publishedVersionId'
-    | 'cohortName'
-    | 'proctorDisplayName'
-    | 'gradingDisplayName'
-    | 'institution'
-    | 'startTime'
-    | 'endTime'
-    | 'autoStart'
-    | 'autoStop'
-  >,
+    | "examId"
+    | "publishedVersionId"
+    | "cohortName"
+    | "proctorDisplayName"
+    | "gradingDisplayName"
+    | "institution"
+    | "startTime"
+    | "endTime"
+    | "autoStart"
+    | "autoStop"
+  >
 ) {
   return {
     examId: schedule.examId,
@@ -439,6 +458,8 @@ export function mapBackendExamEntity(payload: BackendExamEntity): ExamEntity {
     id: payload.id,
     slug: payload.slug,
     title: payload.title,
+    providerKey: payload.providerKey ?? "ielts",
+    providerExamType: payload.providerExamType ?? undefined,
     type: payload.examType,
     status: payload.status,
     visibility: payload.visibility,
@@ -455,6 +476,7 @@ export function mapBackendExamEntity(payload: BackendExamEntity): ExamEntity {
     totalQuestions: payload.totalQuestions ?? undefined,
     totalReadingQuestions: payload.totalReadingQuestions ?? undefined,
     totalListeningQuestions: payload.totalListeningQuestions ?? undefined,
+    revision: payload.revision,
     schemaVersion: payload.schemaVersion ?? 4,
   };
 }
@@ -476,7 +498,9 @@ export function mapBackendExamVersion(payload: BackendExamVersion): ExamVersion 
   };
 }
 
-export function mapBackendExamVersionSummary(payload: BackendExamVersionSummary): ExamVersionSummary {
+export function mapBackendExamVersionSummary(
+  payload: BackendExamVersionSummary
+): ExamVersionSummary {
   return {
     id: payload.id,
     examId: payload.examId,
@@ -491,7 +515,9 @@ export function mapBackendExamVersionSummary(payload: BackendExamVersionSummary)
   };
 }
 
-export function mapBackendExamVersionMetadata(payload: BackendExamVersionMetadata): ExamVersionMetadata {
+export function mapBackendExamVersionMetadata(
+  payload: BackendExamVersionMetadata
+): ExamVersionMetadata {
   return {
     id: payload.id,
     examId: payload.examId,
@@ -540,7 +566,7 @@ export function mapBackendSchedule(payload: BackendExamSchedule): ExamSchedule {
     plannedDurationMinutes: payload.plannedDurationMinutes,
     deliveryMode: payload.deliveryMode,
     recurrence:
-      payload.recurrenceType === 'none'
+      payload.recurrenceType === "none"
         ? undefined
         : {
             type: payload.recurrenceType,
@@ -560,7 +586,7 @@ export function mapBackendSchedule(payload: BackendExamSchedule): ExamSchedule {
 
 export function mapBackendRuntime(
   payload: BackendExamSessionRuntime,
-  schedule: Pick<ExamSchedule, 'examTitle' | 'cohortName' | 'deliveryMode'>,
+  schedule: Pick<ExamSchedule, "examTitle" | "cohortName" | "deliveryMode">
 ): ExamSessionRuntime {
   return {
     id: payload.id,
@@ -608,7 +634,7 @@ export function mapBackendControlEvent(payload: {
   runtimeId: string;
   examId: string;
   actorId: string;
-  action: CohortControlEvent['action'];
+  action: CohortControlEvent["action"];
   sectionKey?: ModuleType | null | undefined;
   minutes?: number | null | undefined;
   reason?: string | null | undefined;

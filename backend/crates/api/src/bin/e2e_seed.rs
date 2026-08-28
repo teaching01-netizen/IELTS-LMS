@@ -441,6 +441,8 @@ async fn seed_builder_fixture(
                 exam_type: "Academic".to_string(),
                 visibility: "organization".to_string(),
                 organization_id: Some("e2e-org".to_owned()),
+                provider_key: None,
+                provider_exam_type: None,
             },
         )
         .await?;
@@ -493,6 +495,8 @@ async fn seed_student_fixture(
                 exam_type: "Academic".to_string(),
                 visibility: "organization".to_string(),
                 organization_id: Some("e2e-org".to_owned()),
+                provider_key: None,
+                provider_exam_type: None,
             },
         )
         .await?;
@@ -526,6 +530,8 @@ async fn seed_student_fixture(
             PublishExamRequest {
                 publish_notes: Some("published for backend-backed student E2E".to_owned()),
                 revision: exam_after_draft.revision,
+                expected_draft_version_id: None,
+                expected_draft_revision: None,
             },
         )
         .await?;

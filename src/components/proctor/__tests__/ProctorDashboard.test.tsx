@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProctorDashboard } from '../ProctorDashboard';
+import { examDeliveryService } from '../../../services/examDeliveryService';
 import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
 
 describe('ProctorDashboard runtime controls', () => {
@@ -12,6 +13,7 @@ describe('ProctorDashboard runtime controls', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   type DashboardProps = React.ComponentProps<typeof ProctorDashboard>;
@@ -383,4 +385,66 @@ describe('ProctorDashboard runtime controls', () => {
     rerender(<DashboardHarness {...baseProps} railSelection="audit" />);
     expect(screen.getByText(/student_warn/i)).toBeTruthy();
   });
+  it('preserves the SAT student clock and extends the selected student by five minutes', async () => {
+    const extendSpy = vi
+      .spyOn(examDeliveryService, 'extendStudentAttempt')
+      .mockResolvedValue({ success: true });
+    const onUpdateSessions = vi.fn();
+    const satSession = {
+      id: 'student-1',
+      studentId: 'STU-001',
+      name: 'Jane Roe',
+      email: 'jane@example.com',
+      scheduleId: 'sched-1',
+      status: 'active' as const,
+      currentSection: 'reading' as const,
+      timeRemaining: 1800,
+      runtimeStatus: 'live' as const,
+      runtimeCurrentSection: 'reading' as const,
+      runtimeTimeRemainingSeconds: 1800,
+      runtimeSectionStatus: 'live',
+      runtimeWaiting: false,
+      violations: [],
+      warnings: 0,
+      lastActivity: '2026-01-01T00:12:00.000Z',
+      examId: 'exam-1',
+      examName: 'Mock Exam',
+    };
+
+    render(
+      <DashboardHarness
+        schedules={[{ ...baseSchedule, status: 'live', startTime: '2026-01-01T00:00:00.000Z' }]}
+        runtimeSnapshots={[liveRuntime]}
+        sessions={[satSession]}
+        alerts={[]}
+        notes={[]}
+        auditLogs={[]}
+        onUpdateSessions={onUpdateSessions}
+        onUpdateAlerts={vi.fn()}
+        onUpdateNotes={vi.fn()}
+        onStartScheduledSession={vi.fn()}
+        onPauseCohort={vi.fn()}
+        onResumeCohort={vi.fn()}
+        onEndSectionNow={vi.fn()}
+        onExtendCurrentSection={vi.fn()}
+        onCompleteExam={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
+    expect(screen.getAllByText('30:00').length).toBeGreaterThan(0);
+    expect(screen.queryByText('20:00')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /open jane roe session details/i }));
+    const extendButton = screen.getByRole('button', { name: /\+5 min/i });
+    await act(async () => {
+      fireEvent.click(extendButton);
+    });
+
+    expect(extendSpy).toHaveBeenCalledWith('student-1', expect.any(String), 5);
+    expect(onUpdateSessions).toHaveBeenCalled();
+    const updated = onUpdateSessions.mock.calls.at(-1)?.[0] as Array<typeof satSession> | undefined;
+    expect(updated?.find((session) => session.id === 'student-1')?.runtimeTimeRemainingSeconds).toBe(2100);
+  });
+
 });

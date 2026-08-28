@@ -384,6 +384,30 @@ export class ExamDeliveryService {
     }
   }
 
+  async extendStudentAttempt(
+    attemptId: string,
+    actor: string,
+    minutes: number,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const scheduleId = await resolveAttemptScheduleId(attemptId);
+      if (!scheduleId) {
+        return { success: false, error: 'Attempt not found' };
+      }
+
+      await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/extend`, {
+        actorId: actor,
+        minutes,
+      }, { retries: 0 });
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to extend student time',
+      };
+    }
+  }
+
   async terminateStudentAttempt(
     attemptId: string,
     actor: string,

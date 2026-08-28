@@ -1,5 +1,7 @@
+import { isBackendGradingEnabled } from './backendBridge';
+
 export async function seedDevelopmentFixtures() {
-  if (!import.meta.env.DEV) {
+  if (!import.meta.env.DEV || isBackendGradingEnabled()) {
     return;
   }
 

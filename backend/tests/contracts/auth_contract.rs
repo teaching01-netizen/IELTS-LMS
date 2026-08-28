@@ -180,8 +180,8 @@ async fn student_entry_locks_identity_on_email_once_claimed() {
 #[tokio::test]
 async fn student_entry_requires_nickname() {
     let database = mysql::TestDatabase::new(AUTH_MIGRATIONS).await;
-    let schedule = seed_schedule_with_slug(database.pool(), "auth-student-entry-requires-nickname")
-        .await;
+    let schedule =
+        seed_schedule_with_slug(database.pool(), "auth-student-entry-requires-nickname").await;
     let app = build_router(AppState::with_pool(
         AppConfig::default(),
         database.pool().clone(),
@@ -1266,6 +1266,8 @@ async fn seed_schedule_with_slug(
                 exam_type: ExamType::Academic.as_str().to_owned(),
                 visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
+                provider_key: None,
+                provider_exam_type: None,
             },
         )
         .await
@@ -1327,6 +1329,8 @@ async fn seed_schedule_with_slug(
             PublishExamRequest {
                 publish_notes: Some("ready".to_owned()),
                 revision: exam_after_draft.revision,
+                expected_draft_version_id: None,
+                expected_draft_revision: None,
             },
         )
         .await

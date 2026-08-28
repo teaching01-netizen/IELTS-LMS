@@ -1,3 +1,4 @@
+use crate::assessment_authoring::{AssessmentAuthoringError, AssessmentAuthoringService};
 use chrono::Utc;
 use ielts_backend_domain::exam::{
     CreateExamRequest, ExamEntity, ExamEvent, ExamEventAction, ExamValidationSummary, ExamVersion,
@@ -61,6 +62,27 @@ pub enum BuilderError {
     NotFound,
     #[error("Validation error: {0}")]
     Validation(String),
+}
+
+impl From<AssessmentAuthoringError> for BuilderError {
+    fn from(error: AssessmentAuthoringError) -> Self {
+        match error {
+            AssessmentAuthoringError::Database(error) => Self::Database(error),
+            AssessmentAuthoringError::NotFound => Self::NotFound,
+            AssessmentAuthoringError::Conflict(message) => Self::Conflict(message),
+            AssessmentAuthoringError::Validation(issues) => Self::Validation(
+                issues
+                    .into_iter()
+                    .map(|issue| format!("{}: {}", issue.path, issue.message))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            ),
+            AssessmentAuthoringError::InvalidData(message) => Self::Validation(message),
+            AssessmentAuthoringError::UnsupportedProvider => {
+                Self::Validation("Assessment provider is not supported".to_owned())
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -240,6 +262,10 @@ impl BuilderService {
         ctx: &ActorContext,
         req: CreateExamRequest,
     ) -> Result<ExamEntity, BuilderError> {
+        if req.provider_key.as_deref() == Some("sat") {
+            return self.create_sat_exam(ctx, req).await;
+        }
+
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
 
@@ -285,6 +311,53 @@ impl BuilderService {
         )
         .await?;
 
+        Ok(exam)
+    }
+
+    async fn create_sat_exam(
+        &self,
+        ctx: &ActorContext,
+        req: CreateExamRequest,
+    ) -> Result<ExamEntity, BuilderError> {
+        let id = Uuid::new_v4().to_string();
+        let mut tx = self.pool.begin().await?;
+        let exam_type = if req.exam_type.trim().is_empty() {
+            "Academic".to_owned()
+        } else {
+            req.exam_type
+        };
+        let provider_exam_type = req
+            .provider_exam_type
+            .unwrap_or_else(|| "digital_sat".to_owned());
+        sqlx::query(
+            "INSERT INTO exam_entities (id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, created_at, updated_at, schema_version, revision) VALUES (?, ?, ?, 'sat', ?, ?, 'draft', ?, ?, ?, NOW(), NOW(), 4, 0)",
+        )
+        .bind(&id)
+        .bind(&req.slug)
+        .bind(&req.title)
+        .bind(provider_exam_type)
+        .bind(exam_type)
+        .bind(&req.visibility)
+        .bind(&req.organization_id)
+        .bind(ctx.actor_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+        AssessmentAuthoringService::initialize_sat_draft_tx(&mut tx, &id, &ctx.actor_id).await?;
+        tx.commit().await?;
+        let exam = sqlx::query_as::<_, ExamEntity>("SELECT * FROM exam_entities WHERE id = ?")
+            .bind(&id)
+            .fetch_one(&self.pool)
+            .await?;
+        self.record_event(
+            &exam.id,
+            exam.current_draft_version_id.clone(),
+            ctx,
+            ExamEventAction::Created,
+            None,
+            Some("draft".to_owned()),
+            Some(serde_json::json!({ "providerKey": "sat" })),
+        )
+        .await?;
         Ok(exam)
     }
 
@@ -523,6 +596,24 @@ impl BuilderService {
             }
         }
 
+        if exam.current_draft_version_id.is_none() {
+            if let (Some(expected_version_id), Some(published_version_id)) = (
+                req.expected_draft_version_id.as_deref(),
+                exam.current_published_version_id.as_deref(),
+            ) {
+                if expected_version_id == published_version_id {
+                    return sqlx::query_as::<_, ExamVersion>(
+                        "SELECT * FROM exam_versions WHERE id = ? AND exam_id = ? AND is_published = TRUE",
+                    )
+                    .bind(published_version_id)
+                    .bind(&exam_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(BuilderError::Database);
+                }
+            }
+        }
+
         if exam.revision != req.revision {
             return Err(BuilderError::Conflict(
                 "Exam has been modified by another user".to_string(),
@@ -536,6 +627,15 @@ impl BuilderService {
         }
 
         let draft_version_id = exam.current_draft_version_id.clone().unwrap();
+        if req
+            .expected_draft_version_id
+            .as_deref()
+            .is_some_and(|expected| expected != draft_version_id)
+        {
+            return Err(BuilderError::Conflict(
+                "The SAT draft changed before it could be published".to_string(),
+            ));
+        }
         let draft_version = sqlx::query_as::<_, ExamVersion>(
             "SELECT * FROM exam_versions WHERE id = ? AND exam_id = ? FOR UPDATE",
         )
@@ -549,7 +649,45 @@ impl BuilderService {
             )
         })?;
 
-        let blocking_errors = Self::collect_publish_blocking_errors(&exam, &draft_version);
+        if req
+            .expected_draft_revision
+            .is_some_and(|expected| expected != draft_version.revision)
+        {
+            return Err(BuilderError::Conflict(
+                "The SAT draft changed after the last publish check".to_string(),
+            ));
+        }
+
+        if exam.provider_key.as_deref() == Some("sat") {
+            let report = AssessmentAuthoringService::new(self.pool.clone())
+                .validate(&exam_id)
+                .await?;
+            if report.version_id != draft_version_id
+                || report.version_revision != draft_version.revision
+            {
+                return Err(BuilderError::Conflict(
+                    "The SAT draft changed while publish checks were running".to_string(),
+                ));
+            }
+            if !report.valid {
+                let details = report
+                    .errors
+                    .iter()
+                    .map(|issue| format!("{}: {}", issue.path, issue.message))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(BuilderError::Validation(format!(
+                    "Assessment content is not ready for publication: {details}"
+                )));
+            }
+            AssessmentAuthoringService::seal_draft_tx(&mut tx, &draft_version_id).await?;
+        }
+
+        let blocking_errors = if exam.provider_key.as_deref() == Some("sat") {
+            Vec::new()
+        } else {
+            Self::collect_publish_blocking_errors(&exam, &draft_version)
+        };
         if !blocking_errors.is_empty() {
             let details = blocking_errors
                 .iter()
@@ -827,6 +965,33 @@ impl BuilderService {
         exam_id: String,
     ) -> Result<ExamValidationSummary, BuilderError> {
         let exam = self.get_exam(ctx, exam_id.clone()).await?;
+        if exam.provider_key.as_deref() == Some("sat") {
+            let report = AssessmentAuthoringService::new(self.pool.clone())
+                .validate(&exam_id)
+                .await?;
+            return Ok(ExamValidationSummary {
+                exam_id: report.exam_id,
+                draft_version_id: Some(report.version_id),
+                can_publish: report.valid,
+                errors: report
+                    .errors
+                    .into_iter()
+                    .map(|issue| ValidationIssue {
+                        field: issue.path,
+                        message: issue.message,
+                    })
+                    .collect(),
+                warnings: report
+                    .warnings
+                    .into_iter()
+                    .map(|issue| ValidationIssue {
+                        field: issue.path,
+                        message: issue.message,
+                    })
+                    .collect(),
+                validated_at: Utc::now(),
+            });
+        }
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
 

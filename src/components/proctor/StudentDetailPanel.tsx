@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, History, MessageSquare, Pause, Play, UserX, X } from 'lucide-react';
+import { AlertTriangle, History, MessageSquare, Pause, Play, Timer, UserX, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ExamGroup, NoteCategory, ProctorAlert, SessionAuditLog, SessionNote, StudentSession } from '../../types';
 import { Badge } from '../ui/Badge';
@@ -18,6 +18,7 @@ interface StudentDetailPanelProps {
   onTabChange: (tab: StudentDrawerTab) => void;
   onClose: () => void;
   onAction: (action: 'warn' | 'pause' | 'resume' | 'terminate', payload?: unknown) => Promise<void> | void;
+  onExtendTime?: ((minutes: number) => Promise<void> | void) | undefined;
   onSaveNote?: (content: string, category: NoteCategory) => Promise<void> | void;
   onToggleNote?: (noteId: string) => Promise<void> | void;
   onOpenAnswerHistory?: (() => void) | undefined;
@@ -41,6 +42,7 @@ export function StudentDetailPanel({
   onTabChange,
   onClose,
   onAction,
+  onExtendTime,
   onSaveNote,
   onToggleNote,
   onOpenAnswerHistory,
@@ -53,6 +55,7 @@ export function StudentDetailPanel({
   const [toggleNoteError, setToggleNoteError] = useState<string | null>(null);
   const [disciplineAction, setDisciplineAction] = useState<'warn' | 'pause' | 'resume' | 'terminate' | null>(null);
   const [disciplineError, setDisciplineError] = useState<string | null>(null);
+  const [extensionMinutes, setExtensionMinutes] = useState<number | null>(null);
   const [confirmDisciplineAction, setConfirmDisciplineAction] = useState<'pause' | 'terminate' | null>(null);
 
   const cohortNotes = useMemo(() => notes.filter((note) => note.scheduleId === cohort?.scheduleId), [cohort?.scheduleId, notes]);
@@ -167,6 +170,19 @@ export function StudentDetailPanel({
       setDisciplineError(error instanceof Error ? error.message : 'Action failed.');
     } finally {
       setDisciplineAction(null);
+    }
+  };
+
+  const handleExtendTime = async (minutes: number) => {
+    if (!onExtendTime) return;
+    setExtensionMinutes(minutes);
+    setDisciplineError(null);
+    try {
+      await onExtendTime(minutes);
+    } catch (error) {
+      setDisciplineError(error instanceof Error ? error.message : 'Time extension failed.');
+    } finally {
+      setExtensionMinutes(null);
     }
   };
 
@@ -347,6 +363,30 @@ export function StudentDetailPanel({
               <Button variant="ghost" size="sm" onClick={onOpenAnswerHistory}>
                 Answer History
               </Button>
+            ) : null}
+            {onExtendTime ? (
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<Timer size={14} />}
+                  isLoading={extensionMinutes === 5}
+                  disabled={extensionMinutes !== null || disciplineAction !== null || student.status === 'terminated'}
+                  onClick={() => void handleExtendTime(5)}
+                >
+                  +5 min
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<Timer size={14} />}
+                  isLoading={extensionMinutes === 10}
+                  disabled={extensionMinutes !== null || disciplineAction !== null || student.status === 'terminated'}
+                  onClick={() => void handleExtendTime(10)}
+                >
+                  +10 min
+                </Button>
+              </>
             ) : null}
             <Button
               variant="warning"

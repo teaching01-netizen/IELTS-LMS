@@ -101,16 +101,16 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
         const runtime = runtimeSnapshots.find((item) => item.scheduleId === session.scheduleId);
         return {
           ...session,
-          runtimeStatus: runtime?.status ?? session.runtimeStatus,
-          runtimeCurrentSection: runtime?.currentSectionKey ?? session.runtimeCurrentSection ?? null,
+          runtimeStatus: session.runtimeStatus ?? runtime?.status ?? 'not_started',
+          runtimeCurrentSection: session.runtimeCurrentSection ?? runtime?.currentSectionKey ?? null,
           runtimeTimeRemainingSeconds:
-            runtime?.currentSectionRemainingSeconds ??
             session.runtimeTimeRemainingSeconds ??
+            runtime?.currentSectionRemainingSeconds ??
             session.timeRemaining,
           runtimeSectionStatus:
-            runtime?.sections.find((item) => item.sectionKey === runtime.currentSectionKey)?.status ??
-            session.runtimeSectionStatus,
-          runtimeWaiting: runtime?.waitingForNextSection ?? session.runtimeWaiting ?? false,
+            session.runtimeSectionStatus ??
+            runtime?.sections.find((item) => item.sectionKey === runtime.currentSectionKey)?.status,
+          runtimeWaiting: session.runtimeWaiting ?? runtime?.waitingForNextSection ?? false,
         };
       }),
     [runtimeSnapshots, sessions],
@@ -388,6 +388,38 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
       return { success: true as const };
     },
     [currentProctorName, onUpdateSessions, sessions],
+  );
+
+  const runStudentExtension = useCallback(
+    async (studentId: string, minutes: number) => {
+      const result = await examDeliveryService.extendStudentAttempt(
+        studentId,
+        currentProctorName ?? 'Proctor',
+        minutes,
+      );
+      if (!result.success) {
+        throw new Error(result.error ?? 'Failed to extend student time');
+      }
+
+      onUpdateSessions(
+        sessions.map((session) =>
+          session.id === studentId
+            ? {
+                ...session,
+                timeRemaining: session.timeRemaining + minutes * 60,
+                runtimeTimeRemainingSeconds:
+                  (session.runtimeTimeRemainingSeconds ?? session.timeRemaining) + minutes * 60,
+              }
+            : session,
+        ),
+      );
+      pushToast({
+        variant: 'success',
+        title: 'Student time extended',
+        message: `Added ${minutes} minutes to the active SAT module.`,
+      });
+    },
+    [currentProctorName, onUpdateSessions, pushToast, sessions],
   );
 
   const requestDisciplineAction = useCallback(
@@ -1008,6 +1040,10 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                   if (!result.success) {
                     throw new Error(result.error);
                   }
+                }}
+                onExtendTime={async (minutes) => {
+                  if (!selectedStudent) return;
+                  await runStudentExtension(selectedStudent.id, minutes);
                 }}
                 onOpenAnswerHistory={
                   onOpenAnswerHistory && selectedStudent

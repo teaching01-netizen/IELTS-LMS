@@ -97,16 +97,11 @@ export function useAdminRootController(): AdminRootController {
 
     try {
       const shouldLoadDefaults = role === 'admin' || role === 'builder';
-      const shouldSeedFixtures = role === 'admin' || role === 'builder';
+      const loadedDefaults = shouldLoadDefaults
+        ? await examAuthoringFacade.preferences.loadDefaults()
+        : examAuthoringFacade.preferences.getDefaults();
 
-      const tasks = await Promise.all([
-        shouldSeedFixtures ? examAuthoringFacade.seedDevelopmentFixtures() : Promise.resolve(),
-        shouldLoadDefaults
-          ? examAuthoringFacade.preferences.loadDefaults()
-          : Promise.resolve(examAuthoringFacade.preferences.getDefaults()),
-      ]);
-
-      setDefaultsState(tasks[1]);
+      setDefaultsState(loadedDefaults);
     } catch (loadError) {
       setInitError(loadError instanceof Error ? loadError.message : 'Failed to load admin data');
     } finally {

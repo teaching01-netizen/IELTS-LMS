@@ -1,6 +1,8 @@
 use crate::state::AppState;
 use chrono::Utc;
-use ielts_backend_application::proctoring::ProctoringService;
+use ielts_backend_application::{
+    assessment_delivery::AssessmentDeliveryService, proctoring::ProctoringService,
+};
 use ielts_backend_domain::schedule::LiveUpdateEvent;
 use ielts_backend_infrastructure::database_monitor::{
     inspect_storage_budget, StorageBudgetLevel, StorageBudgetSnapshot,
@@ -129,6 +131,30 @@ impl ApiBackgroundJobs {
                     event: "auto_advance_section".to_owned(),
                 };
                 self.state.live_updates.publish(event.clone());
+            }
+            if reconciled_count < RUNTIME_RECONCILIATION_BATCH_SIZE as usize {
+                break;
+            }
+        }
+        loop {
+            let outcomes = AssessmentDeliveryService::new(self.state.db_pool())
+                .reconcile_expired_modules_at(Utc::now(), RUNTIME_RECONCILIATION_BATCH_SIZE)
+                .await
+                .map_err(|error| error.to_string())?;
+            let reconciled_count = outcomes.len();
+            for outcome in outcomes {
+                self.state.live_updates.publish(LiveUpdateEvent {
+                    kind: "attempt".to_owned(),
+                    id: outcome.attempt_id,
+                    revision: 0,
+                    event: "sat_module_timeout".to_owned(),
+                });
+                self.state.live_updates.publish(LiveUpdateEvent {
+                    kind: "schedule_roster".to_owned(),
+                    id: outcome.schedule_id,
+                    revision: 0,
+                    event: "sat_module_timeout".to_owned(),
+                });
             }
             if reconciled_count < RUNTIME_RECONCILIATION_BATCH_SIZE as usize {
                 break;

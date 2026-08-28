@@ -614,8 +614,7 @@ async fn save_draft_round_trips_shared_sentence_answer_fields() {
         .get_version(&contract_actor(), saved_version.id.clone())
         .await
         .expect("reload shared sentence draft");
-    let question = &version.content_snapshot["reading"]["passages"][0]["blocks"][0]
-        ["questions"][0];
+    let question = &version.content_snapshot["reading"]["passages"][0]["blocks"][0]["questions"][0];
 
     assert_eq!(question["acceptAnyAnswerKey"], true);
     assert_eq!(question["sharedAcceptedAnswers"], json!(["alpha", "beta"]));
@@ -760,6 +759,8 @@ async fn publish_revalidates_the_current_draft_before_marking_it_published() {
                     serde_json::to_vec(&PublishExamRequest {
                         publish_notes: Some("must not publish invalid latest draft".to_owned()),
                         revision: exam_after_draft.revision,
+                        expected_draft_version_id: None,
+                        expected_draft_revision: None,
                     })
                     .unwrap(),
                 ))
@@ -1160,6 +1161,8 @@ async fn seed_exam(pool: &sqlx::MySqlPool) -> ExamEntity {
                 exam_type: ExamType::Academic.as_str().to_owned(),
                 visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
+                provider_key: None,
+                provider_exam_type: None,
             },
         )
         .await

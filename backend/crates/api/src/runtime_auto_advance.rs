@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use ielts_backend_application::proctoring::ProctoringService;
+use ielts_backend_application::{
+    assessment_delivery::AssessmentDeliveryService, proctoring::ProctoringService,
+};
 use ielts_backend_domain::schedule::LiveUpdateEvent;
 
 use crate::state::AppState;
@@ -20,7 +22,8 @@ pub fn spawn_runtime_auto_advance(state: AppState) -> Option<tokio::task::JoinHa
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         interval.tick().await;
 
-        let service = ProctoringService::new(pool);
+        let service = ProctoringService::new(pool.clone());
+        let sat_service = AssessmentDeliveryService::new(pool);
         loop {
             interval.tick().await;
 
@@ -44,6 +47,31 @@ pub fn spawn_runtime_auto_advance(state: AppState) -> Option<tokio::task::JoinHa
                 }
                 Err(error) => {
                     tracing::warn!(error = %error, "runtime auto-advance tick failed");
+                }
+            }
+
+            match sat_service
+                .reconcile_expired_modules_at(chrono::Utc::now(), 250)
+                .await
+            {
+                Ok(outcomes) => {
+                    for outcome in outcomes {
+                        state.live_updates.publish(LiveUpdateEvent {
+                            kind: "attempt".to_owned(),
+                            id: outcome.attempt_id,
+                            revision: 0,
+                            event: "sat_module_timeout".to_owned(),
+                        });
+                        state.live_updates.publish(LiveUpdateEvent {
+                            kind: "schedule_roster".to_owned(),
+                            id: outcome.schedule_id,
+                            revision: 0,
+                            event: "sat_module_timeout".to_owned(),
+                        });
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "SAT module timeout reconciliation failed")
                 }
             }
         }

@@ -98,6 +98,7 @@ export function collectLegacyServiceViolations(
     const approvedAdapter =
       isPathUnder(file, 'src/features/auth/infrastructure') ||
       isPathUnder(file, 'src/features/student/infrastructure') ||
+      isPathUnder(file, 'src/features/student-delivery/infrastructure') ||
       isPathUnder(file, 'src/features/proctor/infrastructure') ||
       isPathUnder(file, 'src/features/exam-authoring/infrastructure') ||
       isPathUnder(file, 'src/features/scheduling/infrastructure') ||

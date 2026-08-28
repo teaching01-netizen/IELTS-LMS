@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Search, Filter, MoreHorizontal, Copy, CheckCircle, Archive, X, Layers, Book, Pen, Headset, Mic, Settings2, LayoutTemplate, GitCommit, XCircle, Download, Trash2, type LucideIcon } from 'lucide-react';
+import { Plus, Search, Filter, MoreHorizontal, Copy, CheckCircle, Archive, X, Layers, Book, BookOpen, Pen, Headset, Mic, Settings2, LayoutTemplate, GitCommit, XCircle, Download, Trash2, type LucideIcon } from 'lucide-react';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Exam, ExamConfig } from '../../types';
 import { lazyLoad } from '../../app/performance/lazyLoad';
 import { ExamEntity, ExamEvent, ExamVersionSummary, BulkOperationResult } from '../../types/domain';
 import { getExamStatsFromExam, ExamFilterOptions, ExamSortOptions, DEFAULT_FILTERS, DEFAULT_SORT, hasActiveFilters } from '../../utils/examStats';
 import type { ExamListProps, ExamVersionHistoryProps } from '../../features/exam-authoring/contracts/examList';
+import type { CreateExamInput } from '../../features/exam-authoring/contracts/provider';
 import { ExamFiltersPanel } from './ExamFiltersPanel';
 import { ExamBulkActionBar } from './ExamBulkActionBar';
 import { Virtuoso } from 'react-virtuoso';
@@ -164,6 +165,48 @@ const ExamListItem = memo(function ExamListItem({
   );
 });
 
+interface ExamEmptyStateProps {
+  hasFilters: boolean;
+  onClearFilters: () => void;
+  onCreateExam: () => void;
+}
+
+function ExamEmptyState({ hasFilters, onClearFilters, onCreateExam }: ExamEmptyStateProps) {
+  return (
+    <div className="border border-dashed border-gray-300 bg-white px-6 py-16 text-center">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+        <BookOpen size={24} aria-hidden="true" />
+      </div>
+      <h2 className="mt-4 text-lg font-semibold text-gray-900">
+        {hasFilters ? 'No exams match your filters' : 'No exams yet'}
+      </h2>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-gray-500">
+        {hasFilters
+          ? 'Try a different search or clear the active filters to see the full exam library.'
+          : 'Create your first exam to start building an assessment and make it available to students.'}
+      </p>
+      <div className="mt-6 flex flex-wrap justify-center gap-3">
+        {hasFilters ? (
+          <button
+            type="button"
+            onClick={onClearFilters}
+            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            Clear filters
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={onCreateExam}
+          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+        >
+          {hasFilters ? 'Create an exam' : 'Create your first exam'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AdminExams({
   onNavigate,
   exams,
@@ -200,6 +243,7 @@ export function AdminExams({
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   const [newExamTitle, setNewExamTitle] = useState('');
+  const [newProviderKey, setNewProviderKey] = useState<'ielts' | 'sat'>('ielts');
   const [newExamType, setNewExamType] = useState<'Academic' | 'General Training'>('Academic');
   const [newExamPreset, setNewExamPreset] = useState<ExamConfig['general']['preset']>('Academic');
   const [includeScheduling, setIncludeScheduling] = useState(false);
@@ -488,11 +532,16 @@ export function AdminExams({
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onCreateExam(
-      newExamTitle || 'Untitled Exam', 
-      newExamType,
-      newExamPreset
-    );
+    const title = newExamTitle || 'Untitled Exam';
+    const input: CreateExamInput = newProviderKey === 'sat'
+      ? { providerKey: 'sat', title, providerExamType: 'SAT' }
+      : {
+          providerKey: 'ielts',
+          title,
+          providerExamType: newExamType,
+          preset: newExamPreset,
+        };
+    onCreateExam(input);
     setShowCreateModal(false);
   };
 
@@ -567,6 +616,8 @@ export function AdminExams({
       }
     }
   };
+
+  const hasExamFilters = searchQuery.trim().length > 0 || hasActiveFilters(filters);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -692,7 +743,13 @@ export function AdminExams({
         />
       )}
 
-      {view === 'grid' ? (
+      {filteredAndSortedExams.length === 0 ? (
+        <ExamEmptyState
+          hasFilters={hasExamFilters}
+          onClearFilters={clearAllFilters}
+          onCreateExam={() => setShowCreateModal(true)}
+        />
+      ) : view === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredAndSortedExams.map((exam) => {
             const stats = getExamStatsFromExam(exam);
@@ -801,6 +858,28 @@ export function AdminExams({
               </div>
 
               <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Assessment provider</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setNewProviderKey('ielts')}
+                    className={`rounded-md border px-3 py-2 text-left text-sm ${newProviderKey === 'ielts' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                  >
+                    <span className="block font-semibold">IELTS</span>
+                    <span className="text-xs text-gray-500">Academic or General Training</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewProviderKey('sat')}
+                    className={`rounded-md border px-3 py-2 text-left text-sm ${newProviderKey === 'sat' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                  >
+                    <span className="block font-semibold">Digital SAT</span>
+                    <span className="text-xs text-gray-500">Reading & Writing and Math</span>
+                  </button>
+                </div>
+              </div>
+
+              {newProviderKey === 'ielts' && <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Select Preset</label>
                 <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto p-1 border border-gray-100 rounded-lg">
                   {presets.map((preset) => {
@@ -832,9 +911,9 @@ export function AdminExams({
                     );
                   })}
                 </div>
-              </div>
+              </div>}
 
-              <div>
+              {newProviderKey === 'ielts' && <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Standard Type</label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
@@ -854,7 +933,7 @@ export function AdminExams({
                     General Training
                   </button>
                 </div>
-              </div>
+              </div>}
 
               <div className="pt-2">
                 <label className="flex items-center gap-2 cursor-pointer group">

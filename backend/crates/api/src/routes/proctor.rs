@@ -314,6 +314,30 @@ pub async fn resume_attempt(
     Ok(ApiResponse::success_with_request_id(session, request_id.0))
 }
 
+pub async fn extend_attempt(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    _csrf: VerifiedCsrf,
+    Path((schedule_id, attempt_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<ExtendSectionRequest>,
+) -> Result<ApiResponse<ielts_backend_domain::schedule::StudentSessionSummary>, ApiError> {
+    authorize_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
+    let service = ProctoringService::new(state.db_pool());
+    let session = service
+        .extend_attempt(&ctx, schedule_id, attempt_id, req)
+        .await?;
+    state.publish_live_update(ielts_backend_domain::schedule::LiveUpdateEvent {
+        kind: "attempt".to_owned(),
+        id: attempt_id.to_string(),
+        revision: 0,
+        event: "attempt_extended".to_owned(),
+    });
+    Ok(ApiResponse::success_with_request_id(session, request_id.0))
+}
+
 pub async fn terminate_attempt(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,

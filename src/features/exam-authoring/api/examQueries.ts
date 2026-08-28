@@ -38,6 +38,15 @@ export function useExamListQuery(enabled = true) {
   });
 }
 
+export function useExamQuery(examId?: string) {
+  return useQuery({
+    queryKey: examId ? examKeys.detail(examId) : [...examKeys.all, 'detail', 'missing'],
+    queryFn: () => examAuthoringFacade.repository.getExamById(examId ?? ''),
+    enabled: Boolean(examId),
+    ...examListQueryPolicy,
+  });
+}
+
 export function useDeleteExamMutation() {
   const queryClient = useQueryClient();
 

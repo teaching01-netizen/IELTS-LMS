@@ -10,8 +10,8 @@ use crate::{
     frontend,
     http::request_id::request_id_middleware,
     routes::{
-        answer_history, auth, exams, grading, health, library, media, proctor, results, schedules,
-        settings, student, ws,
+        answer_history, assessment_authoring, assessment_delivery, auth, exams, grading, health,
+        library, media, proctor, results, schedules, settings, student, ws,
     },
     state::AppState,
 };
@@ -84,6 +84,72 @@ pub fn build_router(state: AppState) -> Router {
                 .route("/:id/validation", get(exams::get_validation))
                 .route("/:id/versions", get(exams::list_versions))
                 .route("/:id/versions/summary", get(exams::list_version_summaries)),
+        )
+        .nest(
+            "/api/v1/assessment-authoring",
+            Router::new()
+                .route(
+                    "/exams/:exam_id/shell",
+                    get(assessment_authoring::get_authoring_shell),
+                )
+                .route(
+                    "/modules/:module_id/questions",
+                    get(assessment_authoring::list_questions)
+                        .post(assessment_authoring::create_question),
+                )
+                .route(
+                    "/modules/:module_id/question-order",
+                    patch(assessment_authoring::reorder_module_questions),
+                )
+                .route(
+                    "/exam-questions/:exam_question_id",
+                    get(assessment_authoring::get_exam_question)
+                        .delete(assessment_authoring::delete_exam_question),
+                )
+                .route(
+                    "/exam-questions/:exam_question_id/duplicate",
+                    post(assessment_authoring::duplicate_exam_question),
+                )
+                .route(
+                    "/questions/bulk",
+                    post(assessment_authoring::bulk_questions),
+                )
+                .route(
+                    "/question-revisions/:revision_id",
+                    patch(assessment_authoring::patch_question_revision),
+                )
+                .route(
+                    "/exams/:exam_id/sections/:section_id/delivery-settings",
+                    patch(assessment_authoring::update_section_delivery_settings),
+                )
+                .route(
+                    "/exams/:exam_id/validate",
+                    post(assessment_authoring::validate_exam),
+                ),
+        )
+        .nest(
+            "/api/v1/assessment-delivery",
+            Router::new()
+                .route(
+                    "/schedules/:schedule_id/bootstrap",
+                    axum::routing::post(assessment_delivery::bootstrap),
+                )
+                .route(
+                    "/schedules/:schedule_id/responses/:exam_question_id",
+                    axum::routing::patch(assessment_delivery::save_response),
+                )
+                .route(
+                    "/schedules/:schedule_id/modules/start",
+                    axum::routing::post(assessment_delivery::start_module),
+                )
+                .route(
+                    "/schedules/:schedule_id/modules/submit",
+                    axum::routing::post(assessment_delivery::submit_module),
+                )
+                .route(
+                    "/schedules/:schedule_id/submit",
+                    axum::routing::post(assessment_delivery::submit_assessment),
+                ),
         )
         .nest(
             "/api/v1/versions",
@@ -172,6 +238,10 @@ pub fn build_router(state: AppState) -> Router {
                 .route(
                     "/sessions/:schedule_id/attempts/:attempt_id/resume",
                     post(proctor::resume_attempt),
+                )
+                .route(
+                    "/sessions/:schedule_id/attempts/:attempt_id/extend",
+                    post(proctor::extend_attempt),
                 )
                 .route(
                     "/sessions/:schedule_id/attempts/:attempt_id/terminate",

@@ -40,3 +40,7 @@ path = "../../tests/integration/revision_tracking.rs"
 [[test]]
 name = "submission_unanswered_policy"
 path = "../../tests/integration/submission_unanswered_policy.rs"
+
+[[test]]
+name = "sat_adaptive_runtime"
+path = "../../tests/integration/sat_adaptive_runtime.rs"

@@ -34,7 +34,7 @@ import {
   getListeningTotalQuestions
 } from '../utils/examUtils';
 import { normalizeExamStateTableCompletionBlocks } from '../utils/tableCompletion';
-import { hydrateExamState } from './examAdapterService';
+import { createInitialExamState, hydrateExamState } from './examAdapterService';
 import { getWritingTaskContent } from '../utils/writingTaskUtils';
 import { getExamIdCollisionIssues } from '../utils/examIdCollisionCheck';
 import {
@@ -46,7 +46,9 @@ import {
   isBackendBuilderEnabled,
   mapBackendExamVersion,
   rememberExamRevision,
+  buildCreateAssessmentExamPayload,
 } from './backendBridge';
+import type { CreateExamInput } from '../features/exam-authoring/contracts/provider';
 import { canTransition, type ExamTransitionActorRole } from './policies/examStatusTransitions';
 import { notifyObjectiveGradingUpdated } from '../utils/objectiveGradingSync';
 
@@ -243,6 +245,53 @@ export class ExamLifecycleService {
       version,
       event
     };
+  }
+
+  async createProviderExam(
+    input: CreateExamInput,
+    owner: string = 'System',
+  ): Promise<TransitionResult> {
+    if (input.providerKey === 'ielts') {
+      const initialState = this.createInitialStateForProvider(input);
+      return this.createExam(
+        input.title,
+        input.providerExamType,
+        initialState,
+        owner,
+      );
+    }
+
+    if (!this.useBackendBuilder()) {
+      return { success: false, error: 'The Digital SAT requires the backend authoring service.' };
+    }
+
+    try {
+      const slug = generateSlug(input.title);
+      const createdExam = await backendPost<{ id: string; revision: number }>(
+        '/v1/exams',
+        buildCreateAssessmentExamPayload({ ...input, slug }),
+      );
+      rememberExamRevision(createdExam.id, createdExam.revision);
+      const exam = await this.repository.getExamById(createdExam.id);
+      return exam
+        ? { success: true, exam }
+        : { success: false, error: 'The created SAT exam could not be loaded.' };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to create Digital SAT',
+      };
+    }
+  }
+
+  private createInitialStateForProvider(
+    input: Extract<CreateExamInput, { providerKey: 'ielts' }>,
+  ): ExamState {
+    return createInitialExamState(
+      input.title,
+      input.providerExamType,
+      input.preset,
+    );
   }
   
   /**

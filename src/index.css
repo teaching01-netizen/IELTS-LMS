@@ -865,3 +865,211 @@
     outline: none;
   }
 }
+
+/* SAT authoring motion language: restrained, state-first, interruptible. */
+:root {
+  --authoring-motion-fast: 100ms;
+  --authoring-motion-state: 160ms;
+  --authoring-motion-panel: 220ms;
+  --authoring-motion-settle: 260ms;
+  --authoring-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --authoring-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.authoring-glass {
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7), 0 8px 28px rgba(0, 0, 0, 0.04);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  backdrop-filter: saturate(180%) blur(24px);
+}
+
+.authoring-sidebar {
+  background: rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: saturate(160%) blur(20px);
+  backdrop-filter: saturate(160%) blur(20px);
+}
+
+.authoring-subtoolbar {
+  background: rgba(245, 245, 247, 0.82);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  -webkit-backdrop-filter: saturate(170%) blur(18px);
+  backdrop-filter: saturate(170%) blur(18px);
+}
+
+.authoring-segmented {
+  background: rgba(118, 118, 128, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.025);
+}
+
+.sat-editable-inline-math {
+  display: inline;
+}
+
+.sat-editable-block-math {
+  display: block;
+  margin: 0.875rem 0;
+}
+
+.sat-rendered-math {
+  border-radius: 6px;
+  cursor: text;
+  transition:
+    background-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    box-shadow var(--authoring-motion-state) var(--authoring-ease);
+}
+
+.sat-rendered-math--inline {
+  display: inline-flex;
+  align-items: baseline;
+  margin: 0 1px;
+  padding: 0 2px;
+  vertical-align: baseline;
+}
+
+.sat-rendered-math--block {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+}
+
+.sat-rendered-math:hover,
+[data-equation-selected='true'] > .sat-rendered-math {
+  background: rgba(0, 122, 255, 0.055);
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.11);
+}
+
+.sat-rendered-math:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.22);
+}
+
+.sat-mathfield-host {
+  border: 1px solid rgba(0, 122, 255, 0.24);
+  background: rgba(0, 122, 255, 0.025);
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.055);
+}
+
+.sat-mathfield-host--inline {
+  display: inline-flex;
+  min-width: 2.5ch;
+  align-items: center;
+  margin: -1px 1px;
+  border-radius: 6px;
+  vertical-align: -0.1em;
+}
+
+.sat-mathfield-host--block {
+  display: flex;
+  width: min(100%, 36rem);
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  border-radius: 12px;
+}
+
+math-field.sat-inline-mathfield,
+math-field.sat-block-mathfield {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: rgb(15 23 42);
+  --caret-color: #007aff;
+  --selection-background-color: rgba(10, 132, 255, 0.16);
+  --contains-highlight-background-color: rgba(10, 132, 255, 0.10);
+}
+
+math-field.sat-inline-mathfield {
+  min-width: 2.5ch;
+  max-width: min(28rem, 68vw);
+  padding: 0 3px 1px;
+  font-size: 1em;
+  line-height: 1.2;
+}
+
+math-field.sat-block-mathfield {
+  width: 100%;
+  min-height: 42px;
+  padding: 5px 9px;
+  font-size: 1.08em;
+  text-align: center;
+}
+
+math-field.sat-inline-mathfield::part(menu-toggle),
+math-field.sat-inline-mathfield::part(virtual-keyboard-toggle),
+math-field.sat-block-mathfield::part(menu-toggle),
+math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
+  display: none;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .authoring-glass,
+  .authoring-sidebar { background: rgb(255 255 255); }
+  .authoring-subtoolbar { background: rgb(245 245 247); }
+}
+
+.authoring-interactive {
+  transition:
+    background-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    border-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    box-shadow var(--authoring-motion-state) var(--authoring-ease);
+}
+
+.authoring-interactive:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@keyframes authoring-field-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(35, 131, 226, 0); }
+  28% { box-shadow: 0 0 0 5px rgba(35, 131, 226, 0.13); }
+  100% { box-shadow: 0 0 0 0 rgba(35, 131, 226, 0); }
+}
+
+[data-authoring-pulse='true'] {
+  border-radius: 0.875rem;
+  animation: authoring-field-pulse 820ms var(--authoring-ease) 1;
+}
+
+@keyframes authoring-table-settle {
+  from { opacity: 0.72; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+[data-table-feedback='true'] table {
+  animation: authoring-table-settle 180ms var(--authoring-ease) 1;
+}
+
+@keyframes authoring-shimmer {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(110%); }
+}
+
+.authoring-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: rgb(241 245 249);
+}
+
+.authoring-skeleton::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.78),
+    transparent
+  );
+  animation: authoring-shimmer 1.35s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .authoring-interactive:active:not(:disabled) { transform: none; }
+  [data-authoring-pulse='true'],
+  [data-table-feedback='true'] table,
+  .authoring-skeleton::after { animation: none !important; }
+}

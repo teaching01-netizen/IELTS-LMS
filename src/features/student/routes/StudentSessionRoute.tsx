@@ -4,6 +4,7 @@ import { StudentAppWrapper } from '@components/student/StudentAppWrapper';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { useAuthSession } from '../../auth/api/authSession';
 import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRouteData';
+import { SatStudentSessionRoute } from '../../student-delivery/routes/SatStudentSessionRoute';
 
 /**
  * Student Session Route
@@ -20,6 +21,7 @@ export function StudentSessionRoute() {
     attemptSnapshot,
     error,
     isLoading,
+    providerKey,
     retry,
     runtimeSnapshot,
     state,
@@ -78,6 +80,27 @@ export function StudentSessionRoute() {
         description="Student delivery requires a valid schedule-backed route."
         actionLabel="Back to Check-in"
         onAction={navigateToStudentCheckIn}
+      />
+    );
+  }
+
+  if (providerKey === 'sat') {
+    if (!scheduleId || !attemptSnapshot?.id) {
+      return (
+        <ErrorSurface
+          title="SAT attempt unavailable"
+          description="Digital SAT delivery requires a schedule-backed attempt."
+          actionLabel="Back to Check-in"
+          onAction={navigateToStudentCheckIn}
+        />
+      );
+    }
+
+    return (
+      <SatStudentSessionRoute
+        scheduleId={scheduleId}
+        attemptId={attemptSnapshot.id}
+        onExit={navigateToStudentCheckIn}
       />
     );
   }

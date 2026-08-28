@@ -175,7 +175,13 @@ impl SchedulingService {
             ));
         }
 
-        let plan = build_section_plan(&version.config_snapshot)?;
+        let plan = self
+            .build_provider_plan(
+                &exam.provider_key,
+                &req.published_version_id,
+                &version.config_snapshot,
+            )
+            .await?;
         let planned_duration_minutes = plan_total_minutes(&plan);
         validate_schedule_window(req.start_time, req.end_time, planned_duration_minutes)?;
         let proctor_display_name =
@@ -361,7 +367,13 @@ impl SchedulingService {
                 ));
             }
 
-            let plan = build_section_plan(&version.config_snapshot)?;
+            let plan = self
+                .build_provider_plan(
+                    &exam.provider_key,
+                    &next_version_id,
+                    &version.config_snapshot,
+                )
+                .await?;
             let planned_duration_minutes = plan_total_minutes(&plan);
             validate_schedule_window(next_start_time, next_end_time, planned_duration_minutes)?;
 
@@ -666,6 +678,24 @@ impl SchedulingService {
         .execute(&mut *tx)
         .await?;
 
+        sqlx::query(
+            r#"
+            UPDATE assessment_module_attempts ma
+            JOIN student_attempts sa ON sa.id = ma.attempt_id
+            JOIN exam_entities e ON e.id = sa.exam_id
+            SET ma.paused_at = COALESCE(ma.paused_at, NOW()),
+                ma.revision = ma.revision + 1
+            WHERE sa.schedule_id = ?
+              AND e.provider_key = 'sat'
+              AND ma.state = 'active'
+              AND ma.started_at IS NOT NULL
+              AND ma.paused_at IS NULL
+            "#,
+        )
+        .bind(schedule_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+
         insert_control_event(
             &mut tx,
             runtime.id.to_string(),
@@ -733,6 +763,25 @@ impl SchedulingService {
         .bind(paused_seconds)
         .bind(runtime.id)
         .bind(active_section_key)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            UPDATE assessment_module_attempts ma
+            JOIN student_attempts sa ON sa.id = ma.attempt_id
+            JOIN exam_entities e ON e.id = sa.exam_id
+            SET ma.accumulated_paused_seconds = ma.accumulated_paused_seconds
+                    + GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, NOW()), 0),
+                ma.paused_at = NULL,
+                ma.revision = ma.revision + 1
+            WHERE sa.schedule_id = ?
+              AND e.provider_key = 'sat'
+              AND ma.state = 'active'
+              AND ma.paused_at IS NOT NULL
+            "#,
+        )
+        .bind(schedule_id.to_string())
         .execute(&mut *tx)
         .await?;
 
@@ -925,6 +974,101 @@ impl SchedulingService {
         })
     }
 
+    async fn build_provider_plan(
+        &self,
+        provider_key: &str,
+        version_id: &str,
+        config_snapshot: &Value,
+    ) -> Result<Vec<ScheduleSectionPlanEntry>, SchedulingError> {
+        if provider_key != "sat" {
+            return build_section_plan(config_snapshot);
+        }
+
+        let sections = sqlx::query_as::<_, SatScheduleSectionRow>(
+            "SELECT id, section_key, title, display_order, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order",
+        )
+        .bind(version_id)
+        .fetch_all(&self.pool)
+        .await?;
+        if sections.is_empty() {
+            return Err(SchedulingError::Validation(
+                "SAT version has no assessment sections.".to_owned(),
+            ));
+        }
+
+        let mut plan = Vec::with_capacity(sections.len());
+        let mut running_offset = 0_i32;
+        for section in sections {
+            let modules = sqlx::query_as::<_, SatScheduleModuleRow>(
+                "SELECT duration_seconds, adaptive_role FROM assessment_modules WHERE section_id = ? ORDER BY display_order",
+            )
+            .bind(&section.id)
+            .fetch_all(&self.pool)
+            .await?;
+            let base = modules
+                .iter()
+                .find(|module| module.adaptive_role == "base")
+                .ok_or_else(|| {
+                    SchedulingError::Validation(format!(
+                        "SAT section `{}` has no base module.",
+                        section.section_key
+                    ))
+                })?;
+            let lower = modules
+                .iter()
+                .find(|module| module.adaptive_role == "lower_branch")
+                .ok_or_else(|| {
+                    SchedulingError::Validation(format!(
+                        "SAT section `{}` has no lower branch.",
+                        section.section_key
+                    ))
+                })?;
+            let higher = modules
+                .iter()
+                .find(|module| module.adaptive_role == "higher_branch")
+                .ok_or_else(|| {
+                    SchedulingError::Validation(format!(
+                        "SAT section `{}` has no higher branch.",
+                        section.section_key
+                    ))
+                })?;
+            if base.duration_seconds <= 0
+                || lower.duration_seconds <= 0
+                || higher.duration_seconds <= 0
+            {
+                return Err(SchedulingError::Validation(format!(
+                    "SAT section `{}` contains a non-positive module duration.",
+                    section.section_key
+                )));
+            }
+            if section.break_after_seconds < 0 {
+                return Err(SchedulingError::Validation(format!(
+                    "SAT section `{}` contains a negative break duration.",
+                    section.section_key
+                )));
+            }
+
+            let section_seconds = base
+                .duration_seconds
+                .saturating_add(lower.duration_seconds.max(higher.duration_seconds));
+            let duration_minutes = seconds_to_minutes_ceil(section_seconds);
+            let gap_after_minutes = seconds_to_minutes_ceil(section.break_after_seconds);
+            let start_offset_minutes = running_offset;
+            let end_offset_minutes = start_offset_minutes.saturating_add(duration_minutes);
+            plan.push(ScheduleSectionPlanEntry {
+                section_key: section.section_key,
+                label: section.title,
+                order: section.display_order,
+                duration_minutes,
+                gap_after_minutes,
+                start_offset_minutes,
+                end_offset_minutes,
+            });
+            running_offset = end_offset_minutes.saturating_add(gap_after_minutes);
+        }
+        Ok(plan)
+    }
+
     async fn load_schedule_context(
         &self,
         schedule_id: Uuid,
@@ -941,14 +1085,21 @@ impl SchedulingService {
         let version = self
             .load_version_context(schedule.published_version_id.clone())
             .await?;
-        let plan = build_section_plan(&version.config_snapshot)?;
+        let exam = self.load_exam_context(schedule.exam_id.clone()).await?;
+        let plan = self
+            .build_provider_plan(
+                &exam.provider_key,
+                &schedule.published_version_id,
+                &version.config_snapshot,
+            )
+            .await?;
 
         Ok(ScheduleContext { schedule, plan })
     }
 
     async fn load_exam_context(&self, exam_id: String) -> Result<ExamContext, SchedulingError> {
         sqlx::query_as::<_, ExamContext>(
-            "SELECT title, organization_id, CAST(current_draft_version_id AS CHAR) AS current_draft_version_id FROM exam_entities WHERE id = ?",
+            "SELECT title, organization_id, provider_key, CAST(current_draft_version_id AS CHAR) AS current_draft_version_id FROM exam_entities WHERE id = ?",
         )
         .bind(&exam_id)
         .fetch_optional(&self.pool)
@@ -997,7 +1148,8 @@ impl SchedulingService {
         self.get_schedule(ctx, schedule_id).await?;
 
         let user_id_str = user_id.to_string();
-        let metadata = merge_registration_metadata(None, nickname.as_deref(), ielts_course.as_deref());
+        let metadata =
+            merge_registration_metadata(None, nickname.as_deref(), ielts_course.as_deref());
 
         if let Some(row) = self
             .load_registration_by_wcode(schedule_id, &normalized_wcode)
@@ -1192,9 +1344,25 @@ fn is_mysql_duplicate_key(err: &sqlx::Error) -> bool {
 }
 
 #[derive(Debug, Clone, FromRow)]
+struct SatScheduleSectionRow {
+    id: String,
+    section_key: String,
+    title: String,
+    display_order: i32,
+    break_after_seconds: i32,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct SatScheduleModuleRow {
+    duration_seconds: i32,
+    adaptive_role: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
 struct ExamContext {
     title: String,
     organization_id: Option<String>,
+    provider_key: String,
     current_draft_version_id: Option<String>,
 }
 
@@ -1649,6 +1817,14 @@ fn build_section_plan(
     }
 
     Ok(entries)
+}
+
+fn seconds_to_minutes_ceil(seconds: i32) -> i32 {
+    if seconds <= 0 {
+        0
+    } else {
+        seconds.saturating_add(59) / 60
+    }
 }
 
 fn plan_total_minutes(plan: &[ScheduleSectionPlanEntry]) -> i32 {

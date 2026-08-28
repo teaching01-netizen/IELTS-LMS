@@ -1,4 +1,5 @@
 import type { Exam, ExamConfig } from '../../../types';
+import type { CreateExamInput } from './provider';
 import type {
   BulkOperationResult,
   ExamEntity,
@@ -36,11 +37,7 @@ export interface ExamListProps {
   onEditExam: (id: string) => void;
   onGoToConfig?: ((id: string) => void) | undefined;
   onGoToReview?: ((id: string) => void) | undefined;
-  onCreateExam: (
-    title: string,
-    type: 'Academic' | 'General Training',
-    preset: ExamConfig['general']['preset'],
-  ) => void;
+  onCreateExam: (input: CreateExamInput) => void;
   onCloneExam?: (examId: string, newTitle: string) => Promise<void>;
   onCreateFromTemplate?: (templateId: string, newTitle: string) => Promise<void>;
   onDeleteExam?: (examId: string) => Promise<void>;

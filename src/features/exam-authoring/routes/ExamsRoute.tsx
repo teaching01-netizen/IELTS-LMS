@@ -12,6 +12,7 @@ import {
   useDeleteExamMutation,
   useExamListQuery,
 } from '../api/examQueries';
+import type { CreateExamInput } from '../contracts/provider';
 
 export function ExamsRoute() {
   const navigate = useNavigate();
@@ -118,18 +119,8 @@ export function ExamsRoute() {
     }
   };
 
-  const handleCreateExam = async (
-    title: string,
-    type: 'Academic' | 'General Training',
-    preset: ExamConfig['general']['preset'] = 'Academic',
-  ) => {
-    const initialState = examAuthoringFacade.createInitialExamState(title, type, preset, defaults);
-    const result = await examAuthoringFacade.lifecycle.createExam(
-      title,
-      type,
-      initialState,
-      'Sarah Chen',
-    );
+  const handleCreateExam = async (input: CreateExamInput) => {
+    const result = await examAuthoringFacade.lifecycle.createProviderExam(input, 'Sarah Chen');
 
     if (result.success && result.exam) {
       await invalidateExamList(queryClient);

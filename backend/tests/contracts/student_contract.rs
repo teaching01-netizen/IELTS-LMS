@@ -379,9 +379,7 @@ async fn mutation_batch_persists_answers_and_returns_the_server_watermark() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -450,9 +448,7 @@ async fn sentence_completion_student_answers_remain_array_backed_per_question() 
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -483,7 +479,10 @@ async fn sentence_completion_student_answers_remain_array_backed_per_question() 
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = json_body(response).await;
-    assert_eq!(json["data"]["attempt"]["answers"]["r-sentence-q1"], json!(["first", "second"]));
+    assert_eq!(
+        json["data"]["attempt"]["answers"]["r-sentence-q1"],
+        json!(["first", "second"])
+    );
 
     database.shutdown().await;
 }
@@ -519,9 +518,7 @@ async fn mutation_batch_returns_full_commit_payload() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -702,9 +699,7 @@ async fn mutation_batch_rejects_replayed_idempotency_key_and_hash_mismatch() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
     let request = json!({
         "attemptId": attempt_id.clone(),
         "mutations": [
@@ -1200,9 +1195,7 @@ async fn submit_finalizes_the_attempt_idempotently() {
         .await
         .unwrap();
 
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let json = json_body(response).await;
@@ -1267,9 +1260,7 @@ async fn submit_replays_cached_response_for_the_same_idempotency_key() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let first = app
         .clone()
@@ -1451,9 +1442,7 @@ async fn submit_rejects_missing_seq_without_final_patch() {
         .as_str()
         .unwrap()
         .to_owned();
-    let attempt_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let attempt_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -1504,9 +1493,7 @@ async fn bootstrap_hydrates_existing_attempt_after_crash_reconnect() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let mutation = app
         .clone()
@@ -1565,9 +1552,7 @@ async fn mutation_batch_persists_writing_answers_separately_and_tracks_current_q
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     let response = app
         .oneshot(
@@ -1895,9 +1880,7 @@ async fn mutation_batch_accepts_objective_mutations_when_runtime_paused() {
         .as_str()
         .unwrap()
         .to_owned();
-    let base_revision = bootstrap["data"]["attempt"]["revision"]
-        .as_i64()
-        .unwrap() as i32;
+    let base_revision = bootstrap["data"]["attempt"]["revision"].as_i64().unwrap() as i32;
 
     sqlx::query("UPDATE exam_session_runtimes SET status = 'paused' WHERE schedule_id = ?")
         .bind(schedule_id.to_string())
@@ -2602,6 +2585,8 @@ async fn seed_schedule_with_slug_content_and_config(
                 exam_type: ExamType::Academic.as_str().to_owned(),
                 visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
+                provider_key: None,
+                provider_exam_type: None,
             },
         )
         .await
@@ -2633,6 +2618,8 @@ async fn seed_schedule_with_slug_content_and_config(
             PublishExamRequest {
                 publish_notes: Some("ready for delivery".to_owned()),
                 revision: exam_after_draft.revision,
+                expected_draft_version_id: None,
+                expected_draft_revision: None,
             },
         )
         .await

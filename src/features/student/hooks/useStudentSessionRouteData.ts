@@ -51,6 +51,7 @@ interface StudentSessionRouteData {
   attemptSnapshot: StudentAttempt | null;
   error: string | null;
   isLoading: boolean;
+  providerKey: 'ielts' | 'sat';
   runtimeSnapshot: ExamSessionRuntime | null;
   schedule: ExamSchedule | null;
   state: ExamState | null;
@@ -62,6 +63,7 @@ type BackendLiveSession = StudentSessionLivePayload;
 
 type LoadedStaticSnapshot = {
   examState: ExamState;
+  providerKey: 'ielts' | 'sat';
   scheduleEntity: ExamSchedule;
   versionId: string;
 };
@@ -71,6 +73,12 @@ type LiveSnapshotApplyDecision = {
   applyAttempt: boolean;
   applyRuntime: boolean;
 };
+
+function providerKeyFromVersion(version: unknown): 'ielts' | 'sat' {
+  const versionRecord = asRecord(version);
+  const contentSnapshot = asRecord(versionRecord?.['contentSnapshot']);
+  return contentSnapshot?.['providerKey'] === 'sat' ? 'sat' : 'ielts';
+}
 
 export function useStudentSessionRouteData(
   scheduleId?: string,
@@ -84,6 +92,7 @@ export function useStudentSessionRouteData(
   const [schedule, setSchedule] = useState<ExamSchedule | null>(null);
   const [state, setState] = useState<ExamState | null>(null);
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<ExamSessionRuntime | null>(null);
+  const [providerKey, setProviderKey] = useState<'ielts' | 'sat'>('ielts');
   const [liveSocketConnected, setLiveSocketConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -136,6 +145,8 @@ export function useStudentSessionRouteData(
 
     const session = await (sessionBootstrap?.loadStatic() ??
       studentSessionFacade.loadStaticSession(scheduleId, candidateId));
+    const providerKey = providerKeyFromVersion(session.version);
+    setProviderKey(providerKey);
     const scheduleEntity = studentSessionFacade.mapSchedule(session.schedule);
     const version = studentSessionFacade.mapVersion(session.version);
     const diagramSnapshotDiagnostics = collectPublishedDiagramSnapshotIssues(version.contentSnapshot);
@@ -162,6 +173,7 @@ export function useStudentSessionRouteData(
 
     return {
       examState,
+      providerKey,
       scheduleEntity,
       versionId: version.id,
     };
@@ -564,7 +576,10 @@ export function useStudentSessionRouteData(
           examId: loadedStatic.scheduleEntity.examId,
           examTitle: loadedStatic.scheduleEntity.examTitle,
           ...createCandidateProfile(candidateId, storedCandidateProfile),
-          currentModule: mappedRuntime?.currentSectionKey ?? firstEnabledModule,
+          currentModule:
+            loadedStatic.providerKey === 'sat'
+              ? 'reading'
+              : mappedRuntime?.currentSectionKey ?? firstEnabledModule,
         });
         setAttemptSnapshot(createdAttempt);
       }
@@ -619,6 +634,7 @@ export function useStudentSessionRouteData(
     attemptSnapshot,
     error,
     isLoading,
+    providerKey,
     runtimeSnapshot,
     schedule,
     state,

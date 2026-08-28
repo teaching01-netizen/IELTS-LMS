@@ -1967,6 +1967,38 @@ pub(crate) async fn auto_submit_schedule_attempts_in_tx(
 
     let now = Utc::now();
     for attempt in pending_attempts {
+        let provider_key: Option<String> =
+            sqlx::query_scalar("SELECT provider_key FROM exam_entities WHERE id = ?")
+                .bind(attempt.exam_id.to_string())
+                .fetch_optional(&mut *connection)
+                .await?;
+        if provider_key.as_deref() == Some("sat") {
+            sqlx::query(
+                "UPDATE assessment_module_attempts SET state = 'locked', locked_at = COALESCE(locked_at, ?), paused_at = NULL, completion_reason = COALESCE(completion_reason, ?), revision = revision + 1 WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review')",
+            )
+            .bind(now)
+            .bind(completion_reason)
+            .bind(attempt.id.to_string())
+            .execute(&mut *connection)
+            .await?;
+            let final_submission = json!({
+                "providerKey": "sat",
+                "terminated": true,
+                "completionReason": completion_reason,
+                "autoSubmission": true,
+                "submittedAt": now
+            });
+            sqlx::query(
+                "UPDATE student_attempts SET phase = ?, final_submission = ?, submitted_at = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?",
+            )
+            .bind(AttemptPhase::PostExam)
+            .bind(final_submission)
+            .bind(now)
+            .bind(attempt.id.to_string())
+            .execute(&mut *connection)
+            .await?;
+            continue;
+        }
         let submission_id = format!("submission-{}", Uuid::new_v4().simple());
         let final_submission = json!({
             "submissionId": submission_id,
@@ -2046,6 +2078,38 @@ pub(crate) async fn force_finalize_attempt_if_pending(
     };
 
     let now = Utc::now();
+    let provider_key: Option<String> =
+        sqlx::query_scalar("SELECT provider_key FROM exam_entities WHERE id = ?")
+            .bind(attempt.exam_id.to_string())
+            .fetch_optional(tx.as_mut())
+            .await?;
+    if provider_key.as_deref() == Some("sat") {
+        sqlx::query(
+            "UPDATE assessment_module_attempts SET state = 'locked', locked_at = COALESCE(locked_at, ?), paused_at = NULL, completion_reason = COALESCE(completion_reason, ?), revision = revision + 1 WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review')",
+        )
+        .bind(now)
+        .bind(completion_reason)
+        .bind(attempt_id.to_string())
+        .execute(tx.as_mut())
+        .await?;
+        let final_submission = json!({
+            "providerKey": "sat",
+            "terminated": true,
+            "completionReason": completion_reason,
+            "submittedAt": now
+        });
+        sqlx::query(
+            "UPDATE student_attempts SET phase = ?, final_submission = ?, submitted_at = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?",
+        )
+        .bind(AttemptPhase::PostExam)
+        .bind(final_submission)
+        .bind(now)
+        .bind(attempt_id.to_string())
+        .execute(tx.as_mut())
+        .await?;
+        tx.commit().await?;
+        return Ok(());
+    }
     let submission_id = format!("submission-{}", Uuid::new_v4().simple());
     let final_submission = json!({
         "submissionId": submission_id,

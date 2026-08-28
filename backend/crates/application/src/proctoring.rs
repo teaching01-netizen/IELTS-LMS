@@ -75,6 +75,19 @@ impl ProctoringService {
         .ok_or(ProctoringError::NotFound)
     }
 
+    async fn load_provider_key_for_schedule(
+        &self,
+        schedule_id: Uuid,
+    ) -> Result<String, ProctoringError> {
+        sqlx::query_scalar::<_, String>(
+            "SELECT e.provider_key FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?",
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(ProctoringError::NotFound)
+    }
+
     fn is_ielts_mode(config_snapshot: &Value) -> bool {
         config_snapshot
             .get("general")
@@ -419,6 +432,11 @@ impl ProctoringService {
             }
         }
 
+        if self.load_provider_key_for_schedule(schedule_id).await? == "sat" {
+            return Err(ProctoringError::Validation(
+                "Adaptive SAT sections cannot be ended with a cohort section override. Use module timing or per-student controls so routing remains deterministic.".to_owned(),
+            ));
+        }
         let config_snapshot = self.load_config_snapshot_for_schedule(schedule_id).await?;
         if Self::is_ielts_mode(&config_snapshot) {
             return Err(ProctoringError::Validation(
@@ -740,6 +758,24 @@ impl ProctoringService {
         .execute(&mut *tx)
         .await?;
 
+        sqlx::query(
+            r#"
+            UPDATE assessment_module_attempts ma
+            JOIN student_attempts sa ON sa.id = ma.attempt_id
+            JOIN exam_entities e ON e.id = sa.exam_id
+            SET ma.extension_seconds = ma.extension_seconds + (? * 60),
+                ma.revision = ma.revision + 1
+            WHERE sa.schedule_id = ?
+              AND e.provider_key = 'sat'
+              AND ma.state = 'active'
+              AND ma.started_at IS NOT NULL
+            "#,
+        )
+        .bind(req.minutes)
+        .bind(schedule_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+
         insert_control_event(
             &mut tx,
             runtime.id.into_uuid(),
@@ -776,6 +812,111 @@ impl ProctoringService {
             .get_runtime(&system_actor(), schedule_id)
             .await
             .map_err(map_scheduling_error)
+    }
+
+    pub async fn extend_attempt(
+        &self,
+        ctx: &ActorContext,
+        schedule_id: Uuid,
+        attempt_id: Uuid,
+        req: ExtendSectionRequest,
+    ) -> Result<StudentSessionSummary, ProctoringError> {
+        let scheduling = SchedulingService::new(self.pool.clone());
+        let schedule = scheduling
+            .get_schedule(ctx, schedule_id)
+            .await
+            .map_err(map_scheduling_error)?;
+        let organization_id = schedule
+            .organization_id
+            .as_ref()
+            .and_then(|s| Uuid::parse_str(s).ok());
+        if let Some(org_id) = organization_id {
+            if !AuthorizationService::can_access_student_data(
+                ctx,
+                schedule_id.to_string(),
+                "",
+                org_id.to_string(),
+            ) {
+                return Err(ProctoringError::NotFound);
+            }
+        }
+        if self.load_provider_key_for_schedule(schedule_id).await? != "sat" {
+            return Err(ProctoringError::Validation(
+                "Per-student time extensions are currently supported for adaptive SAT attempts only."
+                    .to_owned(),
+            ));
+        }
+        if req.minutes <= 0 {
+            return Err(ProctoringError::Validation(
+                "Extension minutes must be greater than zero.".to_owned(),
+            ));
+        }
+        let config_snapshot = self.load_config_snapshot_for_schedule(schedule_id).await?;
+        let allowed = Self::allowed_extension_minutes(&config_snapshot);
+        if allowed.is_empty() || !allowed.contains(&i64::from(req.minutes)) {
+            return Err(ProctoringError::Validation(format!(
+                "Extension of {} minutes is not allowed by exam policy.",
+                req.minutes
+            )));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let proctor_status: Option<String> = sqlx::query_scalar(
+            "SELECT COALESCE(proctor_status, 'active') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+        )
+        .bind(attempt_id.to_string())
+        .bind(schedule_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(proctor_status) = proctor_status else {
+            return Err(ProctoringError::NotFound);
+        };
+        if proctor_status == "terminated" {
+            return Err(ProctoringError::Conflict(
+                "A terminated SAT attempt cannot receive a time extension.".to_owned(),
+            ));
+        }
+        let updated = sqlx::query(
+            "UPDATE assessment_module_attempts SET extension_seconds = extension_seconds + (? * 60), revision = revision + 1 WHERE attempt_id = ? AND state = 'active' AND started_at IS NOT NULL",
+        )
+        .bind(req.minutes)
+        .bind(attempt_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(ProctoringError::Conflict(
+                "The student does not have an active SAT module to extend.".to_owned(),
+            ));
+        }
+        insert_audit_log(
+            &mut tx,
+            schedule_id,
+            &ctx.actor_id.to_string(),
+            "EXTENSION_GRANTED",
+            Some(attempt_id),
+            Some(json!({
+                "scope": "attempt",
+                "minutes": req.minutes,
+                "reason": req.reason,
+            })),
+        )
+        .await?;
+        OutboxRepository::enqueue_in_tx(
+            &mut tx,
+            "schedule_roster",
+            &schedule_id.to_string(),
+            0,
+            "roster_changed",
+            &json!({
+                "scheduleId": schedule_id,
+                "event": "extend_attempt",
+                "attemptId": attempt_id,
+                "minutes": req.minutes,
+            }),
+        )
+        .await?;
+        tx.commit().await?;
+        self.load_student_session(schedule_id, attempt_id).await
     }
 
     pub async fn complete_exam(
@@ -1546,6 +1687,34 @@ impl ProctoringService {
         .execute(&mut *tx)
         .await?;
 
+        match action_type {
+            "STUDENT_PAUSE" => {
+                sqlx::query(
+                    "UPDATE assessment_module_attempts SET paused_at = COALESCE(paused_at, NOW()), revision = revision + 1 WHERE attempt_id = ? AND state = 'active' AND started_at IS NOT NULL AND paused_at IS NULL",
+                )
+                .bind(attempt_id.to_string())
+                .execute(&mut *tx)
+                .await?;
+            }
+            "STUDENT_RESUME" => {
+                sqlx::query(
+                    "UPDATE assessment_module_attempts SET accumulated_paused_seconds = accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, paused_at, NOW()), 0), paused_at = NULL, revision = revision + 1 WHERE attempt_id = ? AND state = 'active' AND paused_at IS NOT NULL",
+                )
+                .bind(attempt_id.to_string())
+                .execute(&mut *tx)
+                .await?;
+            }
+            "STUDENT_TERMINATE" => {
+                sqlx::query(
+                    "UPDATE assessment_module_attempts SET state = 'locked', locked_at = COALESCE(locked_at, NOW()), paused_at = NULL, completion_reason = COALESCE(completion_reason, 'proctor_terminate'), revision = revision + 1 WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review')",
+                )
+                .bind(attempt_id.to_string())
+                .execute(&mut *tx)
+                .await?;
+            }
+            _ => {}
+        }
+
         insert_audit_log(
             &mut tx,
             schedule_id,
@@ -1577,7 +1746,7 @@ impl ProctoringService {
         let rows = sqlx::query_as::<_, AttemptProjectionRow>(
             r#"
             SELECT
-                id,
+                student_attempts.id,
                 candidate_id,
                 candidate_name,
                 candidate_email,
@@ -1586,15 +1755,32 @@ impl ProctoringService {
                 phase,
                 integrity,
                 violations_snapshot,
-                exam_id,
+                student_attempts.exam_id,
                 exam_title,
                 student_attempts.updated_at,
                 COALESCE(proctor_status, 'active') AS proctor_status,
                 last_warning_id,
                 presence.last_heartbeat_at AS presence_last_heartbeat_at,
-                presence.last_heartbeat_status AS presence_last_heartbeat_status
+                presence.last_heartbeat_status AS presence_last_heartbeat_status,
+                e.provider_key,
+                sat_module.title AS sat_module_title,
+                sat_module.module_key AS sat_module_key,
+                sat_attempt.started_at AS sat_started_at,
+                sat_attempt.paused_at AS sat_paused_at,
+                sat_attempt.allocated_seconds AS sat_allocated_seconds,
+                sat_attempt.extension_seconds AS sat_extension_seconds,
+                sat_attempt.accumulated_paused_seconds AS sat_accumulated_paused_seconds
             FROM student_attempts
+            JOIN exam_entities e ON e.id = student_attempts.exam_id
             LEFT JOIN student_attempt_presence presence ON presence.attempt_id = student_attempts.id
+            LEFT JOIN assessment_module_attempts sat_attempt ON sat_attempt.id = (
+                SELECT ma2.id
+                FROM assessment_module_attempts ma2
+                WHERE ma2.attempt_id = student_attempts.id AND ma2.state = 'active'
+                ORDER BY ma2.created_at DESC, ma2.id DESC
+                LIMIT 1
+            )
+            LEFT JOIN assessment_modules sat_module ON sat_module.id = sat_attempt.module_id
             WHERE student_attempts.schedule_id = ?
             ORDER BY student_attempts.updated_at DESC
             "#,
@@ -1621,7 +1807,7 @@ impl ProctoringService {
         let row = sqlx::query_as::<_, AttemptProjectionRow>(
             r#"
             SELECT
-                id,
+                student_attempts.id,
                 candidate_id,
                 candidate_name,
                 candidate_email,
@@ -1630,15 +1816,32 @@ impl ProctoringService {
                 phase,
                 integrity,
                 violations_snapshot,
-                exam_id,
+                student_attempts.exam_id,
                 exam_title,
                 student_attempts.updated_at,
                 COALESCE(proctor_status, 'active') AS proctor_status,
                 last_warning_id,
                 presence.last_heartbeat_at AS presence_last_heartbeat_at,
-                presence.last_heartbeat_status AS presence_last_heartbeat_status
+                presence.last_heartbeat_status AS presence_last_heartbeat_status,
+                e.provider_key,
+                sat_module.title AS sat_module_title,
+                sat_module.module_key AS sat_module_key,
+                sat_attempt.started_at AS sat_started_at,
+                sat_attempt.paused_at AS sat_paused_at,
+                sat_attempt.allocated_seconds AS sat_allocated_seconds,
+                sat_attempt.extension_seconds AS sat_extension_seconds,
+                sat_attempt.accumulated_paused_seconds AS sat_accumulated_paused_seconds
             FROM student_attempts
+            JOIN exam_entities e ON e.id = student_attempts.exam_id
             LEFT JOIN student_attempt_presence presence ON presence.attempt_id = student_attempts.id
+            LEFT JOIN assessment_module_attempts sat_attempt ON sat_attempt.id = (
+                SELECT ma2.id
+                FROM assessment_module_attempts ma2
+                WHERE ma2.attempt_id = student_attempts.id AND ma2.state = 'active'
+                ORDER BY ma2.created_at DESC, ma2.id DESC
+                LIMIT 1
+            )
+            LEFT JOIN assessment_modules sat_module ON sat_module.id = sat_attempt.module_id
             WHERE student_attempts.id = ? AND student_attempts.schedule_id = ?
             "#,
         )
@@ -1927,6 +2130,14 @@ struct AttemptProjectionRow {
     last_warning_id: Option<String>,
     presence_last_heartbeat_at: Option<DateTime<Utc>>,
     presence_last_heartbeat_status: Option<String>,
+    provider_key: String,
+    sat_module_title: Option<String>,
+    sat_module_key: Option<String>,
+    sat_started_at: Option<DateTime<Utc>>,
+    sat_paused_at: Option<DateTime<Utc>>,
+    sat_allocated_seconds: Option<i32>,
+    sat_extension_seconds: Option<i32>,
+    sat_accumulated_paused_seconds: Option<i32>,
 }
 
 #[derive(FromRow)]
@@ -2189,6 +2400,26 @@ fn map_scheduling_error(error: SchedulingError) -> ProctoringError {
     }
 }
 
+fn compute_sat_attempt_remaining_seconds(
+    started_at: Option<DateTime<Utc>>,
+    paused_at: Option<DateTime<Utc>>,
+    allocated_seconds: i32,
+    extension_seconds: i32,
+    accumulated_paused_seconds: i32,
+    now: DateTime<Utc>,
+) -> i32 {
+    let total = allocated_seconds.saturating_add(extension_seconds).max(0);
+    let Some(started_at) = started_at else {
+        return total;
+    };
+    let time_base = paused_at.unwrap_or(now);
+    let elapsed = (time_base - started_at)
+        .num_seconds()
+        .max(0)
+        .saturating_sub(i64::from(accumulated_paused_seconds.max(0)));
+    (i64::from(total) - elapsed).clamp(0, i64::from(total)) as i32
+}
+
 fn attempt_row_to_session(
     row: AttemptProjectionRow,
     runtime: &ExamSessionRuntime,
@@ -2244,6 +2475,28 @@ fn attempt_row_to_session(
         })
         .unwrap_or_else(|| i32::from(row.last_warning_id.is_some()));
 
+    let is_sat = row.provider_key == "sat";
+    let time_remaining = if is_sat {
+        compute_sat_attempt_remaining_seconds(
+            row.sat_started_at,
+            row.sat_paused_at,
+            row.sat_allocated_seconds.unwrap_or(0),
+            row.sat_extension_seconds.unwrap_or(0),
+            row.sat_accumulated_paused_seconds.unwrap_or(0),
+            Utc::now(),
+        )
+    } else {
+        runtime.current_section_remaining_seconds
+    };
+    let current_section = if is_sat {
+        row.sat_module_title
+            .clone()
+            .or(row.sat_module_key.clone())
+            .unwrap_or_else(|| row.current_module.clone())
+    } else {
+        row.current_module.clone()
+    };
+
     StudentSessionSummary {
         attempt_id: row.id.to_string(),
         student_id: row.candidate_id,
@@ -2251,13 +2504,37 @@ fn attempt_row_to_session(
         student_email: row.candidate_email,
         schedule_id: row.schedule_id.to_string(),
         status,
-        current_section: row.current_module,
-        time_remaining: runtime.current_section_remaining_seconds,
+        current_section: current_section.clone(),
+        time_remaining,
         runtime_status: runtime.status.clone(),
-        runtime_current_section: runtime.current_section_key.clone(),
-        runtime_time_remaining_seconds: runtime.current_section_remaining_seconds,
-        runtime_section_status,
-        runtime_waiting: runtime.waiting_for_next_section,
+        runtime_current_section: if is_sat {
+            Some(current_section.clone())
+        } else {
+            runtime.current_section_key.clone()
+        },
+        runtime_time_remaining_seconds: if is_sat {
+            time_remaining
+        } else {
+            runtime.current_section_remaining_seconds
+        },
+        runtime_section_status: if is_sat {
+            Some(
+                if row.proctor_status == "paused" || row.sat_paused_at.is_some() {
+                    "paused".to_owned()
+                } else if row.sat_started_at.is_some() {
+                    "live".to_owned()
+                } else {
+                    "locked".to_owned()
+                },
+            )
+        } else {
+            runtime_section_status
+        },
+        runtime_waiting: if is_sat {
+            false
+        } else {
+            runtime.waiting_for_next_section
+        },
         violations: row.violations_snapshot,
         warnings,
         last_activity,
