@@ -45,6 +45,19 @@ const AUTH_MIGRATIONS: &[&str] = &[
     "0023_sort_memory_hotpath_indexes.sql",
     "0024_projection_sort_hardening.sql",
     "0025_join_storm_admission_queue.sql",
+    "0026_relax_access_code_constraints.sql",
+    "0027_grading_objective_overrides.sql",
+    "0028_grading_objective_grading_source.sql",
+    "0029_release_events_timestamp_precision.sql",
+    "0030_outbox_retry_policy.sql",
+    "0031_grading_export_profiles.sql",
+    "0032_provider_neutral_sat.sql",
+    "0033_sat_runtime_authoring_hardening.sql",
+    "0034_assessment_access_links.sql",
+    "0035_autosave_durability_hardening.sql",
+    "0036_question_revision_updated_by.sql",
+    "0037_runtime_timing_model.sql",
+    "0038_sat_section_timing_model.sql",
 ];
 
 #[tokio::test]
@@ -67,7 +80,8 @@ async fn student_entry_locks_identity_on_student_name() {
                 .header("x-forwarded-for", "203.0.113.10")
                 .body(Body::from(
                     serde_json::to_vec(&StudentEntryRequest {
-                        schedule_id: schedule_id.clone(),
+                        schedule_id: Some(schedule_id.clone()),
+                        access_link_id: None,
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
@@ -91,7 +105,8 @@ async fn student_entry_locks_identity_on_student_name() {
                 .header("x-forwarded-for", "203.0.113.10")
                 .body(Body::from(
                     serde_json::to_vec(&StudentEntryRequest {
-                        schedule_id: schedule_id.clone(),
+                        schedule_id: Some(schedule_id.clone()),
+                        access_link_id: None,
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Mallory Candidate".to_owned(),
@@ -132,7 +147,8 @@ async fn student_entry_locks_identity_on_email_once_claimed() {
                 .header("x-forwarded-for", "203.0.113.11")
                 .body(Body::from(
                     serde_json::to_vec(&StudentEntryRequest {
-                        schedule_id: schedule_id.clone(),
+                        schedule_id: Some(schedule_id.clone()),
+                        access_link_id: None,
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
@@ -156,7 +172,8 @@ async fn student_entry_locks_identity_on_email_once_claimed() {
                 .header("x-forwarded-for", "203.0.113.11")
                 .body(Body::from(
                     serde_json::to_vec(&StudentEntryRequest {
-                        schedule_id: schedule_id.clone(),
+                        schedule_id: Some(schedule_id.clone()),
+                        access_link_id: None,
                         wcode: "W123456".to_owned(),
                         email: "mallory@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
@@ -196,7 +213,8 @@ async fn student_entry_requires_nickname() {
                 .header("x-forwarded-for", "203.0.113.15")
                 .body(Body::from(
                     serde_json::to_vec(&StudentEntryRequest {
-                        schedule_id: schedule.id.clone(),
+                        schedule_id: Some(schedule.id.clone()),
+                        access_link_id: None,
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
@@ -236,7 +254,8 @@ async fn student_entry_requires_ielts_course() {
                 .header("x-forwarded-for", "203.0.113.16")
                 .body(Body::from(
                     serde_json::to_vec(&StudentEntryRequest {
-                        schedule_id: schedule.id.clone(),
+                        schedule_id: Some(schedule.id.clone()),
+                        access_link_id: None,
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
@@ -276,7 +295,8 @@ async fn student_entry_persists_nickname_and_ielts_course_metadata() {
                 .header("x-forwarded-for", "203.0.113.17")
                 .body(Body::from(
                     serde_json::to_vec(&StudentEntryRequest {
-                        schedule_id: schedule.id.clone(),
+                        schedule_id: Some(schedule.id.clone()),
+                        access_link_id: None,
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
@@ -342,7 +362,8 @@ async fn student_entry_is_rate_limited_per_ip() {
 
     let schedule_id = schedule.id.clone();
     let request = StudentEntryRequest {
-        schedule_id: schedule_id.clone(),
+        schedule_id: Some(schedule_id.clone()),
+        access_link_id: None,
         wcode: "W123456".to_owned(),
         email: "alice@example.com".to_owned(),
         student_name: "Alice Candidate".to_owned(),
@@ -407,7 +428,8 @@ async fn student_entry_returns_queued_admission_when_storm_mode_enabled() {
                 .header("x-forwarded-for", "203.0.113.21")
                 .body(Body::from(
                     serde_json::to_vec(&StudentEntryRequest {
-                        schedule_id: schedule.id.clone(),
+                        schedule_id: Some(schedule.id.clone()),
+                        access_link_id: None,
                         wcode: "W123456".to_owned(),
                         email: "alice@example.com".to_owned(),
                         student_name: "Alice Candidate".to_owned(),
@@ -448,7 +470,8 @@ async fn student_entry_queue_retries_are_not_rate_limited_in_storm_mode() {
     ));
 
     let payload = StudentEntryRequest {
-        schedule_id: schedule.id.clone(),
+        schedule_id: Some(schedule.id.clone()),
+        access_link_id: None,
         wcode: "W123456".to_owned(),
         email: "alice@example.com".to_owned(),
         student_name: "Alice Candidate".to_owned(),
@@ -511,7 +534,8 @@ async fn student_entry_transitions_from_queued_to_authenticated_after_runtime_st
     ));
 
     let payload = StudentEntryRequest {
-        schedule_id: schedule.id.clone(),
+        schedule_id: Some(schedule.id.clone()),
+        access_link_id: None,
         wcode: "W123456".to_owned(),
         email: "alice@example.com".to_owned(),
         student_name: "Alice Candidate".to_owned(),

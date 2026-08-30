@@ -20,6 +20,7 @@
     "playwright": "playwright test",
     "playwright:ui": "playwright test --ui",
     "playwright:debug": "playwright test --debug",
+    "e2e:sat-a11y": "playwright test --config playwright.sat-a11y.config.ts",
     "e2e:prod-smoke": "playwright test --config playwright.prod-smoke.config.ts",
     "e2e:prod-load": "playwright test --config playwright.prod-load.config.ts",
     "e2e:live-runner": "tsx e2e/prod-load/live-multi-user-runner.ts",
@@ -31,10 +32,7 @@
     "k6:resume": "k6 run k6/prod-resume-100.js",
     "k6:auto-submit": "k6 run k6/prod-auto-submit-200.js",
     "e2e:live-with-k6": "sh -c 'TS=$(date +%s); LOG_DIR=\"${LOG_DIR:-e2e/.generated/live-runner}\"; mkdir -p \"$LOG_DIR\"; K6_LOG_FILE=\"${K6_LOG_FILE:-$LOG_DIR/k6-$TS.log}\"; LIVE_RUN_LOG_FILE=\"${LIVE_RUN_LOG_FILE:-$LOG_DIR/live-runner-$TS.log}\"; echo \"[combo] k6 log: $K6_LOG_FILE\"; echo \"[combo] live log: $LIVE_RUN_LOG_FILE\"; k6 run \"${K6_SCRIPT:-k6/prod-start-exam-200.js}\" > \"$K6_LOG_FILE\" 2>&1 & K6_PID=$!; LIVE_RUN_LOG_FILE=\"$LIVE_RUN_LOG_FILE\" npm run e2e:live-runner; STATUS=$?; kill $K6_PID >/dev/null 2>&1 || true; wait $K6_PID >/dev/null 2>&1 || true; exit $STATUS'",
-    "e2e:leapcell-ui": "node deploy/leapcell-load/ui-server.mjs",
-    "predev": "node scripts/prepare-desmos-self-host.mjs",
-    "prebuild": "node scripts/prepare-desmos-self-host.mjs",
-    "desmos:prepare": "node scripts/prepare-desmos-self-host.mjs"
+    "e2e:leapcell-ui": "node deploy/leapcell-load/ui-server.mjs"
   },
   "dependencies": {
     "@dnd-kit/helpers": "^0.5.0",
@@ -63,6 +61,7 @@
     "mathlive": "0.110.0",
     "motion": "^12.23.24",
     "next-themes": "^0.4.6",
+    "qrcode": "^1.5.4",
     "radix-ui": "^1.4.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -87,6 +86,7 @@
     "@testing-library/react": "^16.0.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^2.0.0",
@@ -97,6 +97,7 @@
     "eslint-plugin-storybook": "^10.3.5",
     "globals": "^15.0.0",
     "jsdom": "^24.0.0",
+    "mysql2": "^3.24.2",
     "postcss": "^8.5.19",
     "postcss-100vh-fix": "^2.0.0",
     "rollup-plugin-visualizer": "^5.12.0",

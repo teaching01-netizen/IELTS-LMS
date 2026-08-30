@@ -20,6 +20,7 @@ import {
   Subscript as SubscriptIcon,
   Superscript as SuperscriptIcon,
   Table2,
+  Underline as UnderlineIcon,
   Undo2,
   X,
 } from "lucide-react";
@@ -35,7 +36,11 @@ import { uploadAssessmentAsset } from "../api/assessmentMediaApi";
 import { authoringMotion } from "../ui/authoringMotion";
 
 const baseExtensions = [
-  StarterKit.configure({ codeBlock: false, blockquote: false, heading: { levels: [2, 3] } }),
+  StarterKit.configure({
+    codeBlock: false,
+    blockquote: false,
+    heading: { levels: [2, 3] },
+  }),
   EditableInlineMath,
   EditableBlockMath,
   TableKit.configure({ table: { resizable: true, lastColumnResizable: false } }),
@@ -49,6 +54,36 @@ type MathDialogTarget =
   | { mode: "insert"; display: boolean; latex: string }
   | { mode: "edit"; display: boolean; latex: string; pos: number };
 
+export interface RichComposerCapabilities {
+  blockStyles: boolean;
+  lists: boolean;
+  underline: boolean;
+  equation: boolean;
+  image: boolean;
+  table: boolean;
+  history: boolean;
+}
+
+export const SAT_RICH_COMPOSER_CAPABILITIES: Readonly<RichComposerCapabilities> = Object.freeze({
+  blockStyles: true,
+  lists: true,
+  underline: true,
+  equation: true,
+  image: true,
+  table: true,
+  history: true,
+});
+
+export const SAT_CHOICE_COMPOSER_CAPABILITIES: Readonly<RichComposerCapabilities> = Object.freeze({
+  blockStyles: false,
+  lists: false,
+  underline: true,
+  equation: true,
+  image: true,
+  table: true,
+  history: true,
+});
+
 export interface RichQuestionComposerProps {
   value: StructuredContent;
   onChange: (value: StructuredContent) => void;
@@ -57,6 +92,7 @@ export interface RichQuestionComposerProps {
   compact?: boolean;
   minHeightClassName?: string;
   assetOwnerId?: string;
+  capabilities?: Readonly<RichComposerCapabilities>;
 }
 
 export function RichQuestionComposer({
@@ -67,6 +103,7 @@ export function RichQuestionComposer({
   compact = false,
   minHeightClassName = "min-h-[132px]",
   assetOwnerId,
+  capabilities = SAT_RICH_COMPOSER_CAPABILITIES,
 }: RichQuestionComposerProps) {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [tableFeedback, setTableFeedback] = useState(false);
@@ -133,6 +170,7 @@ export function RichQuestionComposer({
         <ComposerToolbar
           editor={editor}
           compact={compact}
+          capabilities={capabilities}
           onOpenDialog={setDialog}
           onTableMutation={flashTableFeedback}
         />
@@ -164,11 +202,13 @@ export function RichQuestionComposer({
 function ComposerToolbar({
   editor,
   compact,
+  capabilities,
   onOpenDialog,
   onTableMutation,
 }: {
   editor: Editor;
   compact: boolean;
+  capabilities: Readonly<RichComposerCapabilities>;
   onOpenDialog: (dialog: Dialog) => void;
   onTableMutation: () => void;
 }) {
@@ -177,6 +217,7 @@ function ComposerToolbar({
     selector: ({ editor: current }) => ({
       bold: current?.isActive("bold") ?? false,
       italic: current?.isActive("italic") ?? false,
+      underline: current?.isActive("underline") ?? false,
       superscript: current?.isActive("superscript") ?? false,
       subscript: current?.isActive("subscript") ?? false,
       bulletList: current?.isActive("bulletList") ?? false,
@@ -207,32 +248,38 @@ function ComposerToolbar({
   return (
     <div className="authoring-editor-toolbar sticky top-[105px] z-20 rounded-t-[14px] border-b border-black/[0.06] bg-white/95 backdrop-blur-xl">
       <div className="flex min-h-11 flex-wrap items-center gap-1 px-2 py-1.5">
-        {!compact ? (
+        {!compact && (capabilities.blockStyles || capabilities.lists) ? (
           <div className="flex items-center gap-1">
-            <select
-              aria-label="Text style"
-              value={state?.blockStyle ?? "paragraph"}
-              onChange={(event) => setBlockStyle(event.target.value)}
-              className="h-8 rounded-lg border-0 bg-black/[0.045] px-2.5 pr-7 text-[12px] font-medium text-slate-700 outline-none transition hover:bg-black/[0.07] focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35"
-            >
-              <option value="paragraph">Body</option>
-              <option value="heading2">Heading</option>
-              <option value="heading3">Subheading</option>
-            </select>
-            <ToolbarButton
-              title="Bulleted list (⇧⌘8)"
-              active={state?.bulletList}
-              onClick={() => editor.chain().focus().toggleBulletList().run()}
-            >
-              <List size={15} />
-            </ToolbarButton>
-            <ToolbarButton
-              title="Numbered list (⇧⌘7)"
-              active={state?.orderedList}
-              onClick={() => editor.chain().focus().toggleOrderedList().run()}
-            >
-              <ListOrdered size={15} />
-            </ToolbarButton>
+            {capabilities.blockStyles ? (
+              <select
+                aria-label="Text style"
+                value={state?.blockStyle ?? "paragraph"}
+                onChange={(event) => setBlockStyle(event.target.value)}
+                className="h-8 rounded-lg border-0 bg-black/[0.045] px-2.5 pr-7 text-[12px] font-medium text-slate-700 outline-none transition hover:bg-black/[0.07] focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35"
+              >
+                <option value="paragraph">Body</option>
+                <option value="heading2">Heading</option>
+                <option value="heading3">Subheading</option>
+              </select>
+            ) : null}
+            {capabilities.lists ? (
+              <>
+                <ToolbarButton
+                  title="Bulleted list (⇧⌘8)"
+                  active={state?.bulletList}
+                  onClick={() => editor.chain().focus().toggleBulletList().run()}
+                >
+                  <List size={15} />
+                </ToolbarButton>
+                <ToolbarButton
+                  title="Numbered list (⇧⌘7)"
+                  active={state?.orderedList}
+                  onClick={() => editor.chain().focus().toggleOrderedList().run()}
+                >
+                  <ListOrdered size={15} />
+                </ToolbarButton>
+              </>
+            ) : null}
             <ToolbarDivider />
           </div>
         ) : null}
@@ -252,6 +299,15 @@ function ComposerToolbar({
           >
             <Italic size={15} />
           </ToolbarButton>
+          {capabilities.underline ? (
+            <ToolbarButton
+              title="Underline (⌘U)"
+              active={state?.underline}
+              onClick={() => editor.chain().focus().toggleUnderline().run()}
+            >
+              <UnderlineIcon size={15} />
+            </ToolbarButton>
+          ) : null}
           <ToolbarButton
             title="Superscript"
             active={state?.superscript}
@@ -268,51 +324,61 @@ function ComposerToolbar({
           </ToolbarButton>
         </div>
 
-        <ToolbarDivider />
+        {capabilities.equation || capabilities.image || capabilities.table ? (
+          <ToolbarDivider />
+        ) : null}
         <div className="flex items-center gap-0.5">
-          <ToolbarButton title="Insert equation" onClick={() => onOpenDialog("math")}>
-            <Sigma size={15} />
-          </ToolbarButton>
-          {!compact ? (
-            <>
-              <ToolbarButton title="Insert image or graph" onClick={() => onOpenDialog("image")}>
-                <ImagePlus size={15} />
-              </ToolbarButton>
-              <ToolbarButton
-                title="Insert table"
-                active={state?.table}
-                onClick={() =>
-                  mutateTable(() => {
-                    editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
-                  })
-                }
-              >
-                <Table2 size={15} />
-              </ToolbarButton>
-            </>
+          {capabilities.equation ? (
+            <ToolbarButton title="Insert equation" onClick={() => onOpenDialog("math")}>
+              <Sigma size={15} />
+            </ToolbarButton>
+          ) : null}
+          {capabilities.image ? (
+            <ToolbarButton title="Insert image or graph" onClick={() => onOpenDialog("image")}>
+              <ImagePlus size={15} />
+            </ToolbarButton>
+          ) : null}
+          {capabilities.table ? (
+            <ToolbarButton
+              title="Insert table"
+              active={state?.table}
+              onClick={() =>
+                mutateTable(() => {
+                  editor
+                    .chain()
+                    .focus()
+                    .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                    .run();
+                })
+              }
+            >
+              <Table2 size={15} />
+            </ToolbarButton>
           ) : null}
         </div>
 
-        <div className="ml-auto flex items-center gap-0.5 pl-1">
-          <ToolbarButton
-            title="Undo (⌘Z)"
-            disabled={!state?.canUndo}
-            onClick={() => editor.chain().focus().undo().run()}
-          >
-            <Undo2 size={15} />
-          </ToolbarButton>
-          <ToolbarButton
-            title="Redo (⇧⌘Z)"
-            disabled={!state?.canRedo}
-            onClick={() => editor.chain().focus().redo().run()}
-          >
-            <Redo2 size={15} />
-          </ToolbarButton>
-        </div>
+        {capabilities.history ? (
+          <div className="ml-auto flex items-center gap-0.5 pl-1">
+            <ToolbarButton
+              title="Undo (⌘Z)"
+              disabled={!state?.canUndo}
+              onClick={() => editor.chain().focus().undo().run()}
+            >
+              <Undo2 size={15} />
+            </ToolbarButton>
+            <ToolbarButton
+              title="Redo (⇧⌘Z)"
+              disabled={!state?.canRedo}
+              onClick={() => editor.chain().focus().redo().run()}
+            >
+              <Redo2 size={15} />
+            </ToolbarButton>
+          </div>
+        ) : null}
       </div>
 
       <AnimatePresence initial={false}>
-        {!compact && state?.table ? (
+        {capabilities.table && state?.table ? (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
@@ -322,12 +388,30 @@ function ComposerToolbar({
           >
             <div className="flex flex-wrap items-center gap-1 px-2 py-1.5 text-[11px]">
               <span className="mr-1 px-1 font-semibold text-slate-500">Table</span>
-              <TableAction label="Add row" onClick={() => mutateTable(() => void editor.chain().focus().addRowAfter().run())} />
-              <TableAction label="Delete row" onClick={() => mutateTable(() => void editor.chain().focus().deleteRow().run())} />
-              <TableAction label="Add column" onClick={() => mutateTable(() => void editor.chain().focus().addColumnAfter().run())} />
-              <TableAction label="Delete column" onClick={() => mutateTable(() => void editor.chain().focus().deleteColumn().run())} />
+              <TableAction
+                label="Add row"
+                onClick={() => mutateTable(() => void editor.chain().focus().addRowAfter().run())}
+              />
+              <TableAction
+                label="Delete row"
+                onClick={() => mutateTable(() => void editor.chain().focus().deleteRow().run())}
+              />
+              <TableAction
+                label="Add column"
+                onClick={() =>
+                  mutateTable(() => void editor.chain().focus().addColumnAfter().run())
+                }
+              />
+              <TableAction
+                label="Delete column"
+                onClick={() => mutateTable(() => void editor.chain().focus().deleteColumn().run())}
+              />
               <span className="mx-1 h-4 w-px bg-black/10" />
-              <TableAction danger label="Delete table" onClick={() => mutateTable(() => void editor.chain().focus().deleteTable().run())} />
+              <TableAction
+                danger
+                label="Delete table"
+                onClick={() => mutateTable(() => void editor.chain().focus().deleteTable().run())}
+              />
             </div>
           </motion.div>
         ) : null}
@@ -354,7 +438,9 @@ function TableAction({
       type="button"
       onClick={onClick}
       className={`rounded-md px-2 py-1.5 font-medium transition ${
-        danger ? "text-red-600 hover:bg-red-50" : "text-slate-600 hover:bg-white hover:text-slate-950"
+        danger
+          ? "text-red-600 hover:bg-red-50"
+          : "text-slate-600 hover:bg-white hover:text-slate-950"
       }`}
     >
       {label}
@@ -499,10 +585,15 @@ function MathDialog({
           <div className="mb-2 flex items-center justify-between gap-3">
             <span className="text-[12px] font-semibold text-slate-700">Placement</span>
             {isEditing ? (
-              <span className="text-[11px] text-slate-400">Placement stays fixed while editing</span>
+              <span className="text-[11px] text-slate-400">
+                Placement stays fixed while editing
+              </span>
             ) : null}
           </div>
-          <div className="authoring-segmented inline-flex rounded-full p-1" aria-label="Equation placement">
+          <div
+            className="authoring-segmented inline-flex rounded-full p-1"
+            aria-label="Equation placement"
+          >
             <EquationPlacementButton
               active={!display}
               disabled={isEditing && target.display}
@@ -548,7 +639,10 @@ function MathDialog({
 
         <div>
           <div className="mb-2 flex items-baseline justify-between gap-3">
-            <span id="sat-equation-latex-label" className="text-[12px] font-semibold text-slate-700">
+            <span
+              id="sat-equation-latex-label"
+              className="text-[12px] font-semibold text-slate-700"
+            >
               Equation
             </span>
             <span className="text-[11px] text-slate-400">LaTeX · no $ delimiters</span>
@@ -586,7 +680,8 @@ function MathDialog({
               </p>
             ) : (
               <p id="sat-equation-help" className="text-[11px] leading-5 text-slate-400">
-                Use the quick controls or type LaTeX directly. Press ⌘Return to {isEditing ? "update" : "insert"}.
+                Use the quick controls or type LaTeX directly. Press ⌘Return to{" "}
+                {isEditing ? "update" : "insert"}.
               </p>
             )}
           </div>
@@ -614,7 +709,9 @@ function MathDialog({
               <div className="mx-auto flex flex-col items-center gap-2 text-center text-slate-400">
                 <Sigma size={20} strokeWidth={1.7} />
                 <span className="text-[11px]">
-                  {latex.trim() ? "Complete the expression to preview" : "Your equation will appear here"}
+                  {latex.trim()
+                    ? "Complete the expression to preview"
+                    : "Your equation will appear here"}
                 </span>
               </div>
             )}
@@ -622,7 +719,9 @@ function MathDialog({
         </div>
 
         <div className="flex items-center justify-between border-t border-black/[0.06] pt-4">
-          <span className="hidden text-[11px] text-slate-400 sm:inline">Esc to cancel · ⌘Return to {isEditing ? "update" : "insert"}</span>
+          <span className="hidden text-[11px] text-slate-400 sm:inline">
+            Esc to cancel · ⌘Return to {isEditing ? "update" : "insert"}
+          </span>
           <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
@@ -729,7 +828,6 @@ function ImageDialog({
     try {
       const asset = await uploadAssessmentAsset(file, ownerId);
       setAssetId(asset.id);
-      if (!alt) setAlt(file.name.replace(/\.[^.]+$/, "").replaceAll(/[-_]+/g, " "));
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "Image upload failed.");
     } finally {
@@ -831,18 +929,41 @@ function ImageDialog({
           ) : null}
         </div>
       ) : null}
-      <span id="sat-visual-asset-label" className="text-xs font-semibold text-slate-700">
-        Asset ID or image URL
-      </span>
-      <input
-        id="sat-visual-asset"
-        aria-labelledby="sat-visual-asset-label"
-        data-dialog-initial-focus
-        value={assetId}
-        onChange={(event) => setAssetId(event.target.value)}
-        className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-        placeholder="Paste an existing asset ID or https://…"
-      />
+      {ownerId ? (
+        <details className="mb-3 rounded-xl border border-black/[0.06] bg-[#fafafa] px-3 py-2">
+          <summary className="cursor-pointer text-[11px] font-semibold text-slate-500">
+            Use existing asset…
+          </summary>
+          <div className="mt-3 block">
+            <span className="block text-[11px] font-semibold text-slate-600">
+              Asset ID or image URL
+            </span>
+            <input
+              id="sat-visual-asset"
+              aria-label="Asset ID or image URL"
+              value={assetId}
+              onChange={(event) => setAssetId(event.target.value)}
+              className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+              placeholder="Existing asset ID or https://…"
+            />
+          </div>
+        </details>
+      ) : (
+        <>
+          <div className="block">
+            <span className="text-xs font-semibold text-slate-700">Image URL or asset ID</span>
+            <input
+              id="sat-visual-asset"
+              aria-label="Image URL or asset ID"
+              data-dialog-initial-focus
+              value={assetId}
+              onChange={(event) => setAssetId(event.target.value)}
+              className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+              placeholder="https://…"
+            />
+          </div>
+        </>
+      )}
       <span id="sat-visual-alt-label" className="mt-3 block text-xs font-semibold text-slate-700">
         Alternative text <span className="text-red-500">*</span>
       </span>
@@ -852,8 +973,12 @@ function ImageDialog({
         value={alt}
         onChange={(event) => setAlt(event.target.value)}
         className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-        placeholder="Describe what the student needs to know from this visual"
+        placeholder="Describe the information a student needs from this visual"
       />
+      <p className="mt-1.5 text-[10px] leading-5 text-slate-400">
+        Describe the visual information needed to answer the question; do not use the file name as
+        alt text.
+      </p>
       <span
         id="sat-visual-caption-label"
         className="mt-3 block text-xs font-semibold text-slate-700"

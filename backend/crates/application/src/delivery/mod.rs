@@ -34,10 +34,12 @@ use crate::scheduling::SchedulingService;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryConflictReason {
     ObjectiveLocked,
+    DeadlineExpired,
     SectionMismatch,
     AttemptProctorBlocked,
     BaseRevisionMismatch,
     AttemptSubmitted,
+    ActiveSessionSuperseded,
     FinalFlushRequired,
     FinalPayloadHashMismatch,
 }
@@ -46,10 +48,12 @@ impl DeliveryConflictReason {
     pub fn as_str(self) -> &'static str {
         match self {
             DeliveryConflictReason::ObjectiveLocked => "OBJECTIVE_LOCKED",
+            DeliveryConflictReason::DeadlineExpired => "DEADLINE_EXPIRED",
             DeliveryConflictReason::SectionMismatch => "SECTION_MISMATCH",
             DeliveryConflictReason::AttemptProctorBlocked => "ATTEMPT_PROCTOR_BLOCKED",
             DeliveryConflictReason::BaseRevisionMismatch => "BASE_REVISION_MISMATCH",
             DeliveryConflictReason::AttemptSubmitted => "ATTEMPT_SUBMITTED",
+            DeliveryConflictReason::ActiveSessionSuperseded => "ACTIVE_SESSION_SUPERSEDED",
             DeliveryConflictReason::FinalFlushRequired => "FINAL_FLUSH_REQUIRED",
             DeliveryConflictReason::FinalPayloadHashMismatch => "FINAL_PAYLOAD_HASH_MISMATCH",
         }
@@ -60,6 +64,76 @@ impl DeliveryConflictReason {
 pub enum MutationBatchResponseMode {
     Full,
     Ack,
+}
+
+/// Provider-neutral active-writer claim. Keeping every `student_attempts` update in this
+/// module preserves a single physical writer while provider services retain their transaction.
+pub(crate) async fn claim_provider_attempt_writer_in_tx(
+    conn: &mut MySqlConnection,
+    attempt_id: &str,
+    schedule_id: &str,
+    client_session_id: &str,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL",
+    )
+    .bind(client_session_id)
+    .bind(attempt_id)
+    .bind(schedule_id)
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Provider-neutral phase projection for a started assessment.
+pub(crate) async fn mark_provider_attempt_exam_phase_in_tx(
+    conn: &mut MySqlConnection,
+    attempt_id: &str,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE student_attempts SET phase = 'exam', updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ?",
+    )
+    .bind(attempt_id)
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Authoritative writer for provider-neutral finalization of protected attempt fields.
+/// Callers must pass the connection from their existing transaction so provider-specific
+/// result rows and the canonical attempt seal commit atomically.
+pub(crate) async fn seal_provider_attempt_in_tx(
+    conn: &mut MySqlConnection,
+    attempt_id: &str,
+    final_submission: &Value,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE student_attempts SET phase = 'post-exam', final_submission = ?, submitted_at = CURRENT_TIMESTAMP(6), updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ?",
+    )
+    .bind(final_submission)
+    .bind(attempt_id)
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Same authoritative writer path for proctor termination. Existing submitted timestamps are
+/// preserved because termination may race an idempotent finalization replay.
+pub(crate) async fn terminate_provider_attempt_in_tx(
+    conn: &mut MySqlConnection,
+    attempt_id: &str,
+    schedule_id: &str,
+    final_submission: &Value,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE student_attempts SET phase = 'post-exam', final_submission = ?, submitted_at = COALESCE(submitted_at, CURRENT_TIMESTAMP(6)), updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND schedule_id = ?",
+    )
+    .bind(final_submission)
+    .bind(attempt_id)
+    .bind(schedule_id)
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected())
 }
 
 #[derive(Error, Debug)]
@@ -120,7 +194,6 @@ impl DeliveryError {
 pub struct DeliveryService {
     pool: MySqlPool,
     auth_service: Option<AuthService>,
-    final_submit_grace_seconds: i64,
 }
 
 impl DeliveryService {
@@ -128,17 +201,14 @@ impl DeliveryService {
         Self {
             pool,
             auth_service: None,
-            final_submit_grace_seconds: 15,
         }
     }
 
     pub fn with_auth(pool: MySqlPool, config: AppConfig) -> Self {
-        let final_submit_grace_seconds = config.final_submit_grace_seconds;
         let auth_service = AuthService::new(pool.clone(), config);
         Self {
             pool,
             auth_service: Some(auth_service),
-            final_submit_grace_seconds,
         }
     }
 
@@ -149,9 +219,7 @@ impl DeliveryService {
         _violation_idempotency_usable_hours: i64,
         _heartbeat_min_write_interval_secs: u64,
     ) -> Self {
-        let mut service = Self::new(pool);
-        service.final_submit_grace_seconds = 15;
-        service
+        Self::new(pool)
     }
 
     pub fn with_auth_runtime_tuning(
@@ -162,15 +230,63 @@ impl DeliveryService {
         _violation_idempotency_usable_hours: i64,
         _heartbeat_min_write_interval_secs: u64,
     ) -> Self {
-        let mut service = Self::with_auth(pool, config.clone());
-        service.final_submit_grace_seconds = config.final_submit_grace_seconds;
-        service
+        Self::with_auth(pool, config)
     }
 
     fn auth_service(&self) -> Result<&AuthService, DeliveryError> {
         self.auth_service
             .as_ref()
             .ok_or_else(|| DeliveryError::Internal("Auth service is not configured.".to_owned()))
+    }
+
+    async fn lock_runtime_write_gate_tx(
+        &self,
+        conn: &mut MySqlConnection,
+        schedule_id: Uuid,
+    ) -> Result<(Option<RuntimeGateRow>, Option<RuntimeSectionWriteGateRow>), DeliveryError> {
+        // Lock order invariant: runtime -> active runtime section -> student attempt.
+        // Proctor/runtime transitions use the same ordering, preventing a student write from
+        // racing a section boundary or introducing an attempt<->runtime deadlock cycle.
+        let runtime = sqlx::query_as::<_, RuntimeGateRow>(
+            "SELECT id, status, current_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(&mut *conn)
+        .await?;
+
+        let section = match runtime
+            .as_ref()
+            .and_then(|runtime| runtime.current_section_key.as_deref())
+        {
+            Some(section_key) => {
+                let runtime_id = runtime
+                    .as_ref()
+                    .map(|runtime| runtime.id.as_str())
+                    .expect("runtime exists when current section key exists");
+                sqlx::query_as::<_, RuntimeSectionWriteGateRow>(
+                    r#"
+                    SELECT
+                        status,
+                        actual_start_at,
+                        paused_at,
+                        planned_duration_minutes,
+                        extension_minutes,
+                        accumulated_paused_seconds,
+                        UTC_TIMESTAMP(6) AS server_now
+                    FROM exam_session_runtime_sections
+                    WHERE runtime_id = ? AND section_key = ?
+                    FOR UPDATE
+                    "#,
+                )
+                .bind(runtime_id)
+                .bind(section_key)
+                .fetch_optional(&mut *conn)
+                .await?
+            }
+            None => None,
+        };
+
+        Ok((runtime, section))
     }
 
     pub async fn get_session_context(
@@ -233,6 +349,7 @@ impl DeliveryService {
             &mut session,
             principal,
             client_session_id,
+            false,
             "clientSessionId is required to refresh attempt credentials.",
         )
         .await?;
@@ -524,6 +641,7 @@ impl DeliveryService {
             &mut session,
             principal,
             client_session_id,
+            true,
             "clientSessionId is required to issue attempt credentials.",
         )
         .await?;
@@ -536,6 +654,7 @@ impl DeliveryService {
         session: &mut StudentSessionContext,
         principal: &AuthenticatedSession,
         client_session_id: Option<String>,
+        claim_write_ownership: bool,
         missing_client_session_message: &str,
     ) -> Result<(), DeliveryError> {
         let attempt = session.attempt.as_ref().ok_or(DeliveryError::NotFound)?;
@@ -544,13 +663,35 @@ impl DeliveryService {
             .or(fallback_client_session_id)
             .ok_or_else(|| DeliveryError::Validation(missing_client_session_message.to_owned()))?;
 
+        let active_client_session_id: Option<String> = sqlx::query_scalar(
+            "SELECT active_client_session_id FROM student_attempts WHERE id = ?",
+        )
+        .bind(&attempt.id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if !claim_write_ownership {
+            if let Some(active_session_id) = active_client_session_id.as_ref() {
+                if active_session_id != &client_session_id {
+                    return Err(DeliveryError::Conflict {
+                            message: "Attempt write credential has been superseded by a newer student session."
+                                .to_owned(),
+                            reason: Some(DeliveryConflictReason::ActiveSessionSuperseded),
+                            latest_revision: Some(attempt.revision),
+                            server_accepted_through_seq: None,
+                            active_session_id: Some(active_session_id.clone()),
+                        });
+                }
+            }
+        }
+
         let token = self
             .auth_service()?
             .issue_attempt_token(
                 principal,
                 schedule_id.to_string(),
                 attempt.id.clone(),
-                client_session_id,
+                client_session_id.clone(),
                 None,
                 None,
             )
@@ -558,18 +699,56 @@ impl DeliveryService {
             .map_err(|err| {
                 DeliveryError::Internal(format!("Unable to issue attempt token: {err}"))
             })?;
+
+        if claim_write_ownership || active_client_session_id.is_none() {
+            sqlx::query(
+                r#"
+                    UPDATE student_attempts
+                    SET active_client_session_id = ?,
+                        integrity = JSON_SET(integrity, '$.clientSessionId', ?),
+                        recovery = JSON_SET(recovery, '$.clientSessionId', ?),
+                        updated_at = NOW()
+                    WHERE id = ?
+                    "#,
+            )
+            .bind(&client_session_id)
+            .bind(&client_session_id)
+            .bind(&client_session_id)
+            .bind(&attempt.id)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        session.attempt = Some(
+            sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+                .bind(&attempt.id)
+                .fetch_one(&self.pool)
+                .await?,
+        );
         session.attempt_credential = Some(token);
         Ok(())
+    }
+
+    pub async fn apply_mutation_batch(
+        &self,
+        schedule_id: Uuid,
+        req: StudentMutationBatchRequest,
+        response_mode: MutationBatchResponseMode,
+        idempotency_key: Option<String>,
+    ) -> Result<StudentMutationBatchResponse, DeliveryError> {
+        self.apply_mutation_batch_at(schedule_id, req, Utc::now(), response_mode, idempotency_key)
+            .await
     }
 
     #[tracing::instrument(
         skip(self, req),
         fields(schedule_id = %schedule_id, attempt_id = %req.attempt_id)
     )]
-    pub async fn apply_mutation_batch(
+    pub async fn apply_mutation_batch_at(
         &self,
         schedule_id: Uuid,
         req: StudentMutationBatchRequest,
+        server_received_at: DateTime<Utc>,
         _response_mode: MutationBatchResponseMode,
         idempotency_key: Option<String>,
     ) -> Result<StudentMutationBatchResponse, DeliveryError> {
@@ -599,6 +778,9 @@ impl DeliveryService {
         }
 
         let mut tx = self.pool.begin().await?;
+        let (runtime_gate, runtime_section_gate) = self
+            .lock_runtime_write_gate_tx(tx.as_mut(), schedule_id)
+            .await?;
         let mut attempt = self
             .load_attempt_by_id_for_update(tx.as_mut(), req.attempt_id.clone())
             .await?
@@ -608,6 +790,36 @@ impl DeliveryService {
             return Err(DeliveryError::Validation(
                 "Attempt does not belong to the provided schedule or student key.".to_owned(),
             ));
+        }
+
+        let active_client_session_id: Option<String> = sqlx::query_scalar(
+            "SELECT active_client_session_id FROM student_attempts WHERE id = ?",
+        )
+        .bind(&req.attempt_id)
+        .fetch_one(tx.as_mut())
+        .await?;
+        match active_client_session_id {
+            Some(active_session_id) if active_session_id != req.client_session_id => {
+                return Err(DeliveryError::Conflict {
+                    message:
+                        "Attempt write credential has been superseded by a newer student session."
+                            .to_owned(),
+                    reason: Some(DeliveryConflictReason::ActiveSessionSuperseded),
+                    latest_revision: Some(attempt.revision),
+                    server_accepted_through_seq: None,
+                    active_session_id: Some(active_session_id),
+                });
+            }
+            None => {
+                sqlx::query(
+                            "UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND active_client_session_id IS NULL",
+                        )
+                        .bind(&req.client_session_id)
+                        .bind(&req.attempt_id)
+                        .execute(tx.as_mut())
+                        .await?;
+            }
+            _ => {}
         }
         if let Some(response) = self
             .lookup_idempotent_response_on_connection(
@@ -622,44 +834,16 @@ impl DeliveryService {
             return Ok(response);
         }
 
-        let runtime_gate = sqlx::query_as::<_, RuntimeGateRow>(
-            "SELECT id, status, current_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ?",
-        )
-        .bind(schedule_id.to_string())
-        .fetch_optional(tx.as_mut())
-        .await?;
         let now = Utc::now();
-        let post_submit_grace_active = attempt
-            .submitted_at
+        let objective_mutation_gate = objective_mutation_gate(
+            runtime_gate.as_ref(),
+            runtime_section_gate.as_ref(),
+            Some(attempt.proctor_status),
+            server_received_at,
+        );
+        let active_section_key = runtime_gate
             .as_ref()
-            .map(|submitted_at| {
-                is_within_post_submit_grace_window(
-                    submitted_at.to_owned(),
-                    now,
-                    self.final_submit_grace_seconds,
-                )
-            })
-            .unwrap_or(false);
-        let objective_mutation_gate = if post_submit_grace_active {
-            ObjectiveMutationGate::allow()
-        } else {
-            objective_mutation_gate(runtime_gate.as_ref(), Some(attempt.proctor_status))
-        };
-        let active_section_key = if post_submit_grace_active {
-            None
-        } else {
-            runtime_gate
-                .as_ref()
-                .and_then(|gate| gate.current_section_key.as_deref())
-        };
-        let transition_grace_section_keys = if post_submit_grace_active {
-            HashSet::new()
-        } else if let Some(runtime_gate) = runtime_gate.as_ref() {
-            self.load_recently_completed_section_keys_for_grace(tx.as_mut(), &runtime_gate.id, now)
-                .await?
-        } else {
-            HashSet::new()
-        };
+            .and_then(|gate| gate.current_section_key.as_deref());
 
         let version = self
             .load_version(attempt.published_version_id.clone())
@@ -668,19 +852,17 @@ impl DeliveryService {
         let writing_task_ids = build_writing_task_ids(&version.config_snapshot);
 
         let existing_max_seq: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(mutation_seq), 0) FROM student_attempt_mutations WHERE attempt_id = ? AND client_session_id = ?",
-        )
-        .bind(&req.attempt_id)
-        .bind(&req.client_session_id)
-        .fetch_one(tx.as_mut())
-        .await?;
+                    "SELECT COALESCE(MAX(mutation_seq), 0) FROM student_attempt_mutations WHERE attempt_id = ?",
+                )
+                .bind(&req.attempt_id)
+                .fetch_one(tx.as_mut())
+                .await?;
 
         let mut lookup_existing = QueryBuilder::<MySql>::new(
-            "SELECT client_mutation_id, mutation_type, payload FROM student_attempt_mutations WHERE attempt_id = ",
+            "SELECT client_mutation_id, mutation_type, payload, mutation_seq, applied_revision FROM student_attempt_mutations WHERE attempt_id = ",
         );
         lookup_existing.push_bind(&req.attempt_id);
-        lookup_existing.push(" AND client_session_id = ");
-        lookup_existing.push_bind(&req.client_session_id);
+
         lookup_existing.push(" AND client_mutation_id IN (");
         {
             let mut separated = lookup_existing.separated(", ");
@@ -693,10 +875,25 @@ impl DeliveryService {
             .build_query_as::<ExistingMutationIdentityRow>()
             .fetch_all(tx.as_mut())
             .await?;
-        let existing_by_id: HashMap<String, (MutationType, Value)> = existing_identities
-            .into_iter()
-            .map(|row| (row.client_mutation_id, (row.mutation_type, row.payload)))
-            .collect();
+        let existing_by_id: HashMap<String, (MutationType, Value, i64, Option<i32>)> =
+            existing_identities
+                .into_iter()
+                .map(|row| {
+                    (
+                        row.client_mutation_id,
+                        (
+                            row.mutation_type,
+                            row.payload,
+                            row.mutation_seq,
+                            row.applied_revision,
+                        ),
+                    )
+                })
+                .collect();
+        let mut mutation_results_by_id: HashMap<
+            String,
+            ielts_backend_domain::attempt::StudentMutationResult,
+        > = HashMap::with_capacity(req.mutations.len());
 
         let mut answers: Value = attempt.answers.clone().into();
         let mut writing_answers: Value = attempt.writing_answers.clone().into();
@@ -725,12 +922,24 @@ impl DeliveryService {
         for mutation in &req.mutations {
             let mutation_type = mutation.mutation_type();
             let payload_json = mutation.payload_json();
-            if let Some((existing_type, existing_payload)) = existing_by_id.get(&mutation.id) {
+            if let Some((existing_type, existing_payload, existing_seq, applied_revision)) =
+                existing_by_id.get(&mutation.id)
+            {
                 if existing_type != &mutation_type || existing_payload != &payload_json {
                     return Err(DeliveryError::Validation(
                         "Mutation id already exists with different contents.".to_owned(),
                     ));
                 }
+                mutation_results_by_id.insert(
+                    mutation.id.clone(),
+                    ielts_backend_domain::attempt::StudentMutationResult {
+                        mutation_id: mutation.id.clone(),
+                        status:
+                            ielts_backend_domain::attempt::StudentMutationResultStatus::Duplicate,
+                        server_seq: *existing_seq,
+                        applied_revision: *applied_revision,
+                    },
+                );
                 continue;
             }
             new_mutations.push(mutation);
@@ -743,6 +952,11 @@ impl DeliveryService {
                 server_accepted_through_seq: existing_max_seq,
                 revision: attempt.revision,
                 accepted_in_grace: false,
+                mutation_results: req
+                    .mutations
+                    .iter()
+                    .filter_map(|mutation| mutation_results_by_id.get(&mutation.id).cloned())
+                    .collect(),
                 refreshed_attempt_credential: None,
             };
 
@@ -761,7 +975,7 @@ impl DeliveryService {
             return Ok(response);
         }
 
-        if attempt.submitted_at.is_some() && !post_submit_grace_active {
+        if attempt.submitted_at.is_some() {
             return Err(DeliveryError::Conflict {
                 message: "Attempt is already sealed and no longer accepts new mutations."
                     .to_owned(),
@@ -780,7 +994,6 @@ impl DeliveryService {
                 &writing_task_ids,
                 objective_mutation_gate,
                 active_section_key,
-                &transition_grace_section_keys,
                 &mut answers,
                 &mut writing_answers,
                 &mut flags,
@@ -797,59 +1010,31 @@ impl DeliveryService {
 
         let server_accepted_through_seq =
             existing_max_seq + i64::try_from(new_mutations.len()).unwrap_or(i64::MAX);
-        let recovery = if post_submit_grace_active {
-            merge_recovery(
-                recovery,
-                json!({
-                    "lastPersistedAt": now,
-                    "pendingMutationCount": 0,
-                    "syncState": "saved",
-                    "serverAcceptedThroughSeq": server_accepted_through_seq,
-                    "clientSessionId": req.client_session_id.clone(),
-                    "postSubmitGraceAcceptedAt": now,
-                    "postSubmitGraceLastAppliedMutationCount": applied_mutation_count,
-                }),
-            )
-        } else {
-            merge_recovery(
-                recovery,
-                json!({
-                    "lastPersistedAt": now,
-                    "pendingMutationCount": 0,
-                    "syncState": "saved",
-                    "serverAcceptedThroughSeq": server_accepted_through_seq,
-                    "clientSessionId": req.client_session_id.clone()
-                }),
-            )
-        };
+        let recovery = merge_recovery(
+            recovery,
+            json!({
+                "lastPersistedAt": now,
+                "pendingMutationCount": 0,
+                "syncState": "saved",
+                "serverAcceptedThroughSeq": server_accepted_through_seq,
+                "clientSessionId": req.client_session_id.clone()
+            }),
+        );
 
-        let final_submission = if post_submit_grace_active {
-            Some(merge_post_submit_submission_snapshot(
-                attempt.final_submission.clone(),
-                &answers,
-                &writing_answers,
-                &flags,
-                now,
-                applied_mutation_count,
-                self.final_submit_grace_seconds,
-                server_accepted_through_seq,
-            ))
-        } else {
-            attempt.final_submission.clone()
-        };
+        let final_submission = attempt.final_submission.clone();
 
         let mut next_seq = existing_max_seq;
         for mutation in &new_mutations {
             next_seq = next_seq.saturating_add(1);
             sqlx::query(
                 r#"
-                INSERT INTO student_attempt_mutations (
-                    id, attempt_id, schedule_id, client_session_id, mutation_type,
-                    client_mutation_id, mutation_seq, payload, client_timestamp,
-                    server_received_at, applied_revision, applied_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())
-                "#,
+                        INSERT INTO student_attempt_mutations (
+                            id, attempt_id, schedule_id, client_session_id, mutation_type,
+                            client_mutation_id, mutation_seq, payload, client_timestamp,
+                            server_received_at, applied_revision, applied_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                        "#,
             )
             .bind(Uuid::new_v4().to_string())
             .bind(&req.attempt_id)
@@ -860,9 +1045,20 @@ impl DeliveryService {
             .bind(next_seq)
             .bind(mutation.payload_json())
             .bind(mutation.timestamp)
+            .bind(server_received_at)
             .bind(attempt.revision + 1)
             .execute(tx.as_mut())
             .await?;
+
+            mutation_results_by_id.insert(
+                mutation.id.clone(),
+                ielts_backend_domain::attempt::StudentMutationResult {
+                    mutation_id: mutation.id.clone(),
+                    status: ielts_backend_domain::attempt::StudentMutationResultStatus::Applied,
+                    server_seq: next_seq,
+                    applied_revision: Some(attempt.revision + 1),
+                },
+            );
         }
 
         sqlx::query(
@@ -947,7 +1143,12 @@ impl DeliveryService {
             applied_mutation_count,
             server_accepted_through_seq,
             revision: attempt.revision,
-            accepted_in_grace: post_submit_grace_active,
+            accepted_in_grace: false,
+            mutation_results: req
+                .mutations
+                .iter()
+                .filter_map(|mutation| mutation_results_by_id.get(&mutation.id).cloned())
+                .collect(),
             refreshed_attempt_credential: None,
         };
 
@@ -965,32 +1166,6 @@ impl DeliveryService {
         tx.commit().await?;
 
         Ok(response)
-    }
-
-    async fn load_recently_completed_section_keys_for_grace(
-        &self,
-        conn: &mut MySqlConnection,
-        runtime_id: &str,
-        now: DateTime<Utc>,
-    ) -> Result<HashSet<String>, DeliveryError> {
-        let rows = sqlx::query_as::<_, RuntimeSectionGraceRow>(
-            r#"
-            SELECT section_key, actual_end_at
-            FROM exam_session_runtime_sections
-            WHERE runtime_id = ? AND status = 'completed' AND actual_end_at IS NOT NULL
-            "#,
-        )
-        .bind(runtime_id)
-        .fetch_all(conn)
-        .await?;
-
-        Ok(rows
-            .into_iter()
-            .filter(|row| {
-                now <= row.actual_end_at + ChronoDuration::seconds(self.final_submit_grace_seconds)
-            })
-            .map(|row| row.section_key)
-            .collect())
     }
 
     pub async fn record_heartbeat(
@@ -1194,6 +1369,9 @@ impl DeliveryService {
         }
 
         let mut tx = self.pool.begin().await?;
+        let (runtime_gate, runtime_section_gate) = self
+            .lock_runtime_write_gate_tx(tx.as_mut(), schedule_id)
+            .await?;
         let attempt = self
             .load_attempt_by_id_for_update(tx.as_mut(), req.attempt_id.clone())
             .await?
@@ -1203,6 +1381,37 @@ impl DeliveryService {
             return Err(DeliveryError::Validation(
                 "Attempt does not belong to the provided schedule or student key.".to_owned(),
             ));
+        }
+
+        let active_client_session_id: Option<String> = sqlx::query_scalar(
+            "SELECT active_client_session_id FROM student_attempts WHERE id = ?",
+        )
+        .bind(&req.attempt_id)
+        .fetch_one(tx.as_mut())
+        .await?;
+        match active_client_session_id {
+            Some(active_session_id)
+                if req.client_session_id.as_deref() != Some(active_session_id.as_str()) =>
+            {
+                return Err(DeliveryError::Conflict {
+                    message:
+                        "Attempt write credential has been superseded by a newer student session."
+                            .to_owned(),
+                    reason: Some(DeliveryConflictReason::ActiveSessionSuperseded),
+                    latest_revision: Some(attempt.revision),
+                    server_accepted_through_seq: None,
+                    active_session_id: Some(active_session_id),
+                });
+            }
+            None => {
+                sqlx::query(
+                            "UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND active_client_session_id IS NULL",
+                        ).bind(req.client_session_id.as_deref())
+                        .bind(&req.attempt_id)
+                        .execute(tx.as_mut())
+                        .await?;
+            }
+            _ => {}
         }
         if let Some(response) = self
             .lookup_idempotent_response_on_connection(
@@ -1234,12 +1443,6 @@ impl DeliveryService {
             ));
         }
 
-        let runtime_gate = sqlx::query_as::<_, RuntimeGateRow>(
-            "SELECT id, status, current_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ?",
-        )
-        .bind(schedule_id.to_string())
-        .fetch_optional(tx.as_mut())
-        .await?;
         match runtime_gate.as_ref().map(|row| row.status.as_str()) {
             Some("live") | Some("paused") | Some("completed") => {}
             Some("not_started") | None => {
@@ -1322,6 +1525,32 @@ impl DeliveryService {
                 &mut final_writing_answers,
                 &mut final_flags,
             )?;
+        }
+
+        let persisted_answers: Value = attempt.answers.clone().into();
+        let persisted_writing_answers: Value = attempt.writing_answers.clone().into();
+        let persisted_flags: Value = attempt.flags.clone().into();
+        let final_payload_changes_scored_state = final_answers != persisted_answers
+            || final_writing_answers != persisted_writing_answers
+            || final_flags != persisted_flags;
+        if final_payload_changes_scored_state {
+            let write_gate = objective_mutation_gate(
+                runtime_gate.as_ref(),
+                runtime_section_gate.as_ref(),
+                Some(attempt.proctor_status),
+                runtime_section_gate
+                    .as_ref()
+                    .map(|section| section.server_now)
+                    .unwrap_or_else(Utc::now),
+            );
+            if !write_gate.allowed {
+                return Err(DeliveryError::conflict_reason(
+                    write_gate
+                        .reason
+                        .unwrap_or(DeliveryConflictReason::ObjectiveLocked),
+                    "Final answer payload cannot change scored content outside the active timed section.",
+                ));
+            }
         }
 
         let completion = compute_answer_completion(&answer_schema, &final_answers);
@@ -1500,10 +1729,9 @@ impl DeliveryService {
         let current_module = first_enabled_module(&version.config_snapshot);
         let phase_for_insert = phase.clone();
         let current_module_for_insert = current_module.clone();
-        let now = Utc::now();
-
         let attempt_id = Uuid::new_v4();
-        sqlx::query(
+        let mut tx = self.pool.begin().await?;
+        let insert_result = sqlx::query(
             r#"
             INSERT INTO student_attempts (
                 id, schedule_id, registration_id, wcode, student_key, organization_id, exam_id, published_version_id,
@@ -1548,8 +1776,24 @@ impl DeliveryService {
             "syncState": "idle",
             "serverAcceptedThroughSeq": 0
         }))
-        .execute(&self.pool)
-        .await?;
+        .execute(&mut *tx)
+        .await;
+
+        if let Err(error) = insert_result {
+            let unique_violation = error
+                .as_database_error()
+                .is_some_and(|database_error| database_error.is_unique_violation());
+            tx.rollback().await?;
+            if unique_violation {
+                if let Some(attempt) = self
+                    .load_attempt_by_student_key(schedule.id.clone(), student_key)
+                    .await?
+                {
+                    return Ok(attempt);
+                }
+            }
+            return Err(DeliveryError::from(error));
+        }
 
         sqlx::query(
             r#"
@@ -1571,8 +1815,9 @@ impl DeliveryService {
             "currentModule": current_module,
             "phase": phase
         }))
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
 
         sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
             .bind(attempt_id.to_string())
@@ -2299,7 +2544,7 @@ fn validate_contiguous_sequences(
     Ok(())
 }
 
-#[derive(sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 struct RuntimeGateRow {
     id: String,
     status: String,
@@ -2307,10 +2552,15 @@ struct RuntimeGateRow {
     waiting_for_next_section: bool,
 }
 
-#[derive(sqlx::FromRow)]
-struct RuntimeSectionGraceRow {
-    section_key: String,
-    actual_end_at: DateTime<Utc>,
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct RuntimeSectionWriteGateRow {
+    status: String,
+    actual_start_at: Option<DateTime<Utc>>,
+    paused_at: Option<DateTime<Utc>>,
+    planned_duration_minutes: i32,
+    extension_minutes: i32,
+    accumulated_paused_seconds: i32,
+    server_now: DateTime<Utc>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -2318,6 +2568,8 @@ struct ExistingMutationIdentityRow {
     client_mutation_id: String,
     mutation_type: MutationType,
     payload: Value,
+    mutation_seq: i64,
+    applied_revision: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2344,7 +2596,9 @@ impl ObjectiveMutationGate {
 
 fn objective_mutation_gate(
     runtime: Option<&RuntimeGateRow>,
+    section: Option<&RuntimeSectionWriteGateRow>,
     proctor_status: Option<ielts_backend_domain::attempt::ProctorStatus>,
+    server_received_at: DateTime<Utc>,
 ) -> ObjectiveMutationGate {
     if matches!(
         proctor_status,
@@ -2354,16 +2608,33 @@ fn objective_mutation_gate(
         return ObjectiveMutationGate::block(DeliveryConflictReason::AttemptProctorBlocked);
     }
 
-    if let Some(runtime) = runtime {
-        if runtime.waiting_for_next_section {
-            return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
-        }
-        if matches!(
-            runtime.status.as_str(),
-            "paused" | "completed" | "cancelled"
-        ) {
-            return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
-        }
+    let Some(runtime) = runtime else {
+        return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
+    };
+    if runtime.waiting_for_next_section || runtime.status != "live" {
+        return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
+    }
+
+    let Some(section) = section else {
+        return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
+    };
+    if section.status != "live" || section.paused_at.is_some() {
+        return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
+    }
+
+    let Some(started_at) = section.actual_start_at else {
+        return ObjectiveMutationGate::block(DeliveryConflictReason::ObjectiveLocked);
+    };
+    let duration_seconds = i64::from(
+        section
+            .planned_duration_minutes
+            .saturating_add(section.extension_minutes),
+    )
+    .saturating_mul(60)
+    .saturating_add(i64::from(section.accumulated_paused_seconds.max(0)));
+    let deadline = started_at + ChronoDuration::seconds(duration_seconds.max(0));
+    if server_received_at > deadline {
+        return ObjectiveMutationGate::block(DeliveryConflictReason::DeadlineExpired);
     }
 
     ObjectiveMutationGate::allow()
@@ -3012,7 +3283,6 @@ fn apply_mutation(
     writing_task_ids: &HashSet<String>,
     objective_mutation_gate: ObjectiveMutationGate,
     active_section_key: Option<&str>,
-    transition_grace_section_keys: &HashSet<String>,
     answers: &mut Value,
     writing_answers: &mut Value,
     flags: &mut Value,
@@ -3036,20 +3306,12 @@ fn apply_mutation(
             }
             let question_id = payload.question_id.clone();
             if !answer_schema.constraints.contains_key(&question_id) {
-                tracing::warn!(
-                    mutation_id = %mutation.id,
-                    mutation_type = mutation.mutation_type().as_str(),
-                    question_id = %question_id,
-                    "mutation references unknown questionId; accepting but ignoring apply"
-                );
-                return Ok(false);
+                return Err(DeliveryError::Validation(
+                    "Mutation references an unknown `questionId`.".to_owned(),
+                ));
             }
-            enforce_section_membership(
-                active_section_key,
-                transition_grace_section_keys,
-                &question_id,
-                answer_schema,
-            )?;
+
+            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let value = payload.value.clone();
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
                 DeliveryError::Validation("Mutation references an unknown `questionId`.".to_owned())
@@ -3071,20 +3333,12 @@ fn apply_mutation(
             }
             let question_id = payload.question_id.clone();
             if !answer_schema.constraints.contains_key(&question_id) {
-                tracing::warn!(
-                    mutation_id = %mutation.id,
-                    mutation_type = mutation.mutation_type().as_str(),
-                    question_id = %question_id,
-                    "mutation references unknown questionId; accepting but ignoring apply"
-                );
-                return Ok(false);
+                return Err(DeliveryError::Validation(
+                    "Mutation references an unknown `questionId`.".to_owned(),
+                ));
             }
-            enforce_section_membership(
-                active_section_key,
-                transition_grace_section_keys,
-                &question_id,
-                answer_schema,
-            )?;
+
+            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
                 DeliveryError::Validation("Mutation references an unknown `questionId`.".to_owned())
             })?;
@@ -3105,20 +3359,12 @@ fn apply_mutation(
             }
             let question_id = payload.question_id.clone();
             if !answer_schema.constraints.contains_key(&question_id) {
-                tracing::warn!(
-                    mutation_id = %mutation.id,
-                    mutation_type = mutation.mutation_type().as_str(),
-                    question_id = %question_id,
-                    "mutation references unknown questionId; accepting but ignoring apply"
-                );
-                return Ok(false);
+                return Err(DeliveryError::Validation(
+                    "Mutation references an unknown `questionId`.".to_owned(),
+                ));
             }
-            enforce_section_membership(
-                active_section_key,
-                transition_grace_section_keys,
-                &question_id,
-                answer_schema,
-            )?;
+
+            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let slot_index = usize::try_from(payload.slot_index).unwrap_or(usize::MAX);
             let value = payload.value.clone();
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
@@ -3139,20 +3385,12 @@ fn apply_mutation(
             }
             let question_id = payload.question_id.clone();
             if !answer_schema.constraints.contains_key(&question_id) {
-                tracing::warn!(
-                    mutation_id = %mutation.id,
-                    mutation_type = mutation.mutation_type().as_str(),
-                    question_id = %question_id,
-                    "mutation references unknown questionId; accepting but ignoring apply"
-                );
-                return Ok(false);
+                return Err(DeliveryError::Validation(
+                    "Mutation references an unknown `questionId`.".to_owned(),
+                ));
             }
-            enforce_section_membership(
-                active_section_key,
-                transition_grace_section_keys,
-                &question_id,
-                answer_schema,
-            )?;
+
+            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let slot_index = usize::try_from(payload.slot_index).unwrap_or(usize::MAX);
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
                 DeliveryError::Validation("Mutation references an unknown `questionId`.".to_owned())
@@ -3172,18 +3410,13 @@ fn apply_mutation(
             }
             let task_id = payload.task_id.clone();
             if !writing_task_ids.contains(&task_id) {
-                tracing::warn!(
-                    mutation_id = %mutation.id,
-                    mutation_type = "writing_answer",
-                    task_id = %task_id,
-                    "mutation references unknown taskId; accepting but ignoring apply"
-                );
-                return Ok(false);
+                return Err(DeliveryError::Validation(
+                    "Mutation references an unknown writing `taskId`.".to_owned(),
+                ));
             }
+
             if let Some(active_section_key) = active_section_key {
-                if active_section_key != "writing"
-                    && !transition_grace_section_keys.contains("writing")
-                {
+                if active_section_key != "writing" {
                     return Err(DeliveryError::conflict_reason(
                         DeliveryConflictReason::SectionMismatch,
                         "Mutation belongs to an inactive section.",
@@ -3212,18 +3445,13 @@ fn apply_mutation(
             }
             let task_id = payload.task_id.clone();
             if !writing_task_ids.contains(&task_id) {
-                tracing::warn!(
-                    mutation_id = %mutation.id,
-                    mutation_type = mutation.mutation_type().as_str(),
-                    task_id = %task_id,
-                    "mutation references unknown taskId; accepting but ignoring apply"
-                );
-                return Ok(false);
+                return Err(DeliveryError::Validation(
+                    "Mutation references an unknown writing `taskId`.".to_owned(),
+                ));
             }
+
             if let Some(active_section_key) = active_section_key {
-                if active_section_key != "writing"
-                    && !transition_grace_section_keys.contains("writing")
-                {
+                if active_section_key != "writing" {
                     return Err(DeliveryError::conflict_reason(
                         DeliveryConflictReason::SectionMismatch,
                         "Mutation belongs to an inactive section.",
@@ -3246,20 +3474,12 @@ fn apply_mutation(
             }
             let question_id = payload.question_id.clone();
             if !answer_schema.sections.contains_key(&question_id) {
-                tracing::warn!(
-                    mutation_id = %mutation.id,
-                    mutation_type = "flag",
-                    question_id = %question_id,
-                    "mutation references unknown questionId; accepting but ignoring apply"
-                );
-                return Ok(false);
+                return Err(DeliveryError::Validation(
+                    "Mutation flag references an unknown `questionId`.".to_owned(),
+                ));
             }
-            enforce_section_membership(
-                active_section_key,
-                transition_grace_section_keys,
-                &question_id,
-                answer_schema,
-            )?;
+
+            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let flag_value = payload.value.as_bool().ok_or_else(|| {
                 DeliveryError::Validation("Flag values must be boolean.".to_owned())
             })?;
@@ -3378,102 +3598,6 @@ fn merge_object_values(base: &Value, patch: &Value) -> Value {
     Value::Object(merged)
 }
 
-fn is_within_post_submit_grace_window(
-    submitted_at: DateTime<Utc>,
-    now: DateTime<Utc>,
-    grace_seconds: i64,
-) -> bool {
-    if grace_seconds <= 0 {
-        return false;
-    }
-    let deadline = submitted_at + ChronoDuration::seconds(grace_seconds);
-    now <= deadline
-}
-
-fn merge_post_submit_submission_snapshot(
-    existing: Option<Value>,
-    answers: &Value,
-    writing_answers: &Value,
-    flags: &Value,
-    now: DateTime<Utc>,
-    applied_mutation_count: usize,
-    grace_window_seconds: i64,
-    server_accepted_through_seq: i64,
-) -> Value {
-    let mut merged = ensure_object(existing.unwrap_or_else(|| json!({})));
-    merged.insert("answers".to_owned(), answers.clone());
-    merged.insert("writingAnswers".to_owned(), writing_answers.clone());
-    merged.insert("flags".to_owned(), flags.clone());
-
-    let mut grace_merge = merged
-        .get("graceMerge")
-        .cloned()
-        .map(ensure_object)
-        .unwrap_or_default();
-    let merge_count = grace_merge
-        .get("mergeCount")
-        .and_then(Value::as_i64)
-        .unwrap_or(0)
-        .saturating_add(1);
-    let applied_total = grace_merge
-        .get("appliedMutationTotal")
-        .and_then(Value::as_i64)
-        .unwrap_or(0)
-        .saturating_add(i64::try_from(applied_mutation_count).unwrap_or(i64::MAX));
-    if !grace_merge.contains_key("firstAcceptedAt") {
-        grace_merge.insert(
-            "firstAcceptedAt".to_owned(),
-            Value::String(now.to_rfc3339()),
-        );
-    }
-    grace_merge.insert("acceptedInGrace".to_owned(), Value::Bool(true));
-    grace_merge.insert("lastAcceptedAt".to_owned(), Value::String(now.to_rfc3339()));
-    grace_merge.insert("mergeCount".to_owned(), Value::from(merge_count));
-    grace_merge.insert(
-        "lastAppliedMutationCount".to_owned(),
-        Value::from(i64::try_from(applied_mutation_count).unwrap_or(i64::MAX)),
-    );
-    grace_merge.insert(
-        "appliedMutationTotal".to_owned(),
-        Value::from(applied_total),
-    );
-    grace_merge.insert(
-        "graceWindowSeconds".to_owned(),
-        Value::from(grace_window_seconds.max(0)),
-    );
-    merged.insert("graceMerge".to_owned(), Value::Object(grace_merge));
-
-    let mut final_flush = merged
-        .get("finalFlush")
-        .cloned()
-        .map(ensure_object)
-        .unwrap_or_default();
-    final_flush.insert(
-        "serverAcceptedThroughSeq".to_owned(),
-        Value::from(server_accepted_through_seq),
-    );
-    let client_final_seq = final_flush
-        .get("clientFinalSeq")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    if client_final_seq > 0 {
-        let replay_incomplete = server_accepted_through_seq < client_final_seq;
-        final_flush.insert(
-            "replayIncomplete".to_owned(),
-            Value::Bool(replay_incomplete),
-        );
-        if !replay_incomplete {
-            final_flush.insert(
-                "replayCompletedAt".to_owned(),
-                Value::String(now.to_rfc3339()),
-            );
-        }
-    }
-    merged.insert("finalFlush".to_owned(), Value::Object(final_flush));
-
-    Value::Object(merged)
-}
-
 fn merge_recovery(existing: Value, patch: Value) -> Value {
     let mut base = ensure_object(existing);
     if let Some(patch_map) = patch.as_object() {
@@ -3526,7 +3650,6 @@ fn set_array_slot_answer(
 
 fn enforce_section_membership(
     active_section_key: Option<&str>,
-    transition_grace_section_keys: &HashSet<String>,
     question_id: &str,
     answer_schema: &AnswerSchema,
 ) -> Result<(), DeliveryError> {
@@ -3539,9 +3662,6 @@ fn enforce_section_membership(
         })?;
     if let Some(active_section_key) = active_section_key {
         if expected != active_section_key {
-            if transition_grace_section_keys.contains(expected) {
-                return Ok(());
-            }
             return Err(DeliveryError::conflict_reason(
                 DeliveryConflictReason::SectionMismatch,
                 format!(
@@ -3608,6 +3728,7 @@ mod tests {
             exam_id: "exam-1".to_owned(),
             status,
             plan_snapshot: Vec::new(),
+            timing_model: "legacy_section_v1".to_owned(),
             actual_start_at: None,
             actual_end_at: None,
             active_section_key: None,
@@ -3710,16 +3831,28 @@ mod tests {
     }
 
     #[test]
-    fn objective_mutation_gate_blocks_when_runtime_or_proctor_disallow() {
-        let base = RuntimeGateRow {
+    fn objective_mutation_gate_enforces_runtime_section_deadline_and_proctor_state() {
+        let server_now = Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap();
+        let live_section = RuntimeSectionWriteGateRow {
+            status: "live".to_owned(),
+            actual_start_at: Some(Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap()),
+            paused_at: None,
+            planned_duration_minutes: 10,
+            extension_minutes: 0,
+            accumulated_paused_seconds: 0,
+            server_now,
+        };
+        let paused = RuntimeGateRow {
             id: "runtime-1".to_owned(),
             status: "paused".to_owned(),
             current_section_key: Some("reading".to_owned()),
             waiting_for_next_section: false,
         };
         let paused_gate = objective_mutation_gate(
-            Some(&base),
+            Some(&paused),
+            Some(&live_section),
             Some(ielts_backend_domain::attempt::ProctorStatus::Active),
+            server_now,
         );
         assert!(!paused_gate.allowed);
         assert_eq!(
@@ -3729,22 +3862,91 @@ mod tests {
 
         let live = RuntimeGateRow {
             status: "live".to_owned(),
-            ..base
+            ..paused
         };
         let live_gate = objective_mutation_gate(
             Some(&live),
+            Some(&live_section),
             Some(ielts_backend_domain::attempt::ProctorStatus::Active),
+            server_now,
         );
         assert!(live_gate.allowed);
 
+        let expired_section = RuntimeSectionWriteGateRow {
+            actual_start_at: Some(Utc.with_ymd_and_hms(2026, 1, 10, 8, 54, 59).unwrap()),
+            ..live_section.clone()
+        };
+        let expired_gate = objective_mutation_gate(
+            Some(&live),
+            Some(&expired_section),
+            Some(ielts_backend_domain::attempt::ProctorStatus::Active),
+            server_now,
+        );
+        assert!(!expired_gate.allowed);
+        assert_eq!(
+            expired_gate.reason,
+            Some(DeliveryConflictReason::DeadlineExpired)
+        );
+
         let blocked_by_proctor = objective_mutation_gate(
             Some(&live),
+            Some(&live_section),
             Some(ielts_backend_domain::attempt::ProctorStatus::Paused),
+            server_now,
         );
         assert!(!blocked_by_proctor.allowed);
         assert_eq!(
             blocked_by_proctor.reason,
             Some(DeliveryConflictReason::AttemptProctorBlocked)
+        );
+
+        let missing_runtime = objective_mutation_gate(
+            None,
+            None,
+            Some(ielts_backend_domain::attempt::ProctorStatus::Active),
+            server_now,
+        );
+        assert!(!missing_runtime.allowed);
+    }
+
+    #[test]
+    fn objective_mutation_gate_uses_trusted_ingress_time_across_processing_delay() {
+        let live = RuntimeGateRow {
+            id: "runtime-1".to_owned(),
+            status: "live".to_owned(),
+            current_section_key: Some("reading".to_owned()),
+            waiting_for_next_section: false,
+        };
+        let section = RuntimeSectionWriteGateRow {
+            status: "live".to_owned(),
+            actual_start_at: Some(Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap()),
+            paused_at: None,
+            planned_duration_minutes: 5,
+            extension_minutes: 0,
+            accumulated_paused_seconds: 0,
+            server_now: Utc.with_ymd_and_hms(2026, 1, 10, 9, 6, 0).unwrap(),
+        };
+        let at_deadline = Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap();
+        let after_deadline = at_deadline + ChronoDuration::milliseconds(1);
+
+        let admitted = objective_mutation_gate(
+            Some(&live),
+            Some(&section),
+            Some(ielts_backend_domain::attempt::ProctorStatus::Active),
+            at_deadline,
+        );
+        assert!(admitted.allowed);
+
+        let rejected = objective_mutation_gate(
+            Some(&live),
+            Some(&section),
+            Some(ielts_backend_domain::attempt::ProctorStatus::Active),
+            after_deadline,
+        );
+        assert!(!rejected.allowed);
+        assert_eq!(
+            rejected.reason,
+            Some(DeliveryConflictReason::DeadlineExpired)
         );
     }
 
@@ -3822,7 +4024,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("reading"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -3853,7 +4054,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("writing"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -3884,7 +4084,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("reading"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -3951,7 +4150,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             None,
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -4003,7 +4201,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("reading"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -4033,7 +4230,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("reading"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -4062,7 +4258,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("writing"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -4091,7 +4286,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             None,
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -4147,7 +4341,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("reading"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -4177,7 +4370,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("reading"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -4244,7 +4436,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("reading"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -4272,7 +4463,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("reading"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -4297,7 +4487,6 @@ mod tests {
             &writing_task_ids,
             ObjectiveMutationGate::allow(),
             Some("writing"),
-            &HashSet::new(),
             &mut answers,
             &mut writing_answers,
             &mut flags,
@@ -4641,59 +4830,5 @@ mod tests {
         }))
         .expect("shape accepted");
         assert!(matches!(parsed, MutationCommand::Network(_)));
-    }
-
-    #[test]
-    fn post_submit_grace_window_allows_only_within_configured_duration() {
-        let submitted_at = Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap();
-        let inside = submitted_at + chrono::Duration::minutes(4) + chrono::Duration::seconds(59);
-        let outside = submitted_at + chrono::Duration::minutes(5) + chrono::Duration::seconds(1);
-
-        assert!(is_within_post_submit_grace_window(
-            submitted_at,
-            inside,
-            300
-        ));
-        assert!(!is_within_post_submit_grace_window(
-            submitted_at,
-            outside,
-            300
-        ));
-    }
-
-    #[test]
-    fn merge_post_submit_submission_snapshot_marks_grace_acceptance_and_replay_completion() {
-        let now = Utc.with_ymd_and_hms(2026, 1, 10, 9, 5, 0).unwrap();
-        let existing = json!({
-            "submissionId": "submission-1",
-            "submittedAt": "2026-01-10T09:00:00Z",
-            "answers": {"q1": "old"},
-            "writingAnswers": {"task1": "old"},
-            "flags": {"q1": false},
-            "finalFlush": {
-                "clientFinalSeq": 10,
-                "serverAcceptedThroughSeq": 7,
-                "replayIncomplete": true
-            }
-        });
-
-        let merged = merge_post_submit_submission_snapshot(
-            Some(existing),
-            &json!({"q1": "new"}),
-            &json!({"task1": "new"}),
-            &json!({"q1": true}),
-            now,
-            3,
-            300,
-            11,
-        );
-
-        assert_eq!(merged["answers"]["q1"], "new");
-        assert_eq!(merged["writingAnswers"]["task1"], "new");
-        assert_eq!(merged["flags"]["q1"], true);
-        assert_eq!(merged["graceMerge"]["acceptedInGrace"], true);
-        assert_eq!(merged["graceMerge"]["lastAppliedMutationCount"], 3);
-        assert_eq!(merged["finalFlush"]["replayIncomplete"], false);
-        assert_eq!(merged["finalFlush"]["replayCompletedAt"], now.to_rfc3339());
     }
 }

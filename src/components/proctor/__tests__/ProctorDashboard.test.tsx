@@ -385,6 +385,114 @@ describe('ProctorDashboard runtime controls', () => {
     rerender(<DashboardHarness {...baseProps} railSelection="audit" />);
     expect(screen.getByText(/student_warn/i)).toBeTruthy();
   });
+  it('keeps the shared cohort deadline counting down while one student is disciplinarily paused', async () => {
+    const pausedSession = {
+      id: 'student-paused',
+      studentId: 'STU-PAUSED',
+      name: 'Paused Candidate',
+      email: 'paused@example.com',
+      scheduleId: 'sched-1',
+      status: 'paused' as const,
+      currentSection: 'reading' as const,
+      timeRemaining: 1800,
+      runtimeStatus: 'live' as const,
+      runtimeCurrentSection: 'reading' as const,
+      runtimeTimeRemainingSeconds: 1800,
+      runtimeDeadlineAt: '2026-01-01T00:30:00.000Z',
+      runtimeServerNow: '2026-01-01T00:00:00.000Z',
+      runtimeSectionStatus: 'live',
+      runtimeWaiting: false,
+      violations: [],
+      warnings: 0,
+      lastActivity: '2026-01-01T00:00:00.000Z',
+      examId: 'exam-1',
+      examName: 'Mock Exam',
+    };
+
+    render(
+      <DashboardHarness
+        schedules={[{ ...baseSchedule, status: 'live', startTime: '2026-01-01T00:00:00.000Z' }]}
+        runtimeSnapshots={[{
+          ...liveRuntime,
+          currentSectionDeadlineAt: '2026-01-01T00:30:00.000Z',
+          serverNow: '2026-01-01T00:00:00.000Z',
+        }]}
+        sessions={[pausedSession]}
+        alerts={[]}
+        onUpdateSessions={vi.fn()}
+        onUpdateAlerts={vi.fn()}
+        onStartScheduledSession={vi.fn()}
+        onPauseCohort={vi.fn()}
+        onResumeCohort={vi.fn()}
+        onEndSectionNow={vi.fn()}
+        onExtendCurrentSection={vi.fn()}
+        onCompleteExam={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
+    expect(screen.getByText('30:00')).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(screen.getByText('29:59')).toBeInTheDocument();
+  });
+
+  it.each(['cohort_stage_v2', 'cohort_section_v3'] as const)(
+    'removes per-student time extension controls for a %s SAT runtime',
+    (timingModel) => {
+    const sharedClockSession = {
+      id: 'student-shared-clock',
+      studentId: 'STU-SHARED',
+      name: 'Shared Clock Candidate',
+      email: 'shared@example.com',
+      scheduleId: 'sched-1',
+      status: 'active' as const,
+      currentSection: 'reading' as const,
+      timeRemaining: 1800,
+      runtimeStatus: 'live' as const,
+      runtimeCurrentSection: 'reading' as const,
+      runtimeTimeRemainingSeconds: 1800,
+      runtimeSectionStatus: 'live',
+      runtimeWaiting: false,
+      violations: [],
+      warnings: 0,
+      lastActivity: '2026-01-01T00:00:00.000Z',
+      examId: 'exam-1',
+      examName: 'Mock Exam',
+    };
+
+    render(
+      <DashboardHarness
+        schedules={[{ ...baseSchedule, status: 'live', startTime: '2026-01-01T00:00:00.000Z' }]}
+        runtimeSnapshots={[{ ...liveRuntime, timingModel }]}
+        sessions={[sharedClockSession]}
+        alerts={[]}
+        notes={[]}
+        auditLogs={[]}
+        onUpdateSessions={vi.fn()}
+        onUpdateAlerts={vi.fn()}
+        onUpdateNotes={vi.fn()}
+        onStartScheduledSession={vi.fn()}
+        onPauseCohort={vi.fn()}
+        onResumeCohort={vi.fn()}
+        onEndSectionNow={vi.fn()}
+        onExtendCurrentSection={vi.fn()}
+        onCompleteExam={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
+    fireEvent.click(screen.getByRole('button', { name: /open shared clock candidate session details/i }));
+
+      expect(screen.queryByRole('button', { name: /^\+5 min$/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^\+10 min$/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /extend \+5/i })).toBeInTheDocument();
+    },
+  );
+
   it('preserves the SAT student clock and extends the selected student by five minutes', async () => {
     const extendSpy = vi
       .spyOn(examDeliveryService, 'extendStudentAttempt')

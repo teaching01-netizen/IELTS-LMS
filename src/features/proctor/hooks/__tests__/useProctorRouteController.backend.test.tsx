@@ -247,6 +247,51 @@ describe('useProctorRouteController backend mode', () => {
     global.fetch = originalFetch;
   });
 
+  it('sends the rendered runtime revision with cohort timing mutations', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_PROCTORING', 'true');
+    const extendSpy = vi
+      .spyOn(examDeliveryService, 'extendCurrentSection')
+      .mockResolvedValue({ success: true });
+    const endSpy = vi
+      .spyOn(examDeliveryService, 'endCurrentSectionNow')
+      .mockResolvedValue({ success: true });
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/v1/proctor/sessions') {
+          return jsonResponse([
+            {
+              schedule: buildSchedule(),
+              runtime: buildRuntime(),
+              studentCount: 1,
+              activeCount: 1,
+              alertCount: 0,
+              violationCount: 0,
+              degradedLiveMode: false,
+            },
+          ]);
+        }
+        return jsonFailure(`Unhandled ${url}`);
+      });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useProctorRouteController(), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.runtimeSnapshots[0]?.revision).toBe(1);
+    });
+
+    await act(async () => {
+      await result.current.handleExtendCurrentSection('sched-1', 5);
+      await result.current.handleEndSectionNow('sched-1');
+    });
+
+    expect(extendSpy).toHaveBeenCalledWith('sched-1', 'Proctor', 5, 'reading', 1);
+    expect(endSpy).toHaveBeenCalledWith('sched-1', 'Proctor', 'reading', 1);
+  });
+
   it('polls summaries for all schedules but fetches detail only for the selected schedule', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_PROCTORING', 'true');
     const fetchMock = vi

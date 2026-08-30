@@ -37,7 +37,12 @@ export interface StudentQueuedAdmission {
   queuedAt: string;
 }
 
-export type StudentEntryResult = AuthSession | StudentQueuedAdmission;
+export interface StudentEntrySuccess extends AuthSession {
+  scheduleId: string;
+  studentCode: string;
+}
+
+export type StudentEntryResult = StudentEntrySuccess | StudentQueuedAdmission;
 
 interface LoginPayload {
   email: string;
@@ -60,7 +65,8 @@ interface AccountActivationPayload {
 }
 
 interface StudentEntryPayload {
-  scheduleId: string;
+  scheduleId?: string | undefined;
+  accessLinkId?: string | undefined;
   wcode: string;
   email: string;
   studentName: string;

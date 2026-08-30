@@ -7,6 +7,9 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use chrono::{DateTime, Utc};
 use cookie::time::{Duration as CookieDuration, OffsetDateTime};
+use ielts_backend_application::assessment_access_links::{
+    AccessLinkMode, AssessmentAccessLinkError, AssessmentAccessLinkService,
+};
 use ielts_backend_application::auth::{AuthError, AuthService};
 use ielts_backend_application::scheduling::SchedulingService;
 use ielts_backend_domain::auth::{
@@ -14,6 +17,7 @@ use ielts_backend_domain::auth::{
     SessionResponse, StudentEntryRequest,
 };
 use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
+use ielts_backend_infrastructure::auth::sha256_hex;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -28,6 +32,15 @@ use crate::{
     },
     state::AppState,
 };
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StudentEntrySuccessResponse {
+    #[serde(flatten)]
+    session: ielts_backend_domain::auth::LoginResponse,
+    schedule_id: String,
+    student_code: String,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -347,24 +360,8 @@ pub async fn student_entry(
     headers: axum::http::HeaderMap,
     Json(req): Json<StudentEntryRequest>,
 ) -> Result<Response, ApiError> {
-    let schedule_id = Uuid::parse_str(req.schedule_id.trim()).map_err(|_| {
-        ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "VALIDATION_ERROR",
-            "Schedule ID must be a UUID.",
-        )
-    })?;
-
-    let normalized_wcode = ielts_backend_domain::schedule::normalize_access_code(&req.wcode);
-    if normalized_wcode.is_empty() {
-        return Err(ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "VALIDATION_ERROR",
-            "Wcode is required.",
-        ));
-    }
-
-    if req.student_name.trim().is_empty() {
+    let normalized_name = req.student_name.trim();
+    if normalized_name.is_empty() {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "VALIDATION_ERROR",
@@ -372,7 +369,8 @@ pub async fn student_entry(
         ));
     }
 
-    if req.email.trim().is_empty() {
+    let normalized_email = req.email.trim().to_ascii_lowercase();
+    if normalized_email.is_empty() {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "VALIDATION_ERROR",
@@ -380,29 +378,119 @@ pub async fn student_entry(
         ));
     }
 
-    let normalized_nickname = req.nickname.trim();
-    if normalized_nickname.is_empty() {
-        return Err(ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "VALIDATION_ERROR",
-            "Nickname is required.",
-        ));
-    }
-    if normalized_nickname.chars().count() > 50 {
-        return Err(ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "VALIDATION_ERROR",
-            "Nickname must be 50 characters or less.",
-        ));
-    }
+    let requested_wcode = ielts_backend_domain::schedule::normalize_access_code(&req.wcode);
+    let (schedule_id, provider_key, access_mode, access_link_id) = if let Some(link_id) = req
+        .access_link_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        let resolved = AssessmentAccessLinkService::new(state.db_pool())
+            .resolve_entry(
+                link_id,
+                if requested_wcode.is_empty() {
+                    None
+                } else {
+                    Some(requested_wcode.as_str())
+                },
+                normalized_name,
+                &normalized_email,
+            )
+            .await
+            .map_err(map_access_link_entry_error)?;
+        let schedule_id = Uuid::parse_str(&resolved.schedule_id).map_err(|_| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INVALID_ACCESS_LINK",
+                "Student Link references an invalid schedule.",
+            )
+        })?;
+        (
+            schedule_id,
+            resolved.provider_key,
+            resolved.access_mode,
+            Some(link_id.to_owned()),
+        )
+    } else {
+        let raw_schedule_id = req
+            .schedule_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "VALIDATION_ERROR",
+                    "Schedule ID or Student Link ID is required.",
+                )
+            })?;
+        let schedule_id = Uuid::parse_str(raw_schedule_id).map_err(|_| {
+            ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VALIDATION_ERROR",
+                "Schedule ID must be a UUID.",
+            )
+        })?;
+        let provider_key: String = sqlx::query_scalar(
+                "SELECT e.provider_key FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?",
+            )
+            .bind(schedule_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &error.to_string()))?
+            .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Schedule not found."))?;
+        (schedule_id, provider_key, AccessLinkMode::StudentCode, None)
+    };
 
-    let normalized_ielts_course = req.ielts_course.trim();
-    if normalized_ielts_course.is_empty() {
+    let normalized_wcode = if access_mode == AccessLinkMode::Open {
+        let link_id = access_link_id.as_deref().ok_or_else(|| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INVALID_ACCESS_LINK",
+                "Open Student Link context is missing.",
+            )
+        })?;
+        let digest = sha256_hex(&format!("assessment-access:{link_id}:{normalized_email}"));
+        format!("guest-{}", &digest[..24])
+    } else {
+        requested_wcode
+    };
+    if normalized_wcode.is_empty() {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "VALIDATION_ERROR",
-            "IELTS Course is required.",
+            "Student code is required.",
         ));
+    }
+    // Legacy storm admission is released by a schedule-runtime start command. Access-link-backed
+    // SAT delivery is independently timed per student module, so putting these entries into that
+    // queue would deadlock them in a lobby with no proctor action capable of releasing them.
+    let use_storm_admission = state.config.storm_admission_enabled && access_link_id.is_none();
+
+    let normalized_nickname = req.nickname.trim();
+    let normalized_ielts_course = req.ielts_course.trim();
+    if provider_key == "ielts" {
+        if normalized_nickname.is_empty() {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VALIDATION_ERROR",
+                "Nickname is required.",
+            ));
+        }
+        if normalized_nickname.chars().count() > 50 {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VALIDATION_ERROR",
+                "Nickname must be 50 characters or less.",
+            ));
+        }
+        if normalized_ielts_course.is_empty() {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VALIDATION_ERROR",
+                "IELTS Course is required.",
+            ));
+        }
     }
 
     #[derive(Debug, Clone, FromRow)]
@@ -432,10 +520,7 @@ pub async fn student_entry(
         )
     })?;
 
-    let normalized_name = req.student_name.trim();
-    let normalized_email = req.email.trim().to_ascii_lowercase();
-
-    let queued_admission = if state.config.storm_admission_enabled {
+    let queued_admission = if use_storm_admission {
         load_admission_queue_row(&state.db_pool(), schedule_id, &normalized_wcode).await?
     } else {
         None
@@ -546,7 +631,7 @@ pub async fn student_entry(
             )
                 .into_response());
         }
-    } else if state.config.storm_admission_enabled {
+    } else if use_storm_admission {
         let queue_key = format!("{schedule_id}:{normalized_wcode}");
         sqlx::query(
             r#"
@@ -653,13 +738,13 @@ pub async fn student_entry(
             normalized_wcode.clone(),
             req.email.trim().to_owned(),
             normalized_name.to_owned(),
-            Some(normalized_nickname.to_owned()),
-            Some(normalized_ielts_course.to_owned()),
+            (!normalized_nickname.is_empty()).then(|| normalized_nickname.to_owned()),
+            (!normalized_ielts_course.is_empty()).then(|| normalized_ielts_course.to_owned()),
             user_id,
         )
         .await?;
 
-    if state.config.storm_admission_enabled {
+    if use_storm_admission {
         sqlx::query(
             r#"
             UPDATE student_admission_queue
@@ -689,9 +774,41 @@ pub async fn student_entry(
 
     Ok((
         jar,
-        ApiResponse::success_with_request_id(issued.response, request_id.0),
+        ApiResponse::success_with_request_id(
+            StudentEntrySuccessResponse {
+                session: issued.response,
+                schedule_id: schedule_id.to_string(),
+                student_code: normalized_wcode,
+            },
+            request_id.0,
+        ),
     )
         .into_response())
+}
+
+fn map_access_link_entry_error(error: AssessmentAccessLinkError) -> ApiError {
+    match error {
+        AssessmentAccessLinkError::NotFound => ApiError::new(
+            StatusCode::NOT_FOUND,
+            "ACCESS_LINK_NOT_FOUND",
+            "Student Link not found.",
+        ),
+        AssessmentAccessLinkError::Unavailable(message) => {
+            ApiError::new(StatusCode::FORBIDDEN, "ACCESS_LINK_UNAVAILABLE", &message)
+        }
+        AssessmentAccessLinkError::Validation(message)
+        | AssessmentAccessLinkError::Conflict(message) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "ACCESS_LINK_VALIDATION_ERROR",
+            &message,
+        ),
+        AssessmentAccessLinkError::Database(error) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &error.to_string(),
+        ),
+        AssessmentAccessLinkError::Scheduling(error) => ApiError::from(error),
+    }
 }
 
 fn with_auth_cookies(

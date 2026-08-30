@@ -2,6 +2,7 @@ import React from 'react';
 import { AlertTriangle, Check, Clock, MoreHorizontal, Pause, Play, XCircle } from 'lucide-react';
 import { StudentSession } from '../../types';
 import { Badge } from '../ui/Badge';
+import { useAuthoritativeDeadlineClock } from '../../shared/hooks/useAuthoritativeDeadlineClock';
 
 interface StudentCardProps {
   session: StudentSession;
@@ -33,7 +34,15 @@ export const StudentCard = React.memo(function StudentCard({
 
   const initials = session.name.split(' ').map((part) => part[0]).join('').toUpperCase();
   const runtimeSection = session.runtimeCurrentSection ?? session.currentSection;
-  const runtimeTimeRemaining = session.runtimeTimeRemainingSeconds ?? session.timeRemaining;
+  const runtimeTimeRemaining = useAuthoritativeDeadlineClock({
+    deadlineAt: session.runtimeDeadlineAt ?? null,
+    serverNow: session.runtimeServerNow ?? null,
+    fallbackSeconds: session.runtimeTimeRemainingSeconds ?? session.timeRemaining,
+    running:
+      session.runtimeStatus === 'live'
+      && session.runtimeSectionStatus === 'live'
+      && session.status !== 'terminated',
+  });
   const badgeVariant =
     session.status === 'active'
       ? 'success'

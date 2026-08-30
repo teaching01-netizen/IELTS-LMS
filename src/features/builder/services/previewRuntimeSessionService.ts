@@ -181,6 +181,7 @@ async function ensureRuntimeAtSection(scheduleId: string, targetModule: ModuleTy
       scheduleId,
       PREVIEW_ACTOR,
       runtime.currentSectionKey,
+      runtime.revision ?? undefined,
     );
     if (!endSectionResult.success) {
       throw new Error(endSectionResult.error ?? 'Failed to switch preview section.');

@@ -11,7 +11,12 @@ const STARTUP_MIGRATIONS_LOCK_NAME: &str = "ielts_backend_startup_migrations_loc
 const STARTUP_MIGRATIONS_LOCK_TIMEOUT_SECS: i32 = 300;
 const MIGRATION_HISTORY_GUARD_MODE_ENV: &str = "MIGRATION_HISTORY_GUARD_MODE";
 const REQUIRED_INDEX_GUARD_MODE_ENV: &str = "REQUIRED_INDEX_GUARD_MODE";
-const MUTATION_UNIQUENESS_GUARD_MODE_ENV: &str = "MUTATION_UNIQUENESS_GUARD_MODE";
+
+const REQUIRED_COLUMNS: &[(&str, &str)] = &[
+    ("student_attempts", "active_client_session_id"),
+    ("assessment_question_revisions", "updated_by"),
+    ("exam_session_runtimes", "timing_model"),
+];
 
 const REQUIRED_INDEXES: &[(&str, &str)] = &[
     (
@@ -73,6 +78,7 @@ async fn run_startup_migrations_on_connection(
         record_migration(conn, &migration.filename).await?;
     }
 
+    verify_required_columns(conn).await?;
     verify_required_indexes(conn).await?;
     verify_mutation_uniqueness_guard(conn).await?;
 
@@ -175,6 +181,45 @@ async fn maybe_backfill_schema_migrations(conn: &mut MySqlConnection) -> Result<
     }
 }
 
+async fn verify_required_columns(conn: &mut MySqlConnection) -> Result<(), sqlx::Error> {
+    let mut missing = Vec::new();
+    for (table_name, column_name) in REQUIRED_COLUMNS {
+        let exists: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = ?
+              AND column_name = ?
+            "#,
+        )
+        .bind(table_name)
+        .bind(column_name)
+        .fetch_one(&mut *conn)
+        .await?;
+        if exists == 0 {
+            missing.push(format!("{table_name}.{column_name}"));
+        }
+    }
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    Err(sqlx::Error::Protocol(format!(
+        "Required database columns are missing: {}. Refusing startup because the running application expects the latest durability schema; run the database migrator before starting the API.",
+        missing.join(", ")
+    )))
+}
+
+pub async fn verify_runtime_schema(pool: &MySqlPool) -> Result<(), sqlx::Error> {
+    let mut conn = pool.acquire().await?;
+    verify_required_columns(conn.as_mut()).await?;
+    verify_required_indexes(conn.as_mut()).await?;
+    verify_mutation_uniqueness_guard(conn.as_mut()).await?;
+    Ok(())
+}
+
 async fn verify_required_indexes(conn: &mut MySqlConnection) -> Result<(), sqlx::Error> {
     let mut missing = Vec::new();
     for (table_name, index_name) in REQUIRED_INDEXES {
@@ -226,48 +271,20 @@ async fn verify_mutation_uniqueness_guard(conn: &mut MySqlConnection) -> Result<
         WHERE table_schema = DATABASE()
           AND table_name = 'student_attempt_mutations'
           AND index_name = 'idx_student_attempt_mutations_attempt_mutation_id'
+          AND non_unique = 0
         "#,
     )
     .fetch_one(&mut *conn)
     .await?;
+
     if has_unique_identity_index > 0 {
         return Ok(());
     }
 
-    let duplicate: Option<(String, String, i64)> = sqlx::query_as(
-        r#"
-        SELECT attempt_id, client_mutation_id, COUNT(*) AS duplicate_count
-        FROM student_attempt_mutations
-        GROUP BY attempt_id, client_mutation_id
-        HAVING COUNT(*) > 1
-        LIMIT 1
-        "#,
-    )
-    .fetch_optional(&mut *conn)
-    .await?;
-
-    let Some((attempt_id, client_mutation_id, duplicate_count)) = duplicate else {
-        return Ok(());
-    };
-
-    let detail = format!(
-        "Duplicate mutation identity rows detected in student_attempt_mutations. \
-attempt_id={attempt_id}, client_mutation_id={client_mutation_id}, duplicate_count={duplicate_count}. \
-Pre-deploy gate query: SELECT attempt_id, client_mutation_id, COUNT(*) AS duplicate_count \
-FROM student_attempt_mutations GROUP BY attempt_id, client_mutation_id HAVING COUNT(*) > 1;"
-    );
-    match guard_mode_from_env(MUTATION_UNIQUENESS_GUARD_MODE_ENV, GuardMode::Fail) {
-        GuardMode::Fail => Err(sqlx::Error::Protocol(detail)),
-        GuardMode::Warn => {
-            tracing::warn!(
-                mode = "warn",
-                env = MUTATION_UNIQUENESS_GUARD_MODE_ENV,
-                "MUTATION_UNIQUENESS_GUARD_MODE=warn allows startup despite duplicate mutation identities; {}",
-                detail
-            );
-            Ok(())
-        }
-    }
+    Err(sqlx::Error::Protocol(
+        "Required idempotency invariant is missing: student_attempt_mutations must have UNIQUE idx_student_attempt_mutations_attempt_mutation_id(attempt_id, client_mutation_id). Refusing startup because retries could otherwise apply the same student action more than once."
+            .to_owned(),
+    ))
 }
 
 // Note: ensure_roles_if_possible removed - MySQL uses standard user management

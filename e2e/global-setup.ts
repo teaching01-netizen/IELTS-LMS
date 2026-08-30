@@ -16,7 +16,7 @@ function loadEnvFile(filePath: string) {
   dotenv.config({ path: filePath, override: false });
 }
 
-function runSeedCommand(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
+function runCargoCommand(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
   return new Promise<void>((resolve, reject) => {
     const child = spawn('cargo', args, {
       cwd,
@@ -31,7 +31,7 @@ function runSeedCommand(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
         return;
       }
 
-      reject(new Error(`e2e seed command failed with exit code ${code ?? 'unknown'}`));
+      reject(new Error(`e2e cargo command failed with exit code ${code ?? 'unknown'}`));
     });
   });
 }
@@ -50,6 +50,12 @@ export default async function globalSetup(config: FullConfig) {
   process.env.AUTH_CSRF_COOKIE_NAME ??= 'csrf';
 
   await fs.mkdir(GENERATED_DIR, { recursive: true });
+
+  await runCargoCommand(
+    ['run', '-p', 'ielts-backend-api', '--bin', 'migrate'],
+    backendRoot,
+    process.env,
+  );
 
   const cargoArgs = [
     'run',
@@ -72,5 +78,5 @@ export default async function globalSetup(config: FullConfig) {
     frontendOrigin,
   ];
 
-  await runSeedCommand(cargoArgs, backendRoot, process.env);
+  await runCargoCommand(cargoArgs, backendRoot, process.env);
 }

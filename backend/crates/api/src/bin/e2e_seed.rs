@@ -376,8 +376,45 @@ fn parse_args(args: Vec<String>) -> Result<SeedArgs, Box<dyn std::error::Error>>
 async fn cleanup_existing_fixtures(pool: &MySqlPool) -> Result<(), sqlx::Error> {
     eprintln!("Starting cleanup of existing fixtures...");
 
+    // Schedules reference published exam versions without ON DELETE CASCADE.
+    // Remove schedule aggregates first; their schedule-owned attempts/runtime
+    // state cascade from the schedule boundary.
+    eprintln!("Deleting schedules for fixture exams...");
+    sqlx::query(
+        r#"
+        DELETE es
+        FROM exam_schedules es
+        JOIN exam_entities e ON e.id = es.exam_id
+        WHERE e.slug IN (?, ?)
+        "#,
+    )
+    .bind(BUILDER_EXAM_SLUG.to_owned())
+    .bind(STUDENT_EXAM_SLUG.to_owned())
+    .execute(pool)
+    .await?;
+    eprintln!("✓ Deleted fixture schedules");
+
+    // exam_events.version_id intentionally has no ON DELETE action because the
+    // production audit log is append-only. E2E fixtures are disposable, so
+    // delete their audit events explicitly before cascading the fixture exams.
+    // Keeping this dependency order here makes global setup safely repeatable.
+    eprintln!("Deleting exam_events for fixture exams...");
+    sqlx::query(
+        r#"
+        DELETE ee
+        FROM exam_events ee
+        JOIN exam_entities e ON e.id = ee.exam_id
+        WHERE e.slug IN (?, ?)
+        "#,
+    )
+    .bind(BUILDER_EXAM_SLUG.to_owned())
+    .bind(STUDENT_EXAM_SLUG.to_owned())
+    .execute(pool)
+    .await?;
+    eprintln!("✓ Deleted fixture exam_events");
+
     eprintln!("Deleting exam_entities...");
-    let result = sqlx::query(
+    sqlx::query(
         r#"
         DELETE FROM exam_entities
         WHERE slug IN (?, ?)
@@ -386,15 +423,8 @@ async fn cleanup_existing_fixtures(pool: &MySqlPool) -> Result<(), sqlx::Error> 
     .bind(BUILDER_EXAM_SLUG.to_owned())
     .bind(STUDENT_EXAM_SLUG.to_owned())
     .execute(pool)
-    .await;
-
-    match result {
-        Ok(_) => eprintln!("✓ Deleted exam_entities"),
-        Err(e) => {
-            eprintln!("✗ Failed to delete exam_entities: {}", e);
-            return Err(e);
-        }
-    }
+    .await?;
+    eprintln!("✓ Deleted exam_entities");
 
     eprintln!("Deleting users...");
     let result = sqlx::query(

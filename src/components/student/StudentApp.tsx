@@ -89,6 +89,14 @@ function getBlockingCopy(
         badge: 'Waiting',
         contextLabel: 'Session Runtime',
       };
+    case 'time_expired':
+      return {
+        title: 'Time is up',
+        message:
+          'This section is closed for new answers. Your saved work is being finalized before the cohort advances.',
+        badge: 'Time',
+        contextLabel: 'Authoritative Clock',
+      };
     case 'offline':
       return {
         title: 'Connection lost',
@@ -458,10 +466,12 @@ export function StudentApp({
   }, [uiState.showTimeExtensionRequest, uiState.timeExtensionGranted]);
 
   const handleTimeExtensionRequest = () => {
-    if (timeExtensionReason.trim()) {
-      uiActions.grantTimeExtension(5);
-      runtimeActions.setTimeRemaining(runtimeState.timeRemaining + 300);
+    if (!timeExtensionReason.trim()) return;
+    if (runtimeState.runtimeBacked) {
+      return;
     }
+    uiActions.grantTimeExtension(5);
+    runtimeActions.setTimeRemaining(runtimeState.timeRemaining + 300);
   };
 
   const answeredCount = countAnsweredQuestions(runtimeState.allQuestions, attemptAnswers);

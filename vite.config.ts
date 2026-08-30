@@ -6,15 +6,7 @@ import {defineConfig, loadEnv} from 'vite';
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   const backendApiUrl = env['VITE_BACKEND_API_URL'] || 'http://127.0.0.1:4000';
-  const desmosMode = env['VITE_DESMOS_MODE'] || 'desmos-hosted';
-  const stripHostedDesmosKey = desmosMode === 'self-hosted' && mode !== 'test';
   return {
-    define: stripHostedDesmosKey
-      ? {
-          // Never emit a hosted Desmos partner key into a self-hosted client bundle.
-          'import.meta.env.VITE_DESMOS_API_KEY': JSON.stringify(''),
-        }
-      : {},
     plugins: [
       react(), 
       tailwindcss(),

@@ -11,8 +11,11 @@ pub enum DeliveredAnswerDefinition {
         options: Vec<ChoiceOption>,
     },
     StudentProducedResponse {
+        #[serde(rename = "normalizeFraction", alias = "normalize_fraction")]
         normalize_fraction: bool,
+        #[serde(rename = "normalizeDecimal", alias = "normalize_decimal")]
         normalize_decimal: bool,
+        #[serde(rename = "numericTolerance", alias = "numeric_tolerance")]
         numeric_tolerance: Option<String>,
     },
 }
@@ -42,6 +45,7 @@ pub struct AssessmentDeliveryModule {
     pub duration_seconds: i32,
     pub target_question_count: i32,
     pub adaptive_role: String,
+    pub instructions: StructuredContent,
     pub tool_policy: Value,
     pub questions: Vec<DeliveredQuestion>,
 }
@@ -55,6 +59,7 @@ pub struct AssessmentDeliverySection {
     pub display_order: i32,
     pub duration_seconds: i32,
     pub break_after_seconds: i32,
+    pub instructions: StructuredContent,
     pub modules: Vec<AssessmentDeliveryModule>,
 }
 
@@ -102,13 +107,28 @@ pub struct AssessmentAttemptSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct AssessmentTimingSnapshot {
+    pub authority: String,
+    pub timing_model: String,
+    pub stage_key: Option<String>,
+    pub stage_status: Option<String>,
+    pub server_now: DateTime<Utc>,
+    pub deadline_at: Option<DateTime<Utc>>,
+    pub remaining_seconds: i32,
+    pub runtime_revision: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct AssessmentDeliveryBootstrap {
     pub schedule_id: String,
     pub exam_id: String,
     pub provider_key: String,
     pub version_id: String,
     pub server_now: DateTime<Utc>,
+    pub candidate_name: String,
     pub schedule_runtime_status: String,
+    pub timing: AssessmentTimingSnapshot,
     pub proctor_status: String,
     pub proctor_note: Option<String>,
     pub device_fingerprint_hash: Option<String>,
@@ -125,6 +145,14 @@ pub struct AssessmentResponseRequest {
     pub marked_for_review: bool,
     pub eliminated_options: Vec<String>,
     pub annotations: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_attempt_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_revision: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_write_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

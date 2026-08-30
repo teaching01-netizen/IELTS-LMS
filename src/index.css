@@ -1,18 +1,20 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 @import "tailwindcss";
 
 @theme {
   /* Notion font stack: Inter (brand type) over Notion's system-ui fallback */
-  --font-sans: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+  --font-sans:
+    "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
+    "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
   /* Typography Scale - Consistent visual hierarchy */
-  --font-size-xs: 0.75rem;   /* 12px - Captions, labels */
-  --font-size-sm: 0.875rem;  /* 14px - Body text, secondary */
-  --font-size-base: 1rem;    /* 16px - Default body */
-  --font-size-lg: 1.125rem;  /* 18px - Subheadings */
-  --font-size-xl: 1.25rem;   /* 20px - Headings */
-  --font-size-2xl: 1.5rem;   /* 24px - Section titles */
+  --font-size-xs: 0.75rem; /* 12px - Captions, labels */
+  --font-size-sm: 0.875rem; /* 14px - Body text, secondary */
+  --font-size-base: 1rem; /* 16px - Default body */
+  --font-size-lg: 1.125rem; /* 18px - Subheadings */
+  --font-size-xl: 1.25rem; /* 20px - Headings */
+  --font-size-2xl: 1.5rem; /* 24px - Section titles */
   --font-size-3xl: 1.875rem; /* 30px - Page titles */
 
   --font-weight-normal: 400;
@@ -29,132 +31,132 @@
   --letter-spacing-wide: 0.025em;
 
   /* Spacing Tokens - Consistent spacing scale */
-  --spacing-1: 0.25rem;  /* 4px */
-  --spacing-2: 0.5rem;   /* 8px */
-  --spacing-3: 0.75rem;  /* 12px */
-  --spacing-4: 1rem;     /* 16px */
-  --spacing-5: 1.25rem;  /* 20px */
-  --spacing-6: 1.5rem;   /* 24px */
-  --spacing-8: 2rem;     /* 32px */
-  --spacing-10: 2.5rem;  /* 40px */
-  --spacing-12: 3rem;    /* 48px */
+  --spacing-1: 0.25rem; /* 4px */
+  --spacing-2: 0.5rem; /* 8px */
+  --spacing-3: 0.75rem; /* 12px */
+  --spacing-4: 1rem; /* 16px */
+  --spacing-5: 1.25rem; /* 20px */
+  --spacing-6: 1.5rem; /* 24px */
+  --spacing-8: 2rem; /* 32px */
+  --spacing-10: 2.5rem; /* 40px */
+  --spacing-12: 3rem; /* 48px */
 
   /* Notion Design System Color Palette — warm neutrals, low chroma */
   /* Neutral (Notion gray ramp: #37352F text → #F7F7F5 canvas) */
-  --color-gray-900: #37352F; /* Primary text */
-  --color-gray-800: #3F3D3A;
-  --color-gray-700: #4C4A47;
-  --color-gray-600: #5F5E5B;
+  --color-gray-900: #37352f; /* Primary text */
+  --color-gray-800: #3f3d3a;
+  --color-gray-700: #4c4a47;
+  --color-gray-600: #5f5e5b;
   --color-gray-500: #787774; /* Secondary text */
-  --color-gray-400: #9B9A97; /* Tertiary text */
-  --color-gray-300: #C7C5C3;
-  --color-gray-200: #E3E3E0; /* Button gray, strong borders */
-  --color-gray-100: #EFEFEC; /* Hover */
-  --color-gray-50: #F7F7F5;  /* Canvas, sidebar */
+  --color-gray-400: #9b9a97; /* Tertiary text */
+  --color-gray-300: #c7c5c3;
+  --color-gray-200: #e3e3e0; /* Button gray, strong borders */
+  --color-gray-100: #efefec; /* Hover */
+  --color-gray-50: #f7f7f5; /* Canvas, sidebar */
 
   /* Blue (Notion blue #2383E2) */
-  --color-blue-900: #12488A;
-  --color-blue-800: #185BAA;
-  --color-blue-700: #1D6FC7;
-  --color-blue-600: #2383E2; /* Notion blue - primary */
-  --color-blue-500: #2E8BDD;
-  --color-blue-400: #4F9CE0;
-  --color-blue-300: #84B8E8;
-  --color-blue-200: #B3D3F1;
-  --color-blue-100: #D9E9F8;
-  --color-blue-50: #EEF5FC;
+  --color-blue-900: #12488a;
+  --color-blue-800: #185baa;
+  --color-blue-700: #1d6fc7;
+  --color-blue-600: #2383e2; /* Notion blue - primary */
+  --color-blue-500: #2e8bdd;
+  --color-blue-400: #4f9ce0;
+  --color-blue-300: #84b8e8;
+  --color-blue-200: #b3d3f1;
+  --color-blue-100: #d9e9f8;
+  --color-blue-50: #eef5fc;
 
   /* Green (Notion green #448361) */
   --color-green-900: #204130;
-  --color-green-800: #28513B;
+  --color-green-800: #28513b;
   --color-green-700: #316247;
-  --color-green-600: #3A7453;
+  --color-green-600: #3a7453;
   --color-green-500: #448361;
-  --color-green-400: #5E9B79;
-  --color-green-300: #8FBAA1;
-  --color-green-200: #B9D6C3;
-  --color-green-100: #DCEBE1;
-  --color-green-50: #EEF5F0;
+  --color-green-400: #5e9b79;
+  --color-green-300: #8fbaa1;
+  --color-green-200: #b9d6c3;
+  --color-green-100: #dcebe1;
+  --color-green-50: #eef5f0;
 
   /* Danger (Notion red #D44C47) */
   --color-red-900: #672522;
-  --color-red-800: #84302D;
-  --color-red-700: #A03532;
-  --color-red-600: #BC403C;
-  --color-red-500: #D44C47;
-  --color-red-400: #D56E6A;
-  --color-red-300: #DE9794;
-  --color-red-200: #EBBEBC;
-  --color-red-100: #F5DEDD;
-  --color-red-50: #FBEFEF;
+  --color-red-800: #84302d;
+  --color-red-700: #a03532;
+  --color-red-600: #bc403c;
+  --color-red-500: #d44c47;
+  --color-red-400: #d56e6a;
+  --color-red-300: #de9794;
+  --color-red-200: #ebbebc;
+  --color-red-100: #f5dedd;
+  --color-red-50: #fbefef;
 
   /* Warning (Notion yellow #CB912F) */
-  --color-amber-900: #593F12;
+  --color-amber-900: #593f12;
   --color-amber-800: #785519;
-  --color-amber-700: #966A20;
-  --color-amber-600: #B47F27;
-  --color-amber-500: #CB912F;
-  --color-amber-400: #D5A34A;
-  --color-amber-300: #DEB467;
-  --color-amber-200: #E8CD95;
-  --color-amber-100: #F3E6C8;
-  --color-amber-50: #FAF3E6;
+  --color-amber-700: #966a20;
+  --color-amber-600: #b47f27;
+  --color-amber-500: #cb912f;
+  --color-amber-400: #d5a34a;
+  --color-amber-300: #deb467;
+  --color-amber-200: #e8cd95;
+  --color-amber-100: #f3e6c8;
+  --color-amber-50: #faf3e6;
 
   /* Orange (Notion orange #D9730D) */
-  --color-orange-900: #6E3A06;
+  --color-orange-900: #6e3a06;
   --color-orange-800: #824407;
-  --color-orange-700: #A0550A;
-  --color-orange-600: #BE650B;
-  --color-orange-500: #D9730D;
-  --color-orange-400: #E08B3C;
-  --color-orange-300: #E8AB6F;
-  --color-orange-200: #EAC8A7;
-  --color-orange-100: #F5E4D3;
+  --color-orange-700: #a0550a;
+  --color-orange-600: #be650b;
+  --color-orange-500: #d9730d;
+  --color-orange-400: #e08b3c;
+  --color-orange-300: #e8ab6f;
+  --color-orange-200: #eac8a7;
+  --color-orange-100: #f5e4d3;
 
   /* Purple (Notion purple #9065B0) */
-  --color-purple-900: #5A3C70;
-  --color-purple-800: #6A4885;
-  --color-purple-700: #7D569C;
-  --color-purple-600: #9065B0;
-  --color-purple-500: #A275BD;
-  --color-purple-400: #A983C6;
-  --color-purple-300: #C4A9D8;
-  --color-purple-200: #D5C7E2;
-  --color-purple-100: #EAE3F0;
+  --color-purple-900: #5a3c70;
+  --color-purple-800: #6a4885;
+  --color-purple-700: #7d569c;
+  --color-purple-600: #9065b0;
+  --color-purple-500: #a275bd;
+  --color-purple-400: #a983c6;
+  --color-purple-300: #c4a9d8;
+  --color-purple-200: #d5c7e2;
+  --color-purple-100: #eae3f0;
 
   /* Pink (Notion pink #C14C8A) */
-  --color-pink-900: #7C2F58;
-  --color-pink-800: #933A68;
-  --color-pink-700: #AB4079;
-  --color-pink-600: #C14C8A;
-  --color-pink-500: #CE639B;
-  --color-pink-400: #D171A8;
-  --color-pink-300: #E0A1C5;
-  --color-pink-200: #EDBFD9;
-  --color-pink-100: #F6DFEC;
+  --color-pink-900: #7c2f58;
+  --color-pink-800: #933a68;
+  --color-pink-700: #ab4079;
+  --color-pink-600: #c14c8a;
+  --color-pink-500: #ce639b;
+  --color-pink-400: #d171a8;
+  --color-pink-300: #e0a1c5;
+  --color-pink-200: #edbfd9;
+  --color-pink-100: #f6dfec;
 
   /* Brown (Notion brown #9F6B53) */
-  --color-brown-900: #6B4635;
-  --color-brown-800: #81543F;
-  --color-brown-700: #8A5C46;
-  --color-brown-600: #9F6B53;
-  --color-brown-500: #B0816A;
-  --color-brown-400: #BB8F7A;
-  --color-brown-300: #CFB1A1;
-  --color-brown-200: #DFC9C0;
-  --color-brown-100: #EFE4DF;
+  --color-brown-900: #6b4635;
+  --color-brown-800: #81543f;
+  --color-brown-700: #8a5c46;
+  --color-brown-600: #9f6b53;
+  --color-brown-500: #b0816a;
+  --color-brown-400: #bb8f7a;
+  --color-brown-300: #cfb1a1;
+  --color-brown-200: #dfc9c0;
+  --color-brown-100: #efe4df;
 
   /* Teal (Notion teal family #428694) */
-  --color-emerald-900: #264E55;
-  --color-emerald-800: #2F6068;
-  --color-emerald-700: #39747F;
+  --color-emerald-900: #264e55;
+  --color-emerald-800: #2f6068;
+  --color-emerald-700: #39747f;
   --color-emerald-600: #428694;
-  --color-emerald-500: #4B9494;
-  --color-emerald-400: #589C9C;
-  --color-emerald-300: #7BAFAF;
-  --color-emerald-200: #A7CBCB;
-  --color-emerald-100: #D3E5E5;
-  --color-emerald-50: #EAF2F2;
+  --color-emerald-500: #4b9494;
+  --color-emerald-400: #589c9c;
+  --color-emerald-300: #7bafaf;
+  --color-emerald-200: #a7cbcb;
+  --color-emerald-100: #d3e5e5;
+  --color-emerald-50: #eaf2f2;
 
   /* Semantic Aliases */
   --color-primary: var(--color-blue-600);
@@ -164,12 +166,12 @@
   --color-info: var(--color-blue-700);
 
   /* Hierarchy Colors - Visual hierarchy through color */
-  --color-hierarchy-primary: var(--color-blue-600);      /* Primary actions, main headings */
-  --color-hierarchy-secondary: var(--color-gray-700);     /* Secondary text, labels */
-  --color-hierarchy-tertiary: var(--color-gray-500);      /* Captions, hints */
-  --color-hierarchy-disabled: var(--color-gray-300);      /* Disabled states */
-  --color-hierarchy-border: var(--color-gray-200);       /* Borders, dividers */
-  --color-hierarchy-background: var(--color-gray-50);    /* Section backgrounds */
+  --color-hierarchy-primary: var(--color-blue-600); /* Primary actions, main headings */
+  --color-hierarchy-secondary: var(--color-gray-700); /* Secondary text, labels */
+  --color-hierarchy-tertiary: var(--color-gray-500); /* Captions, hints */
+  --color-hierarchy-disabled: var(--color-gray-300); /* Disabled states */
+  --color-hierarchy-border: var(--color-gray-200); /* Borders, dividers */
+  --color-hierarchy-background: var(--color-gray-50); /* Section backgrounds */
 
   /* Canonical semantic color roles. Tailwind v4 generates utilities from
      these names (bg-background, text-foreground, border-border, ...). All
@@ -195,10 +197,10 @@
   --color-destructive-active: var(--color-red-700);
   --color-destructive-foreground: #ffffff;
   /* Notion hairline border (rgba(55,53,47,0.09)) and strong border (rgba(55,53,47,0.16)) */
-  --color-border: #E6E5E1;
-  --color-border-strong: #D3D1CB;
+  --color-border: #e6e5e1;
+  --color-border-strong: #d3d1cb;
   /* Notion input border (rgba(15,15,15,0.15)) */
-  --color-input: #D9D9D7;
+  --color-input: #d9d9d7;
   --color-ring: var(--color-blue-600);
 
   /* Surface roles */
@@ -221,15 +223,19 @@
   --color-exam-input-surface: #ffffff;
 
   /* Notion Styling — small radii, hairline borders, layered soft shadows */
-  --radius-sm: 3px;   /* Buttons, chips */
-  --radius-md: 4px;   /* Inputs, nav items */
-  --radius-lg: 6px;   /* Menus, popovers, cards */
-  --radius-xl: 10px;  /* Dialogs, sheets */
+  --radius-sm: 3px; /* Buttons, chips */
+  --radius-md: 4px; /* Inputs, nav items */
+  --radius-lg: 6px; /* Menus, popovers, cards */
+  --radius-xl: 10px; /* Dialogs, sheets */
 
   --shadow-sm: 0 1px 2px rgba(15, 15, 15, 0.06);
   --shadow-md: 0 0 0 1px rgba(15, 15, 15, 0.05), 0 3px 6px rgba(15, 15, 15, 0.1);
-  --shadow-lg: 0 0 0 1px rgba(15, 15, 15, 0.05), 0 3px 6px rgba(15, 15, 15, 0.1), 0 9px 24px rgba(15, 15, 15, 0.2);
-  --shadow-xl: 0 0 0 1px rgba(15, 15, 15, 0.06), 0 6px 14px rgba(15, 15, 15, 0.12), 0 16px 48px rgba(15, 15, 15, 0.25);
+  --shadow-lg:
+    0 0 0 1px rgba(15, 15, 15, 0.05), 0 3px 6px rgba(15, 15, 15, 0.1),
+    0 9px 24px rgba(15, 15, 15, 0.2);
+  --shadow-xl:
+    0 0 0 1px rgba(15, 15, 15, 0.06), 0 6px 14px rgba(15, 15, 15, 0.12),
+    0 16px 48px rgba(15, 15, 15, 0.25);
 }
 
 :root {
@@ -288,7 +294,8 @@
   }
 
   @keyframes pulse-subtle {
-    0%, 100% {
+    0%,
+    100% {
       box-shadow: 0 0 0 0 rgba(35, 131, 226, 0);
     }
     50% {
@@ -437,12 +444,12 @@
     }
   }
 
-  .student-exam-shell[data-student-layout-mode='compact'] {
+  .student-exam-shell[data-student-layout-mode="compact"] {
     --student-header-height: var(--student-header-height-compact);
     --student-bottom-bar-height: var(--student-bottom-bar-height-compact);
   }
 
-  .student-exam-shell[data-student-layout-mode='medium'] {
+  .student-exam-shell[data-student-layout-mode="medium"] {
     --student-header-height: var(--student-header-height-medium);
     --student-bottom-bar-height: var(--student-bottom-bar-height-medium);
   }
@@ -477,25 +484,13 @@
   .student-compact-question-navigation [data-student-primary-touch-target] {
     touch-action: manipulation;
   }
-  .student-exam-shell[data-student-layout-mode='compact'] :is(
-    button,
-    [role='button'],
-    input,
-    select,
-    textarea,
-    a[href]
-  ) {
+  .student-exam-shell[data-student-layout-mode="compact"]
+    :is(button, [role="button"], input, select, textarea, a[href]) {
     min-block-size: var(--student-touch-target-preferred);
     min-inline-size: var(--student-touch-target-preferred);
   }
-  .student-exam-shell[data-student-touch-mode='true'] :is(
-    button,
-    [role='button'],
-    input,
-    select,
-    textarea,
-    a[href]
-  ) {
+  .student-exam-shell[data-student-touch-mode="true"]
+    :is(button, [role="button"], input, select, textarea, a[href]) {
     min-block-size: var(--student-touch-target-preferred) !important;
     min-inline-size: var(--student-touch-target-preferred) !important;
     min-width: var(--student-touch-target-preferred) !important;
@@ -510,11 +505,11 @@
     padding-bottom: max(1rem, var(--student-safe-bottom));
   }
 
-  .student-exam-shell[data-student-layout-mode='compact'] .student-exam-footer {
+  .student-exam-shell[data-student-layout-mode="compact"] .student-exam-footer {
     border-radius: 0.375rem;
   }
 
-  .student-exam-shell[data-student-layout-mode='compact'] .student-exam-main {
+  .student-exam-shell[data-student-layout-mode="compact"] .student-exam-main {
     overflow: hidden;
   }
 
@@ -532,7 +527,6 @@
     box-sizing: border-box;
     background-color: var(--color-exam-surface);
   }
-
 
   .student-exam-footer {
     align-self: stretch;
@@ -558,7 +552,7 @@
    * visually hidden and inert. display:none is intentionally avoided because
    * it would collapse the `auto` grid row and reflow the workspace.
    */
-  .student-exam-shell[data-student-keyboard-open='true'] .student-exam-footer {
+  .student-exam-shell[data-student-keyboard-open="true"] .student-exam-footer {
     visibility: hidden;
     pointer-events: none;
   }
@@ -709,7 +703,8 @@
 
   /* One-shot urgency cue for the exam timer under five minutes. */
   @keyframes student-urgent-cue {
-    0%, 100% {
+    0%,
+    100% {
       box-shadow: 0 0 0 0 rgba(212, 76, 71, 0);
     }
     50% {
@@ -755,31 +750,32 @@
     font-family: inherit !important;
   }
 
-  .student-stimulus-content :is(
-    p,
-    h1,
-    h2,
-    h3,
-    h4,
-    h5,
-    h6,
-    li,
-    table,
-    thead,
-    tbody,
-    tfoot,
-    tr,
-    th,
-    td,
-    caption,
-    span,
-    strong,
-    b,
-    em,
-    i,
-    a,
-    u
-  ) {
+  .student-stimulus-content
+    :is(
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      li,
+      table,
+      thead,
+      tbody,
+      tfoot,
+      tr,
+      th,
+      td,
+      caption,
+      span,
+      strong,
+      b,
+      em,
+      i,
+      a,
+      u
+    ) {
     font-size: 1em !important;
     line-height: inherit !important;
   }
@@ -808,36 +804,14 @@
     width: var(--writing-editor-pane-width, calc(50% - 16px));
   }
 
-  .student-accessible-table-typography :is(
-    table,
-    thead,
-    tbody,
-    tfoot,
-    tr,
-    th,
-    td,
-    caption
-  ) {
+  .student-accessible-table-typography :is(table, thead, tbody, tfoot, tr, th, td, caption) {
     font-size: inherit !important;
     line-height: inherit !important;
   }
 
-  .student-accessible-table-typography table :is(
-    p,
-    span,
-    strong,
-    em,
-    b,
-    i,
-    u,
-    a,
-    small,
-    sub,
-    sup,
-    mark,
-    div,
-    li
-  ) {
+  .student-accessible-table-typography
+    table
+    :is(p, span, strong, em, b, i, u, a, small, sub, sup, mark, div, li) {
     font-size: inherit !important;
     line-height: inherit !important;
   }
@@ -879,7 +853,9 @@
 .authoring-glass {
   background: rgba(255, 255, 255, 0.78);
   border-color: rgba(0, 0, 0, 0.06);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7), 0 8px 28px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7),
+    0 8px 28px rgba(0, 0, 0, 0.04);
   -webkit-backdrop-filter: saturate(180%) blur(24px);
   backdrop-filter: saturate(180%) blur(24px);
 }
@@ -936,7 +912,7 @@
 }
 
 .sat-rendered-math:hover,
-[data-equation-selected='true'] > .sat-rendered-math {
+[data-equation-selected="true"] > .sat-rendered-math {
   background: rgba(0, 122, 255, 0.055);
   box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.11);
 }
@@ -979,7 +955,7 @@ math-field.sat-block-mathfield {
   color: rgb(15 23 42);
   --caret-color: #007aff;
   --selection-background-color: rgba(10, 132, 255, 0.16);
-  --contains-highlight-background-color: rgba(10, 132, 255, 0.10);
+  --contains-highlight-background-color: rgba(10, 132, 255, 0.1);
 }
 
 math-field.sat-inline-mathfield {
@@ -1007,8 +983,12 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .authoring-glass,
-  .authoring-sidebar { background: rgb(255 255 255); }
-  .authoring-subtoolbar { background: rgb(245 245 247); }
+  .authoring-sidebar {
+    background: rgb(255 255 255);
+  }
+  .authoring-subtoolbar {
+    background: rgb(245 245 247);
+  }
 }
 
 .authoring-interactive {
@@ -1024,28 +1004,44 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 }
 
 @keyframes authoring-field-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(35, 131, 226, 0); }
-  28% { box-shadow: 0 0 0 5px rgba(35, 131, 226, 0.13); }
-  100% { box-shadow: 0 0 0 0 rgba(35, 131, 226, 0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(35, 131, 226, 0);
+  }
+  28% {
+    box-shadow: 0 0 0 5px rgba(35, 131, 226, 0.13);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(35, 131, 226, 0);
+  }
 }
 
-[data-authoring-pulse='true'] {
+[data-authoring-pulse="true"] {
   border-radius: 0.875rem;
   animation: authoring-field-pulse 820ms var(--authoring-ease) 1;
 }
 
 @keyframes authoring-table-settle {
-  from { opacity: 0.72; transform: translateY(-2px); }
-  to { opacity: 1; transform: none; }
+  from {
+    opacity: 0.72;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-[data-table-feedback='true'] table {
+[data-table-feedback="true"] table {
   animation: authoring-table-settle 180ms var(--authoring-ease) 1;
 }
 
 @keyframes authoring-shimmer {
-  from { transform: translateX(-110%); }
-  to { transform: translateX(110%); }
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(110%);
+  }
 }
 
 .authoring-skeleton {
@@ -1057,19 +1053,304 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 .authoring-skeleton::after {
   position: absolute;
   inset: 0;
-  content: '';
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.78),
-    transparent
-  );
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.78), transparent);
   animation: authoring-shimmer 1.35s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .authoring-interactive:active:not(:disabled) { transform: none; }
-  [data-authoring-pulse='true'],
-  [data-table-feedback='true'] table,
-  .authoring-skeleton::after { animation: none !important; }
+  .authoring-interactive:active:not(:disabled) {
+    transform: none;
+  }
+  [data-authoring-pulse="true"],
+  [data-table-feedback="true"] table,
+  .authoring-skeleton::after {
+    animation: none !important;
+  }
+}
+
+/* SAT delivery accessibility system */
+.sat-ui {
+  --sat-background: #ffffff;
+  --sat-surface: #ffffff;
+  --sat-surface-subtle: #f2f2f7;
+  --sat-surface-hover: #e9e9ee;
+  --sat-text: #1d1d1f;
+  --sat-text-secondary: #515154;
+  --sat-divider: rgba(60, 60, 67, 0.36);
+  --sat-divider-soft: rgba(60, 60, 67, 0.18);
+  --sat-accent: #0077c8;
+  --sat-accent-strong: #0067b8;
+  --sat-accent-soft: #eaf5fc;
+  --sat-accent-text: #ffffff;
+  --sat-focus: #005fcc;
+  --sat-review: #b51d4f;
+  --sat-danger: #b42318;
+  --sat-danger-soft: #fff1f0;
+  --sat-warning: #8a4b00;
+  --sat-warning-soft: #fff7e6;
+  --sat-disabled-background: #e9e9ee;
+  --sat-disabled-text: #616166;
+  --sat-tool-chrome: #202022;
+  --sat-tool-text: #ffffff;
+  --sat-tool-hover: rgba(255, 255, 255, 0.12);
+  --sat-press-overlay: rgba(0, 0, 0, 0.075);
+  --sat-control-target: 44px;
+  --sat-motion-state: 130ms;
+  --sat-type-body: 1.0625rem;
+  --sat-type-control-primary: 0.9375rem;
+  --sat-type-control-secondary: 0.875rem;
+  --sat-type-metadata: 0.8125rem;
+  --sat-type-timer: 1.25rem;
+  --sat-type-input: 1.125rem;
+  --sat-type-reference: 1rem;
+  --sat-reading-scale: 1;
+  --sat-reading-line-height: 1.6;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: var(--sat-text);
+  background: var(--sat-background);
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+}
+
+.sat-exam-prose {
+  font-family:
+    Charter, "Bitstream Charter", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+
+.sat-tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.sat-type-body {
+  font-size: var(--sat-type-body);
+  line-height: 1.6;
+}
+
+.sat-type-control-primary {
+  font-size: var(--sat-type-control-primary);
+  line-height: 1.35;
+}
+
+.sat-type-control-secondary {
+  font-size: var(--sat-type-control-secondary);
+  line-height: 1.35;
+}
+
+.sat-type-metadata {
+  font-size: var(--sat-type-metadata);
+  line-height: 1.45;
+}
+
+.sat-type-timer {
+  font-size: var(--sat-type-timer);
+  line-height: 1.2;
+}
+
+.sat-type-input {
+  font-size: var(--sat-type-input);
+  line-height: 1.3;
+}
+
+.sat-type-reference {
+  font-size: var(--sat-type-reference);
+  line-height: 1.45;
+}
+
+.sat-reading-surface .sat-type-body {
+  font-size: calc(var(--sat-type-body) * var(--sat-reading-scale));
+  line-height: var(--sat-reading-line-height);
+}
+
+.sat-reading-surface .sat-reading-copy {
+  font-size: calc(var(--sat-type-control-primary) * var(--sat-reading-scale));
+  line-height: var(--sat-reading-line-height);
+}
+
+.sat-exam-topbar {
+  padding-left: calc(1rem + var(--student-safe-left));
+  padding-right: calc(1rem + var(--student-safe-right));
+  padding-top: var(--student-safe-top);
+}
+
+.sat-exam-shell > main {
+  margin-left: var(--student-safe-left);
+  margin-right: var(--student-safe-right);
+}
+
+.sat-exam-footer {
+  padding-left: calc(1rem + var(--student-safe-left));
+  padding-right: calc(1rem + var(--student-safe-right));
+  padding-bottom: calc(0.5rem + var(--student-safe-bottom));
+}
+
+.sat-dialog-backdrop {
+  padding-top: calc(1rem + var(--student-safe-top));
+  padding-right: calc(1rem + var(--student-safe-right));
+  padding-bottom: calc(1rem + var(--student-safe-bottom));
+  padding-left: calc(1rem + var(--student-safe-left));
+}
+
+.sat-touch-target {
+  min-width: var(--sat-control-target);
+  min-height: var(--sat-control-target);
+}
+
+.sat-pressable {
+  -webkit-tap-highlight-color: transparent;
+  transition-property: background-color, border-color, color, box-shadow, opacity;
+  transition-duration: var(--sat-motion-state);
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sat-pressable:not(:disabled):active {
+  box-shadow: inset 0 0 0 999px var(--sat-press-overlay);
+  transition-duration: 40ms;
+}
+
+.sat-tool-pressable {
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--sat-motion-state) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sat-tool-pressable:not(:disabled):active {
+  background-color: var(--sat-tool-hover);
+  transition-duration: 40ms;
+}
+
+.sat-state-transition {
+  transition-property: background-color, border-color, color, fill, box-shadow, opacity;
+  transition-duration: var(--sat-motion-state);
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sat-surface-enter {
+  animation: sat-surface-enter 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sat-backdrop-enter {
+  animation: sat-backdrop-enter 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sat-tool-surface-enter {
+  animation: sat-tool-surface-enter 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes sat-surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sat-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sat-tool-surface-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.sat-answer-choice {
+  transition-property: background-color, border-color, box-shadow;
+  transition-duration: var(--sat-motion-state);
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sat-answer-choice:active {
+  box-shadow: inset 0 0 0 999px rgba(0, 0, 0, 0.045);
+  transition-duration: 40ms;
+}
+
+.sat-answer-choice:has(input:focus-visible) {
+  outline: 2px solid var(--sat-focus);
+  outline-offset: 2px;
+}
+
+@media (min-width: 640px) {
+  .sat-exam-topbar {
+    padding-left: calc(1.5rem + var(--student-safe-left));
+    padding-right: calc(1.5rem + var(--student-safe-right));
+  }
+  .sat-exam-footer {
+    padding-left: calc(1.75rem + var(--student-safe-left));
+    padding-right: calc(1.75rem + var(--student-safe-right));
+  }
+}
+
+@media (prefers-contrast: more) {
+  .sat-ui {
+    --sat-text: #000000;
+    --sat-text-secondary: #242426;
+    --sat-divider: #4a4a4f;
+    --sat-divider-soft: #77777c;
+    --sat-accent: #005aaa;
+    --sat-accent-strong: #004b91;
+    --sat-accent-soft: #e6f2ff;
+    --sat-focus: #0047cc;
+    --sat-review: #8f003b;
+    --sat-disabled-background: #e0e0e3;
+    --sat-disabled-text: #3b3b3f;
+    --sat-press-overlay: rgba(0, 0, 0, 0.12);
+  }
+}
+
+@media (forced-colors: active) {
+  .sat-ui {
+    --sat-background: Canvas;
+    --sat-surface: Canvas;
+    --sat-surface-subtle: Canvas;
+    --sat-surface-hover: Canvas;
+    --sat-text: CanvasText;
+    --sat-text-secondary: CanvasText;
+    --sat-divider: CanvasText;
+    --sat-divider-soft: CanvasText;
+    --sat-accent: Highlight;
+    --sat-accent-strong: Highlight;
+    --sat-accent-soft: Canvas;
+    --sat-accent-text: HighlightText;
+    --sat-focus: Highlight;
+    --sat-review: LinkText;
+    --sat-danger: CanvasText;
+    --sat-danger-soft: Canvas;
+    --sat-warning: CanvasText;
+    --sat-warning-soft: Canvas;
+    --sat-disabled-background: Canvas;
+    --sat-disabled-text: GrayText;
+    --sat-tool-chrome: CanvasText;
+    --sat-tool-text: Canvas;
+    --sat-tool-hover: Canvas;
+  }
+
+  .sat-ui :is(button, input, textarea, [role="dialog"]) {
+    forced-color-adjust: auto;
+  }
+
+  .sat-pressable:not(:disabled):active,
+  .sat-tool-pressable:not(:disabled):active,
+  .sat-answer-choice:active {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }

@@ -1,21 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ExamState } from '../../../types';
-import {
-  createLatestOnlyAsyncRunner,
-  type LatestOnlyAsyncRunner,
-} from '../../../utils/latestOnlyAsync';
+import type { ExamState } from "../../../types";
+import { useDurableLatestAutosave } from "../../../hooks/useDurableLatestAutosave";
 
-export type BuilderSaveStatus = 'unsaved' | 'saving' | 'saved' | 'error';
+export type BuilderSaveStatus = "unsaved" | "saving" | "saved" | "error";
 
 export interface UseBuilderAutosaveOptions {
-  /** Persists a full exam state snapshot. Serialized by a latest-wins runner. */
+  /** Persists a full exam state snapshot. Serialized and retry-safe. */
   save: (state: ExamState) => Promise<void>;
   /** Debounce window for scheduleAutosave (default 350ms). */
   debounceMs?: number;
-  /**
-   * Invoked only when the failing save is the latest scheduled request.
-   * Superseded failures are intentionally silent.
-   */
+  /** Stable browser-durable recovery identity, normally scoped to one exam. */
+  durableKey?: string | null;
+  /** Restores a crash-recovered local draft into the editor. */
+  onRecover?: (state: ExamState) => void;
+  /** Builder defaults to explicit recovery instead of overwriting a newer server revision. */
+  autoSaveRecovered?: boolean;
   onError?: (error: Error) => void;
 }
 
@@ -50,100 +48,19 @@ export interface UseBuilderAutosaveResult {
  *   navigation can be gated on `ok`.
  */
 export function useBuilderAutosave(options: UseBuilderAutosaveOptions): UseBuilderAutosaveResult {
-  const { save, debounceMs = 350, onError } = options;
-
-  const [status, setStatus] = useState<BuilderSaveStatus>('saved');
-
-  const saveRef = useRef(save);
-  const onErrorRef = useRef(onError);
-  const latestRequestIdRef = useRef(0);
-  const debounceRef = useRef<number | null>(null);
-  const pendingStateRef = useRef<ExamState | null>(null);
-  const pendingRequestIdRef = useRef<number | null>(null);
-  const runnerRef = useRef<LatestOnlyAsyncRunner<{ state: ExamState; requestId: number }> | null>(
-    null,
-  );
-
-  useEffect(() => {
-    saveRef.current = save;
-  }, [save]);
-
-  useEffect(() => {
-    onErrorRef.current = onError;
-  }, [onError]);
-
-  if (!runnerRef.current) {
-    runnerRef.current = createLatestOnlyAsyncRunner(async ({ state: nextState, requestId }) => {
-      setStatus('saving');
-      try {
-        await saveRef.current(nextState);
-        if (requestId === latestRequestIdRef.current) {
-          setStatus('saved');
-        }
-      } catch (error) {
-        if (requestId === latestRequestIdRef.current) {
-          setStatus('error');
-          onErrorRef.current?.(
-            error instanceof Error ? error : new Error('Unknown save error'),
-          );
-        }
-        throw error;
-      }
-    });
-  }
-
-  const scheduleAutosave = useCallback(
-    (nextState: ExamState) => {
-      const requestId = ++latestRequestIdRef.current;
-      pendingStateRef.current = nextState;
-      pendingRequestIdRef.current = requestId;
-      setStatus('unsaved');
-
-      if (debounceRef.current) {
-        window.clearTimeout(debounceRef.current);
-      }
-
-      debounceRef.current = window.setTimeout(() => {
-        const pending = pendingStateRef.current;
-        const pendingRequestId = pendingRequestIdRef.current;
-        if (!pending || pendingRequestId === null) {
-          return;
-        }
-
-        runnerRef.current?.enqueue({ state: pending, requestId: pendingRequestId });
-        pendingStateRef.current = null;
-        pendingRequestIdRef.current = null;
-        debounceRef.current = null;
-      }, debounceMs);
-    },
-    [debounceMs],
-  );
-
-  const flushNow = useCallback(async (state: ExamState): Promise<FlushResult> => {
-    const requestId = ++latestRequestIdRef.current;
-
-    if (debounceRef.current) {
-      window.clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
-    pendingStateRef.current = null;
-    pendingRequestIdRef.current = null;
-
-    runnerRef.current?.enqueue({ state, requestId });
-    await runnerRef.current?.idle();
-
-    return { ok: !runnerRef.current?.lastError, isLatest: requestId === latestRequestIdRef.current };
-  }, []);
-
-  const retry = useCallback((state: ExamState) => {
-    const requestId = ++latestRequestIdRef.current;
-    runnerRef.current?.enqueue({ state, requestId });
-  }, []);
+  const autosave = useDurableLatestAutosave<ExamState>({
+    save: options.save,
+    debounceMs: options.debounceMs ?? 350,
+    durableKey: options.durableKey,
+    onError: options.onError,
+    onRecover: options.onRecover,
+    autoSaveRecovered: options.autoSaveRecovered ?? false,
+  });
 
   return {
-    status,
-    scheduleAutosave,
-    flushNow,
-    retry,
+    status: autosave.status,
+    scheduleAutosave: autosave.schedule,
+    flushNow: autosave.flush,
+    retry: autosave.retry,
   };
 }

@@ -4,6 +4,7 @@ use ielts_backend_infrastructure::{
     config::AppConfig,
     distributed_rate_limit::DistributedRateLimiter,
     live_update_bus::LiveUpdateBusRepository,
+    migrations::verify_runtime_schema,
     pool::DatabasePool,
     rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult, RateLimiter},
     telemetry::Telemetry,
@@ -87,9 +88,18 @@ impl AppState {
                     .max_connections(config.db_pool_max_connections)
                     .acquire_timeout(Duration::from_millis(config.db_pool_acquire_timeout_ms))
                     .idle_timeout(Some(Duration::from_secs(config.db_pool_idle_timeout_secs)))
+                    .after_connect(|connection, _meta| {
+                        Box::pin(async move {
+                            sqlx::query("SET time_zone = '+00:00'")
+                                .execute(&mut *connection)
+                                .await?;
+                            Ok(())
+                        })
+                    })
                     .connect(database_url)
                     .await?;
 
+                verify_runtime_schema(&pool).await?;
                 Ok(Self::with_pool(config, pool))
             }
             None => Ok(Self::new(config)),

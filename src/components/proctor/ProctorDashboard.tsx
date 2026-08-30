@@ -62,7 +62,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   selectedScheduleId,
   onSelectScheduleId,
   onUpdateSessions,
-  onUpdateAlerts,
+  onUpdateAlerts: _onUpdateAlerts,
   onUpdateNotes,
   onStartScheduledSession,
   onPauseCohort,
@@ -107,6 +107,8 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
             session.runtimeTimeRemainingSeconds ??
             runtime?.currentSectionRemainingSeconds ??
             session.timeRemaining,
+          runtimeDeadlineAt: session.runtimeDeadlineAt ?? runtime?.currentSectionDeadlineAt ?? null,
+          runtimeServerNow: session.runtimeServerNow ?? runtime?.serverNow ?? null,
           runtimeSectionStatus:
             session.runtimeSectionStatus ??
             runtime?.sections.find((item) => item.sectionKey === runtime.currentSectionKey)?.status,
@@ -1041,10 +1043,14 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                     throw new Error(result.error);
                   }
                 }}
-                onExtendTime={async (minutes) => {
-                  if (!selectedStudent) return;
-                  await runStudentExtension(selectedStudent.id, minutes);
-                }}
+                onExtendTime={
+                  selectedRuntime?.timingModel === 'cohort_stage_v2' || selectedRuntime?.timingModel === 'cohort_section_v3'
+                    ? undefined
+                    : async (minutes) => {
+                        if (!selectedStudent) return;
+                        await runStudentExtension(selectedStudent.id, minutes);
+                      }
+                }
                 onOpenAnswerHistory={
                   onOpenAnswerHistory && selectedStudent
                     ? () => onOpenAnswerHistory(selectedStudent.id)
@@ -1124,8 +1130,8 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                     <option value="writing">Writing</option>
                     <option value="speaking">Speaking</option>
                   </select>
-                  <input type="number" min="0" value={filterCriteria.minViolations ?? ''} onChange={(e) => updateFilterCriterion('minViolations', e.target.value ? Number.parseInt(e.target.value, 10) : undefined)} placeholder="Min violations" className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none" />
-                  <input type="number" min="0" value={filterCriteria.maxTimeRemaining ? Math.floor(filterCriteria.maxTimeRemaining / 60) : ''} onChange={(e) => updateFilterCriterion('maxTimeRemaining', e.target.value ? Number.parseInt(e.target.value, 10) * 60 : undefined)} placeholder="Max time (min)" className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none" />
+                  <input aria-label="Minimum violations" type="number" min="0" value={filterCriteria.minViolations ?? ''} onChange={(e) => updateFilterCriterion('minViolations', e.target.value ? Number.parseInt(e.target.value, 10) : undefined)} placeholder="Min violations" className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none" />
+                  <input aria-label="Maximum time remaining in minutes" type="number" min="0" value={filterCriteria.maxTimeRemaining ? Math.floor(filterCriteria.maxTimeRemaining / 60) : ''} onChange={(e) => updateFilterCriterion('maxTimeRemaining', e.target.value ? Number.parseInt(e.target.value, 10) * 60 : undefined)} placeholder="Max time (min)" className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none" />
                 </div>
               ) : null}
 

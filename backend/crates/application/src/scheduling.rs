@@ -9,7 +9,7 @@ use ielts_backend_infrastructure::{
     actor_context::ActorContext, authorization::AuthorizationService,
 };
 use serde_json::Value;
-use sqlx::{FromRow, MySql, MySqlPool};
+use sqlx::{FromRow, MySql, MySqlPool, Transaction};
 use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
 
@@ -159,6 +159,20 @@ impl SchedulingService {
         ctx: &ActorContext,
         req: CreateScheduleRequest,
     ) -> Result<ExamSchedule, SchedulingError> {
+        let mut tx = self.pool.begin().await?;
+        let schedule = self
+            .create_schedule_in_transaction(ctx, req, &mut tx)
+            .await?;
+        tx.commit().await?;
+        Ok(schedule)
+    }
+
+    pub(crate) async fn create_schedule_in_transaction(
+        &self,
+        ctx: &ActorContext,
+        req: CreateScheduleRequest,
+        tx: &mut Transaction<'_, MySql>,
+    ) -> Result<ExamSchedule, SchedulingError> {
         let exam = self.load_exam_context(req.exam_id.clone()).await?;
         let version = self
             .load_version_context(req.published_version_id.clone())
@@ -222,16 +236,14 @@ impl SchedulingService {
         .bind(ScheduleStatus::Scheduled)
         .bind(ctx.actor_id.to_string())
         .bind(0)
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await?;
 
-        let schedule =
-            sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
-                .bind(schedule_id.to_string())
-                .fetch_one(&self.pool)
-                .await?;
-
-        Ok(schedule)
+        sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(SchedulingError::from)
     }
 
     pub async fn list_schedules(
@@ -502,7 +514,11 @@ impl SchedulingService {
         }
 
         let context = self.load_schedule_context(schedule_id).await?;
-        Ok(build_not_started_runtime(&context.schedule, &context.plan))
+        Ok(build_not_started_runtime(
+            &context.schedule,
+            &context.plan,
+            context.timing_model(),
+        ))
     }
 
     pub async fn apply_runtime_command(
@@ -532,20 +548,34 @@ impl SchedulingService {
         schedule_id: Uuid,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
         let context = self.load_schedule_context(schedule_id).await?;
+        if context.provider_key == "sat" {
+            let incompatible_accommodations: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM schedule_registrations WHERE schedule_id = ? AND extra_time_minutes <> 0",
+            )
+            .bind(schedule_id.to_string())
+            .fetch_one(&self.pool)
+            .await?;
+            if incompatible_accommodations > 0 {
+                return Err(SchedulingError::Validation(format!(
+                    "SAT shared-clock runtime cannot start while {incompatible_accommodations} registration(s) have individual extra_time_minutes. Create separate accommodation timing cohorts instead."
+                )));
+            }
+        }
         let runtime_id = Uuid::new_v4();
         let now = Utc::now();
         let plan_snapshot = serde_json::to_value(&context.plan).expect("serialize plan snapshot");
+        let timing_model = context.timing_model();
 
         let mut tx = self.pool.begin().await?;
 
         let runtime_insert = sqlx::query(
             r#"
             INSERT INTO exam_session_runtimes (
-                id, schedule_id, exam_id, status, plan_snapshot, actual_start_at, actual_end_at,
+                id, schedule_id, exam_id, status, plan_snapshot, timing_model, actual_start_at, actual_end_at,
                 active_section_key, current_section_key, current_section_remaining_seconds,
                 waiting_for_next_section, is_overrun, total_paused_seconds, created_at, updated_at, revision
             )
-            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, false, false, 0, NOW(), NOW(), 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, false, false, 0, NOW(), NOW(), 1)
             "#,
         )
         .bind(runtime_id.to_string())
@@ -553,6 +583,7 @@ impl SchedulingService {
         .bind(&context.schedule.exam_id)
         .bind(RuntimeStatus::Live)
         .bind(plan_snapshot)
+        .bind(timing_model)
         .bind(now)
         .bind(context.plan.first().map(|entry| entry.section_key.clone()))
         .bind(context.plan.first().map(|entry| entry.section_key.clone()))
@@ -678,23 +709,28 @@ impl SchedulingService {
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(
-            r#"
-            UPDATE assessment_module_attempts ma
-            JOIN student_attempts sa ON sa.id = ma.attempt_id
-            JOIN exam_entities e ON e.id = sa.exam_id
-            SET ma.paused_at = COALESCE(ma.paused_at, NOW()),
-                ma.revision = ma.revision + 1
-            WHERE sa.schedule_id = ?
-              AND e.provider_key = 'sat'
-              AND ma.state = 'active'
-              AND ma.started_at IS NOT NULL
-              AND ma.paused_at IS NULL
-            "#,
-        )
-        .bind(schedule_id.to_string())
-        .execute(&mut *tx)
-        .await?;
+        if matches!(
+            runtime.timing_model.as_str(),
+            "legacy_section_v1" | "cohort_section_v3"
+        ) {
+            sqlx::query(
+                r#"
+                UPDATE assessment_module_attempts ma
+                JOIN student_attempts sa ON sa.id = ma.attempt_id
+                JOIN exam_entities e ON e.id = sa.exam_id
+                SET ma.paused_at = COALESCE(ma.paused_at, NOW()),
+                    ma.revision = ma.revision + 1
+                WHERE sa.schedule_id = ?
+                  AND e.provider_key = 'sat'
+                  AND ma.state = 'active'
+                  AND ma.started_at IS NOT NULL
+                  AND ma.paused_at IS NULL
+                "#,
+            )
+            .bind(schedule_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
 
         insert_control_event(
             &mut tx,
@@ -766,24 +802,29 @@ impl SchedulingService {
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(
-            r#"
-            UPDATE assessment_module_attempts ma
-            JOIN student_attempts sa ON sa.id = ma.attempt_id
-            JOIN exam_entities e ON e.id = sa.exam_id
-            SET ma.accumulated_paused_seconds = ma.accumulated_paused_seconds
-                    + GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, NOW()), 0),
-                ma.paused_at = NULL,
-                ma.revision = ma.revision + 1
-            WHERE sa.schedule_id = ?
-              AND e.provider_key = 'sat'
-              AND ma.state = 'active'
-              AND ma.paused_at IS NOT NULL
-            "#,
-        )
-        .bind(schedule_id.to_string())
-        .execute(&mut *tx)
-        .await?;
+        if matches!(
+            runtime.timing_model.as_str(),
+            "legacy_section_v1" | "cohort_section_v3"
+        ) {
+            sqlx::query(
+                r#"
+                UPDATE assessment_module_attempts ma
+                JOIN student_attempts sa ON sa.id = ma.attempt_id
+                JOIN exam_entities e ON e.id = sa.exam_id
+                SET ma.accumulated_paused_seconds = ma.accumulated_paused_seconds
+                        + GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, NOW()), 0),
+                    ma.paused_at = NULL,
+                    ma.revision = ma.revision + 1
+                WHERE sa.schedule_id = ?
+                  AND e.provider_key = 'sat'
+                  AND ma.state = 'active'
+                  AND ma.paused_at IS NOT NULL
+                "#,
+            )
+            .bind(schedule_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
 
         insert_control_event(
             &mut tx,
@@ -946,9 +987,15 @@ impl SchedulingService {
                 if section.status != SectionRuntimeStatus::Live || section.paused_at.is_some() {
                     return None;
                 }
-
-                let remaining = i64::from(current_section_remaining_seconds.max(0));
-                Some(server_now + Duration::seconds(remaining))
+                let started_at = section.actual_start_at?;
+                let duration_seconds = i64::from(
+                    section
+                        .planned_duration_minutes
+                        .saturating_add(section.extension_minutes),
+                )
+                .saturating_mul(60)
+                .saturating_add(i64::from(section.accumulated_paused_seconds.max(0)));
+                Some(started_at + Duration::seconds(duration_seconds))
             });
 
         Ok(ExamSessionRuntime {
@@ -957,6 +1004,7 @@ impl SchedulingService {
             exam_id: runtime_row.exam_id.to_string(),
             status: runtime_row.status,
             plan_snapshot: serde_json::from_value(runtime_row.plan_snapshot).unwrap_or_default(),
+            timing_model: runtime_row.timing_model,
             actual_start_at: runtime_row.actual_start_at,
             actual_end_at: runtime_row.actual_end_at,
             active_section_key: runtime_row.active_section_key,
@@ -996,8 +1044,9 @@ impl SchedulingService {
             ));
         }
 
-        let mut plan = Vec::with_capacity(sections.len());
+        let mut plan = Vec::with_capacity(sections.len().saturating_mul(3));
         let mut running_offset = 0_i32;
+        let mut stage_order = 0_i32;
         for section in sections {
             let modules = sqlx::query_as::<_, SatScheduleModuleRow>(
                 "SELECT duration_seconds, adaptive_role FROM assessment_modules WHERE section_id = ? ORDER BY display_order",
@@ -1041,30 +1090,67 @@ impl SchedulingService {
                     section.section_key
                 )));
             }
+            if base.duration_seconds % 60 != 0
+                || lower.duration_seconds % 60 != 0
+                || higher.duration_seconds % 60 != 0
+            {
+                return Err(SchedulingError::Validation(format!(
+                    "SAT section `{}` module durations must be whole minutes; runtime scheduling never rounds assessment time.",
+                    section.section_key
+                )));
+            }
+            if lower.duration_seconds != higher.duration_seconds {
+                return Err(SchedulingError::Validation(format!(
+                    "SAT section `{}` lower and higher Module 2 branches must have the same duration so the cohort can share one authoritative clock.",
+                    section.section_key
+                )));
+            }
             if section.break_after_seconds < 0 {
                 return Err(SchedulingError::Validation(format!(
                     "SAT section `{}` contains a negative break duration.",
                     section.section_key
                 )));
             }
+            if section.break_after_seconds % 60 != 0 {
+                return Err(SchedulingError::Validation(format!(
+                    "SAT section `{}` break duration must be a whole number of minutes; runtime scheduling never rounds assessment time.",
+                    section.section_key
+                )));
+            }
 
-            let section_seconds = base
-                .duration_seconds
-                .saturating_add(lower.duration_seconds.max(higher.duration_seconds));
-            let duration_minutes = seconds_to_minutes_ceil(section_seconds);
-            let gap_after_minutes = seconds_to_minutes_ceil(section.break_after_seconds);
-            let start_offset_minutes = running_offset;
-            let end_offset_minutes = start_offset_minutes.saturating_add(duration_minutes);
+            // SAT v3 uses one authoritative cohort clock per logical section.
+            // Module 1 -> Module 2 is student-local; only the section boundary is cohort-gated.
+            let m1_duration = base.duration_seconds / 60;
+            let m2_duration = lower.duration_seconds / 60;
+            let section_duration = m1_duration.saturating_add(m2_duration);
+            let section_end = running_offset.saturating_add(section_duration);
             plan.push(ScheduleSectionPlanEntry {
-                section_key: section.section_key,
-                label: section.title,
-                order: section.display_order,
-                duration_minutes,
-                gap_after_minutes,
-                start_offset_minutes,
-                end_offset_minutes,
+                section_key: section.section_key.clone(),
+                label: section.title.clone(),
+                order: stage_order,
+                duration_minutes: section_duration,
+                gap_after_minutes: 0,
+                start_offset_minutes: running_offset,
+                end_offset_minutes: section_end,
             });
-            running_offset = end_offset_minutes.saturating_add(gap_after_minutes);
+            stage_order = stage_order.saturating_add(1);
+            running_offset = section_end;
+
+            if section.break_after_seconds > 0 {
+                let break_duration = section.break_after_seconds / 60;
+                let break_end = running_offset.saturating_add(break_duration);
+                plan.push(ScheduleSectionPlanEntry {
+                    section_key: format!("sat:break:{}", section.section_key),
+                    label: "Break".to_owned(),
+                    order: stage_order,
+                    duration_minutes: break_duration,
+                    gap_after_minutes: 0,
+                    start_offset_minutes: running_offset,
+                    end_offset_minutes: break_end,
+                });
+                stage_order = stage_order.saturating_add(1);
+                running_offset = break_end;
+            }
         }
         Ok(plan)
     }
@@ -1094,7 +1180,11 @@ impl SchedulingService {
             )
             .await?;
 
-        Ok(ScheduleContext { schedule, plan })
+        Ok(ScheduleContext {
+            schedule,
+            plan,
+            provider_key: exam.provider_key,
+        })
     }
 
     async fn load_exam_context(&self, exam_id: String) -> Result<ExamContext, SchedulingError> {
@@ -1377,6 +1467,17 @@ struct VersionContext {
 struct ScheduleContext {
     schedule: ExamSchedule,
     plan: Vec<ScheduleSectionPlanEntry>,
+    provider_key: String,
+}
+
+impl ScheduleContext {
+    fn timing_model(&self) -> &'static str {
+        if self.provider_key == "sat" {
+            "cohort_section_v3"
+        } else {
+            "legacy_section_v1"
+        }
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -1432,6 +1533,7 @@ struct RuntimeRow {
     exam_id: Hyphenated,
     status: RuntimeStatus,
     plan_snapshot: Value,
+    timing_model: String,
     actual_start_at: Option<DateTime<Utc>>,
     actual_end_at: Option<DateTime<Utc>>,
     active_section_key: Option<String>,
@@ -1672,6 +1774,7 @@ async fn insert_control_event(
 fn build_not_started_runtime(
     schedule: &ExamSchedule,
     plan: &[ScheduleSectionPlanEntry],
+    timing_model: &str,
 ) -> ExamSessionRuntime {
     let created_at = Utc::now();
 
@@ -1681,6 +1784,7 @@ fn build_not_started_runtime(
         exam_id: schedule.exam_id.clone(),
         status: RuntimeStatus::NotStarted,
         plan_snapshot: plan.to_vec(),
+        timing_model: timing_model.to_owned(),
         actual_start_at: None,
         actual_end_at: None,
         active_section_key: None,
@@ -1817,14 +1921,6 @@ fn build_section_plan(
     }
 
     Ok(entries)
-}
-
-fn seconds_to_minutes_ceil(seconds: i32) -> i32 {
-    if seconds <= 0 {
-        0
-    } else {
-        seconds.saturating_add(59) / 60
-    }
 }
 
 fn plan_total_minutes(plan: &[ScheduleSectionPlanEntry]) -> i32 {

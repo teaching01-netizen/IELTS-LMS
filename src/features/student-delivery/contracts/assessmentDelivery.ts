@@ -2,35 +2,18 @@ import type {
   AccessibilityMetadata,
   ChoiceOption,
   DeliveredAnswerDefinition,
+  DeliveredAssessmentModule,
+  DeliveredAssessmentSection,
   DeliveredQuestion,
   QuestionKind,
   QuestionMetadata,
   StructuredContent,
-} from '../../exam-authoring/api/assessmentContracts';
+} from "../../exam-authoring/api/assessmentContracts";
 
 export type { DeliveredAnswerDefinition, DeliveredQuestion };
 
-export interface AssessmentDeliveryModule {
-  id: string;
-  moduleKey: string;
-  title: string;
-  displayOrder: number;
-  durationSeconds: number;
-  targetQuestionCount: number;
-  adaptiveRole: string;
-  toolPolicy: Record<string, unknown> | string[];
-  questions: DeliveredQuestion[];
-}
-
-export interface AssessmentDeliverySection {
-  id: string;
-  sectionKey: string;
-  title: string;
-  displayOrder: number;
-  durationSeconds: number;
-  breakAfterSeconds: number;
-  modules: AssessmentDeliveryModule[];
-}
+export type AssessmentDeliveryModule = DeliveredAssessmentModule;
+export type AssessmentDeliverySection = DeliveredAssessmentSection;
 
 export interface AssessmentModuleAttemptSnapshot {
   id: string;
@@ -68,13 +51,26 @@ export interface AssessmentAttemptSnapshot {
   responses: AssessmentResponseSnapshot[];
 }
 
+export interface AssessmentTimingSnapshot {
+  authority: "cohort_runtime" | "legacy_attempt";
+  timingModel: "cohort_stage_v2" | "cohort_section_v3" | "legacy_section_v1";
+  stageKey: string | null;
+  stageStatus: string | null;
+  serverNow: string;
+  deadlineAt: string | null;
+  remainingSeconds: number;
+  runtimeRevision: number;
+}
+
 export interface AssessmentDeliveryBootstrap {
   scheduleId: string;
   examId: string;
-  providerKey: 'sat';
+  providerKey: "sat";
   versionId: string;
   serverNow: string;
+  candidateName: string;
   scheduleRuntimeStatus: string;
+  timing: AssessmentTimingSnapshot;
   proctorStatus: string;
   proctorNote: string | null;
   deviceFingerprintHash: string | null;
@@ -89,6 +85,10 @@ export interface AssessmentResponseRequest {
   markedForReview: boolean;
   eliminatedOptions: string[];
   annotations: Record<string, unknown>;
+  moduleAttemptId?: string;
+  stageKey?: string | null;
+  runtimeRevision?: number | null;
+  clientWriteId?: string;
 }
 
 export interface AssessmentModuleStartRequest {
@@ -105,7 +105,7 @@ export interface AssessmentSubmitRequest {
 
 export interface AssessmentSectionResult {
   sectionKey: string;
-  route: 'lower' | 'higher' | null;
+  route: "lower" | "higher" | null;
   rawCorrect: number;
   operationalQuestionCount: number;
   scaledScore: number | null;
@@ -115,10 +115,10 @@ export interface AssessmentSectionResult {
 export interface AssessmentResult {
   id: string;
   submissionId: string;
-  providerKey: 'sat';
+  providerKey: "sat";
   totalScore: number | null;
   scorePayload: Record<string, unknown>;
-  scoreKind: 'practice';
+  scoreKind: "practice";
   sections: AssessmentSectionResult[];
 }
 

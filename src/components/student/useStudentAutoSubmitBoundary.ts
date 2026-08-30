@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react';
 import type { ModuleType } from '../../types';
 import type { ExamSessionRuntime, RuntimeStatus } from '../../types/domain';
+import type { StudentBlockingReason } from '@student/domain/exam-session/blockingPolicy';
 
 interface UseStudentAutoSubmitBoundaryOptions {
   effectivePhase: 'pre-check' | 'lobby' | 'exam' | 'post-exam' | 'submitted';
   autoSubmitEnabled: boolean;
   runtimeState: {
     blockingActive: boolean;
+    blockingReason: StudentBlockingReason;
     displayTimeRemaining: number | null;
     runtimeBacked: boolean;
     runtimeStatus: RuntimeStatus | null;
@@ -23,15 +25,7 @@ export function useStudentAutoSubmitBoundary({
   flushAndSubmitCurrentModuleWithRetry,
 }: UseStudentAutoSubmitBoundaryOptions) {
   const autoSubmitFingerprintRef = useRef<string | null>(null);
-  const priorTimeRemainingRef = useRef<number | null>(null);
-
   useEffect(() => {
-    const priorTimeRemaining = priorTimeRemainingRef.current;
-    priorTimeRemainingRef.current =
-      typeof runtimeState.displayTimeRemaining === 'number'
-        ? runtimeState.displayTimeRemaining
-        : null;
-
     if (!autoSubmitEnabled) {
       autoSubmitFingerprintRef.current = null;
       return;
@@ -42,7 +36,7 @@ export function useStudentAutoSubmitBoundary({
       return;
     }
 
-    if (runtimeState.blockingActive) {
+    if (runtimeState.blockingActive && runtimeState.blockingReason !== 'time_expired') {
       return;
     }
 
@@ -55,20 +49,16 @@ export function useStudentAutoSubmitBoundary({
         return;
       }
 
-      const reachedZero = runtimeState.displayTimeRemaining === 0;
-      const transitionedToZero =
-        reachedZero && typeof priorTimeRemaining === 'number' && priorTimeRemaining > 0;
+      const serverSectionChanged =
+        runtimeState.runtimeSnapshot?.currentSectionKey !== runtimeState.currentModule;
+      const serverConfirmedZero =
+        runtimeState.runtimeSnapshot?.currentSectionRemainingSeconds === 0;
 
-      const serverSectionKey = runtimeState.runtimeSnapshot?.currentSectionKey ?? null;
-      const serverRemaining = runtimeState.runtimeSnapshot?.currentSectionRemainingSeconds;
-      const serverConfirmedBoundary =
-        serverSectionKey !== runtimeState.currentModule || serverRemaining === 0;
-
-      if (!transitionedToZero && !serverConfirmedBoundary) {
-        return;
-      }
-
-      if (!serverConfirmedBoundary) {
+      // The local countdown may reach zero before the next authoritative runtime poll.
+      // It can drive UI urgency, but only a server-confirmed zero or section transition may
+      // finalize a runtime-backed module. This prevents client clock skew or stale offsets
+      // from submitting while the server still admits work.
+      if (!serverConfirmedZero && !serverSectionChanged) {
         return;
       }
     } else if (runtimeState.displayTimeRemaining !== 0) {
@@ -87,6 +77,7 @@ export function useStudentAutoSubmitBoundary({
     effectivePhase,
     flushAndSubmitCurrentModuleWithRetry,
     runtimeState.blockingActive,
+    runtimeState.blockingReason,
     runtimeState.currentModule,
     runtimeState.displayTimeRemaining,
     runtimeState.runtimeBacked,

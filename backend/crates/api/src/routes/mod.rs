@@ -1,6 +1,8 @@
 pub mod answer_history;
+pub mod assessment_access_links;
 pub mod assessment_authoring;
 pub mod assessment_delivery;
+pub mod assessment_release;
 pub mod auth;
 pub mod exams;
 pub mod grading;

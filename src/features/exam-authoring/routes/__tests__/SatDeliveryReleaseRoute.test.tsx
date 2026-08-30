@@ -8,6 +8,8 @@ import { SatDeliveryReleaseRoute } from "../SatDeliveryReleaseRoute";
 const mocks = vi.hoisted(() => ({
   publish: vi.fn(),
   refetchReadiness: vi.fn(),
+  refetchRelease: vi.fn(),
+  refetchDistribution: vi.fn(),
 }));
 
 vi.mock("../../api/assessmentQueries", () => ({
@@ -21,6 +23,20 @@ vi.mock("../../api/assessmentQueries", () => ({
     },
     isLoading: false,
     error: null,
+  }),
+  useAssessmentReleaseState: () => ({
+    data: {
+      examId: "exam-sat-1",
+      providerKey: "sat",
+      state: "never_published",
+      currentPublishedVersion: null,
+      workingDraft: { id: "draft-v5", parentVersionId: null, versionNumber: 5, revision: 42 },
+      summary: { candidateDurationSeconds: 0, authoredQuestionCount: 0, deliveredQuestionCount: 0 },
+      access: { totalLinks: 0, liveLinks: 0, upcomingLinks: 0, linksOnCurrentRelease: 0, liveLinksOnPreviousReleases: 0 },
+    },
+    isLoading: false,
+    error: null,
+    refetch: mocks.refetchRelease,
   }),
   useAssessmentReleaseReadiness: () => ({
     data: {
@@ -41,15 +57,33 @@ vi.mock("../../api/assessmentQueries", () => ({
     error: null,
   }),
 }));
+
+vi.mock("../../api/assessmentAccessLinkQueries", () => ({
+  useAccessDistributionOverview: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: mocks.refetchDistribution,
+  }),
+}));
+vi.mock("../../ui/access-links/StudentLinksDashboard", () => ({
+  StudentLinksDashboard: ({ onBackToRelease }: { onBackToRelease: () => void }) => (
+    <div>
+      <span>student-links-dashboard</span>
+      <button type="button" onClick={onBackToRelease}>Back to release</button>
+    </div>
+  ),
+}));
+
 vi.mock("../../ui/SatDeliveryReleasePage", () => ({
   SatDeliveryReleasePage: ({
     onIssueClick,
-    onCreateSchedule,
     onPublish,
+    onOpenStudentAccess,
   }: {
     onIssueClick: (issue: AssessmentValidationIssue) => void;
-    onCreateSchedule: () => void;
     onPublish: (notes?: string) => Promise<void>;
+    onOpenStudentAccess: () => void;
   }) => (
     <div>
       <button
@@ -65,8 +99,8 @@ vi.mock("../../ui/SatDeliveryReleasePage", () => ({
       >
         Open issue
       </button>
-      <button type="button" onClick={onCreateSchedule}>
-        Create schedule
+      <button type="button" onClick={onOpenStudentAccess}>
+        Student Access
       </button>
       <button type="button" onClick={() => void onPublish("Release notes")}>
         Publish
@@ -117,7 +151,6 @@ function renderRoute(onExamRefresh = vi.fn().mockResolvedValue(undefined)) {
           element={<SatDeliveryReleaseRoute exam={exam} onExamRefresh={onExamRefresh} />}
         />
         <Route path="/builder/:examId" element={<LocationProbe />} />
-        <Route path="/admin/scheduling" element={<LocationProbe />} />
       </Routes>
     </MemoryRouter>
   );
@@ -127,7 +160,11 @@ function renderRoute(onExamRefresh = vi.fn().mockResolvedValue(undefined)) {
 beforeEach(() => {
   mocks.publish.mockReset();
   mocks.refetchReadiness.mockReset();
+  mocks.refetchRelease.mockReset();
+  mocks.refetchDistribution.mockReset();
   mocks.refetchReadiness.mockResolvedValue(undefined);
+  mocks.refetchRelease.mockResolvedValue(undefined);
+  mocks.refetchDistribution.mockResolvedValue(undefined);
   mocks.publish.mockResolvedValue({
     id: "draft-v5",
     examId: exam.id,
@@ -154,6 +191,9 @@ describe("SatDeliveryReleaseRoute", () => {
       })
     );
     expect(onExamRefresh).toHaveBeenCalledTimes(1);
+    expect(mocks.refetchRelease).toHaveBeenCalledTimes(1);
+    expect(mocks.refetchDistribution).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("student-links-dashboard")).toBeInTheDocument();
   });
 
   it("deep-links a release blocker to the exact authoring question and field", () => {
@@ -167,14 +207,26 @@ describe("SatDeliveryReleaseRoute", () => {
     expect(location).toContain("field=metadata.domain");
   });
 
-  it("hands scheduling intent to the scheduler without embedding availability in publish", () => {
+  it("persists Student Access as the canonical URL-addressable review mode", () => {
     renderRoute();
+    fireEvent.click(screen.getByRole("button", { name: "Student Access" }));
+    expect(screen.getByText("student-links-dashboard")).toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Create schedule" }));
+  it("accepts legacy Student Links URLs and returns to Release", () => {
+    render(
+      <MemoryRouter initialEntries={[`/builder/${exam.id}/review?view=links`]}>
+        <Routes>
+          <Route
+            path="/builder/:examId/review"
+            element={<SatDeliveryReleaseRoute exam={exam} onExamRefresh={vi.fn()} />}
+          />
+        </Routes>
+      </MemoryRouter>
+    );
 
-    const location = screen.getByTestId("location").textContent ?? "";
-    expect(location).toContain('"pathname":"/admin/scheduling"');
-    expect(location).toContain(`"examId":"${exam.id}"`);
-    expect(location).toContain('"openCreateModal":true');
+    expect(screen.getByText("student-links-dashboard")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to release" }));
+    expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
   });
 });

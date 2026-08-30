@@ -5,6 +5,7 @@ import type { ExamGroup, NoteCategory, ProctorAlert, SessionAuditLog, SessionNot
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { ConfirmModal } from '../ConfirmModal';
+import { useAuthoritativeDeadlineClock } from '../../shared/hooks/useAuthoritativeDeadlineClock';
 
 export type StudentDrawerTab = 'timeline' | 'violations' | 'notes' | 'audit';
 
@@ -108,6 +109,16 @@ export function StudentDetailPanel({
     return events;
   }, [student?.violations, studentAlerts, studentAuditLogs]);
 
+  const runtimeRemaining = useAuthoritativeDeadlineClock({
+    deadlineAt: student?.runtimeDeadlineAt ?? null,
+    serverNow: student?.runtimeServerNow ?? null,
+    fallbackSeconds: student?.runtimeTimeRemainingSeconds ?? student?.timeRemaining ?? 0,
+    running:
+      student?.runtimeStatus === 'live'
+      && student.runtimeSectionStatus === 'live'
+      && student.status !== 'terminated',
+  });
+
   if (!student || !cohort) {
     return (
       <div className="border border-slate-200 bg-white px-6 py-3">
@@ -125,7 +136,6 @@ export function StudentDetailPanel({
   }
 
   const runtimeSection = student.runtimeCurrentSection ?? student.currentSection ?? 'waiting';
-  const runtimeRemaining = student.runtimeTimeRemainingSeconds ?? student.timeRemaining;
   const tabClass = (tab: StudentDrawerTab) =>
     `inline-flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-medium ${
       activeTab === tab ? 'border-slate-950 text-slate-950' : 'border-transparent text-slate-500 hover:text-slate-800'

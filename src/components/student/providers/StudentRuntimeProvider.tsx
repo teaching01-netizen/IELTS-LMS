@@ -49,6 +49,7 @@ export type BlockingReason =
   | 'not_started'
   | 'waiting_for_runtime'
   | 'waiting_for_advance'
+  | 'time_expired'
   | 'offline'
   | 'syncing_reconnect'
   | 'heartbeat_lost'
@@ -71,7 +72,12 @@ interface RuntimeReducerState {
   submittedAt: string | null;
   blockingReasonOverride: Exclude<
     BlockingReason,
-    'cohort_paused' | 'not_started' | 'waiting_for_runtime' | 'waiting_for_advance' | null
+    | 'cohort_paused'
+    | 'not_started'
+    | 'waiting_for_runtime'
+    | 'waiting_for_advance'
+    | 'time_expired'
+    | null
   > | null;
   blockingMachine: BlockingMachineState;
   attemptSyncState: AttemptSyncState;
@@ -971,25 +977,6 @@ export function StudentRuntimeProvider({
     () => getStudentQuestionsForModule(state, runtimeState.currentModule),
     [runtimeState.currentModule, state]
   );
-  const blocking = useMemo(
-    () =>
-      deriveBlockingState(
-        runtimeBacked,
-        runtimeSnapshot,
-        runtimeState.waitingForCohortAdvance,
-        runtimeState.proctorStatus,
-        runtimeState.blockingReasonOverride,
-        runtimeState.timeRemaining
-      ),
-    [
-      runtimeBacked,
-      runtimeState.proctorStatus,
-      runtimeSnapshot,
-      runtimeState.blockingReasonOverride,
-      runtimeState.timeRemaining,
-      runtimeState.waitingForCohortAdvance,
-    ]
-  );
   const runtimeStatus = runtimeBacked ? (runtimeSnapshot?.status ?? 'not_started') : null;
   const displayTimeRemaining =
     runtimeState.phase === 'exam'
@@ -1004,6 +991,30 @@ export function StudentRuntimeProvider({
           }) ?? runtimeState.timeRemaining)
         : runtimeState.timeRemaining
       : undefined;
+  const runtimeDeadlineExpired =
+    runtimeBacked && runtimeSnapshot?.status === 'live' && displayTimeRemaining === 0;
+  // Stable state does not need to tick every second, but it must flip to locked at the
+  // authoritative deadline. Until then the snapshot value is sufficient for blocking policy.
+  const blockingTimeRemaining = runtimeDeadlineExpired ? 0 : runtimeState.timeRemaining;
+  const blocking = useMemo(
+    () =>
+      deriveBlockingState(
+        runtimeBacked,
+        runtimeSnapshot,
+        runtimeState.waitingForCohortAdvance,
+        runtimeState.proctorStatus,
+        runtimeState.blockingReasonOverride,
+        blockingTimeRemaining
+      ),
+    [
+      blockingTimeRemaining,
+      runtimeBacked,
+      runtimeState.proctorStatus,
+      runtimeSnapshot,
+      runtimeState.blockingReasonOverride,
+      runtimeState.waitingForCohortAdvance,
+    ]
+  );
   const submitRequiresConfirmation = false;
 
   const setPhase = useCallback((phase: ExamPhase) => {
@@ -1117,11 +1128,8 @@ export function StudentRuntimeProvider({
   // When runtimeBacked=true, the clock is deadline-derived via RuntimeClockContext and
   // should not invalidate stable consumers. Spread still copies the current values
   // but deps intentionally omit timeRemaining/elapsedTime so a per-second deadline tick
-  // does not recompute stableState. NOTE: blocking derives from timeRemaining
-  // (blocking:974), so in fallback (!runtimeBacked) the tick still invalidates
-  // stableState 1 Hz via blocking — isolation only holds for the runtimeBacked path
-  // where timeRemaining is static. If fallback isolation is needed, split blocking
-  // into clock-free vs clock-dependent parts.
+  // does not recompute stableState. Runtime-backed blocking only changes when the
+  // deadline crosses zero; the visible countdown continues through RuntimeClockContext.
   const stableState = useMemo<RuntimeStableState>(
     () => ({
       ...runtimeState,

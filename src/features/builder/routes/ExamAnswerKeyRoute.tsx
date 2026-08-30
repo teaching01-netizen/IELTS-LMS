@@ -10,6 +10,8 @@ import { AcceptedAnswersEditor } from '@components/blocks/AcceptedAnswersEditor'
 import { resolveAcceptedAnswers } from '../../../utils/acceptedAnswers';
 import { applyAnswerKeyEdit, buildAnswerKeyRows, type AnswerKeyRow } from '../utils/answerKeyOverview';
 import { getStudentQuestionsForModule, type StudentQuestionDescriptor } from '../../exam-authoring/api/examAuthoringGateway';
+import { useOptionalAuthSession } from '../../auth/api/authSession';
+import { buildStaffDraftKey } from '../../../utils/staffDraftKey';
 
 type SaveStatus = 'unsaved' | 'saving' | 'saved' | 'error';
 
@@ -20,6 +22,8 @@ function nowLabel() {
 export function ExamAnswerKeyRoute() {
   const { examId } = useParams<{ examId: string }>();
   const navigate = useNavigate();
+  const authSession = useOptionalAuthSession();
+  const staffActorId = authSession?.session?.user.id ?? null;
   const controller = useBuilderRouteController(examId);
 
   const [localState, setLocalState] = useState<ExamState | null>(null);
@@ -28,9 +32,20 @@ export function ExamAnswerKeyRoute() {
   const [groupFilter, setGroupFilter] = useState<string>('all');
 
   const localStateRef = useRef<ExamState | null>(null);
+  const recoveredDraftRef = useRef(false);
   const handleUpdateExamContentRef = useRef(controller.handleUpdateExamContent);
   const { status: saveStatus, scheduleAutosave, flushNow: flushAutosaveNow } = useBuilderAutosave({
-    save: (nextState) => handleUpdateExamContentRef.current(nextState),
+    save: async (nextState) => {
+      await handleUpdateExamContentRef.current(nextState);
+      recoveredDraftRef.current = false;
+    },
+    durableKey: examId ? buildStaffDraftKey(staffActorId, 'exam-answer-key', examId) : null,
+    autoSaveRecovered: false,
+    onRecover: (recovered) => {
+      recoveredDraftRef.current = true;
+      setLocalState(recovered);
+      localStateRef.current = recovered;
+    },
   });
 
   useEffect(() => {
@@ -38,7 +53,7 @@ export function ExamAnswerKeyRoute() {
   }, [controller.handleUpdateExamContent]);
 
   useEffect(() => {
-    if (controller.state) {
+    if (controller.state && !recoveredDraftRef.current) {
       setLocalState(controller.state);
       localStateRef.current = controller.state;
     }

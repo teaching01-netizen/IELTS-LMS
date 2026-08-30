@@ -105,3 +105,27 @@ export function hasStructuredContent(content: StructuredContent): boolean {
   }
   return content.nodes.length > 0 && plainTextFromContent(content).length > 0;
 }
+
+
+export function plainContentFromText(text: string): StructuredContent {
+  const paragraphNode: RichTextNode = text.length
+    ? { type: "paragraph", content: [{ type: "text", text }] }
+    : { type: "paragraph" };
+  return { version: 2, nodes: [], document: { type: "doc", content: [paragraphNode] } };
+}
+
+export function supportsFastPlainEditing(content: StructuredContent): boolean {
+  if (content.version === 1) {
+    return content.nodes.every((node) => node.type === "paragraph") && content.nodes.length <= 1;
+  }
+  const document = content.document;
+  if (!document || document.type !== "doc") return content.nodes.length === 0;
+  const blocks = document.content ?? [];
+  if (blocks.length > 1) return false;
+  const paragraph = blocks[0];
+  if (!paragraph) return true;
+  if (paragraph.type !== "paragraph") return false;
+  return (paragraph.content ?? []).every((node) =>
+    node.type === "text" && (!node.marks || node.marks.length === 0)
+  );
+}

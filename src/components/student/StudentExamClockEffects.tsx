@@ -134,6 +134,7 @@ export function StudentExamClockEffects({
     autoSubmitEnabled,
     runtimeState: {
       blockingActive: runtimeState.blocking.active,
+      blockingReason: runtimeState.blocking.reason,
       displayTimeRemaining: displayTimeRemaining ?? null,
       runtimeBacked: runtimeState.runtimeBacked,
       runtimeStatus: runtimeState.runtimeStatus,

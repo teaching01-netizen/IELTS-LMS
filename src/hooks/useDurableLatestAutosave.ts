@@ -1,0 +1,195 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createLatestOnlyAsyncRunner, type LatestOnlyAsyncRunner } from "../utils/latestOnlyAsync";
+import { clearDurableDraft, loadDurableDraft, saveDurableDraft } from "../utils/durableDraftStore";
+
+export type DurableAutosaveStatus = "unsaved" | "saving" | "saved" | "error";
+
+export interface DurableAutosaveFlushResult {
+  ok: boolean;
+  isLatest: boolean;
+}
+
+export interface UseDurableLatestAutosaveOptions<T> {
+  save: (value: T) => Promise<unknown>;
+  durableKey?: string | null | undefined;
+  debounceMs: number;
+  onError?: ((error: Error) => void) | undefined;
+  onRecover?: ((value: T) => void) | undefined;
+  autoSaveRecovered?: boolean | undefined;
+}
+export interface UseDurableLatestAutosaveResult<T> {
+  status: DurableAutosaveStatus;
+  lastSavedAt: Date | null;
+  schedule: (value: T) => void;
+  flush: (value: T) => Promise<DurableAutosaveFlushResult>;
+  retry: (value: T) => void;
+}
+
+type QueueItem<T> = {
+  value: T;
+  requestId: number;
+  durableKey: string | null;
+  save: (value: T) => Promise<unknown>;
+};
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error("Autosave failed.");
+}
+
+export function useDurableLatestAutosave<T>(
+  options: UseDurableLatestAutosaveOptions<T>
+): UseDurableLatestAutosaveResult<T> {
+  const { debounceMs, durableKey = null, autoSaveRecovered = true } = options;
+  const [status, setStatus] = useState<DurableAutosaveStatus>("saved");
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const saveRef = useRef(options.save);
+  const onErrorRef = useRef(options.onError);
+  const onRecoverRef = useRef(options.onRecover);
+  const durableKeyRef = useRef<string | null>(durableKey);
+  const latestRequestIdRef = useRef(0);
+  const debounceRef = useRef<number | null>(null);
+  const pendingValueRef = useRef<T | null>(null);
+  const pendingRequestIdRef = useRef<number | null>(null);
+  const runnerRef = useRef<LatestOnlyAsyncRunner<QueueItem<T>> | null>(null);
+
+  useEffect(() => {
+    saveRef.current = options.save;
+    onErrorRef.current = options.onError;
+    onRecoverRef.current = options.onRecover;
+    durableKeyRef.current = durableKey;
+  }, [durableKey, options.onError, options.onRecover, options.save]);
+
+  if (!runnerRef.current) {
+    runnerRef.current = createLatestOnlyAsyncRunner(async (item) => {
+      setStatus("saving");
+      if (item.durableKey) {
+        try {
+          await saveDurableDraft(item.durableKey, item.value);
+        } catch (error) {
+          onErrorRef.current?.(asError(error));
+        }
+      }
+      try {
+        await item.save(item.value);
+        if (
+          item.requestId === latestRequestIdRef.current &&
+          item.durableKey === durableKeyRef.current
+        ) {
+          if (item.durableKey) await clearDurableDraft(item.durableKey);
+          setStatus("saved");
+          setLastSavedAt(new Date());
+        }
+      } catch (error) {
+        if (item.requestId === latestRequestIdRef.current) {
+          const resolved = asError(error);
+          setStatus("error");
+          onErrorRef.current?.(resolved);
+        }
+        throw error;
+      }
+    });
+  }
+
+  const persistLocal = useCallback((key: string | null, value: T, requestId: number) => {
+    if (!key) return;
+    void saveDurableDraft(key, value).catch((error) => {
+      if (requestId !== latestRequestIdRef.current) return;
+      setStatus("error");
+      onErrorRef.current?.(asError(error));
+    });
+  }, []);
+  const enqueuePending = useCallback(() => {
+    const value = pendingValueRef.current;
+    const requestId = pendingRequestIdRef.current;
+    if (value === null || requestId === null) return;
+    runnerRef.current?.enqueue({
+      value,
+      requestId,
+      durableKey: durableKeyRef.current,
+      save: saveRef.current,
+    });
+    pendingValueRef.current = null;
+    pendingRequestIdRef.current = null;
+    debounceRef.current = null;
+  }, []);
+
+  const schedule = useCallback(
+    (value: T) => {
+      const requestId = ++latestRequestIdRef.current;
+      const key = durableKeyRef.current;
+      pendingValueRef.current = value;
+      pendingRequestIdRef.current = requestId;
+      setStatus("unsaved");
+      persistLocal(key, value, requestId);
+      if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+      debounceRef.current = window.setTimeout(enqueuePending, debounceMs);
+    },
+    [debounceMs, enqueuePending, persistLocal]
+  );
+
+  const flush = useCallback(async (value: T): Promise<DurableAutosaveFlushResult> => {
+    const requestId = ++latestRequestIdRef.current;
+    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    debounceRef.current = null;
+    pendingValueRef.current = null;
+    pendingRequestIdRef.current = null;
+    runnerRef.current?.enqueue({
+      value,
+      requestId,
+      durableKey: durableKeyRef.current,
+      save: saveRef.current,
+    });
+    await runnerRef.current?.idle();
+    return {
+      ok: !runnerRef.current?.lastError,
+      isLatest: requestId === latestRequestIdRef.current,
+    };
+  }, []);
+
+  const retry = useCallback((value: T) => {
+    const requestId = ++latestRequestIdRef.current;
+    runnerRef.current?.enqueue({
+      value,
+      requestId,
+      durableKey: durableKeyRef.current,
+      save: saveRef.current,
+    });
+  }, []);
+
+  useEffect(() => {
+    const requestId = ++latestRequestIdRef.current;
+    if (!durableKey) return;
+    let cancelled = false;
+    void loadDurableDraft<T>(durableKey)
+      .then((recovered) => {
+        if (cancelled || recovered === null) return;
+        onRecoverRef.current?.(recovered);
+        setStatus("unsaved");
+        if (autoSaveRecovered) {
+          runnerRef.current?.enqueue({ value: recovered, requestId, durableKey, save: saveRef.current });
+        }
+      })
+      .catch((error) => {
+        if (cancelled || requestId !== latestRequestIdRef.current) return;
+        setStatus("error");
+        onErrorRef.current?.(asError(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [autoSaveRecovered, durableKey]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  return {
+    status,
+    lastSavedAt,
+    schedule,
+    flush,
+    retry,
+  };
+}

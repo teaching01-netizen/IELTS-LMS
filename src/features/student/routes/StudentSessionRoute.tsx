@@ -24,6 +24,8 @@ export function StudentSessionRoute() {
     providerKey,
     retry,
     runtimeSnapshot,
+    liveSocketConnected,
+    satAttemptUpdateToken,
     state,
     refreshRuntime,
   } =
@@ -100,6 +102,10 @@ export function StudentSessionRoute() {
       <SatStudentSessionRoute
         scheduleId={scheduleId}
         attemptId={attemptSnapshot.id}
+        candidateId={attemptSnapshot.candidateId}
+        runtimeSnapshot={runtimeSnapshot}
+        liveSocketConnected={liveSocketConnected}
+        attemptUpdateToken={satAttemptUpdateToken}
         onExit={navigateToStudentCheckIn}
       />
     );

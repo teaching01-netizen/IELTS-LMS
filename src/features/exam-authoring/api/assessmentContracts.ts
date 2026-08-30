@@ -3,6 +3,7 @@ export type {
   AnswerDefinition,
   AssessmentAuthoringShell,
   AssessmentModuleShell,
+  AssessmentPreviewProjection,
   AssessmentQuestionDetail,
   AssessmentQuestionSummary,
   AssessmentSectionShell,
@@ -11,6 +12,8 @@ export type {
   ChoiceOption,
   ContentNode,
   DeliveredAnswerDefinition,
+  DeliveredAssessmentModule,
+  DeliveredAssessmentSection,
   DeliveredQuestion,
   Difficulty,
   QuestionKind,
@@ -18,4 +21,4 @@ export type {
   QuestionRevision,
   SaveQuestionRevisionRequest,
   StructuredContent,
-} from '../contracts/assessment';
+} from "../contracts/assessment";

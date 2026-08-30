@@ -1,0 +1,1 @@
+export { StructuredContentRenderer } from '../StructuredContentRenderer';

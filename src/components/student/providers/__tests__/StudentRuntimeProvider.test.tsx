@@ -316,6 +316,33 @@ describe('StudentRuntimeProvider', () => {
     expect(screen.getByTestId('current-question')).toHaveTextContent('task-1');
   });
 
+  it('locks runtime-backed interaction at the authoritative deadline even when the snapshot remaining value is stale', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    const runtime = {
+      ...createRuntimeSnapshot('writing'),
+      serverNow: '2026-01-01T00:00:00.000Z',
+      currentSectionDeadlineAt: '2026-01-01T00:00:01.000Z',
+      currentSectionRemainingSeconds: 120,
+    };
+    const { result } = renderRuntime({
+      attemptSnapshot: baseAttempt,
+      runtimeBacked: true,
+      runtimeSnapshot: runtime,
+    });
+
+    expect(result.current.state.blocking.reason).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_100);
+    });
+    expect(result.current.state.blocking).toMatchObject({
+      active: true,
+      reason: 'time_expired',
+      timeRemaining: 0,
+    });
+    vi.useRealTimers();
+  });
+
   it('treats reconnect/device continuity transitions as non-blocking runtime signals', () => {
     const { result } = renderRuntime();
 

@@ -175,6 +175,11 @@ describe('student exam acceptance contracts', () => {
     };
 
     expect(deriveBlockingState(base)).toMatchObject({ active: false, reason: null });
+    expect(deriveBlockingState({ ...base, timeRemaining: 0 })).toMatchObject({
+      active: true,
+      reason: 'time_expired',
+      timeRemaining: 0,
+    });
     expect(deriveBlockingState({ ...base, blockingReasonOverride: 'storage_unavailable' })).toMatchObject({
       active: true,
       reason: 'storage_unavailable',

@@ -204,19 +204,14 @@ impl AnswerHistoryService {
         });
         ordered_keys.extend(fallback_keys);
 
-        let mut objective_label_index_by_module = HashMap::<String, usize>::new();
-        let mut writing_label_index = 0usize;
-        for (target_type, target_id) in &ordered_keys {
-            if let Some(entry) = catalog_by_key.get(&(target_type.clone(), target_id.clone())) {
-                if *target_type == AnswerHistoryTargetType::Writing {
-                    writing_label_index += 1;
-                } else {
-                    *objective_label_index_by_module
-                        .entry(entry.module.clone())
-                        .or_insert(0) += 1;
-                }
-            }
-        }
+        let mut objective_label_index = target_catalog
+            .iter()
+            .filter(|entry| entry.target_type == AnswerHistoryTargetType::Objective)
+            .count();
+        let mut writing_label_index = target_catalog
+            .iter()
+            .filter(|entry| entry.target_type == AnswerHistoryTargetType::Writing)
+            .count();
 
         for (target_type, target_id) in ordered_keys {
             let key = (target_type.clone(), target_id.clone());
@@ -244,11 +239,8 @@ impl AnswerHistoryService {
                 writing_label_index += 1;
                 format!("Task {} (Unmapped)", writing_label_index)
             } else {
-                let next = objective_label_index_by_module
-                    .entry(module.clone())
-                    .and_modify(|index| *index += 1)
-                    .or_insert(1);
-                format!("Question {} (Unmapped)", next)
+                objective_label_index += 1;
+                format!("Question {} (Unmapped)", objective_label_index)
             };
 
             if revision_count > 0 {
@@ -828,8 +820,15 @@ fn classify_target_mutation(
             },
         )
         .to_string();
-    let question_id =
-        extract_payload_string(payload, &["questionId", "question_id", "currentQuestionId"]);
+    let question_id = extract_payload_string(
+        payload,
+        &[
+            "questionId",
+            "question_id",
+            "currentQuestionId",
+            "current_question_id",
+        ],
+    );
     let task_id = extract_payload_string(payload, &["taskId", "task_id", "currentTaskId"]);
     let slot_id = extract_payload_string(payload, &["slotId", "slot_id"]);
     let slot_index = extract_payload_usize(payload, &["slotIndex", "slot_index"]);

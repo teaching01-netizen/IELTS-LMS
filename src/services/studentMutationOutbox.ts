@@ -442,6 +442,48 @@ function shouldSampleLifecycleSuccessLogs(sampleRate = 0.2): boolean {
   return Math.random() < sampleRate;
 }
 
+function normalizedComparableAnswer(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.filter((entry) => typeof entry === 'string' && entry.trim().length > 0);
+  }
+  if (typeof value === 'string' && value.trim().length === 0) return undefined;
+  if (value === null) return undefined;
+  return value;
+}
+
+function mutationIsRepresentedBySubmittedAttempt(
+  attempt: StudentAttempt,
+  mutation: StudentAttemptMutation,
+): boolean {
+  const final = attempt.finalSubmission;
+  if (!final || !attempt.submittedAt) return false;
+
+  if (mutation.type === 'answer') {
+    const actual = final.answers?.[mutation.payload.questionId];
+    const slotIndex = mutation.payload.slotIndex;
+    if (typeof slotIndex === 'number' && Number.isInteger(slotIndex) && slotIndex >= 0) {
+      const expectedSource = mutation.payload.value;
+      const expected = Array.isArray(expectedSource) ? expectedSource[slotIndex] : expectedSource;
+      const actualSlot = Array.isArray(actual) ? actual[slotIndex] : undefined;
+      return normalizedComparableAnswer(actualSlot) === normalizedComparableAnswer(expected);
+    }
+    return JSON.stringify(normalizedComparableAnswer(actual)) ===
+      JSON.stringify(normalizedComparableAnswer(mutation.payload.value));
+  }
+
+  if (mutation.type === 'writing_answer') {
+    const actual = final.writingAnswers?.[mutation.payload.taskId];
+    const expected = mutation.payload.value.trim().length > 0 ? mutation.payload.value : undefined;
+    return (actual && actual.trim().length > 0 ? actual : undefined) === expected;
+  }
+
+  if (mutation.type === 'flag') {
+    return Boolean(final.flags?.[mutation.payload.questionId]) === mutation.payload.value;
+  }
+
+  return false;
+}
+
 export function createStudentMutationOutbox(deps: {
   getAttempt: () => StudentAttempt | null;
   syncAttemptState: (attempt: StudentAttempt) => void;
@@ -461,6 +503,7 @@ export function createStudentMutationOutbox(deps: {
   ) => Promise<void>;
   clearPendingMutations: (attemptId: string) => Promise<void>;
   getAttemptsByScheduleId: (scheduleId: string) => Promise<StudentAttempt[]>;
+  getCanonicalAttempt: (attempt: StudentAttempt) => Promise<StudentAttempt | null>;
 }): StudentMutationOutbox {
   return {
     flushNow: async () => {
@@ -631,15 +674,36 @@ export function createStudentMutationOutbox(deps: {
           const conflictReason = deps.backendConflictReason(error);
           if (conflictReason === 'ATTEMPT_SUBMITTED') {
             deps.onReplayAfterSubmit?.(currentAttempt);
-            deps.mirror.reset();
-            await deps.clearPendingMutations(currentAttempt.id);
-            deps.clearAttemptMutationWatermark(currentAttempt);
-            deps.setStorageDurabilityBlocking(false);
-            const cachedAttempts = await deps.getAttemptsByScheduleId(currentAttempt.scheduleId);
-            const refreshed =
-              cachedAttempts.find((candidate) => candidate.id === currentAttempt.id) ?? currentAttempt;
-            deps.syncAttemptState(refreshed);
-            return true;
+            const pendingAtSeal = deps.mirror.getPendingMutations();
+            const canonical = await deps.getCanonicalAttempt(currentAttempt).catch(() => null);
+            const fullyRepresented = Boolean(
+              canonical?.finalSubmission &&
+              canonical.submittedAt &&
+              pendingAtSeal.length > 0 &&
+              pendingAtSeal.every((mutation) =>
+                mutationIsRepresentedBySubmittedAttempt(canonical, mutation)
+              )
+            );
+
+            if (fullyRepresented && canonical) {
+              deps.mirror.reset();
+              await deps.clearPendingMutations(currentAttempt.id);
+              deps.clearAttemptMutationWatermark(currentAttempt);
+              deps.setStorageDurabilityBlocking(false);
+              deps.syncAttemptState(mergeStudentAttempt(canonical, {
+                recovery: { pendingMutationCount: 0, syncState: 'saved' },
+              }));
+              return true;
+            }
+
+            const sealedAttempt = mergeStudentAttempt(deps.getAttempt() ?? savingAttempt, {
+              recovery: {
+                syncState: 'error',
+                pendingMutationCount: pendingAtSeal.length,
+              },
+            });
+            deps.syncAttemptState(sealedAttempt);
+            return false;
           }
 
           if (conflictReason === 'SECTION_MISMATCH' || conflictReason === 'OBJECTIVE_LOCKED') {

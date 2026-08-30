@@ -7,6 +7,7 @@ export const authoringMotion = {
   press: { scale: 0.97 },
   hoverLift: { y: -1 },
   fast: { duration: 0.1, ease: AUTHORING_EASE_STANDARD },
+  question: { duration: 0.075, ease: AUTHORING_EASE_STANDARD },
   state: { duration: 0.16, ease: AUTHORING_EASE },
   panel: { duration: 0.22, ease: AUTHORING_EASE },
   surface: { duration: 0.2, ease: AUTHORING_EASE },

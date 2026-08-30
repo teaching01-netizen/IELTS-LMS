@@ -11,7 +11,8 @@ pub use delivery::{
     AssessmentAttemptSnapshot, AssessmentDeliveryBootstrap, AssessmentDeliveryModule,
     AssessmentDeliverySection, AssessmentModuleAttemptSnapshot, AssessmentModuleStartRequest,
     AssessmentModuleSubmitRequest, AssessmentResponseRequest, AssessmentResponseSnapshot,
-    AssessmentSubmitRequest, DeliveredAnswerDefinition, DeliveredQuestion,
+    AssessmentSubmitRequest, AssessmentTimingSnapshot, DeliveredAnswerDefinition,
+    DeliveredQuestion,
 };
 pub use question::{
     AccessibilityMetadata, AnswerDefinition, ChoiceOption, Difficulty, QuestionKind,

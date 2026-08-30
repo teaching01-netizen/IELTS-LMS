@@ -33,6 +33,8 @@ function mapBackendSessionSummary(payload: {
   runtimeStatus: StudentSession['runtimeStatus'];
   runtimeCurrentSection?: StudentSession['runtimeCurrentSection'] | null | undefined;
   runtimeTimeRemainingSeconds: number;
+  runtimeDeadlineAt?: string | null | undefined;
+  runtimeServerNow?: string | null | undefined;
   runtimeSectionStatus?: StudentSession['runtimeSectionStatus'] | null | undefined;
   runtimeWaiting: boolean;
   violations: StudentSession['violations'];
@@ -55,6 +57,8 @@ function mapBackendSessionSummary(payload: {
     runtimeStatus: payload.runtimeStatus ?? 'not_started',
     runtimeCurrentSection: payload.runtimeCurrentSection ?? null,
     runtimeTimeRemainingSeconds: payload.runtimeTimeRemainingSeconds,
+    runtimeDeadlineAt: payload.runtimeDeadlineAt ?? null,
+    runtimeServerNow: payload.runtimeServerNow ?? null,
     runtimeSectionStatus: payload.runtimeSectionStatus ?? undefined,
     runtimeWaiting: payload.runtimeWaiting,
     violations: payload.violations ?? [],
@@ -438,8 +442,40 @@ export function useProctorRouteController(): ProctorRouteController {
     [refresh, refreshSchedule, selectedScheduleId],
   );
 
+  const handleRuntimeSnapshot = useCallback(
+    (payload: { scheduleId?: string; runtime: unknown }) => {
+      const scheduleId = payload.scheduleId ?? selectedScheduleId;
+      if (!scheduleId || scheduleId !== selectedScheduleId) return;
+      const schedule = schedules.find((candidate) => candidate.id === scheduleId);
+      if (!schedule) return;
+      try {
+        const mapped = proctorFacade.mapRuntime(
+          payload.runtime as Parameters<typeof proctorFacade.mapRuntime>[0],
+          schedule,
+        );
+        setRuntimeSnapshots((current) => {
+          const existing = current.find((runtime) => runtime.scheduleId === scheduleId);
+          const incomingRevision = mapped.revision ?? -1;
+          const existingRevision = existing?.revision ?? -1;
+          if (existing && incomingRevision <= existingRevision) return current;
+          return [
+            ...current.filter((runtime) => runtime.scheduleId !== scheduleId),
+            {
+              ...mapped,
+              proctorPresence: existing?.proctorPresence ?? [],
+            },
+          ];
+        });
+      } catch {
+        // Pull-based refresh remains the recovery path for malformed frames.
+      }
+    },
+    [schedules, selectedScheduleId],
+  );
+
   useLiveUpdates({
     ...(selectedScheduleId ? { scheduleId: selectedScheduleId } : {}),
+    onRuntimeSnapshot: handleRuntimeSnapshot,
     onEvent: handleLiveUpdate,
   });
 
@@ -475,6 +511,7 @@ export function useProctorRouteController(): ProctorRouteController {
         scheduleId,
         'Proctor',
         expectedActiveSectionKey,
+        runtime?.revision ?? undefined,
       );
       if (!result.success) {
         setError(result.error ?? 'Failed to end section');
@@ -495,6 +532,7 @@ export function useProctorRouteController(): ProctorRouteController {
         'Proctor',
         minutes,
         expectedActiveSectionKey,
+        runtime?.revision ?? undefined,
       );
       if (!result.success) {
         setError(result.error ?? 'Failed to extend section');

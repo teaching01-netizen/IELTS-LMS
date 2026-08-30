@@ -46,6 +46,8 @@ export type ProctorSessionDetailPayload = {
     runtimeStatus: StudentSession['runtimeStatus'];
     runtimeCurrentSection?: StudentSession['runtimeCurrentSection'] | null | undefined;
     runtimeTimeRemainingSeconds: number;
+    runtimeDeadlineAt?: string | null | undefined;
+    runtimeServerNow?: string | null | undefined;
     runtimeSectionStatus?: StudentSession['runtimeSectionStatus'] | null | undefined;
     runtimeWaiting: boolean;
     violations: StudentSession['violations'];

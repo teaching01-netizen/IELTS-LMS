@@ -328,6 +328,7 @@ export interface ExamSessionRuntime {
   cohortName: string;
   deliveryMode: "proctor_start";
   status: RuntimeStatus;
+  timingModel?: 'legacy_section_v1' | 'cohort_stage_v2' | 'cohort_section_v3' | undefined;
   actualStartAt: string | null;
   actualEndAt: string | null;
   activeSectionKey: ModuleType | null;

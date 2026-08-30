@@ -746,6 +746,8 @@ export interface StudentSession {
   runtimeStatus?: RuntimeStatus | undefined;
   runtimeCurrentSection?: ModuleType | null | undefined;
   runtimeTimeRemainingSeconds?: number | undefined;
+  runtimeDeadlineAt?: string | null | undefined;
+  runtimeServerNow?: string | null | undefined;
   runtimeSectionStatus?: SectionRuntimeStatus | undefined;
   runtimeWaiting?: boolean | undefined;
   violations: Violation[];

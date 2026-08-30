@@ -2,12 +2,12 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import {
   AlertTriangle,
   ArrowLeft,
-  CalendarPlus,
   CheckCircle2,
   ChevronDown,
   Clock3,
   GitBranch,
   Info,
+  Link2,
   LoaderCircle,
   RefreshCw,
   Rocket,
@@ -21,17 +21,18 @@ import type {
   AssessmentSectionShell,
   AssessmentValidationIssue,
   AssessmentValidationReport,
-  PublishedAssessmentVersion,
 } from "../contracts/assessment";
+import type { AssessmentReleaseState } from "../contracts/release";
+
 interface SatDeliveryReleasePageProps {
   exam: ExamEntity;
   shell: AssessmentAuthoringShell | null;
+  releaseState: AssessmentReleaseState | null;
   isLoading: boolean;
   loadError: string | null;
   readiness: AssessmentValidationReport | null;
   isChecking: boolean;
   readinessError: string | null;
-  publishedVersion: PublishedAssessmentVersion | null;
   isPublishing: boolean;
   publishError: string | null;
   onBackToBuilder: () => void;
@@ -39,7 +40,7 @@ interface SatDeliveryReleasePageProps {
   onRefreshReadiness: () => Promise<unknown>;
   onPublish: (publishNotes?: string) => Promise<void>;
   onIssueClick: (issue: AssessmentValidationIssue) => void;
-  onCreateSchedule: () => void;
+  onOpenStudentAccess: () => void;
 }
 
 const surfaceClass =
@@ -49,12 +50,12 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
   const {
     exam,
     shell,
+    releaseState,
     isLoading,
     loadError,
     readiness,
     isChecking,
     readinessError,
-    publishedVersion,
     isPublishing,
     publishError,
     onBackToBuilder,
@@ -62,7 +63,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
     onRefreshReadiness,
     onPublish,
     onIssueClick,
-    onCreateSchedule,
+    onOpenStudentAccess,
   } = props;
   const [dirtySections, setDirtySections] = useState<Set<string>>(() => new Set());
   const [showPublishDialog, setShowPublishDialog] = useState(false);
@@ -77,22 +78,11 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
     });
   }, []);
 
-  if (publishedVersion) {
-    return (
-      <PublishedReleaseSuccess
-        examTitle={exam.title}
-        version={publishedVersion}
-        onBackToExams={onBackToExams}
-        onCreateSchedule={onCreateSchedule}
-      />
-    );
-  }
-
   if (isLoading) {
     return <ReleaseLoadingSurface />;
   }
 
-  if (loadError || !shell) {
+  if (loadError || !shell || !releaseState) {
     return (
       <div className="min-h-screen bg-[#f5f5f7] px-6 py-12">
         <div className="mx-auto max-w-2xl rounded-[22px] border border-red-200 bg-white p-6">
@@ -100,7 +90,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
             Delivery & Release could not load
           </p>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            {loadError ?? "The current SAT draft is unavailable."}
+            {loadError ?? "The current SAT release state is unavailable."}
           </p>
           <button
             type="button"
@@ -121,31 +111,25 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
     (sum, section) => sum + section.durationSeconds + section.breakAfterSeconds,
     0
   );
-  const deliveredQuestionCount = shell.sections.reduce((sum, section) => {
-    const base = section.modules.find((module) => module.adaptiveRole === "base");
-    const branches = section.modules.filter(
-      (module) => module.adaptiveRole === "lower_branch" || module.adaptiveRole === "higher_branch"
-    );
-    const branchTarget = Math.max(0, ...branches.map((module) => module.targetQuestionCount));
-    return sum + (base?.targetQuestionCount ?? 0) + branchTarget;
-  }, 0);
-  const authoredQuestionCount = shell.sections.reduce(
-    (sum, section) =>
-      sum + section.modules.reduce((inner, module) => inner + module.questions.length, 0),
-    0
-  );
   const canPublish =
-    Boolean(readinessFresh && readiness?.valid) && dirtySections.size === 0 && !isPublishing;
+    releaseState.state !== "published_current" &&
+    Boolean(readinessFresh && readiness?.valid) &&
+    dirtySections.size === 0 &&
+    !isPublishing;
 
   return (
     <div className="min-h-screen bg-[#f5f5f7] text-slate-950">
-      <ReleaseHeader examTitle={exam.title} onBack={onBackToBuilder} />
+      <ReleaseHeader
+        examTitle={exam.title}
+        onBack={onBackToBuilder}
+        onOpenStudentAccess={releaseState.currentPublishedVersion ? onOpenStudentAccess : undefined}
+      />
       <main className="mx-auto w-full max-w-[1240px] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
         <ReleaseStatusHero
+          releaseState={releaseState}
           readiness={readinessFresh ? readiness : null}
           isChecking={isChecking}
           dirtyCount={dirtySections.size}
-          versionRevision={shell.versionRevision}
         />
 
         <div className="mt-6 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -168,30 +152,30 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
               </div>
             </section>
 
-            <ReadinessPanel
-              readiness={readinessFresh ? readiness : null}
-              isChecking={isChecking}
-              error={readinessError}
-              onRefresh={onRefreshReadiness}
-              onIssueClick={onIssueClick}
-            />
+            {releaseState.state !== "published_current" ? (
+              <ReadinessPanel
+                readiness={readinessFresh ? readiness : null}
+                isChecking={isChecking}
+                error={readinessError}
+                onRefresh={onRefreshReadiness}
+                onIssueClick={onIssueClick}
+              />
+            ) : null}
 
             <RuntimePolicyPanel />
           </div>
 
           <ReleaseSummary
             examTitle={exam.title}
-            shell={shell}
+            releaseState={releaseState}
             blockerCount={blockers.length}
             warningCount={warnings.length}
-            authoredQuestionCount={authoredQuestionCount}
-            deliveredQuestionCount={deliveredQuestionCount}
-            candidateSeconds={totalCandidateSeconds}
             dirtyCount={dirtySections.size}
             canPublish={canPublish}
             isPublishing={isPublishing}
             publishError={publishError}
             onPublish={() => setShowPublishDialog(true)}
+            onOpenStudentAccess={onOpenStudentAccess}
           />
         </div>
       </main>
@@ -204,6 +188,8 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
         warningCount={warnings.length}
         candidateSeconds={totalCandidateSeconds}
         isPublishing={isPublishing}
+        isUpdate={releaseState.state === "unpublished_changes"}
+        currentPublishedVersionNumber={releaseState.currentPublishedVersion?.versionNumber ?? null}
         onClose={() => setShowPublishDialog(false)}
         onConfirm={onPublish}
       />
@@ -211,7 +197,15 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
   );
 }
 
-function ReleaseHeader({ examTitle, onBack }: { examTitle: string; onBack: () => void }) {
+function ReleaseHeader({
+  examTitle,
+  onBack,
+  onOpenStudentAccess,
+}: {
+  examTitle: string;
+  onBack: () => void;
+  onOpenStudentAccess?: (() => void) | undefined;
+}) {
   return (
     <header className="sticky top-0 z-40 border-b border-black/[0.06] bg-white/88 backdrop-blur-2xl">
       <div className="mx-auto flex min-h-[68px] max-w-[1240px] items-center gap-3 px-4 sm:px-6 lg:px-8">
@@ -225,75 +219,79 @@ function ReleaseHeader({ examTitle, onBack }: { examTitle: string; onBack: () =>
         </button>
         <div className="h-5 w-px bg-black/[0.08]" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-950">
-            {examTitle}
-          </p>
-          <p className="mt-0.5 text-xs text-slate-500">Delivery & Release</p>
+          <p className="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-950">{examTitle}</p>
+          <p className="mt-0.5 text-xs text-slate-500">Release</p>
         </div>
+        {onOpenStudentAccess ? (
+          <button
+            type="button"
+            onClick={onOpenStudentAccess}
+            className="flex min-h-10 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold text-slate-600 transition-colors hover:bg-black/[0.04] hover:text-slate-950"
+          >
+            <Link2 size={14} aria-hidden="true" />
+            Student Access
+          </button>
+        ) : null}
       </div>
     </header>
   );
 }
+
 function ReleaseStatusHero({
+  releaseState,
   readiness,
   isChecking,
   dirtyCount,
-  versionRevision,
 }: {
+  releaseState: AssessmentReleaseState;
   readiness: AssessmentValidationReport | null;
   isChecking: boolean;
   dirtyCount: number;
-  versionRevision: number;
 }) {
+  const publishedVersion = releaseState.currentPublishedVersion;
   const ready = Boolean(readiness?.valid) && dirtyCount === 0;
-  const tone = ready ? "emerald" : readiness ? "amber" : "slate";
+  const publishedCurrent = releaseState.state === "published_current" && dirtyCount === 0;
+  const changed = releaseState.state === "unpublished_changes" || dirtyCount > 0;
+  const heading = publishedCurrent
+    ? "Published"
+    : changed && publishedVersion
+      ? "Unpublished changes"
+      : isChecking
+        ? "Checking publish readiness…"
+        : ready
+          ? "Ready to publish"
+          : readiness
+            ? "Review required"
+            : "Preparing release checks";
+  const description = dirtyCount > 0
+    ? `Save ${dirtyCount} delivery section${dirtyCount === 1 ? "" : "s"} before publishing.`
+    : publishedCurrent && publishedVersion
+      ? `Version ${publishedVersion.versionNumber} is what students receive.`
+      : changed && publishedVersion
+        ? `Students still receive Version ${publishedVersion.versionNumber}.`
+        : readiness?.valid
+          ? "Everything required for the first release is ready."
+          : "Resolve blocking issues before publishing.";
+  const tone = publishedCurrent || ready ? "emerald" : changed || readiness ? "amber" : "slate";
+
   return (
-    <section
-      className={`${surfaceClass} flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6`}
-    >
+    <section className={`${surfaceClass} flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6`}>
       <div className="flex items-start gap-3">
-        <div
-          className={`mt-0.5 flex h-10 w-10 items-center justify-center rounded-full ${
-            tone === "emerald"
-              ? "bg-emerald-50 text-emerald-600"
-              : tone === "amber"
-                ? "bg-amber-50 text-amber-600"
-                : "bg-slate-100 text-slate-500"
-          }`}
-        >
-          {isChecking ? (
-            <LoaderCircle size={19} className="animate-spin" />
-          ) : ready ? (
-            <CheckCircle2 size={20} />
-          ) : (
-            <ShieldCheck size={20} />
-          )}
+        <div className={`mt-0.5 flex h-10 w-10 items-center justify-center rounded-full ${tone === "emerald" ? "bg-emerald-50 text-emerald-600" : tone === "amber" ? "bg-amber-50 text-amber-600" : "bg-slate-100 text-slate-500"}`}>
+          {isChecking && !publishedCurrent ? <LoaderCircle size={19} className="animate-spin" /> : publishedCurrent || ready ? <CheckCircle2 size={20} /> : <ShieldCheck size={20} />}
         </div>
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            Release status
-          </p>
-          <h1 className="mt-1 text-[22px] font-semibold tracking-[-0.025em] text-slate-950">
-            {isChecking
-              ? "Checking publish readiness…"
-              : ready
-                ? "Ready to publish"
-                : readiness
-                  ? "Review required"
-                  : "Preparing release checks"}
-          </h1>
-          <p className="mt-1 text-sm leading-6 text-slate-500">
-            {dirtyCount > 0
-              ? `${dirtyCount} delivery section${dirtyCount === 1 ? "" : "s"} ha${dirtyCount === 1 ? "s" : "ve"} unsaved changes.`
-              : readiness?.valid
-                ? "The checked draft matches the current server revision."
-                : "Resolve blocking issues before creating an immutable published version."}
-          </p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Release status</p>
+          <h1 className="mt-1 text-[22px] font-semibold tracking-[-0.025em] text-slate-950">{heading}</h1>
+          <p className="mt-1 text-sm leading-6 text-slate-500">{description}</p>
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2 self-start rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 sm:self-auto">
-        Draft revision {versionRevision}
-      </div>
+      {publishedVersion ? (
+        <div className="shrink-0 self-start text-right sm:self-auto">
+          <p className="text-xs font-semibold text-slate-700">Version {publishedVersion.versionNumber}</p>
+          <p className="mt-0.5 text-[10px] text-slate-400">Published {formatPublishedDate(publishedVersion.publishedAt)}</p>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -536,6 +534,7 @@ function MinuteField({
       <div className="mt-1.5 flex min-h-11 items-center rounded-xl border border-black/[0.08] bg-white px-3 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15">
         <input
           id={id}
+          aria-label={label}
           type="number"
           min={minimum}
           value={value}
@@ -569,6 +568,7 @@ function NumberField({
       <div className="mt-1.5 flex min-h-11 items-center rounded-xl border border-black/[0.08] bg-white px-3 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15">
         <input
           id={id}
+          aria-label={label}
           type="number"
           min={min}
           max={max}
@@ -792,58 +792,75 @@ function PolicyRow({ label, value }: { label: string; value: string }) {
 
 function ReleaseSummary({
   examTitle,
-  shell,
+  releaseState,
   blockerCount,
   warningCount,
-  authoredQuestionCount,
-  deliveredQuestionCount,
-  candidateSeconds,
   dirtyCount,
   canPublish,
   isPublishing,
   publishError,
   onPublish,
+  onOpenStudentAccess,
 }: {
   examTitle: string;
-  shell: AssessmentAuthoringShell;
+  releaseState: AssessmentReleaseState;
   blockerCount: number;
   warningCount: number;
-  authoredQuestionCount: number;
-  deliveredQuestionCount: number;
-  candidateSeconds: number;
   dirtyCount: number;
   canPublish: boolean;
   isPublishing: boolean;
   publishError: string | null;
   onPublish: () => void;
+  onOpenStudentAccess: () => void;
 }) {
+  const published = releaseState.currentPublishedVersion;
+  const publishedCurrent = releaseState.state === "published_current" && dirtyCount === 0;
+  const isUpdate = releaseState.state === "unpublished_changes" || (published && dirtyCount > 0);
+  const { summary, access } = releaseState;
+
   return (
     <aside className="xl:sticky xl:top-[92px]">
       <div className={`${surfaceClass} overflow-hidden`}>
         <div className="border-b border-black/[0.06] p-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            Release summary
+            {publishedCurrent ? "Published" : isUpdate ? "Next release" : "Release summary"}
           </p>
-          <h2 className="mt-1 truncate text-[18px] font-semibold tracking-[-0.02em] text-slate-950">
-            {examTitle}
-          </h2>
-          <p className="mt-1 text-xs text-slate-500">
-            The values below are the draft that will be frozen.
+          <h2 className="mt-1 truncate text-[18px] font-semibold tracking-[-0.02em] text-slate-950">{examTitle}</h2>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            {publishedCurrent && published
+              ? `Version ${published.versionNumber} is available to students.`
+              : isUpdate && published
+                ? `Students still receive Version ${published.versionNumber} until you publish these changes.`
+                : "Publish once the exam is ready for students."}
           </p>
         </div>
         <dl className="divide-y divide-black/[0.05] px-5">
-          <SummaryRow label="Draft" value={`Revision ${shell.versionRevision}`} />
-          <SummaryRow label="Candidate time" value={formatDuration(candidateSeconds)} />
+          {published ? (
+            <SummaryRow
+              label="Current release"
+              value={`Version ${published.versionNumber}`}
+              detail={publishedCurrent ? `Published ${formatPublishedDate(published.publishedAt)}` : "Unchanged until you publish"}
+            />
+          ) : null}
+          <SummaryRow label="Candidate time" value={formatDuration(summary.candidateDurationSeconds)} />
           <SummaryRow
             label="Questions"
-            value={`${deliveredQuestionCount} delivered max`}
-            detail={`${authoredQuestionCount} authored across branches`}
+            value={`${summary.deliveredQuestionCount} delivered max`}
+            detail={`${summary.authoredQuestionCount} authored across branches`}
           />
-          <SummaryRow
-            label="Readiness"
-            value={`${blockerCount} blocker${blockerCount === 1 ? "" : "s"}`}
-            detail={`${warningCount} recommendation${warningCount === 1 ? "" : "s"}`}
-          />
+          {publishedCurrent ? (
+            <SummaryRow
+              label="Student access"
+              value={`${access.totalLinks} link${access.totalLinks === 1 ? "" : "s"}`}
+              detail={access.liveLinks > 0 ? `${access.liveLinks} live · ${access.upcomingLinks} upcoming` : "No live links"}
+            />
+          ) : (
+            <SummaryRow
+              label="Readiness"
+              value={`${blockerCount} blocker${blockerCount === 1 ? "" : "s"}`}
+              detail={`${warningCount} recommendation${warningCount === 1 ? "" : "s"}`}
+            />
+          )}
         </dl>
         <div className="p-5">
           {dirtyCount > 0 ? (
@@ -852,26 +869,34 @@ function ReleaseSummary({
               Save all delivery changes before publishing.
             </div>
           ) : null}
-          <button
-            type="button"
-            onClick={onPublish}
-            disabled={!canPublish || isPublishing}
-            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0071e3] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-          >
-            {isPublishing ? (
-              <LoaderCircle size={16} className="animate-spin" />
-            ) : (
-              <Rocket size={16} />
-            )}
-            {isPublishing ? "Publishing…" : "Publish Version"}
-          </button>
-          {publishError ? (
-            <p role="alert" className="mt-3 text-xs leading-5 text-red-700">
-              {publishError}
-            </p>
+          {publishedCurrent ? (
+            <button
+              type="button"
+              onClick={onOpenStudentAccess}
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0071e3] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+            >
+              <Link2 size={16} />
+              Student Access
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onPublish}
+              disabled={!canPublish || isPublishing}
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0071e3] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+            >
+              {isPublishing ? <LoaderCircle size={16} className="animate-spin" /> : <Rocket size={16} />}
+              {isPublishing ? "Publishing…" : isUpdate ? "Publish Update" : "Publish"}
+            </button>
+          )}
+          {published && !publishedCurrent ? (
+            <button type="button" onClick={onOpenStudentAccess} className="mt-2 min-h-10 w-full rounded-xl text-xs font-semibold text-slate-500 hover:bg-black/[0.035] hover:text-slate-800">
+              Student Access
+            </button>
           ) : null}
+          {publishError ? <p role="alert" className="mt-3 text-xs leading-5 text-red-700">{publishError}</p> : null}
           <p className="mt-3 text-center text-[11px] leading-5 text-slate-400">
-            Publishing freezes this draft. Student access is configured separately in Scheduling.
+            {publishedCurrent ? "Existing links remain on the release they were created for." : "Publishing creates an immutable release. Existing links never change automatically."}
           </p>
         </div>
       </div>
@@ -900,6 +925,8 @@ function PublishAssessmentDialog({
   warningCount,
   candidateSeconds,
   isPublishing,
+  isUpdate,
+  currentPublishedVersionNumber,
   onClose,
   onConfirm,
 }: {
@@ -910,6 +937,8 @@ function PublishAssessmentDialog({
   warningCount: number;
   candidateSeconds: number;
   isPublishing: boolean;
+  isUpdate: boolean;
+  currentPublishedVersionNumber: number | null;
   onClose: () => void;
   onConfirm: (publishNotes?: string) => Promise<void>;
 }) {
@@ -976,11 +1005,12 @@ function PublishAssessmentDialog({
               id="sat-publish-dialog-title"
               className="text-[21px] font-semibold tracking-[-0.025em]"
             >
-              Publish {examTitle}?
+              {isUpdate ? `Publish changes to ${examTitle}?` : `Publish ${examTitle}?`}
             </h2>
             <p className="mt-1 text-sm leading-6 text-slate-500">
-              Draft revision {shell.versionRevision} will be frozen as an immutable published
-              version.
+              {isUpdate && currentPublishedVersionNumber
+                ? `Students continue to receive Version ${currentPublishedVersionNumber} until this update is published.`
+                : "Students will receive this release until you publish a later update."}
             </p>
           </div>
         </div>
@@ -1023,9 +1053,11 @@ function PublishAssessmentDialog({
           </div>
         </div>
 
-        <label className="mt-5 block text-xs font-medium text-slate-500">
+        <label htmlFor="sat-publish-notes" className="mt-5 block text-xs font-medium text-slate-500">
           Publish notes <span className="font-normal text-slate-400">Optional</span>
           <textarea
+            id="sat-publish-notes"
+            aria-label="Publish notes"
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             rows={3}
@@ -1067,7 +1099,7 @@ function PublishAssessmentDialog({
             ) : (
               <Rocket size={15} />
             )}
-            {isPublishing ? "Publishing…" : "Publish Version"}
+            {isPublishing ? "Publishing…" : isUpdate ? "Publish Update" : "Publish"}
           </button>
         </div>
       </div>
@@ -1075,65 +1107,6 @@ function PublishAssessmentDialog({
   );
 }
 
-function PublishedReleaseSuccess({
-  examTitle,
-  version,
-  onBackToExams,
-  onCreateSchedule,
-}: {
-  examTitle: string;
-  version: PublishedAssessmentVersion;
-  onBackToExams: () => void;
-  onCreateSchedule: () => void;
-}) {
-  return (
-    <div className="min-h-screen bg-[#f5f5f7] px-4 py-12 text-slate-950 sm:px-6">
-      <main className="mx-auto max-w-2xl">
-        <div className={`${surfaceClass} overflow-hidden`}>
-          <div className="p-6 sm:p-8">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-              <CheckCircle2 size={24} aria-hidden="true" />
-            </div>
-            <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
-              Published successfully
-            </p>
-            <h1 className="mt-2 text-[28px] font-semibold tracking-[-0.03em] text-slate-950">
-              Version {version.versionNumber} is immutable and ready to schedule.
-            </h1>
-            <p className="mt-3 text-sm leading-6 text-slate-500">
-              {examTitle} has been frozen as a published version. Scheduling remains a separate
-              operational step so existing schedules stay pinned to the version they were created
-              with.
-            </p>
-
-            <dl className="mt-6 divide-y divide-black/[0.05] rounded-2xl bg-[#f5f5f7] px-4">
-              <SummaryRow label="Published version" value={`Version ${version.versionNumber}`} />
-              <SummaryRow label="Version revision" value={`${version.revision}`} />
-              <SummaryRow label="Status" value="Published · immutable" />
-            </dl>
-            <div className="mt-7 flex flex-col gap-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={onCreateSchedule}
-                className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-              >
-                <CalendarPlus size={17} aria-hidden="true" />
-                Create Schedule
-              </button>
-              <button
-                type="button"
-                onClick={onBackToExams}
-                className="min-h-12 rounded-xl bg-[#f5f5f7] px-5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-              >
-                Back to Exams
-              </button>
-            </div>
-          </div>
-        </div>
-      </main>
-    </div>
-  );
-}
 function ReleaseLoadingSurface() {
   return (
     <div className="min-h-screen bg-[#f5f5f7] text-slate-950" aria-busy="true">
@@ -1154,6 +1127,17 @@ function ReleaseLoadingSurface() {
       </main>
     </div>
   );
+}
+
+function formatPublishedDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "recently";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function formatDuration(totalSeconds: number) {

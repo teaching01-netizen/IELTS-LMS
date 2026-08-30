@@ -66,9 +66,9 @@ const ProviderReviewRoute = lazy(() =>
     default: module.ProviderReviewRoute,
   }))
 );
-const ExamPreviewRoute = lazy(() =>
-  import("../../features/builder/routes/ExamPreviewRoute").then((module) => ({
-    default: module.ExamPreviewRoute,
+const ProviderPreviewRoute = lazy(() =>
+  import("../../features/exam-authoring/routes/ProviderPreviewRoute").then((module) => ({
+    default: module.ProviderPreviewRoute,
   }))
 );
 const ExamAnswerKeyRoute = lazy(() =>
@@ -96,10 +96,21 @@ const StudentRegistrationRoute = lazy(() =>
     default: module.StudentRegistrationRoute,
   }))
 );
+const StudentAccessLinkEntryRoute = lazy(() =>
+  import("../../features/student-delivery/routes/StudentAccessLinkEntryRoute").then((module) => ({
+    default: module.StudentAccessLinkEntryRoute,
+  }))
+);
 
 const DevHighlightSelectionRoute = lazy(() =>
   import("./dev/HighlightSelectionDebugRoute").then((module) => ({
     default: module.HighlightSelectionDebugRoute,
+  }))
+);
+
+const DevSatAccessibilityRoute = lazy(() =>
+  import("./dev/SatAccessibilityDebugRoute").then((module) => ({
+    default: module.SatAccessibilityDebugRoute,
   }))
 );
 
@@ -274,7 +285,7 @@ const baseRoutes = [
         path: "builder/:examId/preview",
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
-            <ExamPreviewRoute />
+            <ProviderPreviewRoute />
           </Suspense>,
           ["admin", "builder"]
         ),
@@ -304,6 +315,14 @@ const baseRoutes = [
             <ProctorAnswerHistoryRoute />
           </Suspense>,
           ["admin", "proctor"]
+        ),
+      },
+      {
+        path: "join/:accessLinkId",
+        element: (
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <StudentAccessLinkEntryRoute />
+          </Suspense>
         ),
       },
       {
@@ -342,6 +361,14 @@ const devRoutes = import.meta.env.DEV
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>
             <DevHighlightSelectionRoute />
+          </Suspense>
+        ),
+      },
+      {
+        path: "/__dev/sat-accessibility",
+        element: (
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <DevSatAccessibilityRoute />
           </Suspense>
         ),
       },

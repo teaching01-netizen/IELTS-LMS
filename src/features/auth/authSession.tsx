@@ -16,6 +16,7 @@ import {
   type AuthSession,
   type AuthUserRole,
   type StudentEntryResult,
+  type StudentEntrySuccess,
 } from './api/authGateway';
 
 export type { StudentQueuedAdmission } from './api/authGateway';
@@ -27,7 +28,8 @@ interface AuthSessionContextValue {
   status: AuthStatus;
   login: (email: string, password: string) => Promise<AuthSession>;
   studentEntry: (payload: {
-    scheduleId: string;
+    scheduleId?: string | undefined;
+    accessLinkId?: string | undefined;
     wcode: string;
     email: string;
     studentName: string;
@@ -146,7 +148,8 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const studentEntry = useCallback(async (payload: {
-    scheduleId: string;
+    scheduleId?: string | undefined;
+    accessLinkId?: string | undefined;
     wcode: string;
     email: string;
     studentName: string;
@@ -157,7 +160,8 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     if (!('user' in result)) {
       return result;
     }
-    return setSessionState(result, setSession, setStatus) as AuthSession;
+    setSessionState(result, setSession, setStatus);
+    return result as StudentEntrySuccess;
   }, []);
 
   const logout = useCallback(async () => {

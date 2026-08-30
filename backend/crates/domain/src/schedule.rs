@@ -122,6 +122,7 @@ pub struct ExamSessionRuntime {
     pub exam_id: String,
     pub status: RuntimeStatus,
     pub plan_snapshot: Vec<ScheduleSectionPlanEntry>,
+    pub timing_model: String,
     pub actual_start_at: Option<DateTime<Utc>>,
     pub actual_end_at: Option<DateTime<Utc>>,
     pub active_section_key: Option<String>,
@@ -657,6 +658,8 @@ pub struct StudentSessionSummary {
     pub runtime_status: RuntimeStatus,
     pub runtime_current_section: Option<String>,
     pub runtime_time_remaining_seconds: i32,
+    pub runtime_deadline_at: Option<DateTime<Utc>>,
+    pub runtime_server_now: Option<DateTime<Utc>>,
     pub runtime_section_status: Option<String>,
     pub runtime_waiting: bool,
     pub violations: Value,
@@ -720,6 +723,7 @@ pub struct ExtendSectionRequest {
     pub minutes: i32,
     pub reason: Option<String>,
     pub expected_active_section_key: Option<String>,
+    pub expected_runtime_revision: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -734,6 +738,7 @@ pub struct AttemptCommandRequest {
     pub message: Option<String>,
     pub reason: Option<String>,
     pub expected_active_section_key: Option<String>,
+    pub expected_runtime_revision: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

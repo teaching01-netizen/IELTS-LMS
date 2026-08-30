@@ -1,15 +1,20 @@
+use std::collections::{HashMap, HashSet};
+
 use ielts_backend_domain::assessment::{
-    AccessibilityMetadata, AnswerDefinition, ChoiceOption, Difficulty, QuestionKind,
-    QuestionMetadata, QuestionRevision, SaveQuestionRevisionRequest, StructuredContent,
+    AccessibilityMetadata, AnswerDefinition, AssessmentDeliverySection, AssessmentTool,
+    ChoiceOption, Difficulty, QuestionKind, QuestionMetadata, QuestionRevision,
+    SaveQuestionRevisionRequest, StructuredContent,
 };
 use ielts_backend_domain::exam_provider::{
     provider_for, QuestionValidationContext, ValidationIssue,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use sqlx::{FromRow, MySql, MySqlPool, Transaction};
+use sqlx::{FromRow, MySql, MySqlPool, QueryBuilder, Transaction};
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::assessment_delivery::{AssessmentDeliveryError, AssessmentDeliveryService};
 
 #[derive(Debug, Error)]
 pub enum AssessmentAuthoringError {
@@ -35,6 +40,16 @@ pub struct AssessmentAuthoringShell {
     pub version_id: String,
     pub version_revision: i32,
     pub sections: Vec<AssessmentSectionShell>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssessmentPreviewProjection {
+    pub exam_id: String,
+    pub provider_key: String,
+    pub version_id: String,
+    pub version_revision: i32,
+    pub sections: Vec<AssessmentDeliverySection>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -98,6 +113,14 @@ pub struct AssessmentQuestionSummary {
     pub question_type: QuestionKind,
     pub semantic_revision: i32,
     pub revision: i32,
+    pub prompt_preview: String,
+    pub answer_key_preview: Option<String>,
+    pub domain: Option<String>,
+    pub skill: Option<String>,
+    pub difficulty: Difficulty,
+    pub tags: Vec<String>,
+    pub has_stimulus: bool,
+    pub content_complexity: String,
     pub readiness: QuestionReadinessSummary,
 }
 
@@ -138,20 +161,46 @@ pub struct ReorderQuestionsRequest {
     pub question_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BulkMetadataPatch {
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub skill: Option<String>,
+    #[serde(default)]
+    pub difficulty: Option<Difficulty>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BulkQuestionAction {
-    Move { destination_module_id: String },
-    Duplicate { destination_module_id: String },
-    SetPretest { value: bool },
+    Move {
+        #[serde(rename = "destinationModuleId", alias = "destination_module_id")]
+        destination_module_id: String,
+    },
+    Duplicate {
+        #[serde(rename = "destinationModuleId", alias = "destination_module_id")]
+        destination_module_id: String,
+    },
+    SetPretest {
+        value: bool,
+    },
+    PatchMetadata {
+        patch: BulkMetadataPatch,
+    },
     Delete,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BulkQuestionRequest {
     pub question_ids: Vec<String>,
     pub action: BulkQuestionAction,
+    #[serde(default)]
+    pub expected_revisions: HashMap<String, i32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -159,6 +208,49 @@ pub struct BulkQuestionRequest {
 pub struct BulkQuestionResult {
     pub affected_question_ids: Vec<String>,
     pub created_question_ids: Vec<String>,
+    pub updated_questions: Vec<AssessmentQuestionSummary>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BatchQuestionDraft {
+    pub question_type: QuestionKind,
+    pub stimulus: StructuredContent,
+    pub prompt: StructuredContent,
+    pub answer: AnswerDefinition,
+    pub rationale: StructuredContent,
+    pub metadata: QuestionMetadata,
+    pub accessibility: AccessibilityMetadata,
+    #[serde(default)]
+    pub is_pretest: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BatchCreateQuestionsRequest {
+    pub questions: Vec<BatchQuestionDraft>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SampleExamModuleDraft {
+    pub module_id: String,
+    pub questions: Vec<BatchQuestionDraft>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LoadSampleExamRequest {
+    pub expected_version_id: String,
+    pub expected_version_revision: i32,
+    pub modules: Vec<SampleExamModuleDraft>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchCreateQuestionsResult {
+    pub created_question_ids: Vec<String>,
+    pub questions: Vec<AssessmentQuestionSummary>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -222,6 +314,111 @@ struct ModuleRow {
 }
 
 #[derive(Debug, FromRow)]
+struct SampleModuleRow {
+    id: String,
+    section_key: String,
+    module_key: String,
+    target_question_count: i32,
+}
+
+struct PreparedSampleQuestion {
+    question_id: String,
+    revision_id: String,
+    exam_question_id: String,
+    module_id: String,
+    display_order: i32,
+    is_pretest: bool,
+    question_type: String,
+    stimulus: Value,
+    prompt: Value,
+    answer_definition: Value,
+    rationale: Value,
+    metadata: Value,
+    accessibility: Value,
+}
+
+#[derive(Debug, FromRow)]
+struct PublishedSectionCloneRow {
+    id: String,
+    section_key: String,
+    title: String,
+    display_order: i32,
+    duration_seconds: i32,
+    break_after_seconds: i32,
+    instructions: Value,
+    tool_policy: Value,
+}
+
+#[derive(Debug, FromRow)]
+struct PublishedModuleCloneRow {
+    id: String,
+    section_id: String,
+    module_key: String,
+    title: String,
+    display_order: i32,
+    duration_seconds: i32,
+    target_question_count: i32,
+    adaptive_role: String,
+    instructions: Value,
+    tool_policy: Value,
+}
+
+#[derive(Debug, FromRow)]
+struct PublishedRoutingCloneRow {
+    section_id: String,
+    base_module_id: String,
+    lower_module_id: String,
+    higher_module_id: String,
+    policy_key: String,
+    policy_config: Value,
+}
+
+#[derive(Debug, FromRow)]
+struct PublishedScoringCloneRow {
+    policy_key: String,
+    policy_config: Value,
+}
+
+#[derive(Debug, FromRow)]
+struct PublishedQuestionCloneRow {
+    source_module_id: String,
+    source_revision_id: String,
+    question_id: String,
+    max_semantic_revision: i32,
+    question_type: String,
+    stimulus: Value,
+    prompt: Value,
+    answer_definition: Value,
+    rationale: Value,
+    metadata: Value,
+    accessibility: Value,
+    display_order: i32,
+    is_pretest: bool,
+}
+
+struct PreparedDraftQuestionClone {
+    revision_id: String,
+    question_id: String,
+    semantic_revision: i32,
+    question_type: String,
+    stimulus: Value,
+    prompt: Value,
+    answer_definition: Value,
+    rationale: Value,
+    metadata: Value,
+    accessibility: Value,
+}
+
+struct PreparedDraftPlacementClone {
+    exam_question_id: String,
+    module_id: String,
+    question_id: String,
+    question_revision_id: String,
+    display_order: i32,
+    is_pretest: bool,
+}
+
+#[derive(Debug, FromRow)]
 struct DetailRow {
     exam_question_id: String,
     module_id: String,
@@ -241,6 +438,27 @@ struct DetailRow {
     rationale: Value,
     metadata: Value,
     accessibility: Value,
+}
+
+fn map_preview_delivery_error(error: AssessmentDeliveryError) -> AssessmentAuthoringError {
+    match error {
+        AssessmentDeliveryError::Database(error) => AssessmentAuthoringError::Database(error),
+        AssessmentDeliveryError::NotFound => AssessmentAuthoringError::NotFound,
+        AssessmentDeliveryError::UnsupportedProvider => {
+            AssessmentAuthoringError::UnsupportedProvider
+        }
+        AssessmentDeliveryError::InvalidData(message)
+        | AssessmentDeliveryError::Validation(message)
+        | AssessmentDeliveryError::Conflict(message) => {
+            AssessmentAuthoringError::InvalidData(message)
+        }
+        AssessmentDeliveryError::StructuredConflict { message, .. } => {
+            AssessmentAuthoringError::InvalidData(message)
+        }
+        AssessmentDeliveryError::ActiveSessionSuperseded => AssessmentAuthoringError::InvalidData(
+            "Preview projection unexpectedly encountered student-session state.".to_owned(),
+        ),
+    }
 }
 
 pub struct AssessmentAuthoringService {
@@ -310,6 +528,99 @@ impl AssessmentAuthoringService {
         })
     }
 
+    pub async fn preview(
+        &self,
+        exam_id: &str,
+    ) -> Result<AssessmentPreviewProjection, AssessmentAuthoringError> {
+        let exam = self.exam(exam_id).await?;
+        if exam.provider_key != "sat" {
+            return Err(AssessmentAuthoringError::UnsupportedProvider);
+        }
+        let version_id = exam
+            .current_draft_version_id
+            .ok_or(AssessmentAuthoringError::NotFound)?;
+        let version_revision: i32 = sqlx::query_scalar(
+            "SELECT revision FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE",
+        )
+        .bind(&version_id)
+        .bind(exam_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AssessmentAuthoringError::NotFound)?;
+        let sections = AssessmentDeliveryService::new(self.pool.clone())
+            .preview_sections(&version_id)
+            .await
+            .map_err(map_preview_delivery_error)?;
+        Ok(AssessmentPreviewProjection {
+            exam_id: exam.id,
+            provider_key: exam.provider_key,
+            version_id,
+            version_revision,
+            sections,
+        })
+    }
+
+    pub async fn open_shell(
+        &self,
+        exam_id: &str,
+        actor_id: &str,
+    ) -> Result<AssessmentAuthoringShell, AssessmentAuthoringError> {
+        let mut tx = self.pool.begin().await?;
+        let exam: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT provider_key, current_draft_version_id, current_published_version_id FROM exam_entities WHERE id = ? FOR UPDATE",
+        )
+        .bind(exam_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((provider_key, current_draft_version_id, current_published_version_id)) = exam
+        else {
+            return Err(AssessmentAuthoringError::NotFound);
+        };
+        if provider_key != "sat" {
+            return Err(AssessmentAuthoringError::UnsupportedProvider);
+        }
+        if current_draft_version_id.is_some() {
+            tx.commit().await?;
+            return self.shell(exam_id).await;
+        }
+        let published_version_id = current_published_version_id.ok_or_else(|| {
+            AssessmentAuthoringError::InvalidData(
+                "The SAT exam has neither an editable draft nor a published version to continue."
+                    .to_owned(),
+            )
+        })?;
+        let draft_version_id = Self::clone_published_sat_to_draft_tx(
+            &mut tx,
+            exam_id,
+            &published_version_id,
+            actor_id,
+        )
+        .await?;
+        let updated = sqlx::query(
+            "UPDATE exam_entities SET current_draft_version_id = ?, updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND current_draft_version_id IS NULL",
+        )
+        .bind(&draft_version_id)
+        .bind(exam_id)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(AssessmentAuthoringError::Conflict(
+                "The SAT draft changed while authoring was opening.".to_owned(),
+            ));
+        }
+        sqlx::query(
+            "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, created_at) VALUES (?, ?, ?, ?, 'version_created', NOW())",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(exam_id)
+        .bind(&draft_version_id)
+        .bind(actor_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        self.shell(exam_id).await
+    }
+
     pub async fn create_question(
         &self,
         module_id: &str,
@@ -370,6 +681,367 @@ impl AssessmentAuthoringService {
         touch_draft_version_tx(&mut tx, &version_id).await?;
         tx.commit().await?;
         self.question(&exam_question_id).await
+    }
+
+    pub async fn batch_create_questions(
+        &self,
+        module_id: &str,
+        request: BatchCreateQuestionsRequest,
+        actor_id: &str,
+    ) -> Result<BatchCreateQuestionsResult, AssessmentAuthoringError> {
+        const MAX_BATCH_SIZE: usize = 64;
+        if request.questions.is_empty() {
+            return Err(AssessmentAuthoringError::InvalidData(
+                "Batch question creation requires at least one question.".to_owned(),
+            ));
+        }
+        if request.questions.len() > MAX_BATCH_SIZE {
+            return Err(AssessmentAuthoringError::InvalidData(
+                "A batch can contain at most 64 questions.".to_owned(),
+            ));
+        }
+
+        let mut questions = request.questions;
+        for draft in &mut questions {
+            draft.metadata.tags = normalize_tags(&draft.metadata.tags)?;
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let version_id = lock_current_draft_for_module_tx(&mut tx, module_id).await?;
+        let module: (String, String) = sqlx::query_as(
+            "SELECT s.section_key, m.module_key FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?",
+        )
+        .bind(module_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AssessmentAuthoringError::NotFound)?;
+        ensure_module_capacity_tx(&mut tx, module_id, questions.len()).await?;
+
+        let requested_pretests = questions
+            .iter()
+            .filter(|question| question.is_pretest)
+            .count();
+        let existing_pretests: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM assessment_exam_questions WHERE module_id = ? AND is_pretest = TRUE",
+        )
+        .bind(module_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if existing_pretests + i64::try_from(requested_pretests).unwrap_or(i64::MAX) > 2 {
+            return Err(AssessmentAuthoringError::InvalidData(
+                "Each SAT module can have at most two pretest questions.".to_owned(),
+            ));
+        }
+
+        let provider = provider_for("sat").ok_or(AssessmentAuthoringError::UnsupportedProvider)?;
+        let mut validation_issues = Vec::new();
+        for (index, draft) in questions.iter().enumerate() {
+            if draft.metadata.section_key != module.0 {
+                validation_issues.push(ValidationIssue {
+                    code: "sat.metadata.section.required",
+                    path: format!("questions.{index}.metadata.sectionKey"),
+                    message: "Question metadata must match the destination SAT section.".to_owned(),
+                    blocking: true,
+                });
+                continue;
+            }
+            let question = QuestionRevision {
+                id: String::new(),
+                question_id: String::new(),
+                semantic_revision: 1,
+                revision: 0,
+                state: "draft".to_owned(),
+                question_type: draft.question_type,
+                stimulus: draft.stimulus.clone(),
+                prompt: draft.prompt.clone(),
+                answer: draft.answer.clone(),
+                rationale: draft.rationale.clone(),
+                metadata: draft.metadata.clone(),
+                accessibility: draft.accessibility.clone(),
+            };
+            for mut issue in provider.validate_question(
+                QuestionValidationContext {
+                    section_key: &module.0,
+                    module_key: &module.1,
+                },
+                &question,
+            ) {
+                issue.path = format!("questions.{index}.{}", issue.path);
+                validation_issues.push(issue);
+            }
+        }
+        if validation_issues.iter().any(|issue| issue.blocking) {
+            return Err(AssessmentAuthoringError::Validation(validation_issues));
+        }
+
+        let mut next_order: i32 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(display_order), -1) + 1 FROM assessment_exam_questions WHERE module_id = ?",
+        )
+        .bind(module_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let mut created_question_ids = Vec::with_capacity(questions.len());
+        for draft in questions {
+            let question_id = Uuid::new_v4().to_string();
+            let revision_id = Uuid::new_v4().to_string();
+            let exam_question_id = Uuid::new_v4().to_string();
+            let question_type = serde_json::to_value(draft.question_type)?;
+            let question_type = question_type.as_str().ok_or_else(|| {
+                AssessmentAuthoringError::InvalidData("Invalid question type.".to_owned())
+            })?;
+            sqlx::query(
+                "INSERT INTO assessment_questions (id, provider_key, created_by) VALUES (?, 'sat', ?)",
+            )
+            .bind(&question_id)
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO assessment_question_revisions (id, question_id, semantic_revision, revision, state, question_type, stimulus, prompt, answer_definition, rationale, metadata, accessibility, created_by) VALUES (?, ?, 1, 0, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&revision_id)
+            .bind(&question_id)
+            .bind(question_type)
+            .bind(serde_json::to_value(&draft.stimulus)?)
+            .bind(serde_json::to_value(&draft.prompt)?)
+            .bind(serde_json::to_value(&draft.answer)?)
+            .bind(serde_json::to_value(&draft.rationale)?)
+            .bind(serde_json::to_value(&draft.metadata)?)
+            .bind(serde_json::to_value(&draft.accessibility)?)
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest) VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&exam_question_id)
+            .bind(module_id)
+            .bind(&question_id)
+            .bind(&revision_id)
+            .bind(next_order)
+            .bind(draft.is_pretest)
+            .execute(&mut *tx)
+            .await?;
+            created_question_ids.push(exam_question_id);
+            next_order = next_order.checked_add(1).ok_or_else(|| {
+                AssessmentAuthoringError::InvalidData("Question order overflowed.".to_owned())
+            })?;
+        }
+        touch_draft_version_tx(&mut tx, &version_id).await?;
+        tx.commit().await?;
+        Ok(BatchCreateQuestionsResult {
+            created_question_ids,
+            questions: self.summaries(module_id).await?,
+        })
+    }
+
+    pub async fn load_sample_exam(
+        &self,
+        exam_id: &str,
+        mut request: LoadSampleExamRequest,
+        actor_id: &str,
+    ) -> Result<AssessmentAuthoringShell, AssessmentAuthoringError> {
+        for module in &mut request.modules {
+            for draft in &mut module.questions {
+                draft.metadata.tags = normalize_tags(&draft.metadata.tags)?;
+            }
+        }
+        let mut tx = self.pool.begin().await?;
+        let exam: Option<(String, Option<String>)> = sqlx::query_as(
+            "SELECT provider_key, current_draft_version_id FROM exam_entities WHERE id = ? FOR UPDATE",
+        )
+        .bind(exam_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((provider_key, current_draft_version_id)) = exam else {
+            return Err(AssessmentAuthoringError::NotFound);
+        };
+        if provider_key != "sat" {
+            return Err(AssessmentAuthoringError::UnsupportedProvider);
+        }
+        let version_id = current_draft_version_id.ok_or(AssessmentAuthoringError::NotFound)?;
+        if version_id != request.expected_version_id {
+            return Err(AssessmentAuthoringError::Conflict(
+                "The SAT draft changed before the sample exam could be loaded. Refresh and try again."
+                    .to_owned(),
+            ));
+        }
+        let version_revision: Option<i32> = sqlx::query_scalar(
+            "SELECT revision FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE FOR UPDATE",
+        )
+        .bind(&version_id)
+        .bind(exam_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if version_revision != Some(request.expected_version_revision) {
+            return Err(AssessmentAuthoringError::Conflict(
+                "The SAT draft changed before the sample exam could be loaded. Refresh and try again."
+                    .to_owned(),
+            ));
+        }
+
+        let modules = sqlx::query_as::<_, SampleModuleRow>(
+            "SELECT m.id, s.section_key, m.module_key, m.target_question_count FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE s.exam_version_id = ? ORDER BY s.display_order, m.display_order FOR UPDATE",
+        )
+        .bind(&version_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        if modules.len() != request.modules.len() {
+            return Err(AssessmentAuthoringError::InvalidData(
+                "Sample exam payload must contain every SAT module exactly once.".to_owned(),
+            ));
+        }
+        let mut requested_ids = HashSet::with_capacity(request.modules.len());
+        for requested in &request.modules {
+            if !requested_ids.insert(requested.module_id.as_str()) {
+                return Err(AssessmentAuthoringError::InvalidData(
+                    "Sample exam payload contains a duplicate module.".to_owned(),
+                ));
+            }
+        }
+
+        let provider = provider_for("sat").ok_or(AssessmentAuthoringError::UnsupportedProvider)?;
+        let blueprint = provider.blueprint();
+        let mut validation_issues = Vec::new();
+        for module in &modules {
+            let requested = request
+                .modules
+                .iter()
+                .find(|candidate| candidate.module_id == module.id)
+                .ok_or_else(|| {
+                    AssessmentAuthoringError::InvalidData(
+                        "Sample exam payload contains an unknown or missing module.".to_owned(),
+                    )
+                })?;
+            let expected_count = usize::try_from(module.target_question_count).map_err(|_| {
+                AssessmentAuthoringError::InvalidData(
+                    "SAT module target count cannot be negative.".to_owned(),
+                )
+            })?;
+            if requested.questions.len() != expected_count {
+                return Err(AssessmentAuthoringError::InvalidData(format!(
+                    "{} requires exactly {} sample questions.",
+                    module.module_key, module.target_question_count
+                )));
+            }
+            let blueprint_module = blueprint
+                .module(&module.section_key, &module.module_key)
+                .ok_or_else(|| {
+                    AssessmentAuthoringError::InvalidData(
+                        "Sample exam target module is not part of the SAT blueprint.".to_owned(),
+                    )
+                })?;
+            let pretest_count = requested
+                .questions
+                .iter()
+                .filter(|question| question.is_pretest)
+                .count();
+            if pretest_count
+                != usize::try_from(blueprint_module.pretest_count).unwrap_or(usize::MAX)
+            {
+                return Err(AssessmentAuthoringError::InvalidData(format!(
+                    "{} requires exactly {} pretest questions.",
+                    module.module_key, blueprint_module.pretest_count
+                )));
+            }
+            for (index, draft) in requested.questions.iter().enumerate() {
+                if draft.metadata.section_key != module.section_key {
+                    validation_issues.push(ValidationIssue {
+                        code: "sat.metadata.section.required",
+                        path: format!(
+                            "modules.{}.questions.{index}.metadata.sectionKey",
+                            module.id
+                        ),
+                        message: "Question metadata must match the destination SAT section."
+                            .to_owned(),
+                        blocking: true,
+                    });
+                    continue;
+                }
+                let question = QuestionRevision {
+                    id: String::new(),
+                    question_id: String::new(),
+                    semantic_revision: 1,
+                    revision: 0,
+                    state: "draft".to_owned(),
+                    question_type: draft.question_type,
+                    stimulus: draft.stimulus.clone(),
+                    prompt: draft.prompt.clone(),
+                    answer: draft.answer.clone(),
+                    rationale: draft.rationale.clone(),
+                    metadata: draft.metadata.clone(),
+                    accessibility: draft.accessibility.clone(),
+                };
+                for mut issue in provider.validate_question(
+                    QuestionValidationContext {
+                        section_key: &module.section_key,
+                        module_key: &module.module_key,
+                    },
+                    &question,
+                ) {
+                    issue.path = format!("modules.{}.questions.{index}.{}", module.id, issue.path);
+                    validation_issues.push(issue);
+                }
+            }
+        }
+        if validation_issues.iter().any(|issue| issue.blocking) {
+            return Err(AssessmentAuthoringError::Validation(validation_issues));
+        }
+
+        let mut prepared = Vec::with_capacity(
+            request
+                .modules
+                .iter()
+                .map(|module| module.questions.len())
+                .sum(),
+        );
+        for module in &modules {
+            let requested = request
+                .modules
+                .iter()
+                .find(|candidate| candidate.module_id == module.id)
+                .ok_or_else(|| {
+                    AssessmentAuthoringError::InvalidData(
+                        "Sample module disappeared during validation.".to_owned(),
+                    )
+                })?;
+            for (index, draft) in requested.questions.iter().enumerate() {
+                prepared.push(prepare_sample_question(
+                    &module.id,
+                    i32::try_from(index).map_err(|_| {
+                        AssessmentAuthoringError::InvalidData(
+                            "Question order overflowed.".to_owned(),
+                        )
+                    })?,
+                    draft,
+                )?);
+            }
+        }
+
+        let mut previous_question_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT eq.question_id FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id WHERE s.exam_version_id = ?",
+        )
+        .bind(&version_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut delete_placements = QueryBuilder::<MySql>::new(
+            "DELETE FROM assessment_exam_questions WHERE module_id IN (",
+        );
+        {
+            let mut separated = delete_placements.separated(", ");
+            for module in &modules {
+                separated.push_bind(&module.id);
+            }
+        }
+        delete_placements.push(")");
+        delete_placements.build().execute(&mut *tx).await?;
+        previous_question_ids.sort();
+        previous_question_ids.dedup();
+        delete_unreferenced_questions_tx(&mut tx, &previous_question_ids).await?;
+        insert_prepared_sample_questions_tx(&mut tx, &prepared, actor_id).await?;
+        touch_draft_version_tx(&mut tx, &version_id).await?;
+        tx.commit().await?;
+        self.shell(exam_id).await
     }
 
     pub async fn save_question(
@@ -447,7 +1119,7 @@ impl AssessmentAuthoringService {
             AssessmentAuthoringError::InvalidData("Invalid question type.".to_owned())
         })?;
         let result = sqlx::query(
-            "UPDATE assessment_question_revisions SET question_type = ?, stimulus = ?, prompt = ?, answer_definition = ?, rationale = ?, metadata = ?, accessibility = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP(6), created_by = ? WHERE id = ? AND revision = ? AND state = 'draft'",
+            "UPDATE assessment_question_revisions SET question_type = ?, stimulus = ?, prompt = ?, answer_definition = ?, rationale = ?, metadata = ?, accessibility = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP(6), updated_by = ? WHERE id = ? AND revision = ? AND state = 'draft'",
         )
         .bind(question_type)
         .bind(serde_json::to_value(&request.stimulus)?)
@@ -536,6 +1208,11 @@ impl AssessmentAuthoringService {
                     &format!("{}.break", section.section_key),
                     "Section break duration cannot be negative.",
                 ));
+            } else if section.break_after_seconds % 60 != 0 {
+                errors.push(structure_issue(
+                    &format!("{}.break", section.section_key),
+                    "SAT break duration must be a whole number of minutes; delivery never rounds assessment time.",
+                ));
             } else if section.break_after_seconds != blueprint_section.break_after_seconds {
                 warnings.push(warning_issue(
                     "sat.delivery.nonstandard_break",
@@ -557,10 +1234,25 @@ impl AssessmentAuthoringService {
                     ));
                     continue;
                 };
+                if !sat_tool_policy_matches(&module.tool_policy, &blueprint_module.tools) {
+                    errors.push(structure_issue(
+                        &format!("{}.{}.tools", section.section_key, module.module_key),
+                        if blueprint_module.tools.is_empty() {
+                            "Reading and Writing modules do not permit Math calculator or reference tools."
+                        } else {
+                            "Math modules require both the calculator and reference sheet tools."
+                        },
+                    ));
+                }
                 if module.duration_seconds <= 0 {
                     errors.push(structure_issue(
                         &format!("{}.{}.duration", section.section_key, module.module_key),
                         "SAT module duration must be greater than zero.",
+                    ));
+                } else if module.duration_seconds % 60 != 0 {
+                    errors.push(structure_issue(
+                        &format!("{}.{}.duration", section.section_key, module.module_key),
+                        "SAT module duration must be a whole number of minutes; delivery never rounds assessment time.",
                     ));
                 } else if module.duration_seconds != blueprint_module.duration_seconds {
                     warnings.push(warning_issue(
@@ -1070,6 +1762,269 @@ impl AssessmentAuthoringService {
         self.shell(exam_id).await
     }
 
+    pub async fn clone_published_sat_to_draft_tx(
+        tx: &mut Transaction<'_, MySql>,
+        exam_id: &str,
+        published_version_id: &str,
+        actor_id: &str,
+    ) -> Result<String, AssessmentAuthoringError> {
+        let source: Option<(i32, Value, Value)> = sqlx::query_as(
+            "SELECT version_number, content_snapshot, config_snapshot FROM exam_versions WHERE id = ? AND exam_id = ? AND is_published = TRUE FOR UPDATE",
+        )
+        .bind(published_version_id)
+        .bind(exam_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        let Some((_published_number, content_snapshot, config_snapshot)) = source else {
+            return Err(AssessmentAuthoringError::InvalidData(
+                "The published SAT version is unavailable for draft continuation.".to_owned(),
+            ));
+        };
+
+        let existing_draft: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM exam_versions WHERE exam_id = ? AND is_draft = TRUE LIMIT 1 FOR UPDATE",
+        )
+        .bind(exam_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if let Some(existing_draft) = existing_draft {
+            return Ok(existing_draft);
+        }
+
+        let next_version_number: i32 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(version_number), 0) + 1 FROM exam_versions WHERE exam_id = ?",
+        )
+        .bind(exam_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        let draft_version_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO exam_versions (id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, TRUE, FALSE, 0)",
+        )
+        .bind(&draft_version_id)
+        .bind(exam_id)
+        .bind(next_version_number)
+        .bind(published_version_id)
+        .bind(content_snapshot)
+        .bind(config_snapshot)
+        .bind(actor_id)
+        .execute(&mut **tx)
+        .await?;
+
+        let sections = sqlx::query_as::<_, PublishedSectionCloneRow>(
+            "SELECT id, section_key, title, display_order, duration_seconds, break_after_seconds, instructions, tool_policy FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id",
+        )
+        .bind(published_version_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        if sections.is_empty() {
+            return Err(AssessmentAuthoringError::InvalidData(
+                "The published SAT version has no assessment sections to continue editing."
+                    .to_owned(),
+            ));
+        }
+        let mut section_ids = HashMap::with_capacity(sections.len());
+        for section in &sections {
+            let new_section_id = Uuid::new_v4().to_string();
+            section_ids.insert(section.id.clone(), new_section_id.clone());
+            sqlx::query(
+                "INSERT INTO assessment_sections (id, exam_version_id, section_key, title, display_order, duration_seconds, break_after_seconds, instructions, tool_policy, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            )
+            .bind(&new_section_id)
+            .bind(&draft_version_id)
+            .bind(&section.section_key)
+            .bind(&section.title)
+            .bind(section.display_order)
+            .bind(section.duration_seconds)
+            .bind(section.break_after_seconds)
+            .bind(&section.instructions)
+            .bind(&section.tool_policy)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        let modules = sqlx::query_as::<_, PublishedModuleCloneRow>(
+            "SELECT m.id, m.section_id, m.module_key, m.title, m.display_order, m.duration_seconds, m.target_question_count, m.adaptive_role, m.instructions, m.tool_policy FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE s.exam_version_id = ? ORDER BY s.display_order, m.display_order, m.id",
+        )
+        .bind(published_version_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        let mut module_ids = HashMap::with_capacity(modules.len());
+        for module in &modules {
+            let new_section_id = section_ids.get(&module.section_id).ok_or_else(|| {
+                AssessmentAuthoringError::InvalidData(
+                    "A published SAT module references an unknown section.".to_owned(),
+                )
+            })?;
+            let new_module_id = Uuid::new_v4().to_string();
+            module_ids.insert(module.id.clone(), new_module_id.clone());
+            sqlx::query(
+                "INSERT INTO assessment_modules (id, section_id, module_key, title, display_order, duration_seconds, target_question_count, adaptive_role, instructions, tool_policy, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            )
+            .bind(&new_module_id)
+            .bind(new_section_id)
+            .bind(&module.module_key)
+            .bind(&module.title)
+            .bind(module.display_order)
+            .bind(module.duration_seconds)
+            .bind(module.target_question_count)
+            .bind(&module.adaptive_role)
+            .bind(&module.instructions)
+            .bind(&module.tool_policy)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        let routing = sqlx::query_as::<_, PublishedRoutingCloneRow>(
+            "SELECT rp.section_id, rp.base_module_id, rp.lower_module_id, rp.higher_module_id, rp.policy_key, rp.policy_config FROM assessment_routing_policies rp JOIN assessment_sections s ON s.id = rp.section_id WHERE s.exam_version_id = ?",
+        )
+        .bind(published_version_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        for policy in routing {
+            let new_section_id = section_ids.get(&policy.section_id).ok_or_else(|| {
+                AssessmentAuthoringError::InvalidData(
+                    "A SAT routing policy references an unknown section.".to_owned(),
+                )
+            })?;
+            let new_base_id = module_ids.get(&policy.base_module_id).ok_or_else(|| {
+                AssessmentAuthoringError::InvalidData(
+                    "A SAT routing policy references an unknown base module.".to_owned(),
+                )
+            })?;
+            let new_lower_id = module_ids.get(&policy.lower_module_id).ok_or_else(|| {
+                AssessmentAuthoringError::InvalidData(
+                    "A SAT routing policy references an unknown lower module.".to_owned(),
+                )
+            })?;
+            let new_higher_id = module_ids.get(&policy.higher_module_id).ok_or_else(|| {
+                AssessmentAuthoringError::InvalidData(
+                    "A SAT routing policy references an unknown higher module.".to_owned(),
+                )
+            })?;
+            sqlx::query(
+                "INSERT INTO assessment_routing_policies (id, section_id, base_module_id, lower_module_id, higher_module_id, policy_key, policy_config, revision) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(new_section_id)
+            .bind(new_base_id)
+            .bind(new_lower_id)
+            .bind(new_higher_id)
+            .bind(&policy.policy_key)
+            .bind(&policy.policy_config)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        let scoring = sqlx::query_as::<_, PublishedScoringCloneRow>(
+            "SELECT policy_key, policy_config FROM assessment_scoring_policies WHERE exam_version_id = ?",
+        )
+        .bind(published_version_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if let Some(scoring) = scoring {
+            sqlx::query(
+                "INSERT INTO assessment_scoring_policies (id, exam_version_id, policy_key, policy_config, revision) VALUES (?, ?, ?, ?, 0)",
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(&draft_version_id)
+            .bind(&scoring.policy_key)
+            .bind(&scoring.policy_config)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        let source_questions = sqlx::query_as::<_, PublishedQuestionCloneRow>(
+            "SELECT m.id AS source_module_id, qr.id AS source_revision_id, eq.question_id, (SELECT MAX(r2.semantic_revision) FROM assessment_question_revisions r2 WHERE r2.question_id = eq.question_id) AS max_semantic_revision, qr.question_type, qr.stimulus, qr.prompt, qr.answer_definition, qr.rationale, qr.metadata, qr.accessibility, eq.display_order, eq.is_pretest FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id WHERE s.exam_version_id = ? ORDER BY s.display_order, m.display_order, eq.display_order, eq.id",
+        )
+        .bind(published_version_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        let mut revision_ids = HashMap::<String, String>::new();
+        let mut next_semantic_by_question = HashMap::<String, i32>::new();
+        let mut revisions = Vec::new();
+        let mut placements = Vec::with_capacity(source_questions.len());
+        for source in source_questions {
+            let new_revision_id =
+                if let Some(existing) = revision_ids.get(&source.source_revision_id) {
+                    existing.clone()
+                } else {
+                    let next_semantic = next_semantic_by_question
+                        .entry(source.question_id.clone())
+                        .or_insert(source.max_semantic_revision.saturating_add(1));
+                    let semantic_revision = *next_semantic;
+                    *next_semantic = next_semantic.saturating_add(1);
+                    let revision_id = Uuid::new_v4().to_string();
+                    revisions.push(PreparedDraftQuestionClone {
+                        revision_id: revision_id.clone(),
+                        question_id: source.question_id.clone(),
+                        semantic_revision,
+                        question_type: source.question_type.clone(),
+                        stimulus: source.stimulus.clone(),
+                        prompt: source.prompt.clone(),
+                        answer_definition: source.answer_definition.clone(),
+                        rationale: source.rationale.clone(),
+                        metadata: source.metadata.clone(),
+                        accessibility: source.accessibility.clone(),
+                    });
+                    revision_ids.insert(source.source_revision_id.clone(), revision_id.clone());
+                    revision_id
+                };
+            let new_module_id = module_ids.get(&source.source_module_id).ok_or_else(|| {
+                AssessmentAuthoringError::InvalidData(
+                    "A published SAT question references an unknown module.".to_owned(),
+                )
+            })?;
+            placements.push(PreparedDraftPlacementClone {
+                exam_question_id: Uuid::new_v4().to_string(),
+                module_id: new_module_id.clone(),
+                question_id: source.question_id,
+                question_revision_id: new_revision_id,
+                display_order: source.display_order,
+                is_pretest: source.is_pretest,
+            });
+        }
+
+        if !revisions.is_empty() {
+            let mut revision_insert = QueryBuilder::<MySql>::new(
+                "INSERT INTO assessment_question_revisions (id, question_id, semantic_revision, revision, state, question_type, stimulus, prompt, answer_definition, rationale, metadata, accessibility, created_by) ",
+            );
+            revision_insert.push_values(&revisions, |mut row, revision| {
+                row.push_bind(&revision.revision_id)
+                    .push_bind(&revision.question_id)
+                    .push_bind(revision.semantic_revision)
+                    .push_bind(0_i32)
+                    .push_bind("draft")
+                    .push_bind(&revision.question_type)
+                    .push_bind(&revision.stimulus)
+                    .push_bind(&revision.prompt)
+                    .push_bind(&revision.answer_definition)
+                    .push_bind(&revision.rationale)
+                    .push_bind(&revision.metadata)
+                    .push_bind(&revision.accessibility)
+                    .push_bind(actor_id);
+            });
+            revision_insert.build().execute(&mut **tx).await?;
+        }
+        if !placements.is_empty() {
+            let mut placement_insert = QueryBuilder::<MySql>::new(
+                "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest) ",
+            );
+            placement_insert.push_values(&placements, |mut row, placement| {
+                row.push_bind(&placement.exam_question_id)
+                    .push_bind(&placement.module_id)
+                    .push_bind(&placement.question_id)
+                    .push_bind(&placement.question_revision_id)
+                    .push_bind(placement.display_order)
+                    .push_bind(placement.is_pretest);
+            });
+            placement_insert.build().execute(&mut **tx).await?;
+        }
+
+        Ok(draft_version_id)
+    }
+
     pub async fn seal_draft_tx(
         tx: &mut Transaction<'_, MySql>,
         version_id: &str,
@@ -1096,10 +2051,14 @@ fn default_question(section_key: &str) -> SaveQuestionRevisionRequest {
     let content = |text: &str| StructuredContent {
         version: 1,
         document: None,
-        nodes: vec![ielts_backend_domain::assessment::ContentNode::Paragraph {
-            id: Uuid::new_v4().to_string(),
-            text: text.to_owned(),
-        }],
+        nodes: if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![ielts_backend_domain::assessment::ContentNode::Paragraph {
+                id: Uuid::new_v4().to_string(),
+                text: text.to_owned(),
+            }]
+        },
     };
     SaveQuestionRevisionRequest {
         revision: 0,
@@ -1109,13 +2068,13 @@ fn default_question(section_key: &str) -> SaveQuestionRevisionRequest {
             document: None,
             nodes: Vec::new(),
         },
-        prompt: content("New SAT question"),
+        prompt: content(""),
         answer: AnswerDefinition::SingleChoice {
             options: ['A', 'B', 'C', 'D']
                 .into_iter()
                 .map(|label| ChoiceOption {
                     id: label.to_string(),
-                    content: content("Enter answer choice"),
+                    content: content(""),
                 })
                 .collect(),
             correct_option_id: None,
@@ -1135,6 +2094,192 @@ fn default_question(section_key: &str) -> SaveQuestionRevisionRequest {
         accessibility: AccessibilityMetadata {
             long_description: None,
         },
+    }
+}
+
+fn normalize_tags(tags: &[String]) -> Result<Vec<String>, AssessmentAuthoringError> {
+    const MAX_TAGS: usize = 24;
+    const MAX_TAG_LENGTH: usize = 64;
+    let mut normalized = Vec::with_capacity(tags.len().min(MAX_TAGS));
+    for tag in tags {
+        let value = tag.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if value.chars().count() > MAX_TAG_LENGTH {
+            return Err(AssessmentAuthoringError::InvalidData(
+                "Question tags cannot exceed 64 characters.".to_owned(),
+            ));
+        }
+        if !normalized
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(value))
+        {
+            normalized.push(value.to_owned());
+        }
+        if normalized.len() > MAX_TAGS {
+            return Err(AssessmentAuthoringError::InvalidData(
+                "A question can contain at most 24 tags.".to_owned(),
+            ));
+        }
+    }
+    Ok(normalized)
+}
+
+fn content_preview(content: &StructuredContent, max_chars: usize) -> String {
+    fn visit(value: &Value, output: &mut String) {
+        match value {
+            Value::String(value) => {
+                if !value.trim().is_empty() {
+                    if !output.is_empty() {
+                        output.push(' ');
+                    }
+                    output.push_str(value.trim());
+                }
+            }
+            Value::Array(values) => values.iter().for_each(|value| visit(value, output)),
+            Value::Object(object) => {
+                if let Some(text) = object.get("text").and_then(Value::as_str) {
+                    if !text.trim().is_empty() {
+                        if !output.is_empty() {
+                            output.push(' ');
+                        }
+                        output.push_str(text.trim());
+                    }
+                } else if let Some(attrs) = object.get("attrs").and_then(Value::as_object) {
+                    for key in ["latex", "alt"] {
+                        if let Some(value) = attrs.get(key).and_then(Value::as_str) {
+                            if !value.trim().is_empty() {
+                                if !output.is_empty() {
+                                    output.push(' ');
+                                }
+                                output.push_str(value.trim());
+                            }
+                        }
+                    }
+                }
+                if let Some(children) = object.get("content") {
+                    visit(children, output);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut text = String::new();
+    if let Some(document) = &content.document {
+        visit(document, &mut text);
+    } else {
+        for node in &content.nodes {
+            let value = match node {
+                ielts_backend_domain::assessment::ContentNode::Paragraph { text, .. }
+                | ielts_backend_domain::assessment::ContentNode::Heading { text, .. } => {
+                    text.clone()
+                }
+                ielts_backend_domain::assessment::ContentNode::Equation { latex, .. } => {
+                    latex.clone()
+                }
+                ielts_backend_domain::assessment::ContentNode::Image { alt, .. } => alt.clone(),
+                ielts_backend_domain::assessment::ContentNode::Table { rows, .. } => rows
+                    .iter()
+                    .flat_map(|row| row.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            };
+            if !value.trim().is_empty() {
+                if !text.is_empty() {
+                    text.push(' ');
+                }
+                text.push_str(value.trim());
+            }
+        }
+    }
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= max_chars {
+        return normalized;
+    }
+    let mut preview: String = normalized
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect();
+    preview.push('…');
+    preview
+}
+
+fn answer_key_preview(answer: &AnswerDefinition) -> Option<String> {
+    match answer {
+        AnswerDefinition::SingleChoice {
+            correct_option_id, ..
+        } => correct_option_id.clone(),
+        AnswerDefinition::StudentProducedResponse {
+            accepted_responses, ..
+        } => accepted_responses
+            .iter()
+            .map(|value| value.trim())
+            .find(|value| !value.is_empty())
+            .map(str::to_owned),
+    }
+}
+
+fn question_content_complexity(question: &QuestionRevision) -> String {
+    fn content_is_rich(content: &StructuredContent) -> bool {
+        if content.nodes.iter().any(|node| {
+            !matches!(
+                node,
+                ielts_backend_domain::assessment::ContentNode::Paragraph { .. }
+            )
+        }) {
+            return true;
+        }
+        content.document.as_ref().is_some_and(|document| {
+            if document
+                .get("content")
+                .and_then(Value::as_array)
+                .is_some_and(|blocks| blocks.len() > 1)
+            {
+                return true;
+            }
+            fn rich(value: &Value) -> bool {
+                match value {
+                    Value::Array(values) => values.iter().any(rich),
+                    Value::Object(object) => {
+                        matches!(
+                            object.get("type").and_then(Value::as_str),
+                            Some(
+                                "image"
+                                    | "table"
+                                    | "inlineMath"
+                                    | "blockMath"
+                                    | "heading"
+                                    | "bulletList"
+                                    | "orderedList"
+                            )
+                        ) || object
+                            .get("marks")
+                            .and_then(Value::as_array)
+                            .is_some_and(|marks| !marks.is_empty())
+                            || object.get("content").is_some_and(rich)
+                    }
+                    _ => false,
+                }
+            }
+            rich(document)
+        })
+    }
+    let answer_rich = match &question.answer {
+        AnswerDefinition::SingleChoice { options, .. } => options
+            .iter()
+            .any(|option| content_is_rich(&option.content)),
+        AnswerDefinition::StudentProducedResponse { .. } => false,
+    };
+    if content_is_rich(&question.stimulus)
+        || content_is_rich(&question.prompt)
+        || content_is_rich(&question.rationale)
+        || answer_rich
+    {
+        "rich".to_owned()
+    } else {
+        "plain".to_owned()
     }
 }
 
@@ -1168,6 +2313,28 @@ fn detail_from_row(row: DetailRow) -> Result<AssessmentQuestionDetail, Assessmen
 
 fn invalid_json(error: serde_json::Error) -> AssessmentAuthoringError {
     AssessmentAuthoringError::InvalidData(error.to_string())
+}
+
+fn sat_tool_policy_matches(tool_policy: &Value, expected: &[AssessmentTool]) -> bool {
+    let expected: HashSet<&'static str> = expected
+        .iter()
+        .map(|tool| match tool {
+            AssessmentTool::Calculator => "calculator",
+            AssessmentTool::ReferenceSheet => "reference_sheet",
+        })
+        .collect();
+    let actual: Option<HashSet<&str>> = match tool_policy {
+        Value::Array(values) => values.iter().map(Value::as_str).collect(),
+        Value::Object(values) => Some(
+            values
+                .iter()
+                .filter(|(_, value)| !matches!(value, Value::Bool(false) | Value::Null))
+                .map(|(key, _)| key.as_str())
+                .collect(),
+        ),
+        _ => None,
+    };
+    actual.is_some_and(|actual| actual == expected)
 }
 
 fn structure_issue(path: &str, message: &str) -> ValidationIssue {
@@ -1325,13 +2492,21 @@ impl AssessmentAuthoringService {
                 };
                 Ok(AssessmentQuestionSummary {
                     exam_question_id: detail.exam_question_id,
-                    question_id: detail.question.question_id,
-                    question_revision_id: detail.question.id,
+                    question_id: detail.question.question_id.clone(),
+                    question_revision_id: detail.question.id.clone(),
                     display_order: detail.display_order,
                     is_pretest: detail.is_pretest,
                     question_type: detail.question.question_type,
                     semantic_revision: detail.question.semantic_revision,
                     revision: detail.question.revision,
+                    prompt_preview: content_preview(&detail.question.prompt, 180),
+                    answer_key_preview: answer_key_preview(&detail.question.answer),
+                    domain: detail.question.metadata.domain.clone(),
+                    skill: detail.question.metadata.skill.clone(),
+                    difficulty: detail.question.metadata.difficulty.clone(),
+                    tags: detail.question.metadata.tags.clone(),
+                    has_stimulus: !detail.question.stimulus.is_empty(),
+                    content_complexity: question_content_complexity(&detail.question),
                     readiness: QuestionReadinessSummary {
                         status: status.to_owned(),
                         blocking_issue_count,
@@ -1464,6 +2639,7 @@ impl AssessmentAuthoringService {
             return Ok(BulkQuestionResult {
                 affected_question_ids: Vec::new(),
                 created_question_ids: Vec::new(),
+                updated_questions: Vec::new(),
             });
         }
         let mut unique = request.question_ids.clone();
@@ -1545,6 +2721,82 @@ impl AssessmentAuthoringService {
                         .bind(question_id)
                         .execute(&mut *tx)
                         .await?;
+                }
+            }
+            BulkQuestionAction::PatchMetadata { patch } => {
+                if request.expected_revisions.len() != request.question_ids.len() {
+                    return Err(AssessmentAuthoringError::InvalidData(
+                        "Metadata bulk edits require an expected revision for every selected question."
+                            .to_owned(),
+                    ));
+                }
+                for question_id in &request.question_ids {
+                    let row = sqlx::query_as::<_, DetailRow>(
+                        "SELECT eq.id AS exam_question_id, m.id AS module_id, m.module_key, s.section_key, eq.display_order, eq.is_pretest, qr.id AS revision_id, qr.question_id, qr.semantic_revision, qr.revision, qr.state, qr.question_type, qr.stimulus, qr.prompt, qr.answer_definition, qr.rationale, qr.metadata, qr.accessibility FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id WHERE eq.id = ? FOR UPDATE",
+                    )
+                    .bind(question_id)
+                    .fetch_optional(&mut *tx)
+                    .await?
+                    .ok_or(AssessmentAuthoringError::NotFound)?;
+                    let mut detail = detail_from_row(row)?;
+                    let expected_revision =
+                        *request.expected_revisions.get(question_id).ok_or_else(|| {
+                            AssessmentAuthoringError::InvalidData(
+                                "Missing expected revision for a selected question.".to_owned(),
+                            )
+                        })?;
+                    if detail.question.revision != expected_revision {
+                        return Err(AssessmentAuthoringError::Conflict(
+                            "A selected question changed while you were editing metadata. Refresh and try again."
+                                .to_owned(),
+                        ));
+                    }
+                    if let Some(domain) = &patch.domain {
+                        detail.question.metadata.domain = Some(domain.clone());
+                        if patch.skill.is_none() {
+                            detail.question.metadata.skill = None;
+                        }
+                    }
+                    if let Some(skill) = &patch.skill {
+                        detail.question.metadata.skill = Some(skill.clone());
+                    }
+                    if let Some(difficulty) = &patch.difficulty {
+                        detail.question.metadata.difficulty = difficulty.clone();
+                    }
+                    if let Some(tags) = &patch.tags {
+                        detail.question.metadata.tags = normalize_tags(tags)?;
+                    }
+                    let provider =
+                        provider_for("sat").ok_or(AssessmentAuthoringError::UnsupportedProvider)?;
+                    let metadata_issues: Vec<_> = provider
+                        .validate_question(
+                            QuestionValidationContext {
+                                section_key: &detail.section_key,
+                                module_key: &detail.module_key,
+                            },
+                            &detail.question,
+                        )
+                        .into_iter()
+                        .filter(|issue| issue.blocking && issue.path.starts_with("metadata."))
+                        .collect();
+                    if !metadata_issues.is_empty() {
+                        return Err(AssessmentAuthoringError::Validation(metadata_issues));
+                    }
+                    let result = sqlx::query(
+                        "UPDATE assessment_question_revisions SET metadata = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP(6), created_by = ? WHERE id = ? AND revision = ? AND state = 'draft'",
+                    )
+                    .bind(serde_json::to_value(&detail.question.metadata)?)
+                    .bind(actor_id)
+                    .bind(&detail.question.id)
+                    .bind(expected_revision)
+                    .execute(&mut *tx)
+                    .await?;
+                    if result.rows_affected() != 1 {
+                        return Err(AssessmentAuthoringError::Conflict(
+                            "A selected question changed while metadata was being saved."
+                                .to_owned(),
+                        ));
+                    }
                 }
             }
             BulkQuestionAction::Move {
@@ -1633,11 +2885,134 @@ impl AssessmentAuthoringService {
         }
         touch_draft_version_tx(&mut tx, &version_id).await?;
         tx.commit().await?;
+        let mut refresh_modules = source_modules;
+        if let BulkQuestionAction::Move {
+            destination_module_id,
+        }
+        | BulkQuestionAction::Duplicate {
+            destination_module_id,
+        } = &request.action
+        {
+            if !refresh_modules.contains(destination_module_id) {
+                refresh_modules.push(destination_module_id.clone());
+            }
+        }
+        let mut updated_questions = Vec::new();
+        for module_id in refresh_modules {
+            updated_questions.extend(self.summaries(&module_id).await?);
+        }
         Ok(BulkQuestionResult {
             affected_question_ids: request.question_ids,
             created_question_ids,
+            updated_questions,
         })
     }
+}
+
+fn prepare_sample_question(
+    module_id: &str,
+    display_order: i32,
+    draft: &BatchQuestionDraft,
+) -> Result<PreparedSampleQuestion, AssessmentAuthoringError> {
+    let question_type = serde_json::to_value(draft.question_type)?;
+    let question_type = question_type
+        .as_str()
+        .ok_or_else(|| {
+            AssessmentAuthoringError::InvalidData("Invalid sample question type.".to_owned())
+        })?
+        .to_owned();
+    Ok(PreparedSampleQuestion {
+        question_id: Uuid::new_v4().to_string(),
+        revision_id: Uuid::new_v4().to_string(),
+        exam_question_id: Uuid::new_v4().to_string(),
+        module_id: module_id.to_owned(),
+        display_order,
+        is_pretest: draft.is_pretest,
+        question_type,
+        stimulus: serde_json::to_value(&draft.stimulus)?,
+        prompt: serde_json::to_value(&draft.prompt)?,
+        answer_definition: serde_json::to_value(&draft.answer)?,
+        rationale: serde_json::to_value(&draft.rationale)?,
+        metadata: serde_json::to_value(&draft.metadata)?,
+        accessibility: serde_json::to_value(&draft.accessibility)?,
+    })
+}
+
+async fn delete_unreferenced_questions_tx(
+    tx: &mut Transaction<'_, MySql>,
+    question_ids: &[String],
+) -> Result<(), AssessmentAuthoringError> {
+    if question_ids.is_empty() {
+        return Ok(());
+    }
+    let mut builder = QueryBuilder::<MySql>::new(
+        "DELETE q FROM assessment_questions q LEFT JOIN assessment_exam_questions eq ON eq.question_id = q.id WHERE eq.question_id IS NULL AND q.id IN (",
+    );
+    {
+        let mut separated = builder.separated(", ");
+        for question_id in question_ids {
+            separated.push_bind(question_id);
+        }
+    }
+    builder.push(")");
+    builder.build().execute(&mut **tx).await?;
+    Ok(())
+}
+
+async fn insert_prepared_sample_questions_tx(
+    tx: &mut Transaction<'_, MySql>,
+    rows: &[PreparedSampleQuestion],
+    actor_id: &str,
+) -> Result<(), AssessmentAuthoringError> {
+    if rows.is_empty() {
+        return Err(AssessmentAuthoringError::InvalidData(
+            "Sample exam must contain questions.".to_owned(),
+        ));
+    }
+
+    let mut questions = QueryBuilder::<MySql>::new(
+        "INSERT INTO assessment_questions (id, provider_key, created_by) ",
+    );
+    questions.push_values(rows, |mut row, question| {
+        row.push_bind(&question.question_id)
+            .push_bind("sat")
+            .push_bind(actor_id);
+    });
+    questions.build().execute(&mut **tx).await?;
+
+    let mut revisions = QueryBuilder::<MySql>::new(
+        "INSERT INTO assessment_question_revisions (id, question_id, semantic_revision, revision, state, question_type, stimulus, prompt, answer_definition, rationale, metadata, accessibility, created_by) ",
+    );
+    revisions.push_values(rows, |mut row, question| {
+        row.push_bind(&question.revision_id)
+            .push_bind(&question.question_id)
+            .push_bind(1_i32)
+            .push_bind(0_i32)
+            .push_bind("draft")
+            .push_bind(&question.question_type)
+            .push_bind(&question.stimulus)
+            .push_bind(&question.prompt)
+            .push_bind(&question.answer_definition)
+            .push_bind(&question.rationale)
+            .push_bind(&question.metadata)
+            .push_bind(&question.accessibility)
+            .push_bind(actor_id);
+    });
+    revisions.build().execute(&mut **tx).await?;
+
+    let mut exam_questions = QueryBuilder::<MySql>::new(
+        "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest) ",
+    );
+    exam_questions.push_values(rows, |mut row, question| {
+        row.push_bind(&question.exam_question_id)
+            .push_bind(&question.module_id)
+            .push_bind(&question.question_id)
+            .push_bind(&question.revision_id)
+            .push_bind(question.display_order)
+            .push_bind(question.is_pretest);
+    });
+    exam_questions.build().execute(&mut **tx).await?;
+    Ok(())
 }
 
 async fn ensure_same_section_tx(
@@ -1955,4 +3330,145 @@ async fn touch_draft_version_tx(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod authoring_unit_tests {
+    use super::*;
+    use ielts_backend_domain::assessment::ContentNode;
+
+    fn paragraph(text: &str) -> StructuredContent {
+        StructuredContent {
+            version: 1,
+            nodes: vec![ContentNode::Paragraph {
+                id: "p1".to_owned(),
+                text: text.to_owned(),
+            }],
+            document: None,
+        }
+    }
+
+    #[test]
+    fn normalize_tags_trims_deduplicates_and_preserves_first_spelling() {
+        let tags = vec![
+            " algebra ".to_owned(),
+            "ALGEBRA".to_owned(),
+            "linear".to_owned(),
+            "".to_owned(),
+        ];
+        assert_eq!(
+            normalize_tags(&tags).expect("tags should normalize"),
+            vec!["algebra".to_owned(), "linear".to_owned()]
+        );
+    }
+
+    #[test]
+    fn normalize_tags_rejects_oversized_values() {
+        let tags = vec!["x".repeat(65)];
+        assert!(matches!(
+            normalize_tags(&tags),
+            Err(AssessmentAuthoringError::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn content_preview_collapses_whitespace_and_truncates_on_char_boundaries() {
+        let content = paragraph("  SAT   prompt   with   emoji 🎯 and more words  ");
+        assert_eq!(content_preview(&content, 18), "SAT prompt with e…");
+    }
+
+    #[test]
+    fn default_question_is_an_actual_empty_slot() {
+        let question = default_question("math");
+        assert!(question.prompt.is_empty());
+        let AnswerDefinition::SingleChoice {
+            options,
+            correct_option_id,
+        } = question.answer
+        else {
+            panic!("default SAT question must be multiple choice")
+        };
+        assert_eq!(options.len(), 4);
+        assert!(options.iter().all(|option| option.content.is_empty()));
+        assert!(correct_option_id.is_none());
+    }
+
+    #[test]
+    fn prepared_sample_question_preserves_identity_boundary_and_payload() {
+        let draft = BatchQuestionDraft {
+            question_type: QuestionKind::StudentProducedResponse,
+            stimulus: paragraph("Sample stimulus"),
+            prompt: paragraph("Sample prompt"),
+            answer: AnswerDefinition::StudentProducedResponse {
+                accepted_responses: vec!["5".to_owned()],
+                normalize_fraction: true,
+                normalize_decimal: true,
+                numeric_tolerance: None,
+            },
+            rationale: paragraph("Sample rationale"),
+            metadata: QuestionMetadata {
+                section_key: "math".to_owned(),
+                domain: Some("algebra".to_owned()),
+                skill: Some("Linear Equations in One Variable".to_owned()),
+                difficulty: Difficulty::Medium,
+                tags: vec!["sample-sat".to_owned()],
+            },
+            accessibility: AccessibilityMetadata {
+                long_description: None,
+            },
+            is_pretest: true,
+        };
+        let prepared = prepare_sample_question("module-1", 7, &draft).expect("prepare sample");
+        assert_eq!(prepared.module_id, "module-1");
+        assert_eq!(prepared.display_order, 7);
+        assert!(prepared.is_pretest);
+        assert_eq!(prepared.question_type, "student_produced_response");
+        assert_eq!(prepared.prompt["nodes"][0]["text"], "Sample prompt");
+        assert_ne!(prepared.question_id, prepared.revision_id);
+        assert_ne!(prepared.question_id, prepared.exam_question_id);
+    }
+
+    #[test]
+    fn bulk_action_accepts_frontend_destination_module_id() {
+        let action: BulkQuestionAction = serde_json::from_value(json!({
+            "type": "move",
+            "destinationModuleId": "module-2"
+        }))
+        .expect("frontend bulk action must deserialize");
+        match action {
+            BulkQuestionAction::Move {
+                destination_module_id,
+            } => assert_eq!(destination_module_id, "module-2"),
+            other => panic!("expected move action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn content_complexity_detects_equations_without_flattening() {
+        let mut request = default_question("math");
+        request.prompt = StructuredContent {
+            version: 1,
+            nodes: vec![ContentNode::Equation {
+                id: "e1".to_owned(),
+                latex: "x^2=4".to_owned(),
+                display: true,
+            }],
+            document: None,
+        };
+        let question = QuestionRevision {
+            id: "revision".to_owned(),
+            question_id: "question".to_owned(),
+            semantic_revision: 1,
+            revision: 0,
+            state: "draft".to_owned(),
+            question_type: request.question_type,
+            stimulus: request.stimulus,
+            prompt: request.prompt,
+            answer: request.answer,
+            rationale: request.rationale,
+            metadata: request.metadata,
+            accessibility: request.accessibility,
+        };
+        assert_eq!(question_content_complexity(&question), "rich");
+    }
 }

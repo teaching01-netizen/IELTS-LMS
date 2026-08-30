@@ -5,6 +5,8 @@ import {
   hasStructuredContent,
   plainTextFromContent,
   structuredContentFromDocument,
+  plainContentFromText,
+  supportsFastPlainEditing,
 } from "../richContent";
 
 describe("rich SAT question content", () => {
@@ -48,6 +50,19 @@ describe("rich SAT question content", () => {
     expect(content.nodes).toEqual([]);
     expect(content.document).toEqual(document);
     expect(plainTextFromContent(content)).toBe("x2");
+  });
+
+  it("round-trips fast plain content without creating rich structure", () => {
+    const content = plainContentFromText("A concise SAT prompt");
+    expect(plainTextFromContent(content)).toBe("A concise SAT prompt");
+    expect(supportsFastPlainEditing(content)).toBe(true);
+  });
+
+  it("refuses fast editing when marks, equations, or multiple blocks could be lost", () => {
+    const marked = structuredContentFromDocument({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "x", marks: [{ type: "bold" }] }] }] });
+    const multiple = structuredContentFromDocument({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "one" }] }, { type: "paragraph", content: [{ type: "text", text: "two" }] }] });
+    expect(supportsFastPlainEditing(marked)).toBe(false);
+    expect(supportsFastPlainEditing(multiple)).toBe(false);
   });
 
   it("treats math and images as meaningful content", () => {

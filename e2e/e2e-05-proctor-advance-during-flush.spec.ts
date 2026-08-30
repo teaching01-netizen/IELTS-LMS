@@ -24,9 +24,11 @@ import {
  * value's `mutations:batch` request is held client-side) → ADVANCE the runtime
  * (proctor end-section-now on the final section: completes the runtime AND
  * auto-submits the attempt in the SAME transaction) → RELEASE the delayed
- * response (the mutation reaches the server AFTER the attempt snapshot was
- * taken) → the server's post-submit path decides: GRACE MERGE or STRUCTURED
- * CONFLICT — and either way the answer must NOT be lost silently.
+ * request. Because Playwright held the request before it reached the server,
+ * this is a genuine post-submit arrival and MUST be rejected as
+ * `ATTEMPT_SUBMITTED`. The late value must never be merged into authoritative
+ * exam state, and it must never be lost silently from the client's durable
+ * recovery queue.
  *
  * The four plan steps map to a genuine server-side race, made deterministic
  * with Playwright request routing (no clock mocking):
@@ -47,33 +49,15 @@ import {
  *   the held mutation.
  * - "Release the delayed response": the held request is forwarded after the
  *   advance resolved (status/body recorded verbatim).
- * - "Verify grace OR structured conflict" (MEASURED, not assumed): the
- *   mutation-batch path computes `post_submit_grace_active` from
- *   `submitted_at + final_submit_grace_seconds`
- *   (backend/crates/application/src/delivery/mod.rs:647-656,
- *   `is_within_post_submit_grace_window` :3519-3529; the seeded config
- *   default is 300s — infrastructure/src/config.rs:698, the repo
- *   backend/.env defines no FINAL_SUBMIT_GRACE_SECONDS override, and e2e-04
- *   observed `graceWindowSeconds: 300` in a real merged snapshot). The
- *   first delivered mutation lands ~2-5s after the advance, but it is scored
- *   by the BASE-REVISION gate BEFORE the grace path (delivery/mod.rs:
- *   814-838): the proctor advance's in-transaction auto-submit bumps the
- *   attempt revision (delivery/mod.rs:2204-2207), and the held batch was
- *   composed against the pre-advance revision — so the delivered batch is
- *   deterministically rejected with the STRUCTURED CONFLICT
- *   `BASE_REVISION_MISMATCH`. The client's rebase path then retries
- *   immediately with the refreshed revision
- *   (src/services/studentAttemptRepository.ts:2388-2428) and THAT retry is
- *   accepted inside the grace window via `merge_post_submit_submission_snapshot`
- *   (delivery/mod.rs:3531-3612), which marks the snapshot `finalFlush` +
- *   `graceMerge` (`acceptedInGrace`/`graceWindowSeconds`/`mergeCount`) and
- *   returns `acceptedInGrace: true` (:1010-1017). BOTH plan branches are
- *   therefore exercised sequentially by this journey; the spec asserts the
- *   ACTUAL verdict of the released mutation from the recorded response
- *   (never forces one) and then asserts the shared invariant: the final
- *   value is not silently lost — it must appear in
- *   `student_attempts.writing_answers`/`final_submission` after convergence,
- *   or remain demonstrably in the durable queue while the UI stays honest.
+ * - "Verify strict post-submit rejection": once the proctor transaction has
+ *   sealed the attempt, `apply_mutation_batch` admits only exact duplicate
+ *   mutation ids that were already persisted. A brand-new mutation arriving
+ *   afterward returns the structured conflict `ATTEMPT_SUBMITTED`; there is
+ *   no post-submit grace merge. The outbox then loads the canonical sealed
+ *   attempt. Because this held sentinel is absent from that submission, it
+ *   keeps the mutation pending with an error sync state instead of clearing
+ *   it. The test therefore proves both sides of the boundary: server truth is
+ *   immutable after submit, while client recovery evidence is retained.
  *
  * Honesty notes / deviations (recorded — production untouched):
  * - No grading worker is started (no grading-projection assertions; the
@@ -88,12 +72,10 @@ import {
  * - The route hold can only be proven held by the request actually carrying
  *   the sentinel; a silent bypass (ever the probe fails to fire) is a HARD
  *   failure, not a skip.
- * - The exact F-9 retry badge text is NOT pre-pinned: the delivered batch's
- *   structured conflict (BASE_REVISION_MISMATCH) is resolved by the client's
- *   automatic rebase+retry (the same machinery that produced e2e-04's
- *   graceMerge); the fallback path (no convergence at all) asserts the
- *   load-bearing proof — durable-queue retention — and logs the banner text
- *   as evidence instead of guessing a selector.
+ * - The exact error banner text is not pre-pinned. The load-bearing evidence
+ *   is stronger: the server returns `ATTEMPT_SUBMITTED`, the sealed snapshot
+ *   excludes the held sentinel, and the browser's durable queue still holds
+ *   that exact value. Banner text is logged only as human-facing evidence.
  * - CI retries (2) cannot succeed after the first truthful attempt: the
  *   seeded access code binds student identity on first check-in ("Student
  *   identity is locked for this access code" — e2e-04 observed property).
@@ -257,24 +239,6 @@ async function waitForTask1InDurableQueue(page: Page, value: string, timeoutMs =
     .toBe(true);
 }
 
-/** Poll until the durable queue holds NO answer/writing mutations. */
-async function waitForDurableQueueDrained(page: Page, timeoutMs = 60_000) {
-  await expect
-    .poll(
-      async () => {
-        const [local, idb] = await Promise.all([
-          readDurableQueueFromLocalStorage(page),
-          readDurableQueueFromIndexedDb(page),
-        ]);
-        const hasAnswer = (mutations: DurableMutationLite[]) =>
-          mutations.some((mutation) => mutation.type === 'answer' || mutation.type === 'writing_answer');
-        return !hasAnswer(local) && !hasAnswer(idb);
-      },
-      { timeout: timeoutMs, message: 'durable queue drained after the accepted flush' },
-    )
-    .toBe(true);
-}
-
 // ---------------------------------------------------------------------------
 // The held-request harness (DELAY the mutation response, deterministically).
 // ---------------------------------------------------------------------------
@@ -386,7 +350,7 @@ test.describe('E2E-05 Proctor advances during client flush (DB-verified)', () =>
     await closeDb();
   });
 
-  test('a mutation held in-flight while the proctor ends the final section lands after the snapshot and is never silently lost', async ({
+  test('a mutation held before server ingress while the proctor ends the final section is rejected after submit and retained durably', async ({
     browser,
   }, testInfo) => {
     const manifest = readBackendE2EManifest();
@@ -552,9 +516,10 @@ test.describe('E2E-05 Proctor advances during client flush (DB-verified)', () =>
       'post-exam screen after the proctor advance (probe still held)',
     ).toBeVisible({ timeout: 60_000 });
 
-    // ---- 7. RELEASE THE DELAYED RESPONSE ----
-    // Land the released mutation strictly AFTER the advance but well inside
-    // the 300s post-submit grace window (measured release→submit gap ~1-3s).
+    // ---- 7. RELEASE THE DELAYED REQUEST ----
+    // Forward only after the proctor transaction has sealed the attempt. Since
+    // the request has not reached the server yet, this is intentionally a
+    // true post-submit arrival, not an in-flight pre-deadline server request.
     const settleBeforeReleaseMs = 1_250;
     await studentPage.waitForTimeout(settleBeforeReleaseMs);
     holdHarness.release();
@@ -585,161 +550,85 @@ test.describe('E2E-05 Proctor advances during client flush (DB-verified)', () =>
     expect(firstHeld.error, 'the held request must have been forwarded to the server').toBeNull();
 
     // ---------------------------------------------------------------------
-    // 9. VERIFY GRACE OR STRUCTURED CONFLICT — assert the ACTUAL verdict.
+    // 9. VERIFY STRICT POST-SUBMIT REJECTION.
     //
-    // The released batch is scored by the base-revision gate BEFORE any grace
-    // acceptance (delivery/mod.rs:814-838): the proctor advance's
-    // in-transaction auto-submit bumps the attempt revision
-    // (delivery/mod.rs:2204-2207) while the held batch was composed against
-    // the pre-advance revision, so the deterministic verdict for the DELIVERED
-    // batch is the structured conflict BASE_REVISION_MISMATCH. The client's
-    // rebase path then retries immediately with the refreshed revision
-    // (src/services/studentAttemptRepository.ts:2388-2428) and THAT retry
-    // lands inside the 300s post-submit grace window → the grace MERGE. Both
-    // plan branches are therefore exercised by one journey: a structured
-    // conflict on the delivered mutation, then a grace accept on the rebased
-    // retry. The invariant (no silent loss) is asserted on the end state.
+    // This request was held before server ingress. Once the proctor transaction
+    // seals the attempt, a new mutation id cannot alter authoritative state.
+    // Exact duplicates that were already persisted remain idempotent, but this
+    // sentinel is intentionally new and must return ATTEMPT_SUBMITTED.
     // ---------------------------------------------------------------------
     const releasedBody = parseJson<{
       success?: boolean;
-      data?: {
-        acceptedInGrace?: boolean;
-        appliedMutationCount?: number;
-        attempt?: { phase?: string | null } | null;
+      error?: {
+        code?: string | null;
+        message?: string | null;
+        details?: { reason?: string | null } | null;
       };
-      error?: { code?: string | null; message?: string | null; details?: { reason?: string | null } | null };
     }>(firstHeld.body as string);
 
     const conflictReason = String(releasedBody?.error?.details?.reason ?? '');
-    const isStructuredConflict =
-      firstHeld.status === 409 &&
-      ['BASE_REVISION_MISMATCH', 'ATTEMPT_SUBMITTED', 'SECTION_MISMATCH', 'OBJECTIVE_LOCKED', 'ATTEMPT_PROCTOR_BLOCKED'].includes(
-        conflictReason,
-      );
-    const isGraceAccept =
-      firstHeld.status === 200 &&
-      releasedBody?.success !== false &&
-      releasedBody?.data?.acceptedInGrace === true;
     console.log(
       `[e2e-05][verdict] released mutation response: HTTP ${firstHeld.status} ` +
         `body=${String(firstHeld.body).slice(0, 500)}`,
     );
+    expect(firstHeld.status, 'a new mutation arriving after submit must conflict').toBe(409);
+    expect(conflictReason, 'post-submit mutation has a stable machine-readable reason').toBe(
+      'ATTEMPT_SUBMITTED',
+    );
+
+    // ---- 10. THE INVARIANT: SEALED SERVER TRUTH + RETAINED RECOVERY INTENT ----
+    // The final sentinel was never server-admitted, so it must not appear in
+    // the sealed attempt, final submission, or append-only mutation log. The
+    // browser must retain it in the durable queue instead of pretending it was
+    // saved or silently discarding it.
+    const sealedRows = await queryDb<AttemptRow>(
+      `SELECT id, phase, submitted_at, answers, writing_answers, final_submission, created_at, revision
+       FROM student_attempts WHERE id = ?`,
+      [attemptId],
+    );
+    expect(sealedRows).toHaveLength(1);
+    const sealedAttempt = sealedRows[0]!;
+    expect(sealedAttempt.phase).toBe('post-exam');
+    expect(sealedAttempt.submitted_at).not.toBeNull();
+    expect(sealedAttempt.final_submission).not.toBeNull();
+
+    const persistedWriting = parseJson<Record<string, unknown>>(sealedAttempt.writing_answers);
+    const snapshot = parseJson<Record<string, unknown>>(sealedAttempt.final_submission as string);
+    const snapshotWriting = parseJson<Record<string, unknown>>(snapshot['writingAnswers'] as unknown);
+    expect(persistedWriting['task1'], 'authoritative writing stays at the last admitted value').toBe(
+      writingTask1Base,
+    );
+    expect(snapshotWriting['task1'], 'sealed submission excludes the post-submit sentinel').toBe(
+      writingTask1Base,
+    );
+    expect(snapshot['graceMerge'], 'post-submit grace merge must not exist').toBeUndefined();
+    expect(String(snapshot['completionReason'])).toBe('proctor_end');
+    expect(snapshot['autoSubmission'] === true).toBe(true);
+    expect(String(snapshot['submissionPolicy'])).toBe('forced_auto_submit');
+    expect(parseJson<Record<string, unknown>>(sealedAttempt.answers)['listening-q1']).toBe(listeningAnswer);
+    expect(parseJson<Record<string, unknown>>(sealedAttempt.answers)['reading-q1']).toBe(readingAnswer);
+
+    const mutationRows = await queryDb<{ mutation_type: string; payload: unknown; applied_at: string | null }>(
+      'SELECT mutation_type, payload, applied_at FROM student_attempt_mutations WHERE attempt_id = ?',
+      [attemptId],
+    );
+    const payloadText = (row: { payload: unknown }): string =>
+      typeof row.payload === 'string' ? row.payload : JSON.stringify(row.payload);
+    const forbiddenLateMutation = mutationRows.find(
+      (row) => row.mutation_type === 'SetEssayText' && payloadText(row).includes(writingTask1Final),
+    );
     expect(
-      isStructuredConflict || isGraceAccept,
-      `released mutation must be a structured conflict or a grace accept ` +
-        `(HTTP ${firstHeld.status}, reason="${conflictReason}", ` +
-        `acceptedInGrace=${JSON.stringify(releasedBody?.data?.acceptedInGrace ?? null)})`,
-    ).toBe(true);
-    if (isStructuredConflict) {
-      console.log(
-        `[e2e-05][branch] STRUCTURED CONFLICT on the delivered mutation: reason=${JSON.stringify(conflictReason)} ` +
-          `(expected BASE_REVISION_MISMATCH: the advance bumped the revision while the batch was in flight)`,
-      );
-    }
+      forbiddenLateMutation,
+      'post-submit sentinel must never enter the accepted mutation log',
+    ).toBeUndefined();
 
-    // ---- 10. THE INVARIANT: NO SILENT ANSWER LOSS ----
-    // The rebased retry is expected to land the FINAL value inside the grace
-    // window (e2e-04 observed the identical merge path). Poll the converged
-    // end state; if the client ever stops retrying (environment-dependent),
-    // the durable queue provably retains the value and the UI stays honest —
-    // that fallback is asserted instead.
-    let convergedAttempt: AttemptRow | null = null;
-    try {
-      convergedAttempt = (
-        await pollDb<AttemptRow>(
-          `SELECT id, phase, submitted_at, answers, writing_answers, final_submission, created_at, revision
-           FROM student_attempts WHERE id = ?`,
-          [attemptId],
-          (rows) => {
-            if (rows.length !== 1 || rows[0].phase !== 'post-exam' || rows[0].final_submission === null) {
-              return false;
-            }
-            const writing = parseJson<Record<string, unknown>>(rows[0].writing_answers);
-            const snapshot = parseJson<Record<string, unknown>>(rows[0].final_submission as string);
-            const snapshotWriting = parseJson<Record<string, unknown>>(snapshot['writingAnswers'] as unknown);
-            return writing['task1'] === writingTask1Final && snapshotWriting['task1'] === writingTask1Final;
-          },
-          'the FINAL value converged into student_attempts.writing_answers AND final_submission',
-          90_000,
-        )
-      )[0] ?? null;
-    } catch {
-      convergedAttempt = null;
-    }
-
-    // The rebased retry batch, if the harness observed it (it carries the same
-    // sentinel value under NEW mutation ids), is recorded as the grace-accept
-    // evidence on the wire.
-    const retryRecord = holdHarness.heldBatches.find((record) => record.index > 0 && record.status !== null);
-    if (retryRecord) {
-      const retryBody = parseJson<{ data?: { acceptedInGrace?: boolean } }>(retryRecord.body as string);
-      console.log(
-        `[e2e-05][retry] rebased retry batch: HTTP ${retryRecord.status} ` +
-          `acceptedInGrace=${JSON.stringify(retryBody?.data?.acceptedInGrace ?? null)}`,
-      );
-    }
-
-    if (convergedAttempt) {
-      // ---------- GRACE MERGE evidence on the converged row ----------
-      const snapshot = parseJson<Record<string, unknown>>(convergedAttempt.final_submission as string);
-      const merge = (snapshot['graceMerge'] as Record<string, unknown> | undefined) ?? {};
-      expect(merge['acceptedInGrace'], 'snapshot carries graceMerge.acceptedInGrace=true').toBe(true);
-      expect(Number(merge['graceWindowSeconds']), 'grace window is the configured 300s default').toBe(300);
-      expect(Number(merge['mergeCount'])).toBeGreaterThanOrEqual(1);
-      expect(String(merge['firstAcceptedAt'] ?? '')).not.toBe('');
-      expect(snapshot['finalFlush'], 'snapshot carries finalFlush after the grace merge').toBeTruthy();
-      expect(String(snapshot['completionReason'])).toBe('proctor_end');
-      expect(snapshot['autoSubmission'] === true).toBe(true);
-      expect(String(snapshot['submissionPolicy'])).toBe('forced_auto_submit');
-
-      const snapshotWriting = parseJson<Record<string, unknown>>(snapshot['writingAnswers'] as unknown);
-      expect(snapshotWriting['task1']).toBe(writingTask1Final);
-      const persistedWriting = parseJson<Record<string, unknown>>(convergedAttempt.writing_answers);
-      expect(persistedWriting['task1']).toBe(writingTask1Final);
-      expect(parseJson<Record<string, unknown>>(convergedAttempt.answers)['listening-q1']).toBe(listeningAnswer);
-      expect(parseJson<Record<string, unknown>>(convergedAttempt.answers)['reading-q1']).toBe(readingAnswer);
-
-      // Audit trail: the accepted writer mutation is append-only in
-      // student_attempt_mutations with the exact FINAL value.
-      const mutationRows = await queryDb<{ mutation_type: string; payload: unknown; applied_at: string | null }>(
-        'SELECT mutation_type, payload, applied_at FROM student_attempt_mutations WHERE attempt_id = ?',
-        [attemptId],
-      );
-      // mysql2 returns MySQL JSON columns as parsed objects; normalize so the
-      // sentinel can be searched in the payload either way.
-      const payloadText = (row: { payload: unknown }): string =>
-        typeof row.payload === 'string' ? row.payload : JSON.stringify(row.payload);
-      const finalMutation = [...mutationRows].reverse().find(
-        // The writing answer travels on the wire as a SetEssayText operation
-        // (src/services/studentAttemptRepository.ts:1439-1445), which is the
-        // mutation_type the backend stores (domain/attempt.rs as_str).
-        (row) => row.mutation_type === 'SetEssayText' && payloadText(row).includes(writingTask1Final),
-      );
-      expect(finalMutation, 'the final writing mutation is persisted append-only').toBeTruthy();
-      expect(
-        finalMutation?.applied_at,
-        'the accepted mutation was applied (server-side acceptance trace)',
-      ).not.toBeNull();
-
-      // Client honesty after the accepted flush: the durable queue drains (the
-      // value is committed to the server; nothing is dropped silently).
-      await waitForDurableQueueDrained(studentPage);
-    } else {
-      // ---------- FALLBACK: no convergence — the value must be provably retained ----------
-      // The server-side acceptance never landed (e.g. the client stopped
-      // retrying in the post-exam state). The invariant then rests on the
-      // durable queue (localStorage + IndexedDB mirrors) still holding the
-      // exact final value, with the UI not falsely claiming "Saved".
-      console.log('[e2e-05][found] no convergence observed; asserting durable-queue retention instead');
-      await waitForTask1InDurableQueue(studentPage, writingTask1Final, 45_000);
-      const bannerText = await studentPage.getByRole('banner').innerText().catch(() => '');
-      console.log(
-        `[e2e-05][found] banner text while the value is retained in the durable queue: ` +
-          `${bannerText.replace(/\n/g, ' | ')}`,
-      );
-    }
-
-    const mergeObservedAtMs = Date.now();
+    await waitForTask1InDurableQueue(studentPage, writingTask1Final, 45_000);
+    const bannerText = await studentPage.getByRole('banner').innerText().catch(() => '');
+    console.log(
+      `[e2e-05][retained] post-submit value remains in durable recovery queue; banner=` +
+        `${bannerText.replace(/\n/g, ' | ')}`,
+    );
+    const recoveryObservedAtMs = Date.now();
 
     // ---- 10. Exactly ONE attempt row for this run's (schedule, email) ----
     const attemptCount = await queryDb<{ count: number }>(
@@ -755,9 +644,8 @@ test.describe('E2E-05 Proctor advances during client flush (DB-verified)', () =>
       durableQueueConfirmationLeadMs: durableWriteConfirmedAtMs - (holdHarness.firstHitAtMs ?? 0),
       advanceDurationMs: advanceEndMs - advanceStartMs,
       releaseToSubmitGapMs: releasedAtMs - submitObservedAtMs,
-      submitToMergeObservedMs: mergeObservedAtMs - submitObservedAtMs,
+      submitToRecoveryObservedMs: recoveryObservedAtMs - submitObservedAtMs,
       serverRoundTripAfterReleaseMs: forwardedAtMs - releasedAtMs,
-      configuredGraceWindowSeconds: 300,
     };
     console.log(`[e2e-05] timings: ${JSON.stringify(timings)}`);
 

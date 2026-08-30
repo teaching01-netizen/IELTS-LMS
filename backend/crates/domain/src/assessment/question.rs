@@ -21,12 +21,17 @@ pub struct ChoiceOption {
 pub enum AnswerDefinition {
     SingleChoice {
         options: Vec<ChoiceOption>,
+        #[serde(rename = "correctOptionId", alias = "correct_option_id")]
         correct_option_id: Option<String>,
     },
     StudentProducedResponse {
+        #[serde(rename = "acceptedResponses", alias = "accepted_responses")]
         accepted_responses: Vec<String>,
+        #[serde(rename = "normalizeFraction", alias = "normalize_fraction")]
         normalize_fraction: bool,
+        #[serde(rename = "normalizeDecimal", alias = "normalize_decimal")]
         normalize_decimal: bool,
+        #[serde(rename = "numericTolerance", alias = "numeric_tolerance")]
         numeric_tolerance: Option<String>,
     },
 }

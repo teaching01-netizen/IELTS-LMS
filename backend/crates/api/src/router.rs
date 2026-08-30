@@ -10,8 +10,9 @@ use crate::{
     frontend,
     http::request_id::request_id_middleware,
     routes::{
-        answer_history, assessment_authoring, assessment_delivery, auth, exams, grading, health,
-        library, media, proctor, results, schedules, settings, student, ws,
+        answer_history, assessment_access_links, assessment_authoring, assessment_delivery,
+        assessment_release, auth, exams, grading, health, library, media, proctor, results,
+        schedules, settings, student, ws,
     },
     state::AppState,
 };
@@ -86,16 +87,77 @@ pub fn build_router(state: AppState) -> Router {
                 .route("/:id/versions/summary", get(exams::list_version_summaries)),
         )
         .nest(
+            "/api/v1/assessment-access",
+            Router::new()
+                .route(
+                    "/exams/:exam_id/overview",
+                    get(assessment_access_links::get_exam_overview),
+                )
+                .route(
+                    "/exams/:exam_id/links",
+                    get(assessment_access_links::list_exam_links)
+                        .post(assessment_access_links::create_exam_link),
+                )
+                .route(
+                    "/links/:link_id",
+                    get(assessment_access_links::get_link)
+                        .patch(assessment_access_links::update_link),
+                )
+                .route(
+                    "/links/:link_id/lifecycle",
+                    post(assessment_access_links::set_link_lifecycle),
+                )
+                .route(
+                    "/links/:link_id/duplicate",
+                    post(assessment_access_links::duplicate_link),
+                )
+                .route(
+                    "/links/:link_id/members",
+                    get(assessment_access_links::list_link_members),
+                )
+                .route(
+                    "/links/:link_id/activity",
+                    get(assessment_access_links::list_link_activity),
+                ),
+        )
+        .nest(
+            "/api/v1/public",
+            Router::new().route(
+                "/access-links/:link_id",
+                get(assessment_access_links::get_public_link),
+            ),
+        )
+        .nest(
+            "/api/v1/assessment-release",
+            Router::new().route(
+                "/exams/:exam_id",
+                get(assessment_release::get_release_state),
+            ),
+        )
+        .nest(
             "/api/v1/assessment-authoring",
             Router::new()
                 .route(
                     "/exams/:exam_id/shell",
-                    get(assessment_authoring::get_authoring_shell),
+                    get(assessment_authoring::get_authoring_shell)
+                        .post(assessment_authoring::open_authoring_shell),
+                )
+                .route(
+                    "/exams/:exam_id/preview",
+                    get(assessment_authoring::get_preview_projection),
+                )
+                .route(
+                    "/exams/:exam_id/load-sample",
+                    post(assessment_authoring::load_sample_exam),
                 )
                 .route(
                     "/modules/:module_id/questions",
                     get(assessment_authoring::list_questions)
                         .post(assessment_authoring::create_question),
+                )
+                .route(
+                    "/modules/:module_id/questions/batch",
+                    post(assessment_authoring::batch_create_questions),
                 )
                 .route(
                     "/modules/:module_id/question-order",

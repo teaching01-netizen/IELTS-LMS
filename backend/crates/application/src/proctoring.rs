@@ -457,6 +457,13 @@ impl ProctoringService {
                 "Runtime must be live before ending a section.".to_owned(),
             ));
         }
+        if let Some(expected_revision) = req.expected_runtime_revision {
+            if runtime.revision != expected_revision {
+                return Err(ProctoringError::Conflict(
+                    "Runtime changed; refresh before retrying.".to_owned(),
+                ));
+            }
+        }
 
         if let Some(expected) = req.expected_active_section_key.as_deref() {
             match runtime.active_section_key.as_deref() {
@@ -705,6 +712,13 @@ impl ProctoringService {
         .fetch_optional(tx.as_mut())
         .await?
         .ok_or(ProctoringError::NotFound)?;
+        if let Some(expected_revision) = req.expected_runtime_revision {
+            if runtime.revision != expected_revision {
+                return Err(ProctoringError::Conflict(
+                    "Runtime changed; refresh before retrying.".to_owned(),
+                ));
+            }
+        }
 
         if let Some(expected) = req.expected_active_section_key.as_deref() {
             match runtime.active_section_key.as_deref() {
@@ -758,23 +772,28 @@ impl ProctoringService {
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query(
-            r#"
-            UPDATE assessment_module_attempts ma
-            JOIN student_attempts sa ON sa.id = ma.attempt_id
-            JOIN exam_entities e ON e.id = sa.exam_id
-            SET ma.extension_seconds = ma.extension_seconds + (? * 60),
-                ma.revision = ma.revision + 1
-            WHERE sa.schedule_id = ?
-              AND e.provider_key = 'sat'
-              AND ma.state = 'active'
-              AND ma.started_at IS NOT NULL
-            "#,
-        )
-        .bind(req.minutes)
-        .bind(schedule_id.to_string())
-        .execute(&mut *tx)
-        .await?;
+        if matches!(
+            runtime.timing_model.as_str(),
+            "legacy_section_v1" | "cohort_section_v3"
+        ) {
+            sqlx::query(
+                r#"
+                UPDATE assessment_module_attempts ma
+                JOIN student_attempts sa ON sa.id = ma.attempt_id
+                JOIN exam_entities e ON e.id = sa.exam_id
+                SET ma.extension_seconds = ma.extension_seconds + (? * 60),
+                    ma.revision = ma.revision + 1
+                WHERE sa.schedule_id = ?
+                  AND e.provider_key = 'sat'
+                  AND ma.state = 'active'
+                  AND ma.started_at IS NOT NULL
+                "#,
+            )
+            .bind(req.minutes)
+            .bind(schedule_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
 
         insert_control_event(
             &mut tx,
@@ -843,6 +862,21 @@ impl ProctoringService {
         if self.load_provider_key_for_schedule(schedule_id).await? != "sat" {
             return Err(ProctoringError::Validation(
                 "Per-student time extensions are currently supported for adaptive SAT attempts only."
+                    .to_owned(),
+            ));
+        }
+        let timing_model: Option<String> = sqlx::query_scalar(
+            "SELECT timing_model FROM exam_session_runtimes WHERE schedule_id = ?",
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+        if matches!(
+            timing_model.as_deref(),
+            Some("cohort_stage_v2" | "cohort_section_v3")
+        ) {
+            return Err(ProctoringError::Validation(
+                "Individual time extensions are disabled for shared-clock SAT sessions; extend the active cohort section instead."
                     .to_owned(),
             ));
         }
@@ -1690,7 +1724,7 @@ impl ProctoringService {
         match action_type {
             "STUDENT_PAUSE" => {
                 sqlx::query(
-                    "UPDATE assessment_module_attempts SET paused_at = COALESCE(paused_at, NOW()), revision = revision + 1 WHERE attempt_id = ? AND state = 'active' AND started_at IS NOT NULL AND paused_at IS NULL",
+                    "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET ma.paused_at = COALESCE(ma.paused_at, NOW()), ma.revision = ma.revision + 1 WHERE ma.attempt_id = ? AND r.timing_model IN ('legacy_section_v1', 'cohort_section_v3') AND ma.state = 'active' AND ma.started_at IS NOT NULL AND ma.paused_at IS NULL",
                 )
                 .bind(attempt_id.to_string())
                 .execute(&mut *tx)
@@ -1698,7 +1732,7 @@ impl ProctoringService {
             }
             "STUDENT_RESUME" => {
                 sqlx::query(
-                    "UPDATE assessment_module_attempts SET accumulated_paused_seconds = accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, paused_at, NOW()), 0), paused_at = NULL, revision = revision + 1 WHERE attempt_id = ? AND state = 'active' AND paused_at IS NOT NULL",
+                    "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET ma.accumulated_paused_seconds = ma.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, NOW()), 0), ma.paused_at = NULL, ma.revision = ma.revision + 1 WHERE ma.attempt_id = ? AND r.timing_model IN ('legacy_section_v1', 'cohort_section_v3') AND ma.state = 'active' AND ma.paused_at IS NOT NULL",
                 )
                 .bind(attempt_id.to_string())
                 .execute(&mut *tx)
@@ -2153,6 +2187,7 @@ struct RuntimeHydrationRow {
     exam_id: Hyphenated,
     status: RuntimeStatus,
     plan_snapshot: Value,
+    timing_model: String,
     actual_start_at: Option<DateTime<Utc>>,
     actual_end_at: Option<DateTime<Utc>>,
     active_section_key: Option<String>,
@@ -2192,6 +2227,7 @@ struct RuntimeRow {
     id: Hyphenated,
     exam_id: Hyphenated,
     status: RuntimeStatus,
+    timing_model: String,
     active_section_key: Option<String>,
     revision: i32,
 }
@@ -2334,9 +2370,12 @@ fn runtime_hydration_row_to_runtime(
             if section.status != SectionRuntimeStatus::Live || section.paused_at.is_some() {
                 return None;
             }
-
-            let remaining = i64::from(current_section_remaining_seconds.max(0));
-            Some(server_now + Duration::seconds(remaining))
+            Some(section_deadline(
+                section.actual_start_at?,
+                section.planned_duration_minutes,
+                section.extension_minutes,
+                section.accumulated_paused_seconds,
+            ))
         });
 
     ExamSessionRuntime {
@@ -2345,6 +2384,7 @@ fn runtime_hydration_row_to_runtime(
         exam_id: row.exam_id.to_string(),
         status: row.status,
         plan_snapshot: serde_json::from_value(row.plan_snapshot).unwrap_or_default(),
+        timing_model: row.timing_model,
         actual_start_at: row.actual_start_at,
         actual_end_at: row.actual_end_at,
         active_section_key: row.active_section_key,
@@ -2476,14 +2516,17 @@ fn attempt_row_to_session(
         .unwrap_or_else(|| i32::from(row.last_warning_id.is_some()));
 
     let is_sat = row.provider_key == "sat";
-    let time_remaining = if is_sat {
+    let cohort_timed_sat = is_sat && runtime.timing_model == "cohort_stage_v2";
+    let time_remaining = if cohort_timed_sat {
+        runtime.current_section_remaining_seconds
+    } else if is_sat {
         compute_sat_attempt_remaining_seconds(
             row.sat_started_at,
             row.sat_paused_at,
             row.sat_allocated_seconds.unwrap_or(0),
             row.sat_extension_seconds.unwrap_or(0),
             row.sat_accumulated_paused_seconds.unwrap_or(0),
-            Utc::now(),
+            runtime.server_now,
         )
     } else {
         runtime.current_section_remaining_seconds
@@ -2517,7 +2560,15 @@ fn attempt_row_to_session(
         } else {
             runtime.current_section_remaining_seconds
         },
-        runtime_section_status: if is_sat {
+        runtime_deadline_at: if !is_sat || cohort_timed_sat {
+            runtime.current_section_deadline_at
+        } else {
+            None
+        },
+        runtime_server_now: Some(runtime.server_now),
+        runtime_section_status: if cohort_timed_sat {
+            runtime_section_status
+        } else if is_sat {
             Some(
                 if row.proctor_status == "paused" || row.sat_paused_at.is_some() {
                     "paused".to_owned()
@@ -2745,6 +2796,7 @@ mod runtime_hydration_tests {
             exam_id: exam_uuid.hyphenated(),
             status: RuntimeStatus::Live,
             plan_snapshot: json!([]),
+            timing_model: "legacy_section_v1".to_owned(),
             actual_start_at: Some(now - chrono::Duration::seconds(45)),
             actual_end_at: None,
             active_section_key: Some("reading".to_owned()),
@@ -2804,6 +2856,8 @@ mod proctor_alert_tests {
             runtime_status: RuntimeStatus::Live,
             runtime_current_section: Some("reading".to_owned()),
             runtime_time_remaining_seconds: 120,
+            runtime_deadline_at: None,
+            runtime_server_now: Some(Utc::now()),
             runtime_section_status: Some("live".to_owned()),
             runtime_waiting: false,
             violations: json!([]),

@@ -143,13 +143,13 @@ impl ApiBackgroundJobs {
                 .map_err(|error| error.to_string())?;
             let reconciled_count = outcomes.len();
             for outcome in outcomes {
-                self.state.live_updates.publish(LiveUpdateEvent {
+                self.state.publish_live_update(LiveUpdateEvent {
                     kind: "attempt".to_owned(),
                     id: outcome.attempt_id,
                     revision: 0,
                     event: "sat_module_timeout".to_owned(),
                 });
-                self.state.live_updates.publish(LiveUpdateEvent {
+                self.state.publish_live_update(LiveUpdateEvent {
                     kind: "schedule_roster".to_owned(),
                     id: outcome.schedule_id,
                     revision: 0,

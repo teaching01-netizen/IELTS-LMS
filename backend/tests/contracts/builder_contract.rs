@@ -35,6 +35,34 @@ const BUILDER_MIGRATIONS: &[&str] = &[
     "0008_grading_results.sql",
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
+    "0011_outbox_notify_trigger.sql",
+    "0012_registration_fields.sql",
+    "0013_proctor_presence_unique.sql",
+    "0014_student_attempt_presence.sql",
+    "0015_operation_write_hardening.sql",
+    "0016_attempt_mutation_id_uniqueness.sql",
+    "0017_production_hardening.sql",
+    "0018_exam_day_concurrency_hardening.sql",
+    "0019_violation_id_idempotency.sql",
+    "0020_schedule_role_display_names.sql",
+    "0021_attempt_finalization_consistency.sql",
+    "0022_attempt_submission_ledger.sql",
+    "0023_sort_memory_hotpath_indexes.sql",
+    "0024_projection_sort_hardening.sql",
+    "0025_join_storm_admission_queue.sql",
+    "0026_relax_access_code_constraints.sql",
+    "0027_grading_objective_overrides.sql",
+    "0028_grading_objective_grading_source.sql",
+    "0029_release_events_timestamp_precision.sql",
+    "0030_outbox_retry_policy.sql",
+    "0031_grading_export_profiles.sql",
+    "0032_provider_neutral_sat.sql",
+    "0033_sat_runtime_authoring_hardening.sql",
+    "0034_assessment_access_links.sql",
+    "0035_autosave_durability_hardening.sql",
+    "0036_question_revision_updated_by.sql",
+    "0037_runtime_timing_model.sql",
+    "0038_sat_section_timing_model.sql",
 ];
 
 #[tokio::test]
@@ -241,6 +269,94 @@ async fn patch_draft_creates_a_new_version_and_advances_the_exam_pointer() {
         Some(version_id.to_owned())
     );
     assert_eq!(exam_after.revision, seeded.revision + 1);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn stale_staff_draft_save_returns_conflict_without_overwriting_the_winning_draft() {
+    let database = mysql::TestDatabase::new(BUILDER_MIGRATIONS).await;
+    let seeded = seed_exam(database.pool()).await;
+    let auth = mysql::create_authenticated_user(
+        database.pool(),
+        UserRole::Builder,
+        "concurrent-builder@example.com",
+        "Concurrent Builder",
+    )
+    .await;
+    let app = build_router(app_state(database.pool().clone()));
+    let initial_revision = seeded.revision;
+
+    let winning_content = json!({"marker": "editor-a", "reading": {"passages": []}});
+    let winning_config = json!({"marker": "editor-a-config"});
+    let winner = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("PATCH")
+                .uri(format!("/api/v1/exams/{}/draft", seeded.id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&SaveDraftRequest {
+                        content_snapshot: winning_content.clone(),
+                        config_snapshot: winning_config.clone(),
+                        revision: initial_revision,
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(winner.status(), StatusCode::OK);
+
+    let stale = app
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("PATCH")
+                .uri(format!("/api/v1/exams/{}/draft", seeded.id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&SaveDraftRequest {
+                        content_snapshot: json!({"marker": "editor-b"}),
+                        config_snapshot: json!({"marker": "editor-b-config"}),
+                        revision: initial_revision,
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+    let stale_body = to_bytes(stale.into_body(), usize::MAX).await.unwrap();
+    let stale_json: serde_json::Value = serde_json::from_slice(&stale_body).unwrap();
+    assert_eq!(stale_json["error"]["code"], "CONFLICT");
+
+    let authoritative: (String, i32) = sqlx::query_as(
+        "SELECT CAST(current_draft_version_id AS CHAR), revision FROM exam_entities WHERE id = ?",
+    )
+    .bind(&seeded.id)
+    .fetch_one(database.pool())
+    .await
+    .expect("load authoritative exam revision");
+    assert_eq!(authoritative.1, initial_revision + 1);
+    let persisted: (serde_json::Value, serde_json::Value) =
+        sqlx::query_as("SELECT content_snapshot, config_snapshot FROM exam_versions WHERE id = ?")
+            .bind(&authoritative.0)
+            .fetch_one(database.pool())
+            .await
+            .expect("load winning draft");
+    assert_eq!(persisted.0, winning_content);
+    assert_eq!(persisted.1, winning_config);
+    let saved_events: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM exam_events WHERE exam_id = ? AND action = 'draft_saved'",
+    )
+    .bind(&seeded.id)
+    .fetch_one(database.pool())
+    .await
+    .expect("count draft events");
+    assert_eq!(saved_events, 1);
 
     database.shutdown().await;
 }

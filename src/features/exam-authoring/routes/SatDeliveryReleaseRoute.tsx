@@ -1,16 +1,15 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { ExamEntity } from "../../../types/domain";
 import {
   useAssessmentReleaseReadiness,
+  useAssessmentReleaseState,
   useAuthoringShell,
   usePublishAssessment,
 } from "../api/assessmentQueries";
-import type {
-  AssessmentValidationIssue,
-  PublishedAssessmentVersion,
-} from "../contracts/assessment";
+import { useAccessDistributionOverview } from "../api/assessmentAccessLinkQueries";
+import type { AssessmentValidationIssue } from "../contracts/assessment";
 import { SatDeliveryReleasePage } from "../ui/SatDeliveryReleasePage";
+import { StudentLinksDashboard } from "../ui/access-links/StudentLinksDashboard";
 
 interface SatDeliveryReleaseRouteProps {
   exam: ExamEntity;
@@ -19,15 +18,33 @@ interface SatDeliveryReleaseRouteProps {
 
 export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryReleaseRouteProps) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const shellQuery = useAuthoringShell(exam.id);
   const publishMutation = usePublishAssessment(exam.id);
-  const [publishedVersion, setPublishedVersion] = useState<PublishedAssessmentVersion | null>(null);
+  const releaseQuery = useAssessmentReleaseState(exam.id);
+  const distributionQuery = useAccessDistributionOverview(exam.id);
   const shell = shellQuery.data;
+  const releaseState = releaseQuery.data ?? null;
+  const shouldCheckReadiness = releaseState?.state !== "published_current";
   const readinessQuery = useAssessmentReleaseReadiness(
     exam.id,
     shell?.versionId,
-    shell?.versionRevision
+    shell?.versionRevision,
+    shouldCheckReadiness
   );
+  const view = searchParams.get("view");
+  const showStudentAccess = view === "access" || view === "links";
+
+  const openStudentAccess = () => {
+    const next = new URLSearchParams(searchParams);
+    next.set("view", "access");
+    setSearchParams(next, { replace: true });
+  };
+  const openRelease = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("view");
+    setSearchParams(next, { replace: true });
+  };
 
   const handlePublish = async (publishNotes?: string) => {
     if (!shell) throw new Error("The SAT draft is not loaded.");
@@ -48,14 +65,14 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       throw new Error("The SAT draft changed. Publish checks were refreshed; review them again.");
     }
 
-    const published = await publishMutation.mutateAsync({
+    await publishMutation.mutateAsync({
       revision: exam.revision,
       expectedDraftVersionId: shell.versionId,
       expectedDraftRevision: shell.versionRevision,
       ...(publishNotes?.trim() ? { publishNotes: publishNotes.trim() } : {}),
     });
-    setPublishedVersion(published);
-    await onExamRefresh();
+    await Promise.all([onExamRefresh(), releaseQuery.refetch(), distributionQuery.refetch()]);
+    openStudentAccess();
   };
 
   const handleIssue = (issue: AssessmentValidationIssue) => {
@@ -66,27 +83,38 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
     navigate(`/builder/${exam.id}${params.toString() ? `?${params.toString()}` : ""}`);
   };
 
-  const handleCreateSchedule = () => {
-    navigate("/admin/scheduling", {
-      state: {
-        initialScheduleDraft: {
-          examId: exam.id,
-          openCreateModal: true,
-        },
-      },
-    });
-  };
+
+
+  if (showStudentAccess) {
+    return (
+      <StudentLinksDashboard
+        exam={exam}
+        overview={distributionQuery.data ?? null}
+        isLoading={distributionQuery.isLoading && !distributionQuery.data}
+        error={distributionQuery.error instanceof Error ? distributionQuery.error.message : null}
+        onRefresh={() => distributionQuery.refetch()}
+        onBackToRelease={openRelease}
+      />
+    );
+  }
 
   return (
     <SatDeliveryReleasePage
       exam={exam}
       shell={shell ?? null}
-      isLoading={shellQuery.isLoading}
-      loadError={shellQuery.error instanceof Error ? shellQuery.error.message : null}
+      releaseState={releaseState}
+      isLoading={shellQuery.isLoading || releaseQuery.isLoading}
+      loadError={
+        shellQuery.error instanceof Error
+          ? shellQuery.error.message
+          : releaseQuery.error instanceof Error
+            ? releaseQuery.error.message
+            : null
+      }
       readiness={readinessQuery.data ?? null}
       isChecking={readinessQuery.isFetching}
       readinessError={readinessQuery.error instanceof Error ? readinessQuery.error.message : null}
-      publishedVersion={publishedVersion}
+      onOpenStudentAccess={openStudentAccess}
       isPublishing={publishMutation.isPending}
       publishError={publishMutation.error instanceof Error ? publishMutation.error.message : null}
       onBackToBuilder={() => navigate(`/builder/${exam.id}`)}
@@ -94,7 +122,6 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       onRefreshReadiness={() => readinessQuery.refetch()}
       onPublish={handlePublish}
       onIssueClick={handleIssue}
-      onCreateSchedule={handleCreateSchedule}
     />
   );
 }

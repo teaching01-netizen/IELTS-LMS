@@ -53,6 +53,8 @@ interface StudentSessionRouteData {
   isLoading: boolean;
   providerKey: 'ielts' | 'sat';
   runtimeSnapshot: ExamSessionRuntime | null;
+  liveSocketConnected: boolean;
+  satAttemptUpdateToken: number;
   schedule: ExamSchedule | null;
   state: ExamState | null;
   refreshRuntime: () => Promise<void>;
@@ -94,6 +96,7 @@ export function useStudentSessionRouteData(
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<ExamSessionRuntime | null>(null);
   const [providerKey, setProviderKey] = useState<'ielts' | 'sat'>('ielts');
   const [liveSocketConnected, setLiveSocketConnected] = useState(false);
+  const [satAttemptUpdateToken, setSatAttemptUpdateToken] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadTransitionRollout = useMemo(buildDefaultAnswerInvariantRollout, []);
@@ -370,6 +373,7 @@ export function useStudentSessionRouteData(
         if (!attemptSnapshot?.id || event.id !== attemptSnapshot.id) {
           return;
         }
+        setSatAttemptUpdateToken((value) => value + 1);
       } else {
         return;
       }
@@ -636,6 +640,8 @@ export function useStudentSessionRouteData(
     isLoading,
     providerKey,
     runtimeSnapshot,
+    liveSocketConnected,
+    satAttemptUpdateToken,
     schedule,
     state,
     refreshRuntime: refreshBackendSessionSnapshot,

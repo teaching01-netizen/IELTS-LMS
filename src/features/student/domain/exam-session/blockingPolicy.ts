@@ -7,6 +7,7 @@ export type StudentBlockingReason =
   | 'not_started'
   | 'waiting_for_runtime'
   | 'waiting_for_advance'
+  | 'time_expired'
   | 'offline'
   | 'syncing_reconnect'
   | 'heartbeat_lost'
@@ -104,6 +105,15 @@ export function deriveBlockingState(input: BlockingPolicyInput): BlockingPolicyS
       reason: 'waiting_for_advance',
       runtimeStatus,
       timeRemaining: input.timeRemaining,
+    };
+  }
+
+  if (runtimeStatus === 'live' && input.timeRemaining <= 0) {
+    return {
+      active: true,
+      reason: 'time_expired',
+      runtimeStatus,
+      timeRemaining: 0,
     };
   }
 

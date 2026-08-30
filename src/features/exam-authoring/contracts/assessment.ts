@@ -96,6 +96,14 @@ export interface AssessmentQuestionSummary {
   questionType: QuestionKind;
   semanticRevision: number;
   revision: number;
+  promptPreview: string;
+  answerKeyPreview: string | null;
+  domain: string | null;
+  skill: string | null;
+  difficulty: Difficulty;
+  tags: string[];
+  hasStimulus: boolean;
+  contentComplexity: "plain" | "rich";
   readiness: QuestionReadinessSummary;
 }
 
@@ -189,6 +197,38 @@ export interface DeliveredQuestion {
   accessibility: AccessibilityMetadata;
 }
 
+export interface DeliveredAssessmentModule {
+  id: string;
+  moduleKey: string;
+  title: string;
+  displayOrder: number;
+  durationSeconds: number;
+  targetQuestionCount: number;
+  adaptiveRole: string;
+  instructions: StructuredContent;
+  toolPolicy: Record<string, unknown> | string[];
+  questions: DeliveredQuestion[];
+}
+
+export interface DeliveredAssessmentSection {
+  id: string;
+  sectionKey: string;
+  title: string;
+  displayOrder: number;
+  durationSeconds: number;
+  breakAfterSeconds: number;
+  instructions: StructuredContent;
+  modules: DeliveredAssessmentModule[];
+}
+
+export interface AssessmentPreviewProjection {
+  examId: string;
+  providerKey: "sat";
+  versionId: string;
+  versionRevision: number;
+  sections: DeliveredAssessmentSection[];
+}
+
 export interface AssessmentValidationIssue {
   code: string;
   path: string;
@@ -217,15 +257,61 @@ export interface DuplicateQuestionRequest {
   insertAfterExamQuestionId?: string;
 }
 
+export interface BulkMetadataPatch {
+  domain?: string;
+  skill?: string;
+  difficulty?: Difficulty;
+  tags?: string[];
+}
+
 export type BulkQuestionAction =
   | { type: "move"; destinationModuleId: string }
   | { type: "duplicate"; destinationModuleId: string }
   | { type: "set_pretest"; value: boolean }
+  | { type: "patch_metadata"; patch: BulkMetadataPatch }
   | { type: "delete" };
 
 export interface BulkQuestionRequest {
   questionIds: string[];
   action: BulkQuestionAction;
+  expectedRevisions?: Record<string, number>;
+}
+
+export interface BulkQuestionResult {
+  affectedQuestionIds: string[];
+  createdQuestionIds: string[];
+  updatedQuestions: AssessmentQuestionSummary[];
+}
+
+export interface BatchQuestionDraft {
+  questionType: QuestionKind;
+  stimulus: StructuredContent;
+  prompt: StructuredContent;
+  answer: AnswerDefinition;
+  rationale: StructuredContent;
+  metadata: QuestionMetadata;
+  accessibility: AccessibilityMetadata;
+  isPretest: boolean;
+}
+
+export interface BatchCreateQuestionsRequest {
+  questions: BatchQuestionDraft[];
+}
+
+export interface SampleExamModuleDraft {
+  moduleId: string;
+  questions: BatchQuestionDraft[];
+}
+
+export interface LoadSampleExamRequest {
+  expectedVersionId: string;
+  expectedVersionRevision: number;
+  modules: SampleExamModuleDraft[];
+}
+
+export interface BatchCreateQuestionsResult {
+  createdQuestionIds: string[];
+  questions: AssessmentQuestionSummary[];
 }
 
 export interface AssessmentValidationReport {

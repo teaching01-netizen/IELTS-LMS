@@ -1,14 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Calculator } from 'lucide-react';
+import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Calculator } from "lucide-react";
 import {
   calculatorWorkspaceKey,
   loadCalculatorWorkspace,
   saveCalculatorWorkspace,
-  type SatCalculatorWorkspace,
-} from '../../application/satCalculatorWorkspace';
-import type { DesmosCalculatorMode, DesmosCalculatorState } from '../../infrastructure/desmos/desmosTypes';
-import { DesmosCalculator } from './DesmosCalculator';
-import { SatToolWindow } from './SatToolWindow';
+} from "../../infrastructure/satCalculatorWorkspace";
+import type { DesmosCalculatorMode } from "../../infrastructure/desmos/desmosTypes";
+import { DesmosCalculator } from "./DesmosCalculator";
+import { SatToolWindow } from "./SatToolWindow";
 
 export interface SatCalculatorPanelProps {
   open: boolean;
@@ -16,10 +15,11 @@ export interface SatCalculatorPanelProps {
   attemptId: string;
   moduleAttemptId: string;
   disabled?: boolean;
+  prewarmWhenClosed?: boolean;
   onClose: () => void;
 }
 
-const PERSIST_DEBOUNCE_MS = 300;
+const calculatorModes: readonly DesmosCalculatorMode[] = ["scientific", "graphing"];
 
 export function SatCalculatorPanel({
   open,
@@ -27,83 +27,76 @@ export function SatCalculatorPanel({
   attemptId,
   moduleAttemptId,
   disabled = false,
+  prewarmWhenClosed = false,
   onClose,
 }: SatCalculatorPanelProps) {
   const storageKey = useMemo(
     () => calculatorWorkspaceKey(scheduleId, attemptId, moduleAttemptId),
-    [attemptId, moduleAttemptId, scheduleId],
+    [attemptId, moduleAttemptId, scheduleId]
   );
-  const workspaceRef = useRef<SatCalculatorWorkspace>(loadCalculatorWorkspace(storageKey));
-  const persistTimerRef = useRef<number | null>(null);
-  const [mode, setMode] = useState<DesmosCalculatorMode>(workspaceRef.current.activeMode);
-
-  const persistNow = useCallback(() => {
-    if (persistTimerRef.current !== null) {
-      window.clearTimeout(persistTimerRef.current);
-      persistTimerRef.current = null;
-    }
-    saveCalculatorWorkspace(storageKey, workspaceRef.current);
-  }, [storageKey]);
-
-  const schedulePersist = useCallback(() => {
-    if (persistTimerRef.current !== null) window.clearTimeout(persistTimerRef.current);
-    persistTimerRef.current = window.setTimeout(() => {
-      persistTimerRef.current = null;
-      saveCalculatorWorkspace(storageKey, workspaceRef.current);
-    }, PERSIST_DEBOUNCE_MS);
-  }, [storageKey]);
+  const [mode, setMode] = useState<DesmosCalculatorMode>(
+    () => loadCalculatorWorkspace(storageKey).activeMode
+  );
 
   useEffect(() => {
-    workspaceRef.current = loadCalculatorWorkspace(storageKey);
-    setMode(workspaceRef.current.activeMode);
-    return () => persistNow();
-  }, [persistNow, storageKey]);
+    setMode(loadCalculatorWorkspace(storageKey).activeMode);
+  }, [storageKey]);
 
   const handleModeChange = (nextMode: DesmosCalculatorMode) => {
-    if (nextMode === mode) return;
-    workspaceRef.current = { ...workspaceRef.current, activeMode: nextMode };
-    persistNow();
+    if (nextMode === mode || disabled) return;
     setMode(nextMode);
+    saveCalculatorWorkspace(storageKey, { activeMode: nextMode });
   };
-  const handleStateChange = useCallback((state: DesmosCalculatorState) => {
-    workspaceRef.current = mode === 'graphing'
-      ? { ...workspaceRef.current, graphingState: state }
-      : { ...workspaceRef.current, scientificState: state };
-    schedulePersist();
-  }, [mode, schedulePersist]);
 
-  const initialState = mode === 'graphing'
-    ? workspaceRef.current.graphingState
-    : workspaceRef.current.scientificState;
+  const handleModeKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (disabled || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const group = event.currentTarget.parentElement;
+    const nextMode = event.key === "ArrowLeft" || event.key === "Home" ? "scientific" : "graphing";
+    handleModeChange(nextMode);
+    window.requestAnimationFrame(() => {
+      group?.querySelector<HTMLButtonElement>(`[data-sat-calculator-mode="${nextMode}"]`)?.focus();
+    });
+  };
 
   return (
-    <SatToolWindow title="Calculator" open={open} onClose={() => { persistNow(); onClose(); }}>
-      <div className="grid h-full min-h-0 grid-rows-[52px_minmax(0,1fr)] bg-white">
-        <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-4">
-          <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
-            <Calculator className="h-4 w-4" aria-hidden="true" />
-            <span>Desmos</span>
+    <SatToolWindow
+      title="Calculator"
+      open={open}
+      collapsible
+      keepMountedOnClose
+      prewarmWhenClosed={prewarmWhenClosed}
+      interactionDisabled={disabled}
+      onClose={onClose}
+    >
+      <div className="grid h-full min-h-0 grid-rows-[minmax(56px,auto)_minmax(0,1fr)] bg-[var(--sat-surface)]">
+        <div className="flex min-w-0 items-center justify-end gap-3 border-b border-[var(--sat-divider-soft)] px-3 py-1.5 sm:px-4">
+          <div className="hidden min-w-0 items-center gap-2 sat-type-metadata font-medium text-[var(--sat-text-secondary)] min-[520px]:flex">
+            <Calculator className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="truncate">Desmos · College Board</span>
           </div>
-          <div className="inline-flex rounded-xl bg-slate-100 p-1" role="group" aria-label="Calculator type">
-            {(['scientific', 'graphing'] as const).map((candidate) => (
+          <div
+            className="grid w-full max-w-[240px] grid-cols-2 rounded-[8px] bg-[var(--sat-surface-subtle)] p-1 min-[520px]:ml-auto"
+            role="group"
+            aria-label="Calculator type"
+          >
+            {calculatorModes.map((candidate) => (
               <button
                 type="button"
                 key={candidate}
+                data-sat-calculator-mode={candidate}
                 onClick={() => handleModeChange(candidate)}
+                onKeyDown={handleModeKeyDown}
+                disabled={disabled}
                 aria-pressed={mode === candidate}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${mode === candidate ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                className={`sat-pressable sat-state-transition min-h-11 min-w-0 rounded-[6px] px-2 sat-type-control-primary font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] ${mode === candidate ? "bg-[var(--sat-surface)] text-[var(--sat-text)] shadow-sm" : "text-[var(--sat-text-secondary)] hover:text-[var(--sat-text)]"} disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)]`}
               >
-                {candidate === 'scientific' ? 'Scientific' : 'Graphing'}
+                {candidate === "scientific" ? "Scientific" : "Graphing"}
               </button>
             ))}
           </div>
         </div>
-        <DesmosCalculator
-          mode={mode}
-          initialState={initialState}
-          disabled={disabled}
-          onStateChange={handleStateChange}
-        />
+        <DesmosCalculator mode={mode} disabled={disabled} />
       </div>
     </SatToolWindow>
   );

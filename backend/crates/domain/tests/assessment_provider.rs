@@ -29,7 +29,14 @@ fn metadata(section_key: &str) -> QuestionMetadata {
             }
             .to_owned(),
         ),
-        skill: Some("test-skill".to_owned()),
+        skill: Some(
+            if section_key == "math" {
+                "Linear Equations in One Variable"
+            } else {
+                "Central Ideas and Details"
+            }
+            .to_owned(),
+        ),
         difficulty: Difficulty::Medium,
         tags: Vec::new(),
     }
@@ -180,4 +187,197 @@ fn rich_document_text_is_not_treated_as_empty() {
         })),
     };
     assert!(!rich.is_empty());
+}
+
+#[test]
+fn sat_provider_rejects_skill_outside_selected_domain() {
+    let provider = provider_for("sat").expect("SAT provider");
+    let options = ["a", "b", "c", "d"]
+        .into_iter()
+        .map(|id| ChoiceOption {
+            id: id.to_owned(),
+            content: content(id),
+        })
+        .collect();
+    let mut question = revision(
+        QuestionKind::SingleChoice,
+        AnswerDefinition::SingleChoice {
+            options,
+            correct_option_id: Some("a".to_owned()),
+        },
+        "math",
+    );
+    question.metadata.domain = Some("algebra".to_owned());
+    question.metadata.skill = Some("Circles".to_owned());
+    let issues = provider.validate_question(
+        QuestionValidationContext {
+            section_key: "math",
+            module_key: "math-m1",
+        },
+        &question,
+    );
+    assert!(issues
+        .iter()
+        .any(|issue| issue.code == "sat.metadata.skill.invalid"));
+}
+
+#[test]
+fn sat_provider_rejects_invalid_student_response_keys() {
+    let provider = provider_for("sat").expect("SAT provider");
+    for response in ["12%", "$5", "123456", "1/0", "1.2/3"] {
+        let question = revision(
+            QuestionKind::StudentProducedResponse,
+            AnswerDefinition::StudentProducedResponse {
+                accepted_responses: vec![response.to_owned()],
+                normalize_fraction: true,
+                normalize_decimal: true,
+                numeric_tolerance: None,
+            },
+            "math",
+        );
+        let issues = provider.validate_question(
+            QuestionValidationContext {
+                section_key: "math",
+                module_key: "math-m1",
+            },
+            &question,
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code.starts_with("sat.spr.")),
+            "{response} should be rejected: {issues:?}"
+        );
+    }
+}
+
+#[test]
+fn sat_provider_accepts_standard_student_response_forms() {
+    let provider = provider_for("sat").expect("SAT provider");
+    for response in ["12", ".5", "3/4", "-2.5", "-2/3"] {
+        let question = revision(
+            QuestionKind::StudentProducedResponse,
+            AnswerDefinition::StudentProducedResponse {
+                accepted_responses: vec![response.to_owned()],
+                normalize_fraction: true,
+                normalize_decimal: true,
+                numeric_tolerance: None,
+            },
+            "math",
+        );
+        let issues = provider.validate_question(
+            QuestionValidationContext {
+                section_key: "math",
+                module_key: "math-m1",
+            },
+            &question,
+        );
+        assert!(
+            issues.is_empty(),
+            "{response} should be accepted: {issues:?}"
+        );
+    }
+}
+
+#[test]
+fn sat_provider_accepts_graphical_answer_choices_with_accessible_media() {
+    let provider = provider_for("sat").expect("SAT provider");
+    let options = ["a", "b", "c", "d"]
+        .into_iter()
+        .map(|id| ChoiceOption {
+            id: id.to_owned(),
+            content: StructuredContent {
+                version: 2,
+                nodes: Vec::new(),
+                document: Some(serde_json::json!({
+                    "type": "doc",
+                    "content": [{
+                        "type": "image",
+                        "attrs": { "assetId": format!("asset-{id}"), "src": format!("/api/v1/media/asset-{id}"), "alt": format!("Graph {id}") }
+                    }]
+                })),
+            },
+        })
+        .collect();
+    let mut question = revision(
+        QuestionKind::SingleChoice,
+        AnswerDefinition::SingleChoice {
+            options,
+            correct_option_id: Some("b".to_owned()),
+        },
+        "math",
+    );
+    question.metadata.domain = Some("advanced-math".to_owned());
+    question.metadata.skill = Some("Nonlinear Functions".to_owned());
+    let issues = provider.validate_question(
+        QuestionValidationContext {
+            section_key: "math",
+            module_key: "math-m1",
+        },
+        &question,
+    );
+    assert!(issues.is_empty(), "unexpected issues: {issues:?}");
+}
+
+#[test]
+fn sat_provider_rejects_image_without_media_source() {
+    let provider = provider_for("sat").expect("SAT provider");
+    let options = ["a", "b", "c", "d"]
+        .into_iter()
+        .map(|id| ChoiceOption {
+            id: id.to_owned(),
+            content: content(id),
+        })
+        .collect();
+    let mut question = revision(
+        QuestionKind::SingleChoice,
+        AnswerDefinition::SingleChoice {
+            options,
+            correct_option_id: Some("a".to_owned()),
+        },
+        "reading-writing",
+    );
+    question.stimulus = StructuredContent {
+        version: 2,
+        nodes: Vec::new(),
+        document: Some(serde_json::json!({
+            "type": "doc",
+            "content": [{ "type": "image", "attrs": { "alt": "Graph" } }]
+        })),
+    };
+    let issues = provider.validate_question(
+        QuestionValidationContext {
+            section_key: "reading-writing",
+            module_key: "rw-m1",
+        },
+        &question,
+    );
+    assert!(issues
+        .iter()
+        .any(|issue| issue.code == "sat.media.source.required"));
+}
+
+#[test]
+fn sat_provider_requires_primary_student_response_before_equivalents() {
+    let provider = provider_for("sat").expect("SAT provider");
+    let question = revision(
+        QuestionKind::StudentProducedResponse,
+        AnswerDefinition::StudentProducedResponse {
+            accepted_responses: vec!["".to_owned(), "12".to_owned()],
+            normalize_fraction: true,
+            normalize_decimal: true,
+            numeric_tolerance: None,
+        },
+        "math",
+    );
+    let issues = provider.validate_question(
+        QuestionValidationContext {
+            section_key: "math",
+            module_key: "math-m1",
+        },
+        &question,
+    );
+    assert!(issues
+        .iter()
+        .any(|issue| issue.code == "sat.spr.primary.required"));
 }

@@ -6,7 +6,7 @@ import {
   createCalculatorWorkspace,
   loadCalculatorWorkspace,
   saveCalculatorWorkspace,
-} from '../satCalculatorWorkspace';
+} from '../../infrastructure/satCalculatorWorkspace';
 
 describe('satCalculatorWorkspace', () => {
   beforeEach(() => window.sessionStorage.clear());
@@ -17,11 +17,10 @@ describe('satCalculatorWorkspace', () => {
     expect(first).not.toBe(second);
   });
 
-  it('round-trips opaque Desmos state without interpreting it', () => {
+  it('round-trips the selected embedded calculator mode', () => {
     const key = calculatorWorkspaceKey('schedule-1', 'attempt-1', 'module-1');
-    const graphingState = { expressions: { list: [{ id: '1', latex: 'y=x^2' }] } };
-    expect(saveCalculatorWorkspace(key, { activeMode: 'graphing', graphingState })).toBe(true);
-    expect(loadCalculatorWorkspace(key)).toEqual({ activeMode: 'graphing', graphingState });
+    expect(saveCalculatorWorkspace(key, { activeMode: 'graphing' })).toBe(true);
+    expect(loadCalculatorWorkspace(key)).toEqual({ activeMode: 'graphing' });
   });
 
   it('returns a safe default for corrupt state and clears persisted state', () => {

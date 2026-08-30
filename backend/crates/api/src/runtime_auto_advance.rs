@@ -56,13 +56,13 @@ pub fn spawn_runtime_auto_advance(state: AppState) -> Option<tokio::task::JoinHa
             {
                 Ok(outcomes) => {
                     for outcome in outcomes {
-                        state.live_updates.publish(LiveUpdateEvent {
+                        state.publish_live_update(LiveUpdateEvent {
                             kind: "attempt".to_owned(),
                             id: outcome.attempt_id,
                             revision: 0,
                             event: "sat_module_timeout".to_owned(),
                         });
-                        state.live_updates.publish(LiveUpdateEvent {
+                        state.publish_live_update(LiveUpdateEvent {
                             kind: "schedule_roster".to_owned(),
                             id: outcome.schedule_id,
                             revision: 0,

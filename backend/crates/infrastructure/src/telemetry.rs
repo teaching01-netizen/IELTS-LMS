@@ -76,8 +76,6 @@ pub struct Telemetry {
     final_snapshot_hash_mismatch_total: Counter,
     student_answer_loss_risk_total: Family<OutcomeLabels, Counter>,
     submit_replay_incomplete_total: Counter,
-    post_submit_grace_accepted_total: Counter,
-    post_submit_grace_rejected_total: Counter,
     violation_to_alert_latency: Histogram,
     websocket_connections: Gauge<i64, AtomicI64>,
     outbox_backlog_events: Gauge<i64, AtomicI64>,
@@ -144,8 +142,6 @@ impl Telemetry {
         let final_snapshot_hash_mismatch_total = Counter::default();
         let student_answer_loss_risk_total = Family::<OutcomeLabels, Counter>::default();
         let submit_replay_incomplete_total = Counter::default();
-        let post_submit_grace_accepted_total = Counter::default();
-        let post_submit_grace_rejected_total = Counter::default();
         let violation_to_alert_latency = Histogram::new(exponential_buckets(0.001, 2.0, 14));
         let websocket_connections = Gauge::<i64, AtomicI64>::default();
         let outbox_backlog_events = Gauge::<i64, AtomicI64>::default();
@@ -240,16 +236,6 @@ impl Telemetry {
             "backend_submit_replay_incomplete_total",
             "Count of submits where client-final sequence exceeded server-accepted sequence at seal time.",
             submit_replay_incomplete_total.clone(),
-        );
-        registry.register(
-            "backend_post_submit_grace_accepted_total",
-            "Count of mutation batches accepted during the post-submit grace window.",
-            post_submit_grace_accepted_total.clone(),
-        );
-        registry.register(
-            "backend_post_submit_grace_rejected_total",
-            "Count of mutation batches rejected because the post-submit grace window elapsed.",
-            post_submit_grace_rejected_total.clone(),
         );
         registry.register(
             "backend_violation_to_alert_duration_seconds",
@@ -382,8 +368,6 @@ impl Telemetry {
             final_snapshot_hash_mismatch_total,
             student_answer_loss_risk_total,
             submit_replay_incomplete_total,
-            post_submit_grace_accepted_total,
-            post_submit_grace_rejected_total,
             violation_to_alert_latency,
             websocket_connections,
             outbox_backlog_events,
@@ -490,14 +474,6 @@ impl Telemetry {
 
     pub fn observe_submit_replay_incomplete(&self) {
         self.submit_replay_incomplete_total.inc();
-    }
-
-    pub fn observe_post_submit_grace_accepted(&self) {
-        self.post_submit_grace_accepted_total.inc();
-    }
-
-    pub fn observe_post_submit_grace_rejected(&self) {
-        self.post_submit_grace_rejected_total.inc();
     }
 
     pub fn observe_violation_to_alert(&self, duration: Duration) {
@@ -739,12 +715,10 @@ mod tests {
     }
 
     #[test]
-    fn render_includes_answer_loss_and_post_submit_grace_metrics() {
+    fn render_includes_answer_loss_metrics() {
         let telemetry = Telemetry::new();
         telemetry.observe_student_answer_loss_risk("pending_seq_gap");
         telemetry.observe_submit_replay_incomplete();
-        telemetry.observe_post_submit_grace_accepted();
-        telemetry.observe_post_submit_grace_rejected();
 
         let rendered = telemetry.render().expect("render metrics");
         assert!(rendered.contains("student_answer_loss_risk_total"));
@@ -752,16 +726,6 @@ mod tests {
         assert_eq!(
             metric_value(&rendered, "backend_submit_replay_incomplete_total")
                 .expect("submit replay incomplete value"),
-            1.0
-        );
-        assert_eq!(
-            metric_value(&rendered, "backend_post_submit_grace_accepted_total")
-                .expect("post submit grace accepted value"),
-            1.0
-        );
-        assert_eq!(
-            metric_value(&rendered, "backend_post_submit_grace_rejected_total")
-                .expect("post submit grace rejected value"),
             1.0
         );
     }

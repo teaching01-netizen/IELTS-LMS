@@ -156,6 +156,7 @@ type BackendExamSessionRuntime = {
   scheduleId: string;
   examId: string;
   status: ExamSessionRuntime["status"];
+  timingModel?: ExamSessionRuntime["timingModel"];
   revision?: number | null | undefined;
   actualStartAt?: string | null | undefined;
   actualEndAt?: string | null | undefined;
@@ -596,6 +597,7 @@ export function mapBackendRuntime(
     cohortName: schedule.cohortName,
     deliveryMode: schedule.deliveryMode,
     status: payload.status,
+    timingModel: payload.timingModel ?? 'legacy_section_v1',
     actualStartAt: payload.actualStartAt ?? null,
     actualEndAt: payload.actualEndAt ?? null,
     activeSectionKey: payload.activeSectionKey ?? null,
@@ -606,6 +608,7 @@ export function mapBackendRuntime(
     waitingForNextSection: payload.waitingForNextSection,
     isOverrun: payload.isOverrun,
     totalPausedSeconds: payload.totalPausedSeconds,
+    revision: payload.revision ?? null,
     sections: payload.sections.map((section) => ({
       sectionKey: section.sectionKey,
       label: section.label,

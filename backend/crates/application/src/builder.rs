@@ -596,21 +596,19 @@ impl BuilderService {
             }
         }
 
-        if exam.current_draft_version_id.is_none() {
-            if let (Some(expected_version_id), Some(published_version_id)) = (
-                req.expected_draft_version_id.as_deref(),
-                exam.current_published_version_id.as_deref(),
-            ) {
-                if expected_version_id == published_version_id {
-                    return sqlx::query_as::<_, ExamVersion>(
-                        "SELECT * FROM exam_versions WHERE id = ? AND exam_id = ? AND is_published = TRUE",
-                    )
-                    .bind(published_version_id)
-                    .bind(&exam_id)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(BuilderError::Database);
-                }
+        if let (Some(expected_version_id), Some(published_version_id)) = (
+            req.expected_draft_version_id.as_deref(),
+            exam.current_published_version_id.as_deref(),
+        ) {
+            if expected_version_id == published_version_id {
+                return sqlx::query_as::<_, ExamVersion>(
+                    "SELECT * FROM exam_versions WHERE id = ? AND exam_id = ? AND is_published = TRUE",
+                )
+                .bind(published_version_id)
+                .bind(&exam_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(BuilderError::Database);
             }
         }
 
@@ -722,12 +720,27 @@ impl BuilderService {
             .fetch_one(&mut *tx)
             .await?;
 
-        // Update exam entity
+        let next_draft_version_id = if exam.provider_key.as_deref() == Some("sat") {
+            Some(
+                AssessmentAuthoringService::clone_published_sat_to_draft_tx(
+                    &mut tx,
+                    &exam_id,
+                    &draft_version_id,
+                    &ctx.actor_id,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
+        // Update exam entity. SAT keeps the published version immutable while immediately
+        // continuing authoring in a fresh child draft.
         sqlx::query(
             r#"
             UPDATE exam_entities
             SET
-                current_draft_version_id = NULL,
+                current_draft_version_id = ?,
                 current_published_version_id = ?,
                 status = ?,
                 published_at = NOW(),
@@ -736,6 +749,7 @@ impl BuilderService {
             WHERE id = ?
             "#,
         )
+        .bind(&next_draft_version_id)
         .bind(&draft_version_id)
         .bind("published")
         .bind(&exam_id)
@@ -758,6 +772,22 @@ impl BuilderService {
         .bind("published".to_string())
         .execute(&mut *tx)
         .await?;
+
+        if let Some(next_draft_version_id) = next_draft_version_id.as_deref() {
+            sqlx::query(
+                r#"
+                INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, created_at)
+                VALUES (?, ?, ?, ?, ?, NOW())
+                "#,
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(&exam_id)
+            .bind(next_draft_version_id)
+            .bind(ctx.actor_id.to_string())
+            .bind(ExamEventAction::VersionCreated)
+            .execute(&mut *tx)
+            .await?;
+        }
 
         tx.commit().await?;
 

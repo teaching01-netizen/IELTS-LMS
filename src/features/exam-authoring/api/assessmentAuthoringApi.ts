@@ -6,11 +6,16 @@ import {
 } from "../infrastructure/examAuthoringBackendGateway";
 import type {
   AssessmentAuthoringShell,
+  AssessmentPreviewProjection,
   AssessmentQuestionDetail,
   AssessmentQuestionSummary,
   AssessmentValidationReport,
+  BatchCreateQuestionsRequest,
+  BatchCreateQuestionsResult,
   BulkQuestionRequest,
+  BulkQuestionResult,
   DuplicateQuestionRequest,
+  LoadSampleExamRequest,
   ReorderQuestionsRequest,
   PublishedAssessmentVersion,
   PublishAssessmentRequest,
@@ -24,6 +29,26 @@ export const assessmentAuthoringApi = {
     return backendGet<AssessmentAuthoringShell>(`/v1/assessment-authoring/exams/${examId}/shell`);
   },
 
+  openShell(examId: string): Promise<AssessmentAuthoringShell> {
+    return backendPost<AssessmentAuthoringShell>(`/v1/assessment-authoring/exams/${examId}/shell`);
+  },
+
+  getPreview(examId: string): Promise<AssessmentPreviewProjection> {
+    return backendGet<AssessmentPreviewProjection>(
+      `/v1/assessment-authoring/exams/${examId}/preview`
+    );
+  },
+
+  loadSampleExam(
+    examId: string,
+    request: LoadSampleExamRequest
+  ): Promise<AssessmentAuthoringShell> {
+    return backendPost<AssessmentAuthoringShell, LoadSampleExamRequest>(
+      `/v1/assessment-authoring/exams/${examId}/load-sample`,
+      request
+    );
+  },
+
   listQuestions(moduleId: string): Promise<AssessmentQuestionSummary[]> {
     return backendGet<AssessmentQuestionSummary[]>(
       `/v1/assessment-authoring/modules/${moduleId}/questions`
@@ -33,6 +58,16 @@ export const assessmentAuthoringApi = {
   createQuestion(moduleId: string): Promise<AssessmentQuestionDetail> {
     return backendPost<AssessmentQuestionDetail>(
       `/v1/assessment-authoring/modules/${moduleId}/questions`
+    );
+  },
+
+  batchCreateQuestions(
+    moduleId: string,
+    request: BatchCreateQuestionsRequest
+  ): Promise<BatchCreateQuestionsResult> {
+    return backendPost<BatchCreateQuestionsResult, BatchCreateQuestionsRequest>(
+      `/v1/assessment-authoring/modules/${moduleId}/questions/batch`,
+      request
     );
   },
 
@@ -76,11 +111,11 @@ export const assessmentAuthoringApi = {
     );
   },
 
-  bulkQuestions(request: BulkQuestionRequest): Promise<{
-    affectedQuestionIds: string[];
-    createdQuestionIds: string[];
-  }> {
-    return backendPost(`/v1/assessment-authoring/questions/bulk`, request);
+  bulkQuestions(request: BulkQuestionRequest): Promise<BulkQuestionResult> {
+    return backendPost<BulkQuestionResult, BulkQuestionRequest>(
+      `/v1/assessment-authoring/questions/bulk`,
+      request
+    );
   },
 
   updateSectionDeliverySettings(

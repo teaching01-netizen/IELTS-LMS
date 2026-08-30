@@ -491,6 +491,7 @@ export class ExamDeliveryService {
     actor: string,
     minutes: number,
     expectedActiveSectionKey?: string | null,
+    expectedRuntimeRevision?: number | null,
     _now: Date | string = new Date(),
   ): Promise<RuntimeMutationResult> {
     try {
@@ -501,6 +502,7 @@ export class ExamDeliveryService {
           actorId: actor,
           minutes,
           expectedActiveSectionKey: expectedActiveSectionKey ?? undefined,
+          expectedRuntimeRevision: expectedRuntimeRevision ?? undefined,
         },
         { retries: 0 },
       );
@@ -521,6 +523,7 @@ export class ExamDeliveryService {
     scheduleId: string,
     actor: string,
     expectedActiveSectionKey?: string | null,
+    expectedRuntimeRevision?: number | null,
     _now: Date | string = new Date(),
   ): Promise<RuntimeMutationResult> {
     try {
@@ -530,6 +533,7 @@ export class ExamDeliveryService {
         {
           actorId: actor,
           expectedActiveSectionKey: expectedActiveSectionKey ?? undefined,
+          expectedRuntimeRevision: expectedRuntimeRevision ?? undefined,
         },
         { retries: 0 },
       );

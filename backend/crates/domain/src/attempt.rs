@@ -714,6 +714,22 @@ pub struct StudentLiveSessionContext {
     pub degraded_live_mode: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StudentMutationResultStatus {
+    Applied,
+    Duplicate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudentMutationResult {
+    pub mutation_id: String,
+    pub status: StudentMutationResultStatus,
+    pub server_seq: i64,
+    pub applied_revision: Option<i32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudentMutationBatchResponse {
@@ -724,6 +740,8 @@ pub struct StudentMutationBatchResponse {
     pub revision: i32,
     #[serde(default)]
     pub accepted_in_grace: bool,
+    #[serde(default)]
+    pub mutation_results: Vec<StudentMutationResult>,
     pub refreshed_attempt_credential: Option<crate::auth::IssueAttemptToken>,
 }
 

@@ -265,7 +265,10 @@ pub struct AccountActivationRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudentEntryRequest {
-    pub schedule_id: String,
+    #[serde(default)]
+    pub schedule_id: Option<String>,
+    #[serde(default)]
+    pub access_link_id: Option<String>,
     pub wcode: String,
     pub email: String,
     pub student_name: String,

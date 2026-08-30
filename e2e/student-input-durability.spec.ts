@@ -85,6 +85,22 @@ test.describe('Student iPad autosave durability (runtime-backed)', () => {
     const page = await context.newPage();
 
     const delayedBatches: Array<{ values: string[]; delayMs: number }> = [];
+    const studentRequestUrls: string[] = [];
+    const studentResponses: string[] = [];
+    const studentErrorBodies: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/student/sessions/')) {
+        studentRequestUrls.push(`${request.method()} ${request.url()}`);
+      }
+    });
+    page.on('response', (response) => {
+      if (response.url().includes('/student/sessions/')) {
+        studentResponses.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+        if (response.status() >= 400) {
+          void response.text().then((body) => studentErrorBodies.push(`${response.status()} ${response.url()} ${body.slice(0, 1000)}`)).catch(() => undefined);
+        }
+      }
+    });
     let seenMutationBatches = 0;
     await page.route(
       `**/api/v1/student/sessions/${manifest.student.scheduleId}/mutations:batch`,
@@ -111,14 +127,16 @@ test.describe('Student iPad autosave durability (runtime-backed)', () => {
     await answerField.click();
     await answerField.type(earlyValue, { delay: 3 });
     await focusSwitchTarget.click();
+    await page.getByRole('button', { name: 'Close question navigator' }).click();
 
     await expect
-      .poll(() => seenMutationBatches, { timeout: 20_000 })
+      .poll(() => seenMutationBatches, { timeout: 20_000, message: `mutation batch not observed; requests: ${studentRequestUrls.join(' | ')}; responses: ${studentResponses.join(' | ')}; errors: ${studentErrorBodies.join(' | ')}` })
       .toBeGreaterThanOrEqual(1);
 
     await answerField.click();
     await answerField.fill(finalValue);
     await focusSwitchTarget.click();
+    await page.getByRole('button', { name: 'Close question navigator' }).click();
 
     await expect
       .poll(async () => {

@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use chrono::Utc;
 use ielts_backend_application::assessment_delivery::{
     AssessmentDeliveryError, AssessmentDeliveryService,
 };
@@ -11,6 +12,7 @@ use ielts_backend_domain::assessment::{
     AssessmentResponseRequest, AssessmentResponseSnapshot, AssessmentResult,
     AssessmentSubmitRequest,
 };
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
@@ -37,6 +39,16 @@ fn map_error(error: AssessmentDeliveryError) -> ApiError {
         AssessmentDeliveryError::Conflict(message) => {
             ApiError::new(StatusCode::CONFLICT, "ASSESSMENT_CONFLICT", &message)
         }
+        AssessmentDeliveryError::StructuredConflict { reason, message } => {
+            ApiError::new(StatusCode::CONFLICT, "ASSESSMENT_CONFLICT", &message)
+                .with_details(json!({ "reason": reason.as_str() }))
+        }
+        AssessmentDeliveryError::ActiveSessionSuperseded => ApiError::new(
+            StatusCode::CONFLICT,
+            "ACTIVE_SESSION_SUPERSEDED",
+            "A newer student session owns this attempt.",
+        )
+        .with_details(json!({ "reason": "ACTIVE_SESSION_SUPERSEDED" })),
         AssessmentDeliveryError::Validation(message) => ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "VALIDATION_ERROR",
@@ -66,6 +78,23 @@ fn ensure_schedule(principal: &AttemptPrincipal, schedule_id: &str) -> Result<St
     Ok(principal.authorization.claims.attempt_id.clone())
 }
 
+async fn ensure_active_writer(
+    state: &AppState,
+    principal: &AttemptPrincipal,
+    schedule_id: &str,
+) -> Result<String, ApiError> {
+    let attempt_id = ensure_schedule(principal, schedule_id)?;
+    AssessmentDeliveryService::new(state.db_pool())
+        .ensure_active_writer(
+            schedule_id,
+            &attempt_id,
+            &principal.authorization.claims.client_session_id,
+        )
+        .await
+        .map_err(map_error)?;
+    Ok(attempt_id)
+}
+
 pub async fn bootstrap(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
@@ -88,13 +117,15 @@ pub async fn save_response(
     Path((schedule_id, exam_question_id)): Path<(Uuid, Uuid)>,
     Json(request): Json<AssessmentResponseRequest>,
 ) -> Result<ApiResponse<AssessmentResponseSnapshot>, ApiError> {
+    let server_received_at = Utc::now();
     let schedule_id = schedule_id.to_string();
-    let attempt_id = ensure_schedule(&principal, &schedule_id)?;
+    let attempt_id = ensure_active_writer(&state, &principal, &schedule_id).await?;
     let payload = AssessmentDeliveryService::new(state.db_pool())
-        .save_response(
+        .save_response_at(
             &schedule_id,
             &attempt_id,
             &exam_question_id.to_string(),
+            server_received_at,
             request,
         )
         .await
@@ -110,15 +141,28 @@ pub async fn start_module(
     Json(request): Json<AssessmentModuleStartRequest>,
 ) -> Result<ApiResponse<AssessmentDeliveryBootstrap>, ApiError> {
     let schedule_id = schedule_id.to_string();
-    let attempt_id = ensure_schedule(&principal, &schedule_id)?;
+    let attempt_id = ensure_active_writer(&state, &principal, &schedule_id).await?;
     let payload = AssessmentDeliveryService::new(state.db_pool())
         .start_module(&schedule_id, &attempt_id, request)
         .await
         .map_err(map_error)?;
+    let revision = payload
+        .attempt
+        .module_attempts
+        .iter()
+        .map(|module| i64::from(module.revision))
+        .max()
+        .unwrap_or(0);
     state.publish_live_update(ielts_backend_domain::schedule::LiveUpdateEvent {
         kind: "attempt".to_owned(),
-        id: attempt_id,
-        revision: 0,
+        id: attempt_id.clone(),
+        revision,
+        event: "sat_module_started".to_owned(),
+    });
+    state.publish_live_update(ielts_backend_domain::schedule::LiveUpdateEvent {
+        kind: "schedule_roster".to_owned(),
+        id: schedule_id,
+        revision,
         event: "sat_module_started".to_owned(),
     });
     Ok(ApiResponse::success_with_request_id(payload, request_id.0))
@@ -132,11 +176,30 @@ pub async fn submit_module(
     Json(request): Json<AssessmentModuleSubmitRequest>,
 ) -> Result<ApiResponse<AssessmentDeliveryBootstrap>, ApiError> {
     let schedule_id = schedule_id.to_string();
-    let attempt_id = ensure_schedule(&principal, &schedule_id)?;
+    let attempt_id = ensure_active_writer(&state, &principal, &schedule_id).await?;
     let payload = AssessmentDeliveryService::new(state.db_pool())
         .submit_module(&schedule_id, &attempt_id, request)
         .await
         .map_err(map_error)?;
+    let revision = payload
+        .attempt
+        .module_attempts
+        .iter()
+        .map(|module| i64::from(module.revision))
+        .max()
+        .unwrap_or(0);
+    state.publish_live_update(ielts_backend_domain::schedule::LiveUpdateEvent {
+        kind: "attempt".to_owned(),
+        id: attempt_id,
+        revision,
+        event: "sat_module_submitted".to_owned(),
+    });
+    state.publish_live_update(ielts_backend_domain::schedule::LiveUpdateEvent {
+        kind: "schedule_roster".to_owned(),
+        id: schedule_id,
+        revision,
+        event: "sat_module_submitted".to_owned(),
+    });
     Ok(ApiResponse::success_with_request_id(payload, request_id.0))
 }
 
@@ -148,7 +211,7 @@ pub async fn submit_assessment(
     Json(request): Json<AssessmentSubmitRequest>,
 ) -> Result<ApiResponse<AssessmentResult>, ApiError> {
     let schedule_id = schedule_id.to_string();
-    let attempt_id = ensure_schedule(&principal, &schedule_id)?;
+    let attempt_id = ensure_active_writer(&state, &principal, &schedule_id).await?;
     let payload = AssessmentDeliveryService::new(state.db_pool())
         .complete_assessment(&schedule_id, &attempt_id, request)
         .await

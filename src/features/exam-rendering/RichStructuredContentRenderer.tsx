@@ -8,11 +8,15 @@ import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
 import "katex/dist/katex.min.css";
 import type { StructuredContent } from "./api/assessmentContracts";
-import { SatImage } from "../exam-authoring/editor/SatImageExtension";
-import { documentFromStructuredContent } from "../exam-authoring/editor/richContent";
+import { SatImage } from "../exam-authoring/api/renderingPublic";
+import { documentFromStructuredContent } from "../exam-authoring/api/renderingPublic";
 
 const extensions = [
-  StarterKit.configure({ codeBlock: false, blockquote: false, heading: { levels: [2, 3] } }),
+  StarterKit.configure({
+    codeBlock: false,
+    blockquote: false,
+    heading: { levels: [2, 3] },
+  }),
   Mathematics.configure({ katexOptions: { throwOnError: false, strict: false } }),
   TableKit.configure({ table: { resizable: false } }),
   Subscript,
@@ -21,7 +25,7 @@ const extensions = [
 ];
 
 export function RichStructuredContentRenderer({ content }: { content: StructuredContent }) {
-  const initial = useMemo(() => documentFromStructuredContent(content), []);
+  const initial = useMemo(() => documentFromStructuredContent(content), [content]);
   const editor = useEditor({
     extensions,
     content: initial as JSONContent,

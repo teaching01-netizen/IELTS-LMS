@@ -1,6 +1,6 @@
 import type { DeliveredQuestion, QuestionRevision } from "./api/assessmentContracts";
 import { StructuredContentRenderer } from "./StructuredContentRenderer";
-import { hasStructuredContent } from "../exam-authoring/editor/richContent";
+import { hasStructuredContent } from "../exam-authoring/api/renderingPublic";
 import { SingleChoiceAnswer } from "./answers/SingleChoiceAnswer";
 import { StudentProducedAnswer } from "./answers/StudentProducedAnswer";
 

@@ -291,7 +291,10 @@ struct ApiLegacyMutationBatchRequest {
 #[serde(rename_all = "camelCase")]
 struct ApiMutationCommand {
     mutation_id: String,
-    base_revision: i32,
+    // Compatibility-only. New clients do not send a per-command revision; the server
+    // serializes attempt mutations under the attempt row lock and mutationId is idempotent.
+    #[serde(default, rename = "baseRevision")]
+    _legacy_base_revision: Option<i32>,
     #[serde(flatten)]
     command: ApiMutationCommandPayload,
 }
@@ -435,7 +438,7 @@ fn parse_mutation_batch_request(
                 seq: (index + 1) as i64,
                 timestamp: Utc::now(),
                 command: mutation.command.command(),
-                base_revision: Some(mutation.base_revision),
+                base_revision: None,
             })
             .collect();
         return Ok((parsed_new.attempt_id, mutations));
@@ -652,6 +655,7 @@ pub async fn apply_mutation_batch(
     Path((schedule_id, _batch)): Path<(Uuid, String)>,
     Json(payload): Json<Value>,
 ) -> Result<ApiResponse<StudentMutationBatchResponse>, ApiError> {
+    let server_received_at = Utc::now();
     let (request_attempt_id, request_mutations) = parse_mutation_batch_request(payload)?;
     let attempt_id = principal.authorization.claims.attempt_id.clone();
     let sampled_success_logs = header_bool(&headers, STUDENT_LIFECYCLE_SAMPLE_HEADER);
@@ -720,9 +724,10 @@ pub async fn apply_mutation_batch(
     let service = delivery_service(&state);
     let started = Instant::now();
     let mut result = match service
-        .apply_mutation_batch(
+        .apply_mutation_batch_at(
             schedule_id,
             req,
+            server_received_at,
             // Public student mutation API is operation-command + full response only.
             MutationBatchResponseMode::Full,
             extract_idempotency_key(&headers)?,
@@ -732,14 +737,13 @@ pub async fn apply_mutation_batch(
         Ok(result) => result,
         Err(err) => {
             if let DeliveryError::Conflict {
-                reason: Some(DeliveryConflictReason::AttemptSubmitted),
+                reason: Some(DeliveryConflictReason::DeadlineExpired),
                 ..
             } = &err
             {
-                state.telemetry.observe_post_submit_grace_rejected();
                 state
                     .telemetry
-                    .observe_student_answer_loss_risk("post_submit_grace_elapsed");
+                    .observe_student_answer_loss_risk("deadline_expired_write_rejected");
             }
             let expected_section_transition_conflict = matches!(
                 &err,
@@ -747,6 +751,7 @@ pub async fn apply_mutation_batch(
                     reason: Some(
                         DeliveryConflictReason::SectionMismatch
                             | DeliveryConflictReason::ObjectiveLocked
+                            | DeliveryConflictReason::DeadlineExpired
                     ),
                     ..
                 }
@@ -792,9 +797,6 @@ pub async fn apply_mutation_batch(
         result.applied_mutation_count,
         result.applied_mutation_count,
     );
-    if result.accepted_in_grace && result.applied_mutation_count > 0 {
-        state.telemetry.observe_post_submit_grace_accepted();
-    }
     if sampled_success_logs {
         tracing::info!(
             event = "student_save_lifecycle",
@@ -1558,12 +1560,11 @@ mod tests {
     }
 
     #[test]
-    fn mutation_batch_accepts_allowlisted_command_and_preserves_base_revision() {
+    fn mutation_batch_accepts_allowlisted_command_without_revision_oracle() {
         let payload = json!({
             "attemptId": "attempt-1",
             "mutations": [{
                 "mutationId": "m-1",
-                "baseRevision": 7,
                 "type": "SetSlot",
                 "questionId": "q1",
                 "slotIndex": 2,
@@ -1574,7 +1575,7 @@ mod tests {
         let parsed = serde_json::from_value::<ApiMutationBatchRequest>(payload).unwrap();
         assert_eq!(parsed.mutations.len(), 1);
         let command = &parsed.mutations[0];
-        assert_eq!(command.base_revision, 7);
+        assert_eq!(command._legacy_base_revision, None);
         match &command.command {
             ApiMutationCommandPayload::SetSlot {
                 question_id,
@@ -1590,7 +1591,7 @@ mod tests {
     }
 
     #[test]
-    fn mutation_batch_accepts_set_flag_and_preserves_base_revision() {
+    fn mutation_batch_accepts_legacy_base_revision_but_does_not_use_it() {
         let payload = json!({
             "attemptId": "attempt-1",
             "mutations": [{
@@ -1613,7 +1614,7 @@ mod tests {
         assert_eq!(attempt_id, "attempt-1");
         assert_eq!(mutations.len(), 2);
         assert_eq!(mutations[0].id, "m-flag-1");
-        assert_eq!(mutations[0].base_revision, Some(7));
+        assert_eq!(mutations[0].base_revision, None);
         assert_eq!(
             mutations[0].command,
             MutationCommand::Flag(QuestionValueMutationPayload {
@@ -1622,7 +1623,7 @@ mod tests {
             })
         );
         assert_eq!(mutations[1].id, "m-flag-2");
-        assert_eq!(mutations[1].base_revision, Some(8));
+        assert_eq!(mutations[1].base_revision, None);
         assert_eq!(
             mutations[1].command,
             MutationCommand::Flag(QuestionValueMutationPayload {

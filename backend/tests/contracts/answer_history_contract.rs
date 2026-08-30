@@ -12,13 +12,14 @@ use uuid::Uuid;
 
 use ielts_backend_api::{router::build_router, state::AppState};
 use ielts_backend_application::{
-    builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
+    builder::BuilderService, delivery::DeliveryService, grading::GradingService,
+    scheduling::SchedulingService,
 };
 use ielts_backend_domain::{
     attempt::{StudentBootstrapRequest, StudentSubmitRequest},
     auth::UserRole,
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
-    schedule::CreateScheduleRequest,
+    schedule::{CreateScheduleRequest, RuntimeCommandAction, RuntimeCommandRequest},
 };
 use ielts_backend_infrastructure::{
     actor_context::{ActorContext, ActorRole},
@@ -38,6 +39,34 @@ const ANSWER_HISTORY_MIGRATIONS: &[&str] = &[
     "0008_grading_results.sql",
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
+    "0011_outbox_notify_trigger.sql",
+    "0012_registration_fields.sql",
+    "0013_proctor_presence_unique.sql",
+    "0014_student_attempt_presence.sql",
+    "0015_operation_write_hardening.sql",
+    "0016_attempt_mutation_id_uniqueness.sql",
+    "0017_production_hardening.sql",
+    "0018_exam_day_concurrency_hardening.sql",
+    "0019_violation_id_idempotency.sql",
+    "0020_schedule_role_display_names.sql",
+    "0021_attempt_finalization_consistency.sql",
+    "0022_attempt_submission_ledger.sql",
+    "0023_sort_memory_hotpath_indexes.sql",
+    "0024_projection_sort_hardening.sql",
+    "0025_join_storm_admission_queue.sql",
+    "0026_relax_access_code_constraints.sql",
+    "0027_grading_objective_overrides.sql",
+    "0028_grading_objective_grading_source.sql",
+    "0029_release_events_timestamp_precision.sql",
+    "0030_outbox_retry_policy.sql",
+    "0031_grading_export_profiles.sql",
+    "0032_provider_neutral_sat.sql",
+    "0033_sat_runtime_authoring_hardening.sql",
+    "0034_assessment_access_links.sql",
+    "0035_autosave_durability_hardening.sql",
+    "0036_question_revision_updated_by.sql",
+    "0037_runtime_timing_model.sql",
+    "0038_sat_section_timing_model.sql",
 ];
 
 #[tokio::test]
@@ -972,7 +1001,8 @@ async fn bootstrap_and_submit(
         .await
         .expect("bootstrap attempt");
 
-    let attempt_id = context.attempt.expect("attempt").id;
+    let attempt = context.attempt.expect("attempt");
+    let attempt_id = attempt.id.clone();
 
     service
         .submit_attempt(
@@ -983,7 +1013,7 @@ async fn bootstrap_and_submit(
                 answers: Some(answers),
                 writing_answers: Some(writing_answers),
                 flags: Some(json!({})),
-                last_seen_revision: Some(0),
+                last_seen_revision: Some(attempt.revision),
                 submission_id: Some(format!("submission-{candidate_id}")),
                 client_session_id: None,
                 client_final_seq: Some(0),
@@ -995,6 +1025,11 @@ async fn bootstrap_and_submit(
         )
         .await
         .expect("submit attempt");
+
+    GradingService::new(pool.clone())
+        .run_projection_cycle(Default::default())
+        .await
+        .expect("project submitted attempt into grading/answer-history tables");
 
     Uuid::parse_str(&attempt_id).unwrap()
 }
@@ -1024,8 +1059,25 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             exam.id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
-                    "reading": {"questions": [{"id": "q1"}, {"id": "q2"}]},
-                    "writing": {"tasks": [{"id": "task1"}]}
+                    "reading": {
+                        "passages": [{
+                            "id": "reading-1",
+                            "title": "Answer History Passage",
+                            "blocks": [{
+                                "id": "reading-block-1",
+                                "type": "SHORT_ANSWER",
+                                "questions": [
+                                    {"id": "q1", "prompt": "Question 1", "correctAnswer": "alpha"},
+                                    {"id": "q2", "prompt": "Question 2", "correctAnswer": "beta"}
+                                ]
+                            }]
+                        }]
+                    },
+                    "writing": {
+                        "task1Prompt": "Summarise the information.",
+                        "task2Prompt": "Discuss both views.",
+                        "tasks": [{"id": "task1"}]
+                    }
                 }),
                 config_snapshot: sample_delivery_config(),
                 revision: exam.revision,
@@ -1049,7 +1101,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .await
         .unwrap();
 
-    SchedulingService::new(pool.clone())
+    let scheduling = SchedulingService::new(pool.clone());
+    let schedule = scheduling
         .create_schedule(
             &actor,
             CreateScheduleRequest {
@@ -1067,15 +1120,31 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             },
         )
         .await
-        .unwrap()
+        .unwrap();
+    scheduling
+        .apply_runtime_command(
+            &actor,
+            Uuid::parse_str(&schedule.id).unwrap(),
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("answer history contract fixture".to_owned()),
+            },
+        )
+        .await
+        .expect("start answer-history runtime");
+    schedule
 }
 
 fn sample_delivery_config() -> serde_json::Value {
     json!({
         "sections": {
-            "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5},
-            "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0},
-            "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 10}
+            "listening": {"enabled": false, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 0},
+            "reading": {
+                "enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0,
+                "bandScoreTable": {"2": 9.0, "1": 7.0, "0": 0.0}
+            },
+            "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 0},
+            "speaking": {"enabled": false, "label": "Speaking", "order": 4, "duration": 15, "gapAfterMinutes": 0}
         }
     })
 }

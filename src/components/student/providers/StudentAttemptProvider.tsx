@@ -611,6 +611,11 @@ export function StudentAttemptProvider({
           studentAttemptRepository.clearPendingMutations(attemptId),
         getAttemptsByScheduleId: (scheduleId) =>
           studentAttemptRepository.getAttemptsByScheduleId(scheduleId),
+        getCanonicalAttempt: (attempt) =>
+          studentAttemptRepository.getCanonicalAttemptByScheduleId(
+            attempt.scheduleId,
+            attempt.studentKey
+          ),
       });
 
       return outbox.flushNow();

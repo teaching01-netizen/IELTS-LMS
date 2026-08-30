@@ -49,6 +49,7 @@ function createDeps(overrides?: {
     : vi.fn(() => Promise.resolve());
   const clearPendingMutations = vi.fn(() => Promise.resolve());
   const getAttemptsByScheduleId = vi.fn(() => Promise.resolve([attempt]));
+  const getCanonicalAttempt = vi.fn(() => Promise.resolve<StudentAttempt | null>(null));
 
   const mirror = new PendingMutationDurabilityMirror({
     debounceMs: 100,
@@ -76,6 +77,7 @@ function createDeps(overrides?: {
     saveAttempt,
     clearPendingMutations,
     getAttemptsByScheduleId,
+    getCanonicalAttempt,
     pendingMutations,
   };
 }
@@ -85,26 +87,57 @@ describe('studentMutationOutbox conflict handling', () => {
     localStorage.clear();
   });
 
-  it('ATTEMPT_SUBMITTED: calls onReplayAfterSubmit, resets mirror, clears watermarks', async () => {
+  it('ATTEMPT_SUBMITTED: preserves an unproven pending answer instead of reporting success', async () => {
     const deps = createDeps({
       conflictReason: 'ATTEMPT_SUBMITTED',
       saveAttemptError: new Error('conflict'),
     });
-
-    const outbox = createStudentMutationOutbox(deps);
-
-    // Add a pending mutation so flushNow has work to do
-    deps.mirror.setPendingMutations([makeMutation()], {
+    const pending = makeMutation({ id: 'mutation-unproven' });
+    deps.mirror.setPendingMutations([pending], {
       durableWriteMode: 'immediate',
       includesAnswerMutation: true,
       awaitPersistence: true,
     });
 
-    const result = await outbox.flushNow();
+    const result = await createStudentMutationOutbox(deps).flushNow();
+
+    expect(result).toBe(false);
+    expect(deps.onReplayAfterSubmit).toHaveBeenCalledTimes(1);
+    expect(deps.clearPendingMutations).not.toHaveBeenCalled();
+    expect(deps.clearAttemptMutationWatermark).not.toHaveBeenCalled();
+    expect(deps.mirror.getPendingMutations().map((mutation) => mutation.id)).toEqual([
+      'mutation-unproven',
+    ]);
+  });
+
+  it('ATTEMPT_SUBMITTED: clears only when the canonical final snapshot proves the pending answer', async () => {
+    const deps = createDeps({
+      conflictReason: 'ATTEMPT_SUBMITTED',
+      saveAttemptError: new Error('conflict'),
+    });
+    deps.getCanonicalAttempt.mockResolvedValue(makeAttempt({
+      phase: 'submitted',
+      submittedAt: '2026-07-05T11:00:00Z',
+      finalSubmission: {
+        submissionId: 'submission-1',
+        submittedAt: '2026-07-05T11:00:00Z',
+        answers: { q1: 'A' },
+        writingAnswers: {},
+        flags: {},
+      },
+    }));
+    deps.mirror.setPendingMutations([makeMutation({ id: 'mutation-proven', payload: { questionId: 'q1', value: 'A', interactionType: 'discrete' } })], {
+      durableWriteMode: 'immediate',
+      includesAnswerMutation: true,
+      awaitPersistence: true,
+    });
+
+    const result = await createStudentMutationOutbox(deps).flushNow();
 
     expect(result).toBe(true);
-    expect(deps.onReplayAfterSubmit).toHaveBeenCalledTimes(1);
+    expect(deps.clearPendingMutations).toHaveBeenCalledWith('attempt-1');
     expect(deps.clearAttemptMutationWatermark).toHaveBeenCalledTimes(1);
+    expect(deps.mirror.getPendingMutations()).toEqual([]);
   });
 
   it('SECTION_MISMATCH: returns false, syncs with saving/offline state', async () => {

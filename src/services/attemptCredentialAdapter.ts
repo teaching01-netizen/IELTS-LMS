@@ -4,7 +4,7 @@ import type { StudentAttempt } from '../types/studentAttempt';
 
 const STORAGE_KEY_ATTEMPT_CREDENTIALS = 'ielts_student_attempt_credentials_v1';
 
-interface BackendAttemptCredential {
+export interface BackendAttemptCredential {
   attemptToken: string;
   expiresAt: string;
 }
@@ -23,6 +23,15 @@ interface StoredAttemptCredential {
 export interface AttemptCredentialRef {
   id: string;
   scheduleId: string;
+}
+
+export interface AttemptCredentialRefreshRef extends AttemptCredentialRef {
+  candidateId: string;
+}
+
+export interface AttemptCredentialStatus {
+  expiresAt: string;
+  expiresAtMs: number;
 }
 
 function getBrowserStorage(type: 'localStorage' | 'sessionStorage'): Storage | null {
@@ -181,6 +190,29 @@ export function hasAttemptCredential(scheduleId: string, attemptId: string): boo
   );
 }
 
+export function getAttemptCredentialStatus(
+  scheduleId: string,
+  attemptId: string,
+): AttemptCredentialStatus | null {
+  const credential = loadAttemptCredential({ scheduleId, id: attemptId });
+  if (!credential) return null;
+  const expiresAtMs = Date.parse(credential.expiresAt);
+  return {
+    expiresAt: credential.expiresAt,
+    expiresAtMs,
+  };
+}
+
+export function isAttemptCredentialExpiringWithin(
+  scheduleId: string,
+  attemptId: string,
+  withinMs: number,
+  nowMs = Date.now(),
+): boolean {
+  const status = getAttemptCredentialStatus(scheduleId, attemptId);
+  return !status || !Number.isFinite(status.expiresAtMs) || status.expiresAtMs - nowMs <= withinMs;
+}
+
 export function buildAttemptAuthorizationHeader(attempt: AttemptCredentialRef): Record<string, string> {
   const credential = loadAttemptCredential(attempt);
   if (!credential) {
@@ -200,8 +232,8 @@ export function tryBuildAttemptAuthorizationHeader(
   }
 }
 
-export async function refreshAttemptCredentialForAttempt(
-  attempt: StudentAttempt,
+export async function refreshAttemptCredential(
+  attempt: AttemptCredentialRefreshRef,
   clientSessionId: string,
 ): Promise<boolean> {
   const session = await backendGet<BackendStudentSessionContextWithCredential>(
@@ -219,4 +251,11 @@ export async function refreshAttemptCredentialForAttempt(
 
   storeAttemptCredential(attempt, session.attemptCredential);
   return true;
+}
+
+export async function refreshAttemptCredentialForAttempt(
+  attempt: StudentAttempt,
+  clientSessionId: string,
+): Promise<boolean> {
+  return refreshAttemptCredential(attempt, clientSessionId);
 }

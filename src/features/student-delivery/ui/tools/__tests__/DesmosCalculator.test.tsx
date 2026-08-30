@@ -1,70 +1,52 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 import { DesmosCalculator } from '../DesmosCalculator';
-import type { DesmosCalculatorInstance, DesmosNamespace } from '../../../infrastructure/desmos/desmosTypes';
 
-class ResizeObserverStub {
-  observe() {}
-  disconnect() {}
-  unobserve() {}
-}
-
-function createCalculator(): DesmosCalculatorInstance {
-  return {
-    getState: vi.fn(() => ({ expressions: { list: [] } })),
-    setState: vi.fn(),
-    setBlank: vi.fn(),
-    resize: vi.fn(),
-    focusFirstExpression: vi.fn(),
-    observeEvent: vi.fn(),
-    unobserveEvent: vi.fn(),
-    destroy: vi.fn(),
-  };
-}
-
-function installDesmos(calculator: DesmosCalculatorInstance, scientificEnabled = true) {
-  const namespace: DesmosNamespace = {
-    enabledFeatures: { GraphingCalculator: true, ScientificCalculator: scientificEnabled },
-    GraphingCalculator: vi.fn(() => calculator),
-    ScientificCalculator: vi.fn(() => calculator),
-  };
-  window.Desmos = namespace;
-  return namespace;
-}
 describe('DesmosCalculator', () => {
-  beforeEach(() => {
-    delete window.Desmos;
-    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
-  });
+  it('embeds the official College Board scientific and graphing calculators', () => {
+    render(<DesmosCalculator mode="scientific" />);
 
-  it('uses the official scientific calculator and restores opaque state', async () => {
-    const calculator = createCalculator();
-    const Desmos = installDesmos(calculator);
-    const onStateChange = vi.fn();
-    const initialState = { evaluator: { degreeMode: false } };
-    const { unmount } = render(
-      <DesmosCalculator mode="scientific" initialState={initialState} onStateChange={onStateChange} />,
+    const scientific = screen.getByTitle('Desmos scientific calculator, College Board testing version');
+    const graphing = screen.getByTitle('Desmos graphing calculator, College Board testing version');
+
+    expect(scientific).toHaveAttribute(
+      'src',
+      'https://www.desmos.com/testing/collegeboard/scientific?embed',
     );
-
-    await waitFor(() => expect(Desmos.ScientificCalculator).toHaveBeenCalledTimes(1));
-    expect(calculator.setState).toHaveBeenCalledWith(initialState);
-
-    const observeMock = vi.mocked(calculator.observeEvent);
-    const changeHandler = observeMock.mock.calls[0]?.[1];
-    changeHandler?.();
-    await new Promise((resolve) => window.setTimeout(resolve, 180));
-    expect(onStateChange).toHaveBeenCalledWith({ expressions: { list: [] } });
-
-    unmount();
-    expect(calculator.unobserveEvent).toHaveBeenCalledWith('change.sat-exam');
-    expect(calculator.destroy).toHaveBeenCalledTimes(1);
+    expect(graphing).toHaveAttribute(
+      'src',
+      'https://www.desmos.com/testing/collegeboard/graphing?embed',
+    );
+    expect(scientific).toHaveClass('block');
+    expect(graphing).toHaveClass('hidden');
   });
 
-  it('fails closed when scientific calculator entitlement is missing', async () => {
-    const calculator = createCalculator();
-    installDesmos(calculator, false);
-    render(<DesmosCalculator mode="scientific" onStateChange={vi.fn()} />);
-    expect(await screen.findByText('Calculator unavailable')).toBeInTheDocument();
-    expect(screen.getByText(/not enabled for this Desmos API key/i)).toBeInTheDocument();
+  it('keeps both embeds mounted when switching modes', () => {
+    const { rerender } = render(<DesmosCalculator mode="scientific" />);
+    const scientific = screen.getByTitle('Desmos scientific calculator, College Board testing version');
+    const graphing = screen.getByTitle('Desmos graphing calculator, College Board testing version');
+
+    fireEvent.load(scientific);
+    fireEvent.load(graphing);
+    rerender(<DesmosCalculator mode="graphing" />);
+
+    expect(scientific).toBeInTheDocument();
+    expect(graphing).toBeInTheDocument();
+    expect(scientific).toHaveClass('hidden');
+    expect(graphing).toHaveClass('block');
+    expect(screen.queryByText('Loading calculator…')).not.toBeInTheDocument();
+  });
+
+  it('removes the calculator iframe from keyboard interaction when the proctor pauses the exam', async () => {
+    const { rerender } = render(<DesmosCalculator mode="graphing" />);
+    const graphing = screen.getByTitle('Desmos graphing calculator, College Board testing version');
+    graphing.focus();
+    expect(document.activeElement).toBe(graphing);
+
+    rerender(<DesmosCalculator mode="graphing" disabled />);
+    await waitFor(() => expect(document.activeElement).not.toBe(graphing));
+    expect(graphing).toHaveAttribute('tabindex', '-1');
+    expect(graphing).toHaveAttribute('inert', '');
+    expect(screen.getByText('Paused by proctor')).toBeInTheDocument();
   });
 });

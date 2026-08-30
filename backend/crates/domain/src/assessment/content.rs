@@ -71,6 +71,7 @@ pub enum ContentNode {
     },
     Image {
         id: String,
+        #[serde(rename = "assetId", alias = "asset_id")]
         asset_id: String,
         alt: String,
         caption: Option<String>,

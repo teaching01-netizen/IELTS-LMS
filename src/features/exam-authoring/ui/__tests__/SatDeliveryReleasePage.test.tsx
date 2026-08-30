@@ -7,6 +7,7 @@ import type {
   AssessmentValidationIssue,
   AssessmentValidationReport,
 } from "../../contracts/assessment";
+import type { AssessmentReleaseState } from "../../contracts/release";
 import { SatDeliveryReleasePage } from "../SatDeliveryReleasePage";
 
 const updateMutation = vi.hoisted(() => ({
@@ -99,6 +100,36 @@ const readyReport: AssessmentValidationReport = {
   warnings: [],
 };
 
+const neverPublishedRelease: AssessmentReleaseState = {
+  examId: exam.id,
+  providerKey: "sat",
+  state: "never_published",
+  currentPublishedVersion: null,
+  workingDraft: { id: shell.versionId, parentVersionId: null, versionNumber: 1, revision: 12 },
+  summary: { candidateDurationSeconds: 4440, authoredQuestionCount: 81, deliveredQuestionCount: 54 },
+  access: { totalLinks: 0, liveLinks: 0, upcomingLinks: 0, linksOnCurrentRelease: 0, liveLinksOnPreviousReleases: 0 },
+};
+
+const publishedCurrentRelease: AssessmentReleaseState = {
+  ...neverPublishedRelease,
+  state: "published_current",
+  currentPublishedVersion: {
+    id: "published-v4",
+    versionNumber: 4,
+    revision: 1,
+    publishNotes: null,
+    publishedAt: "2026-08-29T03:26:24.000Z",
+  },
+  workingDraft: { id: shell.versionId, parentVersionId: "published-v4", versionNumber: 5, revision: 0 },
+  access: { totalLinks: 1, liveLinks: 1, upcomingLinks: 0, linksOnCurrentRelease: 0, liveLinksOnPreviousReleases: 1 },
+};
+
+const unpublishedChangesRelease: AssessmentReleaseState = {
+  ...publishedCurrentRelease,
+  state: "unpublished_changes",
+  workingDraft: { ...publishedCurrentRelease.workingDraft!, revision: 1 },
+};
+
 const blockingIssue: AssessmentValidationIssue = {
   code: "sat.metadata.domain.required",
   path: "examQuestion:q-17:metadata.domain",
@@ -110,12 +141,12 @@ function pageProps(overrides: Partial<ComponentProps<typeof SatDeliveryReleasePa
   return {
     exam,
     shell,
+    releaseState: neverPublishedRelease,
     isLoading: false,
     loadError: null,
     readiness: readyReport,
     isChecking: false,
     readinessError: null,
-    publishedVersion: null,
     isPublishing: false,
     publishError: null,
     onBackToBuilder: vi.fn(),
@@ -123,7 +154,7 @@ function pageProps(overrides: Partial<ComponentProps<typeof SatDeliveryReleasePa
     onRefreshReadiness: vi.fn().mockResolvedValue(undefined),
     onPublish: vi.fn().mockResolvedValue(undefined),
     onIssueClick: vi.fn(),
-    onCreateSchedule: vi.fn(),
+    onOpenStudentAccess: vi.fn(),
     ...overrides,
   };
 }
@@ -151,7 +182,7 @@ describe("SatDeliveryReleasePage", () => {
   it("enables publishing only for a checked, current, clean draft", () => {
     render(<SatDeliveryReleasePage {...pageProps()} />);
 
-    expect(screen.getByRole("button", { name: "Publish Version" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
     expect(screen.getByText("Ready to publish")).toBeInTheDocument();
   });
 
@@ -160,7 +191,7 @@ describe("SatDeliveryReleasePage", () => {
 
     fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
 
-    expect(screen.getByRole("button", { name: "Publish Version" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
     expect(screen.getByText("Save all delivery changes before publishing.")).toBeInTheDocument();
   });
 
@@ -177,7 +208,7 @@ describe("SatDeliveryReleasePage", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Publish Version" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
     expect(screen.getByText("1 recommendation")).toBeInTheDocument();
   });
   it("surfaces blockers and forwards question issue navigation", () => {
@@ -195,7 +226,7 @@ describe("SatDeliveryReleasePage", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "Publish Version" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /Choose the SAT domain/ }));
     expect(onIssueClick).toHaveBeenCalledWith(blockingIssue);
   });
@@ -204,44 +235,47 @@ describe("SatDeliveryReleasePage", () => {
     const onPublish = vi.fn().mockResolvedValue(undefined);
     render(<SatDeliveryReleasePage {...pageProps({ onPublish })} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Publish Version" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
     const dialog = screen.getByRole("dialog");
     expect(dialog).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("What changed in this release?"), {
       target: { value: "Delivery thresholds reviewed" },
     });
-    const publishButtons = screen.getAllByRole("button", { name: "Publish Version" });
+    const publishButtons = screen.getAllByRole("button", { name: "Publish" });
     fireEvent.click(publishButtons[publishButtons.length - 1]!);
 
     await waitFor(() => expect(onPublish).toHaveBeenCalledWith("Delivery thresholds reviewed"));
   });
-  it("hands a published immutable version off to Scheduling", () => {
-    const onCreateSchedule = vi.fn();
-    const onBackToExams = vi.fn();
+  it("treats an untouched continuation draft as already published", () => {
+    const onOpenStudentAccess = vi.fn();
     render(
       <SatDeliveryReleasePage
         {...pageProps({
-          publishedVersion: {
-            id: "version-1",
-            examId: exam.id,
-            versionNumber: 3,
-            revision: 13,
-            isDraft: false,
-            isPublished: true,
-            publishNotes: "Ready",
-            createdAt: "2026-08-28T08:00:00.000Z",
-          },
-          onCreateSchedule,
-          onBackToExams,
+          releaseState: publishedCurrentRelease,
+          readiness: null,
+          onOpenStudentAccess,
         })}
       />
     );
 
-    expect(screen.getByText("Version 3 is immutable and ready to schedule.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Create Schedule" }));
-    expect(onCreateSchedule).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Back to Exams" }));
-    expect(onBackToExams).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("heading", { name: "Published" })).toBeInTheDocument();
+    expect(screen.getByText("Version 4 is what students receive.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Publish" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Publish Update" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Student Access" }).at(-1)!);
+    expect(onOpenStudentAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("labels a changed continuation draft as an update while preserving the live release", () => {
+    render(
+      <SatDeliveryReleasePage
+        {...pageProps({ releaseState: unpublishedChangesRelease })}
+      />
+    );
+
+    expect(screen.getByText("Unpublished changes")).toBeInTheDocument();
+    expect(screen.getByText("Students still receive Version 4.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish Update" })).toBeEnabled();
   });
 });

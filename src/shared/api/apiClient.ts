@@ -35,6 +35,7 @@ export interface ApiRequestConfig {
   timeout?: number;
   retries?: number;
   signal?: AbortSignal;
+  skipUnauthorizedHandler?: boolean;
 }
 
 export interface ApiResponse<T = unknown> {
@@ -167,6 +168,7 @@ class ApiClient {
       timeout = this.defaultTimeout,
       retries = 3,
       signal,
+      skipUnauthorizedHandler = false,
     } = config;
 
     const url = `${this.baseURL}${endpoint}`;
@@ -235,7 +237,7 @@ class ApiClient {
         });
 
         if (!response.ok) {
-          if (response.status === 401 && this.unauthorizedHandler) {
+          if (response.status === 401 && this.unauthorizedHandler && !skipUnauthorizedHandler) {
             try {
               await this.unauthorizedHandler({ endpoint, method, requestId });
             } catch (handlerError) {

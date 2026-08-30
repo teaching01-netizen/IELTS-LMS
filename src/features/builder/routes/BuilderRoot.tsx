@@ -33,6 +33,8 @@ import {
 } from '../../../utils/cloneExamContent';
 import { getBuilderStateRecoveryIssue, reconcileBuilderState } from '../utils/builderStateRecovery';
 import { createAcademicSampleExamState } from '../../../utils/academicSampleExam';
+import { useOptionalAuthSession } from '../../auth/api/authSession';
+import { buildStaffDraftKey } from '../../../utils/staffDraftKey';
 
 const nowLabel = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -162,6 +164,8 @@ export function BuilderRoot() {
   const { examId } = useParams<{ examId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const authSession = useOptionalAuthSession();
+  const staffActorId = authSession?.session?.user.id ?? null;
   const {
     error,
     exam,
@@ -187,10 +191,12 @@ export function BuilderRoot() {
   });
   const [toasts, setToasts] = useState<GlobalToastItem[]>([]);
   const currentStateRef = useRef<ExamState | null>(null);
+  const recoveredBuilderDraftRef = useRef(false);
   const handleUpdateExamContentRef = useRef(handleUpdateExamContent);
 
   useEffect(() => {
     if (examId !== initializedExamId) {
+      recoveredBuilderDraftRef.current = false;
       setInitializedExamId(undefined);
     }
   }, [examId, initializedExamId]);
@@ -200,7 +206,7 @@ export function BuilderRoot() {
   }, [isSidebarCollapsed]);
 
   useEffect(() => {
-    if (state && examId && initializedExamId !== examId) {
+    if (state && examId && initializedExamId !== examId && !recoveredBuilderDraftRef.current) {
       const recoveredState = reconcileBuilderState(state);
       history.reset(recoveredState, 'Loaded exam');
       currentStateRef.current = recoveredState;
@@ -327,6 +333,21 @@ export function BuilderRoot() {
     retry: retrySave,
   } = useBuilderAutosave({
     save: (nextState) => handleUpdateExamContentRef.current(nextState),
+    durableKey: examId ? buildStaffDraftKey(staffActorId, 'exam-builder', examId) : null,
+    autoSaveRecovered: false,
+    onRecover: (recoveredState) => {
+      if (!examId) return;
+      const recovered = reconcileBuilderState(recoveredState);
+      recoveredBuilderDraftRef.current = true;
+      history.reset(recovered, 'Recovered local draft');
+      currentStateRef.current = recovered;
+      setInitializedExamId(examId);
+      pushToast({
+        variant: 'info',
+        title: 'Recovered unsaved changes',
+        message: 'This draft was restored from this device after an interrupted session.',
+      });
+    },
     onError: (error) => {
       pushToast({
         variant: 'error',
