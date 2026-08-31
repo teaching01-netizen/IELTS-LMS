@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowLeft,
-  ClipboardCheck,
-  Eye,
   FileSpreadsheet,
   ListChecks,
   MoreHorizontal,
@@ -55,6 +53,9 @@ import { WorkbookImportUndoBanner } from "./WorkbookImportUndoBanner";
 import { authoringMotion } from "./authoringMotion";
 import { useOptionalAuthSession } from "../../auth/api/authSession";
 import { buildStaffDraftKey } from "../../../utils/staffDraftKey";
+import { AuthoringSegmented } from "./AuthoringSegmented";
+import { ErrorSurface } from "../../../components/ui/ErrorSurface";
+import { LoadingSurface } from "../../../components/ui/LoadingSurface";
 
 export interface AuthoringWorkspaceProps {
   examId: string;
@@ -96,6 +97,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(false);
   const [focusField, setFocusField] = useState<string | null>(null);
+  const [topbarScrolled, setTopbarScrolled] = useState(false);
   const selectionAnchorRef = useRef<string | null>(null);
   const recoveredQuestionDraftKeyRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -159,6 +161,9 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     (sum, question) => sum + (question.readiness.status === "error" ? 1 : 0),
     0
   );
+  const progressPct = totalTarget
+    ? Math.min(100, Math.round((totalAuthored / totalTarget) * 100))
+    : 0;
 
   useEffect(() => {
     if (!shell) return;
@@ -835,15 +840,19 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     selectedModuleIndex,
   ]);
 
-  if (shellQuery.isLoading)
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f5f7] text-sm text-slate-500">
-        Opening SAT workspace…
-      </div>
-    );
+  if (shellQuery.isLoading) return <LoadingSurface label="Opening SAT workspace…" />;
   if (shellQuery.error || !shell)
     return (
-      <div className="p-8 text-sm text-red-700">Unable to load the SAT authoring workspace.</div>
+      <ErrorSurface
+        title="Unable to load the SAT authoring workspace"
+        description={
+          shellQuery.error instanceof Error
+            ? shellQuery.error.message
+            : "This SAT draft is unavailable right now."
+        }
+        actionLabel="Retry"
+        onAction={() => void shellQuery.refetch()}
+      />
     );
 
   const moveTargets =
@@ -853,17 +862,20 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     : 0;
 
   return (
-    <div className="sat-product sat-authoring flex h-screen min-h-[640px] flex-col overflow-hidden bg-[#f5f5f7] text-slate-950">
-      <header className="authoring-glass authoring-topbar z-50 shrink-0 border-b border-black/[0.07] px-2 py-1.5 sm:px-3">
-        <div className="mx-auto flex min-h-[52px] max-w-[1920px] items-center gap-1.5 sm:gap-2">
+    <div className="sat-product sat-authoring flex h-screen min-h-[640px] flex-col overflow-hidden bg-au-canvas text-slate-950">
+      <header
+        className="authoring-glass authoring-topbar z-50 shrink-0 border-b border-black/[0.06] px-2 py-1.5 sm:px-3"
+        data-scrolled={topbarScrolled ? "true" : undefined}
+      >
+        <div className="mx-auto flex min-h-[52px] max-w-[1920px] items-center gap-1 sm:gap-2">
           <button
             type="button"
             onClick={async () => {
               if (await flushBeforeNavigation()) navigate("/sat/exams");
             }}
-            className="authoring-interactive flex min-h-11 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[11px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]"
+            className="authoring-interactive flex min-h-10 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
             aria-label="Back to SAT Exam Library"
-            title="Back to SAT workspace"
+            title="Back to SAT Exam Library"
           >
             <ArrowLeft size={15} aria-hidden="true" />
             <span className="hidden lg:inline">Exam Library</span>
@@ -871,32 +883,49 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
           <div className="mx-0.5 h-5 w-px shrink-0 bg-black/[0.08]" aria-hidden="true" />
           <div className="min-w-0 flex-1 px-1">
             <div className="flex items-center gap-2">
-              <h1 className="truncate text-[14px] font-semibold tracking-[-0.01em]">{examTitle}</h1>
-              <span className="rounded-md bg-black/[0.05] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-slate-600">
+              <h1 className="truncate text-[13px] font-semibold tracking-[-0.012em]">{examTitle}</h1>
+              <span className="shrink-0 rounded-full bg-black/[0.05] px-2 py-0.5 text-[10px] font-semibold tracking-[0.02em] text-slate-600">
                 Draft
               </span>
             </div>
-            <p className="mt-0.5 hidden text-[10px] tabular-nums text-slate-500 sm:block">
-              {totalAuthored} of {totalTarget} questions authored
-            </p>
+            <div className="mt-1 flex items-center gap-2">
+              <p className="truncate text-[11px] tabular-nums text-slate-500">
+                {totalAuthored} of {totalTarget} questions authored
+              </p>
+              <span
+                className="hidden h-[3px] w-14 shrink-0 overflow-hidden rounded-full bg-black/[0.07] sm:block"
+                aria-hidden="true"
+              >
+                <span
+                  className="block h-full rounded-full bg-au-accent transition-[width] duration-500 ease-out"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </span>
+            </div>
           </div>
-          <div
-            className="authoring-segmented flex items-center rounded-[10px] p-0.5"
-            aria-label="Authoring view"
-          >
-            <ToolbarMode
-              active={workspaceMode === "build"}
-              onClick={() => setWorkspaceMode("build")}
-              icon={<PencilLine size={12} />}
-              label="Build"
-            />
-            <ToolbarMode
-              active={workspaceMode === "issues"}
-              onClick={() => void openIssues()}
-              icon={<ListChecks size={12} />}
-              label={`Issues${totalErrors ? ` ${totalErrors}` : ""}`}
-            />
-          </div>
+          <AuthoringSegmented
+            className="shrink-0"
+            ariaLabel="Authoring view"
+            layoutId="sat-authoring-mode"
+            value={workspaceMode}
+            onChange={(mode) => (mode === "issues" ? void openIssues() : setWorkspaceMode(mode))}
+            options={[
+              { value: "build", label: "Build" },
+              {
+                value: "issues",
+                label: (
+                  <>
+                    Issues
+                    {totalErrors ? (
+                      <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-au-danger-tint px-1.5 text-[10px] font-semibold tabular-nums text-au-danger-text">
+                        {totalErrors}
+                      </span>
+                    ) : null}
+                  </>
+                ),
+              },
+            ]}
+          />
           <div className="hidden md:block">
             <SaveStatusIndicator
               status={autosave.status}
@@ -908,7 +937,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             type="button"
             disabled={!shell}
             onClick={() => void openWorkbookImport()}
-            className="authoring-interactive hidden min-h-10 items-center gap-1.5 rounded-[10px] px-3 text-[11px] font-semibold text-[#0066cc] hover:bg-[#0071e3]/[0.07] disabled:opacity-30 sm:flex"
+            className="authoring-interactive hidden min-h-9 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 disabled:opacity-30 sm:flex"
             title="Import the complete SAT from an Excel workbook"
           >
             <FileSpreadsheet size={14} aria-hidden="true" />
@@ -918,7 +947,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             <button
               type="button"
               onClick={() => setToolbarMenuOpen((open) => !open)}
-              className="authoring-interactive flex h-10 w-10 items-center justify-center rounded-[10px] text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]"
+              className="authoring-interactive flex h-9 w-9 items-center justify-center rounded-[10px] text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
               aria-label="More authoring actions"
               aria-expanded={toolbarMenuOpen}
               aria-haspopup="menu"
@@ -928,7 +957,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             {toolbarMenuOpen ? (
               <div
                 role="menu"
-                className="absolute right-0 top-11 z-[70] min-w-48 rounded-[12px] border border-black/[0.09] bg-white p-1.5 shadow-[0_12px_36px_rgba(0,0,0,0.14)]"
+                className="au-elevation-menu absolute right-0 top-11 z-[70] min-w-52 rounded-[12px] border border-black/[0.08] bg-white p-1.5"
               >
                 <button
                   type="button"
@@ -937,7 +966,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                     setToolbarMenuOpen(false);
                     void openWorkbookImport();
                   }}
-                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[11px] font-semibold text-slate-700 hover:bg-black/[0.04] sm:hidden"
+                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[12px] font-semibold text-slate-700 hover:bg-black/[0.04] sm:hidden"
                 >
                   <FileSpreadsheet size={13} aria-hidden="true" />
                   Import from Excel…
@@ -950,7 +979,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                     setToolbarMenuOpen(false);
                     setSampleDialogOpen(true);
                   }}
-                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[11px] font-semibold text-slate-700 hover:bg-black/[0.04] disabled:opacity-40"
+                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[12px] font-semibold text-slate-700 hover:bg-black/[0.04] disabled:opacity-40"
                   title="Replace this draft with a complete 147-question sample SAT"
                 >
                   <Sparkles size={13} aria-hidden="true" />
@@ -966,9 +995,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/preview`);
             }}
             title="Open the full SAT using the real student delivery renderer"
-            className="authoring-interactive hidden min-h-10 items-center gap-1.5 rounded-[10px] px-3 text-[11px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 disabled:opacity-30 md:flex"
+            className="authoring-interactive hidden min-h-9 items-center rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 disabled:opacity-30 md:flex"
           >
-            <Eye size={13} aria-hidden="true" />
             Preview
           </button>
           <button
@@ -976,16 +1004,18 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             onClick={async () => {
               if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/release`);
             }}
-            className="authoring-interactive flex min-h-10 items-center gap-1.5 rounded-[10px] bg-[#0071e3] px-3.5 text-[11px] font-semibold text-white hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3] focus-visible:ring-offset-2"
+            className="authoring-interactive flex min-h-9 shrink-0 items-center rounded-[10px] bg-au-accent px-3.5 text-[12px] font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2"
           >
-            <ClipboardCheck size={13} aria-hidden="true" />
             Release
           </button>
         </div>
       </header>
 
       {navigationError ? (
-        <div className="shrink-0 border-b border-red-100 bg-red-50 px-5 py-2 text-center text-[11px] font-medium text-red-700">
+        <div
+          role="alert"
+          className="shrink-0 border-b border-au-danger/15 bg-au-danger-tint px-5 py-2 text-center text-[12px] font-medium text-au-danger-text"
+        >
           {navigationError}
         </div>
       ) : null}
@@ -1044,47 +1074,47 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             />
           )
         ) : (
-          <div className="flex w-[430px] items-center justify-center border-r border-black/[0.06] bg-white p-8 text-center text-xs text-slate-400">
+          <div className="flex w-[430px] min-w-[360px] items-center justify-center border-r border-black/[0.06] bg-white p-8 text-center text-[12px] text-slate-500">
             Choose a SAT module.
           </div>
         )}
 
-        <section className="authoring-editor-canvas min-w-[560px] flex-1 overflow-y-auto">
-          <AnimatePresence mode="popLayout" initial={false}>
-            {draft ? (
-              <motion.div
-                key={selectedExamQuestionId ?? draft.id}
-                initial={{ opacity: reduceMotion ? 1 : 0.96 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: reduceMotion ? 1 : 0.94 }}
-                transition={reduceMotion ? { duration: 0.04 } : authoringMotion.question}
-              >
-                <QuestionEditor
-                  question={draft}
-                  {...(selectedModuleIndex >= 0 ? { questionNumber: selectedModuleIndex + 1 } : {})}
-                  saveStatus={autosave.status}
-                  onChange={handleChange}
-                  onSaveNow={() => void handleSaveNow()}
-                  onSaveAndNext={() => void handleSaveAndNext()}
-                  keepMetadataForNext={keepMetadataForNext}
-                  onKeepMetadataForNextChange={setKeepMetadataForNext}
-                  onDuplicate={() => void handleDuplicate()}
-                  onDelete={() => void handleDelete()}
-                />
-              </motion.div>
-            ) : questionQuery.isLoading && selectedExamQuestionId ? (
-              <EditorSkeleton key="loading" />
-            ) : (
-              <EmptyEditor
-                key="empty"
-                moduleTitle={selectedModule?.title ?? null}
-                {...(selectedModule &&
-                selectedModule.questions.length < selectedModule.targetQuestionCount
-                  ? { onCreate: () => void handleCreateQuestion() }
-                  : {})}
+        <section
+          className="authoring-editor-canvas min-w-[560px] flex-1 overflow-y-auto"
+          onScroll={(event) => setTopbarScrolled(event.currentTarget.scrollTop > 6)}
+        >
+          {draft ? (
+            <motion.div
+              key={selectedExamQuestionId ?? draft.id}
+              initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={reduceMotion ? { duration: 0.04 } : authoringMotion.state}
+            >
+              <QuestionEditor
+                question={draft}
+                {...(selectedModuleIndex >= 0 ? { questionNumber: selectedModuleIndex + 1 } : {})}
+                saveStatus={autosave.status}
+                onChange={handleChange}
+                onSaveNow={() => void handleSaveNow()}
+                onSaveAndNext={() => void handleSaveAndNext()}
+                keepMetadataForNext={keepMetadataForNext}
+                onKeepMetadataForNextChange={setKeepMetadataForNext}
+                onDuplicate={() => void handleDuplicate()}
+                onDelete={() => void handleDelete()}
               />
-            )}
-          </AnimatePresence>
+            </motion.div>
+          ) : selectedExamQuestionId ? (
+            <EditorSkeleton key="loading" />
+          ) : (
+            <EmptyEditor
+              key="empty"
+              moduleTitle={selectedModule?.title ?? null}
+              {...(selectedModule &&
+              selectedModule.questions.length < selectedModule.targetQuestionCount
+                ? { onCreate: () => void handleCreateQuestion() }
+                : {})}
+            />
+          )}
         </section>
         <QuestionQuickPreview
           open={previewOpen}
@@ -1191,30 +1221,6 @@ function resolveAuthoringField(path: string | null): string {
   return "answer";
 }
 
-function ToolbarMode({
-  active,
-  onClick,
-  icon,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={`flex min-h-9 items-center gap-1.5 rounded-[8px] px-3 text-[10px] font-semibold transition ${active ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
 function IssuesPane({
   report,
   loading,
@@ -1227,15 +1233,17 @@ function IssuesPane({
   onOpenIssue: (issue: AssessmentValidationIssue) => void;
 }) {
   const issues = report ? [...report.errors, ...report.warnings] : [];
+  const errorCount = report?.errors.length ?? 0;
+  const warningCount = report?.warnings.length ?? 0;
   return (
     <section
       className="flex w-[430px] min-w-[360px] flex-col border-r border-black/[0.06] bg-white"
       aria-label="SAT authoring issues"
     >
-      <div className="flex items-center justify-between border-b border-black/[0.06] px-4 py-3">
-        <div>
-          <h2 className="text-[13px] font-semibold text-slate-900">Issues</h2>
-          <p className="mt-0.5 text-[10px] text-slate-400">
+      <div className="flex items-center justify-between gap-3 border-b border-black/[0.055] px-4 py-3">
+        <div className="min-w-0">
+          <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-slate-900">Issues</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">
             Validation across the current SAT draft
           </p>
         </div>
@@ -1243,14 +1251,26 @@ function IssuesPane({
           type="button"
           disabled={loading}
           onClick={onRefresh}
-          className="min-h-9 rounded-[9px] px-3 text-[10px] font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-40"
+          className="authoring-interactive min-h-9 shrink-0 rounded-[10px] px-3 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.045] disabled:opacity-40"
         >
           {loading ? "Checking…" : "Refresh"}
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      {report ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-black/[0.055] px-4 py-2.5">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-au-danger-tint px-2.5 py-1 text-[11px] font-semibold text-au-danger-text">
+            <span className="h-1.5 w-1.5 rounded-full bg-au-danger" aria-hidden="true" />
+            {errorCount} blocking
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-au-warning-tint px-2.5 py-1 text-[11px] font-semibold text-au-warning-text">
+            <span className="h-1.5 w-1.5 rounded-full bg-au-warning" aria-hidden="true" />
+            {warningCount} warnings
+          </span>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto p-2" aria-live="polite" aria-busy={loading}>
         {loading && !report ? (
-          <div className="p-6 text-center text-[11px] text-slate-400">
+          <div className="p-6 text-center text-[12px] text-slate-500">
             Checking every module and question…
           </div>
         ) : issues.length ? (
@@ -1262,19 +1282,20 @@ function IssuesPane({
                 type="button"
                 disabled={!actionable}
                 onClick={() => onOpenIssue(issue)}
-                className={`mb-1.5 flex w-full gap-2.5 rounded-xl p-3 text-left ${issue.blocking ? "bg-red-50/70" : "bg-amber-50/70"} ${actionable ? "hover:ring-1 hover:ring-black/10" : "cursor-default"}`}
+                className={`authoring-interactive mb-1.5 flex w-full gap-2.5 rounded-[12px] p-3 text-left ${issue.blocking ? "bg-au-danger-tint" : "bg-au-warning-tint"} ${actionable ? "hover:ring-1 hover:ring-black/10" : "cursor-default"}`}
               >
                 <AlertCircle
                   size={14}
-                  className={`mt-0.5 shrink-0 ${issue.blocking ? "text-red-500" : "text-amber-500"}`}
+                  aria-hidden="true"
+                  className={`mt-0.5 shrink-0 ${issue.blocking ? "text-au-danger" : "text-au-warning"}`}
                 />
                 <span className="min-w-0">
                   <span
-                    className={`block text-[11px] font-semibold ${issue.blocking ? "text-red-800" : "text-amber-800"}`}
+                    className={`block text-[12px] font-semibold leading-5 ${issue.blocking ? "text-au-danger-text" : "text-au-warning-text"}`}
                   >
                     {issue.message}
                   </span>
-                  <span className="mt-1 block truncate text-[9px] text-slate-400">
+                  <span className="mt-1 block truncate text-[10px] text-slate-400">
                     {actionable ? "Open question and field" : issue.path}
                   </span>
                 </span>
@@ -1283,14 +1304,19 @@ function IssuesPane({
           })
         ) : report ? (
           <div className="p-8 text-center">
-            <ListChecks size={22} className="mx-auto text-emerald-500" />
-            <p className="mt-2 text-xs font-semibold text-slate-700">No validation issues</p>
-            <p className="mt-1 text-[10px] text-slate-400">
+            <span
+              className="mx-auto flex h-11 w-11 items-center justify-center rounded-[13px] bg-au-success-tint text-au-success"
+              aria-hidden="true"
+            >
+              <ListChecks size={20} />
+            </span>
+            <p className="mt-3 text-[12px] font-semibold text-slate-800">No validation issues</p>
+            <p className="mt-1 text-[11px] text-slate-500">
               This SAT draft passes current authoring validation.
             </p>
           </div>
         ) : (
-          <div className="p-8 text-center text-[11px] text-slate-400">
+          <div className="p-8 text-center text-[12px] text-slate-500">
             Run validation to review authoring issues.
           </div>
         )}
@@ -1307,20 +1333,25 @@ function EmptyEditor({
   onCreate?: () => void;
 }) {
   return (
-    <div className="flex min-h-full items-center justify-center px-8 text-center">
-      <div className="max-w-sm">
-        <PencilLine size={22} className="mx-auto text-slate-300" />
-        <p className="mt-3 text-sm font-semibold text-slate-700">
+    <div className="flex min-h-full items-center justify-center px-8 pb-24 text-center">
+      <div className="max-w-[320px]">
+        <span
+          className="mx-auto flex h-12 w-12 items-center justify-center rounded-[14px] bg-au-fill text-slate-500"
+          aria-hidden="true"
+        >
+          <PencilLine size={20} strokeWidth={1.8} />
+        </span>
+        <p className="mt-4 text-[15px] font-semibold tracking-[-0.018em] text-slate-900">
           {moduleTitle ? `Choose a question in ${moduleTitle}` : "Choose a module"}
         </p>
-        <p className="mt-1 text-[11px] leading-5 text-slate-400">
+        <p className="mt-1.5 text-[12px] leading-5 text-slate-500">
           The question list is the work queue; the editor opens only the selected item.
         </p>
         {onCreate ? (
           <button
             type="button"
             onClick={onCreate}
-            className="mt-3 rounded-full bg-[#0071e3] px-4 py-2 text-[11px] font-semibold text-white"
+            className="authoring-interactive mt-4 inline-flex min-h-10 items-center rounded-[11px] bg-au-accent px-4 text-[12px] font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active"
           >
             Create next question
           </button>
@@ -1333,16 +1364,34 @@ function EmptyEditor({
 function EditorSkeleton() {
   return (
     <div
-      className="mx-auto max-w-[900px] animate-pulse space-y-5 px-9 py-8"
+      className="mx-auto my-5 w-[calc(100%-2rem)] max-w-[940px] animate-pulse space-y-6 px-6 pb-24 pt-8 sm:my-7 sm:px-10"
+      role="status"
       aria-label="Loading question"
     >
-      <div className="h-5 w-36 rounded bg-slate-100" />
-      <div className="h-10 w-full rounded-xl bg-slate-100" />
-      <div className="h-28 w-full rounded-xl bg-slate-100" />
-      <div className="h-32 w-full rounded-xl bg-slate-100" />
-      {[0, 1, 2, 3].map((item) => (
-        <div key={item} className="h-14 w-full rounded-xl bg-slate-100" />
-      ))}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-2.5">
+          <div className="h-4 w-44 rounded-md bg-black/[0.055]" />
+          <div className="h-3 w-28 rounded-md bg-black/[0.04]" />
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <div className="h-9 w-[104px] rounded-[10px] bg-black/[0.05]" />
+          <div className="h-9 w-9 rounded-[10px] bg-black/[0.05]" />
+        </div>
+      </div>
+      <div className="authoring-metadata-bar h-[58px] rounded-[13px]" />
+      <div className="space-y-2.5">
+        <div className="h-3.5 w-36 rounded bg-black/[0.045]" />
+        <div className="h-[92px] rounded-[12px] bg-black/[0.035]" />
+      </div>
+      <div className="space-y-2.5">
+        <div className="h-3.5 w-24 rounded bg-black/[0.045]" />
+        <div className="h-[112px] rounded-[12px] bg-black/[0.035]" />
+      </div>
+      <div className="space-y-2">
+        {[0, 1, 2, 3].map((item) => (
+          <div key={item} className="h-[58px] rounded-[12px] bg-black/[0.03]" />
+        ))}
+      </div>
     </div>
   );
 }

@@ -98,11 +98,23 @@ below the desktop breakpoint so objective answer controls retain usable width.
 - **Accessibility**: group actions use explicit labels, evidence uses a native disclosure button with `aria-expanded`/`aria-controls`, status is written as text, and high-impact decisions use a labelled confirmation dialog.
 - **Interaction**: details are collapsed by default; confirmation states the exact scope before regrading; successful mutations announce the affected questions and students in a live status region. The decision row is separated from the answer context by a hairline divider so the choice reads as the card's single action point.
 
+### SAT rich editor
+
+- **Structure**: a white writing surface with one persistent formatting toolbar, grouped block/text/insert/history controls, and a readable content area. The toolbar is part of the editor's first render and stays in document flow; it is not a hover-only, sticky, or click-to-reveal affordance.
+- **Variants**: full prompt/supporting-material/rationale editor and compact answer-choice editor. Compact mode reduces content padding and wraps the same available tools without horizontal scrolling.
+- **States**: loading, empty with contextual placeholder, focused, active-format, table-editing, equation/image dialog open, and disabled history actions.
+- **Accessibility**: the content surface exposes a labelled textbox, the toolbar exposes a labelled `toolbar` landmark, every icon control has a text label/title, focus-visible styling is retained, and reduced motion removes non-essential transforms.
+- **Interaction**: formatting acts directly on the current selection; active tools use the single authoring blue accent; table controls appear only when a table is selected because they are contextual actions, not hidden editor access.
+- **Metadata**: domain, skill, and difficulty stay available in a quiet compact row; tags are behind a small disclosure because they are secondary to writing the question.
+- **Typography**: SAT authoring uses the system text stack (`--font-au-sans`) with 15px body content and a 17px/20px heading ladder so the editor feels native on Apple platforms without changing the global IELTS font contract.
+
 ## 6. Motion & Interaction
 
 Interactive feedback uses existing Tailwind transitions and the global reduced-motion
 rule. No layout properties animate. Saving an override keeps the row stable and changes
-only status/opacity so the grader's reading position is not disrupted.
+only status/opacity so the grader's reading position is not disrupted. The SAT rich
+editor keeps its toolbar visible at rest; active-format tint, focus rings, and table
+context feedback use short color/opacity transitions only.
 
 ## 7. Depth & Surface
 

@@ -31,8 +31,8 @@ export function SaveStatusIndicator({
       : visibleStatus === "unsaved"
         ? { key: "editing", label: "Editing", icon: Cloud, className: "text-slate-500" }
         : visibleStatus === "error"
-          ? { key: "error", label: "Not saved", icon: CircleAlert, className: "text-red-600" }
-          : { key: "saved", label: "Saved", icon: Check, className: "text-emerald-600" };
+          ? { key: "error", label: "Not saved", icon: CircleAlert, className: "text-au-danger-text" }
+          : { key: "saved", label: "Saved", icon: Check, className: "text-au-success-text" };
   const Icon = meta.icon;
   const title = lastSavedAt
     ? `Last saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
@@ -44,7 +44,7 @@ export function SaveStatusIndicator({
       title={title}
       aria-label={visibleStatus === "error" ? `${title}. Retry save` : title}
       onClick={visibleStatus === "error" ? onRetry : undefined}
-      className={`relative flex min-w-[84px] items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-semibold ${meta.className} ${visibleStatus === "error" ? "hover:bg-red-50" : "cursor-default"}`}
+      className={`relative flex min-w-[84px] items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-semibold ${meta.className} ${visibleStatus === "error" ? "hover:bg-au-danger-tint" : "cursor-default"}`}
       aria-live="polite"
     >
       <AnimatePresence mode="wait" initial={false}>

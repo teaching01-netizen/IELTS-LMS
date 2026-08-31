@@ -1,5 +1,6 @@
 import { SAT_DOMAINS, getSatSkills } from "../providers/sat/taxonomy";
 import type { Difficulty, QuestionRevision } from "../contracts/assessment";
+import { AuthoringSegmented } from "./AuthoringSegmented";
 
 export interface QuestionMetadataBarProps {
   question: QuestionRevision;
@@ -7,7 +8,7 @@ export interface QuestionMetadataBarProps {
 }
 
 const controlClass =
-  "h-10 min-w-0 rounded-[9px] border border-transparent bg-white/78 px-2.5 text-[11px] font-semibold text-slate-700 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.045)] outline-none transition hover:bg-white focus:border-[#0071e3]/30 focus:bg-white focus:ring-4 focus:ring-[#0071e3]/10";
+  "h-9 min-w-0 rounded-[10px] border border-transparent bg-white/80 px-2.5 text-[11px] font-semibold text-slate-700 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05)] outline-none transition hover:bg-white focus:border-au-accent/30 focus:bg-white focus:ring-4 focus:ring-au-accent/10 disabled:opacity-45";
 
 export function QuestionMetadataBar({ question, onChange }: QuestionMetadataBarProps) {
   const domains = question.metadata.sectionKey === "math" ? SAT_DOMAINS.math : SAT_DOMAINS["reading-writing"];
@@ -21,8 +22,8 @@ export function QuestionMetadataBar({ question, onChange }: QuestionMetadataBarP
   };
 
   return (
-    <div className="authoring-metadata-bar mt-4 flex flex-wrap items-center gap-2 rounded-[13px] px-2.5 py-2.5" aria-label="Question metadata">
-      <span className="flex h-10 items-center rounded-[9px] px-2.5 text-[11px] font-semibold text-slate-600">
+    <div className="authoring-metadata-bar mt-3 flex flex-wrap items-center gap-1.5 rounded-[10px] px-1.5 py-1.5" aria-label="Question metadata">
+      <span className="hidden h-9 items-center rounded-[9px] px-2 text-[11px] font-semibold text-slate-600 sm:flex">
         {question.metadata.sectionKey === "math" ? "Math" : "Reading & Writing"}
       </span>
       <select
@@ -41,37 +42,43 @@ export function QuestionMetadataBar({ question, onChange }: QuestionMetadataBarP
         value={question.metadata.skill ?? ""}
         onChange={(event) => onChange({ ...question, metadata: { ...question.metadata, skill: event.target.value || null } })}
         disabled={!skills.length}
-        className={`${controlClass} max-w-[240px] disabled:opacity-45`}
+        className={`${controlClass} max-w-[240px]`}
       >
         <option value="">{skills.length ? "Skill…" : "Choose domain first"}</option>
         {skills.map((skill) => <option key={skill} value={skill}>{skill}</option>)}
       </select>
-      <div className="authoring-segmented flex h-10 items-center rounded-[9px] p-0.5" aria-label="Difficulty">
-        {(["easy", "medium", "hard"] as Difficulty[]).map((difficulty) => (
-          <button
-            key={difficulty}
-            type="button"
-            aria-pressed={question.metadata.difficulty === difficulty}
-            onClick={() => onChange({ ...question, metadata: { ...question.metadata, difficulty } })}
-            className={`h-9 rounded-[8px] px-2.5 text-[10px] font-semibold capitalize transition ${question.metadata.difficulty === difficulty ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
-          >
-            {difficulty}
-          </button>
-        ))}
-      </div>
-      <input
-        aria-label="Question tags"
-        value={question.metadata.tags.join(", ")}
-        onChange={(event) => onChange({
-          ...question,
-          metadata: {
-            ...question.metadata,
-            tags: event.target.value.split(",").map((tag) => tag.trim()).filter(Boolean),
-          },
-        })}
-        className={`${controlClass} min-w-[150px] flex-1`}
-        placeholder="Tags…"
+      <AuthoringSegmented
+        ariaLabel="Difficulty"
+        layoutId="sat-difficulty"
+        value={question.metadata.difficulty}
+        onChange={(difficulty) => onChange({ ...question, metadata: { ...question.metadata, difficulty } })}
+        options={[
+          { value: "easy" as Difficulty, label: "Easy" },
+          { value: "medium" as Difficulty, label: "Medium" },
+          { value: "hard" as Difficulty, label: "Hard" },
+        ]}
       />
+      <details className="relative ml-auto">
+        <summary className="authoring-interactive flex min-h-9 cursor-pointer list-none items-center rounded-[9px] px-2.5 text-[11px] font-semibold text-slate-500 marker:hidden hover:bg-black/[0.04] hover:text-slate-800">
+          Tags{question.metadata.tags.length ? ` · ${question.metadata.tags.length}` : ""}
+        </summary>
+        <div className="au-elevation-menu absolute right-0 top-10 z-20 w-56 rounded-[12px] border border-black/[0.08] bg-white p-2">
+          <input
+            id={`sat-question-tags-${question.id}`}
+            aria-label="Question tags"
+            value={question.metadata.tags.join(", ")}
+            onChange={(event) => onChange({
+              ...question,
+              metadata: {
+                ...question.metadata,
+                tags: event.target.value.split(",").map((tag) => tag.trim()).filter(Boolean),
+              },
+            })}
+            className={`${controlClass} w-full`}
+            placeholder="Add tags…"
+          />
+        </div>
+      </details>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
 import { ConfirmPopover } from "./ConfirmPopover";
 import { SatStudentResponseEditor } from "./SatStudentResponseEditor";
 import { QuestionMetadataBar } from "./QuestionMetadataBar";
+import { AuthoringSegmented } from "./AuthoringSegmented";
 import { authoringMotion } from "./authoringMotion";
 
 export interface QuestionEditorProps {
@@ -96,44 +97,43 @@ export function QuestionEditor({
   };
 
   return (
-    <article className="authoring-editor-sheet mx-auto my-5 w-[calc(100%-2rem)] max-w-[940px] px-6 pb-24 pt-6 sm:my-7 sm:px-10 sm:pt-9">
-      <header className="mb-6">
+    <article className="authoring-editor-sheet mx-auto my-5 w-[calc(100%-2rem)] max-w-[940px] px-6 pb-24 pt-7 sm:my-7 sm:px-10 sm:pt-9">
+      <header className="mb-7">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-400">
-              <span>{questionNumber ? `Question ${questionNumber}` : "Question"}</span>
-              <span>·</span>
+            <h2 className="text-[22px] font-semibold tracking-[-0.035em] text-slate-950">
+              {questionNumber ? `Question ${questionNumber}` : "Edit question"}
+            </h2>
+            <div className="mt-1.5 flex items-center gap-2 text-[11px] font-semibold text-slate-500">
               <ReadinessLabel ready={promptReady && answerReady} />
+              <span aria-hidden="true" className="text-slate-300">·</span>
               <SaveState status={saveStatus} />
             </div>
-            <h2 className="mt-1 text-[22px] font-semibold tracking-[-0.035em] text-slate-950">
-              Edit question
-            </h2>
           </div>
           <div className="relative flex shrink-0 items-center gap-1">
             <button
               type="button"
               onClick={onDuplicate}
-              className="authoring-interactive flex min-h-10 items-center gap-1.5 rounded-[10px] px-3 text-[11px] font-semibold text-slate-600 hover:bg-black/[0.045]"
+              className="authoring-interactive flex min-h-9 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.045]"
               title="Duplicate question (⌘D)"
             >
-              <Copy size={13} />
+              <Copy size={13} aria-hidden="true" />
               Duplicate
             </button>
             <button
               type="button"
               onClick={() => setMoreOpen((value) => !value)}
-              className="authoring-interactive flex h-10 w-10 items-center justify-center rounded-[10px] text-slate-500 hover:bg-black/[0.045]"
+              className="authoring-interactive flex h-9 w-9 items-center justify-center rounded-[10px] text-slate-500 hover:bg-black/[0.045]"
               aria-label="More question actions"
               aria-expanded={moreOpen}
               aria-haspopup="menu"
             >
-              <MoreHorizontal size={15} />
+              <MoreHorizontal size={15} aria-hidden="true" />
             </button>
             {moreOpen ? (
               <div
                 role="menu"
-                className="absolute right-0 top-11 z-40 min-w-44 rounded-xl border border-black/[0.08] bg-white p-1.5 shadow-[0_12px_30px_rgba(0,0,0,0.14)]"
+                className="au-elevation-menu absolute right-0 top-11 z-40 min-w-44 rounded-[12px] border border-black/[0.08] bg-white p-1.5"
               >
                 <button
                   type="button"
@@ -142,9 +142,9 @@ export function QuestionEditor({
                     onSaveNow();
                   }}
                   role="menuitem"
-                  className="flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[12px] font-semibold text-slate-700 hover:bg-black/[0.04]"
                 >
-                  <Save size={12} />
+                  <Save size={12} aria-hidden="true" />
                   Save now
                 </button>
                 <button
@@ -154,9 +154,9 @@ export function QuestionEditor({
                     setDeleteOpen(true);
                   }}
                   role="menuitem"
-                  className="flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[11px] font-semibold text-red-600 hover:bg-red-50"
+                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[12px] font-semibold text-au-danger-text hover:bg-au-danger-tint"
                 >
-                  <Trash2 size={12} />
+                  <Trash2 size={12} aria-hidden="true" />
                   Delete question
                 </button>
               </div>
@@ -208,27 +208,28 @@ export function QuestionEditor({
           />
         </EditorSection>
 
-        <section data-authoring-field="answer" className="border-t border-black/[0.06] pt-5">
+        <section data-authoring-field="answer" className="border-t border-au-separator pt-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-[14px] font-semibold text-slate-900">Answer</h3>
-              <p className="mt-0.5 text-[10px] text-slate-400">
+              <p className="mt-0.5 text-[11px] text-slate-500">
                 Set the response type and key without leaving the editing flow.
               </p>
             </div>
-            <div className="authoring-segmented inline-flex rounded-[10px] p-0.5">
-              <ResponseTypeButton active={!isSpr} onClick={() => changeKind("single_choice")}>
-                Multiple choice
-              </ResponseTypeButton>
-              {question.metadata.sectionKey === "math" ? (
-                <ResponseTypeButton
-                  active={isSpr}
-                  onClick={() => changeKind("student_produced_response")}
-                >
-                  Student response
-                </ResponseTypeButton>
-              ) : null}
-            </div>
+            <AuthoringSegmented
+              ariaLabel="Response type"
+              layoutId="sat-response-type"
+              value={isSpr ? "spr" : "choice"}
+              onChange={(kind) =>
+                changeKind(kind === "spr" ? "student_produced_response" : "single_choice")
+              }
+              options={[
+                { value: "choice", label: "Multiple choice" },
+                ...(question.metadata.sectionKey === "math"
+                  ? [{ value: "spr" as const, label: "Student response" }]
+                  : []),
+              ]}
+            />
           </div>
 
           {isSpr ? (
@@ -258,22 +259,24 @@ export function QuestionEditor({
                         key={option.id}
                         layout
                         transition={authoringMotion.state}
-                        className={`authoring-answer-row group flex items-start gap-2 rounded-[13px] border p-2 transition ${correct ? "border-black/[0.09] bg-black/[0.018]" : "border-transparent hover:bg-black/[0.022]"}`}
+                        className={`authoring-answer-row group flex items-start gap-2 rounded-[12px] border p-2 transition ${correct ? "border-au-success/25 bg-au-success/[0.05]" : "border-transparent hover:bg-au-fill"}`}
                       >
                         <motion.button
                           type="button"
                           whileTap={authoringMotion.press}
+                          transition={authoringMotion.fast}
                           onClick={() =>
                             onChange({
                               ...question,
                               answer: { ...answer, correctOptionId: option.id },
                             })
                           }
-                          className={`mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${correct ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-[12px] font-bold ${correct ? "bg-au-success-text text-white" : "bg-au-fill-strong text-slate-600 hover:bg-au-fill-press"}`}
                           aria-label={`Mark choice ${letter} correct`}
+                          aria-pressed={correct}
                           title={`Set ${letter} correct · ⌘${index + 1}`}
                         >
-                          {correct ? <Check size={14} strokeWidth={3} /> : letter}
+                          {correct ? <Check size={14} strokeWidth={3} aria-hidden="true" /> : letter}
                         </motion.button>
                         <div className="min-w-0 flex-1">
                           <FastQuestionComposer
@@ -284,8 +287,6 @@ export function QuestionEditor({
                             compact
                             assetOwnerId={question.id}
                             capabilities={SAT_CHOICE_COMPOSER_CAPABILITIES}
-                            richTriggerAlwaysVisible
-                            richTriggerLabel={`Add equation, code, image, graph, or table to choice ${letter}`}
                             minHeightClassName="min-h-[42px]"
                           />
                         </div>
@@ -295,7 +296,8 @@ export function QuestionEditor({
                               initial={{ opacity: 0, x: 3 }}
                               animate={{ opacity: 1, x: 0 }}
                               exit={{ opacity: 0 }}
-                              className="mt-3 pr-1 text-[9px] font-semibold uppercase tracking-wide text-emerald-700"
+                              transition={authoringMotion.fast}
+                              className="mt-3 pr-1 text-[10px] font-semibold uppercase tracking-[0.04em] text-au-success-text"
                             >
                               Key
                             </motion.span>
@@ -309,10 +311,11 @@ export function QuestionEditor({
           )}
         </section>
 
-        <details className="group border-t border-black/[0.06] pt-5">
-          <summary className="cursor-pointer list-none text-[12px] font-semibold text-slate-600 marker:hidden hover:text-slate-950">
-            Rationale{" "}
-            <span className="ml-1 font-normal text-slate-400">Internal · recommended</span>
+        <details className="group border-t border-au-separator pt-5">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[12px] font-semibold text-slate-700 marker:hidden transition-colors hover:text-slate-950">
+            <ChevronRight size={12} aria-hidden="true" className="text-slate-400 transition-transform duration-200 group-open:rotate-90" />
+            Rationale
+            <span className="font-normal text-slate-400">Internal · recommended</span>
           </summary>
           <div className="mt-3" data-authoring-field="rationale">
             <FastQuestionComposer
@@ -327,12 +330,12 @@ export function QuestionEditor({
         </details>
       </div>
 
-      <div className="authoring-editor-footer sticky bottom-0 z-20 mt-10 flex items-center justify-between border-t border-black/[0.08] px-1 py-3">
+      <div className="authoring-editor-footer sticky bottom-3 z-20 mt-10 flex items-center justify-between gap-3 rounded-[14px] border border-black/[0.07] px-3.5 py-2.5 shadow-[0_0_0_0.5px_rgba(0,0,0,0.03),0_8px_28px_rgba(0,0,0,0.08)]">
         <div className="flex min-w-0 items-center gap-3">
           <SaveState status={saveStatus} verbose />
           <label
             htmlFor="sat-keep-metadata-next"
-            className="hidden cursor-pointer items-center gap-1.5 text-[10px] font-medium text-slate-600 sm:flex"
+            className="hidden cursor-pointer items-center gap-1.5 text-[11px] font-medium text-slate-600 sm:flex"
             title="When Save & Next reaches an empty slot, carry Domain, Skill, and Difficulty into the new question."
           >
             <input
@@ -341,7 +344,7 @@ export function QuestionEditor({
               type="checkbox"
               checked={keepMetadataForNext}
               onChange={(event) => onKeepMetadataForNextChange(event.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 accent-[#0071e3]"
+              className="h-4 w-4 rounded border-black/[0.2] accent-au-accent"
             />
             Keep metadata for next
           </label>
@@ -352,10 +355,10 @@ export function QuestionEditor({
           transition={authoringMotion.fast}
           onClick={onSaveAndNext}
           disabled={saveStatus === "saving"}
-          className="authoring-interactive flex min-h-11 items-center gap-2 rounded-[10px] bg-[#0071e3] px-4 text-[11px] font-semibold text-white hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3] focus-visible:ring-offset-2 disabled:opacity-45"
+          className="authoring-interactive flex min-h-10 items-center gap-2 rounded-[11px] bg-au-accent px-4 text-[12px] font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2 disabled:opacity-45"
           title="Save and move to the next question (⌘Return)"
         >
-          Save & Next <ChevronRight size={13} />
+          Save & Next <ChevronRight size={13} aria-hidden="true" />
         </motion.button>
       </div>
     </article>
@@ -419,13 +422,13 @@ function SatSupportingMaterialStarters({
       className="mb-2 flex flex-wrap items-center gap-1.5"
       aria-label="Supporting material starters"
     >
-      <span className="mr-1 text-[10px] font-medium text-slate-400">Quick start</span>
+      <span className="mr-1 text-[11px] font-medium text-slate-400">Quick start</span>
       {starters.map((starter) => (
         <button
           key={starter.key}
           type="button"
           onClick={() => onSelect(starter.key)}
-          className="rounded-[9px] bg-black/[0.045] px-2.5 py-1.5 text-[10px] font-semibold text-slate-600 transition hover:bg-black/[0.075] hover:text-slate-900"
+          className="authoring-interactive rounded-[9px] bg-au-fill px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-au-fill-strong hover:text-slate-900"
         >
           {starter.label}
         </button>
@@ -434,31 +437,10 @@ function SatSupportingMaterialStarters({
   );
 }
 
-function ResponseTypeButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={`min-h-9 rounded-[8px] px-3 text-[10px] font-semibold transition ${active ? "bg-white text-slate-950 shadow-[0_1px_2px_rgba(0,0,0,0.08)]" : "text-slate-500 hover:text-slate-800"}`}
-    >
-      {children}
-    </button>
-  );
-}
-
 function ReadinessLabel({ ready }: { ready: boolean }) {
   return (
-    <span className={`flex items-center gap-1 ${ready ? "text-emerald-600" : "text-slate-400"}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${ready ? "bg-emerald-500" : "bg-slate-300"}`} />
+    <span className={`flex items-center gap-1 ${ready ? "text-au-success-text" : "text-slate-400"}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${ready ? "bg-au-success" : "bg-black/[0.2]"}`} aria-hidden="true" />
       {ready ? "Core complete" : "Incomplete"}
     </span>
   );
@@ -481,7 +463,7 @@ function SaveState({
           : "Saved";
   return (
     <span
-      className={`text-[10px] font-medium ${status === "error" ? "text-red-600" : status === "saved" ? "text-emerald-600" : "text-slate-400"}`}
+      className={`text-[10px] font-medium ${status === "error" ? "text-au-danger-text" : status === "saved" ? "text-au-success-text" : "text-slate-400"}`}
     >
       {verbose && status === "unsaved" ? "Autosave pending · ⌘S saves now" : label}
     </span>

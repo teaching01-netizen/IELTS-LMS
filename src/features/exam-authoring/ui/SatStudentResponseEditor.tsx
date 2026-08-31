@@ -41,12 +41,12 @@ export function SatStudentResponseEditor({
   };
 
   return (
-    <div className="space-y-4 rounded-[16px] border border-black/[0.07] bg-[#fbfbfc] p-4">
+    <div className="space-y-4 rounded-[16px] border border-au-separator bg-au-surface-raised p-4">
       <div>
         <div className="block">
           <span className="mb-1.5 flex items-baseline justify-between gap-3">
             <span className="text-[12px] font-semibold text-slate-800">Primary answer</span>
-            <span className="text-[10px] text-slate-400">5 characters · 6 with a minus sign</span>
+            <span className="text-[11px] text-slate-400">5 characters · 6 with a minus sign</span>
           </span>
           <input
             id="sat-primary-response"
@@ -59,20 +59,20 @@ export function SatStudentResponseEditor({
             maxLength={32}
             aria-invalid={Boolean(primary && !primaryValidation.valid)}
             aria-describedby="sat-primary-response-help"
-            className={`w-full rounded-xl border bg-white px-3.5 py-3 font-mono text-[16px] text-slate-950 outline-none transition focus:ring-4 ${primary && !primaryValidation.valid ? "border-red-300 focus:border-red-400 focus:ring-red-100" : "border-black/[0.09] focus:border-[#0071e3]/35 focus:ring-[#0071e3]/10"}`}
+            className={`w-full rounded-[12px] border bg-white px-3.5 py-3 font-mono text-[16px] text-slate-950 outline-none transition focus:ring-4 ${primary && !primaryValidation.valid ? "border-au-danger/40 focus:border-au-danger focus:ring-au-danger/10" : "border-au-separator-strong focus:border-au-accent/35 focus:ring-au-accent/10"}`}
             placeholder="12"
           />
         </div>
-        <div id="sat-primary-response-help" className="mt-1.5 min-h-5 text-[10px] leading-5">
+        <div id="sat-primary-response-help" className="mt-1.5 min-h-5 text-[11px] leading-5">
           {primary && !primaryValidation.valid ? (
-            <span className="text-red-600">{primaryValidation.message}</span>
+            <span className="text-au-danger-text">{primaryValidation.message}</span>
           ) : primaryValidation.valid ? (
-            <span className="inline-flex items-center gap-1 text-emerald-700">
-              <CheckCircle2 size={12} />
+            <span className="inline-flex items-center gap-1 text-au-success-text">
+              <CheckCircle2 size={12} aria-hidden="true" />
               Valid SAT student response
             </span>
           ) : (
-            <span className="text-slate-400">
+            <span className="text-slate-500">
               Use an integer, decimal, or fraction. Do not include %, $, commas, or mixed numbers.
             </span>
           )}
@@ -82,7 +82,7 @@ export function SatStudentResponseEditor({
       <div>
         <div className="mb-2 flex items-center justify-between gap-3">
           <span className="text-[12px] font-semibold text-slate-800">Accepted equivalents</span>
-          <span className="text-[10px] text-slate-400">Optional</span>
+          <span className="text-[11px] text-slate-400">Optional</span>
         </div>
         {equivalents.length ? (
           <div className="mb-2 flex flex-wrap gap-1.5">
@@ -122,21 +122,21 @@ export function SatStudentResponseEditor({
             spellCheck={false}
             maxLength={32}
             aria-label="Add accepted equivalent"
-            className="min-w-0 flex-1 rounded-xl border border-black/[0.09] bg-white px-3 py-2.5 font-mono text-[13px] text-slate-900 outline-none focus:border-[#0071e3]/35 focus:ring-4 focus:ring-[#0071e3]/10"
+            className="min-w-0 flex-1 rounded-[12px] border border-au-separator-strong bg-white px-3 py-2.5 font-mono text-[13px] text-slate-900 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
             placeholder="Example: 24/2"
           />
           <button
             type="button"
             disabled={!equivalentDraft}
             onClick={addEquivalent}
-            className="inline-flex h-10 items-center gap-1.5 rounded-full bg-black/[0.055] px-3 text-[10px] font-semibold text-slate-700 hover:bg-black/[0.08] disabled:opacity-35"
+            className="authoring-interactive inline-flex h-10 items-center gap-1.5 rounded-[11px] bg-au-fill px-3.5 text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong disabled:opacity-35"
           >
-            <Plus size={12} />
+            <Plus size={12} aria-hidden="true" />
             Add
           </button>
         </div>
         {equivalentError ? (
-          <p className="mt-1.5 text-[10px] text-red-600">{equivalentError}</p>
+          <p className="mt-1.5 text-[11px] text-au-danger-text">{equivalentError}</p>
         ) : null}
       </div>
     </div>

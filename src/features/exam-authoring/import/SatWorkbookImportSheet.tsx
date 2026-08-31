@@ -199,7 +199,7 @@ export function SatWorkbookImportSheet({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={authoringMotion.surface}
-          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/25 p-3 backdrop-blur-sm sm:p-5"
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/28 p-3 backdrop-blur-[3px] sm:p-5"
           role="dialog"
           aria-modal="true"
           aria-label="Import SAT from Excel"
@@ -213,7 +213,7 @@ export function SatWorkbookImportSheet({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.99 }}
             transition={authoringMotion.surface}
-            className="flex max-h-[94vh] w-full max-w-[1320px] flex-col overflow-hidden rounded-[24px] border border-black/10 bg-white shadow-[0_28px_90px_rgba(0,0,0,0.24)]"
+            className="au-elevation-sheet flex max-h-[94vh] w-full max-w-[1320px] flex-col overflow-hidden rounded-[20px] border border-black/[0.08] bg-white"
           >
             <header className="flex shrink-0 items-start justify-between border-b border-black/[0.06] px-5 py-4 sm:px-6">
               <div>
@@ -261,7 +261,7 @@ export function SatWorkbookImportSheet({
                 <button
                   type="button"
                   onClick={() => void downloadTemplate()}
-                  className="mt-2 flex min-h-10 w-full items-center justify-center gap-2 rounded-[11px] text-[11px] font-semibold text-[#0066cc] hover:bg-[#0071e3]/[0.07]"
+                  className="authoring-interactive mt-2 flex min-h-10 w-full items-center justify-center gap-2 rounded-[11px] text-[11px] font-semibold text-au-accent hover:bg-au-accent-tint"
                 >
                   <Download size={14} />
                   Download SAT Excel template
@@ -275,7 +275,7 @@ export function SatWorkbookImportSheet({
                 ) : null}
 
                 {activity === "staging" ? (
-                  <div className="mt-3 flex items-center gap-2 rounded-xl bg-[#0071e3]/[0.06] px-3 py-2.5 text-[11px] font-medium text-[#005bbb]">
+                  <div className="mt-3 flex items-center gap-2 rounded-[12px] bg-au-accent-tint px-3 py-2.5 text-[11px] font-medium text-au-accent">
                     <UploadCloud size={14} />
                     Securing {preview?.assets.length ?? 0} workbook visual{
                       preview?.assets.length === 1 ? "" : "s"
@@ -308,7 +308,7 @@ export function SatWorkbookImportSheet({
                             }}
                             className={`flex min-h-10 w-full items-center justify-between rounded-[10px] px-2.5 text-left text-[11px] transition ${
                               selected
-                                ? "bg-[#0071e3]/10 text-[#005bbb]"
+                                ? "bg-au-accent-tint-strong text-au-accent"
                                 : "text-slate-600 hover:bg-black/[0.04]"
                             }`}
                           >
@@ -368,7 +368,7 @@ export function SatWorkbookImportSheet({
                         aria-label="Preview workbook question"
                         value={selectedQuestionIndex}
                         onChange={(event) => setSelectedQuestionIndex(Number(event.target.value))}
-                        className="h-9 rounded-[9px] border-0 bg-black/[0.045] px-3 text-[10px] font-semibold text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/30"
+                        className="h-9 rounded-[9px] border-0 bg-black/[0.045] px-3 text-[10px] font-semibold text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-au-accent/30"
                       >
                         {selectedModule.questions.map((_, index) => (
                           <option key={index} value={index}>
@@ -421,7 +421,7 @@ export function SatWorkbookImportSheet({
                     !preview?.valid || stagedAssets.length !== preview.assets.length || busy
                   }
                   onClick={() => void commit()}
-                  className="min-h-10 rounded-full bg-[#0071e3] px-4 text-[11px] font-semibold text-white hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:opacity-35"
+                  className="authoring-interactive min-h-10 rounded-[11px] bg-au-accent px-4 text-[12px] font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active disabled:cursor-not-allowed disabled:opacity-35"
                 >
                   {activity === "importing"
                     ? "Importing…"
@@ -533,7 +533,7 @@ function DropTarget({
       aria-label="Choose or drop SAT Excel workbook"
       onClick={onChoose}
       className={`w-full rounded-[16px] border border-dashed p-5 text-center transition disabled:cursor-wait ${
-        dragging ? "border-[#0071e3]/55 bg-[#0071e3]/[0.06]" : "border-black/[0.14] bg-[#f7f7f8]"
+        dragging ? "border-au-accent/55 bg-au-accent-tint" : "border-black/[0.14] bg-au-fill"
       }`}
       onDragEnter={(event) => {
         event.preventDefault();
@@ -548,7 +548,7 @@ function DropTarget({
         if (nextFile) onDrop(nextFile);
       }}
     >
-      <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#0071e3] shadow-sm">
+      <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-white text-au-accent shadow-sm" aria-hidden="true">
         <UploadCloud size={18} />
       </span>
       <p className="mt-3 truncate text-[12px] font-semibold text-slate-800">

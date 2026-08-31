@@ -130,7 +130,7 @@ export function RichQuestionComposer({
         role: "textbox",
         "aria-label": label,
         "data-placeholder": placeholder,
-        class: `${minHeightClassName} caret-[#007aff] outline-none selection:bg-[#0a84ff]/15 text-[15px] leading-[1.75] text-slate-900 [&_.is-editor-empty:first-child]:before:pointer-events-none [&_.is-editor-empty:first-child]:before:float-left [&_.is-editor-empty:first-child]:before:h-0 [&_.is-editor-empty:first-child]:before:text-slate-300 [&_.is-editor-empty:first-child]:before:content-[attr(data-placeholder)] [&_p]:my-2.5 [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-[20px] [&_h2]:font-semibold [&_h2]:tracking-[-0.015em] [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-[16px] [&_h3]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_li]:pl-1 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-black/10 [&_td]:p-2.5 [&_th]:border [&_th]:border-black/10 [&_th]:bg-[#f5f5f7] [&_th]:p-2.5 [&_img]:my-4 [&_img]:max-h-80 [&_img]:max-w-full [&_img]:rounded-xl [&_img]:object-contain [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-[#f5f5f7] [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-[13px] [&_pre]:leading-6 [&_pre]:text-slate-900`,
+        class: `${minHeightClassName} sat-rich-editor__input`,
       },
     },
     onUpdate: ({ editor: current }) => {
@@ -160,27 +160,21 @@ export function RichQuestionComposer({
 
   return (
     <div
+      data-editor-surface="rich"
+      data-compact={compact ? "true" : undefined}
       data-table-feedback={tableFeedback ? "true" : undefined}
-      className="group rounded-[15px] border border-black/[0.10] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.035)] transition-[border-color,box-shadow] duration-150 focus-within:border-[#0a84ff]/60 focus-within:shadow-[0_3px_14px_rgba(0,0,0,0.06)] focus-within:ring-[3px] focus-within:ring-[#0a84ff]/10"
+      className="sat-rich-editor"
     >
-      <div
-        className={
-          compact
-            ? "max-h-0 overflow-hidden opacity-0 transition-all duration-150 group-focus-within:max-h-12 group-focus-within:opacity-100"
-            : undefined
-        }
-      >
-        <ComposerToolbar
-          editor={editor}
-          compact={compact}
-          capabilities={capabilities}
-          onOpenDialog={setDialog}
-          onTableMutation={flashTableFeedback}
-        />
-      </div>
+      <ComposerToolbar
+        editor={editor}
+        compact={compact}
+        capabilities={capabilities}
+        onOpenDialog={setDialog}
+        onTableMutation={flashTableFeedback}
+      />
       <EditorContent
         editor={editor}
-        className={compact ? "px-3.5 py-3" : "px-5 py-4 sm:px-6 sm:py-5"}
+        className="sat-rich-editor__content"
       />
       <AnimatePresence>
         {dialog === "math" ? (
@@ -250,16 +244,16 @@ function ComposerToolbar({
   };
 
   return (
-    <div className="authoring-editor-toolbar sticky top-[105px] z-20 rounded-t-[14px] border-b border-black/[0.06] bg-white/95 backdrop-blur-xl">
-      <div className="flex min-h-11 flex-wrap items-center gap-1 px-2 py-1.5">
+    <div className="sat-rich-editor__toolbar" role="toolbar" aria-label="Formatting tools">
+      <div className="sat-rich-editor__toolbar-row">
         {!compact && (capabilities.blockStyles || capabilities.lists) ? (
-          <div className="flex items-center gap-1">
+          <div className="sat-rich-editor__toolbar-group" role="group" aria-label="Block formatting">
             {capabilities.blockStyles ? (
               <select
                 aria-label="Text style"
                 value={state?.blockStyle ?? "paragraph"}
                 onChange={(event) => setBlockStyle(event.target.value)}
-                className="h-8 rounded-lg border-0 bg-black/[0.045] px-2.5 pr-7 text-[12px] font-medium text-slate-700 outline-none transition hover:bg-black/[0.07] focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35"
+                className="sat-rich-editor__style-select"
               >
                 <option value="paragraph">Body</option>
                 <option value="heading2">Heading</option>
@@ -273,14 +267,14 @@ function ComposerToolbar({
                   active={state?.bulletList}
                   onClick={() => editor.chain().focus().toggleBulletList().run()}
                 >
-                  <List size={15} />
+                  <List size={16} aria-hidden="true" />
                 </ToolbarButton>
                 <ToolbarButton
                   title="Numbered list (⇧⌘7)"
                   active={state?.orderedList}
                   onClick={() => editor.chain().focus().toggleOrderedList().run()}
                 >
-                  <ListOrdered size={15} />
+                  <ListOrdered size={16} aria-hidden="true" />
                 </ToolbarButton>
               </>
             ) : null}
@@ -288,20 +282,20 @@ function ComposerToolbar({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-0.5">
+        <div className="sat-rich-editor__toolbar-group" role="group" aria-label="Text formatting">
           <ToolbarButton
             title="Bold (⌘B)"
             active={state?.bold}
             onClick={() => editor.chain().focus().toggleBold().run()}
           >
-            <Bold size={15} />
+            <Bold size={16} aria-hidden="true" />
           </ToolbarButton>
           <ToolbarButton
             title="Italic (⌘I)"
             active={state?.italic}
             onClick={() => editor.chain().focus().toggleItalic().run()}
           >
-            <Italic size={15} />
+            <Italic size={16} aria-hidden="true" />
           </ToolbarButton>
           {capabilities.underline ? (
             <ToolbarButton
@@ -309,7 +303,7 @@ function ComposerToolbar({
               active={state?.underline}
               onClick={() => editor.chain().focus().toggleUnderline().run()}
             >
-              <UnderlineIcon size={15} />
+              <UnderlineIcon size={16} aria-hidden="true" />
             </ToolbarButton>
           ) : null}
           <ToolbarButton
@@ -317,29 +311,29 @@ function ComposerToolbar({
             active={state?.superscript}
             onClick={() => editor.chain().focus().toggleSuperscript().run()}
           >
-            <SuperscriptIcon size={15} />
+            <SuperscriptIcon size={16} aria-hidden="true" />
           </ToolbarButton>
           <ToolbarButton
             title="Subscript"
             active={state?.subscript}
             onClick={() => editor.chain().focus().toggleSubscript().run()}
           >
-            <SubscriptIcon size={15} />
+            <SubscriptIcon size={16} aria-hidden="true" />
           </ToolbarButton>
         </div>
 
         {capabilities.equation || capabilities.image || capabilities.table || capabilities.code ? (
           <ToolbarDivider />
         ) : null}
-        <div className="flex items-center gap-0.5">
+        <div className="sat-rich-editor__toolbar-group" role="group" aria-label="Insert content">
           {capabilities.equation ? (
             <ToolbarButton title="Insert equation" onClick={() => onOpenDialog("math")}>
-              <Sigma size={15} />
+              <Sigma size={16} aria-hidden="true" />
             </ToolbarButton>
           ) : null}
           {capabilities.image ? (
             <ToolbarButton title="Insert image or graph" onClick={() => onOpenDialog("image")}>
-              <ImagePlus size={15} />
+              <ImagePlus size={16} aria-hidden="true" />
             </ToolbarButton>
           ) : null}
           {capabilities.code ? (
@@ -348,7 +342,7 @@ function ComposerToolbar({
               active={state?.codeBlock}
               onClick={() => editor.chain().focus().toggleCodeBlock().run()}
             >
-              <Code2 size={15} />
+              <Code2 size={16} aria-hidden="true" />
             </ToolbarButton>
           ) : null}
           {capabilities.table ? (
@@ -365,26 +359,26 @@ function ComposerToolbar({
                 })
               }
             >
-              <Table2 size={15} />
+              <Table2 size={16} aria-hidden="true" />
             </ToolbarButton>
           ) : null}
         </div>
 
         {capabilities.history ? (
-          <div className="ml-auto flex items-center gap-0.5 pl-1">
+          <div className="sat-rich-editor__toolbar-group sat-rich-editor__toolbar-group--history" role="group" aria-label="History">
             <ToolbarButton
               title="Undo (⌘Z)"
               disabled={!state?.canUndo}
               onClick={() => editor.chain().focus().undo().run()}
             >
-              <Undo2 size={15} />
+              <Undo2 size={16} aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
               title="Redo (⇧⌘Z)"
               disabled={!state?.canRedo}
               onClick={() => editor.chain().focus().redo().run()}
             >
-              <Redo2 size={15} />
+              <Redo2 size={16} aria-hidden="true" />
             </ToolbarButton>
           </div>
         ) : null}
@@ -393,14 +387,14 @@ function ComposerToolbar({
       <AnimatePresence initial={false}>
         {capabilities.table && state?.table ? (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             transition={authoringMotion.state}
-            className="overflow-hidden border-t border-black/[0.05] bg-[#f7f7f8]"
+            className="sat-rich-editor__table-toolbar"
           >
-            <div className="flex flex-wrap items-center gap-1 px-2 py-1.5 text-[11px]">
-              <span className="mr-1 px-1 font-semibold text-slate-500">Table</span>
+            <div className="sat-rich-editor__table-toolbar-row">
+              <span className="sat-rich-editor__table-label">Table</span>
               <TableAction
                 label="Add row"
                 onClick={() => mutateTable(() => void editor.chain().focus().addRowAfter().run())}
@@ -419,7 +413,7 @@ function ComposerToolbar({
                 label="Delete column"
                 onClick={() => mutateTable(() => void editor.chain().focus().deleteColumn().run())}
               />
-              <span className="mx-1 h-4 w-px bg-black/10" />
+              <span className="sat-rich-editor__table-divider" aria-hidden="true" />
               <TableAction
                 danger
                 label="Delete table"
@@ -434,7 +428,7 @@ function ComposerToolbar({
 }
 
 function ToolbarDivider() {
-  return <span className="mx-0.5 h-5 w-px bg-black/10" aria-hidden="true" />;
+  return <span className="sat-rich-editor__toolbar-divider" aria-hidden="true" />;
 }
 
 function TableAction({
@@ -450,11 +444,7 @@ function TableAction({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-md px-2 py-1.5 font-medium transition ${
-        danger
-          ? "text-red-600 hover:bg-red-50"
-          : "text-slate-600 hover:bg-white hover:text-slate-950"
-      }`}
+      className={`sat-rich-editor__table-action${danger ? " sat-rich-editor__table-action--danger" : ""}`}
     >
       {label}
     </button>
@@ -484,11 +474,7 @@ function ToolbarButton({
       whileTap={authoringMotion.press}
       transition={authoringMotion.fast}
       onClick={onClick}
-      className={`authoring-interactive relative flex h-8 min-w-8 items-center justify-center overflow-hidden rounded-lg px-2 disabled:cursor-default disabled:opacity-25 ${
-        active
-          ? "bg-[#0a84ff]/10 text-[#0066cc]"
-          : "text-slate-500 hover:bg-black/[0.055] hover:text-slate-950"
-      }`}
+      className={`sat-rich-editor__toolbar-button${active ? " is-active" : ""}`}
     >
       <span className="relative z-10">{children}</span>
     </motion.button>

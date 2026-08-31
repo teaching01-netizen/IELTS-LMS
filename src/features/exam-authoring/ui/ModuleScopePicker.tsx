@@ -1,6 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { Check, ChevronDown } from "lucide-react";
 import type { AssessmentSectionShell } from "../contracts/assessment";
+import { authoringMotion } from "./authoringMotion";
 
 export interface ModuleScopePickerProps {
   sections: AssessmentSectionShell[];
@@ -14,6 +16,7 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
   const popupId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const reduceMotion = useReducedMotion();
   const selected = useMemo(() => {
     for (const section of sections) {
       const module = section.modules.find((candidate) => candidate.id === selectedModuleId);
@@ -79,38 +82,42 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
           setOpen(true);
         }}
         onClick={() => setOpen((value) => !value)}
-        className="group flex min-h-11 max-w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left outline-none transition hover:bg-black/[0.035] focus-visible:ring-4 focus-visible:ring-[#0071e3]/10 disabled:opacity-45"
+        className="group flex min-h-11 max-w-full items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-45"
       >
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[10px] font-medium text-slate-400">{selected.section.title}</div>
+          <div className="truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">{selected.section.title}</div>
           <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-[13px] font-semibold tracking-[-0.01em] text-slate-950">{selected.module.title}</span>
-            <ChevronDown size={12} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+            <span className="truncate text-[13px] font-semibold tracking-[-0.012em] text-slate-950">{selected.module.title}</span>
+            <ChevronDown size={12} className={`shrink-0 text-slate-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} aria-hidden="true" />
           </div>
         </div>
         <div className="w-[54px] shrink-0 text-right">
-          <div className="text-[10px] font-semibold tabular-nums text-slate-500">{authored}/{target}</div>
-          <div className="mt-1 h-1 overflow-hidden rounded-full bg-black/[0.06]">
-            <div className="h-full rounded-full bg-[#0071e3] transition-[width]" style={{ width: `${progress}%` }} />
+          <div className="text-[11px] font-semibold tabular-nums text-slate-500">{authored}/{target}</div>
+          <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-black/[0.06]" aria-hidden="true">
+            <div className="h-full rounded-full bg-au-accent transition-[width] duration-500 ease-out" style={{ width: `${progress}%` }} />
           </div>
         </div>
       </button>
 
       {open ? (
-        <div
+        <motion.div
           ref={menuRef}
           id={popupId}
           role="menu"
           aria-label="Choose SAT module"
           tabIndex={-1}
           onKeyDown={handleMenuKeyDown}
-          className="absolute left-0 top-[calc(100%+6px)] z-[110] max-h-[min(520px,calc(100vh-112px))] w-[340px] max-w-[calc(100vw-24px)] isolate overflow-y-auto overscroll-contain rounded-[14px] border border-black/[0.10] bg-white p-1.5 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
+          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -4, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={reduceMotion ? { duration: 0.01 } : authoringMotion.spring}
+          style={{ transformOrigin: "top left" }}
+          className="au-elevation-menu absolute left-0 top-[calc(100%+6px)] z-[110] max-h-[min(520px,calc(100vh-112px))] w-[340px] max-w-[calc(100vw-24px)] isolate overflow-y-auto overscroll-contain rounded-[14px] border border-black/[0.08] bg-white p-1.5"
         >
           {sections.map((section, sectionIndex) => (
             <div key={section.id} className={sectionIndex ? "mt-2 border-t border-black/[0.055] pt-2" : ""}>
               <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
-                <span className="text-[10px] font-semibold text-slate-500">{section.title}</span>
-                <span className="text-[9px] tabular-nums text-slate-400">{Math.round(section.durationSeconds / 60)} min</span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">{section.title}</span>
+                <span className="text-[10px] tabular-nums text-slate-400">{Math.round(section.durationSeconds / 60)} min</span>
               </div>
               <div className="space-y-0.5">
                 {section.modules.map((module) => {
@@ -129,17 +136,17 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
                         setOpen(false);
                         if (!current) onSelectModule(module.id);
                       }}
-                      className={`flex min-h-[58px] w-full items-center gap-2 rounded-[10px] px-2.5 py-2.5 text-left outline-none transition focus-visible:ring-4 focus-visible:ring-[#0071e3]/10 ${current ? "bg-[#0071e3]/[0.075]" : "hover:bg-black/[0.035]"}`}
+                      className={`flex min-h-[58px] w-full items-center gap-2 rounded-[10px] px-2.5 py-2.5 text-left outline-none transition focus-visible:ring-4 focus-visible:ring-au-accent/10 ${current ? "bg-au-accent-tint-strong" : "hover:bg-black/[0.035]"}`}
                     >
-                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${current ? "bg-[#0071e3] text-white" : "text-transparent"}`} aria-hidden="true"><Check size={11} strokeWidth={3} /></span>
+                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${current ? "bg-au-accent text-white" : "text-transparent"}`} aria-hidden="true"><Check size={11} strokeWidth={3} /></span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-3">
-                          <span className={`truncate text-[11px] font-semibold ${current ? "text-slate-950" : "text-slate-700"}`}>{module.title}</span>
-                          <span className="shrink-0 text-[9px] tabular-nums text-slate-400">{module.questions.length}/{module.targetQuestionCount}</span>
+                          <span className={`truncate text-[12px] font-semibold tracking-[-0.008em] ${current ? "text-slate-950" : "text-slate-700"}`}>{module.title}</span>
+                          <span className="shrink-0 text-[10px] tabular-nums text-slate-400">{module.questions.length}/{module.targetQuestionCount}</span>
                         </div>
                         <div className="mt-1.5 flex items-center gap-2">
-                          <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-black/[0.055]"><div className="h-full rounded-full bg-[#0071e3]" style={{ width: `${moduleProgress}%` }} /></div>
-                          {errors ? <span className="text-[8px] font-semibold text-red-500">{errors} error{errors === 1 ? "" : "s"}</span> : incomplete ? <span className="text-[8px] font-medium text-slate-400">{incomplete} incomplete</span> : module.questions.length === module.targetQuestionCount ? <span className="text-[8px] font-semibold text-emerald-600">Complete</span> : null}
+                          <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-black/[0.055]" aria-hidden="true"><div className="h-full rounded-full bg-au-accent" style={{ width: `${moduleProgress}%` }} /></div>
+                          {errors ? <span className="text-[10px] font-semibold text-au-danger-text">{errors} error{errors === 1 ? "" : "s"}</span> : incomplete ? <span className="text-[10px] font-medium text-slate-400">{incomplete} incomplete</span> : module.questions.length === module.targetQuestionCount ? <span className="text-[10px] font-semibold text-au-success-text">Complete</span> : null}
                         </div>
                       </div>
                     </button>
@@ -148,7 +155,7 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
               </div>
             </div>
           ))}
-        </div>
+        </motion.div>
       ) : null}
     </div>
   );

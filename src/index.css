@@ -6,6 +6,9 @@
   --font-sans:
     "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
     "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+  --font-au-sans:
+    "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
   /* Typography Scale - Consistent visual hierarchy */
@@ -40,6 +43,56 @@
   --spacing-8: 2rem; /* 32px */
   --spacing-10: 2.5rem; /* 40px */
   --spacing-12: 3rem; /* 48px */
+
+  /* ── Authoring (au) system — SAT authoring workspace material tokens ──
+   * Apple-platform-inspired: one accent family, system fills instead of
+   * arbitrary alphas, and AA-checked status pairs (dot/icon variant vs.
+   * small-text variant). The `au-` namespace keeps IELTS surfaces untouched. */
+  --color-au-accent: #0071e3;
+  --color-au-accent-hover: #0077ed;
+  --color-au-accent-active: #0067c9;
+  --color-au-accent-tint: rgba(0, 113, 227, 0.08);
+  --color-au-accent-tint-strong: rgba(0, 113, 227, 0.14);
+  --color-au-canvas: #f5f5f7;
+  --color-au-surface: #ffffff;
+  --color-au-surface-raised: #fbfbfd;
+  --color-au-separator: rgba(60, 60, 67, 0.12);
+  --color-au-separator-strong: rgba(60, 60, 67, 0.2);
+  --color-au-fill: rgba(120, 120, 128, 0.08);
+  --color-au-fill-strong: rgba(120, 120, 128, 0.14);
+  --color-au-fill-press: rgba(120, 120, 128, 0.21);
+  /* Status: dot/icon colors clear ≥3:1 as non-text UI; text variants clear
+   * ≥4.5:1 at the workspace's small sizes. Color never carries state alone. */
+  --color-au-success: #059669;
+  --color-au-success-text: #067647;
+  --color-au-success-tint: rgba(5, 150, 105, 0.1);
+  --color-au-danger: #d92d20;
+  --color-au-danger-text: #b42318;
+  --color-au-danger-tint: rgba(217, 45, 32, 0.08);
+  --color-au-warning: #d97706;
+  --color-au-warning-text: #92400e;
+  --color-au-warning-tint: rgba(217, 119, 6, 0.1);
+
+  /* Type ramp — the only sizes the workspace may use. Tracking tightens as
+   * size grows, the way optical Sizes do on Apple platforms. */
+  --text-au-11: 0.6875rem;
+  --text-au-11--line-height: 1.4546;
+  --text-au-12: 0.75rem;
+  --text-au-12--line-height: 1.4584;
+  --text-au-13: 0.8125rem;
+  --text-au-13--line-height: 1.4616;
+  --text-au-15: 0.9375rem;
+  --text-au-15--line-height: 1.4667;
+  --text-au-17: 1.0625rem;
+  --text-au-17--line-height: 1.4706;
+  --text-au-22: 1.375rem;
+  --text-au-22--line-height: 1.2728;
+
+  /* Corner language — one radius per role, no in-betweens. */
+  --radius-au-sm: 7px; /* chips, micro controls */
+  --radius-au-md: 10px; /* controls, list rows */
+  --radius-au-lg: 12px; /* cards, inputs, options */
+  --radius-au-xl: 16px; /* sheets, panels */
 
   /* Notion Design System Color Palette — warm neutrals, low chroma */
   /* Neutral (Notion gray ramp: #37352F text → #F7F7F5 canvas) */
@@ -1481,17 +1534,379 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 }
 
-/* SAT authoring workspace — one material hierarchy, not a card farm. */
+/* SAT authoring workspace — one material hierarchy, not a card farm.
+ * Layer order: glass chrome → frosted rail → quiet canvas → sheet of paper. */
 .sat-authoring {
   --authoring-sidebar-width: 430px;
-  --authoring-canvas: #f4f4f6;
-  --authoring-sheet: rgba(255, 255, 255, 0.96);
+  --authoring-canvas: var(--sat-canvas, #f5f5f7);
+  --authoring-sheet: rgba(255, 255, 255, 0.97);
   --authoring-hairline: rgba(60, 60, 67, 0.14);
+
+  /* Elevation: a 0.5px contact hairline plus layered ambient shadows — the
+   * recipe that makes surfaces read as physical objects, not drawn borders. */
+  --au-elevation-menu:
+    0 0 0 0.5px rgba(0, 0, 0, 0.055),
+    0 2px 8px rgba(0, 0, 0, 0.055),
+    0 14px 44px rgba(0, 0, 0, 0.14);
+  --au-elevation-sheet:
+    0 0 0 0.5px rgba(0, 0, 0, 0.045),
+    0 2px 6px rgba(0, 0, 0, 0.028),
+    0 24px 68px rgba(0, 0, 0, 0.085);
+}
+
+.au-elevation-menu {
+  box-shadow: var(--au-elevation-menu);
+}
+
+.au-elevation-sheet {
+  box-shadow: var(--au-elevation-sheet);
+}
+
+.sat-rich-editor {
+  overflow: visible;
+  border: 1px solid var(--color-au-separator-strong);
+  border-radius: var(--radius-au-lg);
+  background: var(--color-au-surface);
+  box-shadow: var(--shadow-sm);
+  font-family: var(--font-au-sans);
+  transition:
+    border-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    box-shadow var(--authoring-motion-state) var(--authoring-ease);
+}
+
+.sat-rich-editor:focus-within {
+  border-color: var(--color-au-accent);
+  box-shadow:
+    0 0 0 3px var(--color-au-accent-tint),
+    var(--shadow-sm);
+}
+
+.sat-rich-editor__toolbar {
+  border-bottom: 1px solid var(--color-au-separator);
+  border-radius: calc(var(--radius-au-lg) - 1px) calc(var(--radius-au-lg) - 1px) 0 0;
+  background: var(--color-au-surface-raised);
+}
+
+.sat-rich-editor__toolbar-row,
+.sat-rich-editor__toolbar-group,
+.sat-rich-editor__table-toolbar-row {
+  display: flex;
+  align-items: center;
+}
+
+.sat-rich-editor__toolbar-row {
+  min-height: 2.75rem;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+}
+
+.sat-rich-editor__toolbar-group {
+  gap: 2px;
+}
+
+.sat-rich-editor__toolbar-group--history {
+  margin-left: auto;
+  padding-left: var(--spacing-1);
+  border-left: 1px solid var(--color-au-separator);
+}
+
+.sat-rich-editor__toolbar-divider,
+.sat-rich-editor__table-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  background: var(--color-au-separator);
+}
+
+.sat-rich-editor__toolbar-divider {
+  height: var(--spacing-5);
+  margin-inline: 2px;
+}
+
+.sat-rich-editor__style-select,
+.sat-rich-editor__toolbar-button {
+  min-height: var(--spacing-10);
+  border-radius: var(--radius-au-sm);
+  font-family: inherit;
+  font-size: var(--text-au-12);
+  line-height: 1;
+}
+
+.sat-rich-editor__style-select {
+  min-width: 4.5rem;
+  border: 1px solid transparent;
+  background: var(--color-au-fill);
+  padding: 0 var(--spacing-3);
+  color: var(--color-gray-700);
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+  transition:
+    background-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    border-color var(--authoring-motion-fast) var(--authoring-ease-standard);
+}
+
+.sat-rich-editor__style-select:hover {
+  background: var(--color-au-fill-strong);
+}
+
+.sat-rich-editor__style-select:focus-visible {
+  border-color: var(--color-au-accent);
+  box-shadow: 0 0 0 2px var(--color-au-accent-tint);
+}
+
+.sat-rich-editor__toolbar-button {
+  display: inline-flex;
+  min-width: var(--spacing-10);
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  padding-inline: var(--spacing-2);
+  color: var(--color-gray-500);
+  outline: none;
+  cursor: pointer;
+  transition:
+    background-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    border-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    transform var(--authoring-motion-fast) var(--authoring-ease-standard);
+}
+
+.sat-rich-editor__toolbar-button:hover:not(:disabled) {
+  border-color: var(--color-au-separator);
+  background: var(--color-au-fill);
+  color: var(--color-gray-900);
+}
+
+.sat-rich-editor__toolbar-button:active:not(:disabled) {
+  transform: scale(0.96);
+  background: var(--color-au-fill-press);
+}
+
+.sat-rich-editor__toolbar-button:focus-visible {
+  border-color: var(--color-au-accent);
+  box-shadow: 0 0 0 2px var(--color-au-accent-tint);
+}
+
+.sat-rich-editor__toolbar-button.is-active {
+  border-color: var(--color-au-accent-tint-strong);
+  background: var(--color-au-accent-tint-strong);
+  color: var(--color-au-accent-active);
+}
+
+.sat-rich-editor__toolbar-button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.sat-rich-editor__table-toolbar {
+  overflow: hidden;
+  border-top: 1px solid var(--color-au-separator);
+  background: var(--color-au-canvas);
+}
+
+.sat-rich-editor__table-toolbar-row {
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  color: var(--color-gray-500);
+  font-size: var(--text-au-11);
+}
+
+.sat-rich-editor__table-label {
+  margin-right: var(--spacing-1);
+  padding-inline: var(--spacing-1);
+  color: var(--color-gray-500);
+  font-weight: 600;
+}
+
+.sat-rich-editor__table-divider {
+  height: var(--spacing-4);
+  margin-inline: var(--spacing-1);
+}
+
+.sat-rich-editor__table-action {
+  border-radius: var(--radius-au-sm);
+  padding: var(--spacing-1) var(--spacing-2);
+  color: var(--color-gray-700);
+  font-family: inherit;
+  font-size: var(--text-au-11);
+  font-weight: 600;
+  transition:
+    background-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    color var(--authoring-motion-fast) var(--authoring-ease-standard);
+}
+
+.sat-rich-editor__table-action:hover {
+  background: var(--color-au-surface);
+  color: var(--color-gray-900);
+}
+
+.sat-rich-editor__table-action--danger {
+  color: var(--color-au-danger-text);
+}
+
+.sat-rich-editor__table-action--danger:hover {
+  background: var(--color-au-danger-tint);
+  color: var(--color-au-danger-text);
+}
+
+.sat-rich-editor__content {
+  padding: var(--spacing-4) var(--spacing-5);
+}
+
+.sat-rich-editor[data-compact="true"] .sat-rich-editor__content {
+  padding: var(--spacing-3) var(--spacing-3);
+}
+
+.sat-rich-editor__input {
+  min-width: 0;
+  caret-color: var(--color-au-accent);
+  outline: none;
+  color: var(--color-gray-900);
+  font-family: var(--font-au-sans);
+  font-size: var(--text-au-15);
+  line-height: var(--text-au-15--line-height);
+}
+
+.sat-rich-editor [contenteditable="true"]::selection {
+  background: var(--color-au-accent-tint-strong);
+}
+
+.sat-rich-editor__input.is-editor-empty::before,
+.sat-rich-editor__input .is-editor-empty:first-child::before {
+  pointer-events: none;
+  float: left;
+  height: 0;
+  color: var(--color-gray-400);
+  content: attr(data-placeholder);
+}
+
+.sat-rich-editor__input p {
+  margin-block: var(--spacing-3);
+}
+
+.sat-rich-editor__input p:first-child,
+.sat-rich-editor__input h2:first-child,
+.sat-rich-editor__input h3:first-child {
+  margin-top: 0;
+}
+
+.sat-rich-editor__input p:last-child,
+.sat-rich-editor__input h2:last-child,
+.sat-rich-editor__input h3:last-child {
+  margin-bottom: 0;
+}
+
+.sat-rich-editor__input h2,
+.sat-rich-editor__input h3 {
+  font-weight: 600;
+}
+
+.sat-rich-editor__input h2 {
+  margin-top: var(--spacing-5);
+  margin-bottom: var(--spacing-2);
+  color: var(--color-gray-900);
+  font-size: var(--text-au-17);
+  line-height: var(--text-au-17--line-height);
+  letter-spacing: -0.015em;
+}
+
+.sat-rich-editor__input h3 {
+  margin-top: var(--spacing-4);
+  margin-bottom: var(--spacing-2);
+  color: var(--color-gray-900);
+  font-size: var(--text-au-15);
+  line-height: var(--text-au-15--line-height);
+}
+
+.sat-rich-editor__input ul,
+.sat-rich-editor__input ol {
+  margin-block: var(--spacing-3);
+  padding-left: var(--spacing-6);
+}
+
+.sat-rich-editor__input li {
+  margin-block: var(--spacing-1);
+  padding-left: var(--spacing-1);
+}
+
+.sat-rich-editor__input table {
+  width: 100%;
+  margin-block: var(--spacing-4);
+  border-collapse: collapse;
+}
+
+.sat-rich-editor__input td,
+.sat-rich-editor__input th {
+  border: 1px solid var(--color-au-separator-strong);
+  padding: var(--spacing-2) var(--spacing-3);
+  text-align: left;
+}
+
+.sat-rich-editor__input th {
+  background: var(--color-au-canvas);
+  font-weight: 600;
+}
+
+.sat-rich-editor__input img {
+  max-width: 100%;
+  max-height: 20rem;
+  margin-block: var(--spacing-4);
+  border-radius: var(--radius-au-lg);
+  object-fit: contain;
+}
+
+.sat-rich-editor__input pre {
+  max-width: 100%;
+  margin-block: var(--spacing-4);
+  overflow-x: auto;
+  border-radius: var(--radius-au-lg);
+  background: var(--color-au-canvas);
+  padding: var(--spacing-4);
+  color: var(--color-gray-900);
+  font-family: var(--font-mono);
+  font-size: var(--text-au-13);
+  line-height: 1.5;
+}
+
+@media (pointer: coarse) {
+  .sat-rich-editor__style-select,
+  .sat-rich-editor__toolbar-button {
+    min-height: var(--student-touch-target-min);
+  }
+
+  .sat-rich-editor__toolbar-button {
+    min-width: var(--student-touch-target-min);
+  }
+}
+
+@media (max-width: 640px) {
+  .sat-rich-editor__toolbar-group--history {
+    margin-left: 0;
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .sat-rich-editor__content {
+    padding: var(--spacing-4);
+  }
 }
 
 .sat-authoring .authoring-topbar {
-  background: rgba(250, 250, 252, 0.82);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
+  background: rgba(250, 250, 252, 0.8);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  backdrop-filter: saturate(180%) blur(24px);
+  border-bottom-color: rgba(60, 60, 67, 0.1);
+  transition: border-bottom-color 220ms var(--authoring-ease, ease);
+}
+
+/* The chrome separates from content only once it scrolls — quiet at rest,
+ * structural in motion, the way Apple toolbars behave. */
+.sat-authoring .authoring-topbar[data-scrolled="true"] {
+  border-bottom-color: rgba(60, 60, 67, 0.17);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 
 .sat-authoring .authoring-workspace {
@@ -1499,22 +1914,24 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 }
 
 .sat-authoring .authoring-sidebar {
-  background: rgba(247, 247, 249, 0.88);
+  background: rgba(249, 249, 250, 0.92);
   border-color: var(--authoring-hairline);
 }
 
 .sat-authoring .authoring-sidebar-header {
-  background: rgba(250, 250, 252, 0.66);
-  -webkit-backdrop-filter: saturate(150%) blur(18px);
-  backdrop-filter: saturate(150%) blur(18px);
+  background: rgba(250, 250, 252, 0.72);
+  -webkit-backdrop-filter: saturate(160%) blur(18px);
+  backdrop-filter: saturate(160%) blur(18px);
 }
 
 .sat-authoring .authoring-question-row {
   box-shadow: none;
 }
 
+/* Selection is carried by a tint plus a hairline ring — color is reinforced
+ * by the aria-current outline so it never depends on hue alone. */
 .sat-authoring .authoring-question-row:has([aria-current="true"]) {
-  box-shadow: inset 0 0 0 1px rgba(0, 113, 227, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(0, 113, 227, 0.22);
 }
 
 .sat-authoring .authoring-editor-canvas {
@@ -1525,16 +1942,14 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 .sat-authoring .authoring-editor-sheet {
   background: var(--authoring-sheet);
-  border: 1px solid rgba(60, 60, 67, 0.10);
+  border: 1px solid rgba(60, 60, 67, 0.1);
   border-radius: 20px;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.025),
-    0 12px 36px rgba(0, 0, 0, 0.045);
+  box-shadow: var(--au-elevation-sheet);
 }
 
 .sat-authoring .authoring-metadata-bar {
-  background: rgba(118, 118, 128, 0.075);
-  box-shadow: inset 0 0 0 1px rgba(60, 60, 67, 0.055);
+  background: rgba(118, 118, 128, 0.065);
+  box-shadow: inset 0 0 0 1px rgba(60, 60, 67, 0.05);
 }
 
 .sat-authoring .authoring-answer-row {
@@ -1542,9 +1957,9 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 }
 
 .sat-authoring .authoring-editor-footer {
-  background: rgba(255, 255, 255, 0.88);
-  -webkit-backdrop-filter: saturate(160%) blur(18px);
-  backdrop-filter: saturate(160%) blur(18px);
+  background: rgba(255, 255, 255, 0.82);
+  -webkit-backdrop-filter: saturate(160%) blur(20px);
+  backdrop-filter: saturate(160%) blur(20px);
 }
 
 @media (max-width: 1100px) {
@@ -1554,6 +1969,30 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     border-radius: 14px;
     box-shadow: none;
   }
+}
+
+@media (max-width: 900px) {
+  .sat-authoring .authoring-workspace {
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+
+  .sat-authoring .authoring-sidebar {
+    width: 100%;
+    min-width: 0;
+    height: clamp(220px, 34vh, 300px);
+    flex: 0 0 clamp(220px, 34vh, 300px);
+    border-right: 0;
+    border-bottom: 1px solid var(--authoring-hairline);
+  }
+
+  .sat-authoring .authoring-editor-canvas {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+  }
+
 }
 
 @media (prefers-reduced-transparency: reduce) {
