@@ -15,6 +15,7 @@ pub mod library;
 pub mod media;
 pub mod proctoring;
 pub mod results;
+pub mod sat_workbook;
 pub mod scheduling;
 pub mod student_access;
 pub mod validation;

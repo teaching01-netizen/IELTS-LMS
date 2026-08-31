@@ -20,15 +20,16 @@ async function sha256(file: File): Promise<string | null> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function uploadAssessmentAsset(
+async function uploadImageAsset(
   file: File,
+  ownerKind: "assessment_question" | "assessment_import",
   ownerId: string
 ): Promise<AssessmentMediaAsset> {
   if (!file.type.startsWith("image/")) throw new Error("Only image files can be inserted here.");
   if (file.size > 10 * 1024 * 1024) throw new Error("Images must be 10 MB or smaller.");
 
   const intent = await backendPost<UploadIntent>("/v1/media/uploads", {
-    ownerKind: "assessment_question",
+    ownerKind,
     ownerId,
     contentType: file.type || "application/octet-stream",
     fileName: file.name,
@@ -44,4 +45,18 @@ export async function uploadAssessmentAsset(
     sizeBytes: file.size,
     checksumSha256: await sha256(file),
   });
+}
+
+export function uploadAssessmentAsset(
+  file: File,
+  ownerId: string
+): Promise<AssessmentMediaAsset> {
+  return uploadImageAsset(file, "assessment_question", ownerId);
+}
+
+export function uploadAssessmentImportAsset(
+  file: File,
+  importId: string
+): Promise<AssessmentMediaAsset> {
+  return uploadImageAsset(file, "assessment_import", importId);
 }

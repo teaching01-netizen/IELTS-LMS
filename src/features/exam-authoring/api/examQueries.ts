@@ -15,12 +15,12 @@ const examListQueryPolicy = {
 
 export const examKeys = {
   all: ['exam-authoring'] as const,
-  list: () => [...examKeys.all, 'list'] as const,
+  list: (providerKey?: 'sat' | 'ielts') => [...examKeys.all, 'list', providerKey ?? 'all'] as const,
   detail: (examId: string) => [...examKeys.all, 'detail', examId] as const,
 };
 
-export async function fetchExamList(): Promise<ExamListData> {
-  const entities = await examAuthoringFacade.repository.getAllExamsWithLegacyMigration();
+export async function fetchExamList(providerKey?: 'sat' | 'ielts'): Promise<ExamListData> {
+  const entities = await examAuthoringFacade.repository.getAllExamsWithLegacyMigration(providerKey);
   const exams = await examAuthoringFacade.adaptExamEntitiesToLegacyExams(
     entities,
     examAuthoringFacade.repository,
@@ -29,10 +29,10 @@ export async function fetchExamList(): Promise<ExamListData> {
   return { entities, exams };
 }
 
-export function useExamListQuery(enabled = true) {
+export function useExamListQuery(enabled = true, providerKey?: 'sat' | 'ielts') {
   return useQuery({
-    queryKey: examKeys.list(),
-    queryFn: fetchExamList,
+    queryKey: examKeys.list(providerKey),
+    queryFn: () => fetchExamList(providerKey),
     enabled,
     ...examListQueryPolicy,
   });
@@ -57,12 +57,12 @@ export function useDeleteExamMutation() {
         return;
       }
 
-      void queryClient.invalidateQueries({ queryKey: examKeys.list() });
+      void queryClient.invalidateQueries({ queryKey: examKeys.all });
       queryClient.removeQueries({ queryKey: examKeys.detail(examId) });
     },
   });
 }
 
 export function invalidateExamList(queryClient: QueryClient): Promise<void> {
-  return queryClient.invalidateQueries({ queryKey: examKeys.list() });
+  return queryClient.invalidateQueries({ queryKey: examKeys.all });
 }

@@ -122,6 +122,7 @@ export function ScheduleSessionModal({
     const schedule: ExamSchedule = {
       id: `sched-${Date.now()}`,
       examId: draft.examId,
+      providerKey: selectedExamEntity?.providerKey ?? 'ielts',
       examTitle: selectedExamEntity?.title || selectedVersion.contentSnapshot.title,
       proctorDisplayName: trimmedProctorDisplayName,
       gradingDisplayName: trimmedGradingDisplayName,

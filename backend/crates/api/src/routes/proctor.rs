@@ -37,6 +37,7 @@ pub struct LiveModeQuery {
 #[serde(rename_all = "camelCase")]
 pub struct ProctorSessionQuery {
     pub mode: Option<String>,
+    pub provider_key: Option<String>,
     pub audit_limit: Option<u32>,
     pub alert_limit: Option<u32>,
 }
@@ -45,6 +46,7 @@ pub async fn list_sessions(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
+    Query(query): Query<ProctorSessionQuery>,
 ) -> Result<ApiResponse<Vec<ProctorSessionSummary>>, ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Proctor])?;
     let service = ProctoringService::new(state.db_pool());
@@ -58,6 +60,22 @@ pub async fn list_sessions(
             .into_iter()
             .filter(|session| allowed.contains(&session.schedule.id))
             .collect()
+    };
+    let sessions = if let Some(provider_key) = query.provider_key.as_deref() {
+        if !matches!(provider_key, "sat" | "ielts") {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VALIDATION_ERROR",
+                "providerKey must be either sat or ielts.",
+            ));
+        }
+        let allowed = provider_schedule_ids(&state, provider_key).await?;
+        sessions
+            .into_iter()
+            .filter(|session| allowed.contains(&session.schedule.id))
+            .collect()
+    } else {
+        sessions
     };
     state
         .telemetry
@@ -459,6 +477,31 @@ async fn authorize_schedule(
                 "The authenticated user is not assigned to this schedule.",
             )
         })
+}
+
+async fn provider_schedule_ids(
+    state: &AppState,
+    provider_key: &str,
+) -> Result<std::collections::HashSet<String>, ApiError> {
+    let rows = query_scalar::<_, String>(
+        r#"
+        SELECT schedules.id
+        FROM exam_schedules schedules
+        JOIN exam_entities exams ON exams.id = schedules.exam_id
+        WHERE exams.provider_key = ?
+        "#,
+    )
+    .bind(provider_key)
+    .fetch_all(&state.db_pool())
+    .await
+    .map_err(|err| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &err.to_string(),
+        )
+    })?;
+    Ok(rows.into_iter().collect())
 }
 
 async fn assigned_schedule_ids(

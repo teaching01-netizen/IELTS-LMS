@@ -97,7 +97,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
             onClick={onBackToExams}
             className="mt-5 min-h-11 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white"
           >
-            Return to Exams
+            Exam Library
           </button>
         </div>
       </div>
@@ -215,7 +215,7 @@ function ReleaseHeader({
           className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm font-medium text-slate-600 transition-colors hover:bg-black/[0.04] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         >
           <ArrowLeft size={17} aria-hidden="true" />
-          Builder
+          Questions
         </button>
         <div className="h-5 w-px bg-black/[0.08]" />
         <div className="min-w-0 flex-1">

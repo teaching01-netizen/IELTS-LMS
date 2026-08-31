@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Bell, LayoutDashboard, LogOut, Search } from 'lucide-react';
+import { ArrowRight, Bell, LayoutDashboard, LogOut, Search } from 'lucide-react';
 import { ProctorProps } from '../../features/proctor/contracts';
 import { useAuthSession } from '../../features/auth/authSession';
 import { ProctorDashboard } from './ProctorDashboard';
@@ -32,6 +32,7 @@ export function ProctorApp({
   selectedScheduleId,
   onSelectScheduleId,
   onExit,
+  onSwitchToSat,
   onUpdateSessions,
   onUpdateAlerts,
   onUpdateNotes,
@@ -81,13 +82,23 @@ export function ProctorApp({
                 P
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">Workspace</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">IELTS</p>
                 <div className="flex items-center gap-2">
                   <LayoutDashboard size={16} className="text-slate-500" />
-                  <span className="text-sm font-semibold text-slate-900">Monitoring</span>
+                  <span className="text-sm font-semibold text-slate-900">Proctoring</span>
                 </div>
               </div>
             </div>
+            {onSwitchToSat ? (
+              <button
+                type="button"
+                onClick={onSwitchToSat}
+                className="hidden min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 lg:flex"
+              >
+                Digital SAT
+                <ArrowRight size={12} aria-hidden="true" />
+              </button>
+            ) : null}
             <div className="relative w-64">
               <Search className="absolute left-2.5 top-2 text-gray-400" size={16} />
               <input

@@ -23,6 +23,10 @@ use ielts_backend_application::{
     builder::{BuilderError, BuilderService},
     delivery::DeliveryService,
     proctoring::ProctoringService,
+    sat_workbook::{
+        SatWorkbookAsset, SatWorkbookCommitRequest, SatWorkbookModuleDraft, SatWorkbookPreview,
+        SatWorkbookStagedAsset,
+    },
     scheduling::SchedulingService,
 };
 use ielts_backend_domain::{
@@ -80,6 +84,8 @@ const SAT_MIGRATIONS: &[&str] = &[
     "0036_question_revision_updated_by.sql",
     "0037_runtime_timing_model.sql",
     "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
+    "0040_sat_workbook_import_recovery.sql",
 ];
 
 #[tokio::test]
@@ -1431,6 +1437,356 @@ async fn sat_sample_loader_replaces_full_draft_atomically() {
         .sum();
     assert_eq!(after_invalid_total, 147);
     assert_eq!(after_invalid.version_revision, current.version_revision);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn sat_workbook_commit_is_atomic_recoverable_and_invalidates_undo_after_edit() {
+    let database = mysql::TestDatabase::new(SAT_MIGRATIONS).await;
+    let pool = database.pool().clone();
+    let actor = ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin);
+    let builder = BuilderService::new(pool.clone());
+    let exam = create_sat_exam(&builder, &actor, "SAT Workbook Commit").await;
+    let authoring = AssessmentAuthoringService::new(pool.clone());
+
+    let before = authoring
+        .shell(&exam.id)
+        .await
+        .expect("workbook baseline shell");
+    let sample = complete_sample_request(&before);
+    let modules: Vec<SatWorkbookModuleDraft> = before
+        .sections
+        .iter()
+        .flat_map(|section| {
+            section.modules.iter().map(|module| {
+                let questions = sample
+                    .modules
+                    .iter()
+                    .find(|candidate| candidate.module_id == module.id)
+                    .expect("matching sample module")
+                    .questions
+                    .clone();
+                SatWorkbookModuleDraft {
+                    module_key: module.module_key.clone(),
+                    section_key: section.section_key.clone(),
+                    questions,
+                }
+            })
+        })
+        .collect();
+
+    let preview = SatWorkbookPreview {
+        import_id: Uuid::new_v4().to_string(),
+        template_version: "1".to_owned(),
+        row_count: 147,
+        question_count: 147,
+        valid: true,
+        modules: modules.clone(),
+        assets: vec![],
+        issues: vec![],
+    };
+    authoring
+        .register_sat_workbook_preview(&exam.id, &preview, &actor.actor_id)
+        .await
+        .expect("register workbook preview");
+    let request = SatWorkbookCommitRequest {
+        import_id: preview.import_id.clone(),
+        expected_version_id: before.version_id.clone(),
+        expected_version_revision: before.version_revision,
+        modules: modules.clone(),
+        assets: vec![],
+    };
+
+    let committed = authoring
+        .commit_sat_workbook(&exam.id, request.clone(), &actor.actor_id)
+        .await
+        .expect("atomic workbook commit");
+    let loaded = &committed.shell;
+    assert!(committed.undo.available);
+    assert_eq!(committed.undo.import_id, preview.import_id);
+    assert_eq!(loaded.version_revision, before.version_revision + 1);
+    assert_eq!(
+        loaded
+            .sections
+            .iter()
+            .flat_map(|section| &section.modules)
+            .map(|module| module.questions.len())
+            .sum::<usize>(),
+        147
+    );
+    assert!(loaded
+        .sections
+        .iter()
+        .flat_map(|section| &section.modules)
+        .all(|module| {
+            module.questions.len() == module.target_question_count as usize
+                && module
+                    .questions
+                    .iter()
+                    .filter(|question| question.is_pretest)
+                    .count()
+                    == 2
+        }));
+    assert!(
+        authoring
+            .sat_workbook_undo_state(&exam.id)
+            .await
+            .expect("undo state")
+            .expect("committed import")
+            .available
+    );
+
+    let restored = authoring
+        .undo_sat_workbook_import(&exam.id, &committed.undo.import_id, &actor.actor_id)
+        .await
+        .expect("undo workbook import");
+    assert_ne!(restored.version_id, before.version_id);
+    assert_eq!(
+        restored
+            .sections
+            .iter()
+            .flat_map(|section| &section.modules)
+            .map(|module| module.questions.len())
+            .sum::<usize>(),
+        0
+    );
+    assert!(authoring
+        .sat_workbook_undo_state(&exam.id)
+        .await
+        .expect("undo state after restore")
+        .is_none());
+
+    let second_preview = SatWorkbookPreview {
+        import_id: Uuid::new_v4().to_string(),
+        template_version: "1".to_owned(),
+        row_count: 147,
+        question_count: 147,
+        valid: true,
+        modules: modules.clone(),
+        assets: vec![],
+        issues: vec![],
+    };
+    authoring
+        .register_sat_workbook_preview(&exam.id, &second_preview, &actor.actor_id)
+        .await
+        .expect("register second workbook preview");
+    let second = authoring
+        .commit_sat_workbook(
+            &exam.id,
+            SatWorkbookCommitRequest {
+                import_id: second_preview.import_id.clone(),
+                expected_version_id: restored.version_id.clone(),
+                expected_version_revision: restored.version_revision,
+                modules,
+                assets: vec![],
+            },
+            &actor.actor_id,
+        )
+        .await
+        .expect("second workbook commit");
+    let first_question_id = second.shell.sections[0].modules[0].questions[0]
+        .exam_question_id
+        .clone();
+    let question = authoring
+        .question(&first_question_id)
+        .await
+        .expect("imported question")
+        .question;
+    authoring
+        .save_question_revision(
+            &question.id,
+            SaveQuestionRevisionRequest {
+                revision: question.revision,
+                question_type: question.question_type,
+                stimulus: question.stimulus,
+                prompt: question.prompt,
+                answer: question.answer,
+                rationale: question.rationale,
+                metadata: question.metadata,
+                accessibility: question.accessibility,
+            },
+            &actor.actor_id,
+        )
+        .await
+        .expect("post-import edit");
+    let stale_undo = authoring
+        .undo_sat_workbook_import(&exam.id, &second.undo.import_id, &actor.actor_id)
+        .await;
+    assert!(matches!(
+        stale_undo,
+        Err(AssessmentAuthoringError::Conflict(_))
+    ));
+
+    let stale_commit = authoring
+        .commit_sat_workbook(&exam.id, request, &actor.actor_id)
+        .await;
+    assert!(matches!(
+        stale_commit,
+        Err(AssessmentAuthoringError::Conflict(_))
+    ));
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn sat_workbook_media_is_verified_promoted_and_orphaned_on_undo() {
+    let database = mysql::TestDatabase::new(SAT_MIGRATIONS).await;
+    let pool = database.pool().clone();
+    let actor = ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin);
+    let builder = BuilderService::new(pool.clone());
+    let exam = create_sat_exam(&builder, &actor, "SAT Workbook Media").await;
+    let authoring = AssessmentAuthoringService::new(pool.clone());
+    let before = authoring.shell(&exam.id).await.expect("workbook baseline");
+    let sample = complete_sample_request(&before);
+    let mut modules: Vec<SatWorkbookModuleDraft> = before
+        .sections
+        .iter()
+        .flat_map(|section| {
+            section.modules.iter().map(|module| {
+                let questions = sample
+                    .modules
+                    .iter()
+                    .find(|candidate| candidate.module_id == module.id)
+                    .expect("matching sample module")
+                    .questions
+                    .clone();
+                SatWorkbookModuleDraft {
+                    module_key: module.module_key.clone(),
+                    section_key: section.section_key.clone(),
+                    questions,
+                }
+            })
+        })
+        .collect();
+    modules[0].questions[0].prompt = StructuredContent {
+        version: 2,
+        nodes: vec![],
+        document: Some(json!({
+            "type": "doc",
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "Use the graph to answer the question."}]},
+                {"type": "image", "attrs": {
+                    "assetId": "workbook:graph_01",
+                    "alt": "A test graph",
+                    "caption": "Workbook graph"
+                }}
+            ]
+        })),
+    };
+
+    let import_id = Uuid::new_v4().to_string();
+    let asset_id = Uuid::new_v4().to_string();
+    let size_bytes = 123_i64;
+    let checksum = "workbook-checksum";
+    sqlx::query(
+        r#"
+        INSERT INTO media_assets (
+            id, owner_kind, owner_id, content_type, file_name, upload_status,
+            object_key, size_bytes, checksum_sha256, upload_url, download_url,
+            delete_after_at, created_at, updated_at
+        )
+        VALUES (?, 'assessment_import', ?, 'image/png', 'graph_01.png', 'finalized',
+                ?, ?, ?, 'https://upload.invalid', 'https://download.invalid',
+                DATE_ADD(NOW(), INTERVAL 1 DAY), NOW(), NOW())
+        "#,
+    )
+    .bind(&asset_id)
+    .bind(&import_id)
+    .bind(format!("media/{asset_id}/graph_01.png"))
+    .bind(size_bytes)
+    .bind(checksum)
+    .execute(&pool)
+    .await
+    .expect("stage workbook media");
+
+    let preview = SatWorkbookPreview {
+        import_id: import_id.clone(),
+        template_version: "1".to_owned(),
+        row_count: 147,
+        question_count: 147,
+        valid: true,
+        modules: modules.clone(),
+        assets: vec![SatWorkbookAsset {
+            key: "graph_01".to_owned(),
+            file_name: "graph_01.png".to_owned(),
+            content_type: "image/png".to_owned(),
+            size_bytes: size_bytes as usize,
+            checksum_sha256: checksum.to_owned(),
+            alt_text: "A test graph".to_owned(),
+            caption: Some("Workbook graph".to_owned()),
+            data_base64: None,
+        }],
+        issues: vec![],
+    };
+    authoring
+        .register_sat_workbook_preview(&exam.id, &preview, &actor.actor_id)
+        .await
+        .expect("register workbook preview");
+    let committed = authoring
+        .commit_sat_workbook(
+            &exam.id,
+            SatWorkbookCommitRequest {
+                import_id: import_id.clone(),
+                expected_version_id: before.version_id.clone(),
+                expected_version_revision: before.version_revision,
+                modules,
+                assets: vec![SatWorkbookStagedAsset {
+                    key: "graph_01".to_owned(),
+                    asset_id: asset_id.clone(),
+                }],
+            },
+            &actor.actor_id,
+        )
+        .await
+        .expect("commit workbook with media");
+
+    let media: (String, String, String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
+        "SELECT owner_kind, owner_id, upload_status, delete_after_at FROM media_assets WHERE id = ?",
+    )
+    .bind(&asset_id)
+    .fetch_one(&pool)
+    .await
+    .expect("promoted media row");
+    assert_eq!(media.0, "assessment_exam");
+    assert_eq!(media.1, exam.id);
+    assert_eq!(media.2, "finalized");
+    assert!(media.3.is_none());
+
+    let first_question_id = committed.shell.sections[0].modules[0].questions[0]
+        .exam_question_id
+        .clone();
+    let question = authoring
+        .question(&first_question_id)
+        .await
+        .expect("imported media question");
+    let document = question
+        .question
+        .prompt
+        .document
+        .as_ref()
+        .expect("rich prompt with media");
+    let image = &document["content"][1];
+    assert_eq!(image["type"], "image");
+    assert_eq!(image["attrs"]["assetId"], asset_id);
+    assert_eq!(image["attrs"]["alt"], "A test graph");
+    assert_eq!(image["attrs"]["caption"], "Workbook graph");
+    assert!(image["attrs"].get("src").is_none());
+
+    authoring
+        .undo_sat_workbook_import(&exam.id, &committed.undo.import_id, &actor.actor_id)
+        .await
+        .expect("undo workbook with media");
+    let orphan: (String, String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
+        "SELECT owner_kind, upload_status, delete_after_at FROM media_assets WHERE id = ?",
+    )
+    .bind(&asset_id)
+    .fetch_one(&pool)
+    .await
+    .expect("orphaned media row");
+    assert_eq!(orphan.0, "assessment_exam");
+    assert_eq!(orphan.1, "orphaned");
+    assert!(orphan.2.is_some());
 
     database.shutdown().await;
 }

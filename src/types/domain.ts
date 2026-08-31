@@ -216,6 +216,7 @@ export interface ExamEvent {
 export interface ExamSchedule {
   id: string;
   examId: string;
+  providerKey: ExamProviderKey;
   examTitle: string;
   proctorDisplayName: string;
   gradingDisplayName: string;
@@ -324,6 +325,7 @@ export interface ExamSessionRuntime {
   id: string;
   scheduleId: string;
   examId: string;
+  providerKey: ExamProviderKey;
   examTitle: string;
   cohortName: string;
   deliveryMode: "proctor_start";

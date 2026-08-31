@@ -70,8 +70,8 @@ interface StudentEntryPayload {
   wcode: string;
   email: string;
   studentName: string;
-  nickname: string;
-  ieltsCourse: string;
+  nickname?: string | undefined;
+  ieltsCourse?: string | undefined;
 }
 
 function extractEnvelopeData<T>(response: { data?: BackendEnvelope<T> | T | undefined }): T {

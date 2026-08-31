@@ -46,8 +46,8 @@ import {
  */
 export interface IExamRepository {
   // Exam Entity operations
-  getAllExamsWithLegacyMigration(): Promise<ExamEntity[]>;
-  getAllExams(): Promise<ExamEntity[]>;
+  getAllExamsWithLegacyMigration(providerKey?: 'sat' | 'ielts'): Promise<ExamEntity[]>;
+  getAllExams(providerKey?: 'sat' | 'ielts'): Promise<ExamEntity[]>;
   getExamById(id: string): Promise<ExamEntity | null>;
   saveExam(exam: ExamEntity): Promise<void>;
   deleteExam(id: string): Promise<void>;
@@ -120,12 +120,13 @@ export class BackendExamRepository implements IExamRepository {
     ttlMs: 60 * 1000,
   });
 
-  async getAllExamsWithLegacyMigration(): Promise<ExamEntity[]> {
-    return this.getAllExams();
+  async getAllExamsWithLegacyMigration(providerKey?: 'sat' | 'ielts'): Promise<ExamEntity[]> {
+    return this.getAllExams(providerKey);
   }
 
-  async getAllExams(): Promise<ExamEntity[]> {
-    const exams = await backendGet<any[]>('/v1/exams');
+  async getAllExams(providerKey?: 'sat' | 'ielts'): Promise<ExamEntity[]> {
+    const query = providerKey ? `?providerKey=${encodeURIComponent(providerKey)}` : '';
+    const exams = await backendGet<any[]>(`/v1/exams${query}`);
     return exams.map(mapBackendExamEntity);
   }
 

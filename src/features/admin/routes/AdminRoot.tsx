@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
-import { Bell, Menu, Search, ShieldCheck } from 'lucide-react';
+import { Bell, ChevronDown, Menu, Search, ShieldCheck } from 'lucide-react';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { useAdminRootController } from '@admin/hooks/useAdminRootController';
 import { AdminProvider } from './AdminContext';
@@ -13,6 +13,7 @@ import { AdminProvider } from './AdminContext';
  */
 export function AdminRoot() {
   const navigate = useNavigate();
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const {
     contextValue,
     currentView,
@@ -63,22 +64,38 @@ export function AdminRoot() {
           role="navigation"
           aria-label="Admin navigation"
         >
-          <div className="h-14 flex items-center justify-between px-4 border-b border-border">
+          <div className="relative h-14 flex items-center justify-between px-3 border-b border-border">
             {sidebarOpen ? (
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 bg-gray-900 text-white rounded-sm flex items-center justify-center font-bold text-xs">
-                  IP
+              <button
+                type="button"
+                onClick={() => setWorkspaceMenuOpen((open) => !open)}
+                className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 text-left hover:bg-gray-100"
+                aria-expanded={workspaceMenuOpen}
+                aria-haspopup="menu"
+              >
+                <div className="w-7 h-7 shrink-0 bg-gray-900 text-white rounded-md flex items-center justify-center font-bold text-[10px]">
+                  IELTS
                 </div>
-                <span className="font-bold text-gray-900 tracking-tight">IELTS Platform</span>
-              </div>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold tracking-tight text-gray-900">IELTS</span>
+                  <span className="block text-[9px] font-medium text-gray-400">Workspace</span>
+                </span>
+                <ChevronDown size={13} className={`shrink-0 text-gray-400 transition-transform ${workspaceMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
             ) : null}
             <button
               onClick={() => setSidebarOpen((open) => !open)}
-              className="p-1 hover:bg-gray-200 rounded-sm text-gray-600 transition-colors"
+              className="ml-1 p-1.5 hover:bg-gray-200 rounded-md text-gray-600 transition-colors"
               aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
             >
-              <Menu size={20} />
+              <Menu size={18} />
             </button>
+            {sidebarOpen && workspaceMenuOpen ? (
+              <div role="menu" className="absolute left-3 right-3 top-[52px] z-50 overflow-hidden rounded-xl border border-black/10 bg-white p-1.5 shadow-xl">
+                <button type="button" role="menuitem" onClick={() => setWorkspaceMenuOpen(false)} className="min-h-10 w-full rounded-lg bg-black/[0.045] px-3 text-left text-xs font-semibold text-gray-900">IELTS</button>
+                <button type="button" role="menuitem" onClick={() => navigate('/sat/exams')} className="mt-0.5 min-h-10 w-full rounded-lg px-3 text-left text-xs font-medium text-gray-600 hover:bg-black/[0.04]">Digital SAT</button>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex-1 overflow-y-auto py-6">

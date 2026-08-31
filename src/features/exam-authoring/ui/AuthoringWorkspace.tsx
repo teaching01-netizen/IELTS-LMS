@@ -2,7 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { AlertCircle, ClipboardCheck, Eye, ListChecks, PencilLine, Sparkles } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ClipboardCheck,
+  Eye,
+  FileSpreadsheet,
+  ListChecks,
+  MoreHorizontal,
+  PencilLine,
+  Sparkles,
+} from "lucide-react";
 import type {
   AssessmentAuthoringShell,
   AssessmentQuestionDetail,
@@ -11,6 +21,8 @@ import type {
   BatchQuestionDraft,
   BulkQuestionAction,
   QuestionRevision,
+  SatWorkbookCommitResult,
+  SatWorkbookUndoState,
 } from "../contracts/assessment";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
 import {
@@ -34,10 +46,12 @@ import {
 import { validateSatQuestion } from "../providers/sat/satProvider";
 import { QuestionEditor } from "./QuestionEditor";
 import { QuestionImportSheet } from "../import/QuestionImportSheet";
+import { SatWorkbookImportSheet } from "../import/SatWorkbookImportSheet";
 import { QuestionListPane, type QuestionListFilter } from "./QuestionListPane";
 import { QuestionQuickPreview } from "./QuestionQuickPreview";
 import { SaveStatusIndicator } from "./SaveStatusIndicator";
 import { SampleExamLoadDialog } from "./SampleExamLoadDialog";
+import { WorkbookImportUndoBanner } from "./WorkbookImportUndoBanner";
 import { authoringMotion } from "./authoringMotion";
 import { useOptionalAuthSession } from "../../auth/api/authSession";
 import { buildStaffDraftKey } from "../../../utils/staffDraftKey";
@@ -74,7 +88,12 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const [navigationError, setNavigationError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [workbookImportOpen, setWorkbookImportOpen] = useState(false);
+  const [workbookBaseline, setWorkbookBaseline] = useState<AssessmentAuthoringShell | null>(null);
+  const [workbookUndo, setWorkbookUndo] = useState<SatWorkbookUndoState | null>(null);
+  const [workbookUndoBusy, setWorkbookUndoBusy] = useState(false);
   const [sampleDialogOpen, setSampleDialogOpen] = useState(false);
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(false);
   const [focusField, setFocusField] = useState<string | null>(null);
   const selectionAnchorRef = useRef<string | null>(null);
@@ -85,6 +104,25 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const questionDraftKey = selectedExamQuestionId
     ? buildStaffDraftKey(staffActorId, "assessment-question", examId, selectedExamQuestionId)
     : null;
+
+  const shellVersionId = shell?.versionId ?? null;
+  const shellVersionRevision = shell?.versionRevision ?? null;
+
+  useEffect(() => {
+    if (!shellVersionId) return;
+    let cancelled = false;
+    void assessmentAuthoringApi
+      .getSatWorkbookUndoState(examId)
+      .then((state) => {
+        if (!cancelled) setWorkbookUndo(state?.available ? state : null);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkbookUndo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [examId, shellVersionId, shellVersionRevision]);
 
   const selectedSection = useMemo(
     () =>
@@ -315,6 +353,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
 
   const handleChange = useCallback(
     (next: QuestionRevision) => {
+      setWorkbookUndo(null);
       setDraft(next);
       autosave.scheduleAutosave(next);
     },
@@ -400,6 +439,77 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     },
     [batchCreate, examId, flushBeforeNavigation, queryClient, selectedModuleId]
   );
+
+  const openWorkbookImport = useCallback(async () => {
+    setNavigationError(null);
+    if (!(await flushBeforeNavigation())) return;
+    try {
+      const baseline = await assessmentAuthoringApi.getShell(examId);
+      setWorkbookBaseline(baseline);
+      setWorkbookImportOpen(true);
+    } catch (error) {
+      setNavigationError(
+        error instanceof Error ? error.message : "The SAT workbook importer could not be opened."
+      );
+    }
+  }, [examId, flushBeforeNavigation]);
+
+  const handleWorkbookCommitted = useCallback(
+    (result: SatWorkbookCommitResult) => {
+      const nextShell = result.shell;
+      queryClient.setQueryData(assessmentKeys.shell(examId), nextShell);
+      queryClient.removeQueries({ queryKey: ["assessment-question"] });
+      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
+      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
+      const firstModule = nextShell.sections[0]?.modules[0] ?? null;
+      setWorkspaceMode("build");
+      setSelectedIds(new Set());
+      selectionAnchorRef.current = null;
+      setDraft(null);
+      setSelectedModuleId(firstModule?.id ?? null);
+      setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
+      setWorkbookImportOpen(false);
+      setWorkbookBaseline(null);
+      setWorkbookUndo(result.undo.available ? result.undo : null);
+    },
+    [examId, queryClient]
+  );
+
+  const handleWorkbookUndo = useCallback(async () => {
+    if (!workbookUndo?.available || workbookUndoBusy) return;
+    if (autosave.status !== "saved") {
+      setWorkbookUndo(null);
+      setNavigationError("Undo is no longer available after editing the imported SAT.");
+      return;
+    }
+    setWorkbookUndoBusy(true);
+    setNavigationError(null);
+    try {
+      const nextShell = await assessmentAuthoringApi.undoSatWorkbookImport(
+        examId,
+        workbookUndo.importId
+      );
+      queryClient.setQueryData(assessmentKeys.shell(examId), nextShell);
+      queryClient.removeQueries({ queryKey: ["assessment-question"] });
+      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
+      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
+      const firstModule = nextShell.sections[0]?.modules[0] ?? null;
+      setWorkspaceMode("build");
+      setSelectedIds(new Set());
+      selectionAnchorRef.current = null;
+      setDraft(null);
+      setSelectedModuleId(firstModule?.id ?? null);
+      setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
+      setWorkbookUndo(null);
+    } catch (error) {
+      setWorkbookUndo(null);
+      setNavigationError(
+        error instanceof Error ? error.message : "The Excel import could not be undone."
+      );
+    } finally {
+      setWorkbookUndoBusy(false);
+    }
+  }, [autosave.status, examId, queryClient, workbookUndo, workbookUndoBusy]);
 
   const handleLoadSampleExam = useCallback(async () => {
     setNavigationError(null);
@@ -743,21 +853,37 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     : 0;
 
   return (
-    <div className="flex h-screen min-h-[640px] flex-col overflow-hidden bg-[#f5f5f7] text-slate-950">
-      <header className="authoring-glass z-50 shrink-0 border-b border-black/[0.055] px-3 py-2 sm:px-4">
-        <div className="mx-auto flex max-w-[1920px] items-center gap-2">
-          <div className="min-w-0 flex-1">
+    <div className="sat-product sat-authoring flex h-screen min-h-[640px] flex-col overflow-hidden bg-[#f5f5f7] text-slate-950">
+      <header className="authoring-glass authoring-topbar z-50 shrink-0 border-b border-black/[0.07] px-2 py-1.5 sm:px-3">
+        <div className="mx-auto flex min-h-[52px] max-w-[1920px] items-center gap-1.5 sm:gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              if (await flushBeforeNavigation()) navigate("/sat/exams");
+            }}
+            className="authoring-interactive flex min-h-11 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[11px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]"
+            aria-label="Back to SAT Exam Library"
+            title="Back to SAT workspace"
+          >
+            <ArrowLeft size={15} aria-hidden="true" />
+            <span className="hidden lg:inline">Exam Library</span>
+          </button>
+          <div className="mx-0.5 h-5 w-px shrink-0 bg-black/[0.08]" aria-hidden="true" />
+          <div className="min-w-0 flex-1 px-1">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-[14px] font-semibold tracking-[-0.01em]">{examTitle}</h1>
-              <span className="rounded-full bg-black/[0.045] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+              <span className="rounded-md bg-black/[0.05] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-slate-600">
                 Draft
               </span>
             </div>
-            <p className="mt-0.5 text-[10px] tabular-nums text-slate-400">
+            <p className="mt-0.5 hidden text-[10px] tabular-nums text-slate-500 sm:block">
               {totalAuthored} of {totalTarget} questions authored
             </p>
           </div>
-          <div className="authoring-segmented flex items-center rounded-full p-1">
+          <div
+            className="authoring-segmented flex items-center rounded-[10px] p-0.5"
+            aria-label="Authoring view"
+          >
             <ToolbarMode
               active={workspaceMode === "build"}
               onClick={() => setWorkspaceMode("build")}
@@ -771,41 +897,88 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               label={`Issues${totalErrors ? ` ${totalErrors}` : ""}`}
             />
           </div>
-          <SaveStatusIndicator
-            status={autosave.status}
-            lastSavedAt={autosave.lastSavedAt}
-            {...(draft ? { onRetry: () => autosave.retry(draft) } : {})}
-          />
+          <div className="hidden md:block">
+            <SaveStatusIndicator
+              status={autosave.status}
+              lastSavedAt={autosave.lastSavedAt}
+              {...(draft ? { onRetry: () => autosave.retry(draft) } : {})}
+            />
+          </div>
           <button
             type="button"
-            disabled={loadSampleExam.isPending}
-            onClick={() => setSampleDialogOpen(true)}
-            className="flex h-10 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold text-[#0066cc] hover:bg-[#0071e3]/[0.08] disabled:opacity-40"
-            title="Replace this draft with a complete 147-question sample SAT"
+            disabled={!shell}
+            onClick={() => void openWorkbookImport()}
+            className="authoring-interactive hidden min-h-10 items-center gap-1.5 rounded-[10px] px-3 text-[11px] font-semibold text-[#0066cc] hover:bg-[#0071e3]/[0.07] disabled:opacity-30 sm:flex"
+            title="Import the complete SAT from an Excel workbook"
           >
-            <Sparkles size={13} />
-            Load sample
+            <FileSpreadsheet size={14} aria-hidden="true" />
+            Import
           </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setToolbarMenuOpen((open) => !open)}
+              className="authoring-interactive flex h-10 w-10 items-center justify-center rounded-[10px] text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]"
+              aria-label="More authoring actions"
+              aria-expanded={toolbarMenuOpen}
+              aria-haspopup="menu"
+            >
+              <MoreHorizontal size={16} aria-hidden="true" />
+            </button>
+            {toolbarMenuOpen ? (
+              <div
+                role="menu"
+                className="absolute right-0 top-11 z-[70] min-w-48 rounded-[12px] border border-black/[0.09] bg-white p-1.5 shadow-[0_12px_36px_rgba(0,0,0,0.14)]"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setToolbarMenuOpen(false);
+                    void openWorkbookImport();
+                  }}
+                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[11px] font-semibold text-slate-700 hover:bg-black/[0.04] sm:hidden"
+                >
+                  <FileSpreadsheet size={13} aria-hidden="true" />
+                  Import from Excel…
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={loadSampleExam.isPending}
+                  onClick={() => {
+                    setToolbarMenuOpen(false);
+                    setSampleDialogOpen(true);
+                  }}
+                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[11px] font-semibold text-slate-700 hover:bg-black/[0.04] disabled:opacity-40"
+                  title="Replace this draft with a complete 147-question sample SAT"
+                >
+                  <Sparkles size={13} aria-hidden="true" />
+                  Load sample exam…
+                </button>
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             disabled={!shell}
             onClick={async () => {
-              if (await flushBeforeNavigation()) navigate(`/builder/${examId}/preview`);
+              if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/preview`);
             }}
             title="Open the full SAT using the real student delivery renderer"
-            className="hidden h-10 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold text-slate-600 hover:bg-black/[0.045] disabled:opacity-30 sm:flex"
+            className="authoring-interactive hidden min-h-10 items-center gap-1.5 rounded-[10px] px-3 text-[11px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 disabled:opacity-30 md:flex"
           >
-            <Eye size={13} />
+            <Eye size={13} aria-hidden="true" />
             Preview
           </button>
           <button
             type="button"
             onClick={async () => {
-              if (await flushBeforeNavigation()) navigate(`/builder/${examId}/review`);
+              if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/release`);
             }}
-            className="flex h-10 items-center gap-1.5 rounded-full bg-[#0071e3] px-3.5 text-[11px] font-semibold text-white hover:bg-[#0077ed]"
+            className="authoring-interactive flex min-h-10 items-center gap-1.5 rounded-[10px] bg-[#0071e3] px-3.5 text-[11px] font-semibold text-white hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3] focus-visible:ring-offset-2"
           >
-            <ClipboardCheck size={13} />
+            <ClipboardCheck size={13} aria-hidden="true" />
             Release
           </button>
         </div>
@@ -817,7 +990,14 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         </div>
       ) : null}
 
-      <main className="mx-auto flex min-h-0 w-full max-w-[1920px] flex-1 overflow-x-auto">
+      {workbookUndo?.available ? (
+        <WorkbookImportUndoBanner
+          busy={workbookUndoBusy}
+          onUndo={() => void handleWorkbookUndo()}
+        />
+      ) : null}
+
+      <main className="authoring-workspace mx-auto flex min-h-0 w-full max-w-[1920px] flex-1 overflow-x-auto">
         {selectedModule && selectedSection ? (
           workspaceMode === "build" ? (
             <QuestionListPane
@@ -869,14 +1049,14 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
           </div>
         )}
 
-        <section className="min-w-[560px] flex-1 overflow-y-auto bg-white">
+        <section className="authoring-editor-canvas min-w-[560px] flex-1 overflow-y-auto">
           <AnimatePresence mode="popLayout" initial={false}>
             {draft ? (
               <motion.div
                 key={selectedExamQuestionId ?? draft.id}
-                initial={{ opacity: reduceMotion ? 1 : 0.92, x: reduceMotion ? 0 : 2 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: reduceMotion ? 1 : 0.9, x: reduceMotion ? 0 : -1 }}
+                initial={{ opacity: reduceMotion ? 1 : 0.96 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: reduceMotion ? 1 : 0.94 }}
                 transition={reduceMotion ? { duration: 0.04 } : authoringMotion.question}
               >
                 <QuestionEditor
@@ -912,6 +1092,19 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
           onClose={() => setPreviewOpen(false)}
         />
       </main>
+      {workbookBaseline ? (
+        <SatWorkbookImportSheet
+          open={workbookImportOpen}
+          examId={examId}
+          shell={workbookBaseline}
+          existingQuestionCount={totalAuthored}
+          onClose={() => {
+            setWorkbookImportOpen(false);
+            setWorkbookBaseline(null);
+          }}
+          onCommitted={handleWorkbookCommitted}
+        />
+      ) : null}
       <SampleExamLoadDialog
         open={sampleDialogOpen}
         busy={loadSampleExam.isPending}
@@ -1014,7 +1207,7 @@ function ToolbarMode({
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-[10px] font-semibold transition ${active ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+      className={`flex min-h-9 items-center gap-1.5 rounded-[8px] px-3 text-[10px] font-semibold transition ${active ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
     >
       {icon}
       {label}
@@ -1050,7 +1243,7 @@ function IssuesPane({
           type="button"
           disabled={loading}
           onClick={onRefresh}
-          className="h-8 rounded-full px-3 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+          className="min-h-9 rounded-[9px] px-3 text-[10px] font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-40"
         >
           {loading ? "Checking…" : "Refresh"}
         </button>

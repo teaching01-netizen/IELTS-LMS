@@ -17,6 +17,10 @@ import type {
   DuplicateQuestionRequest,
   LoadSampleExamRequest,
   ReorderQuestionsRequest,
+  SatWorkbookCommitRequest,
+  SatWorkbookCommitResult,
+  SatWorkbookPreview,
+  SatWorkbookUndoState,
   PublishedAssessmentVersion,
   PublishAssessmentRequest,
   QuestionRevision,
@@ -46,6 +50,50 @@ export const assessmentAuthoringApi = {
     return backendPost<AssessmentAuthoringShell, LoadSampleExamRequest>(
       `/v1/assessment-authoring/exams/${examId}/load-sample`,
       request
+    );
+  },
+
+  async getSatWorkbookTemplate(examId: string): Promise<Blob> {
+    const response = await fetch(
+      `/api/v1/assessment-authoring/exams/${encodeURIComponent(examId)}/sat-workbook-template`,
+      { credentials: "same-origin" }
+    );
+    if (!response.ok) {
+      throw new Error(`SAT workbook template could not be downloaded (${response.status}).`);
+    }
+    return response.blob();
+  },
+
+  previewSatWorkbook(examId: string, file: File): Promise<SatWorkbookPreview> {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return backendPost<SatWorkbookPreview, FormData>(
+      `/v1/assessment-authoring/exams/${examId}/sat-workbook-preview`,
+      form,
+      { timeout: 45_000, retries: 0 }
+    );
+  },
+
+  commitSatWorkbook(
+    examId: string,
+    request: SatWorkbookCommitRequest
+  ): Promise<SatWorkbookCommitResult> {
+    return backendPost<SatWorkbookCommitResult, SatWorkbookCommitRequest>(
+      `/v1/assessment-authoring/exams/${examId}/sat-workbook-commit`,
+      request,
+      { timeout: 45_000, retries: 0 }
+    );
+  },
+
+  getSatWorkbookUndoState(examId: string): Promise<SatWorkbookUndoState | null> {
+    return backendGet<SatWorkbookUndoState | null>(
+      `/v1/assessment-authoring/exams/${examId}/sat-workbook-undo`
+    );
+  },
+
+  undoSatWorkbookImport(examId: string, importId: string): Promise<AssessmentAuthoringShell> {
+    return backendPost<AssessmentAuthoringShell>(
+      `/v1/assessment-authoring/exams/${examId}/sat-workbook-imports/${importId}/undo`
     );
   },
 

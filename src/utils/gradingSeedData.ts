@@ -55,6 +55,7 @@ async function createMockSchedule(): Promise<ExamSchedule> {
   const schedule: ExamSchedule = {
     id: MOCK_SCHEDULE_ID,
     examId: 'exam-1',
+    providerKey: 'ielts',
     examTitle: 'Academic Practice Test 1',
     proctorDisplayName: 'Academic Practice Test 1',
     gradingDisplayName: 'Academic Practice Test 1',

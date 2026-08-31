@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, patch, post, put},
@@ -149,6 +149,28 @@ pub fn build_router(state: AppState) -> Router {
                 .route(
                     "/exams/:exam_id/load-sample",
                     post(assessment_authoring::load_sample_exam),
+                )
+                .route(
+                    "/exams/:exam_id/sat-workbook-template",
+                    get(assessment_authoring::download_sat_workbook_template),
+                )
+                .route(
+                    "/exams/:exam_id/sat-workbook-preview",
+                    post(assessment_authoring::preview_sat_workbook)
+                        .layer(DefaultBodyLimit::max(13 * 1024 * 1024)),
+                )
+                .route(
+                    "/exams/:exam_id/sat-workbook-commit",
+                    post(assessment_authoring::commit_sat_workbook)
+                        .layer(DefaultBodyLimit::max(16 * 1024 * 1024)),
+                )
+                .route(
+                    "/exams/:exam_id/sat-workbook-undo",
+                    get(assessment_authoring::get_sat_workbook_undo_state),
+                )
+                .route(
+                    "/exams/:exam_id/sat-workbook-imports/:import_id/undo",
+                    post(assessment_authoring::undo_sat_workbook_import),
                 )
                 .route(
                     "/modules/:module_id/questions",
@@ -427,6 +449,8 @@ pub fn build_router(state: AppState) -> Router {
                 .route("/", get(results::list_results))
                 .route("/analytics", get(results::analytics))
                 .route("/export", post(results::export_results))
+                .route("/sat", get(results::list_sat_results))
+                .route("/sat/:result_id", get(results::get_sat_result))
                 .route("/:result_id/events", get(results::result_events))
                 .route("/:result_id", get(results::get_result)),
         )

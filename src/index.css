@@ -444,12 +444,12 @@
     }
   }
 
-  .student-exam-shell[data-student-layout-mode="compact"] {
+  .student-exam-shell[data-student-layout-mode='compact'] {
     --student-header-height: var(--student-header-height-compact);
     --student-bottom-bar-height: var(--student-bottom-bar-height-compact);
   }
 
-  .student-exam-shell[data-student-layout-mode="medium"] {
+  .student-exam-shell[data-student-layout-mode='medium'] {
     --student-header-height: var(--student-header-height-medium);
     --student-bottom-bar-height: var(--student-bottom-bar-height-medium);
   }
@@ -484,12 +484,12 @@
   .student-compact-question-navigation [data-student-primary-touch-target] {
     touch-action: manipulation;
   }
-  .student-exam-shell[data-student-layout-mode="compact"]
+  .student-exam-shell[data-student-layout-mode='compact']
     :is(button, [role="button"], input, select, textarea, a[href]) {
     min-block-size: var(--student-touch-target-preferred);
     min-inline-size: var(--student-touch-target-preferred);
   }
-  .student-exam-shell[data-student-touch-mode="true"]
+  .student-exam-shell[data-student-touch-mode='true']
     :is(button, [role="button"], input, select, textarea, a[href]) {
     min-block-size: var(--student-touch-target-preferred) !important;
     min-inline-size: var(--student-touch-target-preferred) !important;
@@ -505,11 +505,11 @@
     padding-bottom: max(1rem, var(--student-safe-bottom));
   }
 
-  .student-exam-shell[data-student-layout-mode="compact"] .student-exam-footer {
+  .student-exam-shell[data-student-layout-mode='compact'] .student-exam-footer {
     border-radius: 0.375rem;
   }
 
-  .student-exam-shell[data-student-layout-mode="compact"] .student-exam-main {
+  .student-exam-shell[data-student-layout-mode='compact'] .student-exam-main {
     overflow: hidden;
   }
 
@@ -552,7 +552,7 @@
    * visually hidden and inert. display:none is intentionally avoided because
    * it would collapse the `auto` grid row and reflow the workspace.
    */
-  .student-exam-shell[data-student-keyboard-open="true"] .student-exam-footer {
+  .student-exam-shell[data-student-keyboard-open='true'] .student-exam-footer {
     visibility: hidden;
     pointer-events: none;
   }
@@ -1352,5 +1352,216 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   .sat-answer-choice:active {
     outline: 2px solid Highlight;
     outline-offset: -2px;
+  }
+}
+
+/* Digital SAT product surface — semantic Apple-platform-inspired tokens.
+ * Scoped to the SAT workspace so IELTS keeps its established visual system. */
+.sat-product {
+  --sat-label: #1d1d1f;
+  --sat-secondary-label: #515154;
+  --sat-tertiary-label: #6e6e73;
+  --sat-separator: rgba(60, 60, 67, 0.22);
+  --sat-separator-strong: rgba(60, 60, 67, 0.34);
+  --sat-fill: rgba(120, 120, 128, 0.12);
+  --sat-fill-hover: rgba(120, 120, 128, 0.18);
+  --sat-surface: #ffffff;
+  --sat-canvas: #f5f5f7;
+  --sat-accent: #0071e3;
+  --sat-accent-hover: #0077ed;
+  --sat-warning: #8a4b00;
+  --sat-danger: #b42318;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
+  color: var(--sat-label);
+  background: var(--sat-canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Raise the minimum contrast of the small secondary metadata used throughout
+ * the SAT workspace. Color is never the only carrier of state. */
+.sat-product .text-slate-400 { color: var(--sat-tertiary-label) !important; }
+.sat-product .text-slate-500 { color: var(--sat-secondary-label) !important; }
+.sat-product .text-slate-600 { color: #3a3a3c !important; }
+.sat-product .text-slate-700 { color: #2c2c2e !important; }
+.sat-product .text-slate-800,
+.sat-product .text-slate-900,
+.sat-product .text-slate-950 { color: var(--sat-label) !important; }
+
+/* A consistent keyboard focus treatment stays visible independently of color
+ * and survives high-contrast preferences. */
+.sat-product :is(button, a[href], input, select, textarea):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--sat-accent) 72%, white);
+  outline-offset: 2px;
+  box-shadow: none !important;
+}
+
+/* Touch-first Apple platforms use a 44pt default target. Preserve compact
+ * desktop density while ensuring touch hardware receives comfortable targets. */
+@media (pointer: coarse) {
+  .sat-product :is(button, a[href], input, select, textarea) {
+    min-block-size: 44px;
+  }
+  .sat-product :is(button, a[href]) {
+    min-inline-size: 44px;
+  }
+}
+
+/* Hover belongs to pointer devices. Avoid sticky pseudo-hover feedback on touch. */
+@media (hover: hover) and (pointer: fine) {
+  .sat-product button:not(:disabled),
+  .sat-product a[href] {
+    transition: background-color 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;
+  }
+}
+
+/* Reduce Motion: state changes remain immediate and legible without translation,
+ * scaling, spinning flourishes, or rotating disclosure glyphs. */
+@media (prefers-reduced-motion: reduce) {
+  .sat-product *,
+  .sat-product *::before,
+  .sat-product *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .sat-product .group-hover\:translate-x-0\.5,
+  .sat-product .rotate-180 {
+    transform: none !important;
+  }
+}
+
+/* Safari exposes the system Reduce Transparency preference. Opaque fallbacks
+ * keep navigation and menus readable when translucency is reduced. */
+@media (prefers-reduced-transparency: reduce) {
+  .sat-product .backdrop-blur-2xl,
+  .sat-product .backdrop-blur-xl,
+  .sat-product .backdrop-blur-sm,
+  .sat-product .backdrop-blur-\[2px\] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  .sat-product aside,
+  .sat-product header,
+  .sat-product nav[aria-label="Digital SAT"] {
+    background-color: var(--sat-surface) !important;
+  }
+}
+
+/* Increased Contrast: stronger separators and labels, without introducing
+ * louder brand color or changing status semantics. */
+@media (prefers-contrast: more) {
+  .sat-product {
+    --sat-secondary-label: #333336;
+    --sat-tertiary-label: #424245;
+    --sat-separator: rgba(0, 0, 0, 0.42);
+    --sat-separator-strong: rgba(0, 0, 0, 0.62);
+  }
+  .sat-product [class*="border-black/"] {
+    border-color: var(--sat-separator) !important;
+  }
+  .sat-product :is(input, select, textarea) {
+    border-color: var(--sat-separator-strong) !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .sat-product {
+    forced-color-adjust: auto;
+    --sat-label: CanvasText;
+    --sat-secondary-label: CanvasText;
+    --sat-tertiary-label: CanvasText;
+    --sat-surface: Canvas;
+    --sat-canvas: Canvas;
+    --sat-accent: Highlight;
+  }
+  .sat-product :is(button, a[href], input, select, textarea):focus-visible {
+    outline: 3px solid Highlight;
+  }
+}
+
+/* SAT authoring workspace — one material hierarchy, not a card farm. */
+.sat-authoring {
+  --authoring-sidebar-width: 430px;
+  --authoring-canvas: #f4f4f6;
+  --authoring-sheet: rgba(255, 255, 255, 0.96);
+  --authoring-hairline: rgba(60, 60, 67, 0.14);
+}
+
+.sat-authoring .authoring-topbar {
+  background: rgba(250, 250, 252, 0.82);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.sat-authoring .authoring-workspace {
+  background: var(--authoring-canvas);
+}
+
+.sat-authoring .authoring-sidebar {
+  background: rgba(247, 247, 249, 0.88);
+  border-color: var(--authoring-hairline);
+}
+
+.sat-authoring .authoring-sidebar-header {
+  background: rgba(250, 250, 252, 0.66);
+  -webkit-backdrop-filter: saturate(150%) blur(18px);
+  backdrop-filter: saturate(150%) blur(18px);
+}
+
+.sat-authoring .authoring-question-row {
+  box-shadow: none;
+}
+
+.sat-authoring .authoring-question-row:has([aria-current="true"]) {
+  box-shadow: inset 0 0 0 1px rgba(0, 113, 227, 0.06);
+}
+
+.sat-authoring .authoring-editor-canvas {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 140px),
+    var(--authoring-canvas);
+}
+
+.sat-authoring .authoring-editor-sheet {
+  background: var(--authoring-sheet);
+  border: 1px solid rgba(60, 60, 67, 0.10);
+  border-radius: 20px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.025),
+    0 12px 36px rgba(0, 0, 0, 0.045);
+}
+
+.sat-authoring .authoring-metadata-bar {
+  background: rgba(118, 118, 128, 0.075);
+  box-shadow: inset 0 0 0 1px rgba(60, 60, 67, 0.055);
+}
+
+.sat-authoring .authoring-answer-row {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.sat-authoring .authoring-editor-footer {
+  background: rgba(255, 255, 255, 0.88);
+  -webkit-backdrop-filter: saturate(160%) blur(18px);
+  backdrop-filter: saturate(160%) blur(18px);
+}
+
+@media (max-width: 1100px) {
+  .sat-authoring .authoring-editor-sheet {
+    width: calc(100% - 1rem);
+    margin-block: 0.5rem;
+    border-radius: 14px;
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .sat-authoring .authoring-topbar,
+  .sat-authoring .authoring-sidebar-header,
+  .sat-authoring .authoring-editor-footer {
+    background: #fff !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
   }
 }

@@ -146,6 +146,7 @@ export function AdminScheduling({
     const schedule: ExamSchedule = {
       id: editingScheduleId || `sched-${Date.now()}`,
       examId: draft.examId,
+      providerKey: selectedExamEntity?.providerKey ?? 'ielts',
       examTitle: selectedExamEntity?.title || selectedVersion.contentSnapshot.title,
       proctorDisplayName: trimmedProctorDisplayName,
       gradingDisplayName: trimmedGradingDisplayName,

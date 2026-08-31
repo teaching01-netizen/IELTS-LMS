@@ -208,6 +208,7 @@ function ExamEmptyState({ hasFilters, onClearFilters, onCreateExam }: ExamEmptyS
 }
 
 export function AdminExams({
+  providerScope = 'all',
   onNavigate,
   exams,
   onEditExam,
@@ -533,7 +534,8 @@ export function AdminExams({
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const title = newExamTitle || 'Untitled Exam';
-    const input: CreateExamInput = newProviderKey === 'sat'
+    const resolvedProviderKey = providerScope === 'ielts' ? 'ielts' : newProviderKey;
+    const input: CreateExamInput = resolvedProviderKey === 'sat'
       ? { providerKey: 'sat', title, providerExamType: 'SAT' }
       : {
           providerKey: 'ielts',
@@ -857,27 +859,29 @@ export function AdminExams({
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Assessment provider</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setNewProviderKey('ielts')}
-                    className={`rounded-md border px-3 py-2 text-left text-sm ${newProviderKey === 'ielts' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
-                  >
-                    <span className="block font-semibold">IELTS</span>
-                    <span className="text-xs text-gray-500">Academic or General Training</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewProviderKey('sat')}
-                    className={`rounded-md border px-3 py-2 text-left text-sm ${newProviderKey === 'sat' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
-                  >
-                    <span className="block font-semibold">Digital SAT</span>
-                    <span className="text-xs text-gray-500">Reading & Writing and Math</span>
-                  </button>
+              {providerScope === 'all' ? (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Assessment provider</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewProviderKey('ielts')}
+                      className={`rounded-md border px-3 py-2 text-left text-sm ${newProviderKey === 'ielts' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                    >
+                      <span className="block font-semibold">IELTS</span>
+                      <span className="text-xs text-gray-500">Academic or General Training</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewProviderKey('sat')}
+                      className={`rounded-md border px-3 py-2 text-left text-sm ${newProviderKey === 'sat' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                    >
+                      <span className="block font-semibold">Digital SAT</span>
+                      <span className="text-xs text-gray-500">Reading & Writing and Math</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
               {newProviderKey === 'ielts' && <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Select Preset</label>

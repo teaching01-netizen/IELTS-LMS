@@ -90,8 +90,6 @@ describe('StudentAccessLinkEntryRoute', () => {
       wcode: '',
       email: 'ada@example.com',
       studentName: 'Ada Student',
-      nickname: '',
-      ieltsCourse: '',
     }));
     expect(await screen.findByTestId('destination')).toHaveTextContent(
       '/student/internal-schedule-1/guest-server-issued',

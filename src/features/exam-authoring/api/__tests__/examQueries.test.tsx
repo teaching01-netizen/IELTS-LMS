@@ -82,6 +82,22 @@ describe('exam-authoring query boundary', () => {
     });
   });
 
+  it('keeps provider-scoped exam libraries isolated in query and transport boundaries', async () => {
+    const queryClient = createQueryClient();
+    const { result } = renderHook(() => useExamListQuery(true, 'sat'), {
+      wrapper: createWrapper(queryClient),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockGetAllExams).toHaveBeenCalledWith('sat');
+    expect(queryClient.getQueryData(examKeys.list('sat'))).toEqual({
+      entities: [examEntity],
+      exams: [],
+    });
+    expect(queryClient.getQueryData(examKeys.list('ielts'))).toBeUndefined();
+  });
+
   it('invalidates the active list after a successful deletion', async () => {
     const queryClient = createQueryClient();
     mockDeleteExam.mockResolvedValue({ success: true });

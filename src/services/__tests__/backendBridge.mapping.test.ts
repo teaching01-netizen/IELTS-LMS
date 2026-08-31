@@ -65,6 +65,7 @@ describe('backendBridge contract mappings', () => {
     const mapped = mapBackendSchedule({
       id: 'sched-1',
       examId: 'exam-1',
+      providerKey: 'sat',
       examTitle: 'Exam',
       publishedVersionId: 'ver-1',
       cohortName: 'Cohort A',
@@ -84,6 +85,7 @@ describe('backendBridge contract mappings', () => {
       revision: 3,
     });
 
+    expect(mapped.providerKey).toBe('sat');
     expect(mapped.recurrence).toEqual({
       type: 'weekly',
       interval: 2,
@@ -97,6 +99,7 @@ describe('backendBridge contract mappings', () => {
         id: 'runtime-1',
         scheduleId: 'sched-1',
         examId: 'exam-1',
+        providerKey: 'sat',
         status: 'live',
         currentSectionRemainingSeconds: 1800,
         waitingForNextSection: false,
@@ -118,12 +121,14 @@ describe('backendBridge contract mappings', () => {
         ],
       },
       {
+        providerKey: 'sat',
         examTitle: 'Exam',
         cohortName: 'Cohort A',
         deliveryMode: 'proctor_start',
       },
     );
 
+    expect(mapped.providerKey).toBe('sat');
     expect(mapped.sections[0]?.order).toBe(2);
   });
 

@@ -1,4 +1,4 @@
-import type { Exam, ExamConfig } from '../../../types';
+import type { Exam } from '../../../types';
 import type { CreateExamInput } from './provider';
 import type {
   BulkOperationResult,
@@ -29,6 +29,7 @@ export interface DeleteExamInput {
 }
 
 export interface ExamListProps {
+  providerScope?: 'ielts' | 'all';
   onNavigate: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
   exams: Exam[];
   examEntities?: ExamEntity[];

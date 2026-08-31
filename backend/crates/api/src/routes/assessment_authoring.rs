@@ -1,6 +1,7 @@
 use axum::{
-    extract::{Extension, Path, State},
-    http::StatusCode,
+    body::Body,
+    extract::{Extension, Multipart, Path, State},
+    http::{header, Response, StatusCode},
     Json,
 };
 use ielts_backend_application::assessment_authoring::{
@@ -8,7 +9,12 @@ use ielts_backend_application::assessment_authoring::{
     AssessmentPreviewProjection, AssessmentQuestionDetail, AssessmentQuestionSummary,
     AssessmentValidationReport, BatchCreateQuestionsRequest, BatchCreateQuestionsResult,
     BulkQuestionRequest, BulkQuestionResult, DuplicateQuestionRequest, LoadSampleExamRequest,
-    ReorderQuestionsRequest, UpdateSectionDeliverySettingsRequest,
+    ReorderQuestionsRequest, SatWorkbookCommitResult, SatWorkbookUndoState,
+    UpdateSectionDeliverySettingsRequest,
+};
+use ielts_backend_application::sat_workbook::{
+    build_sat_workbook_template, parse_sat_workbook, SatWorkbookCommitRequest, SatWorkbookError,
+    SatWorkbookPreview,
 };
 use ielts_backend_domain::assessment::SaveQuestionRevisionRequest;
 use ielts_backend_domain::auth::UserRole;
@@ -57,6 +63,26 @@ fn map_error(error: AssessmentAuthoringError) -> ApiError {
     }
 }
 
+fn map_workbook_error(error: SatWorkbookError) -> ApiError {
+    match error {
+        SatWorkbookError::TooLarge => ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "SAT_WORKBOOK_TOO_LARGE",
+            &error.to_string(),
+        ),
+        SatWorkbookError::InvalidWorkbook(_) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "INVALID_SAT_WORKBOOK",
+            &error.to_string(),
+        ),
+        SatWorkbookError::Template(_) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "SAT_WORKBOOK_TEMPLATE_ERROR",
+            &error.to_string(),
+        ),
+    }
+}
+
 async fn require_staff(
     state: &AppState,
     principal: &AuthenticatedUser,
@@ -69,6 +95,26 @@ async fn require_staff(
         .await
         .map(|_| ())
         .map_err(ApiError::from)
+}
+
+async fn require_sat_shell(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    exam_id: &str,
+) -> Result<AssessmentAuthoringShell, ApiError> {
+    require_staff(state, principal, exam_id).await?;
+    let shell = AssessmentAuthoringService::new(state.db_pool())
+        .shell(exam_id)
+        .await
+        .map_err(map_error)?;
+    if shell.provider_key != "sat" {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "UNSUPPORTED_PROVIDER",
+            "SAT workbook import is only available for SAT exams.",
+        ));
+    }
+    Ok(shell)
 }
 
 async fn require_module_staff(
@@ -247,6 +293,140 @@ pub async fn batch_create_questions(
         .await
         .map_err(map_error)?;
     Ok(ApiResponse::success_with_request_id(result, request_id.0))
+}
+
+pub async fn download_sat_workbook_template(
+    State(state): State<AppState>,
+    principal: AuthenticatedUser,
+    Path(exam_id): Path<Uuid>,
+) -> Result<Response<Body>, ApiError> {
+    let exam_id = exam_id.to_string();
+    require_sat_shell(&state, &principal, &exam_id).await?;
+    let bytes = build_sat_workbook_template().map_err(map_workbook_error)?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            header::CONTENT_TYPE,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        .header(
+            header::CONTENT_DISPOSITION,
+            "attachment; filename=SAT-Authoring-Template.xlsx",
+        )
+        .header(header::CACHE_CONTROL, "private, no-store")
+        .body(Body::from(bytes))
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "SAT_WORKBOOK_RESPONSE_ERROR",
+                &error.to_string(),
+            )
+        })
+}
+
+pub async fn preview_sat_workbook(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    _csrf: VerifiedCsrf,
+    Path(exam_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> Result<ApiResponse<SatWorkbookPreview>, ApiError> {
+    let exam_id = exam_id.to_string();
+    require_sat_shell(&state, &principal, &exam_id).await?;
+    let mut workbook = None;
+    while let Some(field) = multipart.next_field().await.map_err(|error| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "INVALID_MULTIPART",
+            &error.to_string(),
+        )
+    })? {
+        if field.name() != Some("file") {
+            continue;
+        }
+        if field
+            .file_name()
+            .is_some_and(|name| !name.to_ascii_lowercase().ends_with(".xlsx"))
+        {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "INVALID_SAT_WORKBOOK_TYPE",
+                "Choose an .xlsx SAT workbook.",
+            ));
+        }
+        workbook = Some(field.bytes().await.map_err(|error| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "SAT_WORKBOOK_READ_ERROR",
+                &error.to_string(),
+            )
+        })?);
+        break;
+    }
+    let workbook = workbook.ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "SAT_WORKBOOK_REQUIRED",
+            "Attach an .xlsx workbook in the file field.",
+        )
+    })?;
+    let preview = parse_sat_workbook(&workbook).map_err(map_workbook_error)?;
+    if preview.valid {
+        AssessmentAuthoringService::new(state.db_pool())
+            .register_sat_workbook_preview(&exam_id, &preview, &principal.user.id)
+            .await
+            .map_err(map_error)?;
+    }
+    Ok(ApiResponse::success_with_request_id(preview, request_id.0))
+}
+
+pub async fn commit_sat_workbook(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    _csrf: VerifiedCsrf,
+    Path(exam_id): Path<Uuid>,
+    Json(request): Json<SatWorkbookCommitRequest>,
+) -> Result<ApiResponse<SatWorkbookCommitResult>, ApiError> {
+    let exam_id = exam_id.to_string();
+    require_staff(&state, &principal, &exam_id).await?;
+    let result = AssessmentAuthoringService::new(state.db_pool())
+        .commit_sat_workbook(&exam_id, request, &principal.user.id)
+        .await
+        .map_err(map_error)?;
+    Ok(ApiResponse::success_with_request_id(result, request_id.0))
+}
+
+pub async fn get_sat_workbook_undo_state(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    Path(exam_id): Path<Uuid>,
+) -> Result<ApiResponse<Option<SatWorkbookUndoState>>, ApiError> {
+    let exam_id = exam_id.to_string();
+    require_sat_shell(&state, &principal, &exam_id).await?;
+    let state = AssessmentAuthoringService::new(state.db_pool())
+        .sat_workbook_undo_state(&exam_id)
+        .await
+        .map_err(map_error)?;
+    Ok(ApiResponse::success_with_request_id(state, request_id.0))
+}
+
+pub async fn undo_sat_workbook_import(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    _csrf: VerifiedCsrf,
+    Path((exam_id, import_id)): Path<(Uuid, Uuid)>,
+) -> Result<ApiResponse<AssessmentAuthoringShell>, ApiError> {
+    let exam_id = exam_id.to_string();
+    require_staff(&state, &principal, &exam_id).await?;
+    let shell = AssessmentAuthoringService::new(state.db_pool())
+        .undo_sat_workbook_import(&exam_id, &import_id.to_string(), &principal.user.id)
+        .await
+        .map_err(map_error)?;
+    Ok(ApiResponse::success_with_request_id(shell, request_id.0))
 }
 
 pub async fn load_sample_exam(

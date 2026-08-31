@@ -11,6 +11,7 @@ import katex from "katex";
 import "katex/dist/katex.min.css";
 import {
   Bold,
+  Code2,
   ImagePlus,
   Italic,
   List,
@@ -37,7 +38,6 @@ import { authoringMotion } from "../ui/authoringMotion";
 
 const baseExtensions = [
   StarterKit.configure({
-    codeBlock: false,
     blockquote: false,
     heading: { levels: [2, 3] },
   }),
@@ -61,6 +61,7 @@ export interface RichComposerCapabilities {
   equation: boolean;
   image: boolean;
   table: boolean;
+  code: boolean;
   history: boolean;
 }
 
@@ -71,6 +72,7 @@ export const SAT_RICH_COMPOSER_CAPABILITIES: Readonly<RichComposerCapabilities> 
   equation: true,
   image: true,
   table: true,
+  code: true,
   history: true,
 });
 
@@ -81,6 +83,7 @@ export const SAT_CHOICE_COMPOSER_CAPABILITIES: Readonly<RichComposerCapabilities
   equation: true,
   image: true,
   table: true,
+  code: true,
   history: true,
 });
 
@@ -127,7 +130,7 @@ export function RichQuestionComposer({
         role: "textbox",
         "aria-label": label,
         "data-placeholder": placeholder,
-        class: `${minHeightClassName} caret-[#007aff] outline-none selection:bg-[#0a84ff]/15 text-[15px] leading-[1.75] text-slate-900 [&_.is-editor-empty:first-child]:before:pointer-events-none [&_.is-editor-empty:first-child]:before:float-left [&_.is-editor-empty:first-child]:before:h-0 [&_.is-editor-empty:first-child]:before:text-slate-300 [&_.is-editor-empty:first-child]:before:content-[attr(data-placeholder)] [&_p]:my-2.5 [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-[20px] [&_h2]:font-semibold [&_h2]:tracking-[-0.015em] [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-[16px] [&_h3]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_li]:pl-1 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-black/10 [&_td]:p-2.5 [&_th]:border [&_th]:border-black/10 [&_th]:bg-[#f5f5f7] [&_th]:p-2.5 [&_img]:my-4 [&_img]:max-h-80 [&_img]:max-w-full [&_img]:rounded-xl [&_img]:object-contain`,
+        class: `${minHeightClassName} caret-[#007aff] outline-none selection:bg-[#0a84ff]/15 text-[15px] leading-[1.75] text-slate-900 [&_.is-editor-empty:first-child]:before:pointer-events-none [&_.is-editor-empty:first-child]:before:float-left [&_.is-editor-empty:first-child]:before:h-0 [&_.is-editor-empty:first-child]:before:text-slate-300 [&_.is-editor-empty:first-child]:before:content-[attr(data-placeholder)] [&_p]:my-2.5 [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-[20px] [&_h2]:font-semibold [&_h2]:tracking-[-0.015em] [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-[16px] [&_h3]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_li]:pl-1 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-black/10 [&_td]:p-2.5 [&_th]:border [&_th]:border-black/10 [&_th]:bg-[#f5f5f7] [&_th]:p-2.5 [&_img]:my-4 [&_img]:max-h-80 [&_img]:max-w-full [&_img]:rounded-xl [&_img]:object-contain [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-[#f5f5f7] [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-[13px] [&_pre]:leading-6 [&_pre]:text-slate-900`,
       },
     },
     onUpdate: ({ editor: current }) => {
@@ -223,6 +226,7 @@ function ComposerToolbar({
       bulletList: current?.isActive("bulletList") ?? false,
       orderedList: current?.isActive("orderedList") ?? false,
       table: current?.isActive("table") ?? false,
+      codeBlock: current?.isActive("codeBlock") ?? false,
       blockStyle: current?.isActive("heading", { level: 2 })
         ? "heading2"
         : current?.isActive("heading", { level: 3 })
@@ -324,7 +328,7 @@ function ComposerToolbar({
           </ToolbarButton>
         </div>
 
-        {capabilities.equation || capabilities.image || capabilities.table ? (
+        {capabilities.equation || capabilities.image || capabilities.table || capabilities.code ? (
           <ToolbarDivider />
         ) : null}
         <div className="flex items-center gap-0.5">
@@ -336,6 +340,15 @@ function ComposerToolbar({
           {capabilities.image ? (
             <ToolbarButton title="Insert image or graph" onClick={() => onOpenDialog("image")}>
               <ImagePlus size={15} />
+            </ToolbarButton>
+          ) : null}
+          {capabilities.code ? (
+            <ToolbarButton
+              title="Code block"
+              active={state?.codeBlock}
+              onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+            >
+              <Code2 size={15} />
             </ToolbarButton>
           ) : null}
           {capabilities.table ? (

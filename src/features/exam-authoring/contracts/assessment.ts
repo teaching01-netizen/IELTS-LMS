@@ -309,6 +309,64 @@ export interface LoadSampleExamRequest {
   modules: SampleExamModuleDraft[];
 }
 
+export interface SatWorkbookIssue {
+  row: number;
+  field: string;
+  message: string;
+  blocking: boolean;
+}
+
+export interface SatWorkbookModuleDraft {
+  moduleKey: string;
+  sectionKey: string;
+  questions: BatchQuestionDraft[];
+}
+
+export interface SatWorkbookAsset {
+  key: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  checksumSha256: string;
+  altText: string;
+  caption: string | null;
+  dataBase64?: string;
+}
+
+export interface SatWorkbookStagedAsset {
+  key: string;
+  assetId: string;
+}
+
+export interface SatWorkbookPreview {
+  importId: string;
+  templateVersion: string;
+  rowCount: number;
+  questionCount: number;
+  valid: boolean;
+  modules: SatWorkbookModuleDraft[];
+  assets: SatWorkbookAsset[];
+  issues: SatWorkbookIssue[];
+}
+
+export interface SatWorkbookCommitRequest {
+  importId: string;
+  expectedVersionId: string;
+  expectedVersionRevision: number;
+  modules: SatWorkbookModuleDraft[];
+  assets: SatWorkbookStagedAsset[];
+}
+
+export interface SatWorkbookUndoState {
+  importId: string;
+  available: boolean;
+}
+
+export interface SatWorkbookCommitResult {
+  shell: AssessmentAuthoringShell;
+  undo: SatWorkbookUndoState;
+}
+
 export interface BatchCreateQuestionsResult {
   createdQuestionIds: string[];
   questions: AssessmentQuestionSummary[];

@@ -3726,6 +3726,7 @@ mod tests {
             id: "runtime-1".to_owned(),
             schedule_id: "schedule-1".to_owned(),
             exam_id: "exam-1".to_owned(),
+            provider_key: "ielts".to_owned(),
             status,
             plan_snapshot: Vec::new(),
             timing_model: "legacy_section_v1".to_owned(),

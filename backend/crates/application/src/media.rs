@@ -81,7 +81,10 @@ impl MediaService {
                 size_bytes = ?,
                 checksum_sha256 = ?,
                 download_url = ?,
-                delete_after_at = NULL,
+                delete_after_at = CASE
+                    WHEN owner_kind = 'assessment_import' THEN DATE_ADD(NOW(), INTERVAL 1 DAY)
+                    ELSE NULL
+                END,
                 updated_at = NOW()
             WHERE id = ?
             "#,

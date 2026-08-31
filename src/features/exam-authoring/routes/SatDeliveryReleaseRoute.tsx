@@ -1,4 +1,4 @@
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import type { ExamEntity } from "../../../types/domain";
 import {
   useAssessmentReleaseReadiness,
@@ -18,7 +18,9 @@ interface SatDeliveryReleaseRouteProps {
 
 export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryReleaseRouteProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const inSatWorkspace = location.pathname.startsWith("/sat/");
   const shellQuery = useAuthoringShell(exam.id);
   const publishMutation = usePublishAssessment(exam.id);
   const releaseQuery = useAssessmentReleaseState(exam.id);
@@ -36,6 +38,10 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
   const showStudentAccess = view === "access" || view === "links";
 
   const openStudentAccess = () => {
+    if (inSatWorkspace) {
+      navigate(`/sat/exams/${exam.id}/access`);
+      return;
+    }
     const next = new URLSearchParams(searchParams);
     next.set("view", "access");
     setSearchParams(next, { replace: true });
@@ -80,7 +86,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
     const params = new URLSearchParams();
     if (match?.[1]) params.set("question", match[1]);
     if (match?.[2]) params.set("field", match[2]);
-    navigate(`/builder/${exam.id}${params.toString() ? `?${params.toString()}` : ""}`);
+    navigate(`${inSatWorkspace ? `/sat/exams/${exam.id}` : `/builder/${exam.id}`}${params.toString() ? `?${params.toString()}` : ""}`);
   };
 
 
@@ -117,8 +123,8 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       onOpenStudentAccess={openStudentAccess}
       isPublishing={publishMutation.isPending}
       publishError={publishMutation.error instanceof Error ? publishMutation.error.message : null}
-      onBackToBuilder={() => navigate(`/builder/${exam.id}`)}
-      onBackToExams={() => navigate("/admin/exams")}
+      onBackToBuilder={() => navigate(inSatWorkspace ? `/sat/exams/${exam.id}` : `/builder/${exam.id}`)}
+      onBackToExams={() => navigate(inSatWorkspace ? "/sat/exams" : "/admin/exams")}
       onRefreshReadiness={() => readinessQuery.refetch()}
       onPublish={handlePublish}
       onIssueClick={handleIssue}

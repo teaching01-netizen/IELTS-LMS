@@ -272,7 +272,9 @@ pub struct StudentEntryRequest {
     pub wcode: String,
     pub email: String,
     pub student_name: String,
+    #[serde(default)]
     pub nickname: String,
+    #[serde(default)]
     pub ielts_course: String,
 }
 

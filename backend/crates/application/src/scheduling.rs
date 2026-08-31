@@ -207,17 +207,18 @@ impl SchedulingService {
         sqlx::query(
             r#"
             INSERT INTO exam_schedules (
-                id, exam_id, organization_id, exam_title, proctor_display_name, grading_display_name,
+                id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name,
                 published_version_id, cohort_name,
                 institution, start_time, end_time, planned_duration_minutes, delivery_mode,
                 recurrence_type, recurrence_interval, auto_start, auto_stop, status, created_by,
                 created_at, updated_at, revision
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
             "#,
         )
         .bind(schedule_id.to_string())
         .bind(&req.exam_id)
+        .bind(&exam.provider_key)
         .bind(&exam.organization_id)
         .bind(&exam.title)
         .bind(proctor_display_name)
@@ -571,16 +572,17 @@ impl SchedulingService {
         let runtime_insert = sqlx::query(
             r#"
             INSERT INTO exam_session_runtimes (
-                id, schedule_id, exam_id, status, plan_snapshot, timing_model, actual_start_at, actual_end_at,
+                id, schedule_id, exam_id, provider_key, status, plan_snapshot, timing_model, actual_start_at, actual_end_at,
                 active_section_key, current_section_key, current_section_remaining_seconds,
                 waiting_for_next_section, is_overrun, total_paused_seconds, created_at, updated_at, revision
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, false, false, 0, NOW(), NOW(), 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, false, false, 0, NOW(), NOW(), 1)
             "#,
         )
         .bind(runtime_id.to_string())
         .bind(&context.schedule.id)
         .bind(&context.schedule.exam_id)
+        .bind(&context.provider_key)
         .bind(RuntimeStatus::Live)
         .bind(plan_snapshot)
         .bind(timing_model)
@@ -1002,6 +1004,7 @@ impl SchedulingService {
             id: runtime_row.id.to_string(),
             schedule_id: runtime_row.schedule_id.to_string(),
             exam_id: runtime_row.exam_id.to_string(),
+            provider_key: runtime_row.provider_key,
             status: runtime_row.status,
             plan_snapshot: serde_json::from_value(runtime_row.plan_snapshot).unwrap_or_default(),
             timing_model: runtime_row.timing_model,
@@ -1531,6 +1534,7 @@ struct RuntimeRow {
     id: Hyphenated,
     schedule_id: Hyphenated,
     exam_id: Hyphenated,
+    provider_key: String,
     status: RuntimeStatus,
     plan_snapshot: Value,
     timing_model: String,
@@ -1782,6 +1786,7 @@ fn build_not_started_runtime(
         id: Uuid::nil().to_string(),
         schedule_id: schedule.id.clone(),
         exam_id: schedule.exam_id.clone(),
+        provider_key: schedule.provider_key.clone(),
         status: RuntimeStatus::NotStarted,
         plan_snapshot: plan.to_vec(),
         timing_model: timing_model.to_owned(),

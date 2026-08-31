@@ -13,7 +13,6 @@ import { documentFromStructuredContent } from "../exam-authoring/api/renderingPu
 
 const extensions = [
   StarterKit.configure({
-    codeBlock: false,
     blockquote: false,
     heading: { levels: [2, 3] },
   }),
@@ -34,7 +33,7 @@ export function RichStructuredContentRenderer({ content }: { content: Structured
     editorProps: {
       attributes: {
         class:
-          "outline-none text-[inherit] leading-7 [&_p]:my-2 [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-3 [&_h3]:font-semibold [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-slate-200 [&_td]:p-2.5 [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:p-2.5",
+          "outline-none text-[inherit] leading-7 [&_p]:my-2 [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-3 [&_h3]:font-semibold [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-slate-200 [&_td]:p-2.5 [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:p-2.5 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-slate-50 [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-[0.92em] [&_pre]:leading-6 [&_pre]:text-slate-900",
       },
     },
   });

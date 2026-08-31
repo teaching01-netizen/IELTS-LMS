@@ -28,6 +28,31 @@ pub async fn list_results(
     Ok(ApiResponse::success_with_request_id(results, request_id.0))
 }
 
+pub async fn list_sat_results(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+) -> Result<ApiResponse<Vec<ielts_backend_application::results::SatResultSummary>>, ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::Grader, UserRole::Proctor])?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal);
+    let service = ResultsService::new(state.db_pool());
+    let results = service.list_sat_results(&ctx).await?;
+    Ok(ApiResponse::success_with_request_id(results, request_id.0))
+}
+
+pub async fn get_sat_result(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+    Path(result_id): Path<Uuid>,
+) -> Result<ApiResponse<ielts_backend_application::results::SatResultDetail>, ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::Grader, UserRole::Proctor])?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal);
+    let service = ResultsService::new(state.db_pool());
+    let result = service.get_sat_result(&ctx, result_id).await?;
+    Ok(ApiResponse::success_with_request_id(result, request_id.0))
+}
+
 pub async fn get_result(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,

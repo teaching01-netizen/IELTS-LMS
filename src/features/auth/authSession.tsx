@@ -33,8 +33,8 @@ interface AuthSessionContextValue {
     wcode: string;
     email: string;
     studentName: string;
-    nickname: string;
-    ieltsCourse: string;
+    nickname?: string | undefined;
+    ieltsCourse?: string | undefined;
   }) => Promise<StudentEntryResult>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
@@ -153,8 +153,8 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     wcode: string;
     email: string;
     studentName: string;
-    nickname: string;
-    ieltsCourse: string;
+    nickname?: string | undefined;
+    ieltsCourse?: string | undefined;
   }) => {
     const result = await authService.studentEntry(payload);
     if (!('user' in result)) {

@@ -362,33 +362,37 @@ impl BuilderService {
     }
 
     pub async fn list_exams(&self, ctx: &ActorContext) -> Result<Vec<ExamEntity>, BuilderError> {
-        // Admins and AdminObservers can see all exams
-        // Other roles can only see exams from their organization
-        let query = if matches!(
+        self.list_exams_for_provider(ctx, None).await
+    }
+
+    pub async fn list_exams_for_provider(
+        &self,
+        ctx: &ActorContext,
+        provider_key: Option<&str>,
+    ) -> Result<Vec<ExamEntity>, BuilderError> {
+        let mut query = QueryBuilder::<MySql>::new("SELECT * FROM exam_entities WHERE 1=1");
+
+        if !matches!(
             ctx.role,
             ielts_backend_infrastructure::actor_context::ActorRole::Admin
                 | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
         ) {
-            "SELECT * FROM exam_entities ORDER BY updated_at DESC, created_at DESC"
-        } else if let Some(ref org_id) = ctx.organization_id {
-            "SELECT * FROM exam_entities WHERE organization_id = ? ORDER BY updated_at DESC, created_at DESC"
-        } else {
-            "SELECT * FROM exam_entities WHERE 1=0 ORDER BY updated_at DESC, created_at DESC"
-            // No access
-        };
+            if let Some(org_id) = ctx.organization_id.as_ref() {
+                query.push(" AND organization_id = ").push_bind(org_id);
+            } else {
+                query.push(" AND 1=0");
+            }
+        }
 
-        let exams = if let Some(org_id) = ctx.organization_id.clone() {
-            sqlx::query_as::<_, ExamEntity>(query)
-                .bind(org_id.to_string())
-                .fetch_all(&self.pool)
-                .await?
-        } else {
-            sqlx::query_as::<_, ExamEntity>(query)
-                .fetch_all(&self.pool)
-                .await?
-        };
+        if let Some(provider_key) = provider_key {
+            query.push(" AND provider_key = ").push_bind(provider_key);
+        }
 
-        Ok(exams)
+        query.push(" ORDER BY updated_at DESC, created_at DESC");
+        Ok(query
+            .build_query_as::<ExamEntity>()
+            .fetch_all(&self.pool)
+            .await?)
     }
 
     pub async fn get_exam(

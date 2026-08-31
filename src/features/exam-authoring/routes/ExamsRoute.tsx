@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ErrorSurface } from '@components/ui/ErrorSurface';
 import { LoadingSurface } from '@components/ui/LoadingSurface';
-import type { ExamConfig } from '../../../types';
 import type { ExamEvent, ExamVersionSummary, VersionDiff } from '../../../types/domain';
 import { ExamList } from '../ui/ExamList/ExamList';
 import { examAuthoringFacade } from '../application/examAuthoringFacade';
@@ -17,25 +16,8 @@ import type { CreateExamInput } from '../contracts/provider';
 export function ExamsRoute() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const examListQuery = useExamListQuery();
+  const examListQuery = useExamListQuery(true, 'ielts');
   const deleteExamMutation = useDeleteExamMutation();
-  const [defaults, setDefaults] = useState<ExamConfig>(() =>
-    examAuthoringFacade.preferences.getDefaults(),
-  );
-
-  useEffect(() => {
-    let isMounted = true;
-
-    void examAuthoringFacade.preferences.loadDefaults().then((loadedDefaults) => {
-      if (isMounted) {
-        setDefaults(loadedDefaults);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   if (examListQuery.isLoading) {
     return <LoadingSurface label="Loading exams..." />;
@@ -57,6 +39,9 @@ export function ExamsRoute() {
   }
 
   const examList = examListQuery.data ?? { entities: [], exams: [] };
+  const ieltsEntities = examList.entities.filter((exam) => exam.providerKey !== 'sat');
+  const ieltsExamIds = new Set(ieltsEntities.map((exam) => exam.id));
+  const ieltsExams = examList.exams.filter((exam) => ieltsExamIds.has(exam.id));
 
   const invalidateAfterSuccess = async (success: boolean) => {
     if (success) {
@@ -165,15 +150,16 @@ export function ExamsRoute() {
 
   return (
     <ExamList
+      providerScope="ielts"
       onNavigate={(mode) => navigate(`/${mode}`)}
-      exams={examList.exams}
+      exams={ieltsExams}
       onEditExam={(id) => navigate(`/builder/${id}`)}
       onGoToConfig={(id) => navigate(`/builder/${id}`)}
       onGoToReview={(id) => navigate(`/builder/${id}/review`)}
       onCreateExam={handleCreateExam}
       onCloneExam={handleCloneExam}
       onCreateFromTemplate={handleCreateFromTemplate}
-      examEntities={examList.entities}
+      examEntities={ieltsEntities}
       onGetVersions={handleGetVersions}
       onGetEvents={handleGetEvents}
       onRestoreVersion={handleRestoreVersion}

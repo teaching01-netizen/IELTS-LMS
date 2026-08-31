@@ -26,6 +26,12 @@ use crate::{
     state::AppState,
 };
 
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExamListQuery {
+    pub provider_key: Option<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExamEntityWithPermissions {
@@ -65,11 +71,23 @@ pub async fn list_exams(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
+    Query(query): Query<ExamListQuery>,
 ) -> Result<ApiResponse<Vec<ExamEntityWithPermissions>>, ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
     let ctx = principal.actor_context();
+    if let Some(provider_key) = query.provider_key.as_deref() {
+        if !matches!(provider_key, "sat" | "ielts") {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "VALIDATION_ERROR",
+                "providerKey must be either sat or ielts.",
+            ));
+        }
+    }
     let service = BuilderService::new(state.db_pool());
-    let exams = service.list_exams(&ctx).await?;
+    let exams = service
+        .list_exams_for_provider(&ctx, query.provider_key.as_deref())
+        .await?;
     let response = exams
         .into_iter()
         .map(|exam| to_exam_with_permissions(&ctx, exam))

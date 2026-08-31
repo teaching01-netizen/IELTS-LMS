@@ -53,6 +53,7 @@ export interface ProctorData {
 export interface ProctorOperationCallbacks {
   // Exit proctor mode
   onExit: () => void;
+  onSwitchToSat?: (() => void) | undefined;
   
   // Update sessions
   onUpdateSessions: (sessions: StudentSession[]) => void;
@@ -101,6 +102,7 @@ export interface ProctorProps {
   
   // From ProctorOperationCallbacks
   onExit: () => void;
+  onSwitchToSat?: (() => void) | undefined;
   onUpdateSessions: (sessions: StudentSession[]) => void;
   onUpdateAlerts: (alerts: ProctorAlert[]) => void;
   onUpdateNotes: (notes: SessionNote[]) => void;

@@ -104,7 +104,7 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
           aria-label="Choose SAT module"
           tabIndex={-1}
           onKeyDown={handleMenuKeyDown}
-          className="absolute left-0 top-[calc(100%+6px)] z-[80] w-[330px] max-w-[calc(100vw-24px)] rounded-[18px] border border-black/[0.08] bg-white/95 p-2 shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur-2xl"
+          className="absolute left-0 top-[calc(100%+6px)] z-[110] max-h-[min(520px,calc(100vh-112px))] w-[340px] max-w-[calc(100vw-24px)] isolate overflow-y-auto overscroll-contain rounded-[14px] border border-black/[0.10] bg-white p-1.5 shadow-[0_18px_50px_rgba(15,23,42,0.16)]"
         >
           {sections.map((section, sectionIndex) => (
             <div key={section.id} className={sectionIndex ? "mt-2 border-t border-black/[0.055] pt-2" : ""}>
@@ -129,7 +129,7 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
                         setOpen(false);
                         if (!current) onSelectModule(module.id);
                       }}
-                      className={`flex min-h-11 w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left outline-none transition focus-visible:ring-4 focus-visible:ring-[#0071e3]/10 ${current ? "bg-[#0071e3]/[0.07]" : "hover:bg-black/[0.035]"}`}
+                      className={`flex min-h-[58px] w-full items-center gap-2 rounded-[10px] px-2.5 py-2.5 text-left outline-none transition focus-visible:ring-4 focus-visible:ring-[#0071e3]/10 ${current ? "bg-[#0071e3]/[0.075]" : "hover:bg-black/[0.035]"}`}
                     >
                       <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${current ? "bg-[#0071e3] text-white" : "text-transparent"}`} aria-hidden="true"><Check size={11} strokeWidth={3} /></span>
                       <div className="min-w-0 flex-1">

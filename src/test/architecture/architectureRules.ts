@@ -104,6 +104,7 @@ export function collectLegacyServiceViolations(
       isPathUnder(file, 'src/features/scheduling/infrastructure') ||
       isPathUnder(file, 'src/features/content-library/infrastructure') ||
       isPathUnder(file, 'src/features/grading/infrastructure') ||
+      isPathUnder(file, 'src/features/results/infrastructure') ||
       isPathUnder(file, 'src/features/answer-history/infrastructure');
     return approvedAdapter ? null : target;
   });

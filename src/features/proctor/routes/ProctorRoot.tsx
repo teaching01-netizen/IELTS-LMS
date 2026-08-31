@@ -34,7 +34,7 @@ export function ProctorRoot() {
     setAlerts,
     setNotes,
     setSessions,
-  } = useProctorRouteController();
+  } = useProctorRouteController({ providerKey: 'ielts' });
 
   if (isLoading) {
     return <LoadingSurface label="Loading Proctor..." />;
@@ -66,6 +66,7 @@ export function ProctorRoot() {
       selectedScheduleId={selectedScheduleId}
       onSelectScheduleId={setSelectedScheduleId}
       onExit={() => navigate('/admin')}
+      onSwitchToSat={() => navigate('/sat/sessions')}
       onUpdateSessions={setSessions}
       onUpdateAlerts={setAlerts}
       onUpdateNotes={setNotes}

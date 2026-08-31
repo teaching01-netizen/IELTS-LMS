@@ -11,46 +11,47 @@ use serde_json::Value;
 
 pub struct SatProvider;
 
-const READING_WRITING_DOMAINS: &[&str] = &[
+pub const READING_WRITING_DOMAINS: &[&str] = &[
     "information-and-ideas",
     "craft-and-structure",
     "expression-of-ideas",
     "standard-english-conventions",
 ];
-const MATH_DOMAINS: &[&str] = &[
+pub const MATH_DOMAINS: &[&str] = &[
     "algebra",
     "advanced-math",
     "problem-solving-and-data-analysis",
     "geometry-and-trigonometry",
 ];
 
-const INFORMATION_AND_IDEAS_SKILLS: &[&str] = &[
+pub const INFORMATION_AND_IDEAS_SKILLS: &[&str] = &[
     "Central Ideas and Details",
     "Command of Evidence — Textual",
     "Command of Evidence — Quantitative",
     "Inferences",
 ];
-const CRAFT_AND_STRUCTURE_SKILLS: &[&str] = &[
+pub const CRAFT_AND_STRUCTURE_SKILLS: &[&str] = &[
     "Words in Context",
     "Text Structure and Purpose",
     "Cross-Text Connections",
 ];
-const EXPRESSION_OF_IDEAS_SKILLS: &[&str] = &["Rhetorical Synthesis", "Transitions"];
-const STANDARD_ENGLISH_CONVENTIONS_SKILLS: &[&str] = &["Boundaries", "Form, Structure, and Sense"];
-const ALGEBRA_SKILLS: &[&str] = &[
+pub const EXPRESSION_OF_IDEAS_SKILLS: &[&str] = &["Rhetorical Synthesis", "Transitions"];
+pub const STANDARD_ENGLISH_CONVENTIONS_SKILLS: &[&str] =
+    &["Boundaries", "Form, Structure, and Sense"];
+pub const ALGEBRA_SKILLS: &[&str] = &[
     "Linear Equations in One Variable",
     "Linear Functions",
     "Linear Equations in Two Variables",
     "Systems of Two Linear Equations",
     "Linear Inequalities",
 ];
-const ADVANCED_MATH_SKILLS: &[&str] = &[
+pub const ADVANCED_MATH_SKILLS: &[&str] = &[
     "Equivalent Expressions",
     "Nonlinear Equations in One Variable",
     "Systems of Equations in Two Variables",
     "Nonlinear Functions",
 ];
-const PROBLEM_SOLVING_SKILLS: &[&str] = &[
+pub const PROBLEM_SOLVING_SKILLS: &[&str] = &[
     "Ratios, Rates, Proportional Relationships, and Units",
     "Percentages",
     "One-Variable Data",
@@ -59,7 +60,7 @@ const PROBLEM_SOLVING_SKILLS: &[&str] = &[
     "Inference from Sample Statistics and Margin of Error",
     "Evaluating Statistical Claims",
 ];
-const GEOMETRY_SKILLS: &[&str] = &[
+pub const GEOMETRY_SKILLS: &[&str] = &[
     "Area and Volume",
     "Lines, Angles, and Triangles",
     "Right Triangles and Trigonometry",
@@ -83,6 +84,68 @@ fn validate_rich_document(value: &Value, path: &str, issues: &mut Vec<Validation
             }
         }
         Value::Object(object) => {
+            if let Some(node_type) = object.get("type").and_then(Value::as_str) {
+                const ALLOWED_NODES: &[&str] = &[
+                    "doc",
+                    "paragraph",
+                    "heading",
+                    "text",
+                    "hardBreak",
+                    "bulletList",
+                    "orderedList",
+                    "listItem",
+                    "inlineMath",
+                    "blockMath",
+                    "image",
+                    "table",
+                    "tableRow",
+                    "tableHeader",
+                    "tableCell",
+                    "codeBlock",
+                ];
+                if !ALLOWED_NODES.contains(&node_type) {
+                    issues.push(issue(
+                        "sat.content.node.unsupported",
+                        &format!("{path}.type"),
+                        "This rich-content element is not supported in SAT delivery.",
+                    ));
+                }
+                if matches!(node_type, "inlineMath" | "blockMath") {
+                    let latex = object
+                        .get("attrs")
+                        .and_then(Value::as_object)
+                        .and_then(|attrs| attrs.get("latex"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if latex.trim().is_empty() {
+                        issues.push(issue(
+                            "sat.math.latex.required",
+                            &format!("{path}.attrs.latex"),
+                            "Math content requires a LaTeX expression.",
+                        ));
+                    }
+                }
+            }
+            if let Some(marks) = object.get("marks").and_then(Value::as_array) {
+                const ALLOWED_MARKS: &[&str] = &[
+                    "bold",
+                    "italic",
+                    "underline",
+                    "superscript",
+                    "subscript",
+                    "code",
+                ];
+                for (index, mark) in marks.iter().enumerate() {
+                    let mark_type = mark.get("type").and_then(Value::as_str).unwrap_or_default();
+                    if !ALLOWED_MARKS.contains(&mark_type) {
+                        issues.push(issue(
+                            "sat.content.mark.unsupported",
+                            &format!("{path}.marks[{index}].type"),
+                            "This text formatting is not supported in SAT delivery.",
+                        ));
+                    }
+                }
+            }
             if object.get("type").and_then(Value::as_str) == Some("image") {
                 let attrs = object.get("attrs").and_then(Value::as_object);
                 let alt = attrs
@@ -322,7 +385,7 @@ pub fn valid_domain(section_key: &str, domain: &str) -> bool {
     }
 }
 
-fn valid_skill(domain: &str, skill: &str) -> bool {
+pub fn valid_skill(domain: &str, skill: &str) -> bool {
     let skills = match domain {
         "information-and-ideas" => INFORMATION_AND_IDEAS_SKILLS,
         "craft-and-structure" => CRAFT_AND_STRUCTURE_SKILLS,

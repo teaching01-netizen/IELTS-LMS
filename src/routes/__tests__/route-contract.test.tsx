@@ -18,6 +18,19 @@ describe('route contracts', () => {
     expect(getLeafPath('/admin/settings')).toBe('settings');
   });
 
+  it('exposes Digital SAT as its own product route tree', () => {
+    expect(getLeafPath('/sat')).toBe(null);
+    expect(getLeafPath('/sat/exams')).toBe('exams');
+    expect(getLeafPath('/sat/sessions')).toBe('sessions');
+    expect(getLeafPath('/sat/results')).toBe('results');
+    expect(getLeafPath('/sat/results/result-1')).toBe('results/:resultId');
+    expect(getLeafPath('/sat/exams/exam-1')).toBe('sat/exams/:examId');
+    expect(getLeafPath('/sat/exams/exam-1/release')).toBe('sat/exams/:examId/release');
+    expect(getLeafPath('/sat/exams/exam-1/preview')).toBe('sat/exams/:examId/preview');
+    expect(getLeafPath('/sat/exams/exam-1/access')).toBe('sat/exams/:examId/access');
+    expect(getLeafPath('/sat/sessions/session-1')).toBe('sat/sessions/:scheduleId');
+  });
+
   it('treats student phases as internal runtime state', () => {
     expect(getLeafPath('/student/schedule-123')).toBe('student/:scheduleId');
     expect(getLeafPath('/student/schedule-123/register')).toBe('student/:scheduleId/register');

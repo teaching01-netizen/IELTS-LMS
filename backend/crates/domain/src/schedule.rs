@@ -12,6 +12,7 @@ use sqlx::FromRow;
 pub struct ExamSchedule {
     pub id: String,
     pub exam_id: String,
+    pub provider_key: String,
     pub organization_id: Option<String>,
     pub exam_title: String,
     pub proctor_display_name: String,
@@ -120,6 +121,7 @@ pub struct ExamSessionRuntime {
     pub id: String,
     pub schedule_id: String,
     pub exam_id: String,
+    pub provider_key: String,
     pub status: RuntimeStatus,
     pub plan_snapshot: Vec<ScheduleSectionPlanEntry>,
     pub timing_model: String,

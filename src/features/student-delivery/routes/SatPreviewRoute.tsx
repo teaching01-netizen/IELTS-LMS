@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ErrorSurface } from "@components/ui/ErrorSurface";
 import { LoadingSurface } from "@components/ui/LoadingSurface";
 import { hasStructuredContent } from "../../exam-authoring/api/renderingPublic";
@@ -25,6 +25,10 @@ function sectionLabel(displayOrder: number, title: string): string {
 
 export function SatPreviewRoute({ examId }: { examId: string }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const backToExam = location.pathname.startsWith("/sat/")
+    ? `/sat/exams/${examId}`
+    : `/builder/${examId}`;
   const preview = useSatPreviewController(examId);
   const [eliminationMode, setEliminationMode] = useState(false);
   const [readingPreferences, setReadingPreferences] = useState(createSatReadingPreferences);
@@ -56,7 +60,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
         title="Nothing to preview yet"
         description="Add at least one module to the SAT draft before opening the full exam preview."
         actionLabel="Return to authoring"
-        onAction={() => navigate(`/builder/${examId}`)}
+        onAction={() => navigate(backToExam)}
       />
     );
   }
@@ -80,7 +84,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
       onPreviousModule={preview.commands.previousModule}
       onNextModule={preview.commands.nextModule}
       onShowBreak={preview.commands.showBreak}
-      onExit={() => navigate(`/builder/${examId}`)}
+      onExit={() => navigate(backToExam)}
     />
   );
 

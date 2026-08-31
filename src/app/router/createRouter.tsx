@@ -102,6 +102,28 @@ const StudentAccessLinkEntryRoute = lazy(() =>
   }))
 );
 
+const SatRoot = lazy(() =>
+  import("../../products/sat/SatRoot").then((module) => ({ default: module.SatRoot }))
+);
+const SatExamLibraryRoute = lazy(() =>
+  import("../../products/sat/routes/SatExamLibraryRoute").then((module) => ({ default: module.SatExamLibraryRoute }))
+);
+const SatSessionsRoute = lazy(() =>
+  import("../../products/sat/routes/SatSessionsRoute").then((module) => ({ default: module.SatSessionsRoute }))
+);
+const SatSessionRoomRoute = lazy(() =>
+  import("../../products/sat/routes/SatSessionRoomRoute").then((module) => ({ default: module.SatSessionRoomRoute }))
+);
+const SatResultsRoute = lazy(() =>
+  import("../../products/sat/routes/SatResultsRoute").then((module) => ({ default: module.SatResultsRoute }))
+);
+const SatResultDetailRoute = lazy(() =>
+  import("../../products/sat/routes/SatResultDetailRoute").then((module) => ({ default: module.SatResultDetailRoute }))
+);
+const SatAccessRoute = lazy(() =>
+  import("../../products/sat/routes/SatAccessRoute").then((module) => ({ default: module.SatAccessRoute }))
+);
+
 const DevHighlightSelectionRoute = lazy(() =>
   import("./dev/HighlightSelectionDebugRoute").then((module) => ({
     default: module.HighlightSelectionDebugRoute,
@@ -142,6 +164,15 @@ function AdminIndexRedirect() {
 function StudentRegisterRedirect() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
   return <Navigate to={`/student/${scheduleId}`} replace />;
+}
+
+function SatIndexRedirect() {
+  const { session, status } = useAuthSession();
+  if (status === "loading") return <LoadingSurface label="Loading Session..." />;
+  if (!session) return <Navigate to="/login" replace />;
+  if (session.user.role === "proctor") return <Navigate to="/sat/sessions" replace />;
+  if (session.user.role === "grader") return <Navigate to="/sat/results" replace />;
+  return <Navigate to="/sat/exams" replace />;
 }
 
 function withAuth(
@@ -253,6 +284,81 @@ const baseRoutes = [
             ),
           },
         ],
+      },
+      {
+        path: "sat",
+        element: withAuth(
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <SatRoot />
+          </Suspense>,
+          ["admin", "builder", "proctor", "grader"]
+        ),
+        children: [
+          { index: true, element: <SatIndexRedirect /> },
+          {
+            path: "exams",
+            element: withAuth(
+              <Suspense fallback={<RouteLoadingFallback />}><SatExamLibraryRoute /></Suspense>,
+              ["admin", "builder"]
+            ),
+          },
+          {
+            path: "sessions",
+            element: withAuth(
+              <Suspense fallback={<RouteLoadingFallback />}><SatSessionsRoute /></Suspense>,
+              ["admin", "proctor"]
+            ),
+          },
+          {
+            path: "results",
+            element: withAuth(
+              <Suspense fallback={<RouteLoadingFallback />}><SatResultsRoute /></Suspense>,
+              ["admin", "grader", "proctor"]
+            ),
+          },
+          {
+            path: "results/:resultId",
+            element: withAuth(
+              <Suspense fallback={<RouteLoadingFallback />}><SatResultDetailRoute /></Suspense>,
+              ["admin", "grader", "proctor"]
+            ),
+          },
+        ],
+      },
+      {
+        path: "sat/exams/:examId",
+        element: withAuth(
+          <Suspense fallback={<RouteLoadingFallback />}><ProviderBuilderRoute /></Suspense>,
+          ["admin", "builder"]
+        ),
+      },
+      {
+        path: "sat/exams/:examId/release",
+        element: withAuth(
+          <Suspense fallback={<RouteLoadingFallback />}><ProviderReviewRoute /></Suspense>,
+          ["admin", "builder"]
+        ),
+      },
+      {
+        path: "sat/exams/:examId/preview",
+        element: withAuth(
+          <Suspense fallback={<RouteLoadingFallback />}><ProviderPreviewRoute /></Suspense>,
+          ["admin", "builder"]
+        ),
+      },
+      {
+        path: "sat/exams/:examId/access",
+        element: withAuth(
+          <Suspense fallback={<RouteLoadingFallback />}><SatAccessRoute /></Suspense>,
+          ["admin", "builder"]
+        ),
+      },
+      {
+        path: "sat/sessions/:scheduleId",
+        element: withAuth(
+          <Suspense fallback={<RouteLoadingFallback />}><SatSessionRoomRoute /></Suspense>,
+          ["admin", "proctor"]
+        ),
       },
       {
         path: "builder/:examId",

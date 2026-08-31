@@ -99,8 +99,6 @@ export function StudentAccessLinkEntryRoute() {
       wcode: activeLink.accessMode === 'student_code' ? normalizedCode : '',
       email: normalizedEmail,
       studentName: normalizedName,
-      nickname: '',
-      ieltsCourse: '',
     });
   }, [studentEntry]);
 

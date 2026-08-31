@@ -44,6 +44,20 @@ pub struct AssessmentAuthoringShell {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SatWorkbookUndoState {
+    pub import_id: String,
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SatWorkbookCommitResult {
+    pub shell: AssessmentAuthoringShell,
+    pub undo: SatWorkbookUndoState,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AssessmentPreviewProjection {
     pub exam_id: String,
     pub provider_key: String,
@@ -211,7 +225,7 @@ pub struct BulkQuestionResult {
     pub updated_questions: Vec<AssessmentQuestionSummary>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BatchQuestionDraft {
     pub question_type: QuestionKind,
@@ -319,6 +333,11 @@ struct SampleModuleRow {
     section_key: String,
     module_key: String,
     target_question_count: i32,
+}
+
+struct SatWorkbookImportContext {
+    import_id: String,
+    staged_assets: Vec<crate::sat_workbook::SatWorkbookStagedAsset>,
 }
 
 struct PreparedSampleQuestion {
@@ -835,11 +854,314 @@ impl AssessmentAuthoringService {
         })
     }
 
+    pub async fn register_sat_workbook_preview(
+        &self,
+        exam_id: &str,
+        preview: &crate::sat_workbook::SatWorkbookPreview,
+        actor_id: &str,
+    ) -> Result<(), AssessmentAuthoringError> {
+        let shell = self.shell(exam_id).await?;
+        if shell.provider_key != "sat" {
+            return Err(AssessmentAuthoringError::UnsupportedProvider);
+        }
+        let asset_manifest = preview
+            .assets
+            .iter()
+            .cloned()
+            .map(|mut asset| {
+                asset.data_base64 = None;
+                asset
+            })
+            .collect::<Vec<_>>();
+        sqlx::query(
+            "UPDATE sat_workbook_imports SET state = 'expired', updated_at = CURRENT_TIMESTAMP(6) WHERE exam_id = ? AND created_by = ? AND state = 'previewed'",
+        )
+        .bind(exam_id)
+        .bind(actor_id)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO sat_workbook_imports (id, exam_id, expected_version_id, expected_version_revision, asset_manifest, state, created_by, expires_at) VALUES (?, ?, ?, ?, ?, 'previewed', ?, DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 DAY))",
+        )
+        .bind(&preview.import_id)
+        .bind(exam_id)
+        .bind(&shell.version_id)
+        .bind(shell.version_revision)
+        .bind(serde_json::to_value(asset_manifest)?)
+        .bind(actor_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn commit_sat_workbook(
+        &self,
+        exam_id: &str,
+        request: crate::sat_workbook::SatWorkbookCommitRequest,
+        actor_id: &str,
+    ) -> Result<SatWorkbookCommitResult, AssessmentAuthoringError> {
+        if request.modules.len() != 6 {
+            return Err(AssessmentAuthoringError::InvalidData(
+                "A complete SAT workbook must contain all six modules.".to_owned(),
+            ));
+        }
+        let shell = self.shell(exam_id).await?;
+        if shell.version_id != request.expected_version_id
+            || shell.version_revision != request.expected_version_revision
+        {
+            return Err(AssessmentAuthoringError::Conflict(
+                "The SAT draft changed after this workbook was checked. Review the latest draft before importing.".to_owned(),
+            ));
+        }
+        let mut seen = HashSet::with_capacity(request.modules.len());
+        let mut modules = Vec::with_capacity(request.modules.len());
+        for workbook_module in request.modules {
+            if !seen.insert(workbook_module.module_key.clone()) {
+                return Err(AssessmentAuthoringError::InvalidData(
+                    "The workbook contains a duplicate SAT module.".to_owned(),
+                ));
+            }
+            let destination = shell
+                .sections
+                .iter()
+                .flat_map(|section| section.modules.iter().map(move |module| (section, module)))
+                .find(|(_, module)| module.module_key == workbook_module.module_key)
+                .ok_or_else(|| {
+                    AssessmentAuthoringError::InvalidData(
+                        "The workbook contains a module that is not part of this SAT draft."
+                            .to_owned(),
+                    )
+                })?;
+            if destination.0.section_key != workbook_module.section_key {
+                return Err(AssessmentAuthoringError::InvalidData(
+                    "The workbook module does not match its SAT section.".to_owned(),
+                ));
+            }
+            modules.push(SampleExamModuleDraft {
+                module_id: destination.1.id.clone(),
+                questions: workbook_module.questions,
+            });
+        }
+        let import_id = request.import_id.clone();
+        let next_shell = self
+            .replace_complete_sat_draft(
+                exam_id,
+                LoadSampleExamRequest {
+                    expected_version_id: request.expected_version_id,
+                    expected_version_revision: request.expected_version_revision,
+                    modules,
+                },
+                actor_id,
+                Some(SatWorkbookImportContext {
+                    import_id: import_id.clone(),
+                    staged_assets: request.assets,
+                }),
+            )
+            .await?;
+        Ok(SatWorkbookCommitResult {
+            shell: next_shell,
+            undo: SatWorkbookUndoState {
+                import_id,
+                available: true,
+            },
+        })
+    }
+
+    pub async fn sat_workbook_undo_state(
+        &self,
+        exam_id: &str,
+    ) -> Result<Option<SatWorkbookUndoState>, AssessmentAuthoringError> {
+        let row: Option<(String, Option<String>, Option<i32>, Option<String>, Option<i32>)> =
+            sqlx::query_as(
+                "SELECT i.id, i.imported_version_id, i.imported_version_revision, e.current_draft_version_id, v.revision FROM sat_workbook_imports i JOIN exam_entities e ON e.id = i.exam_id LEFT JOIN exam_versions v ON v.id = e.current_draft_version_id WHERE i.exam_id = ? AND i.state = 'committed' ORDER BY i.created_at DESC LIMIT 1",
+            )
+            .bind(exam_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(
+            |(
+                import_id,
+                imported_version_id,
+                imported_revision,
+                current_version_id,
+                current_revision,
+            )| {
+                SatWorkbookUndoState {
+                    import_id,
+                    available: imported_version_id == current_version_id
+                        && imported_revision == current_revision,
+                }
+            },
+        ))
+    }
+
+    pub async fn undo_sat_workbook_import(
+        &self,
+        exam_id: &str,
+        import_id: &str,
+        actor_id: &str,
+    ) -> Result<AssessmentAuthoringShell, AssessmentAuthoringError> {
+        let mut tx = self.pool.begin().await?;
+        let exam: Option<(String, Option<String>)> = sqlx::query_as(
+            "SELECT provider_key, current_draft_version_id FROM exam_entities WHERE id = ? FOR UPDATE",
+        )
+        .bind(exam_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((provider_key, current_draft_version_id)) = exam else {
+            return Err(AssessmentAuthoringError::NotFound);
+        };
+        if provider_key != "sat" {
+            return Err(AssessmentAuthoringError::UnsupportedProvider);
+        }
+        let import: Option<(Option<String>, Option<String>, Option<i32>, Option<Value>)> =
+            sqlx::query_as(
+                "SELECT checkpoint_version_id, imported_version_id, imported_version_revision, asset_ids FROM sat_workbook_imports WHERE id = ? AND exam_id = ? AND state = 'committed' FOR UPDATE",
+            )
+            .bind(import_id)
+            .bind(exam_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let Some((checkpoint_version_id, imported_version_id, imported_revision, asset_ids)) =
+            import
+        else {
+            return Err(AssessmentAuthoringError::Conflict(
+                "This SAT workbook import can no longer be undone.".to_owned(),
+            ));
+        };
+        let checkpoint_version_id = checkpoint_version_id.ok_or_else(|| {
+            AssessmentAuthoringError::InvalidData(
+                "The SAT workbook recovery checkpoint is missing.".to_owned(),
+            )
+        })?;
+        let imported_version_id = imported_version_id.ok_or_else(|| {
+            AssessmentAuthoringError::InvalidData(
+                "The imported SAT draft reference is missing.".to_owned(),
+            )
+        })?;
+        let imported_revision = imported_revision.ok_or_else(|| {
+            AssessmentAuthoringError::InvalidData(
+                "The imported SAT revision is missing.".to_owned(),
+            )
+        })?;
+        if current_draft_version_id.as_deref() != Some(imported_version_id.as_str()) {
+            return Err(AssessmentAuthoringError::Conflict(
+                "The SAT changed after this import. Undo is no longer available.".to_owned(),
+            ));
+        }
+        let current: Option<(i32, bool)> = sqlx::query_as(
+            "SELECT revision, is_draft FROM exam_versions WHERE id = ? AND exam_id = ? FOR UPDATE",
+        )
+        .bind(&imported_version_id)
+        .bind(exam_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if current != Some((imported_revision, true)) {
+            return Err(AssessmentAuthoringError::Conflict(
+                "The SAT was edited after this import. Undo is no longer available.".to_owned(),
+            ));
+        }
+        let checkpoint_exists: Option<bool> = sqlx::query_scalar(
+            "SELECT is_draft FROM exam_versions WHERE id = ? AND exam_id = ? AND is_published = FALSE FOR UPDATE",
+        )
+        .bind(&checkpoint_version_id)
+        .bind(exam_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if checkpoint_exists != Some(false) {
+            return Err(AssessmentAuthoringError::Conflict(
+                "The SAT workbook recovery checkpoint is no longer available.".to_owned(),
+            ));
+        }
+        sqlx::query("UPDATE exam_versions SET is_draft = FALSE WHERE id = ? AND is_draft = TRUE")
+            .bind(&imported_version_id)
+            .execute(&mut *tx)
+            .await?;
+        let restored = sqlx::query(
+            "UPDATE exam_versions SET is_draft = TRUE WHERE id = ? AND exam_id = ? AND is_draft = FALSE AND is_published = FALSE",
+        )
+        .bind(&checkpoint_version_id)
+        .bind(exam_id)
+        .execute(&mut *tx)
+        .await?;
+        if restored.rows_affected() != 1 {
+            return Err(AssessmentAuthoringError::Conflict(
+                "The SAT workbook recovery checkpoint could not be restored.".to_owned(),
+            ));
+        }
+        sqlx::query(
+            "UPDATE exam_entities SET current_draft_version_id = ?, updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ?",
+        )
+        .bind(&checkpoint_version_id)
+        .bind(exam_id)
+        .execute(&mut *tx)
+        .await?;
+        let imported_asset_ids: Vec<String> = asset_ids
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|_| {
+                AssessmentAuthoringError::InvalidData(
+                    "The imported media recovery record is unreadable.".to_owned(),
+                )
+            })?
+            .unwrap_or_default();
+        if !imported_asset_ids.is_empty() {
+            let mut orphan = QueryBuilder::<MySql>::new(
+                "UPDATE media_assets SET upload_status = 'orphaned', delete_after_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 7 DAY), updated_at = CURRENT_TIMESTAMP(6) WHERE owner_kind = 'assessment_exam' AND owner_id = ",
+            );
+            orphan.push_bind(exam_id);
+            orphan.push(" AND id IN (");
+            {
+                let mut ids = orphan.separated(", ");
+                for asset_id in &imported_asset_ids {
+                    ids.push_bind(asset_id);
+                }
+            }
+            orphan.push(")");
+            orphan.build().execute(&mut *tx).await?;
+        }
+        let updated = sqlx::query(
+            "UPDATE sat_workbook_imports SET state = 'undone', undone_at = CURRENT_TIMESTAMP(6), updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND exam_id = ? AND state = 'committed'",
+        )
+        .bind(import_id)
+        .bind(exam_id)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(AssessmentAuthoringError::Conflict(
+                "The SAT workbook import was already undone.".to_owned(),
+            ));
+        }
+        sqlx::query(
+            "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, payload, created_at) VALUES (?, ?, ?, ?, 'version_restored', ?, CURRENT_TIMESTAMP(6))",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(exam_id)
+        .bind(&checkpoint_version_id)
+        .bind(actor_id)
+        .bind(json!({"reason":"sat_workbook_import_undo","importId":import_id}))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        self.shell(exam_id).await
+    }
+
     pub async fn load_sample_exam(
+        &self,
+        exam_id: &str,
+        request: LoadSampleExamRequest,
+        actor_id: &str,
+    ) -> Result<AssessmentAuthoringShell, AssessmentAuthoringError> {
+        self.replace_complete_sat_draft(exam_id, request, actor_id, None)
+            .await
+    }
+
+    async fn replace_complete_sat_draft(
         &self,
         exam_id: &str,
         mut request: LoadSampleExamRequest,
         actor_id: &str,
+        import: Option<SatWorkbookImportContext>,
     ) -> Result<AssessmentAuthoringShell, AssessmentAuthoringError> {
         for module in &mut request.modules {
             for draft in &mut module.questions {
@@ -862,7 +1184,7 @@ impl AssessmentAuthoringService {
         let version_id = current_draft_version_id.ok_or(AssessmentAuthoringError::NotFound)?;
         if version_id != request.expected_version_id {
             return Err(AssessmentAuthoringError::Conflict(
-                "The SAT draft changed before the sample exam could be loaded. Refresh and try again."
+                "The SAT draft changed before the complete replacement could be applied. Refresh and try again."
                     .to_owned(),
             ));
         }
@@ -875,10 +1197,53 @@ impl AssessmentAuthoringService {
         .await?;
         if version_revision != Some(request.expected_version_revision) {
             return Err(AssessmentAuthoringError::Conflict(
-                "The SAT draft changed before the sample exam could be loaded. Refresh and try again."
+                "The SAT draft changed before the complete replacement could be applied. Refresh and try again."
                     .to_owned(),
             ));
         }
+
+        let import_asset_ids = if let Some(import_context) = import.as_ref() {
+            let import_row: Option<(String, i32, Value, String)> = sqlx::query_as(
+                "SELECT expected_version_id, expected_version_revision, asset_manifest, created_by FROM sat_workbook_imports WHERE id = ? AND exam_id = ? AND state = 'previewed' AND expires_at > CURRENT_TIMESTAMP(6) FOR UPDATE",
+            )
+            .bind(&import_context.import_id)
+            .bind(exam_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some((expected_version_id, expected_revision, manifest_value, created_by)) =
+                import_row
+            else {
+                return Err(AssessmentAuthoringError::Conflict(
+                    "This SAT workbook preview has expired or was already used. Check the workbook again before importing.".to_owned(),
+                ));
+            };
+            if created_by != actor_id
+                || expected_version_id != version_id
+                || expected_revision != request.expected_version_revision
+            {
+                return Err(AssessmentAuthoringError::Conflict(
+                    "The SAT workbook preview does not belong to the current draft session."
+                        .to_owned(),
+                ));
+            }
+            let manifest: Vec<crate::sat_workbook::SatWorkbookAsset> =
+                serde_json::from_value(manifest_value).map_err(|_| {
+                    AssessmentAuthoringError::InvalidData(
+                        "The workbook asset manifest is unreadable.".to_owned(),
+                    )
+                })?;
+            let staged = verify_staged_workbook_assets_tx(
+                &mut tx,
+                &import_context.import_id,
+                &manifest,
+                &import_context.staged_assets,
+            )
+            .await?;
+            materialize_workbook_assets_in_modules(&mut request.modules, &staged)?;
+            staged.into_values().collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
 
         let modules = sqlx::query_as::<_, SampleModuleRow>(
             "SELECT m.id, s.section_key, m.module_key, m.target_question_count FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE s.exam_version_id = ? ORDER BY s.display_order, m.display_order FOR UPDATE",
@@ -888,14 +1253,14 @@ impl AssessmentAuthoringService {
         .await?;
         if modules.len() != request.modules.len() {
             return Err(AssessmentAuthoringError::InvalidData(
-                "Sample exam payload must contain every SAT module exactly once.".to_owned(),
+                "Complete SAT replacement must contain every module exactly once.".to_owned(),
             ));
         }
         let mut requested_ids = HashSet::with_capacity(request.modules.len());
         for requested in &request.modules {
             if !requested_ids.insert(requested.module_id.as_str()) {
                 return Err(AssessmentAuthoringError::InvalidData(
-                    "Sample exam payload contains a duplicate module.".to_owned(),
+                    "Complete SAT replacement contains a duplicate module.".to_owned(),
                 ));
             }
         }
@@ -910,7 +1275,8 @@ impl AssessmentAuthoringService {
                 .find(|candidate| candidate.module_id == module.id)
                 .ok_or_else(|| {
                     AssessmentAuthoringError::InvalidData(
-                        "Sample exam payload contains an unknown or missing module.".to_owned(),
+                        "Complete SAT replacement contains an unknown or missing module."
+                            .to_owned(),
                     )
                 })?;
             let expected_count = usize::try_from(module.target_question_count).map_err(|_| {
@@ -920,7 +1286,7 @@ impl AssessmentAuthoringService {
             })?;
             if requested.questions.len() != expected_count {
                 return Err(AssessmentAuthoringError::InvalidData(format!(
-                    "{} requires exactly {} sample questions.",
+                    "{} requires exactly {} questions.",
                     module.module_key, module.target_question_count
                 )));
             }
@@ -988,6 +1354,12 @@ impl AssessmentAuthoringService {
             return Err(AssessmentAuthoringError::Validation(validation_issues));
         }
 
+        let checkpoint_version_id = if import.is_some() {
+            Some(Self::checkpoint_sat_draft_tx(&mut tx, exam_id, &version_id, actor_id).await?)
+        } else {
+            None
+        };
+
         let mut prepared = Vec::with_capacity(
             request
                 .modules
@@ -1002,7 +1374,7 @@ impl AssessmentAuthoringService {
                 .find(|candidate| candidate.module_id == module.id)
                 .ok_or_else(|| {
                     AssessmentAuthoringError::InvalidData(
-                        "Sample module disappeared during validation.".to_owned(),
+                        "SAT module disappeared during replacement validation.".to_owned(),
                     )
                 })?;
             for (index, draft) in requested.questions.iter().enumerate() {
@@ -1040,6 +1412,67 @@ impl AssessmentAuthoringService {
         delete_unreferenced_questions_tx(&mut tx, &previous_question_ids).await?;
         insert_prepared_sample_questions_tx(&mut tx, &prepared, actor_id).await?;
         touch_draft_version_tx(&mut tx, &version_id).await?;
+        if let Some(import_context) = import.as_ref() {
+            if !import_asset_ids.is_empty() {
+                let mut promote = QueryBuilder::<MySql>::new(
+                    "UPDATE media_assets SET owner_kind = 'assessment_exam', owner_id = ",
+                );
+                promote.push_bind(exam_id);
+                promote.push(", delete_after_at = NULL, updated_at = CURRENT_TIMESTAMP(6) WHERE owner_kind = 'assessment_import' AND owner_id = ");
+                promote.push_bind(&import_context.import_id);
+                promote.push(" AND upload_status = 'finalized' AND id IN (");
+                {
+                    let mut ids = promote.separated(", ");
+                    for asset_id in &import_asset_ids {
+                        ids.push_bind(asset_id);
+                    }
+                }
+                promote.push(")");
+                let promoted = promote.build().execute(&mut *tx).await?;
+                if promoted.rows_affected() != import_asset_ids.len() as u64 {
+                    return Err(AssessmentAuthoringError::Conflict(
+                        "A staged workbook image changed before import. Check the workbook again."
+                            .to_owned(),
+                    ));
+                }
+            }
+            let post_revision: i32 =
+                sqlx::query_scalar("SELECT revision FROM exam_versions WHERE id = ? FOR UPDATE")
+                    .bind(&version_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            let checkpoint = checkpoint_version_id.as_deref().ok_or_else(|| {
+                AssessmentAuthoringError::InvalidData(
+                    "The workbook recovery checkpoint was not created.".to_owned(),
+                )
+            })?;
+            let updated = sqlx::query(
+                "UPDATE sat_workbook_imports SET checkpoint_version_id = ?, imported_version_id = ?, imported_version_revision = ?, asset_ids = ?, state = 'committed', updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND exam_id = ? AND state = 'previewed'",
+            )
+            .bind(checkpoint)
+            .bind(&version_id)
+            .bind(post_revision)
+            .bind(serde_json::to_value(&import_asset_ids)?)
+            .bind(&import_context.import_id)
+            .bind(exam_id)
+            .execute(&mut *tx)
+            .await?;
+            if updated.rows_affected() != 1 {
+                return Err(AssessmentAuthoringError::Conflict(
+                    "The SAT workbook import was already completed or expired.".to_owned(),
+                ));
+            }
+            sqlx::query(
+                "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, payload, created_at) VALUES (?, ?, ?, ?, 'version_created', ?, CURRENT_TIMESTAMP(6))",
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(exam_id)
+            .bind(checkpoint)
+            .bind(actor_id)
+            .bind(json!({"reason":"sat_workbook_import_checkpoint","importId":import_context.import_id}))
+            .execute(&mut *tx)
+            .await?;
+        }
         tx.commit().await?;
         self.shell(exam_id).await
     }
@@ -1768,11 +2201,44 @@ impl AssessmentAuthoringService {
         published_version_id: &str,
         actor_id: &str,
     ) -> Result<String, AssessmentAuthoringError> {
-        let source: Option<(i32, Value, Value)> = sqlx::query_as(
-            "SELECT version_number, content_snapshot, config_snapshot FROM exam_versions WHERE id = ? AND exam_id = ? AND is_published = TRUE FOR UPDATE",
+        Self::clone_sat_version_tx(
+            tx,
+            exam_id,
+            published_version_id,
+            actor_id,
+            true,
+            true,
+            true,
         )
-        .bind(published_version_id)
+        .await
+    }
+
+    async fn checkpoint_sat_draft_tx(
+        tx: &mut Transaction<'_, MySql>,
+        exam_id: &str,
+        draft_version_id: &str,
+        actor_id: &str,
+    ) -> Result<String, AssessmentAuthoringError> {
+        Self::clone_sat_version_tx(tx, exam_id, draft_version_id, actor_id, false, false, false)
+            .await
+    }
+
+    async fn clone_sat_version_tx(
+        tx: &mut Transaction<'_, MySql>,
+        exam_id: &str,
+        source_version_id: &str,
+        actor_id: &str,
+        source_is_published: bool,
+        target_is_draft: bool,
+        reuse_existing_draft: bool,
+    ) -> Result<String, AssessmentAuthoringError> {
+        let source: Option<(i32, Value, Value)> = sqlx::query_as(
+            "SELECT version_number, content_snapshot, config_snapshot FROM exam_versions WHERE id = ? AND exam_id = ? AND ((? = TRUE AND is_published = TRUE) OR (? = FALSE AND is_draft = TRUE)) FOR UPDATE",
+        )
+        .bind(source_version_id)
         .bind(exam_id)
+        .bind(source_is_published)
+        .bind(source_is_published)
         .fetch_optional(&mut **tx)
         .await?;
         let Some((_published_number, content_snapshot, config_snapshot)) = source else {
@@ -1781,14 +2247,16 @@ impl AssessmentAuthoringService {
             ));
         };
 
-        let existing_draft: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM exam_versions WHERE exam_id = ? AND is_draft = TRUE LIMIT 1 FOR UPDATE",
-        )
-        .bind(exam_id)
-        .fetch_optional(&mut **tx)
-        .await?;
-        if let Some(existing_draft) = existing_draft {
-            return Ok(existing_draft);
+        if reuse_existing_draft {
+            let existing_draft: Option<String> = sqlx::query_scalar(
+                "SELECT id FROM exam_versions WHERE exam_id = ? AND is_draft = TRUE LIMIT 1 FOR UPDATE",
+            )
+            .bind(exam_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+            if let Some(existing_draft) = existing_draft {
+                return Ok(existing_draft);
+            }
         }
 
         let next_version_number: i32 = sqlx::query_scalar(
@@ -1799,22 +2267,23 @@ impl AssessmentAuthoringService {
         .await?;
         let draft_version_id = Uuid::new_v4().to_string();
         sqlx::query(
-            "INSERT INTO exam_versions (id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, TRUE, FALSE, 0)",
+            "INSERT INTO exam_versions (id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, FALSE, 0)",
         )
         .bind(&draft_version_id)
         .bind(exam_id)
         .bind(next_version_number)
-        .bind(published_version_id)
+        .bind(source_version_id)
         .bind(content_snapshot)
         .bind(config_snapshot)
         .bind(actor_id)
+        .bind(target_is_draft)
         .execute(&mut **tx)
         .await?;
 
         let sections = sqlx::query_as::<_, PublishedSectionCloneRow>(
             "SELECT id, section_key, title, display_order, duration_seconds, break_after_seconds, instructions, tool_policy FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id",
         )
-        .bind(published_version_id)
+        .bind(source_version_id)
         .fetch_all(&mut **tx)
         .await?;
         if sections.is_empty() {
@@ -1846,7 +2315,7 @@ impl AssessmentAuthoringService {
         let modules = sqlx::query_as::<_, PublishedModuleCloneRow>(
             "SELECT m.id, m.section_id, m.module_key, m.title, m.display_order, m.duration_seconds, m.target_question_count, m.adaptive_role, m.instructions, m.tool_policy FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE s.exam_version_id = ? ORDER BY s.display_order, m.display_order, m.id",
         )
-        .bind(published_version_id)
+        .bind(source_version_id)
         .fetch_all(&mut **tx)
         .await?;
         let mut module_ids = HashMap::with_capacity(modules.len());
@@ -1878,7 +2347,7 @@ impl AssessmentAuthoringService {
         let routing = sqlx::query_as::<_, PublishedRoutingCloneRow>(
             "SELECT rp.section_id, rp.base_module_id, rp.lower_module_id, rp.higher_module_id, rp.policy_key, rp.policy_config FROM assessment_routing_policies rp JOIN assessment_sections s ON s.id = rp.section_id WHERE s.exam_version_id = ?",
         )
-        .bind(published_version_id)
+        .bind(source_version_id)
         .fetch_all(&mut **tx)
         .await?;
         for policy in routing {
@@ -1919,7 +2388,7 @@ impl AssessmentAuthoringService {
         let scoring = sqlx::query_as::<_, PublishedScoringCloneRow>(
             "SELECT policy_key, policy_config FROM assessment_scoring_policies WHERE exam_version_id = ?",
         )
-        .bind(published_version_id)
+        .bind(source_version_id)
         .fetch_optional(&mut **tx)
         .await?;
         if let Some(scoring) = scoring {
@@ -1937,7 +2406,7 @@ impl AssessmentAuthoringService {
         let source_questions = sqlx::query_as::<_, PublishedQuestionCloneRow>(
             "SELECT m.id AS source_module_id, qr.id AS source_revision_id, eq.question_id, (SELECT MAX(r2.semantic_revision) FROM assessment_question_revisions r2 WHERE r2.question_id = eq.question_id) AS max_semantic_revision, qr.question_type, qr.stimulus, qr.prompt, qr.answer_definition, qr.rationale, qr.metadata, qr.accessibility, eq.display_order, eq.is_pretest FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id WHERE s.exam_version_id = ? ORDER BY s.display_order, m.display_order, eq.display_order, eq.id",
         )
-        .bind(published_version_id)
+        .bind(source_version_id)
         .fetch_all(&mut **tx)
         .await?;
 
@@ -2045,6 +2514,178 @@ impl AssessmentAuthoringService {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, FromRow)]
+struct StagedWorkbookMediaRow {
+    id: String,
+    content_type: String,
+    file_name: String,
+    size_bytes: Option<i64>,
+    checksum_sha256: Option<String>,
+}
+
+async fn verify_staged_workbook_assets_tx(
+    tx: &mut Transaction<'_, MySql>,
+    import_id: &str,
+    manifest: &[crate::sat_workbook::SatWorkbookAsset],
+    staged_assets: &[crate::sat_workbook::SatWorkbookStagedAsset],
+) -> Result<HashMap<String, String>, AssessmentAuthoringError> {
+    if manifest.len() != staged_assets.len() {
+        return Err(AssessmentAuthoringError::InvalidData(
+            "Every embedded workbook image must finish staging before import.".to_owned(),
+        ));
+    }
+    let mut requested = HashMap::with_capacity(staged_assets.len());
+    for staged in staged_assets {
+        if requested
+            .insert(staged.key.clone(), staged.asset_id.clone())
+            .is_some()
+        {
+            return Err(AssessmentAuthoringError::InvalidData(
+                "The workbook contains a duplicate staged asset key.".to_owned(),
+            ));
+        }
+    }
+    if manifest.is_empty() {
+        return Ok(requested);
+    }
+    let mut query = QueryBuilder::<MySql>::new(
+        "SELECT id, content_type, file_name, size_bytes, checksum_sha256 FROM media_assets WHERE owner_kind = 'assessment_import' AND owner_id = ",
+    );
+    query.push_bind(import_id);
+    query.push(" AND upload_status = 'finalized' AND id IN (");
+    {
+        let mut ids = query.separated(", ");
+        for asset_id in requested.values() {
+            ids.push_bind(asset_id);
+        }
+    }
+    query.push(") FOR UPDATE");
+    let rows = query
+        .build_query_as::<StagedWorkbookMediaRow>()
+        .fetch_all(&mut **tx)
+        .await?;
+    if rows.len() != manifest.len() {
+        return Err(AssessmentAuthoringError::Conflict(
+            "A staged workbook image is missing or no longer finalized.".to_owned(),
+        ));
+    }
+    let by_id: HashMap<&str, &StagedWorkbookMediaRow> =
+        rows.iter().map(|row| (row.id.as_str(), row)).collect();
+    for asset in manifest {
+        let asset_id = requested.get(&asset.key).ok_or_else(|| {
+            AssessmentAuthoringError::InvalidData(format!(
+                "Workbook image “{}” was not staged.",
+                asset.key
+            ))
+        })?;
+        let row = by_id.get(asset_id.as_str()).ok_or_else(|| {
+            AssessmentAuthoringError::Conflict(format!(
+                "Workbook image “{}” is no longer available.",
+                asset.key
+            ))
+        })?;
+        if row.content_type != asset.content_type
+            || row.file_name != asset.file_name
+            || row.size_bytes != i64::try_from(asset.size_bytes).ok()
+            || row.checksum_sha256.as_deref() != Some(asset.checksum_sha256.as_str())
+        {
+            return Err(AssessmentAuthoringError::Conflict(format!(
+                "Workbook image “{}” does not match the checked workbook.",
+                asset.key
+            )));
+        }
+    }
+    Ok(requested)
+}
+
+fn materialize_workbook_assets_in_modules(
+    modules: &mut [SampleExamModuleDraft],
+    staged_assets: &HashMap<String, String>,
+) -> Result<(), AssessmentAuthoringError> {
+    for module in modules {
+        for question in &mut module.questions {
+            for content in [
+                &mut question.stimulus,
+                &mut question.prompt,
+                &mut question.rationale,
+            ] {
+                materialize_workbook_assets_in_content(content, staged_assets)?;
+            }
+            if let AnswerDefinition::SingleChoice { options, .. } = &mut question.answer {
+                for option in options {
+                    materialize_workbook_assets_in_content(&mut option.content, staged_assets)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn materialize_workbook_assets_in_content(
+    content: &mut StructuredContent,
+    staged_assets: &HashMap<String, String>,
+) -> Result<(), AssessmentAuthoringError> {
+    let Some(document) = content.document.as_mut() else {
+        return Ok(());
+    };
+    materialize_workbook_assets_in_json(document, staged_assets)
+}
+
+fn materialize_workbook_assets_in_json(
+    value: &mut Value,
+    staged_assets: &HashMap<String, String>,
+) -> Result<(), AssessmentAuthoringError> {
+    match value {
+        Value::Object(map) => {
+            if map.get("type").and_then(Value::as_str) == Some("image") {
+                let attrs = map
+                    .get_mut("attrs")
+                    .and_then(Value::as_object_mut)
+                    .ok_or_else(|| {
+                        AssessmentAuthoringError::InvalidData(
+                            "Workbook image attributes are missing.".to_owned(),
+                        )
+                    })?;
+                let key = attrs
+                    .get("workbookKey")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .or_else(|| {
+                        attrs
+                            .get("assetId")
+                            .and_then(Value::as_str)
+                            .and_then(|value| value.strip_prefix("workbook:"))
+                            .map(ToOwned::to_owned)
+                    })
+                    .ok_or_else(|| {
+                        AssessmentAuthoringError::InvalidData(
+                            "Workbook imports may only use images defined on the Assets sheet."
+                                .to_owned(),
+                        )
+                    })?;
+                let asset_id = staged_assets.get(&key).ok_or_else(|| {
+                    AssessmentAuthoringError::InvalidData(format!(
+                        "Workbook image “{key}” was not staged."
+                    ))
+                })?;
+                attrs.insert("assetId".to_owned(), Value::String(asset_id.clone()));
+                attrs.remove("workbookKey");
+                attrs.remove("src");
+            }
+            for child in map.values_mut() {
+                materialize_workbook_assets_in_json(child, staged_assets)?;
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                materialize_workbook_assets_in_json(child, staged_assets)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn default_question(section_key: &str) -> SaveQuestionRevisionRequest {

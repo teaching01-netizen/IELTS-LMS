@@ -109,6 +109,7 @@ type BackendExamEvent = {
 type BackendExamSchedule = {
   id: string;
   examId: string;
+  providerKey: "ielts" | "sat";
   examTitle: string;
   proctorDisplayName?: string | null | undefined;
   gradingDisplayName?: string | null | undefined;
@@ -155,6 +156,7 @@ type BackendExamSessionRuntime = {
   id: string;
   scheduleId: string;
   examId: string;
+  providerKey: "ielts" | "sat";
   status: ExamSessionRuntime["status"];
   timingModel?: ExamSessionRuntime["timingModel"];
   revision?: number | null | undefined;
@@ -556,6 +558,7 @@ export function mapBackendSchedule(payload: BackendExamSchedule): ExamSchedule {
   return {
     id: payload.id,
     examId: payload.examId,
+    providerKey: payload.providerKey,
     examTitle: payload.examTitle,
     proctorDisplayName: payload.proctorDisplayName ?? payload.examTitle,
     gradingDisplayName: payload.gradingDisplayName ?? payload.examTitle,
@@ -587,12 +590,13 @@ export function mapBackendSchedule(payload: BackendExamSchedule): ExamSchedule {
 
 export function mapBackendRuntime(
   payload: BackendExamSessionRuntime,
-  schedule: Pick<ExamSchedule, "examTitle" | "cohortName" | "deliveryMode">
+  schedule: Pick<ExamSchedule, "providerKey" | "examTitle" | "cohortName" | "deliveryMode">
 ): ExamSessionRuntime {
   return {
     id: payload.id,
     scheduleId: payload.scheduleId,
     examId: payload.examId,
+    providerKey: payload.providerKey ?? schedule.providerKey,
     examTitle: schedule.examTitle,
     cohortName: schedule.cohortName,
     deliveryMode: schedule.deliveryMode,

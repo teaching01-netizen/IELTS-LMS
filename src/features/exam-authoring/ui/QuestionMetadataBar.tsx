@@ -7,7 +7,7 @@ export interface QuestionMetadataBarProps {
 }
 
 const controlClass =
-  "h-9 min-w-0 rounded-lg border border-transparent bg-black/[0.04] px-2.5 text-[11px] font-semibold text-slate-700 outline-none transition hover:bg-black/[0.06] focus:border-[#0071e3]/30 focus:bg-white focus:ring-4 focus:ring-[#0071e3]/10";
+  "h-10 min-w-0 rounded-[9px] border border-transparent bg-white/78 px-2.5 text-[11px] font-semibold text-slate-700 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.045)] outline-none transition hover:bg-white focus:border-[#0071e3]/30 focus:bg-white focus:ring-4 focus:ring-[#0071e3]/10";
 
 export function QuestionMetadataBar({ question, onChange }: QuestionMetadataBarProps) {
   const domains = question.metadata.sectionKey === "math" ? SAT_DOMAINS.math : SAT_DOMAINS["reading-writing"];
@@ -21,8 +21,8 @@ export function QuestionMetadataBar({ question, onChange }: QuestionMetadataBarP
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-y border-black/[0.055] py-3" aria-label="Question metadata">
-      <span className="rounded-lg bg-black/[0.04] px-2.5 py-2 text-[11px] font-semibold text-slate-600">
+    <div className="authoring-metadata-bar mt-4 flex flex-wrap items-center gap-2 rounded-[13px] px-2.5 py-2.5" aria-label="Question metadata">
+      <span className="flex h-10 items-center rounded-[9px] px-2.5 text-[11px] font-semibold text-slate-600">
         {question.metadata.sectionKey === "math" ? "Math" : "Reading & Writing"}
       </span>
       <select
@@ -46,14 +46,14 @@ export function QuestionMetadataBar({ question, onChange }: QuestionMetadataBarP
         <option value="">{skills.length ? "Skill…" : "Choose domain first"}</option>
         {skills.map((skill) => <option key={skill} value={skill}>{skill}</option>)}
       </select>
-      <div className="flex h-9 items-center rounded-lg bg-black/[0.04] p-0.5" aria-label="Difficulty">
+      <div className="authoring-segmented flex h-10 items-center rounded-[9px] p-0.5" aria-label="Difficulty">
         {(["easy", "medium", "hard"] as Difficulty[]).map((difficulty) => (
           <button
             key={difficulty}
             type="button"
             aria-pressed={question.metadata.difficulty === difficulty}
             onClick={() => onChange({ ...question, metadata: { ...question.metadata, difficulty } })}
-            className={`h-8 rounded-[7px] px-2.5 text-[10px] font-semibold capitalize transition ${question.metadata.difficulty === difficulty ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+            className={`h-9 rounded-[8px] px-2.5 text-[10px] font-semibold capitalize transition ${question.metadata.difficulty === difficulty ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
           >
             {difficulty}
           </button>

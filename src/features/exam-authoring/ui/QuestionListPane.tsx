@@ -95,8 +95,8 @@ export function QuestionListPane(props: QuestionListPaneProps) {
   }, [props.module.questions]);
 
   return (
-    <section className="flex min-h-0 w-[430px] min-w-[360px] flex-col border-r border-black/[0.06] bg-white" aria-label={`${props.module.title} questions`}>
-      <div className="border-b border-black/[0.055] px-3 pb-3 pt-2.5">
+    <section className="authoring-sidebar relative isolate flex min-h-0 w-[430px] min-w-[360px] flex-col border-r border-black/[0.06]" aria-label={`${props.module.title} questions`}>
+      <div className="authoring-sidebar-header relative z-[90] overflow-visible border-b border-black/[0.055] px-3 pb-3 pt-2.5">
         <div className="mb-2 flex items-center gap-1">
           <ModuleScopePicker
             sections={props.sections}
@@ -108,7 +108,7 @@ export function QuestionListPane(props: QuestionListPaneProps) {
             type="button"
             onClick={props.onOpenImport}
             disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
-            className="flex h-10 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[10px] font-semibold text-slate-500 transition hover:bg-black/[0.04] hover:text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/10 disabled:opacity-30"
+            className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[10px] font-semibold text-slate-500 transition hover:bg-black/[0.04] hover:text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/10 disabled:opacity-30"
             aria-label="Paste or import questions into this module"
             title="Paste questions"
           >
@@ -119,7 +119,7 @@ export function QuestionListPane(props: QuestionListPaneProps) {
             type="button"
             onClick={props.onCreateQuestion}
             disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
-            className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-[#0071e3] px-3 text-[10px] font-semibold text-white transition hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/20 disabled:opacity-35"
+            className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-[10px] bg-[#0071e3] px-3 text-[10px] font-semibold text-white transition hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/20 disabled:opacity-35"
           >
             <Plus size={13} /> Question
           </button>
@@ -151,7 +151,7 @@ export function QuestionListPane(props: QuestionListPaneProps) {
               type="button"
               aria-pressed={props.filter === value}
               onClick={() => props.onFilterChange(value)}
-              className={`min-w-0 rounded-lg px-1.5 py-1.5 text-[9px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/20 ${props.filter === value ? "bg-white text-slate-900 shadow-[0_1px_2px_rgba(0,0,0,0.08)]" : "text-slate-500 hover:text-slate-800"}`}
+              className={`min-h-8 min-w-0 rounded-lg px-1.5 py-1.5 text-[10px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/20 ${props.filter === value ? "bg-white text-slate-900 shadow-[0_1px_2px_rgba(0,0,0,0.08)]" : "text-slate-500 hover:text-slate-800"}`}
             >
               <span className="truncate">{label}</span> <span className="tabular-nums text-slate-400">{count}</span>
             </button>
@@ -159,7 +159,7 @@ export function QuestionListPane(props: QuestionListPaneProps) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="relative z-0 min-h-0 flex-1 overflow-hidden">
         {rows.length ? (
           <Virtuoso
             data={rows}
@@ -224,9 +224,9 @@ function QuestionRow({
   return (
     <div
       data-question-list-row={question.examQuestionId}
-      className={`group mx-2 my-1 rounded-xl border transition ${selected ? "border-[#0071e3]/35 bg-[#0071e3]/[0.055]" : "border-transparent hover:bg-black/[0.025]"}`}
+      className={`authoring-question-row group mx-2 my-0.5 rounded-[11px] border transition ${selected ? "border-transparent bg-[#0071e3]/[0.10]" : "border-transparent hover:bg-black/[0.035]"}`}
     >
-      <div className="flex min-h-[76px] items-start gap-2 px-2.5 py-2.5">
+      <div className="flex min-h-[72px] items-start gap-2 px-2.5 py-2.5">
         <button
           type="button"
           disabled={disabled}
@@ -235,12 +235,12 @@ function QuestionRow({
           aria-label={`${checked ? "Deselect" : "Select"} question ${question.displayOrder + 1}`}
           aria-pressed={checked}
         >✓</button>
-        <button type="button" onClick={() => onSelect(question.examQuestionId)} className="min-w-0 flex-1 text-left" disabled={disabled}>
+        <button type="button" onClick={() => onSelect(question.examQuestionId)} className="min-w-0 flex-1 rounded-[8px] text-left focus-visible:outline-none" disabled={disabled} aria-current={selected ? "true" : undefined}>
           <div className="flex items-center gap-2">
             <span className="w-6 shrink-0 text-[11px] font-semibold tabular-nums text-slate-400">{question.displayOrder + 1}</span>
-            <span className="truncate text-[12px] font-medium text-slate-900">{question.promptPreview || "Empty question"}</span>
+            <span className="truncate text-[13px] font-medium text-slate-900">{question.promptPreview || "Empty question"}</span>
           </div>
-          <div className="mt-1.5 flex items-center gap-1.5 pl-8 text-[9px] font-medium text-slate-400">
+          <div className="mt-1.5 flex items-center gap-1.5 pl-8 text-[10px] font-medium text-slate-500">
             <ReadinessDot question={question} />
             {question.domain ? <span className="max-w-[112px] truncate">{question.domain.replaceAll("-", " ")}</span> : <span>No domain</span>}
             <span>·</span><span className="capitalize">{question.difficulty}</span>
