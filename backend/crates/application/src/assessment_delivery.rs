@@ -2357,6 +2357,19 @@ impl AssessmentDeliveryService {
         as_of: DateTime<Utc>,
         limit: i64,
     ) -> Result<Vec<SatTimeoutOutcome>, AssessmentDeliveryError> {
+        // Runtime reconciliation can run on multiple API/worker instances.
+        // Use a MySQL named lock so only one instance advances expired SAT state
+        // at a time. This keeps timeout transitions deterministic under scale-out.
+        let mut lock_connection = self.pool.acquire().await?;
+        let acquired: Option<i64> =
+            sqlx::query_scalar("SELECT GET_LOCK('ielts_sat_runtime_reconciliation', 0)")
+                .fetch_one(&mut *lock_connection)
+                .await?;
+        if acquired.unwrap_or(0) != 1 {
+            return Ok(Vec::new());
+        }
+
+        let reconciliation_result = async {
         let rows: Vec<(String, String)> = sqlx::query_as(
             r#"
             SELECT ma.attempt_id, sa.schedule_id
@@ -2440,6 +2453,27 @@ impl AssessmentDeliveryService {
             }
         }
         Ok(outcomes)
+        }.await;
+
+        match sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT RELEASE_LOCK('ielts_sat_runtime_reconciliation')",
+        )
+        .fetch_one(&mut *lock_connection)
+        .await
+        {
+            Ok(Some(1) | Some(0) | None) => {}
+            Ok(Some(lock_state)) => {
+                tracing::warn!(
+                    lock_state,
+                    "unexpected SAT reconciliation lock release state"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "failed releasing SAT reconciliation lock");
+            }
+        }
+
+        reconciliation_result
     }
 
     pub async fn terminate_attempt(

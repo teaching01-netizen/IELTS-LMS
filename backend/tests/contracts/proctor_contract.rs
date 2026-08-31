@@ -53,6 +53,7 @@ const PROCTOR_MIGRATIONS: &[&str] = &[
     "0017_production_hardening.sql",
     "0018_exam_day_concurrency_hardening.sql",
     "0030_outbox_retry_policy.sql",
+    "0041_websocket_connection_leases.sql",
 ];
 
 #[tokio::test]

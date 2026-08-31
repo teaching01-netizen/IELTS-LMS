@@ -8,6 +8,7 @@ use ielts_backend_infrastructure::{
     pool::DatabasePool,
     rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult, RateLimiter},
     telemetry::Telemetry,
+    websocket_lease::WebsocketLeaseRepository,
 };
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::MySqlPool;
@@ -27,6 +28,7 @@ pub struct AppState {
     pub live_update_bus: Option<LiveUpdateBusRepository>,
     pub instance_id: String,
     pub background_runtime: Option<BackgroundRuntimeHandle>,
+    pub websocket_lease: Option<WebsocketLeaseRepository>,
 }
 
 impl AppState {
@@ -48,6 +50,7 @@ impl AppState {
             live_update_bus: None,
             instance_id: format!("api-{}", Uuid::new_v4()),
             background_runtime: None,
+            websocket_lease: None,
         }
     }
 
@@ -70,9 +73,10 @@ impl AppState {
             distributed_rate_limiter: Some(DistributedRateLimiter::new(
                 pool_for_distributed_limiter,
             )),
-            live_update_bus: Some(LiveUpdateBusRepository::new(pool)),
+            live_update_bus: Some(LiveUpdateBusRepository::new(pool.clone())),
             instance_id: format!("api-{}", Uuid::new_v4()),
             background_runtime: None,
+            websocket_lease: Some(WebsocketLeaseRepository::new(pool)),
         }
     }
 
@@ -140,6 +144,9 @@ impl AppState {
     }
 
     pub fn publish_live_update(&self, event: ielts_backend_domain::schedule::LiveUpdateEvent) {
+        // Keep the websocket fan-out path fast while preserving the existing durable
+        // event bus. The durable queue is used for reconnect/replay; local delivery
+        // remains immediate because the background poller will reconcile missed events.
         self.live_updates.publish(event.clone());
         let Some(bus) = self.live_update_bus.clone() else {
             return;
@@ -151,5 +158,23 @@ impl AppState {
                 tracing::warn!(error = %error, "failed to enqueue live update event");
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppState;
+    use ielts_backend_infrastructure::config::AppConfig;
+    use sqlx::mysql::MySqlPoolOptions;
+
+    #[tokio::test]
+    async fn database_backed_state_wires_websocket_leases() {
+        let pool = MySqlPoolOptions::new()
+            .connect_lazy("mysql://root:root@127.0.0.1/ielts")
+            .expect("construct lazy MySQL pool");
+
+        let state = AppState::with_pool(AppConfig::default(), pool);
+
+        assert!(state.websocket_lease.is_some());
     }
 }

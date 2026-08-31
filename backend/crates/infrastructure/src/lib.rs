@@ -18,3 +18,5 @@ pub mod rate_limit;
 pub mod telemetry;
 pub mod tracing;
 pub mod tx;
+
+pub mod websocket_lease;

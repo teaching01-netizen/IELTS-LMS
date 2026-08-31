@@ -50,6 +50,7 @@ RUN apt-get update && apt-get install -y \
 
 ENV FRONTEND_DIST_DIR=/app/frontend/dist
 ENV MIGRATIONS_DIR=/app/migrations
+ENV ENVIRONMENT=production
 
 COPY --from=backend-builder /app/backend/target/release/ielts-backend-api /app/api
 COPY --from=backend-builder /app/backend/target/release/migrate /app/migrate

@@ -2,6 +2,8 @@ use std::env;
 
 use crate::database_monitor::StorageBudgetThresholds;
 
+const DEVELOPMENT_AUTH_SECRET: &str = "dev-auth-secret-change-me";
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BackgroundRuntimeMode {
     #[default]
@@ -554,6 +556,30 @@ impl AppConfig {
         format!("{}:{}", self.api_host, self.api_port)
     }
 
+    /// Validate secrets that must never silently use development defaults in production.
+    pub fn validate_for_runtime(&self) -> Result<(), String> {
+        let environment = env::var("ENVIRONMENT")
+            .or_else(|_| env::var("NODE_ENV"))
+            .unwrap_or_else(|_| "development".to_owned())
+            .to_ascii_lowercase();
+
+        self.validate_for_runtime_environment(&environment)
+    }
+
+    pub fn validate_for_runtime_environment(&self, environment: &str) -> Result<(), String> {
+        let is_production = environment.trim().eq_ignore_ascii_case("production")
+            || environment.trim().eq_ignore_ascii_case("prod");
+        if is_production && self.auth_secret.trim() == DEVELOPMENT_AUTH_SECRET {
+            return Err("AUTH_SECRET must be configured in production".to_owned());
+        }
+
+        if self.auth_secret.trim().is_empty() {
+            return Err("AUTH_SECRET cannot be empty".to_owned());
+        }
+
+        Ok(())
+    }
+
     /// Tune defaults for a single tiny instance.
     ///
     /// This keeps the same backend behavior while reducing memory, CPU, and disk pressure for
@@ -631,7 +657,7 @@ impl Default for AppConfig {
             auth_session_cookie_name: "__Host-session".to_owned(),
             auth_csrf_cookie_name: "__Host-csrf".to_owned(),
             auth_cookie_secure: true,
-            auth_secret: "dev-auth-secret-change-me".to_owned(),
+            auth_secret: DEVELOPMENT_AUTH_SECRET.to_owned(),
             session_absolute_lifetime_hours: 12,
             session_idle_timeout_staff_minutes: 30,
             session_idle_timeout_student_minutes: 60,
@@ -756,6 +782,24 @@ mod tests {
         assert_eq!(config.websocket_connection_cap, 600);
         assert_eq!(config.websocket_connections_per_schedule_cap, 600);
         assert_eq!(config.websocket_connections_per_user_cap, 5);
+    }
+
+    #[test]
+    fn runtime_validation_rejects_the_development_secret_in_production() {
+        let config = AppConfig::default();
+
+        assert!(config
+            .validate_for_runtime_environment("production")
+            .is_err());
+    }
+
+    #[test]
+    fn runtime_validation_allows_the_development_secret_outside_production() {
+        let config = AppConfig::default();
+
+        assert!(config
+            .validate_for_runtime_environment("development")
+            .is_ok());
     }
 
     #[test]

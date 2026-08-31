@@ -27,6 +27,7 @@ use ielts_backend_application::scheduling::SchedulingService;
 use ielts_backend_domain::auth::UserRole;
 use ielts_backend_domain::schedule::LiveUpdateEvent;
 use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
+use ielts_backend_infrastructure::websocket_lease::{WebsocketLease, WebsocketLeaseRepository};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -64,6 +65,17 @@ where
     match result {
         Ok(Ok(())) => Ok(()),
         Ok(Err(_)) | Err(_) => Err(()),
+    }
+}
+
+async fn release_websocket_lease(
+    repository: Option<&WebsocketLeaseRepository>,
+    lease: Option<&WebsocketLease>,
+) {
+    if let (Some(repository), Some(lease)) = (repository, lease) {
+        if let Err(error) = repository.release(&lease.token).await {
+            tracing::warn!(error = %error, "failed releasing websocket lease");
+        }
     }
 }
 
@@ -219,6 +231,43 @@ async fn handle_socket(
         Duration::from_millis(state.config.websocket_slow_client_disconnect_ms.max(1));
     let write_timeout = Duration::from_millis(state.config.websocket_write_timeout_ms.max(1));
 
+    let websocket_lease = if let Some(repository) = &state.websocket_lease {
+        match repository
+            .acquire(
+                &state.instance_id,
+                &user_id,
+                schedule_id.as_deref(),
+                state.config.websocket_connection_cap as i64,
+                state.config.websocket_connections_per_user_cap as i64,
+                state.config.websocket_connections_per_schedule_cap as i64,
+            )
+            .await
+        {
+            Ok(Some(lease)) => Some(lease),
+            Ok(None) => {
+                let _ = tokio::time::timeout(
+                    write_timeout,
+                    socket.send(Message::Text(
+                        json!({
+                            "type": "error",
+                            "code": "CAPACITY",
+                            "message": "WebSocket capacity exceeded."
+                        })
+                        .to_string(),
+                    )),
+                )
+                .await;
+                return;
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "websocket lease acquisition failed");
+                return;
+            }
+        }
+    } else {
+        None
+    };
+
     let current_connections = state.live_updates.connection_opened(&user_id);
     state
         .telemetry
@@ -235,11 +284,29 @@ async fn handle_socket(
             .to_string();
             let _ = tokio::time::timeout(write_timeout, socket.send(Message::Text(payload))).await;
             let remaining = state.live_updates.connection_closed(&user_id);
+            release_websocket_lease(state.websocket_lease.as_ref(), websocket_lease.as_ref()).await;
             state.telemetry.set_websocket_connections(remaining);
             return;
         }
         state.live_updates.subscribe_to_schedule(sid, &user_id);
     }
+
+    let mut websocket_lease_heartbeat = websocket_lease.as_ref().and_then(|lease| {
+        state.websocket_lease.as_ref().map(|repository| {
+            let repository = repository.clone();
+            let token = lease.token.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    interval.tick().await;
+                    if let Err(error) = repository.heartbeat(&token).await {
+                        tracing::warn!(error = %error, "websocket lease heartbeat failed");
+                        break;
+                    }
+                }
+            })
+        })
+    });
 
     let mut all_subscription = if schedule_id.is_none() && attempt_id.is_none() {
         Some(state.live_updates.subscribe_all())
@@ -390,7 +457,11 @@ async fn handle_socket(
             if let Some(ref aid) = attempt_id {
                 state.live_updates.cleanup_attempt_topic_if_idle(aid);
             }
+            if let Some(heartbeat) = websocket_lease_heartbeat.take() {
+                heartbeat.abort();
+            }
             let remaining = state.live_updates.connection_closed(&user_id);
+            release_websocket_lease(state.websocket_lease.as_ref(), websocket_lease.as_ref()).await;
             if let Some(ref sid) = schedule_id {
                 state.live_updates.unsubscribe_from_schedule(sid, &user_id);
             }
@@ -416,7 +487,11 @@ async fn handle_socket(
             if let Some(ref aid) = attempt_id {
                 state.live_updates.cleanup_attempt_topic_if_idle(aid);
             }
+            if let Some(heartbeat) = websocket_lease_heartbeat.take() {
+                heartbeat.abort();
+            }
             let remaining = state.live_updates.connection_closed(&user_id);
+            release_websocket_lease(state.websocket_lease.as_ref(), websocket_lease.as_ref()).await;
             if let Some(ref sid) = schedule_id {
                 state.live_updates.unsubscribe_from_schedule(sid, &user_id);
             }
@@ -658,7 +733,12 @@ async fn handle_socket(
         state.live_updates.cleanup_attempt_topic_if_idle(aid);
     }
 
+    if let Some(heartbeat) = websocket_lease_heartbeat.take() {
+        heartbeat.abort();
+    }
+
     let remaining = state.live_updates.connection_closed(&user_id);
+    release_websocket_lease(state.websocket_lease.as_ref(), websocket_lease.as_ref()).await;
     if let Some(ref sid) = schedule_id {
         state.live_updates.unsubscribe_from_schedule(sid, &user_id);
     }

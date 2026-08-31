@@ -14,6 +14,16 @@ use ielts_backend_infrastructure::{config::AppConfig, live_update_bus::LiveUpdat
 // use sqlx::postgres::PgListener;
 use tokio::sync::broadcast;
 
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("live update mutex was poisoned; recovering state");
+            poisoned.into_inner()
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct LiveUpdateHub {
     sender: broadcast::Sender<LiveUpdateEvent>,
@@ -77,7 +87,7 @@ impl LiveUpdateHub {
         topic_key: &str,
     ) -> broadcast::Receiver<LiveUpdateEvent> {
         let sender = {
-            let mut guard = topics.lock().unwrap();
+            let mut guard = lock_or_recover(topics);
             guard.retain(|_, sender| sender.receiver_count() > 0);
             if let Some(existing) = guard.get(topic_key) {
                 existing.clone()
@@ -103,7 +113,7 @@ impl LiveUpdateHub {
         topics: &Arc<Mutex<HashMap<String, broadcast::Sender<LiveUpdateEvent>>>>,
         topic_key: &str,
     ) {
-        let mut guard = topics.lock().unwrap();
+        let mut guard = lock_or_recover(topics);
         if guard
             .get(topic_key)
             .is_some_and(|sender| sender.receiver_count() == 0)
@@ -126,7 +136,7 @@ impl LiveUpdateHub {
         topic_key: &str,
         event: LiveUpdateEvent,
     ) {
-        let sender = { topics.lock().unwrap().get(topic_key).cloned() };
+        let sender = { lock_or_recover(topics).get(topic_key).cloned() };
         if let Some(sender) = sender {
             let _ = sender.send(event);
             if sender.receiver_count() == 0 {
@@ -152,7 +162,7 @@ impl LiveUpdateHub {
     }
 
     pub fn connection_opened(&self, user_id: &str) -> i64 {
-        let mut users = self.user_connections.lock().unwrap();
+        let mut users = lock_or_recover(&self.user_connections);
         let count = users.entry(user_id.to_owned()).or_insert(0);
         *count += 1;
         drop(users);
@@ -160,7 +170,7 @@ impl LiveUpdateHub {
     }
 
     pub fn connection_closed(&self, user_id: &str) -> i64 {
-        let mut users = self.user_connections.lock().unwrap();
+        let mut users = lock_or_recover(&self.user_connections);
         if let Some(count) = users.get_mut(user_id) {
             if *count > 0 {
                 *count -= 1;
@@ -181,7 +191,7 @@ impl LiveUpdateHub {
     }
 
     pub fn can_user_connect(&self, user_id: &str) -> bool {
-        let users = self.user_connections.lock().unwrap();
+        let users = lock_or_recover(&self.user_connections);
         users.get(user_id).map(|c| *c).unwrap_or(0) < self.connections_per_user_cap
     }
 
@@ -190,20 +200,20 @@ impl LiveUpdateHub {
     }
 
     pub fn is_schedule_at_capacity(&self, schedule_id: &str) -> bool {
-        let schedules = self.schedule_connections.lock().unwrap();
+        let schedules = lock_or_recover(&self.schedule_connections);
         schedules.get(schedule_id).copied().unwrap_or(0) >= self.connections_per_schedule_cap
     }
 
     pub fn subscribe_to_schedule(&self, schedule_id: &str, user_id: &str) {
         let _ = user_id;
-        let mut schedules = self.schedule_connections.lock().unwrap();
+        let mut schedules = lock_or_recover(&self.schedule_connections);
         let count = schedules.entry(schedule_id.to_owned()).or_insert(0);
         *count = count.saturating_add(1);
     }
 
     pub fn unsubscribe_from_schedule(&self, schedule_id: &str, user_id: &str) {
         let _ = user_id;
-        let mut schedules = self.schedule_connections.lock().unwrap();
+        let mut schedules = lock_or_recover(&self.schedule_connections);
         if let Some(count) = schedules.get_mut(schedule_id) {
             if *count > 0 {
                 *count -= 1;
@@ -219,7 +229,7 @@ impl LiveUpdateHub {
         &self,
         topics: &Arc<Mutex<HashMap<String, broadcast::Sender<LiveUpdateEvent>>>>,
     ) -> usize {
-        topics.lock().unwrap().len()
+        lock_or_recover(topics).len()
     }
 
     #[cfg(test)]

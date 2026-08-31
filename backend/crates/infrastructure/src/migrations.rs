@@ -16,6 +16,7 @@ const REQUIRED_COLUMNS: &[(&str, &str)] = &[
     ("student_attempts", "active_client_session_id"),
     ("assessment_question_revisions", "updated_by"),
     ("exam_session_runtimes", "timing_model"),
+    ("websocket_connection_leases", "lease_token"),
 ];
 
 const REQUIRED_INDEXES: &[(&str, &str)] = &[

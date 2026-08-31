@@ -28,6 +28,9 @@ use crate::{
 
 pub async fn run() -> std::io::Result<()> {
     let config = AppConfig::from_env();
+    config
+        .validate_for_runtime()
+        .map_err(std::io::Error::other)?;
     let activity_driven = config.background_runtime_mode.is_activity_driven();
     let otlp_endpoint = if activity_driven {
         None
