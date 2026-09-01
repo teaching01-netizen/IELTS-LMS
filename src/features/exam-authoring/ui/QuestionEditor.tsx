@@ -11,7 +11,6 @@ import {
 } from "../providers/sat/contentTemplates";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { SatStudentResponseEditor } from "./SatStudentResponseEditor";
-import { QuestionMetadataBar } from "./QuestionMetadataBar";
 import { AuthoringSegmented } from "./AuthoringSegmented";
 import { authoringMotion } from "./authoringMotion";
 
@@ -117,7 +116,7 @@ export function QuestionEditor({
             <button
               type="button"
               onClick={onDuplicate}
-              className="authoring-interactive flex min-h-9 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.045]"
+              className="authoring-interactive flex min-h-9 items-center gap-1.5 rounded-[10px] px-2.5 text-[13px] font-semibold text-slate-600 hover:bg-au-fill"
               title="Duplicate question (⌘D)"
             >
               <Copy size={13} aria-hidden="true" />
@@ -126,7 +125,7 @@ export function QuestionEditor({
             <button
               type="button"
               onClick={() => setMoreOpen((value) => !value)}
-              className="authoring-interactive flex h-9 w-9 items-center justify-center rounded-[10px] text-slate-500 hover:bg-black/[0.045]"
+              className="authoring-interactive flex h-9 w-9 items-center justify-center rounded-[10px] text-slate-500 hover:bg-au-fill"
               aria-label="More question actions"
               aria-expanded={moreOpen}
               aria-haspopup="menu"
@@ -136,7 +135,7 @@ export function QuestionEditor({
             {moreOpen ? (
               <div
                 role="menu"
-                className="au-elevation-menu absolute right-0 top-11 z-40 min-w-44 rounded-[12px] border border-black/[0.08] bg-white p-1.5"
+                className="au-elevation-menu absolute right-0 top-11 z-40 min-w-44 rounded-[12px] border border-au-separator bg-white p-1.5"
               >
                 <button
                   type="button"
@@ -145,7 +144,7 @@ export function QuestionEditor({
                     onSaveNow();
                   }}
                   role="menuitem"
-                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[12px] font-semibold text-slate-700 hover:bg-black/[0.04]"
+                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[13px] font-semibold text-slate-700 hover:bg-au-fill"
                 >
                   <Save size={12} aria-hidden="true" />
                   Save now
@@ -157,7 +156,7 @@ export function QuestionEditor({
                     setDeleteOpen(true);
                   }}
                   role="menuitem"
-                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[12px] font-semibold text-au-danger-text hover:bg-au-danger-tint"
+                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[13px] font-semibold text-au-danger-text hover:bg-au-danger-tint"
                 >
                   <Trash2 size={12} aria-hidden="true" />
                   Delete question
@@ -177,10 +176,22 @@ export function QuestionEditor({
             />
           </div>
         </div>
-        <QuestionMetadataBar question={question} onChange={onChange} />
       </header>
 
-      <div className="space-y-6">
+      <div className="mt-8 border-t border-au-separator pt-7" data-authoring-hot-editor>
+        <p className="mb-4 text-[13px] font-semibold tracking-[-0.01em] text-slate-800">Build this question</p>
+        <div className="space-y-6">
+        <EditorSection field="prompt" label="Question prompt" hint="Required" priority>
+          <FastQuestionComposer
+            label="Question prompt"
+            value={question.prompt}
+            onChange={(prompt) => onChange({ ...question, prompt })}
+            placeholder="Write the exact question students will see…"
+            assetOwnerId={question.id}
+            minHeightClassName="min-h-[112px]"
+          />
+        </EditorSection>
+
         <EditorSection field="stimulus" label="Supporting material" hint="Optional">
           {stimulusEmpty ? (
             <SatSupportingMaterialStarters
@@ -197,17 +208,6 @@ export function QuestionEditor({
             placeholder="Passage, context, data, equation, table, or visual…"
             assetOwnerId={question.id}
             minHeightClassName="min-h-[92px]"
-          />
-        </EditorSection>
-
-        <EditorSection field="prompt" label="Prompt" hint="Required" priority>
-          <FastQuestionComposer
-            label="Question prompt"
-            value={question.prompt}
-            onChange={(prompt) => onChange({ ...question, prompt })}
-            placeholder="Write the exact question students will see…"
-            assetOwnerId={question.id}
-            minHeightClassName="min-h-[112px]"
           />
         </EditorSection>
 
@@ -315,7 +315,7 @@ export function QuestionEditor({
         </section>
 
         <details className="group border-t border-au-separator pt-5">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[12px] font-semibold text-slate-700 marker:hidden transition-colors hover:text-slate-950">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[13px] font-semibold text-slate-700 marker:hidden transition-colors hover:text-slate-950">
             <ChevronRight size={12} aria-hidden="true" className="text-slate-400 transition-transform duration-200 group-open:rotate-90" />
             Rationale
             <span className="font-normal text-slate-400">Internal · recommended</span>
@@ -331,9 +331,10 @@ export function QuestionEditor({
             />
           </div>
         </details>
+        </div>
       </div>
 
-      <div className="authoring-editor-footer sticky bottom-3 z-20 mt-10 flex items-center justify-between gap-3 rounded-[14px] border border-black/[0.07] px-3.5 py-2.5 shadow-[0_0_0_0.5px_rgba(0,0,0,0.03),0_8px_28px_rgba(0,0,0,0.08)]">
+      <div className="authoring-editor-footer sticky bottom-3 z-20 mt-10 flex items-center justify-between gap-3 rounded-[14px] border border-au-separator px-3.5 py-2.5 shadow-[0_0_0_0.5px_rgba(0,0,0,0.03),0_8px_28px_rgba(0,0,0,0.08)]">
         <div className="flex min-w-0 items-center gap-3">
           <SaveState status={saveStatus} verbose />
           <label
@@ -347,9 +348,9 @@ export function QuestionEditor({
               type="checkbox"
               checked={keepMetadataForNext}
               onChange={(event) => onKeepMetadataForNextChange(event.target.checked)}
-              className="h-4 w-4 rounded border-black/[0.2] accent-au-accent"
+              className="h-4 w-4 rounded border-au-separator accent-au-accent"
             />
-            Keep metadata for next
+            Carry metadata
           </label>
         </div>
         <motion.button
@@ -358,7 +359,7 @@ export function QuestionEditor({
           transition={authoringMotion.fast}
           onClick={onSaveAndNext}
           disabled={saveStatus === "saving"}
-          className="authoring-interactive flex min-h-10 items-center gap-2 rounded-[11px] bg-au-accent px-4 text-[12px] font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2 disabled:opacity-45"
+          className="authoring-interactive flex min-h-10 items-center gap-2 rounded-[11px] bg-au-accent px-4 text-[13px] font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2 disabled:opacity-45"
           title="Save and move to the next question (⌘Return)"
         >
           Save & Next <ChevronRight size={13} aria-hidden="true" />

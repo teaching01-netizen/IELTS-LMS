@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { plainContentFromText } from "../richContent";
 import { FastQuestionComposer } from "../FastQuestionComposer";
@@ -25,6 +25,25 @@ describe("SAT rich question composer capabilities", () => {
     expect(screen.getByRole("button", { name: "Insert image or graph" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Code block" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Insert table" })).toBeInTheDocument();
+  });
+
+  it("applies the inline placement layout to the equation preview", async () => {
+    render(
+      <RichQuestionComposer
+        value={plainContentFromText("Question prompt")}
+        onChange={vi.fn()}
+        label="Question prompt"
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Insert equation" })).toBeInTheDocument()
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Insert equation" }));
+
+    const previewLabel = screen.getByText("Preview");
+    const preview = previewLabel.parentElement?.children[1];
+    expect(preview).toHaveClass("items-center", "justify-start");
   });
 
   it("starts plain SAT content in the rich editor without a reveal action", async () => {

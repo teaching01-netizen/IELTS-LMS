@@ -60,7 +60,7 @@ export function SampleExamLoadDialog({
     <AnimatePresence>
       {open ? (
         <motion.div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/28 p-5 backdrop-blur-[3px]"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/28 p-5 authoring-glass"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -74,7 +74,7 @@ export function SampleExamLoadDialog({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.99 }}
             transition={authoringMotion.settle}
-            className="au-elevation-sheet w-full max-w-md rounded-[20px] border border-black/[0.08] bg-white p-5"
+            className="au-elevation-sheet w-full max-w-md rounded-[20px] border border-au-separator bg-white p-5"
           >
             <div className="flex items-start gap-3">
               <span
@@ -109,7 +109,7 @@ export function SampleExamLoadDialog({
                 type="button"
                 disabled={busy}
                 onClick={onCancel}
-                className="authoring-interactive min-h-10 rounded-[11px] px-4 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.05] disabled:opacity-40"
+                className="authoring-interactive min-h-10 rounded-[11px] px-4 text-[12px] font-semibold text-slate-600 hover:bg-au-fill disabled:opacity-40"
               >
                 Cancel
               </button>

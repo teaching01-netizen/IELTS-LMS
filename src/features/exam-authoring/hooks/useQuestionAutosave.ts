@@ -22,6 +22,7 @@ export interface UseQuestionAutosaveResult {
   lastSavedAt: Date | null;
   scheduleAutosave: (revision: QuestionRevision) => void;
   flushNow: (revision: QuestionRevision) => Promise<QuestionFlushResult>;
+  commitAndAdvance: (revision: QuestionRevision) => Promise<QuestionFlushResult>;
   retry: (revision: QuestionRevision) => void;
 }
 
@@ -37,11 +38,14 @@ export function useQuestionAutosave(
     autoSaveRecovered: options.autoSaveRecovered ?? false,
   });
 
+  const commitAndAdvance = async (revision: QuestionRevision) => autosave.flush(revision);
+
   return {
     status: autosave.status,
     lastSavedAt: autosave.lastSavedAt,
     scheduleAutosave: autosave.schedule,
     flushNow: autosave.flush,
+    commitAndAdvance,
     retry: autosave.retry,
   };
 }

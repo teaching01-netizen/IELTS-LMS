@@ -68,4 +68,15 @@ describe('SatSessionsRoute', () => {
     expect(screen.getByRole('option', { name: 'SAT Published' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'IELTS Published' })).not.toBeInTheDocument();
   });
+
+  it('explains an invalid session time range without clearing the form', async () => {
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
+    fireEvent.change(screen.getByLabelText('Session start time'), { target: { value: '2026-09-01T13:00' } });
+    fireEvent.change(screen.getByLabelText('Session end time'), { target: { value: '2026-09-01T10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('End time must be after the start time.');
+    expect(screen.getByLabelText('Session start time')).toHaveValue('2026-09-01T13:00');
+  });
 });

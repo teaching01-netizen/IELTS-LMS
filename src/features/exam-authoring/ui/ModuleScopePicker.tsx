@@ -82,7 +82,7 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
           setOpen(true);
         }}
         onClick={() => setOpen((value) => !value)}
-        className="group flex min-h-11 max-w-full items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-45"
+        className="group flex min-h-11 max-w-full items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-45"
       >
         <div className="min-w-0 flex-1">
           <div className="truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">{selected.section.title}</div>
@@ -93,7 +93,7 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
         </div>
         <div className="w-[54px] shrink-0 text-right">
           <div className="text-[11px] font-semibold tabular-nums text-slate-500">{authored}/{target}</div>
-          <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-black/[0.06]" aria-hidden="true">
+          <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-au-fill" aria-hidden="true">
             <div className="h-full rounded-full bg-au-accent transition-[width] duration-500 ease-out" style={{ width: `${progress}%` }} />
           </div>
         </div>
@@ -111,7 +111,7 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={reduceMotion ? { duration: 0.01 } : authoringMotion.spring}
           style={{ transformOrigin: "top left" }}
-          className="au-elevation-menu absolute left-0 top-[calc(100%+6px)] z-[110] max-h-[min(520px,calc(100vh-112px))] w-[340px] max-w-[calc(100vw-24px)] isolate overflow-y-auto overscroll-contain rounded-[14px] border border-black/[0.08] bg-white p-1.5"
+          className="au-elevation-menu absolute left-0 top-[calc(100%+6px)] z-[110] max-h-[min(520px,calc(100vh-112px))] w-[340px] max-w-[calc(100vw-24px)] isolate overflow-y-auto overscroll-contain rounded-[14px] border border-au-separator bg-white p-1.5"
         >
           {sections.map((section, sectionIndex) => (
             <div key={section.id} className={sectionIndex ? "mt-2 border-t border-black/[0.055] pt-2" : ""}>
@@ -145,7 +145,7 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
                           <span className="shrink-0 text-[10px] tabular-nums text-slate-400">{module.questions.length}/{module.targetQuestionCount}</span>
                         </div>
                         <div className="mt-1.5 flex items-center gap-2">
-                          <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-black/[0.055]" aria-hidden="true"><div className="h-full rounded-full bg-au-tint" style={{ width: `${moduleProgress}%` }} /></div>
+                          <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-au-fill" aria-hidden="true"><div className="h-full rounded-full bg-au-tint" style={{ width: `${moduleProgress}%` }} /></div>
                           {errors ? <span className="text-[10px] font-semibold text-au-danger-text">{errors} error{errors === 1 ? "" : "s"}</span> : incomplete ? <span className="text-[10px] font-medium text-slate-400">{incomplete} incomplete</span> : module.questions.length === module.targetQuestionCount ? <span className="text-[10px] font-semibold text-au-success-text">Complete</span> : null}
                         </div>
                       </div>

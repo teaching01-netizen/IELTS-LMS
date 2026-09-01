@@ -51,4 +51,17 @@ describe('SatSessionRoomRoute', () => {
     expect(screen.getByText('Server-authoritative session clock')).toBeInTheDocument();
     expect(screen.getAllByText('Ananda S.')).toHaveLength(2);
   });
+
+  it('marks loaded session data stale and disables risky actions while reconnecting', () => {
+    controllerMock.mockReset();
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [student], alerts: [], error: 'Network unavailable', isLoading: false,
+      lastSuccessfulRefreshAt: '2026-08-30T02:05:00.000Z', reload: vi.fn(), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.getByRole('alert')).toHaveTextContent('Data may be out of date');
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
 });

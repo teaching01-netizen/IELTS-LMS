@@ -84,7 +84,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
 
   if (loadError || !shell || !releaseState) {
     return (
-      <div className="min-h-screen bg-[#f5f5f7] px-6 py-12">
+      <div className="min-h-screen bg-au-fill px-6 py-12">
         <div className="mx-auto max-w-2xl rounded-[22px] border border-red-200 bg-white p-6">
           <p className="text-base font-semibold text-slate-950">
             Delivery & Release could not load
@@ -118,7 +118,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
     !isPublishing;
 
   return (
-    <div className="min-h-screen bg-[#f5f5f7] text-slate-950">
+    <div className="min-h-screen bg-au-fill text-slate-950">
       <ReleaseHeader
         examTitle={exam.title}
         onBack={onBackToBuilder}
@@ -207,17 +207,17 @@ function ReleaseHeader({
   onOpenStudentAccess?: (() => void) | undefined;
 }) {
   return (
-    <header className="sticky top-0 z-40 border-b border-black/[0.06] bg-white/88 backdrop-blur-2xl">
+    <header className="sticky top-0 z-40 border-b border-au-separator bg-white/88 authoring-glass">
       <div className="mx-auto flex min-h-[68px] max-w-[1240px] items-center gap-3 px-4 sm:px-6 lg:px-8">
         <button
           type="button"
           onClick={onBack}
-          className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm font-medium text-slate-600 transition-colors hover:bg-black/[0.04] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm font-medium text-slate-600 transition-colors hover:bg-au-fill hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         >
           <ArrowLeft size={17} aria-hidden="true" />
           Questions
         </button>
-        <div className="h-5 w-px bg-black/[0.08]" />
+        <div className="h-5 w-px bg-au-fill" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-950">{examTitle}</p>
           <p className="mt-0.5 text-xs text-slate-500">Release</p>
@@ -226,7 +226,7 @@ function ReleaseHeader({
           <button
             type="button"
             onClick={onOpenStudentAccess}
-            className="flex min-h-10 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold text-slate-600 transition-colors hover:bg-black/[0.04] hover:text-slate-950"
+            className="flex min-h-10 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold text-slate-600 transition-colors hover:bg-au-fill hover:text-slate-950"
           >
             <Link2 size={14} aria-hidden="true" />
             Student Access
@@ -383,9 +383,9 @@ function SectionDeliveryEditor({
 
   if (!base || !lower || !higher || !routing) {
     return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-800">
+      <div className="rounded-2xl border border-red-200 bg-au-danger-tint p-4 text-sm leading-6 text-red-800">
         <p className="font-semibold">{section.title} has an incomplete adaptive structure.</p>
-        <p className="mt-1 text-red-700">
+        <p className="mt-1 text-au-danger-text">
           A base module plus lower and higher branches are required before publishing.
         </p>
       </div>
@@ -428,7 +428,7 @@ function SectionDeliveryEditor({
 
   const candidateMinutes = baseMinutes + Math.max(lowerMinutes, higherMinutes);
   return (
-    <article className="rounded-[18px] border border-black/[0.07] bg-[#fbfbfc] p-4 sm:p-5">
+    <article className="rounded-[18px] border border-au-separator bg-au-fill p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold tracking-[-0.015em] text-slate-950">
@@ -439,7 +439,7 @@ function SectionDeliveryEditor({
             {breakMinutes > 0 ? ` + ${breakMinutes} min break` : ""}
           </p>
         </div>
-        <div className="flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 ring-1 ring-black/[0.06]">
+        <div className="flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 ring-1 ring-au-accent/10">
           <Clock3 size={12} aria-hidden="true" /> Server timed
         </div>
       </div>
@@ -451,7 +451,7 @@ function SectionDeliveryEditor({
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_180px]">
-        <div className="rounded-2xl border border-black/[0.06] bg-white p-4">
+        <div className="rounded-2xl border border-au-separator bg-white p-4">
           <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
             <GitBranch size={14} className="text-slate-400" aria-hidden="true" /> Adaptive routing
           </div>
@@ -464,7 +464,7 @@ function SectionDeliveryEditor({
               suffix="correct"
               onChange={setThreshold}
             />
-            <div className="rounded-xl bg-[#f5f5f7] px-3 py-2.5 text-xs leading-5 text-slate-600">
+            <div className="rounded-xl bg-au-fill px-3 py-2.5 text-xs leading-5 text-slate-600">
               <span className="font-semibold text-slate-800">0–{Math.max(0, threshold - 1)}</span> →
               Lower
               <span className="mx-2 text-slate-300">·</span>
@@ -478,7 +478,7 @@ function SectionDeliveryEditor({
             </div>
           </div>
         </div>
-        <div className="rounded-2xl border border-black/[0.06] bg-white p-4">
+        <div className="rounded-2xl border border-au-separator bg-white p-4">
           <MinuteField
             label="Break after section"
             value={breakMinutes}
@@ -492,11 +492,11 @@ function SectionDeliveryEditor({
       </div>
 
       {localError ? (
-        <p role="alert" className="mt-3 text-xs font-medium text-red-700">
+        <p role="alert" className="mt-3 text-xs font-medium text-au-danger-text">
           {localError}
         </p>
       ) : null}
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-black/[0.06] pt-4">
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-au-separator pt-4">
         <p className="text-xs text-slate-400">Section revision {section.revision}</p>
         <button
           type="button"
@@ -531,7 +531,7 @@ function MinuteField({
   return (
     <label htmlFor={id} className="block text-xs font-medium text-slate-500">
       {label}
-      <div className="mt-1.5 flex min-h-11 items-center rounded-xl border border-black/[0.08] bg-white px-3 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15">
+      <div className="mt-1.5 flex min-h-11 items-center rounded-xl border border-au-separator bg-white px-3 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15">
         <input
           id={id}
           aria-label={label}
@@ -565,7 +565,7 @@ function NumberField({
   return (
     <label htmlFor={id} className="block text-xs font-medium text-slate-500">
       {label}
-      <div className="mt-1.5 flex min-h-11 items-center rounded-xl border border-black/[0.08] bg-white px-3 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15">
+      <div className="mt-1.5 flex min-h-11 items-center rounded-xl border border-au-separator bg-white px-3 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15">
         <input
           id={id}
           aria-label={label}
@@ -614,7 +614,7 @@ function ReadinessPanel({
           type="button"
           onClick={() => void onRefresh()}
           disabled={isChecking}
-          className="flex min-h-11 items-center gap-2 rounded-xl bg-[#f5f5f7] px-3.5 text-sm font-semibold text-slate-700 hover:bg-slate-200/70 disabled:opacity-50"
+          className="flex min-h-11 items-center gap-2 rounded-xl bg-au-fill px-3.5 text-sm font-semibold text-slate-700 hover:bg-au-fill-strong disabled:opacity-50"
         >
           {isChecking ? (
             <LoaderCircle size={15} className="animate-spin" />
@@ -626,12 +626,12 @@ function ReadinessPanel({
       </div>
 
       {error ? (
-        <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">
+        <p role="alert" className="mt-4 rounded-xl bg-au-danger-tint p-3 text-sm text-au-danger-text">
           {error}
         </p>
       ) : null}
       {!readiness && !isChecking ? (
-        <div className="mt-5 rounded-2xl bg-[#f5f5f7] p-4 text-sm leading-6 text-slate-600">
+        <div className="mt-5 rounded-2xl bg-au-fill p-4 text-sm leading-6 text-slate-600">
           Publish checks have not completed for this draft revision yet.
         </div>
       ) : null}
@@ -659,7 +659,7 @@ function ReadinessPanel({
           onIssueClick={onIssueClick}
         />
       ) : readiness ? (
-        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-au-success-tint px-4 py-3 text-sm font-medium text-emerald-800">
           <CheckCircle2 size={17} aria-hidden="true" /> No blocking release issues.
         </div>
       ) : null}
@@ -713,7 +713,7 @@ function IssueList({
   return (
     <div className="mt-5">
       <p className="mb-2 text-xs font-semibold text-slate-700">{title}</p>
-      <div className="divide-y divide-black/[0.05] overflow-hidden rounded-2xl border border-black/[0.06] bg-white">
+      <div className="divide-y divide-black/[0.05] overflow-hidden rounded-2xl border border-au-separator bg-white">
         {issues.slice(0, 20).map((issue) => {
           const questionIssue = issue.path.startsWith("examQuestion:");
           return (
@@ -721,14 +721,14 @@ function IssueList({
               key={`${issue.code}-${issue.path}`}
               type="button"
               onClick={() => onIssueClick(issue)}
-              className="flex min-h-14 w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-black/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
+              className="flex min-h-14 w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
             >
               {warning ? (
                 <Info size={16} className="mt-0.5 shrink-0 text-amber-600" aria-hidden="true" />
               ) : (
                 <AlertTriangle
                   size={16}
-                  className="mt-0.5 shrink-0 text-red-600"
+                  className="mt-0.5 shrink-0 text-au-danger-text"
                   aria-hidden="true"
                 />
               )}
@@ -769,7 +769,7 @@ function RuntimePolicyPanel() {
         These policies are runtime-authoritative and intentionally read-only here until every
         setting has a typed update contract and exam-day regression coverage.
       </p>
-      <dl className="mt-5 grid gap-x-8 gap-y-4 border-t border-black/[0.06] pt-5 sm:grid-cols-2">
+      <dl className="mt-5 grid gap-x-8 gap-y-4 border-t border-au-separator pt-5 sm:grid-cols-2">
         <PolicyRow label="Start" value="Proctor controlled" />
         <PolicyRow label="Module transition" value="Automatic with proctor control" />
         <PolicyRow label="Time extension" value="+5 / +10 minutes" />
@@ -821,7 +821,7 @@ function ReleaseSummary({
   return (
     <aside className="xl:sticky xl:top-[92px]">
       <div className={`${surfaceClass} overflow-hidden`}>
-        <div className="border-b border-black/[0.06] p-5">
+        <div className="border-b border-au-separator p-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
             {publishedCurrent ? "Published" : isUpdate ? "Next release" : "Release summary"}
           </p>
@@ -864,7 +864,7 @@ function ReleaseSummary({
         </dl>
         <div className="p-5">
           {dirtyCount > 0 ? (
-            <div className="mb-4 flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+            <div className="mb-4 flex items-start gap-2 rounded-xl bg-au-warning-tint p-3 text-xs leading-5 text-amber-800">
               <AlertTriangle size={15} className="mt-0.5 shrink-0" />
               Save all delivery changes before publishing.
             </div>
@@ -873,7 +873,7 @@ function ReleaseSummary({
             <button
               type="button"
               onClick={onOpenStudentAccess}
-              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0071e3] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-au-accent px-4 text-sm font-semibold text-white transition-colors hover:bg-au-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
             >
               <Link2 size={16} />
               Student Access
@@ -883,18 +883,18 @@ function ReleaseSummary({
               type="button"
               onClick={onPublish}
               disabled={!canPublish || isPublishing}
-              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0071e3] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-au-accent px-4 text-sm font-semibold text-white transition-colors hover:bg-au-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
             >
               {isPublishing ? <LoaderCircle size={16} className="animate-spin" /> : <Rocket size={16} />}
               {isPublishing ? "Publishing…" : isUpdate ? "Publish Update" : "Publish"}
             </button>
           )}
           {published && !publishedCurrent ? (
-            <button type="button" onClick={onOpenStudentAccess} className="mt-2 min-h-10 w-full rounded-xl text-xs font-semibold text-slate-500 hover:bg-black/[0.035] hover:text-slate-800">
+            <button type="button" onClick={onOpenStudentAccess} className="mt-2 min-h-10 w-full rounded-xl text-xs font-semibold text-slate-500 hover:bg-au-fill hover:text-slate-800">
               Student Access
             </button>
           ) : null}
-          {publishError ? <p role="alert" className="mt-3 text-xs leading-5 text-red-700">{publishError}</p> : null}
+          {publishError ? <p role="alert" className="mt-3 text-xs leading-5 text-au-danger-text">{publishError}</p> : null}
           <p className="mt-3 text-center text-[11px] leading-5 text-slate-400">
             {publishedCurrent ? "Existing links remain on the release they were created for." : "Publishing creates an immutable release. Existing links never change automatically."}
           </p>
@@ -993,11 +993,11 @@ function PublishAssessmentDialog({
     <dialog
       ref={dialogRef}
       aria-labelledby="sat-publish-dialog-title"
-      className="m-auto w-[min(94vw,620px)] max-h-[88vh] overflow-y-auto rounded-[24px] border-0 bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-black/35 backdrop:backdrop-blur-[2px]"
+      className="m-auto w-[min(94vw,620px)] max-h-[88vh] overflow-y-auto rounded-[24px] border-0 bg-white p-0 text-slate-950 shadow-2xl"
     >
       <div className="p-5 sm:p-6">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[#0071e3]">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-au-accent-tint text-au-accent">
             <Rocket size={19} aria-hidden="true" />
           </div>
           <div>
@@ -1015,12 +1015,12 @@ function PublishAssessmentDialog({
           </div>
         </div>
 
-        <div className="mt-5 rounded-2xl bg-[#f5f5f7] p-4">
+        <div className="mt-5 rounded-2xl bg-au-fill p-4">
           <div className="flex items-center justify-between gap-3 text-sm">
             <span className="text-slate-500">Candidate time</span>
             <span className="font-semibold text-slate-800">{formatDuration(candidateSeconds)}</span>
           </div>
-          <div className="mt-3 border-t border-black/[0.06] pt-3">
+          <div className="mt-3 border-t border-au-separator pt-3">
             {shell.sections.map((section) => (
               <div
                 key={section.id}
@@ -1035,11 +1035,11 @@ function PublishAssessmentDialog({
           </div>
         </div>
 
-        <div className="mt-4 flex items-start gap-2 rounded-2xl border border-black/[0.06] p-4">
+        <div className="mt-4 flex items-start gap-2 rounded-2xl border border-au-separator p-4">
           {blockerCount === 0 ? (
             <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-emerald-600" />
           ) : (
-            <AlertTriangle size={17} className="mt-0.5 shrink-0 text-red-600" />
+            <AlertTriangle size={17} className="mt-0.5 shrink-0 text-au-danger-text" />
           )}
           <div className="text-sm leading-6 text-slate-600">
             <p className="font-semibold text-slate-800">
@@ -1063,7 +1063,7 @@ function PublishAssessmentDialog({
             rows={3}
             maxLength={1000}
             placeholder="What changed in this release?"
-            className="mt-1.5 w-full resize-y rounded-xl border border-black/[0.08] px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15"
+            className="mt-1.5 w-full resize-y rounded-xl border border-au-separator px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15"
           />
         </label>
 
@@ -1074,7 +1074,7 @@ function PublishAssessmentDialog({
           </p>
         ) : null}
         {localError ? (
-          <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-xs leading-5 text-red-700">
+          <p role="alert" className="mt-3 rounded-xl bg-au-danger-tint p-3 text-xs leading-5 text-au-danger-text">
             {localError}
           </p>
         ) : null}
@@ -1084,7 +1084,7 @@ function PublishAssessmentDialog({
             type="button"
             onClick={onClose}
             disabled={isPublishing}
-            className="min-h-11 rounded-xl bg-[#f5f5f7] px-4 text-sm font-semibold text-slate-700 hover:bg-slate-200/70 disabled:opacity-50"
+            className="min-h-11 rounded-xl bg-au-fill px-4 text-sm font-semibold text-slate-700 hover:bg-au-fill-strong disabled:opacity-50"
           >
             Cancel
           </button>
@@ -1092,7 +1092,7 @@ function PublishAssessmentDialog({
             type="button"
             onClick={() => void submit()}
             disabled={blockerCount > 0 || isPublishing}
-            className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#0071e3] px-5 text-sm font-semibold text-white hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+            className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
           >
             {isPublishing ? (
               <LoaderCircle size={15} className="animate-spin" />
@@ -1109,8 +1109,8 @@ function PublishAssessmentDialog({
 
 function ReleaseLoadingSurface() {
   return (
-    <div className="min-h-screen bg-[#f5f5f7] text-slate-950" aria-busy="true">
-      <div className="border-b border-black/[0.06] bg-white/88">
+    <div className="min-h-screen bg-au-fill text-slate-950" aria-busy="true">
+      <div className="border-b border-au-separator bg-white/88">
         <div className="mx-auto flex min-h-[68px] max-w-[1240px] items-center px-4 sm:px-6 lg:px-8">
           <div className="h-4 w-48 animate-pulse rounded-full bg-slate-200" />
         </div>

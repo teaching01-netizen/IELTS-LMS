@@ -1,5 +1,7 @@
 import { useRef, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import {
+  SAT_READING_SPLIT_MAX,
+  SAT_READING_SPLIT_MIN,
   SAT_READING_SPLIT_STEP,
   clampSatReadingSplitRatio,
 } from "../../domain/satReadingPreferences";
@@ -43,10 +45,14 @@ export function SatReadingSplitHandle({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     if (event.key === "Home") {
-      onChange(0.5);
+      onChange(SAT_READING_SPLIT_MIN);
+      return;
+    }
+    if (event.key === "End") {
+      onChange(SAT_READING_SPLIT_MAX);
       return;
     }
     const delta = event.key === "ArrowLeft" ? -SAT_READING_SPLIT_STEP : SAT_READING_SPLIT_STEP;

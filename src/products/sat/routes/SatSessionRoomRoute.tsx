@@ -8,7 +8,7 @@ import { useProctorRouteController } from '../../../features/proctor/hooks/usePr
 import { examDeliveryService } from '../../../features/proctor/infrastructure/proctorGateway';
 import type { StudentSession } from '../../../types';
 import { SatConfirmDialog } from '../ui/ConfirmDialog';
-import { SatMenu } from '../ui/Menu';
+import { SatMenu, type SatMenuItem } from '../ui/Menu';
 
 function formatRemaining(seconds: number): string {
   const safe = Math.max(0, Math.floor(seconds));
@@ -55,6 +55,10 @@ export function SatSessionRoomRoute() {
   const currentStage = runtime?.sections.find((section) => section.sectionKey === runtime.currentSectionKey)?.label ?? runtime?.currentSectionKey ?? 'Waiting to begin';
   const proctorName = session?.user.displayName?.trim() || session?.user.email || 'Proctor';
   const openAlerts = controller.alerts.filter((alert) => !alert.isAcknowledged).length;
+  const isStale = Boolean(controller.error);
+  const lastUpdatedLabel = controller.lastSuccessfulRefreshAt
+    ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' }).format(new Date(controller.lastSuccessfulRefreshAt))
+    : 'unknown';
 
   useEffect(() => {
     if (!selectedStudentId && students[0]) setSelectedStudentId(students[0].id);
@@ -95,10 +99,11 @@ export function SatSessionRoomRoute() {
           <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-[13px] font-semibold tracking-[-0.01em]">{schedule.examTitle}</p><span className={`h-1.5 w-1.5 rounded-full ${runtime.status === 'live' ? 'bg-emerald-500' : runtime.status === 'paused' ? 'bg-amber-500' : 'bg-slate-300'}`} /></div><p className="mt-0.5 truncate text-[9px] text-slate-400">{schedule.cohortName} · {runtimeLabel(runtime.status)}</p></div>
           {controller.error ? <span className="hidden text-[9px] font-semibold text-amber-700 sm:inline">Reconnecting</span> : null}
           {openAlerts > 0 ? <div className="hidden items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1.5 text-[9px] font-semibold text-amber-700 sm:flex"><AlertTriangle size={12} />{openAlerts} need attention</div> : null}
-          <SessionControls runtimeStatus={runtime.status} pending={pending} onStart={() => void run('start', () => controller.handleStartScheduledSession(scheduleId), 'Session started.')} onPause={() => void run('pause', () => controller.handlePauseCohort(scheduleId), 'Session paused.')} onResume={() => void run('resume', () => controller.handleResumeCohort(scheduleId), 'Session resumed.')} onExtend={(minutes) => void run(`extend-${minutes}`, () => controller.handleExtendCurrentSection(scheduleId, minutes), `Added ${minutes} minutes to the current stage.`)} onComplete={() => setConfirm('complete')} />
+          <SessionControls runtimeStatus={runtime.status} pending={pending} blocked={isStale} onStart={() => void run('start', () => controller.handleStartScheduledSession(scheduleId), 'Session started.')} onPause={() => void run('pause', () => controller.handlePauseCohort(scheduleId), 'Session paused.')} onResume={() => void run('resume', () => controller.handleResumeCohort(scheduleId), 'Session resumed.')} onExtend={(minutes) => void run(`extend-${minutes}`, () => controller.handleExtendCurrentSection(scheduleId, minutes), `Added ${minutes} minutes to the current stage.`)} onComplete={() => setConfirm('complete')} />
         </div>
       </header>
 
+      {isStale ? <div role="alert" className="mx-auto flex max-w-[1500px] items-center justify-between gap-3 px-4 pt-3"><div className="rounded-[10px] bg-amber-50 px-3 py-2 text-[10px] font-medium text-amber-800"><span className="font-semibold">Data may be out of date.</span> Last updated {lastUpdatedLabel}. Risky session actions are paused until reconnection.</div><button type="button" onClick={() => void controller.reload()} className="min-h-9 shrink-0 rounded-[10px] bg-white px-3 text-[10px] font-semibold text-slate-700 shadow-sm ring-1 ring-black/[0.08] hover:bg-slate-50">Retry</button></div> : null}
       {message ? <div role="status" className="mx-auto max-w-[1500px] px-4 pt-3"><div className="rounded-[10px] bg-black/[0.045] px-3 py-2 text-[10px] font-medium text-slate-600">{message}</div></div> : null}
 
       <main className="mx-auto grid min-h-[calc(100vh-64px)] max-w-[1500px] lg:grid-cols-[310px_minmax(0,1fr)]">
@@ -120,7 +125,7 @@ export function SatSessionRoomRoute() {
                 <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-[25px] font-semibold tracking-[-0.04em]">{currentStage}</h1><p className="mt-1 text-[10px] text-slate-400">Server-authoritative session clock</p></div><p className="text-[36px] font-semibold tabular-nums tracking-[-0.045em] text-slate-900">{formatRemaining(runtime.currentSectionRemainingSeconds)}</p></div>
               </div>
 
-              {selectedStudent ? <StudentDetail student={selectedStudent} pending={pending} onAddTime={(minutes) => void runStudentAction(`student-extend-${minutes}`, () => examDeliveryService.extendStudentAttempt(selectedStudent.id, proctorName, minutes), `Added ${minutes} minutes for ${selectedStudent.name}.`)} onWarn={() => void runStudentAction('student-warn', () => examDeliveryService.warnStudent(selectedStudent.id, 'Please return your attention to the exam.', proctorName), `Warning sent to ${selectedStudent.name}.`)} onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`)} onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`)} onTerminate={() => setConfirm('terminate')} /> : <div className="flex min-h-[380px] flex-col items-center justify-center text-center"><UserRound size={24} className="text-slate-300" /><p className="mt-3 text-[12px] font-semibold text-slate-500">No student selected</p><p className="mt-1 text-[10px] text-slate-400">Select a student to inspect their SAT attempt.</p></div>}
+              {selectedStudent ? <StudentDetail student={selectedStudent} pending={pending} blocked={isStale} onAddTime={(minutes) => void runStudentAction(`student-extend-${minutes}`, () => examDeliveryService.extendStudentAttempt(selectedStudent.id, proctorName, minutes), `Added ${minutes} minutes for ${selectedStudent.name}.`)} onWarn={() => void runStudentAction('student-warn', () => examDeliveryService.warnStudent(selectedStudent.id, 'Please return your attention to the exam.', proctorName), `Warning sent to ${selectedStudent.name}.`)} onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`)} onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`)} onTerminate={() => setConfirm('terminate')} /> : <div className="flex min-h-[380px] flex-col items-center justify-center text-center"><UserRound size={24} className="text-slate-300" /><p className="mt-3 text-[12px] font-semibold text-slate-500">No student selected</p><p className="mt-1 text-[10px] text-slate-400">Select a student to inspect their SAT attempt.</p></div>}
             </div>
 
             <aside className="border-t border-black/[0.065] pt-5 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
@@ -137,26 +142,26 @@ export function SatSessionRoomRoute() {
   );
 }
 
-function SessionControls({ runtimeStatus, pending, onStart, onPause, onResume, onExtend, onComplete }: { runtimeStatus: string; pending: string | null; onStart: () => void; onPause: () => void; onResume: () => void; onExtend: (minutes: number) => void; onComplete: () => void }) {
+function SessionControls({ runtimeStatus, pending, blocked, onStart, onPause, onResume, onExtend, onComplete }: { runtimeStatus: string; pending: string | null; blocked: boolean; onStart: () => void; onPause: () => void; onResume: () => void; onExtend: (minutes: number) => void; onComplete: () => void }) {
   const primary = runtimeStatus === 'not_started' ? { label: 'Start', icon: Play, action: onStart } : runtimeStatus === 'live' ? { label: 'Pause', icon: Pause, action: onPause } : runtimeStatus === 'paused' ? { label: 'Resume', icon: Play, action: onResume } : null;
   const Icon = primary?.icon;
   const active = runtimeStatus === 'live' || runtimeStatus === 'paused';
-  const sessionItems = [
+  const sessionItems: SatMenuItem[] = [
     { id: 'extend-5', label: 'Add 5 minutes', onSelect: () => onExtend(5) },
     { id: 'extend-10', label: 'Add 10 minutes', onSelect: () => onExtend(10) },
     { id: 'finish', label: 'Finish session…', destructive: true, separatorBefore: true, onSelect: onComplete },
   ];
   return (
     <div className="flex shrink-0 items-center gap-1.5">
-      {primary && Icon ? <button type="button" onClick={primary.action} disabled={Boolean(pending)} className="flex min-h-10 items-center gap-1.5 rounded-[10px] bg-[#0071e3] px-3 text-[10px] font-semibold text-white hover:bg-[#0077ed] disabled:opacity-40"><Icon size={13} />{pending ? 'Working…' : primary.label}</button> : null}
-      {active ? <SatMenu label="Session actions" compact align="end" width={176} icon={MoreHorizontal} items={sessionItems} /> : null}
+      {primary && Icon ? <button type="button" onClick={primary.action} disabled={Boolean(pending) || blocked} className="flex min-h-10 items-center gap-1.5 rounded-[10px] bg-[#0071e3] px-3 text-[10px] font-semibold text-white hover:bg-[#0077ed] disabled:opacity-40"><Icon size={13} />{pending ? 'Working…' : primary.label}</button> : null}
+      {active ? <SatMenu label="Session actions" compact align="end" width={176} icon={MoreHorizontal} items={sessionItems.map((item) => ({ ...item, disabled: blocked || Boolean(item.disabled) }))} /> : null}
     </div>
   );
 }
 
-function StudentDetail({ student, pending, onAddTime, onWarn, onPause, onResume, onTerminate }: { student: StudentSession; pending: string | null; onAddTime: (minutes: number) => void; onWarn: () => void; onPause: () => void; onResume: () => void; onTerminate: () => void }) {
+function StudentDetail({ student, pending, blocked, onAddTime, onWarn, onPause, onResume, onTerminate }: { student: StudentSession; pending: string | null; blocked: boolean; onAddTime: (minutes: number) => void; onWarn: () => void; onPause: () => void; onResume: () => void; onTerminate: () => void }) {
   const remaining = student.runtimeTimeRemainingSeconds ?? student.timeRemaining;
-  return <div className="pt-6"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[0.13em] text-slate-400">Student</p><h2 className="mt-1 truncate text-[22px] font-semibold tracking-[-0.035em]">{student.name}</h2><p className="mt-1 text-[10px] text-slate-400">{student.studentId}{student.email ? ` · ${student.email}` : ''}</p></div><div><SatMenu label="Student actions" compact align="end" width={176} icon={MoreHorizontal} items={[{ id: 'extend-5', label: 'Add 5 minutes', disabled: Boolean(pending), onSelect: () => onAddTime(5) }, { id: 'warn', label: 'Send warning', disabled: Boolean(pending), onSelect: onWarn }, { id: 'toggle', label: student.status === 'paused' ? 'Resume attempt' : 'Pause attempt', disabled: Boolean(pending), onSelect: student.status === 'paused' ? onResume : onPause }, { id: 'terminate', label: 'End attempt…', destructive: true, disabled: Boolean(pending), separatorBefore: true, onSelect: onTerminate }]} /></div></div>
+  return <div className="pt-6"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[0.13em] text-slate-400">Student</p><h2 className="mt-1 truncate text-[22px] font-semibold tracking-[-0.035em]">{student.name}</h2><p className="mt-1 text-[10px] text-slate-400">{student.studentId}{student.email ? ` · ${student.email}` : ''}</p></div><div><SatMenu label="Student actions" compact align="end" width={176} icon={MoreHorizontal} items={[{ id: 'extend-5', label: 'Add 5 minutes', disabled: Boolean(pending) || blocked, onSelect: () => onAddTime(5) }, { id: 'warn', label: 'Send warning', disabled: Boolean(pending) || blocked, onSelect: onWarn }, { id: 'toggle', label: student.status === 'paused' ? 'Resume attempt' : 'Pause attempt', disabled: Boolean(pending) || blocked, onSelect: student.status === 'paused' ? onResume : onPause }, { id: 'terminate', label: 'End attempt…', destructive: true, disabled: Boolean(pending) || blocked, separatorBefore: true, onSelect: onTerminate }]} /></div></div>
     <div className="mt-7 grid gap-4 border-y border-black/[0.055] py-5 sm:grid-cols-3"><div><p className="text-[9px] text-slate-400">Current module</p><p className="mt-1 text-[12px] font-semibold text-slate-700">{String(student.runtimeCurrentSection ?? student.currentSection)}</p></div><div><p className="text-[9px] text-slate-400">Time remaining</p><p className="mt-1 text-[19px] font-semibold tabular-nums tracking-[-0.03em]">{formatRemaining(remaining)}</p></div><div><p className="text-[9px] text-slate-400">Attempt</p><p className="mt-1 text-[12px] font-semibold capitalize text-slate-700">{student.status}</p></div></div>
     <div className="mt-6"><h3 className="text-[12px] font-semibold tracking-[-0.01em]">Attention</h3>{student.warnings === 0 && student.violations.length === 0 ? <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />No current warnings or integrity events.</div> : <div className="mt-3 space-y-2">{student.warnings > 0 ? <div className="rounded-[11px] bg-amber-50 px-3 py-2.5 text-[10px] text-amber-700">{student.warnings} proctor warning{student.warnings === 1 ? '' : 's'}</div> : null}{student.violations.slice(0, 5).map((violation) => <div key={violation.id} className="rounded-[11px] bg-amber-50 px-3 py-2.5"><p className="text-[10px] font-semibold text-amber-800">{violation.type.replace(/_/g, ' ')}</p><p className="mt-1 text-[9px] leading-4 text-amber-700">{violation.description}</p></div>)}</div>}</div>
   </div>;

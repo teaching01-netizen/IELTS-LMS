@@ -99,8 +99,8 @@ export function QuestionListPane(props: QuestionListPaneProps) {
   }, [props.module.questions]);
 
   return (
-    <section className="authoring-sidebar relative isolate flex min-h-0 w-[430px] min-w-[360px] flex-col border-r border-black/[0.06]" aria-label={`${props.module.title} questions`}>
-      <div className="authoring-sidebar-header relative z-[90] overflow-visible border-b border-black/[0.055] px-3 pb-3 pt-2.5">
+    <section className="authoring-sidebar relative isolate flex min-h-0 w-[var(--authoring-sidebar-width)] min-w-0 flex-col border-r border-au-separator" aria-label={`${props.module.title} questions`}>
+      <div className="authoring-sidebar-header relative z-[90] overflow-visible border-b border-au-separator px-3 pb-3 pt-2.5">
         <div className="mb-2 flex items-center gap-1">
           <ModuleScopePicker
             sections={props.sections}
@@ -112,7 +112,7 @@ export function QuestionListPane(props: QuestionListPaneProps) {
             type="button"
             onClick={props.onOpenImport}
             disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
-            className="authoring-interactive flex min-h-9 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[11px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-au-accent/10 disabled:opacity-30"
+            className="authoring-interactive flex min-h-9 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[11px] font-semibold text-slate-600 hover:bg-au-fill hover:text-slate-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-au-accent/10 disabled:opacity-30"
             aria-label="Paste or import questions into this module"
             title="Paste questions"
           >
@@ -140,7 +140,7 @@ export function QuestionListPane(props: QuestionListPaneProps) {
             className="h-9 w-full rounded-[10px] bg-au-fill pl-9 pr-9 text-[12px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-4 focus:ring-au-accent/10"
           />
           {props.searchQuery ? (
-            <button type="button" onClick={() => props.onSearchQueryChange("")} className="authoring-interactive absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:bg-black/[0.05]" aria-label="Clear question search"><X size={12} aria-hidden="true" /></button>
+            <button type="button" onClick={() => props.onSearchQueryChange("")} className="authoring-interactive absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 hover:bg-au-fill" aria-label="Clear question search"><X size={12} aria-hidden="true" /></button>
           ) : null}
         </div>
         <AuthoringSegmented
@@ -257,7 +257,7 @@ function QuestionRow({
         <button type="button" onClick={() => onSelect(question.examQuestionId)} className="min-w-0 flex-1 rounded-[8px] text-left focus-visible:outline-none" disabled={disabled} aria-current={selected ? "true" : undefined}>
           <div className="flex items-baseline gap-2">
             <span className="w-6 shrink-0 text-[11px] font-semibold tabular-nums text-slate-400">{question.displayOrder + 1}</span>
-            <span className="truncate text-[14px] font-medium tracking-[-0.006em] text-slate-900">{question.promptPreview || "Empty question"}</span>
+            <span className="truncate text-[15px] font-medium tracking-[-0.006em] text-slate-900">{question.promptPreview || "Empty question"}</span>
           </div>
           <div className="mt-1.5 flex items-center gap-1.5 pl-8 text-[11px] font-medium text-slate-500">
             <ReadinessDot question={question} />
@@ -282,8 +282,8 @@ function QuestionRow({
             </div>
           ) : <span className="rounded-[7px] bg-au-fill px-1.5 py-1 text-[10px] font-semibold text-slate-500">SPR</span>}
           <div className="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-            <button type="button" disabled={disabled || index <= 0} onClick={() => move(-1)} className="authoring-interactive flex h-6 w-6 items-center justify-center rounded-[7px] text-slate-400 hover:bg-black/[0.05] hover:text-slate-700 disabled:opacity-20" aria-label="Move question up"><ChevronUp size={12} aria-hidden="true" /></button>
-            <button type="button" disabled={disabled || index >= moduleQuestions.length - 1} onClick={() => move(1)} className="authoring-interactive flex h-6 w-6 items-center justify-center rounded-[7px] text-slate-400 hover:bg-black/[0.05] hover:text-slate-700 disabled:opacity-20" aria-label="Move question down"><ChevronDown size={12} aria-hidden="true" /></button>
+            <button type="button" disabled={disabled || index <= 0} onClick={() => move(-1)} className="authoring-interactive flex h-6 w-6 items-center justify-center rounded-[7px] text-slate-400 hover:bg-au-fill hover:text-slate-700 disabled:opacity-20" aria-label="Move question up"><ChevronUp size={12} aria-hidden="true" /></button>
+            <button type="button" disabled={disabled || index >= moduleQuestions.length - 1} onClick={() => move(1)} className="authoring-interactive flex h-6 w-6 items-center justify-center rounded-[7px] text-slate-400 hover:bg-au-fill hover:text-slate-700 disabled:opacity-20" aria-label="Move question down"><ChevronDown size={12} aria-hidden="true" /></button>
           </div>
         </div>
       </div>
@@ -294,14 +294,14 @@ function QuestionRow({
 function ReadinessDot({ question }: { question: AssessmentQuestionSummary }) {
   if (question.readiness.status === "ready") return <CheckCircle2 size={11} className="text-au-success" aria-label="Ready" />;
   if (question.readiness.status === "error") return <AlertCircle size={11} className="text-au-danger" aria-label="Error" />;
-  return <span className="h-2 w-2 rounded-full bg-black/[0.2]" aria-label="Incomplete" />;
+  return <span className="h-2 w-2 rounded-full bg-au-fill" aria-label="Incomplete" />;
 }
 
 function EmptyQuestionRow({ displayOrder, disabled, onCreate }: { displayOrder: number; disabled: boolean; onCreate: () => void }) {
   return (
-    <button type="button" disabled={disabled} onClick={onCreate} className="authoring-interactive mx-2 my-px flex min-h-[56px] w-[calc(100%_-_1rem)] items-center gap-3 rounded-[10px] border border-dashed border-black/[0.1] px-3 text-left text-slate-400 hover:border-au-accent/30 hover:bg-au-accent-tint hover:text-slate-700 disabled:opacity-40">
+    <button type="button" disabled={disabled} onClick={onCreate} className="authoring-interactive mx-2 my-px flex min-h-[56px] w-[calc(100%_-_1rem)] items-center gap-3 rounded-[10px] border border-dashed border-au-separator px-3 text-left text-slate-400 hover:border-au-accent/30 hover:bg-au-accent-tint hover:text-slate-700 disabled:opacity-40">
       <span className="w-6 text-[11px] font-semibold tabular-nums">{displayOrder + 1}</span>
-      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-[7px] bg-black/[0.04]" aria-hidden="true"><Plus size={13} /></span>
+      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-[7px] bg-au-fill" aria-hidden="true"><Plus size={13} /></span>
       <span className="text-[12px] font-medium">Add question</span>
     </button>
   );
@@ -320,8 +320,8 @@ function BulkToolbar(props: QuestionListPaneProps & { selectedIds: string[] }) {
   );
   const patch = (metadata: BulkMetadataPatch) => props.onBulkAction(props.selectedIds, { type: "patch_metadata", patch: metadata }, expectedRevisions);
   return (
-    <div className="border-t border-black/[0.07] bg-white/95 p-3 shadow-[0_-8px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl">
-      <div className="mb-2 flex items-center justify-between"><span className="text-[11px] font-semibold text-slate-800">{props.selectedIds.length} selected</span><button type="button" onClick={props.onClearSelection} className="authoring-interactive flex h-7 w-7 items-center justify-center rounded-[7px] text-slate-400 hover:bg-black/[0.05]" aria-label="Clear selection"><X size={12} aria-hidden="true" /></button></div>
+    <div className="border-t border-au-separator bg-white p-3 shadow-[0_-8px_24px_rgba(15,23,42,0.05)] authoring-glass">
+      <div className="mb-2 flex items-center justify-between"><span className="text-[11px] font-semibold text-slate-800">{props.selectedIds.length} selected</span><button type="button" onClick={props.onClearSelection} className="authoring-interactive flex h-7 w-7 items-center justify-center rounded-[7px] text-slate-400 hover:bg-au-fill" aria-label="Clear selection"><X size={12} aria-hidden="true" /></button></div>
       <div className="grid grid-cols-2 gap-1.5">
         <select value={domain} onChange={(event) => { setDomain(event.target.value); setSkill(""); if (event.target.value) void patch({ domain: event.target.value }); }} className="h-8 rounded-[9px] bg-au-fill px-2 text-[11px] font-medium text-slate-700 outline-none hover:bg-au-fill-strong focus-visible:ring-2 focus-visible:ring-au-accent/30" aria-label="Bulk domain"><option value="">Set domain…</option>{domains.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select>
         <select value={skill} disabled={!domain} onChange={(event) => { setSkill(event.target.value); if (event.target.value) void patch({ skill: event.target.value }); }} className="h-8 rounded-[9px] bg-au-fill px-2 text-[11px] font-medium text-slate-700 outline-none hover:bg-au-fill-strong focus-visible:ring-2 focus-visible:ring-au-accent/30 disabled:opacity-40" aria-label="Bulk skill"><option value="">Set skill…</option>{skills.map((item) => <option key={item} value={item}>{item}</option>)}</select>
@@ -330,8 +330,8 @@ function BulkToolbar(props: QuestionListPaneProps & { selectedIds: string[] }) {
       <div className="mt-1.5 flex gap-1.5"><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="Replace tags…" aria-label="Bulk tags" className="h-8 min-w-0 flex-1 rounded-[9px] bg-au-fill px-2 text-[11px] text-slate-700 outline-none placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-au-accent/30" /><button type="button" disabled={!tags.trim()} onClick={() => void patch({ tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean) })} className="authoring-interactive rounded-[9px] px-2.5 text-[11px] font-semibold text-au-accent hover:bg-au-accent-tint disabled:opacity-30">Apply</button></div>
       {props.moveTargets.length ? <div className="mt-1.5 flex gap-1.5"><select value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} className="h-8 min-w-0 flex-1 rounded-[9px] bg-au-fill px-2 text-[11px] text-slate-700 outline-none hover:bg-au-fill-strong focus-visible:ring-2 focus-visible:ring-au-accent/30" aria-label="Move selected to module">{props.moveTargets.map((target) => <option key={target.id} value={target.id}>{target.title}</option>)}</select><button type="button" disabled={!moveTarget} onClick={() => void props.onBulkAction(props.selectedIds, { type: "move", destinationModuleId: moveTarget })} className="authoring-interactive flex h-8 items-center gap-1 rounded-[9px] px-2.5 text-[11px] font-semibold text-au-accent hover:bg-au-accent-tint"><MoveRight size={11} aria-hidden="true" />Move</button></div> : null}
       <div className="mt-1.5 grid grid-cols-3 gap-1">
-        <button type="button" onClick={() => void props.onBulkAction(props.selectedIds, { type: "duplicate", destinationModuleId: props.module.id })} className="authoring-interactive flex h-9 items-center justify-center gap-1 rounded-[9px] text-[11px] font-semibold text-slate-500 hover:bg-black/[0.045]"><Copy size={11} aria-hidden="true" />Duplicate</button>
-        <button type="button" onClick={() => void props.onBulkAction(props.selectedIds, { type: "set_pretest", value: true })} className="authoring-interactive flex h-9 items-center justify-center gap-1 rounded-[9px] text-[11px] font-semibold text-slate-500 hover:bg-black/[0.045]"><RotateCcw size={11} aria-hidden="true" />Pretest</button>
+        <button type="button" onClick={() => void props.onBulkAction(props.selectedIds, { type: "duplicate", destinationModuleId: props.module.id })} className="authoring-interactive flex h-9 items-center justify-center gap-1 rounded-[9px] text-[11px] font-semibold text-slate-500 hover:bg-au-fill"><Copy size={11} aria-hidden="true" />Duplicate</button>
+        <button type="button" onClick={() => void props.onBulkAction(props.selectedIds, { type: "set_pretest", value: true })} className="authoring-interactive flex h-9 items-center justify-center gap-1 rounded-[9px] text-[11px] font-semibold text-slate-500 hover:bg-au-fill"><RotateCcw size={11} aria-hidden="true" />Pretest</button>
         <div className="relative"><button type="button" onClick={() => setDeleteOpen(true)} className="authoring-interactive flex h-9 w-full items-center justify-center gap-1 rounded-[9px] text-[11px] font-semibold text-au-danger hover:bg-au-danger-tint"><Trash2 size={11} aria-hidden="true" />Delete</button><ConfirmPopover open={deleteOpen} title={`Delete ${props.selectedIds.length} questions?`} description="This removes the selected questions from the module." confirmLabel="Delete selected" onCancel={() => setDeleteOpen(false)} onConfirm={() => { setDeleteOpen(false); void props.onBulkAction(props.selectedIds, { type: "delete" }); }} /></div>
       </div>
     </div>

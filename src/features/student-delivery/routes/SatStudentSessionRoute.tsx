@@ -73,18 +73,6 @@ export function SatStudentSessionRoute({
     ensureDesmosPreconnect();
   }, []);
 
-  const bootstrapCalculatorHost = (
-    <SatCalculatorPanel
-      key="sat-calculator-warm-host"
-      open={false}
-      scheduleId={scheduleId}
-      attemptId={attemptId}
-      moduleAttemptId={`prewarm:${attemptId}`}
-      prewarmWhenClosed
-      onClose={commands.closeTool}
-    />
-  );
-
   if (error && !data) {
     return (
       <SatErrorSurface
@@ -98,10 +86,7 @@ export function SatStudentSessionRoute({
   }
   if (!data) {
     return (
-      <>
-        <SatLoadingSurface label="Loading Digital SAT…" />
-        {bootstrapCalculatorHost}
-      </>
+      <SatLoadingSurface label="Loading Digital SAT…" />
     );
   }
   if (data.result || state.phase === "complete") {
@@ -147,7 +132,6 @@ export function SatStudentSessionRoute({
       attemptId={attemptId}
       moduleAttemptId={calculatorModuleAttemptId}
       disabled={calculatorDisabled}
-      prewarmWhenClosed
       onClose={commands.closeTool}
     />
   ) : null;

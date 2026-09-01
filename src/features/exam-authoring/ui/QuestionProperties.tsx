@@ -29,7 +29,7 @@ export function QuestionProperties({ question, onChange }: QuestionPropertiesPro
     <div className="space-y-4">
       <div className="block space-y-1.5 text-xs font-medium text-slate-600">
         <span>Section</span>
-        <div className="rounded-xl bg-black/[0.035] px-3 py-2.5 text-xs font-semibold text-slate-700">
+        <div className="rounded-xl bg-au-fill px-3 py-2.5 text-xs font-semibold text-slate-700">
           {question.metadata.sectionKey === "math" ? "Math" : "Reading & Writing"}
         </div>
       </div>
@@ -71,7 +71,7 @@ export function QuestionProperties({ question, onChange }: QuestionPropertiesPro
             })
           }
           disabled={skills.length === 0}
-          className={`${controlClass} disabled:bg-slate-50 disabled:text-slate-400`}
+          className={`${controlClass} disabled:bg-au-fill disabled:text-slate-400`}
         >
           <option value="">{skills.length > 0 ? "Choose skill…" : "Choose a domain first"}</option>
           {skills.map((skill) => (

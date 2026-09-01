@@ -22,6 +22,7 @@ export function useAsyncPolling(
 ) {
   const runTask = useEffectEvent(task);
   const inFlightRef = useRef<Promise<void> | null>(null);
+  const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -29,18 +30,32 @@ export function useAsyncPolling(
     }
 
     let cancelled = false;
-    let timeoutId: number | undefined;
     let nextDelay = intervalMs;
+    let waitingForInFlight = false;
 
     const scheduleNext = (delay: number) => {
-      timeoutId = window.setTimeout(() => {
+      if (cancelled || timerRef.current !== null) return;
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
         void poll();
       }, delay);
     };
 
+    const waitForInFlight = () => {
+      const inFlight = inFlightRef.current;
+      if (!inFlight || waitingForInFlight) return;
+      waitingForInFlight = true;
+      const resume = () => {
+        waitingForInFlight = false;
+        if (!cancelled) scheduleNext(nextDelay);
+      };
+      void inFlight.then(resume, resume);
+    };
+
     const poll = async () => {
+      if (cancelled) return;
       if (inFlightRef.current) {
-        scheduleNext(intervalMs);
+        waitForInFlight();
         return;
       }
 
@@ -71,8 +86,9 @@ export function useAsyncPolling(
 
     return () => {
       cancelled = true;
-      if (timeoutId !== undefined) {
-        window.clearTimeout(timeoutId);
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
     };
   }, [enabled, intervalMs, maxIntervalMs, runImmediately]);

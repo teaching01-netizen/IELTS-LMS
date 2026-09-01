@@ -8,6 +8,7 @@ import {
   FileSpreadsheet,
   ListChecks,
   MoreHorizontal,
+  PanelRight,
   PencilLine,
   Sparkles,
 } from "lucide-react";
@@ -46,6 +47,7 @@ import { QuestionEditor } from "./QuestionEditor";
 import { QuestionImportSheet } from "../import/QuestionImportSheet";
 import { SatWorkbookImportSheet } from "../import/SatWorkbookImportSheet";
 import { QuestionListPane, type QuestionListFilter } from "./QuestionListPane";
+import { QuestionInspectorPane, type InspectorSection } from "./QuestionInspectorPane";
 import { QuestionQuickPreview } from "./QuestionQuickPreview";
 import { SaveStatusIndicator } from "./SaveStatusIndicator";
 import { SampleExamLoadDialog } from "./SampleExamLoadDialog";
@@ -54,8 +56,10 @@ import { authoringMotion } from "./authoringMotion";
 import { useOptionalAuthSession } from "../../auth/api/authSession";
 import { buildStaffDraftKey } from "../../../utils/staffDraftKey";
 import { AuthoringSegmented } from "./AuthoringSegmented";
-import { ErrorSurface } from "../../../components/ui/ErrorSurface";
-import { LoadingSurface } from "../../../components/ui/LoadingSurface";
+import {
+  SatAuthoringErrorSurface,
+  SatAuthoringLoadingSurface,
+} from "./SatAuthoringStateSurfaces";
 
 export interface AuthoringWorkspaceProps {
   examId: string;
@@ -95,7 +99,9 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const [workbookUndoBusy, setWorkbookUndoBusy] = useState(false);
   const [sampleDialogOpen, setSampleDialogOpen] = useState(false);
   const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
-  const [keepMetadataForNext, setKeepMetadataForNext] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [activeInspectorSection, setActiveInspectorSection] = useState<InspectorSection>("content");
+  const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
   const [focusField, setFocusField] = useState<string | null>(null);
   const [topbarScrolled, setTopbarScrolled] = useState(false);
   const selectionAnchorRef = useRef<string | null>(null);
@@ -150,6 +156,9 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     selectedModule?.questions.findIndex(
       (question) => question.examQuestionId === selectedExamQuestionId
     ) ?? -1;
+  const selectedQuestionIssues = draft
+    ? validateSatQuestion(draft.metadata.sectionKey, draft)
+    : [];
   const totalAuthored = allQuestions.length;
   const totalTarget =
     shell?.sections.reduce(
@@ -200,6 +209,10 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
     }
   }, [searchParams, selectedModuleId, setSearchParams, shell]);
+
+  useEffect(() => {
+    setActiveInspectorSection("content");
+  }, [selectedExamQuestionId]);
 
   useEffect(() => {
     if (
@@ -582,8 +595,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
 
   const handleSaveAndNext = useCallback(async () => {
     if (!draft || !selectedModule) return;
-    const result = await autosave.flushNow(draft);
-    if (!result.ok) {
+    const result = await autosave.commitAndAdvance(draft);
+    if (!result.ok || !result.isLatest) {
       setNavigationError("Save failed. The next question was not opened.");
       return;
     }
@@ -849,10 +862,10 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     selectedModuleIndex,
   ]);
 
-  if (shellQuery.isLoading) return <LoadingSurface label="Opening SAT workspace…" />;
+  if (shellQuery.isLoading) return <SatAuthoringLoadingSurface label="Opening SAT workspace…" />;
   if (shellQuery.error || !shell)
     return (
-      <ErrorSurface
+      <SatAuthoringErrorSurface
         title="Unable to load the SAT authoring workspace"
         description={
           shellQuery.error instanceof Error
@@ -876,7 +889,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       data-au-section={selectedSection?.sectionKey ?? "rw"}
     >
       <header
-        className="authoring-glass authoring-topbar z-50 shrink-0 border-b border-black/[0.06] px-2 py-1.5 sm:px-3"
+        className="authoring-glass authoring-topbar z-50 shrink-0 border-b border-au-separator px-2 py-1.5 sm:px-3"
         data-scrolled={topbarScrolled ? "true" : undefined}
       >
         <div className="mx-auto flex min-h-[52px] max-w-[1920px] items-center gap-1 sm:gap-2">
@@ -885,18 +898,18 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             onClick={async () => {
               if (await flushBeforeNavigation()) navigate("/sat/exams");
             }}
-            className="authoring-interactive flex min-h-10 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
+            className="authoring-interactive flex min-h-10 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-au-fill hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
             aria-label="Back to SAT Exam Library"
             title="Back to SAT Exam Library"
           >
             <ArrowLeft size={15} aria-hidden="true" />
             <span className="hidden lg:inline">Exam Library</span>
           </button>
-          <div className="mx-0.5 h-5 w-px shrink-0 bg-black/[0.08]" aria-hidden="true" />
+          <div className="mx-0.5 h-5 w-px shrink-0 bg-au-fill" aria-hidden="true" />
           <div className="min-w-0 flex-1 px-1">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-[13px] font-semibold tracking-[-0.012em]">{examTitle}</h1>
-              <span className="shrink-0 rounded-full bg-black/[0.05] px-2 py-0.5 text-[10px] font-semibold tracking-[0.02em] text-slate-600">
+              <span className="shrink-0 rounded-full bg-au-fill px-2 py-0.5 text-[10px] font-semibold tracking-[0.02em] text-slate-600">
                 Draft
               </span>
             </div>
@@ -905,7 +918,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                 {totalAuthored} of {totalTarget} questions authored
               </p>
               <span
-                className="hidden h-[3px] w-14 shrink-0 overflow-hidden rounded-full bg-black/[0.07] sm:block"
+                className="hidden h-[3px] w-14 shrink-0 overflow-hidden rounded-full bg-au-fill sm:block"
                 aria-hidden="true"
               >
                 <span
@@ -938,6 +951,17 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               },
             ]}
           />
+          <button
+            type="button"
+            onClick={() => setInspectorOpen((open) => !open)}
+            className="authoring-interactive flex min-h-9 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-au-fill hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
+            aria-controls="sat-question-inspector"
+            aria-expanded={inspectorOpen}
+            title={inspectorOpen ? "Hide question inspector" : "Show question inspector"}
+          >
+            <PanelRight size={14} aria-hidden="true" />
+            <span className="hidden xl:inline">Inspector</span>
+          </button>
           <div className="hidden md:block">
             <SaveStatusIndicator
               status={autosave.status}
@@ -949,7 +973,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             type="button"
             disabled={!shell}
             onClick={() => void openWorkbookImport()}
-            className="authoring-interactive hidden min-h-9 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 disabled:opacity-30 sm:flex"
+            className="authoring-interactive hidden min-h-9 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-au-fill hover:text-slate-950 disabled:opacity-30 sm:flex"
             title="Import the complete SAT from an Excel workbook"
           >
             <FileSpreadsheet size={14} aria-hidden="true" />
@@ -959,7 +983,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             <button
               type="button"
               onClick={() => setToolbarMenuOpen((open) => !open)}
-              className="authoring-interactive flex h-9 w-9 items-center justify-center rounded-[10px] text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
+              className="authoring-interactive flex h-9 w-9 items-center justify-center rounded-[10px] text-slate-600 hover:bg-au-fill hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
               aria-label="More authoring actions"
               aria-expanded={toolbarMenuOpen}
               aria-haspopup="menu"
@@ -969,7 +993,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             {toolbarMenuOpen ? (
               <div
                 role="menu"
-                className="au-elevation-menu absolute right-0 top-11 z-[70] min-w-52 rounded-[12px] border border-black/[0.08] bg-white p-1.5"
+                className="au-elevation-menu absolute right-0 top-11 z-[70] min-w-52 rounded-[12px] border border-au-separator bg-white p-1.5"
               >
                 <button
                   type="button"
@@ -978,7 +1002,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                     setToolbarMenuOpen(false);
                     void openWorkbookImport();
                   }}
-                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[12px] font-semibold text-slate-700 hover:bg-black/[0.04] sm:hidden"
+                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[12px] font-semibold text-slate-700 hover:bg-au-fill sm:hidden"
                 >
                   <FileSpreadsheet size={13} aria-hidden="true" />
                   Import from Excel…
@@ -991,7 +1015,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                     setToolbarMenuOpen(false);
                     setSampleDialogOpen(true);
                   }}
-                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[12px] font-semibold text-slate-700 hover:bg-black/[0.04] disabled:opacity-40"
+                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[12px] font-semibold text-slate-700 hover:bg-au-fill disabled:opacity-40"
                   title="Replace this draft with a complete 147-question sample SAT"
                 >
                   <Sparkles size={13} aria-hidden="true" />
@@ -1007,7 +1031,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/preview`);
             }}
             title="Open the full SAT using the real student delivery renderer"
-            className="authoring-interactive hidden min-h-9 items-center rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.045] hover:text-slate-950 disabled:opacity-30 md:flex"
+            className="authoring-interactive hidden min-h-9 items-center rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-au-fill hover:text-slate-950 disabled:opacity-30 md:flex"
           >
             Preview
           </button>
@@ -1087,7 +1111,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             />
           )
         ) : (
-          <div className="flex w-[430px] min-w-[360px] items-center justify-center border-r border-black/[0.06] bg-white p-8 text-center text-[12px] text-slate-500">
+          <div className="authoring-sidebar flex w-[var(--authoring-sidebar-width)] min-w-0 items-center justify-center border-r border-au-separator bg-white p-8 text-center text-[12px] text-slate-500">
             Choose a SAT module.
           </div>
         )}
@@ -1129,6 +1153,20 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             />
           )}
         </section>
+        {inspectorOpen && draft ? (
+          <QuestionInspectorPane
+            question={draft}
+            issues={selectedQuestionIssues}
+            activeSection={activeInspectorSection}
+            onSectionChange={setActiveInspectorSection}
+            onChange={handleChange}
+            onClose={() => setInspectorOpen(false)}
+            onIssueSelect={(issue) => {
+              setActiveInspectorSection("validation");
+              setFocusField(resolveAuthoringField(issue.field ?? issue.path));
+            }}
+          />
+        ) : null}
         <QuestionQuickPreview
           open={previewOpen}
           question={draft}
@@ -1250,10 +1288,10 @@ function IssuesPane({
   const warningCount = report?.warnings.length ?? 0;
   return (
     <section
-      className="flex w-[430px] min-w-[360px] flex-col border-r border-black/[0.06] bg-white"
+      className="authoring-issues-pane flex w-[var(--authoring-sidebar-width)] min-w-0 flex-col border-r border-au-separator bg-white"
       aria-label="SAT authoring issues"
     >
-      <div className="flex items-center justify-between gap-3 border-b border-black/[0.055] px-4 py-3">
+      <div className="flex items-center justify-between gap-3 border-b border-au-separator px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-slate-900">Issues</h2>
           <p className="mt-0.5 text-[11px] text-slate-500">
@@ -1264,13 +1302,13 @@ function IssuesPane({
           type="button"
           disabled={loading}
           onClick={onRefresh}
-          className="authoring-interactive min-h-9 shrink-0 rounded-[10px] px-3 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.045] disabled:opacity-40"
+          className="authoring-interactive min-h-9 shrink-0 rounded-[10px] px-3 text-[12px] font-semibold text-slate-600 hover:bg-au-fill disabled:opacity-40"
         >
           {loading ? "Checking…" : "Refresh"}
         </button>
       </div>
       {report ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-black/[0.055] px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 border-b border-au-separator px-4 py-2.5">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-au-danger-tint px-2.5 py-1 text-[11px] font-semibold text-au-danger-text">
             <span className="h-1.5 w-1.5 rounded-full bg-au-danger" aria-hidden="true" />
             {errorCount} blocking
@@ -1383,26 +1421,26 @@ function EditorSkeleton() {
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 space-y-2.5">
-          <div className="h-4 w-44 rounded-md bg-black/[0.055]" />
-          <div className="h-3 w-28 rounded-md bg-black/[0.04]" />
+          <div className="h-4 w-44 rounded-md bg-au-fill" />
+          <div className="h-3 w-28 rounded-md bg-au-fill" />
         </div>
         <div className="flex shrink-0 gap-2">
-          <div className="h-9 w-[104px] rounded-[10px] bg-black/[0.05]" />
-          <div className="h-9 w-9 rounded-[10px] bg-black/[0.05]" />
+          <div className="h-9 w-[104px] rounded-[10px] bg-au-fill" />
+          <div className="h-9 w-9 rounded-[10px] bg-au-fill" />
         </div>
       </div>
       <div className="authoring-metadata-bar h-[58px] rounded-[13px]" />
       <div className="space-y-2.5">
-        <div className="h-3.5 w-36 rounded bg-black/[0.045]" />
-        <div className="h-[92px] rounded-[12px] bg-black/[0.035]" />
+        <div className="h-3.5 w-36 rounded bg-au-fill" />
+        <div className="h-[92px] rounded-[12px] bg-au-fill" />
       </div>
       <div className="space-y-2.5">
-        <div className="h-3.5 w-24 rounded bg-black/[0.045]" />
-        <div className="h-[112px] rounded-[12px] bg-black/[0.035]" />
+        <div className="h-3.5 w-24 rounded bg-au-fill" />
+        <div className="h-[112px] rounded-[12px] bg-au-fill" />
       </div>
       <div className="space-y-2">
         {[0, 1, 2, 3].map((item) => (
-          <div key={item} className="h-[58px] rounded-[12px] bg-black/[0.03]" />
+          <div key={item} className="h-[58px] rounded-[12px] bg-au-fill" />
         ))}
       </div>
     </div>

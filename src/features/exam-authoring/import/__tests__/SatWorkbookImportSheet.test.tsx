@@ -62,6 +62,84 @@ const validPreview: SatWorkbookPreview = {
 describe("SAT workbook import sheet", () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  it("rejects a non-xlsx file before previewing it", async () => {
+    const preview = vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook");
+    render(
+      <SatWorkbookImportSheet
+        open
+        examId="exam-1"
+        shell={shell}
+        existingQuestionCount={0}
+        onClose={vi.fn()}
+        onCommitted={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), {
+      target: { files: [new File(["not xlsx"], "SAT.csv", { type: "text/csv" })] },
+    });
+
+    expect(await screen.findByText("Choose an .xlsx SAT workbook.")).toBeInTheDocument();
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("rejects a workbook over 12 MB before previewing it", async () => {
+    const preview = vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook");
+    render(
+      <SatWorkbookImportSheet
+        open
+        examId="exam-1"
+        shell={shell}
+        existingQuestionCount={0}
+        onClose={vi.fn()}
+        onCommitted={vi.fn()}
+      />
+    );
+
+    const oversized = new File([new Uint8Array(12 * 1024 * 1024 + 1)], "SAT.xlsx");
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), {
+      target: { files: [oversized] },
+    });
+
+    expect(await screen.findByText("SAT workbooks must be 12 MB or smaller.")).toBeInTheDocument();
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("keeps the sheet retryable when commit fails", async () => {
+    vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook").mockResolvedValue(validPreview);
+    const result = { shell, undo: { importId: "import-1", available: true } };
+    const commit = vi
+      .spyOn(assessmentAuthoringApi, "commitSatWorkbook")
+      .mockRejectedValueOnce(new Error("Version changed; reload and try again."))
+      .mockResolvedValueOnce(result);
+    const onCommitted = vi.fn();
+
+    render(
+      <SatWorkbookImportSheet
+        open
+        examId="exam-1"
+        shell={shell}
+        existingQuestionCount={0}
+        onClose={vi.fn()}
+        onCommitted={onCommitted}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), {
+      target: { files: [new File(["xlsx"], "SAT.xlsx")] },
+    });
+    await waitFor(() => expect(screen.getByText("Complete SAT ready to import")).toBeInTheDocument());
+
+    const importButton = screen.getByRole("button", { name: "Import 147 Questions" });
+    fireEvent.click(importButton);
+    expect(await screen.findByText("Version changed; reload and try again.")).toBeInTheDocument();
+    expect(importButton).toBeEnabled();
+
+    fireEvent.click(importButton);
+    await waitFor(() => expect(onCommitted).toHaveBeenCalledWith(result));
+    expect(commit).toHaveBeenCalledTimes(2);
+  });
+
   it("checks an xlsx before enabling the atomic import", async () => {
     vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook").mockResolvedValue(validPreview);
     const result = { shell, undo: { importId: "import-1", available: true } };
@@ -157,6 +235,49 @@ describe("SAT workbook import sheet", () => {
         expect.objectContaining({ assets: [{ key: "graph_01", assetId: "asset-1" }] })
       )
     );
+  });
+
+  it("does not commit when an embedded visual cannot be staged", async () => {
+    const assetPreview: SatWorkbookPreview = {
+      ...validPreview,
+      assets: [
+        {
+          key: "graph_01",
+          fileName: "graph_01.png",
+          contentType: "image/png",
+          sizeBytes: 1,
+          checksumSha256: "checksum",
+          altText: "A graph",
+          caption: null,
+          dataBase64: "AA==",
+        },
+      ],
+    };
+    vi.spyOn(assessmentAuthoringApi, "previewSatWorkbook").mockResolvedValue(assetPreview);
+    vi.spyOn(
+      await import("../../api/assessmentMediaApi"),
+      "uploadAssessmentImportAsset"
+    ).mockRejectedValue(new Error("Asset storage unavailable."));
+    const commit = vi.spyOn(assessmentAuthoringApi, "commitSatWorkbook");
+
+    render(
+      <SatWorkbookImportSheet
+        open
+        examId="exam-1"
+        shell={shell}
+        existingQuestionCount={0}
+        onClose={vi.fn()}
+        onCommitted={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Choose SAT Excel workbook"), {
+      target: { files: [new File(["xlsx"], "SAT.xlsx")] },
+    });
+
+    expect(await screen.findByText("Asset storage unavailable.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import 147 Questions" })).toBeDisabled();
+    expect(commit).not.toHaveBeenCalled();
   });
 
   it("keeps import disabled and shows workbook row diagnostics when validation fails", async () => {

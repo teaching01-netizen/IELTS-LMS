@@ -96,7 +96,11 @@ export function SatCalculatorPanel({
             ))}
           </div>
         </div>
-        <DesmosCalculator mode={mode} disabled={disabled} />
+        <DesmosCalculator
+          mode={mode}
+          disabled={disabled}
+          prewarmInactiveModes={prewarmWhenClosed}
+        />
       </div>
     </SatToolWindow>
   );

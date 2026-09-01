@@ -35,6 +35,31 @@ describe('staff SAT question draft durability laws', () => {
     expect(hook.result.current.status).toBe('unsaved');
   });
 
+  it('commits the latest revision before Save & Next advances', async () => {
+    const current = revision('Commit this wording');
+    let resolveSave: ((value: QuestionRevision) => void) | undefined;
+    const save = vi.fn().mockImplementation(
+      () => new Promise<QuestionRevision>((resolve) => { resolveSave = resolve; })
+    );
+    const hook = renderHook(() => useQuestionAutosave({ save, durableKey: null }));
+
+    let result: { ok: boolean; isLatest: boolean } | null = null;
+    let committed = false;
+    await act(async () => {
+      const pending = hook.result.current.commitAndAdvance(current).then((value) => {
+        committed = true;
+        result = value;
+      });
+      await Promise.resolve();
+      expect(committed).toBe(false);
+      resolveSave?.(current);
+      await pending;
+    });
+
+    expect(result).toEqual({ ok: true, isLatest: true });
+    expect(save).toHaveBeenCalledWith(current);
+  });
+
   it('keeps the recovered question locally when the server rejects its stale revision', async () => {
     const localDraft = revision('Keep this exact work', 7);
     await saveDurableDraft(KEY, localDraft);

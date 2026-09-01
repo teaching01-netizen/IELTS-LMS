@@ -155,7 +155,7 @@ export function RichQuestionComposer({
   };
 
   if (!editor) {
-    return <div className={`${minHeightClassName} animate-pulse rounded-xl bg-slate-50`} />;
+    return <div className={`${minHeightClassName} animate-pulse rounded-xl bg-au-fill`} />;
   }
 
   return (
@@ -666,7 +666,7 @@ function MathDialog({
             aria-invalid={Boolean(equation.error)}
             aria-describedby={equation.error ? "sat-equation-error" : "sat-equation-help"}
             placeholder="Example: \\frac{x+1}{2}=8"
-            className={`w-full resize-y rounded-[13px] border bg-[#f5f5f7] px-3.5 py-3 font-mono text-[14px] leading-6 text-slate-950 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-4 ${
+            className={`w-full resize-y rounded-[13px] border bg-au-fill px-3.5 py-3 font-mono text-[14px] leading-6 text-slate-950 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-4 ${
               equation.error
                 ? "border-red-300 focus:border-red-400 focus:ring-red-100"
                 : "border-transparent focus:border-[#0a84ff]/35 focus:ring-[#0a84ff]/10"
@@ -674,7 +674,7 @@ function MathDialog({
           />
           <div className="mt-1.5 min-h-5" aria-live="polite">
             {equation.error ? (
-              <p id="sat-equation-error" className="text-[11px] leading-5 text-red-600">
+              <p id="sat-equation-error" className="text-[11px] leading-5 text-au-danger-text">
                 {equation.error}
               </p>
             ) : (
@@ -691,7 +691,7 @@ function MathDialog({
           <motion.div
             layout
             transition={authoringMotion.state}
-            className={`flex min-h-28 overflow-x-auto rounded-[15px] border border-black/[0.06] bg-[#fafafa] p-5 ${
+            className={`flex min-h-28 overflow-x-auto rounded-[15px] border border-au-separator bg-au-fill p-5 ${
               display ? "items-center justify-center text-center" : "items-center justify-start"
             }`}
           >
@@ -717,7 +717,7 @@ function MathDialog({
           </motion.div>
         </div>
 
-        <div className="flex items-center justify-between border-t border-black/[0.06] pt-4">
+        <div className="flex items-center justify-between border-t border-au-separator pt-4">
           <span className="hidden text-[11px] text-slate-400 sm:inline">
             Esc to cancel · ⌘Return to {isEditing ? "update" : "insert"}
           </span>
@@ -725,7 +725,7 @@ function MathDialog({
             <button
               type="button"
               onClick={onClose}
-              className="authoring-interactive h-10 rounded-full px-4 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.05]"
+              className="authoring-interactive h-10 rounded-full px-4 text-[12px] font-semibold text-slate-600 hover:bg-au-fill"
             >
               Cancel
             </button>
@@ -735,7 +735,7 @@ function MathDialog({
               transition={authoringMotion.fast}
               disabled={!canCommit}
               onClick={commitEquation}
-              className="authoring-interactive h-10 rounded-full bg-[#0071e3] px-4 text-[12px] font-semibold text-white shadow-[0_1px_2px_rgba(0,0,0,0.12)] hover:bg-[#0077ed] disabled:cursor-default disabled:opacity-35"
+              className="authoring-interactive h-10 rounded-full bg-au-accent px-4 text-[12px] font-semibold text-white shadow-[0_1px_2px_rgba(0,0,0,0.12)] hover:bg-au-accent-hover disabled:cursor-default disabled:opacity-35"
             >
               {isEditing ? "Update equation" : "Insert equation"}
             </motion.button>
@@ -787,7 +787,7 @@ function EquationChip({
     <button
       type="button"
       onClick={onClick}
-      className={`authoring-interactive h-8 rounded-lg bg-black/[0.045] px-2.5 text-[11px] font-medium text-slate-600 hover:bg-black/[0.075] hover:text-slate-950 ${
+      className={`authoring-interactive h-8 rounded-lg bg-au-fill px-2.5 text-[11px] font-medium text-slate-600 hover:bg-au-fill hover:text-slate-950 ${
         symbol ? "min-w-8 font-serif text-[14px]" : ""
       }`}
       title={symbol ? `Insert ${label}` : `Insert ${label.toLowerCase()} structure`}
@@ -846,7 +846,7 @@ function ImageDialog({
       {ownerId ? (
         <label
           htmlFor="sat-visual-upload"
-          className="authoring-interactive mb-4 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-xs font-semibold text-slate-600 hover:border-slate-400 hover:bg-slate-100"
+          className="authoring-interactive mb-4 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-au-fill px-4 py-4 text-xs font-semibold text-slate-600 hover:border-slate-400 hover:bg-slate-100"
         >
           <input
             id="sat-visual-upload"
@@ -876,7 +876,7 @@ function ImageDialog({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={authoringMotion.surface}
-            className="relative mb-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+            className="relative mb-4 overflow-hidden rounded-xl border border-au-separator bg-au-fill"
           >
             <img
               src={previewUrl}
@@ -905,7 +905,7 @@ function ImageDialog({
                 initial={{ opacity: 0, scale: 0.82 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={authoringMotion.spring}
-                className="absolute right-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[10px] font-semibold text-emerald-700 shadow-sm"
+                className="absolute right-2 top-2 rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-au-success-text shadow-sm"
               >
                 Secured ✓
               </motion.span>
@@ -915,7 +915,7 @@ function ImageDialog({
       </AnimatePresence>
 
       {uploadError ? (
-        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-au-danger-tint px-3 py-2 text-xs font-medium text-au-danger-text">
           <span>{uploadError}</span>
           {selectedFile ? (
             <button
@@ -929,7 +929,7 @@ function ImageDialog({
         </div>
       ) : null}
       {ownerId ? (
-        <details className="mb-3 rounded-xl border border-black/[0.06] bg-[#fafafa] px-3 py-2">
+        <details className="mb-3 rounded-xl border border-au-separator bg-au-fill px-3 py-2">
           <summary className="cursor-pointer text-[11px] font-semibold text-slate-500">
             Use existing asset…
           </summary>
@@ -942,7 +942,7 @@ function ImageDialog({
               aria-label="Asset ID or image URL"
               value={assetId}
               onChange={(event) => setAssetId(event.target.value)}
-              className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+              className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
               placeholder="Existing asset ID or https://…"
             />
           </div>
@@ -957,7 +957,7 @@ function ImageDialog({
               data-dialog-initial-focus
               value={assetId}
               onChange={(event) => setAssetId(event.target.value)}
-              className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+              className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
               placeholder="https://…"
             />
           </div>
@@ -971,7 +971,7 @@ function ImageDialog({
         aria-labelledby="sat-visual-alt-label"
         value={alt}
         onChange={(event) => setAlt(event.target.value)}
-        className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+        className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
         placeholder="Describe the information a student needs from this visual"
       />
       <p className="mt-1.5 text-[10px] leading-5 text-slate-400">
@@ -989,7 +989,7 @@ function ImageDialog({
         aria-labelledby="sat-visual-caption-label"
         value={caption}
         onChange={(event) => setCaption(event.target.value)}
-        className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+        className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
         placeholder="Optional"
       />
       <div className="mt-4 flex justify-end">
@@ -1085,7 +1085,7 @@ function DialogFrame({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={authoringMotion.surface}
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/20 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/20 p-4 authoring-glass"
       onMouseDown={(event) => {
         if (dismissOnBackdrop && event.target === event.currentTarget) onClose();
       }}

@@ -4,6 +4,7 @@ import { StructuredContentRenderer } from "../../../exam-rendering/api/structure
 import type { SatQuestionResponseDraft } from "../../domain/satResponses";
 import type { SatSectionKey } from "../../application/satRunnerReducer";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
+import { SatQuestionBody } from "../../../exam-rendering/api/SatQuestionBody";
 import { SatQuestionHeader } from "./SatQuestionHeader";
 import { SatQuestionWorkspace } from "./SatQuestionWorkspace";
 import { SatSingleChoiceAnswer } from "./SatSingleChoiceAnswer";
@@ -41,35 +42,31 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
         onToggleReview={props.onToggleReview}
         onToggleEliminationMode={props.onToggleEliminationMode}
       />
-      <div className="pt-4 sat-exam-prose sat-type-body text-[var(--sat-text)]">
-        {!split && hasStimulus ? (
-          <div className="mb-6 border-b border-[var(--sat-divider-soft)] pb-5">
-            <StructuredContentRenderer content={props.question.stimulus} />
-          </div>
-        ) : null}
-        <div className="mb-5">
-          <StructuredContentRenderer content={props.question.prompt} />
-        </div>
-      </div>
-      {props.question.answer.kind === "single_choice" ? (
-        <SatSingleChoiceAnswer
-          questionId={props.question.examQuestionId}
-          options={props.question.answer.options}
-          value={props.response.answer || undefined}
-          eliminatedOptionIds={eliminated}
-          eliminationMode={props.eliminationMode}
-          disabled={props.disabled}
-          onChange={props.onAnswerChange}
-          onToggleElimination={props.onToggleEliminatedOption}
-        />
-      ) : (
-        <SatStudentProducedAnswer
-          questionId={props.question.examQuestionId}
-          value={props.response.answer}
-          disabled={props.disabled}
-          onChange={props.onAnswerChange}
-        />
-      )}
+      <SatQuestionBody
+        sectionKey={props.sectionKey}
+        question={props.question}
+        stimulusPlacement={split ? "split" : "inline"}
+      >
+        {props.question.answer.kind === "single_choice" ? (
+          <SatSingleChoiceAnswer
+            questionId={props.question.examQuestionId}
+            options={props.question.answer.options}
+            value={props.response.answer || undefined}
+            eliminatedOptionIds={eliminated}
+            eliminationMode={props.eliminationMode}
+            disabled={props.disabled}
+            onChange={props.onAnswerChange}
+            onToggleElimination={props.onToggleEliminatedOption}
+          />
+        ) : (
+          <SatStudentProducedAnswer
+            questionId={props.question.examQuestionId}
+            value={props.response.answer}
+            disabled={props.disabled}
+            onChange={props.onAnswerChange}
+          />
+        )}
+      </SatQuestionBody>
     </div>
   );
 

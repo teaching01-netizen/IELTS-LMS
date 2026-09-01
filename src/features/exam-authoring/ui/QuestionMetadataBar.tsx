@@ -59,10 +59,10 @@ export function QuestionMetadataBar({ question, onChange }: QuestionMetadataBarP
         ]}
       />
       <details className="relative ml-auto">
-        <summary className="authoring-interactive flex min-h-9 cursor-pointer list-none items-center rounded-[9px] px-2.5 text-[11px] font-semibold text-slate-500 marker:hidden hover:bg-black/[0.04] hover:text-slate-800">
+        <summary className="authoring-interactive flex min-h-9 cursor-pointer list-none items-center rounded-[9px] px-2.5 text-[11px] font-semibold text-slate-500 marker:hidden hover:bg-au-fill hover:text-slate-800">
           Tags{question.metadata.tags.length ? ` · ${question.metadata.tags.length}` : ""}
         </summary>
-        <div className="au-elevation-menu absolute right-0 top-10 z-20 w-56 rounded-[12px] border border-black/[0.08] bg-white p-2">
+        <div className="au-elevation-menu absolute right-0 top-10 z-20 w-56 rounded-[12px] border border-au-separator bg-white p-2">
           <input
             id={`sat-question-tags-${question.id}`}
             aria-label="Question tags"

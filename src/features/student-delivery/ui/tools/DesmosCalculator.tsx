@@ -5,20 +5,41 @@ import type { DesmosCalculatorMode } from "../../infrastructure/desmos/desmosTyp
 export interface DesmosCalculatorProps {
   mode: DesmosCalculatorMode;
   disabled?: boolean;
+  prewarmInactiveModes?: boolean;
 }
+
+const DESMOS_MODES = ["scientific", "graphing"] as const;
 
 const DESMOS_EMBED_URLS: Record<DesmosCalculatorMode, string> = {
   scientific: "https://www.desmos.com/testing/collegeboard/scientific?embed",
   graphing: "https://www.desmos.com/testing/collegeboard/graphing?embed",
 };
 
-export function DesmosCalculator({ mode, disabled = false }: DesmosCalculatorProps) {
+export function DesmosCalculator({
+  mode,
+  disabled = false,
+  prewarmInactiveModes = false,
+}: DesmosCalculatorProps) {
   const [loadedModes, setLoadedModes] = useState<ReadonlySet<DesmosCalculatorMode>>(
     () => new Set()
+  );
+  const [mountedModes, setMountedModes] = useState<ReadonlySet<DesmosCalculatorMode>>(
+    () => new Set(prewarmInactiveModes ? DESMOS_MODES : [mode])
   );
   const containerRef = useRef<HTMLDivElement>(null);
   const scientificRef = useRef<HTMLIFrameElement>(null);
   const graphingRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    setMountedModes((current) => {
+      const next = new Set(current);
+      next.add(mode);
+      if (prewarmInactiveModes) {
+        DESMOS_MODES.forEach((candidate) => next.add(candidate));
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [mode, prewarmInactiveModes]);
 
   useEffect(() => {
     if (!disabled) return;
@@ -43,21 +64,26 @@ export function DesmosCalculator({ mode, disabled = false }: DesmosCalculatorPro
       aria-disabled={disabled || undefined}
       tabIndex={-1}
     >
-      {(["scientific", "graphing"] as const).map((candidate) => (
-        <iframe
-          ref={candidate === "scientific" ? scientificRef : graphingRef}
-          key={candidate}
-          src={DESMOS_EMBED_URLS[candidate]}
-          title={`Desmos ${candidate} calculator, College Board testing version`}
-          className={`h-full min-h-[320px] w-full border-0 ${candidate === mode ? "block" : "hidden"}`}
-          loading="eager"
-          referrerPolicy="strict-origin-when-cross-origin"
-          tabIndex={disabled ? -1 : 0}
-          inert={disabled}
-          onLoad={() => setLoadedModes((current) => new Set(current).add(candidate))}
-          data-desmos-mode={candidate}
-        />
-      ))}
+      {DESMOS_MODES.map((candidate) => {
+        if (!prewarmInactiveModes && candidate !== mode && !mountedModes.has(candidate)) {
+          return null;
+        }
+        return (
+          <iframe
+            ref={candidate === "scientific" ? scientificRef : graphingRef}
+            key={candidate}
+            src={DESMOS_EMBED_URLS[candidate]}
+            title={`Desmos ${candidate} calculator, College Board testing version`}
+            className={`h-full min-h-[320px] w-full border-0 ${candidate === mode ? "block" : "hidden"}`}
+            loading={candidate === mode || prewarmInactiveModes ? "eager" : "lazy"}
+            referrerPolicy="strict-origin-when-cross-origin"
+            tabIndex={disabled ? -1 : 0}
+            inert={disabled}
+            onLoad={() => setLoadedModes((current) => new Set(current).add(candidate))}
+            data-desmos-mode={candidate}
+          />
+        );
+      })}
       {!activeReady ? (
         <div
           className="pointer-events-none absolute inset-0 grid place-items-center bg-[var(--sat-surface)]"

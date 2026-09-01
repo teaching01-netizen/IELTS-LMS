@@ -95,7 +95,7 @@ export function SatStudentResponseEditor({
                 <button
                   type="button"
                   onClick={() => removeEquivalent(response)}
-                  className="rounded-full p-0.5 text-slate-400 hover:bg-black/[0.05] hover:text-slate-700"
+                  className="rounded-full p-0.5 text-slate-400 hover:bg-au-fill hover:text-slate-700"
                   aria-label={`Remove accepted response ${response}`}
                 >
                   <X size={11} />

@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 @import "tailwindcss";
 
 @theme {
@@ -1730,7 +1729,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 /* SAT authoring workspace — one material hierarchy, not a card farm.
  * Layer order: glass chrome → frosted rail → quiet canvas → sheet of paper. */
 .sat-authoring {
-  --authoring-sidebar-width: 430px;
+  --authoring-sidebar-width: clamp(280px, 30vw, 430px);
   --authoring-canvas: var(--sat-canvas, #f5f5f7);
   --authoring-sheet: rgba(255, 255, 255, 0.97);
   --authoring-hairline: rgba(60, 60, 67, 0.14);
@@ -2129,7 +2128,10 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   background: var(--authoring-canvas);
 }
 
-.sat-authoring .authoring-sidebar {
+.sat-authoring :is(.authoring-sidebar, .authoring-issues-pane) {
+  flex: 0 0 var(--authoring-sidebar-width);
+  width: var(--authoring-sidebar-width);
+  min-width: 0;
   background: rgba(249, 249, 250, 0.92);
   border-color: var(--authoring-hairline);
 }
@@ -2163,6 +2165,15 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   box-shadow: var(--au-elevation-sheet);
 }
 
+.sat-authoring .authoring-question-preview {
+  width: min(480px, 100%);
+  min-width: 0;
+}
+
+.sat-authoring .authoring-question-preview__inner {
+  min-width: 0;
+}
+
 .sat-authoring .authoring-metadata-bar {
   background: rgba(118, 118, 128, 0.065);
   box-shadow: inset 0 0 0 1px rgba(60, 60, 67, 0.05);
@@ -2193,7 +2204,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     overflow-x: hidden;
   }
 
-  .sat-authoring .authoring-sidebar {
+  .sat-authoring :is(.authoring-sidebar, .authoring-issues-pane) {
     width: 100%;
     min-width: 0;
     height: clamp(220px, 34vh, 300px);
@@ -2207,6 +2218,14 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     min-width: 0;
     min-height: 0;
     overflow-x: hidden;
+  }
+
+  .sat-authoring .authoring-question-preview {
+    width: 100%;
+    height: min(70dvh, 640px);
+    min-height: min(360px, 70dvh);
+    border-top: 1px solid var(--authoring-hairline);
+    border-left: 0;
   }
 
 }
@@ -2243,6 +2262,28 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     border-radius:20px;
     box-shadow:var(--au-elevation-sheet);
     transition: border-color 180ms var(--authoring-ease);
+}
+
+.sat-authoring .authoring-inspector {
+    background: var(--au-material-sidebar-header);
+}
+
+@media (max-width: 1100px) {
+  .sat-authoring .authoring-inspector {
+    width: 280px;
+  }
+}
+
+@media (max-width: 900px) {
+  .sat-authoring .authoring-inspector {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: 60;
+    width: min(88vw, 360px);
+    border-left: 1px solid var(--authoring-hairline);
+    box-shadow: var(--au-elevation-sheet);
+  }
 }
 /* Dirty-bit flush: a 2px tint bar drains across the active row while the save
  * write is in flight: a disk-activity LED, never a spinner. The row keeps
@@ -2291,4 +2332,201 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
  * bottoming out, never a toast or spinner. */
 .sat-authoring .authoring-editor-sheet[data-committing="true"] {
     border-color: color-mix(in oklab, var(--au-tint) 50%, transparent);
+}
+
+/* System dark appearance: SAT is a distinct product surface, so its semantic
+ * tokens invert together instead of leaving light cards stranded in a dark UI. */
+@media (prefers-color-scheme: dark) {
+  .sat-ui,
+  .sat-product {
+    color-scheme: dark;
+    --sat-background: #111113;
+    --sat-surface: #1c1c1e;
+    --sat-surface-subtle: #2c2c2e;
+    --sat-surface-hover: #3a3a3c;
+    --sat-canvas: #111113;
+    --sat-label: #f5f5f7;
+    --sat-secondary-label: #c7c7cc;
+    --sat-tertiary-label: #a1a1a6;
+    --sat-separator: rgba(235, 235, 245, 0.24);
+    --sat-separator-strong: rgba(235, 235, 245, 0.38);
+    --sat-fill: rgba(235, 235, 245, 0.1);
+    --sat-fill-hover: rgba(235, 235, 245, 0.16);
+    --sat-text: #f5f5f7;
+    --sat-text-secondary: #c7c7cc;
+    --sat-divider: rgba(235, 235, 245, 0.24);
+    --sat-divider-soft: rgba(235, 235, 245, 0.16);
+    --sat-accent-core: #0a72d8;
+    --sat-accent: #0a72d8;
+    --sat-accent-strong: #0a5cad;
+    --sat-accent-soft: rgba(105, 173, 255, 0.18);
+    --sat-focus: #8ac2ff;
+    --sat-danger: #ff8f85;
+    --sat-danger-soft: rgba(255, 143, 133, 0.16);
+    --sat-warning: #ffbd70;
+    --sat-warning-soft: rgba(255, 189, 112, 0.16);
+    --sat-disabled-background: #3a3a3c;
+    --sat-disabled-text: #8e8e93;
+  }
+
+  .sat-product {
+    --authoring-canvas: #111113;
+    --authoring-sheet: #1c1c1e;
+    --authoring-hairline: rgba(235, 235, 245, 0.18);
+    --au-material-sidebar: rgba(28, 28, 30, 0.9);
+    --au-material-sidebar-header: rgba(44, 44, 46, 0.92);
+    --au-material-hud: rgba(28, 28, 30, 0.94);
+    --au-material-editor-footer: rgba(28, 28, 30, 0.9);
+    --color-au-accent: #0a72d8;
+    --color-au-accent-hover: #1680eb;
+    --color-au-accent-active: #075fb8;
+    --color-au-accent-tint: rgba(105, 173, 255, 0.18);
+    --color-au-accent-tint-strong: rgba(105, 173, 255, 0.28);
+    --color-au-canvas: #111113;
+    --color-au-surface: #1c1c1e;
+    --color-au-surface-raised: #2c2c2e;
+    --color-au-separator: rgba(235, 235, 245, 0.18);
+    --color-au-separator-strong: rgba(235, 235, 245, 0.3);
+    --color-au-fill: rgba(235, 235, 245, 0.1);
+    --color-au-fill-strong: rgba(235, 235, 245, 0.16);
+    --color-au-fill-press: rgba(235, 235, 245, 0.22);
+    --color-au-success: #58d7a1;
+    --color-au-success-text: #76e8b7;
+    --color-au-success-tint: rgba(88, 215, 161, 0.16);
+    --color-au-danger: #ff8f85;
+    --color-au-danger-text: #ffaaa2;
+    --color-au-danger-tint: rgba(255, 143, 133, 0.16);
+    --color-au-warning: #ffbd70;
+    --color-au-warning-text: #ffd09a;
+    --color-au-warning-tint: rgba(255, 189, 112, 0.16);
+  }
+
+  .sat-authoring {
+    --au-tint: #69adff;
+    --au-tint-strong: #8ac2ff;
+    --au-tint-soft: color-mix(in oklab, var(--au-tint) 18%, transparent);
+    --au-tint-soft-strong: color-mix(in oklab, var(--au-tint) 28%, transparent);
+    --au-elevation-menu:
+      0 0 0 0.5px rgba(255, 255, 255, 0.08),
+      0 2px 8px rgba(0, 0, 0, 0.25),
+      0 14px 44px rgba(0, 0, 0, 0.42);
+    --au-elevation-sheet:
+      0 0 0 0.5px rgba(255, 255, 255, 0.07),
+      0 2px 6px rgba(0, 0, 0, 0.24),
+      0 24px 68px rgba(0, 0, 0, 0.48);
+  }
+
+  .sat-ui [class*="bg-white"],
+  .sat-product [class*="bg-white"] {
+    background-color: var(--sat-surface) !important;
+  }
+
+  .sat-ui [class*="bg-slate-50"],
+  .sat-product [class*="bg-slate-50"],
+  .sat-ui [class*="bg-gray-50"],
+  .sat-product [class*="bg-gray-50"] {
+    background-color: var(--sat-surface-subtle) !important;
+  }
+
+  .sat-ui [class*="bg-slate-100"],
+  .sat-product [class*="bg-slate-100"],
+  .sat-ui [class*="bg-gray-100"],
+  .sat-product [class*="bg-gray-100"] {
+    background-color: var(--sat-surface-hover) !important;
+  }
+
+  .sat-ui [class*="border-slate-"],
+  .sat-product [class*="border-slate-"],
+  .sat-ui [class*="border-gray-"],
+  .sat-product [class*="border-gray-"] {
+    border-color: var(--sat-divider-soft) !important;
+  }
+
+  .sat-ui [class*="text-slate-400"],
+  .sat-ui [class*="text-slate-500"],
+  .sat-product [class*="text-slate-400"],
+  .sat-product [class*="text-slate-500"],
+  .sat-product [class*="text-slate-600"] {
+    color: var(--sat-text-secondary) !important;
+  }
+
+  .sat-ui [class*="text-slate-600"],
+  .sat-ui [class*="text-slate-700"],
+  .sat-ui [class*="text-slate-800"],
+  .sat-ui [class*="text-slate-900"],
+  .sat-ui [class*="text-slate-950"],
+  .sat-product [class*="text-slate-700"],
+  .sat-product [class*="text-slate-800"],
+  .sat-product [class*="text-slate-900"],
+  .sat-product [class*="text-slate-950"] {
+    color: var(--sat-text) !important;
+  }
+
+  .sat-product .authoring-topbar,
+  .sat-product .authoring-sidebar-header,
+  .sat-product .authoring-editor-footer,
+  .sat-product .authoring-inspector {
+    background: var(--au-material-hud);
+    border-color: var(--authoring-hairline);
+  }
+
+  .sat-authoring .authoring-sidebar {
+    background: var(--au-material-sidebar);
+  }
+
+  .sat-authoring .authoring-editor-canvas {
+    background: var(--authoring-canvas);
+  }
+
+  .sat-authoring .authoring-skeleton {
+    background: var(--color-au-fill-strong);
+  }
+
+  .sat-authoring .authoring-skeleton::after {
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+  }
+}
+
+@media (prefers-color-scheme: dark) and (prefers-contrast: more) {
+  .sat-ui,
+  .sat-product {
+    --sat-secondary-label: #f0f0f2;
+    --sat-tertiary-label: #d1d1d6;
+    --sat-divider: rgba(255, 255, 255, 0.5);
+    --sat-divider-soft: rgba(255, 255, 255, 0.36);
+  }
+
+  .sat-product {
+    --color-au-separator: rgba(255, 255, 255, 0.36);
+    --color-au-separator-strong: rgba(255, 255, 255, 0.58);
+  }
+}
+
+@media (prefers-color-scheme: dark) and (forced-colors: active) {
+  .sat-ui,
+  .sat-product {
+    --sat-background: Canvas;
+    --sat-surface: Canvas;
+    --sat-surface-subtle: Canvas;
+    --sat-surface-hover: Canvas;
+    --sat-canvas: Canvas;
+    --sat-text: CanvasText;
+    --sat-text-secondary: CanvasText;
+    --sat-divider: CanvasText;
+    --sat-divider-soft: CanvasText;
+    --sat-accent: Highlight;
+  }
+
+  .sat-product {
+    --authoring-canvas: Canvas;
+    --authoring-sheet: Canvas;
+    --color-au-canvas: Canvas;
+    --color-au-surface: Canvas;
+    --color-au-surface-raised: Canvas;
+    --color-au-separator: CanvasText;
+    --color-au-separator-strong: CanvasText;
+    --color-au-fill: Canvas;
+    --color-au-fill-strong: Canvas;
+    --color-au-fill-press: Canvas;
+  }
 }

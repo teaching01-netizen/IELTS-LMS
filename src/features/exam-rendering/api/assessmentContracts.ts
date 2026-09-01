@@ -16,6 +16,8 @@ export type {
   QuestionKind,
   QuestionMetadata,
   QuestionRevision,
+  RichTextDocument,
+  RichTextNode,
   SaveQuestionRevisionRequest,
   StructuredContent,
 } from '../../exam-authoring/api/assessmentContracts';

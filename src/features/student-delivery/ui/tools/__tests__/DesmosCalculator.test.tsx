@@ -3,32 +3,29 @@ import { describe, expect, it } from 'vitest';
 import { DesmosCalculator } from '../DesmosCalculator';
 
 describe('DesmosCalculator', () => {
-  it('embeds the official College Board scientific and graphing calculators', () => {
+  it('loads only the selected calculator until another mode is activated', () => {
     render(<DesmosCalculator mode="scientific" />);
 
     const scientific = screen.getByTitle('Desmos scientific calculator, College Board testing version');
-    const graphing = screen.getByTitle('Desmos graphing calculator, College Board testing version');
 
     expect(scientific).toHaveAttribute(
       'src',
       'https://www.desmos.com/testing/collegeboard/scientific?embed',
     );
-    expect(graphing).toHaveAttribute(
-      'src',
-      'https://www.desmos.com/testing/collegeboard/graphing?embed',
-    );
     expect(scientific).toHaveClass('block');
-    expect(graphing).toHaveClass('hidden');
+    expect(
+      screen.queryByTitle('Desmos graphing calculator, College Board testing version'),
+    ).not.toBeInTheDocument();
   });
 
-  it('keeps both embeds mounted when switching modes', () => {
+  it('keeps an activated embed mounted when switching modes', () => {
     const { rerender } = render(<DesmosCalculator mode="scientific" />);
     const scientific = screen.getByTitle('Desmos scientific calculator, College Board testing version');
-    const graphing = screen.getByTitle('Desmos graphing calculator, College Board testing version');
 
     fireEvent.load(scientific);
-    fireEvent.load(graphing);
     rerender(<DesmosCalculator mode="graphing" />);
+    const graphing = screen.getByTitle('Desmos graphing calculator, College Board testing version');
+    fireEvent.load(graphing);
 
     expect(scientific).toBeInTheDocument();
     expect(graphing).toBeInTheDocument();

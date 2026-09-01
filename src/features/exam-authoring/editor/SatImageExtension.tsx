@@ -2,13 +2,7 @@ import { useEffect, useState } from "react";
 import Image from "@tiptap/extension-image";
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import { ImageIcon } from "lucide-react";
-import { backendGet } from "../infrastructure/examAuthoringBackendGateway";
-
-interface MediaAsset {
-  id: string;
-  downloadUrl: string | null;
-  uploadStatus: string;
-}
+import { getAssessmentMediaAsset } from "../api/assessmentMediaApi";
 
 function isDirectSource(value: string): boolean {
   return /^(https?:\/\/|data:|blob:|\/)/i.test(value);
@@ -27,7 +21,7 @@ function SatImageNodeView({ node }: NodeViewProps) {
   useEffect(() => {
     let cancelled = false;
     if (!assetId || isDirectSource(assetId)) return;
-    void backendGet<MediaAsset>(`/v1/media/${encodeURIComponent(assetId)}`)
+    void getAssessmentMediaAsset(assetId)
       .then((asset) => {
         if (!cancelled && asset.downloadUrl) setSource(asset.downloadUrl);
       })
@@ -46,10 +40,10 @@ function SatImageNodeView({ node }: NodeViewProps) {
           src={source}
           alt={alt}
           onError={() => setFailed(true)}
-          className="mx-auto max-h-80 max-w-full rounded-xl border border-slate-200 bg-white object-contain"
+          className="mx-auto max-h-80 max-w-full rounded-xl border border-au-separator bg-white object-contain"
         />
       ) : (
-        <div className="flex min-h-32 items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 text-xs text-slate-500">
+        <div className="flex min-h-32 items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-au-fill px-4 text-xs text-slate-500">
           <ImageIcon size={16} />
           {failed ? "Visual could not be loaded" : "Loading visual…"}
         </div>

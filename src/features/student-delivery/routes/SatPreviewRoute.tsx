@@ -196,7 +196,6 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
           scheduleId={`preview:${examId}`}
           attemptId={preview.projection.versionId}
           moduleAttemptId={preview.module.id}
-          prewarmWhenClosed
           onClose={preview.commands.closeCalculator}
         />
       ) : null}

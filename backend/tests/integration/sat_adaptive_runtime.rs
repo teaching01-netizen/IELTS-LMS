@@ -1497,6 +1497,21 @@ async fn sat_workbook_commit_is_atomic_recoverable_and_invalidates_undo_after_ed
         modules: modules.clone(),
         assets: vec![],
     };
+    let mut unregistered_request = request.clone();
+    unregistered_request.import_id = Uuid::new_v4().to_string();
+    let rejected = authoring
+        .commit_sat_workbook(&exam.id, unregistered_request, &actor.actor_id)
+        .await;
+    assert!(
+        matches!(&rejected, Err(AssessmentAuthoringError::Conflict(message)) if message.contains("preview")),
+        "an unregistered workbook preview must be rejected: {rejected:?}"
+    );
+    let unchanged = authoring
+        .shell(&exam.id)
+        .await
+        .expect("shell after rejected import");
+    assert_eq!(unchanged.version_id, before.version_id);
+    assert_eq!(unchanged.version_revision, before.version_revision);
 
     let committed = authoring
         .commit_sat_workbook(&exam.id, request.clone(), &actor.actor_id)

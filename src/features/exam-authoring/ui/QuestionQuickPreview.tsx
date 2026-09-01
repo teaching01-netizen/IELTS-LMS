@@ -28,15 +28,15 @@ export function QuestionQuickPreview({
     <AnimatePresence initial={false}>
       {open && question ? (
         <motion.aside
-          initial={{ opacity: reduceMotion ? 1 : 0, width: reduceMotion ? 480 : 0 }}
-          animate={{ opacity: 1, width: 480 }}
-          exit={{ opacity: reduceMotion ? 0 : 1, width: 0 }}
+          initial={{ opacity: reduceMotion ? 1 : 0, x: reduceMotion ? 0 : 16 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: reduceMotion ? 0 : 1, x: 16 }}
           transition={authoringMotion.surface}
-          className="shrink-0 overflow-hidden border-l border-au-separator bg-au-canvas"
+          className="authoring-question-preview shrink-0 overflow-hidden border-l border-au-separator bg-au-canvas"
           aria-label="Student question preview"
         >
-          <div className="flex h-full w-[480px] flex-col">
-            <header className="flex shrink-0 items-center justify-between border-b border-black/[0.055] bg-white/90 px-4 py-3 backdrop-blur-xl">
+          <div className="authoring-question-preview__inner flex h-full w-full min-w-0 flex-col">
+            <header className="flex shrink-0 items-center justify-between border-b border-au-separator bg-white px-4 py-3 authoring-glass">
               <div>
                 <p className="text-[12px] font-semibold text-slate-800">Student preview</p>
                 <p className="mt-0.5 text-[11px] text-slate-400">
@@ -46,7 +46,7 @@ export function QuestionQuickPreview({
               <button
                 type="button"
                 onClick={onClose}
-                className="authoring-interactive flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-black/[0.05]"
+                className="authoring-interactive flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-au-fill"
                 aria-label="Close preview"
               >
                 <X size={15} aria-hidden="true" />

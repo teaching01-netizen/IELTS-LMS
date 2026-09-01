@@ -183,7 +183,7 @@ export function StructurePane({
                         </div>
                         <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-100">
                           <div
-                            className="h-full rounded-full bg-[#0071e3] transition-[width]"
+                            className="h-full rounded-full bg-au-accent transition-[width]"
                             style={{ width: `${progress}%` }}
                           />
                         </div>
@@ -196,7 +196,7 @@ export function StructurePane({
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
                             transition={authoringMotion.panel}
-                            className="overflow-hidden border-t border-black/[0.06] px-2.5 pb-3 pt-2.5"
+                            className="overflow-hidden border-t border-au-separator px-2.5 pb-3 pt-2.5"
                           >
                             <SortableQuestionGrid
                               module={module}
@@ -224,7 +224,7 @@ export function StructurePane({
                                 module.questions.length >= module.targetQuestionCount
                               }
                               onClick={() => onCreateQuestion(module.id)}
-                              className="mt-3 flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-black/[0.10] bg-white/60 px-2 py-2 text-[11px] font-semibold text-slate-500 transition hover:border-black/[0.16] hover:bg-white hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-45"
+                              className="mt-3 flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-au-separator bg-white px-2 py-2 text-[11px] font-semibold text-slate-500 transition hover:border-au-separator hover:bg-au-fill-strong hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-45"
                             >
                               {module.questions.length >= module.targetQuestionCount ? (
                                 <>
@@ -367,7 +367,7 @@ function SortableQuestionGrid({
         </div>
       </DragDropProvider>
       {reorderError ? (
-        <p className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-[10px] font-medium leading-4 text-red-600">
+        <p className="mt-2 rounded-lg bg-au-danger-tint px-2 py-1.5 text-[10px] font-medium leading-4 text-au-danger-text">
           {reorderError}
         </p>
       ) : null}
@@ -467,7 +467,7 @@ function SortableQuestionButton({
             {selected && !selectionMode ? (
               <motion.span
                 layoutId="sat-selected-question-tile"
-                className="absolute inset-0 bg-[#0071e3]"
+                className="absolute inset-0 bg-au-accent"
                 transition={authoringMotion.spring}
               />
             ) : null}
@@ -589,7 +589,7 @@ function BulkActionBar({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 12 }}
       transition={authoringMotion.panel}
-      className="authoring-glass border-t border-black/[0.06] p-3 shadow-[0_-8px_24px_rgba(15,23,42,0.04)]"
+      className="authoring-glass border-t border-au-separator p-3 shadow-[0_-8px_24px_rgba(15,23,42,0.04)]"
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <AnimatePresence mode="wait" initial={false}>
@@ -618,12 +618,12 @@ function BulkActionBar({
       </div>
 
       {moveTargets.length ? (
-        <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-slate-50 p-1.5">
+        <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-au-fill p-1.5">
           <select
             value={moveTargetId}
             disabled={disabled}
             onChange={(event) => setMoveTargetId(event.target.value)}
-            className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-medium text-slate-600 outline-none focus:border-slate-400"
+            className="min-w-0 flex-1 rounded-md border border-au-separator bg-white px-2 py-1.5 text-[10px] font-medium text-slate-600 outline-none focus:border-slate-400"
             aria-label="Move selected questions to module"
           >
             {moveTargets.map((target) => (
@@ -638,7 +638,7 @@ function BulkActionBar({
             transition={authoringMotion.fast}
             disabled={!count || disabled || !moveTargetId}
             onClick={() => void onAction({ type: "move", destinationModuleId: moveTargetId })}
-            className="flex items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-white hover:text-slate-900 disabled:opacity-30"
+            className="flex items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-au-fill-strong hover:text-slate-900 disabled:opacity-30"
           >
             <MoveRight size={12} /> Move
           </motion.button>
@@ -687,7 +687,7 @@ function BulkActionBar({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -3 }}
             transition={authoringMotion.state}
-            className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-[10px] font-medium leading-4 text-red-600"
+            className="mt-2 rounded-lg bg-au-danger-tint px-2 py-1.5 text-[10px] font-medium leading-4 text-au-danger-text"
           >
             {error}
           </motion.p>

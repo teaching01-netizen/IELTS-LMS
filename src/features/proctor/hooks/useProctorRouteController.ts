@@ -203,6 +203,7 @@ export interface ProctorRouteController {
   auditLogs: SessionAuditLog[];
   error: string | null;
   isLoading: boolean;
+  lastSuccessfulRefreshAt: string | null;
   notes: SessionNote[];
   runtimeSnapshots: ExamSessionRuntime[];
   schedules: ExamSchedule[];
@@ -246,6 +247,7 @@ export function useProctorRouteController(
   );
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(options.initialScheduleId ?? null);
   const [isLoading, setIsLoading] = useState(true);
+  const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [summaryPollIntervalMs, setSummaryPollIntervalMs] = useState(4_000);
   const [detailPollIntervalMs, setDetailPollIntervalMs] = useState(6_000);
@@ -294,6 +296,7 @@ export function useProctorRouteController(
         .map((result) => result.data)
         .filter((detail): detail is ProctorSessionDetailPayload => detail !== undefined),
       hasPendingDetail: results.some((result) => result.isPending),
+      error: results.find((result) => result.error)?.error ?? null,
     }),
   });
 
@@ -390,10 +393,11 @@ export function useProctorRouteController(
   );
 
   useEffect(() => {
-    if (summariesQuery.error) {
+    const queryError = summariesQuery.error ?? detailQueryState.error;
+    if (queryError) {
       setError(
-        summariesQuery.error instanceof Error
-          ? summariesQuery.error.message
+        queryError instanceof Error
+          ? queryError.message
           : 'Failed to load proctor data',
       );
       setIsLoading(false);
@@ -405,12 +409,14 @@ export function useProctorRouteController(
     }
 
     applyMonitoringState(summariesQuery.data, detailQueryState.details);
+    setLastSuccessfulRefreshAt(new Date().toISOString());
     setError(null);
     setIsLoading(detailQueryState.hasPendingDetail);
   }, [
     applyMonitoringState,
     detailQueryState.details,
     detailQueryState.hasPendingDetail,
+    detailQueryState.error,
     summariesQuery.data,
     summariesQuery.error,
   ]);
@@ -653,6 +659,7 @@ export function useProctorRouteController(
     auditLogs,
     error,
     isLoading,
+    lastSuccessfulRefreshAt,
     notes,
     runtimeSnapshots,
     schedules,

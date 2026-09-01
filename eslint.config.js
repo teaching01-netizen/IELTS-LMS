@@ -4,6 +4,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 import storybook from "eslint-plugin-storybook";
 import tseslint from "typescript-eslint";
+import authoringMaterials from "./scripts/eslint-rules/authoring-materials.js";
 
 const sharedTypeScriptFiles = ["**/*.{ts,tsx}"];
 const jsxA11yRecommendedWarnings = Object.fromEntries(
@@ -73,6 +74,11 @@ export default tseslint.config(
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
     },
+  },
+  {
+    files: ["src/features/exam-authoring/**/*.ts", "src/features/exam-authoring/**/*.tsx"],
+    plugins: { "authoring": { rules: { "materials": authoringMaterials } } },
+    rules: { "authoring/materials": "error" },
   },
   {
     files: ["src/features/**/*.ts", "src/features/**/*.tsx"],

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatResultDetailRoute } from '../SatResultDetailRoute';
@@ -27,6 +27,25 @@ describe('SAT Results product', () => {
     expect(screen.getByText('1370')).toBeInTheDocument();
     expect(screen.queryByText(/overall band/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/6\.5/)).not.toBeInTheDocument();
+  });
+
+  it('filters results by score availability and explains an empty match', () => {
+    useSatResultsQueryMock.mockReturnValue({
+      data: [summary, { ...summary, id: 'result-2', studentName: 'Unscored Student', totalScore: null }],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<MemoryRouter><SatResultsRoute /></MemoryRouter>);
+    expect(screen.getByText('Ananda S.')).toBeInTheDocument();
+    expect(screen.getByText('Unscored Student')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: /Score available/i }));
+    expect(screen.getByText('Ananda S.')).toBeInTheDocument();
+    expect(screen.queryByText('Unscored Student')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: /Score unavailable/i }));
+    expect(screen.getByText('Unscored Student')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Search SAT results'), { target: { value: 'missing' } });
+    expect(screen.getByText('No matching SAT results')).toBeInTheDocument();
   });
 
   it('falls back to truthful raw score when no scaled total exists', () => {

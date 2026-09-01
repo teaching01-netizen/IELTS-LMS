@@ -199,7 +199,7 @@ export function SatWorkbookImportSheet({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={authoringMotion.surface}
-          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/28 p-3 backdrop-blur-[3px] sm:p-5"
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/28 p-3 authoring-glass sm:p-5"
           role="dialog"
           aria-modal="true"
           aria-label="Import SAT from Excel"
@@ -213,9 +213,9 @@ export function SatWorkbookImportSheet({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.99 }}
             transition={authoringMotion.surface}
-            className="au-elevation-sheet flex max-h-[94vh] w-full max-w-[1320px] flex-col overflow-hidden rounded-[20px] border border-black/[0.08] bg-white"
+            className="au-elevation-sheet flex max-h-[94vh] w-full max-w-[1320px] flex-col overflow-hidden rounded-[20px] border border-au-separator bg-white"
           >
-            <header className="flex shrink-0 items-start justify-between border-b border-black/[0.06] px-5 py-4 sm:px-6">
+            <header className="flex shrink-0 items-start justify-between border-b border-au-separator px-5 py-4 sm:px-6">
               <div>
                 <h2 className="text-[16px] font-semibold tracking-[-0.02em] text-slate-950">
                   Import SAT from Excel
@@ -230,7 +230,7 @@ export function SatWorkbookImportSheet({
                 type="button"
                 disabled={busy}
                 onClick={onClose}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-black/[0.05] disabled:opacity-35"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-au-fill disabled:opacity-35"
                 aria-label="Close SAT workbook import"
               >
                 <X size={16} />
@@ -238,7 +238,7 @@ export function SatWorkbookImportSheet({
             </header>
 
             <div className="grid min-h-0 flex-1 lg:grid-cols-[430px_minmax(0,1fr)]">
-              <div className="min-h-0 overflow-y-auto border-b border-black/[0.06] p-4 sm:p-5 lg:border-b-0 lg:border-r">
+              <div className="min-h-0 overflow-y-auto border-b border-au-separator p-4 sm:p-5 lg:border-b-0 lg:border-r">
                 <DropTarget
                   file={file}
                   checking={activity === "checking" || activity === "staging"}
@@ -268,7 +268,7 @@ export function SatWorkbookImportSheet({
                 </button>
 
                 {error ? (
-                  <div className="mt-3 flex gap-2 rounded-xl bg-red-50 px-3 py-2.5 text-[11px] leading-5 text-red-700">
+                  <div className="mt-3 flex gap-2 rounded-xl bg-au-danger-tint px-3 py-2.5 text-[11px] leading-5 text-au-danger-text">
                     <AlertCircle size={14} className="mt-0.5 shrink-0" />
                     <span>{error}</span>
                   </div>
@@ -332,7 +332,7 @@ export function SatWorkbookImportSheet({
                           {preview.issues.slice(0, 60).map((issue, index) => (
                             <div
                               key={`${issue.row}-${issue.field}-${index}`}
-                              className="rounded-[10px] bg-amber-50 px-2.5 py-2 text-[10px] leading-4 text-amber-900"
+                              className="rounded-[10px] bg-au-warning-tint px-2.5 py-2 text-[10px] leading-4 text-au-warning-text"
                             >
                               <strong>
                                 {issue.row > 0 ? `Questions · Row ${issue.row} · ` : ""}
@@ -345,7 +345,7 @@ export function SatWorkbookImportSheet({
                         </div>
                       </div>
                     ) : stagedAssets.length === preview.assets.length && activity !== "staging" ? (
-                      <div className="mt-4 flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-[11px] font-medium text-emerald-700">
+                      <div className="mt-4 flex items-center gap-2 rounded-xl bg-au-success-tint px-3 py-2.5 text-[11px] font-medium text-au-success-text">
                         <CheckCircle2 size={15} />
                         Complete SAT ready to import
                       </div>
@@ -354,10 +354,10 @@ export function SatWorkbookImportSheet({
                 ) : null}
               </div>
 
-              <div className="flex min-h-[420px] min-w-0 flex-col bg-[#f5f5f7]">
+              <div className="flex min-h-[420px] min-w-0 flex-col bg-au-fill">
                 {selectedModule && selectedQuestion ? (
                   <>
-                    <div className="flex shrink-0 items-center justify-between border-b border-black/[0.06] bg-white/90 px-4 py-3 backdrop-blur-xl sm:px-5">
+                    <div className="flex shrink-0 items-center justify-between border-b border-au-separator bg-white px-4 py-3 authoring-glass sm:px-5">
                       <div className="min-w-0">
                         <p className="truncate text-[11px] font-semibold text-slate-800">
                           {MODULE_LABELS[selectedModule.moduleKey] ?? selectedModule.moduleKey}
@@ -368,7 +368,7 @@ export function SatWorkbookImportSheet({
                         aria-label="Preview workbook question"
                         value={selectedQuestionIndex}
                         onChange={(event) => setSelectedQuestionIndex(Number(event.target.value))}
-                        className="h-9 rounded-[9px] border-0 bg-black/[0.045] px-3 text-[10px] font-semibold text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-au-accent/30"
+                        className="h-9 rounded-[9px] border-0 bg-au-fill px-3 text-[10px] font-semibold text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-au-accent/30"
                       >
                         {selectedModule.questions.map((_, index) => (
                           <option key={index} value={index}>
@@ -400,7 +400,7 @@ export function SatWorkbookImportSheet({
               </div>
             </div>
 
-            <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-black/[0.06] px-5 py-3 sm:px-6">
+            <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-au-separator px-5 py-3 sm:px-6">
               <p className="hidden max-w-xl text-[10px] leading-4 text-slate-400 sm:block">
                 {existingQuestionCount > 0
                   ? `${existingQuestionCount} current draft questions will be replaced. Published versions are untouched.`
@@ -411,7 +411,7 @@ export function SatWorkbookImportSheet({
                   type="button"
                   disabled={busy}
                   onClick={onClose}
-                  className="min-h-10 rounded-full px-4 text-[11px] font-semibold text-slate-600 hover:bg-black/[0.05] disabled:opacity-35"
+                  className="min-h-10 rounded-full px-4 text-[11px] font-semibold text-slate-600 hover:bg-au-fill disabled:opacity-35"
                 >
                   Cancel
                 </button>
@@ -555,7 +555,7 @@ function DropTarget({
         {checking ? "Preparing workbook…" : (file?.name ?? "Drop your SAT Excel workbook")}
       </p>
       <p className="mt-1 text-[10px] leading-4 text-slate-400">.xlsx · up to 12 MB</p>
-      <span className="mt-3 inline-flex min-h-9 items-center rounded-full bg-white px-3.5 text-[10px] font-semibold text-slate-700 shadow-sm ring-1 ring-black/[0.06]">
+      <span className="mt-3 inline-flex min-h-9 items-center rounded-full bg-white px-3.5 text-[10px] font-semibold text-slate-700 shadow-sm ring-1 ring-au-accent/10">
         Choose File
       </span>
     </button>
@@ -564,7 +564,7 @@ function DropTarget({
 
 function Metric({ label, value, bad = false }: { label: string; value: number; bad?: boolean }) {
   return (
-    <div className="rounded-[11px] bg-[#f5f5f7] px-2.5 py-2">
+    <div className="rounded-[11px] bg-au-fill px-2.5 py-2">
       <p className="text-[9px] font-medium text-slate-400">{label}</p>
       <p
         className={`mt-0.5 text-[15px] font-semibold tabular-nums ${bad ? "text-amber-700" : "text-slate-800"}`}

@@ -1,4 +1,4 @@
-import { backendPost } from "../infrastructure/examAuthoringBackendGateway";
+import { backendGet, backendPost } from "../infrastructure/examAuthoringBackendGateway";
 
 export interface AssessmentMediaAsset {
   id: string;
@@ -7,6 +7,8 @@ export interface AssessmentMediaAsset {
   uploadStatus: string;
   downloadUrl: string | null;
 }
+
+const mediaAssetCache = new Map<string, Promise<AssessmentMediaAsset>>();
 
 interface UploadIntent {
   asset: AssessmentMediaAsset;
@@ -45,6 +47,20 @@ async function uploadImageAsset(
     sizeBytes: file.size,
     checksumSha256: await sha256(file),
   });
+}
+
+export function getAssessmentMediaAsset(assetId: string): Promise<AssessmentMediaAsset> {
+  const cached = mediaAssetCache.get(assetId);
+  if (cached) return cached;
+
+  const request = backendGet<AssessmentMediaAsset>(
+    `/v1/media/${encodeURIComponent(assetId)}`
+  ).catch((error: unknown) => {
+    mediaAssetCache.delete(assetId);
+    throw error;
+  });
+  mediaAssetCache.set(assetId, request);
+  return request;
 }
 
 export function uploadAssessmentAsset(

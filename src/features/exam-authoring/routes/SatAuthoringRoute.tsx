@@ -1,5 +1,5 @@
 import { useParams } from 'react-router-dom';
-import { ErrorSurface } from '@components/ui/ErrorSurface';
+import { SatAuthoringErrorSurface } from '../ui/SatAuthoringStateSurfaces';
 import { AuthoringWorkspace } from '../ui/AuthoringWorkspace';
 
 export interface SatAuthoringRouteProps {
@@ -11,7 +11,12 @@ export function SatAuthoringRoute({ examId: propExamId, examTitle }: SatAuthorin
   const { examId: routeExamId } = useParams<{ examId: string }>();
   const examId = propExamId ?? routeExamId;
   if (!examId) {
-    return <ErrorSurface title="SAT exam not found" description="A valid exam is required to open authoring." />;
+    return (
+      <SatAuthoringErrorSurface
+        title="SAT exam not found"
+        description="A valid exam is required to open authoring."
+      />
+    );
   }
   return <AuthoringWorkspace examId={examId} examTitle={examTitle ?? 'Digital SAT'} />;
 }

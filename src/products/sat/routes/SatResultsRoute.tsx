@@ -13,14 +13,17 @@ export function SatResultsRoute() {
   const navigate = useNavigate();
   const query = useSatResultsQuery();
   const [search, setSearch] = useState('');
+  const [scoreFilter, setScoreFilter] = useState<'all' | 'available' | 'unavailable'>('all');
   const results = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
     return (query.data ?? []).filter((result) => {
+      if (scoreFilter === 'available' && result.totalScore == null) return false;
+      if (scoreFilter === 'unavailable' && result.totalScore != null) return false;
       if (!needle) return true;
       return [result.studentName, result.studentId, result.examTitle, result.cohortName]
         .some((value) => value.toLocaleLowerCase().includes(needle));
     });
-  }, [query.data, search]);
+  }, [query.data, scoreFilter, search]);
 
   if (query.isLoading) return <LoadingSurface label="Opening SAT results…" />;
   if (query.error) return <ErrorSurface title="SAT results could not load" description={query.error instanceof Error ? query.error.message : 'Results are unavailable.'} actionLabel="Retry" onAction={() => void query.refetch()} />;
@@ -38,6 +41,17 @@ export function SatResultsRoute() {
           <input id="sat-results-search" aria-label="Search SAT results" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search results" className="h-10 w-full rounded-[11px] border border-black/[0.075] bg-white pl-9 pr-3 text-sm outline-none focus:border-[#0071e3]/40 focus:ring-4 focus:ring-[#0071e3]/10" />
         </label>
       </div>
+      <fieldset className="mt-4" aria-label="Score availability">
+        <legend className="sr-only">Filter results by score availability</legend>
+        <div role="radiogroup" aria-label="Score availability" className="flex flex-wrap gap-2">
+          {[['all', 'All results'], ['available', 'Score available'], ['unavailable', 'Score unavailable']].map(([value, label]) => (
+            <label key={value} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-full border border-black/[0.075] bg-white px-3 text-[10px] font-semibold text-slate-600 has-[:checked]:border-[#0071e3]/35 has-[:checked]:bg-[#0071e3]/[0.07] has-[:checked]:text-[#0067c9]">
+              <input type="radio" name="sat-score-filter" value={value} checked={scoreFilter === value} onChange={() => setScoreFilter(value as typeof scoreFilter)} className="sr-only" />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
 
       {results.length ? (
         <div className="mt-3 divide-y divide-black/[0.055] border-b border-black/[0.055]">
@@ -58,8 +72,8 @@ export function SatResultsRoute() {
       ) : (
         <div className="flex min-h-[360px] flex-col items-center justify-center text-center">
           <div className="flex h-11 w-11 items-center justify-center rounded-full bg-black/[0.045] text-[17px] font-semibold text-slate-400">—</div>
-          <h2 className="mt-4 text-[16px] font-semibold tracking-[-0.02em]">{search ? 'No matching results' : 'No SAT results yet'}</h2>
-          <p className="mt-1 max-w-sm text-[12px] leading-5 text-slate-400">{search ? 'Try a student, exam, or cohort name.' : 'Completed SAT attempts will appear here when scoring is available.'}</p>
+          <h2 className="mt-4 text-[16px] font-semibold tracking-[-0.02em]">{search || scoreFilter !== 'all' ? 'No matching SAT results' : 'No SAT results yet'}</h2>
+          <p className="mt-1 max-w-sm text-[12px] leading-5 text-slate-400">{search || scoreFilter !== 'all' ? 'Try another search or score-availability filter.' : 'Completed SAT attempts will appear here when scoring is available.'}</p>
         </div>
       )}
     </div>

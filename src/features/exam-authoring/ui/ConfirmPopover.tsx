@@ -49,7 +49,7 @@ export function ConfirmPopover({
           exit={{ opacity: 0, y: 4, scale: 0.99 }}
           transition={authoringMotion.spring}
           style={{ transformOrigin: "bottom right" }}
-          className="au-elevation-menu absolute bottom-full right-0 z-50 mb-2 w-64 rounded-[14px] border border-black/[0.08] bg-white p-3.5"
+          className="au-elevation-menu absolute bottom-full right-0 z-50 mb-2 w-64 rounded-[14px] border border-au-separator bg-white p-3.5"
           role="alertdialog"
           aria-modal="false"
           aria-label={title}
@@ -71,7 +71,7 @@ export function ConfirmPopover({
               transition={authoringMotion.fast}
               onClick={onCancel}
               disabled={busy}
-              className="authoring-interactive min-h-9 rounded-[10px] px-3 text-[12px] font-semibold text-slate-600 hover:bg-black/[0.05] disabled:opacity-40"
+              className="authoring-interactive min-h-9 rounded-[10px] px-3 text-[12px] font-semibold text-slate-600 hover:bg-au-fill disabled:opacity-40"
             >
               Cancel
             </motion.button>
