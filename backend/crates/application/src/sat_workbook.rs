@@ -32,7 +32,121 @@ const MAX_EMBEDDED_ASSET_BYTES: usize = 10 * 1024 * 1024;
 const MAX_EMBEDDED_ASSET_TOTAL_BYTES: usize = 30 * 1024 * 1024;
 const QUESTIONS_SHEET: &str = "Questions";
 const ASSETS_SHEET: &str = "Assets";
-const TEMPLATE_VERSION: &str = "1";
+const AI_INSTRUCTIONS_SHEET: &str = "AI Instructions";
+const TEMPLATE_VERSION: &str = "2";
+
+const AI_SYSTEM_PROMPT: &str = r###"You are a careful Digital SAT assessment author and Excel workbook editor.
+
+TASK
+Using the supplied SAT authoring template, create a complete original Digital SAT practice exam. Preserve the workbook structure, fill the Questions sheet, add any required visuals to the Assets sheet, and return an .xlsx workbook ready for the Import SAT from Excel workflow.
+
+WORKBOOK CONTRACT
+- Keep the sheet names Questions, Guide, Assets, AI Instructions, and hidden _SAT.
+- Keep the Questions header row exactly as supplied. Do not rename, remove, reorder, or invent columns.
+- Write one question per Questions row. Use the supplied module labels and order values.
+- Do not use formulas. Write displayed values into cells.
+- Preserve the hidden _SAT sheet and all workbook validation rules.
+- Return an .xlsx file, not a screenshot, PDF, plain-text table, or a different spreadsheet format.
+- Keep the file, cells, and embedded images within the template limits.
+
+COMPLETE DIGITAL SAT STRUCTURE
+Create exactly 147 questions in six modules:
+- Use the exact module label Reading & Writing · Module 1 for the base module; create 27 questions.
+- Use the exact module label Reading & Writing · Module 2 — Lower; create 27 questions.
+- Use the exact module label Reading & Writing · Module 2 — Higher; create 27 questions.
+- Use the exact module label Math · Module 1 for the base module; create 22 questions.
+- Use the exact module label Math · Module 2 — Lower; create 22 questions.
+- Use the exact module label Math · Module 2 — Higher; create 22 questions.
+- Order must run from 1 through the module count without duplicates.
+- Mark exactly two rows in every module as Pretest=Yes; mark all other rows as Pretest=No.
+- Reading & Writing questions must use Response Type=Multiple Choice.
+- Math questions may use Response Type=Multiple Choice or Response Type=Student Response.
+
+QUESTIONS COLUMNS
+- Module: exact destination module label; it controls placement and adaptive branch.
+- Order: 1-based position inside that module.
+- Prompt: the exact question students will read and answer. This is required.
+- Stimulus: optional passage, context, data, notes, table, equation, or visual supporting the prompt.
+- Response Type: Multiple Choice or Student Response.
+- A, B, C, D: four complete answer choices for Multiple Choice questions.
+- Correct: exactly one of A, B, C, or D for Multiple Choice questions.
+- Accepted Responses: semicolon-separated accepted answers for Math Student Response questions.
+- Domain and Skill: the valid SAT taxonomy values listed below.
+- Difficulty: Easy, Medium, or Hard.
+- Pretest: Yes or No.
+- Rationale: concise internal explanation of why the keyed answer is correct and why distractors or common traps are wrong. Students do not see it.
+- Tags: comma-separated internal search labels.
+
+STUDENT-RESPONSE RULES
+- Use Student Response only in Math.
+- Put the primary answer first in Accepted Responses and equivalents after it, separated by semicolons.
+- Use an integer, decimal, or fraction. SAT responses allow at most 5 characters, or 6 including a leading minus sign.
+- Do not use units, words, commas, mixed fraction notation, or an answer that needs rounding unless the question explicitly makes that valid.
+- Set A, B, C, D, and Correct blank for Student Response rows.
+
+SAT TAXONOMY
+Reading & Writing domains and skills:
+- Information and Ideas: Central Ideas and Details; Command of Evidence — Textual; Command of Evidence — Quantitative; Inferences.
+- Craft and Structure: Words in Context; Text Structure and Purpose; Cross-Text Connections.
+- Expression of Ideas: Rhetorical Synthesis; Transitions.
+- Standard English Conventions: Boundaries; Form, Structure, and Sense.
+Math domains and skills:
+- Algebra: Linear Equations in One Variable; Linear Functions; Linear Equations in Two Variables; Systems of Two Linear Equations; Linear Inequalities.
+- Advanced Math: Equivalent Expressions; Nonlinear Equations in One Variable; Systems of Equations in Two Variables; Nonlinear Functions.
+- Problem-Solving and Data Analysis: Ratios, Rates, Proportional Relationships, and Units; Percentages; One-Variable Data; Two-Variable Data; Probability and Conditional Probability; Inference from Sample Statistics and Margin of Error; Evaluating Statistical Claims.
+- Geometry and Trigonometry: Area and Volume; Lines, Angles, and Triangles; Right Triangles and Trigonometry; Circles.
+Use the exact spelling and punctuation of the taxonomy values in the template.
+
+RICH CONTENT SYNTAX
+The workbook parser converts these text forms into the same structured rich content used by the authoring editor and student renderer:
+- **bold** becomes bold text.
+- *italic* becomes italic text.
+- `code` becomes inline code.
+- \(x^2+1\) becomes an inline equation.
+- \[x^2+1=5\] becomes a display equation. Keep the expression on one line when possible.
+- ## Heading and ### Subheading become headings.
+- - item or * item becomes a bulleted list.
+- 1. item becomes a numbered list.
+- A Markdown table must have a header row, a separator row, and matching cells.
+- A fenced code block such as ```python
+print(1)
+``` becomes a code block.
+- ![graph_01] becomes a workbook image reference. Put it on its own line.
+Do not invent Excel markers for underline, superscript, or subscript. They are not supported by this workbook syntax.
+
+HOW CONTENT APPEARS
+- Prompt is the main student-visible question.
+- Stimulus is student-visible supporting material. Reading & Writing stimulus is presented with the question in the reading workspace; Math stimulus is presented in the Math question flow.
+- A-D are the student-visible choices for Multiple Choice.
+- Correct, Accepted Responses, Domain, Skill, Difficulty, Pretest, Tags, and Rationale are internal system or staff-review data.
+- Rationale is not shown to students.
+- The import preview uses the real question renderer, so inspect the preview before importing.
+
+ASSETS
+- Add each visual as an embedded image on the Assets sheet in the Image column.
+- Give it a unique Asset Key containing only letters, numbers, dots, dashes, or underscores.
+- Provide meaningful Alt Text and an optional Caption.
+- Reference the asset from Prompt or Stimulus as ![asset_key] on its own line.
+- Every image reference must have exactly one matching embedded image and metadata row.
+- Do not place workbook images on Questions, Guide, or AI Instructions.
+
+QUALITY CHECK BEFORE RETURNING THE FILE
+- Verify every answer, calculation, equation, distractor, grammar decision, and rationale.
+- Make the keyed answer the only defensible answer.
+- Match every question to its stated domain and skill.
+- Keep difficulty appropriate for its module branch; do not make Higher and Lower modules identical copies.
+- Use clear, concise, original SAT-style practice content. Do not claim it is official College Board content or copy protected official questions.
+- Check that all six modules have the required count and exactly two pretests.
+- Check that all four choices are present for every Multiple Choice row.
+- Check that Student Response rows have accepted answers, blank choices, and no choice answer key.
+- Check that all rich-content delimiters are closed and all asset references resolve.
+- Check that there are no formulas, duplicate orders, unsupported values, or accidental blank prompts.
+
+SETTINGS BOUNDARY
+Timing, breaks, adaptive routing thresholds, calculator/reference-sheet policy, publishing, and release settings are configured on the SAT Release page. Do not add invented settings columns or assume arbitrary workbook cells will change delivery settings.
+
+FINAL OUTPUT
+Return the completed .xlsx workbook while preserving the template structure. The staff member will upload it, review the validation diagnostics and real student preview, and explicitly choose Import."###;
 
 const HEADERS: [&str; 17] = [
     "Module",
@@ -191,7 +305,8 @@ pub fn build_sat_workbook_template() -> Result<Vec<u8>, SatWorkbookError> {
     let body = Format::new().set_text_wrap().set_align(FormatAlign::Top);
     let scaffold = Format::new()
         .set_background_color(Color::RGB(0xF5F5F7))
-        .set_font_color(Color::RGB(0x3A3A3C));
+        .set_font_color(Color::RGB(0x3A3A3C))
+        .set_text_wrap();
 
     {
         let sheet = workbook.add_worksheet();
@@ -307,6 +422,22 @@ pub fn build_sat_workbook_template() -> Result<Vec<u8>, SatWorkbookError> {
             ("Image", "Add the image on the Assets sheet, then place it with ![graph_01] on its own line."),
             ("Bold / italic", "Use **bold** or *italic* when the source requires emphasis."),
             ("Student response", "Set Response Type to Student Response and put equivalents in Accepted Responses separated by semicolons."),
+            (
+                "Prompt",
+                "Required exact student-visible question. Stimulus is optional supporting material; Rationale is internal and is not shown to students.",
+            ),
+            (
+                "Student preview",
+                "Import preview uses the real student renderer. Reading & Writing stimulus is presented with the question; Math stimulus is presented in the Math question flow.",
+            ),
+            (
+                "AI workflow",
+                "Copy the system prompt from AI Instructions. Ask the AI to preserve this workbook, fill Questions and Assets, and return an .xlsx file.",
+            ),
+            (
+                "Settings",
+                "Timing, adaptive routing, calculator/reference-sheet policy, and publishing are configured on the Release page, not imported from Excel.",
+            ),
         ];
         for (index, (label, value)) in examples.iter().enumerate() {
             guide
@@ -335,6 +466,8 @@ pub fn build_sat_workbook_template() -> Result<Vec<u8>, SatWorkbookError> {
         }
     }
 
+    write_ai_instructions(&mut workbook, &header, &body, &scaffold)?;
+
     {
         let manifest = workbook.add_worksheet();
         manifest.set_name("_SAT").map_err(template_error)?;
@@ -357,6 +490,175 @@ pub fn build_sat_workbook_template() -> Result<Vec<u8>, SatWorkbookError> {
     }
 
     workbook.save_to_buffer().map_err(template_error)
+}
+
+fn write_ai_instructions(
+    workbook: &mut Workbook,
+    header: &Format,
+    body: &Format,
+    scaffold: &Format,
+) -> Result<(), SatWorkbookError> {
+    let sheet = workbook.add_worksheet();
+    sheet
+        .set_name(AI_INSTRUCTIONS_SHEET)
+        .map_err(template_error)?;
+    sheet.set_column_width(0, 38.0).map_err(template_error)?;
+    sheet.set_column_width(1, 110.0).map_err(template_error)?;
+    sheet
+        .write_with_format(0, 0, "SAT AI authoring instructions", header)
+        .map_err(template_error)?;
+    sheet
+        .write_with_format(
+            0,
+            1,
+            "Copy the system prompt, then let your AI fill Questions and Assets.",
+            header,
+        )
+        .map_err(template_error)?;
+    sheet
+        .write_with_format(
+            2,
+            0,
+            "System prompt — copy this into your AI tool",
+            scaffold,
+        )
+        .map_err(template_error)?;
+    sheet
+        .write_with_format(2, 1, AI_SYSTEM_PROMPT, body)
+        .map_err(template_error)?;
+    sheet.set_row_height(2, 300.0).map_err(template_error)?;
+
+    let fields = [
+        (
+            "Module",
+            "Destination module and adaptive branch; determines placement, not raw student text.",
+        ),
+        ("Order", "1-based position within the selected module."),
+        (
+            "Prompt",
+            "Required main question. This is the exact content students see.",
+        ),
+        (
+            "Stimulus",
+            "Optional passage, context, data, notes, table, equation, or visual shown with the question.",
+        ),
+        (
+            "Response Type",
+            "Multiple Choice or Math Student Response; determines the response control.",
+        ),
+        (
+            "A–D",
+            "Four answer choices shown to students for Multiple Choice items.",
+        ),
+        (
+            "Correct",
+            "Internal answer key containing exactly A, B, C, or D; never shown to students.",
+        ),
+        (
+            "Accepted Responses",
+            "Internal semicolon-separated Math Student Response answers; never shown to students.",
+        ),
+        (
+            "Domain / Skill",
+            "Internal SAT taxonomy classification used for authoring and review.",
+        ),
+        ("Difficulty", "Internal Easy, Medium, or Hard classification."),
+        (
+            "Pretest",
+            "Internal SAT assessment metadata; not rendered as question text.",
+        ),
+        (
+            "Rationale",
+            "Internal staff explanation; not shown to students.",
+        ),
+        ("Tags", "Comma-separated internal search labels."),
+        (
+            "Assets",
+            "Embedded image, key, alt text, and caption; referenced from content with ![asset_key].",
+        ),
+    ];
+    let fields_header = 4u32;
+    sheet
+        .write_with_format(fields_header, 0, "Field", header)
+        .map_err(template_error)?;
+    sheet
+        .write_with_format(fields_header, 1, "Meaning and visibility", header)
+        .map_err(template_error)?;
+    for (index, (field, description)) in fields.iter().enumerate() {
+        let row = fields_header + 1 + index as u32;
+        sheet
+            .write_with_format(row, 0, *field, scaffold)
+            .map_err(template_error)?;
+        sheet
+            .write_with_format(row, 1, *description, body)
+            .map_err(template_error)?;
+    }
+
+    let syntax_header = fields_header + fields.len() as u32 + 2;
+    sheet
+        .write_with_format(syntax_header, 0, "Excel syntax", header)
+        .map_err(template_error)?;
+    sheet
+        .write_with_format(syntax_header, 1, "Structured result", header)
+        .map_err(template_error)?;
+    let syntax = [
+        ("**bold**", "Bold text"),
+        ("*italic*", "Italic text"),
+        ("`code`", "Inline code"),
+        (r"\(x^2+1\)", "Inline equation"),
+        (r"\[x^2+1=5\]", "Display equation"),
+        ("## Heading / ### Subheading", "Heading or subheading"),
+        ("- item / * item", "Bulleted list"),
+        ("1. item", "Numbered list"),
+        ("Markdown table", "Structured table"),
+        ("```python\nprint(1)\n```", "Code block"),
+        ("![graph_01]", "Workbook image reference"),
+    ];
+    for (index, (syntax_value, result)) in syntax.iter().enumerate() {
+        let row = syntax_header + 1 + index as u32;
+        sheet
+            .write_with_format(row, 0, *syntax_value, scaffold)
+            .map_err(template_error)?;
+        sheet
+            .write_with_format(row, 1, *result, body)
+            .map_err(template_error)?;
+    }
+
+    let context_header = syntax_header + syntax.len() as u32 + 2;
+    sheet
+        .write_with_format(context_header, 0, "System context", header)
+        .map_err(template_error)?;
+    sheet
+        .write_with_format(context_header, 1, "Where the value is used", header)
+        .map_err(template_error)?;
+    let context = [
+        (
+            "Student preview",
+            "The preview uses the real renderer students receive; review it before importing.",
+        ),
+        (
+            "Reading & Writing",
+            "Stimulus is presented with the question in the reading workspace when present.",
+        ),
+        (
+            "Math",
+            "Stimulus is presented in the Math question flow when present.",
+        ),
+        (
+            "Release settings",
+            "Timing, breaks, adaptive routing, tools, and publishing remain on the Release page.",
+        ),
+    ];
+    for (index, (label, description)) in context.iter().enumerate() {
+        let row = context_header + 1 + index as u32;
+        sheet
+            .write_with_format(row, 0, *label, scaffold)
+            .map_err(template_error)?;
+        sheet
+            .write_with_format(row, 1, *description, body)
+            .map_err(template_error)?;
+    }
+    Ok(())
 }
 
 pub fn parse_sat_workbook(bytes: &[u8]) -> Result<SatWorkbookPreview, SatWorkbookError> {
@@ -1628,7 +1930,10 @@ mod tests {
             "Markdown table",
             "fenced code",
         ] {
-            assert!(instructions.contains(required), "AI instructions omitted {required:?}");
+            assert!(
+                instructions.contains(required),
+                "AI instructions omitted {required:?}"
+            );
         }
 
         assert!(!instructions.trim().is_empty());
