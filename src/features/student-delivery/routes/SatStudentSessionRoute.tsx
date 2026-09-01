@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ErrorSurface } from "@components/ui/ErrorSurface";
-import { LoadingSurface } from "@components/ui/LoadingSurface";
+import { SatErrorSurface, SatLoadingSurface } from "../ui/feedback/SatStateSurfaces";
 import { hasStructuredContent } from "../../exam-authoring/api/renderingPublic";
 import type { ExamSessionRuntime } from "../../../types/domain";
 import { useSatExamController } from "../hooks/useSatExamController";
@@ -88,9 +87,10 @@ export function SatStudentSessionRoute({
 
   if (error && !data) {
     return (
-      <ErrorSurface
+      <SatErrorSurface
         title="SAT delivery unavailable"
-        description={error}
+        description="Your responses are safe. The exam could not be loaded just now."
+        detail={error}
         actionLabel="Exit"
         onAction={() => void onExit()}
       />
@@ -99,7 +99,7 @@ export function SatStudentSessionRoute({
   if (!data) {
     return (
       <>
-        <LoadingSurface label="Loading Digital SAT…" />
+        <SatLoadingSurface label="Loading Digital SAT…" />
         {bootstrapCalculatorHost}
       </>
     );
@@ -211,11 +211,11 @@ export function SatStudentSessionRoute({
     );
   }
   if (state.phase === "submitting") {
-    return withCalculatorHost(<LoadingSurface label="Finalizing SAT responses…" />);
+    return withCalculatorHost(<SatLoadingSurface label="Finalizing SAT responses…" />);
   }
   if (state.phase !== "module" && state.phase !== "review") {
     return withCalculatorHost(
-      <ErrorSurface
+      <SatErrorSurface
         title="SAT state unavailable"
         description="The assessment state could not be recovered."
         actionLabel="Exit"
@@ -224,7 +224,7 @@ export function SatStudentSessionRoute({
     );
   }
   if (!exam.stateModule || !exam.stateModuleAttempt || !exam.stateSection) {
-    return withCalculatorHost(<LoadingSurface label="Refreshing SAT module…" />);
+    return withCalculatorHost(<SatLoadingSurface label="Refreshing SAT module…" />);
   }
 
   const navigationItems = buildSatQuestionNavigationItems(
@@ -266,7 +266,7 @@ export function SatStudentSessionRoute({
   );
   if (!question || !questionId) {
     return withCalculatorHost(
-      <ErrorSurface
+      <SatErrorSurface
         title="SAT question unavailable"
         description="The active question could not be recovered."
         actionLabel="Exit"

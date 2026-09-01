@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
-import { BarChart3, BookOpen, ChevronDown, LogOut, Radio, X } from 'lucide-react';
+import { useMemo } from 'react';
+import { BarChart3, BookOpen, LogOut, Radio } from 'lucide-react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuthSession } from '../../features/auth/authSession';
+import { SatMenu } from './ui/Menu';
 
 type SatNavItem = {
   label: string;
@@ -34,7 +35,6 @@ function ieltsLanding(role: string | undefined): string {
 export function SatRoot() {
   const navigate = useNavigate();
   const { session, logout } = useAuthSession();
-  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const navItems = useMemo(() => navForRole(session?.user.role), [session?.user.role]);
   const displayName = session?.user.displayName?.trim() || session?.user.email || 'Staff';
 
@@ -42,31 +42,25 @@ export function SatRoot() {
     <div className="sat-product min-h-screen bg-[#f5f5f7] text-slate-950 md:flex">
       <a href="#sat-main" className="skip-link">Skip to main content</a>
       <aside className="hidden w-[244px] shrink-0 border-r border-black/[0.07] bg-white/82 backdrop-blur-2xl md:flex md:min-h-screen md:flex-col">
-        <div className="relative px-3 pb-3 pt-3">
-          <button
-            type="button"
-            onClick={() => setWorkspaceMenuOpen((open) => !open)}
-            className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left transition-colors hover:bg-black/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]"
-            aria-expanded={workspaceMenuOpen}
-            aria-haspopup="menu"
-          >
-            <span className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-slate-950 text-[11px] font-semibold tracking-[-0.02em] text-white">SAT</span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-semibold tracking-[-0.01em]">Digital SAT</span>
-              <span className="mt-0.5 block text-[10px] font-medium text-slate-400">Workspace</span>
-            </span>
-            <ChevronDown size={14} className={`text-slate-400 transition-transform ${workspaceMenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-          </button>
-          {workspaceMenuOpen ? (
-            <div role="menu" className="absolute left-3 right-3 top-[58px] z-50 overflow-hidden rounded-[14px] border border-black/[0.08] bg-white p-1.5 shadow-[0_16px_50px_rgba(0,0,0,0.14)]">
-              <button type="button" role="menuitem" className="flex min-h-10 w-full items-center rounded-[10px] bg-black/[0.045] px-3 text-left text-xs font-semibold text-slate-900" onClick={() => setWorkspaceMenuOpen(false)}>
-                Digital SAT
-              </button>
-              <button type="button" role="menuitem" className="mt-0.5 flex min-h-10 w-full items-center rounded-[10px] px-3 text-left text-xs font-medium text-slate-600 hover:bg-black/[0.04]" onClick={() => navigate(ieltsLanding(session?.user.role))}>
-                IELTS
-              </button>
-            </div>
-          ) : null}
+        <div className="px-3 pb-3 pt-3">
+          <SatMenu
+            label="Digital SAT"
+            align="start"
+            width={212}
+            triggerContent={
+              <>
+                <span className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-slate-950 text-[11px] font-semibold tracking-[-0.02em] text-white">SAT</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-semibold tracking-[-0.01em]">Digital SAT</span>
+                  <span className="mt-0.5 block text-[10px] font-medium text-slate-400">Workspace</span>
+                </span>
+              </>
+            }
+            items={[
+              { id: 'sat', label: 'Digital SAT', onSelect: () => {}, current: true },
+              { id: 'ielts', label: 'IELTS', onSelect: () => navigate(ieltsLanding(session?.user.role)) },
+            ]}
+          />
         </div>
 
         <nav aria-label="Digital SAT" className="flex-1 px-3 py-4">
@@ -103,18 +97,21 @@ export function SatRoot() {
 
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-40 flex min-h-14 items-center justify-between border-b border-black/[0.06] bg-white/88 px-4 backdrop-blur-2xl md:hidden">
-          <button type="button" onClick={() => setWorkspaceMenuOpen((open) => !open)} className="flex min-h-10 items-center gap-2 rounded-xl px-2 text-[13px] font-semibold" aria-expanded={workspaceMenuOpen}>
-            <span className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-slate-950 text-[9px] text-white">SAT</span>
-            Digital SAT
-            <ChevronDown size={13} className="text-slate-400" />
-          </button>
-          {workspaceMenuOpen ? (
-            <div aria-label="Choose workspace" className="absolute left-3 right-3 top-12 z-50 rounded-[14px] border border-black/[0.08] bg-white p-2 shadow-xl">
-              <div className="flex items-center justify-between px-2 pb-1"><span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Workspace</span><button type="button" onClick={() => setWorkspaceMenuOpen(false)} className="h-8 w-8 rounded-full text-slate-400" aria-label="Close workspace menu"><X size={15} className="mx-auto" /></button></div>
-              <button type="button" className="min-h-10 w-full rounded-[10px] bg-black/[0.045] px-3 text-left text-xs font-semibold">Digital SAT</button>
-              <button type="button" onClick={() => navigate(ieltsLanding(session?.user.role))} className="mt-1 min-h-10 w-full rounded-[10px] px-3 text-left text-xs font-medium text-slate-600 hover:bg-black/[0.04]">IELTS</button>
-            </div>
-          ) : null}
+          <SatMenu
+            label="Digital SAT"
+            align="start"
+            width={208}
+            triggerContent={
+              <>
+                <span className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-slate-950 text-[9px] text-white">SAT</span>
+                <span className="text-[13px] font-semibold">Digital SAT</span>
+              </>
+            }
+            items={[
+              { id: 'sat', label: 'Digital SAT', onSelect: () => {}, current: true },
+              { id: 'ielts', label: 'IELTS', onSelect: () => navigate(ieltsLanding(session?.user.role)) },
+            ]}
+          />
         </header>
 
         <main id="sat-main" className="min-h-screen pb-20 md:pb-0">

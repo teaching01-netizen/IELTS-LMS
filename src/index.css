@@ -291,6 +291,17 @@
     0 16px 48px rgba(15, 15, 15, 0.25);
 }
 
+@theme inline {
+  /* Authoring semantic colors — runtime-resolved colors driven by per-section tint
+   * and per-surface material variables declared later in this file. Utilities compile
+   * to `var()` references (kept by `@theme inline`) so selection fills, focus rings,
+   * active-module progress, and readiness tracks all re-theme when the section changes. */
+  --color-au-tint: var(--au-tint);
+  --color-au-tint-strong: var(--au-tint-strong);
+  --color-au-tint-soft: var(--au-tint-soft);
+  --color-au-tint-soft-strong: var(--au-tint-soft-strong);
+}
+
 :root {
   /* Width-relative so a height-only viewport shrink (software keyboard) can
      never reflow the footer. vw equals vmin for every phone/tablet profile. */
@@ -1122,8 +1133,16 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 }
 
-/* SAT delivery accessibility system */
+/* SAT delivery accessibility system.
+ * One accent definition serves the exam surface (.sat-ui) and the staff
+ * workspace (.sat-product) so a single blue carries a single meaning. */
+.sat-ui,
+.sat-product {
+  --sat-accent-core: #0071e3;
+}
+
 .sat-ui {
+  color-scheme: light;
   --sat-background: #ffffff;
   --sat-surface: #ffffff;
   --sat-surface-subtle: #f2f2f7;
@@ -1132,7 +1151,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-text-secondary: #515154;
   --sat-divider: rgba(60, 60, 67, 0.36);
   --sat-divider-soft: rgba(60, 60, 67, 0.18);
-  --sat-accent: #0077c8;
+  --sat-accent: var(--sat-accent-core);
   --sat-accent-strong: #0067b8;
   --sat-accent-soft: #eaf5fc;
   --sat-accent-text: #ffffff;
@@ -1420,7 +1439,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-fill-hover: rgba(120, 120, 128, 0.18);
   --sat-surface: #ffffff;
   --sat-canvas: #f5f5f7;
-  --sat-accent: #0071e3;
+  --sat-accent: var(--sat-accent-core);
   --sat-accent-hover: #0077ed;
   --sat-warning: #8a4b00;
   --sat-danger: #b42318;
@@ -1534,6 +1553,180 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 }
 
+/* ============================================================
+ * Digital SAT staff workspace — platform primitives
+ * Menus, dialogs, and segmented controls share one elevation,
+ * one material, and one motion curve across every surface.
+ * ============================================================ */
+.sat-product {
+  --sat-menu-elevation:
+    0 0 0 0.5px rgba(0, 0, 0, 0.055),
+    0 2px 8px rgba(0, 0, 0, 0.055),
+    0 14px 44px rgba(0, 0, 0, 0.14);
+  --sat-dialog-elevation:
+    0 0 0 0.5px rgba(0, 0, 0, 0.045),
+    0 2px 6px rgba(0, 0, 0, 0.028),
+    0 24px 68px rgba(0, 0, 0, 0.085);
+}
+
+/* Menus: hairline contact plus ambient depth. Destructive and current
+ * items carry weight and glyph, never color alone. */
+.sat-product .sat-menu {
+  overflow: hidden;
+  border-radius: 13px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  padding: 5px;
+}
+.sat-product .sat-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  border-radius: 9px;
+  padding: 0 10px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sat-secondary-label);
+  outline: none;
+}
+.sat-product .sat-menu-item[data-current] {
+  font-weight: 600;
+  color: var(--sat-label);
+}
+.sat-product .sat-menu-item[data-destructive] {
+  font-weight: 600;
+  color: var(--sat-danger);
+}
+.sat-product .sat-menu-item:hover,
+.sat-product .sat-menu-item[data-highlighted] {
+  background: var(--sat-fill);
+  color: var(--sat-label);
+}
+.sat-product .sat-menu-item[data-destructive]:hover,
+.sat-product .sat-menu-item[data-destructive][data-highlighted] {
+  background: rgba(180, 35, 24, 0.08);
+  color: var(--sat-danger);
+}
+.sat-product .sat-menu-item:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Dialogs: one scrim, one centered card. Radix renders overlay and
+ * content as portal siblings, so the card positions itself. On compact
+ * widths it docks to the bottom edge as a sheet. */
+.sat-product .sat-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  background: rgba(22, 22, 23, 0.36);
+  -webkit-backdrop-filter: blur(3px) saturate(1.2);
+  backdrop-filter: blur(3px) saturate(1.2);
+}
+.sat-product .sat-dialog {
+  border-radius: 22px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  box-shadow: var(--sat-dialog-elevation);
+  font-family: inherit;
+}
+.sat-product .sat-dialog-center {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 111;
+}
+@media (max-width: 640px) {
+  .sat-product .sat-dialog-center {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    transform: none;
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - 48px);
+    overflow-y: auto;
+    border-radius: 22px 22px 0 0;
+    padding-bottom: max(env(safe-area-inset-bottom), 12px);
+  }
+}
+.sat-product .sat-quiet-button {
+  background: transparent;
+}
+
+/* Segmented control: the inset control grammar — quiet fill, raised
+ * white selection, selection marked by weight and position, not color. */
+.sat-product .sat-segmented {
+  display: inline-flex;
+  width: 100%;
+  padding: 2px;
+  border-radius: 10px;
+  background: rgba(120, 120, 128, 0.12);
+}
+.sat-product .sat-segmented-option {
+  flex: 1;
+  min-height: 32px;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sat-secondary-label);
+  outline: none;
+  transition:
+    background-color 130ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 130ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 130ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sat-product .sat-segmented-option[aria-checked='true'] {
+  background: #ffffff;
+  color: var(--sat-label);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+}
+.sat-product .sat-segmented-option:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--sat-accent) 72%, white);
+  outline-offset: 1px;
+}
+
+/* Loading skeleton: inside the SAT workspace the shared skeleton is
+ * neutral — never colder or louder than the canvas it stands on. */
+.sat-product .bg-gray-50 { background-color: var(--sat-canvas) !important; }
+.sat-product .bg-gray-100 { background-color: var(--sat-fill) !important; }
+.sat-product .bg-gray-200 { background-color: rgba(120, 120, 128, 0.16) !important; }
+.sat-product .border-gray-200 { border-color: var(--sat-separator) !important; }
+.sat-product .border-gray-100 { border-color: rgba(60, 60, 67, 0.12) !important; }
+.sat-product .animate-pulse {
+  animation: sat-skeleton-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes sat-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Transparency and motion are preferences, not decorations. */
+@media (prefers-reduced-transparency: reduce) {
+  .sat-product .sat-dialog-overlay {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    background: rgba(22, 22, 23, 0.55) !important;
+  }
+  .sat-product .sat-menu,
+  .sat-product .sat-dialog {
+    background: #ffffff !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sat-product .sat-segmented-option,
+  .sat-product .animate-pulse {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
 /* SAT authoring workspace — one material hierarchy, not a card farm.
  * Layer order: glass chrome → frosted rail → quiet canvas → sheet of paper. */
 .sat-authoring {
@@ -1541,6 +1734,24 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --authoring-canvas: var(--sat-canvas, #f5f5f7);
   --authoring-sheet: rgba(255, 255, 255, 0.97);
   --authoring-hairline: rgba(60, 60, 67, 0.14);
+
+  /* Section semantics — tint is meaning, not decoration. Every accent-derived
+   * structural surface (selection fills, focus rings, active-module progress,)
+   * derives from --au-tint, so the workspace re-themes per section (Reading & Writing
+   * vs. Math) the way macOS accent colors do. Primary action buttons keep the
+   * static au-accent blue so actions never drift with section scope. */
+  --au-tint: #0071e3;
+  --au-tint-strong: #0067c9;
+  --au-tint-soft: color-mix(in oklab, var(--au-tint) 8%, transparent);
+  --au-tint-soft-strong: color-mix(in oklab, var(--au-tint) 16%, transparent);
+
+  /* Surface materials — three named scopes carry the only translucency in the
+   * workspace: sidebar (recessed, picks up canvas tone), content copper
+   * (opaque paper), HUD (overlay chrome for bars, menus, dialogs). */
+  --au-material-sidebar: rgba(249, 249, 250,  0.86);
+  --au-material-sidebar-header: rgba(250, 250, 252,  0.72);
+  --au-material-hud: rgba(255, 255, 255,  0.92);
+  --au-material-editor-footer: rgba(255, 255, 255,  0.82);
 
   /* Elevation: a 0.5px contact hairline plus layered ambient shadows — the
    * recipe that makes surfaces read as physical objects, not drawn borders. */
@@ -1552,6 +1763,11 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     0 0 0 0.5px rgba(0, 0, 0, 0.045),
     0 2px 6px rgba(0, 0, 0, 0.028),
     0 24px 68px rgba(0, 0, 0, 0.085);
+}
+
+.sat-authoring[data-au-section="math"] {
+  --au-tint: #5856d6;
+  --au-tint-strong: #4c4bc7;
 }
 
 .au-elevation-menu {
@@ -2003,4 +2219,76 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }
+}
+
+.sat-authoring .authoring-topbar {
+    background:var(--au-material-hud);
+}
+.sat-authoring .authoring-sidebar {
+    background:var(--au-material-sidebar);
+    border-color:var(--authoring-hairline);
+}
+.sat-authoring .authoring-sidebar-header {
+    background:var(--au-material-sidebar-header);
+}
+.sat-authoring .authoring-editor-footer {
+    background:var(--au-material-editor-footer);
+}
+.sat-authoring .authoring-question-row:has([aria-current="true"]) {
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--au-tint) 24%, transparent);
+}
+.sat-authoring .authoring-editor-sheet {
+    background:var(--authoring-sheet);
+    border:1px solid rgba(60,60,67,0.1);
+    border-radius:20px;
+    box-shadow:var(--au-elevation-sheet);
+    transition: border-color 180ms var(--authoring-ease);
+}
+/* Dirty-bit flush: a 2px tint bar drains across the active row while the save
+ * write is in flight: a disk-activity LED, never a spinner. The row keeps
+ * `position: relative` (set in QuestionListPane) so the bar rides its bottom edge. */
+.sat-authoring .au-flush-bar {
+
+    position: absolute;
+    inset-inline:2px;
+    bottom:0;
+    height:2px;
+    border-radius:999px;
+    background:var(--au-tint);
+    transform-origin:left;
+    transform: scaleX(0);
+    opacity:0;
+    pointer-events:none;
+}
+
+@keyframes au-flush-drain {
+     from { transform: scaleX(0); opacity:1; }
+     to   { transform: scaleX(1); opacity:1; }
+}
+
+.sat-authoring [data-flushing="true"] .au-flush-bar {
+
+    animation: au-flush-drain 420ms var(--authoring-ease) both;
+}
+
+/* Warm next: the question adjacent to the selection is already prefetched, so a
+ * single 3px tint dot in its corner says next is warm. No counters, no bars. */
+.sat-authoring [data-warm="true"]::after {
+    content:"";
+    position:absolute;
+    right:10px;
+    bottom:9px;
+    width:3px;
+    height:3px;
+    border-radius:999px;
+    background:var(--au-tint);
+    opacity:0.55;
+    pointer-events:none;
+}
+
+/* Commit settle: while a save write is in flight,the sheet's hairline border
+ * flashes to the section tint: a 1px commit haptic that reads as the UI
+ * bottoming out, never a toast or spinner. */
+.sat-authoring .authoring-editor-sheet[data-committing="true"] {
+    border-color: color-mix(in oklab, var(--au-tint) 50%, transparent);
 }

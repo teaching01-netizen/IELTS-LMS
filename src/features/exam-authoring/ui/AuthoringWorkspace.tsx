@@ -814,6 +814,15 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         }
         return;
       }
+      if (!editing && (event.key === "j" || event.key === "k") && selectedModule) {
+        const direction = event.key === "j" ? 1 : -1;
+        const next = selectedModule.questions[selectedModuleIndex + direction];
+        if (next) {
+          event.preventDefault();
+          void selectQuestion(next.examQuestionId);
+        }
+        return;
+      }
       if (!editing && event.code === "Space" && draft) {
         event.preventDefault();
         setPreviewOpen((value) => !value);
@@ -862,7 +871,10 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     : 0;
 
   return (
-    <div className="sat-product sat-authoring flex h-screen min-h-[640px] flex-col overflow-hidden bg-au-canvas text-slate-950">
+    <div
+      className="sat-product sat-authoring flex h-screen min-h-[640px] flex-col overflow-hidden bg-au-canvas text-slate-950"
+      data-au-section={selectedSection?.sectionKey ?? "rw"}
+    >
       <header
         className="authoring-glass authoring-topbar z-50 shrink-0 border-b border-black/[0.06] px-2 py-1.5 sm:px-3"
         data-scrolled={topbarScrolled ? "true" : undefined}
@@ -1064,6 +1076,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               }
               onReorder={handleReorder}
               onBulkAction={handleBulkAction}
+              saveStatus={autosave.status}
             />
           ) : (
             <IssuesPane

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CalendarPlus, Search, X } from 'lucide-react';
+import { ArrowRight, CalendarPlus, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ErrorSurface } from '../../../components/ui/ErrorSurface';
@@ -10,6 +10,8 @@ import { proctorKeys, useProctorSessionSummaries } from '../../../features/proct
 import { proctorFacade } from '../../../features/proctor/application/proctorFacade';
 import { useSaveScheduleMutation } from '../../../features/scheduling/api/scheduleQueries';
 import type { ExamSchedule } from '../../../types/domain';
+import { SatFormDialog } from '../ui/ConfirmDialog';
+import { SatSegmentedControl } from '../ui/SegmentedControl';
 
 type SessionBucket = 'upcoming' | 'live' | 'finished';
 
@@ -78,9 +80,17 @@ export function SatSessionsRoute() {
         </div>
       </div>
 
-      <div className="mt-5 inline-flex w-full max-w-[360px] rounded-[10px] bg-black/[0.055] p-0.5" aria-label="Session status">
-        {(['upcoming', 'live', 'finished'] as const).map((item) => <button key={item} type="button" onClick={() => setBucket(item)} aria-pressed={bucket === item} className={`min-h-8 flex-1 rounded-[8px] px-3 text-[10px] font-semibold capitalize transition ${bucket === item ? 'bg-white text-slate-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]' : 'text-slate-500'}`}>{item}<span className="ml-1.5 text-[9px] tabular-nums text-slate-400">{counts[item]}</span></button>)}
-      </div>
+      <SatSegmentedControl<SessionBucket>
+        label="Session status"
+        value={bucket}
+        options={[
+          { value: 'upcoming', label: `Upcoming ${counts.upcoming}` },
+          { value: 'live', label: `Live ${counts.live}` },
+          { value: 'finished', label: `Finished ${counts.finished}` },
+        ]}
+        onChange={setBucket}
+        className="mt-5 max-w-[360px]"
+      />
 
       {visible.length ? (
         <div className="mt-4 divide-y divide-black/[0.055] border-y border-black/[0.055]">
@@ -133,8 +143,18 @@ function NewSatSessionSheet({ exams, saving, onClose, onCreate }: { exams: Array
     try { await onCreate(schedule); } catch (createError) { setError(createError instanceof Error ? createError.message : 'The session could not be scheduled.'); }
   };
 
-  return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/25 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="new-session-title"><form onSubmit={submit} className="w-full max-w-[480px] overflow-hidden rounded-[22px] border border-black/[0.08] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.18)]"><div className="flex items-center justify-between px-5 pb-2 pt-4"><div><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Digital SAT</p><h2 id="new-session-title" className="mt-1 text-[19px] font-semibold tracking-[-0.025em]">New Session</h2></div><button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-black/[0.04]" aria-label="Close"><X size={16} /></button></div><div className="space-y-4 px-5 py-4">
+  return (
+    <SatFormDialog open eyebrow="Digital SAT" title="New Session" onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="space-y-4 px-5 py-4">
     {exams.length ? <><label htmlFor="sat-session-exam" className="block text-[11px] font-semibold text-slate-600">Exam<select id="sat-session-exam" aria-label="SAT exam" value={examId} onChange={(event) => setExamId(event.target.value)} className="mt-1.5 h-11 w-full rounded-[11px] border border-black/[0.09] bg-white px-3 text-[13px] outline-none focus:border-[#0071e3]/40">{exams.map((exam) => <option key={exam.id} value={exam.id}>{exam.title}</option>)}</select></label><label htmlFor="sat-session-name" className="block text-[11px] font-semibold text-slate-600">Session name<input id="sat-session-name" aria-label="Session name" value={cohort} onChange={(event) => setCohort(event.target.value)} placeholder="September Mock · Morning" maxLength={255} className="mt-1.5 h-11 w-full rounded-[11px] border border-black/[0.09] px-3 text-[13px] outline-none focus:border-[#0071e3]/40" /></label><label htmlFor="sat-session-institution" className="block text-[11px] font-semibold text-slate-600">Institution <span className="font-normal text-slate-400">Optional</span><input id="sat-session-institution" aria-label="Institution" value={institution} onChange={(event) => setInstitution(event.target.value)} className="mt-1.5 h-11 w-full rounded-[11px] border border-black/[0.09] px-3 text-[13px] outline-none focus:border-[#0071e3]/40" /></label><div className="grid gap-3 sm:grid-cols-2"><label htmlFor="sat-session-start" className="block text-[11px] font-semibold text-slate-600">Starts<input id="sat-session-start" aria-label="Session start time" type="datetime-local" value={start} onChange={(event) => setStart(event.target.value)} className="mt-1.5 h-11 w-full rounded-[11px] border border-black/[0.09] px-3 text-[12px] outline-none focus:border-[#0071e3]/40" /></label><label htmlFor="sat-session-end" className="block text-[11px] font-semibold text-slate-600">Ends<input id="sat-session-end" aria-label="Session end time" type="datetime-local" value={end} onChange={(event) => setEnd(event.target.value)} className="mt-1.5 h-11 w-full rounded-[11px] border border-black/[0.09] px-3 text-[12px] outline-none focus:border-[#0071e3]/40" /></label></div></> : <div className="rounded-[12px] bg-black/[0.035] px-4 py-4 text-[12px] leading-5 text-slate-500">Publish a SAT exam before scheduling a session.</div>}
     {error ? <p role="alert" className="text-[11px] font-medium text-red-600">{error}</p> : null}
-  </div><div className="flex justify-end gap-2 border-t border-black/[0.055] px-5 py-3"><button type="button" onClick={onClose} className="min-h-10 rounded-[10px] px-3 text-[12px] font-semibold text-slate-500 hover:bg-black/[0.04]">Cancel</button><button type="submit" disabled={!selectedExam || !cohort.trim() || !start || !end || saving} className="min-h-10 rounded-[10px] bg-[#0071e3] px-4 text-[12px] font-semibold text-white disabled:bg-slate-200 disabled:text-slate-400">{saving ? 'Scheduling…' : 'Schedule'}</button></div></form></div>;
+  </div>
+        <div className="flex justify-end gap-2 border-t border-black/[0.055] px-5 py-3">
+          <button type="button" onClick={onClose} className="min-h-10 rounded-[10px] px-3 text-[12px] font-semibold text-slate-500 hover:bg-black/[0.04]">Cancel</button>
+          <button type="submit" disabled={!selectedExam || !cohort.trim() || !start || !end || saving} className="min-h-10 rounded-[10px] bg-[#0071e3] px-4 text-[12px] font-semibold text-white disabled:bg-slate-200 disabled:text-slate-400">{saving ? 'Scheduling…' : 'Schedule'}</button>
+        </div>
+      </form>
+    </SatFormDialog>
+  );
 }

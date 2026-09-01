@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Plus, Search, X } from 'lucide-react';
+import { ArrowRight, Plus, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ErrorSurface } from '../../../components/ui/ErrorSurface';
@@ -8,6 +8,7 @@ import { useAuthSession } from '../../../features/auth/authSession';
 import { invalidateExamList, useExamListQuery } from '../../../features/exam-authoring/api/examQueries';
 import { examAuthoringFacade } from '../../../features/exam-authoring/application/examAuthoringFacade';
 import type { ExamEntity } from '../../../types/domain';
+import { SatFormDialog } from '../ui/ConfirmDialog';
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value));
@@ -122,27 +123,21 @@ export function SatExamLibraryRoute() {
         </div>
       )}
 
-      {createOpen ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/25 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="new-sat-title">
-          <form onSubmit={createExam} className="w-full max-w-[430px] overflow-hidden rounded-[22px] border border-black/[0.08] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.18)]">
-            <div className="flex items-center justify-between px-5 pb-2 pt-4">
-              <div><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Digital SAT</p><h2 id="new-sat-title" className="mt-1 text-[19px] font-semibold tracking-[-0.025em]">New SAT</h2></div>
-              <button type="button" onClick={() => setCreateOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-black/[0.04]" aria-label="Close"><X size={16} /></button>
-            </div>
-            <div className="px-5 py-4">
-              <label htmlFor="sat-title" className="block text-[11px] font-semibold text-slate-600">Name
-                <input ref={inputRef} id="sat-title" aria-label="SAT exam name" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Practice Test 06" maxLength={255} className="mt-1.5 h-12 w-full rounded-[12px] border border-black/[0.09] px-3 text-[14px] outline-none focus:border-[#0071e3]/40 focus:ring-4 focus:ring-[#0071e3]/10" />
-              </label>
-              {createError ? <p role="alert" className="mt-2 text-[11px] font-medium text-red-600">{createError}</p> : null}
-              <p className="mt-3 text-[10px] leading-4 text-slate-400">Reading & Writing, Math, adaptive modules, and SAT tool policy are created as part of the exam.</p>
-            </div>
-            <div className="flex justify-end gap-2 border-t border-black/[0.055] px-5 py-3">
-              <button type="button" onClick={() => setCreateOpen(false)} className="min-h-10 rounded-[10px] px-3 text-[12px] font-semibold text-slate-500 hover:bg-black/[0.04]">Cancel</button>
-              <button type="submit" disabled={!title.trim() || creating} className="min-h-10 rounded-[10px] bg-[#0071e3] px-4 text-[12px] font-semibold text-white disabled:bg-slate-200 disabled:text-slate-400">{creating ? 'Creating…' : 'Create'}</button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      <SatFormDialog open={createOpen} eyebrow="Digital SAT" title="New SAT" onClose={() => setCreateOpen(false)}>
+        <form onSubmit={createExam}>
+          <div className="px-5 py-4">
+            <label htmlFor="sat-title" className="block text-[11px] font-semibold text-slate-600">Name
+              <input ref={inputRef} id="sat-title" aria-label="SAT exam name" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Practice Test 06" maxLength={255} className="mt-1.5 h-12 w-full rounded-[12px] border border-black/[0.09] px-3 text-[14px] outline-none focus:border-[#0071e3]/40 focus:ring-4 focus:ring-[#0071e3]/10" />
+            </label>
+            {createError ? <p role="alert" className="mt-2 text-[11px] font-medium text-red-600">{createError}</p> : null}
+            <p className="mt-3 text-[10px] leading-4 text-slate-400">Reading & Writing, Math, adaptive modules, and SAT tool policy are created as part of the exam.</p>
+          </div>
+          <div className="flex justify-end gap-2 border-t border-black/[0.055] px-5 py-3">
+            <button type="button" onClick={() => setCreateOpen(false)} className="min-h-10 rounded-[10px] px-3 text-[12px] font-semibold text-slate-500 hover:bg-black/[0.04]">Cancel</button>
+            <button type="submit" disabled={!title.trim() || creating} className="min-h-10 rounded-[10px] bg-[#0071e3] px-4 text-[12px] font-semibold text-white disabled:bg-slate-200 disabled:text-slate-400">{creating ? 'Creating…' : 'Create'}</button>
+          </div>
+        </form>
+      </SatFormDialog>
     </div>
   );
 }

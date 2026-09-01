@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ErrorSurface } from "@components/ui/ErrorSurface";
-import { LoadingSurface } from "@components/ui/LoadingSurface";
+import { SatErrorSurface, SatLoadingSurface } from "../ui/feedback/SatStateSurfaces";
 import { hasStructuredContent } from "../../exam-authoring/api/renderingPublic";
 import { useSatPreviewController } from "../hooks/useSatPreviewController";
 import { SatPreviewControls } from "../ui/SatPreviewControls";
@@ -35,10 +34,10 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
 
   useEffect(() => setEliminationMode(false), [preview.question?.examQuestionId]);
 
-  if (preview.loading) return <LoadingSurface label="Loading SAT draft preview…" />;
+  if (preview.loading) return <SatLoadingSurface label="Loading SAT draft preview…" />;
   if (preview.error) {
     return (
-      <ErrorSurface
+      <SatErrorSurface
         title="SAT preview unavailable"
         description={preview.error}
         actionLabel="Retry"
@@ -48,7 +47,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
   }
   if (!preview.projection) {
     return (
-      <ErrorSurface
+      <SatErrorSurface
         title="SAT preview unavailable"
         description="The current draft could not be projected."
       />
@@ -56,7 +55,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
   }
   if (!preview.section || !preview.module) {
     return (
-      <ErrorSurface
+      <SatErrorSurface
         title="Nothing to preview yet"
         description="Add at least one module to the SAT draft before opening the full exam preview."
         actionLabel="Return to authoring"
@@ -132,7 +131,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
     return (
       <>
         {controls}
-        <ErrorSurface
+        <SatErrorSurface
           title="This module has no questions"
           description="Use the staff preview controls to inspect another module or return to authoring."
         />

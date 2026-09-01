@@ -718,9 +718,11 @@ impl AssessmentDeliveryService {
             aggregate.raw_correct += row.raw_correct.unwrap_or_default();
             aggregate.operational_question_count +=
                 row.operational_question_count.unwrap_or_default();
-            aggregate.target_question_count = aggregate
-                .target_question_count
-                .max(row.target_question_count);
+            if row.adaptive_role == "base" {
+                aggregate.target_question_count = aggregate
+                    .target_question_count
+                    .saturating_add(row.target_question_count);
+            }
             if let Some(route) = route_from_adaptive_role(&row.adaptive_role) {
                 if let Some(existing_route) = aggregate.route {
                     if existing_route != route {
@@ -731,6 +733,9 @@ impl AssessmentDeliveryService {
                     }
                 } else {
                     aggregate.route = Some(route);
+                    aggregate.target_question_count = aggregate
+                        .target_question_count
+                        .saturating_add(row.target_question_count);
                 }
             }
             aggregate.modules.push(json!({
@@ -744,15 +749,11 @@ impl AssessmentDeliveryService {
         let mut section_results = Vec::with_capacity(aggregates.len());
         for (section_key, aggregate) in aggregates {
             let max_raw = aggregate.target_question_count.max(1);
-            let normalized_raw = if aggregate.operational_question_count > 0 {
-                let numerator = i64::from(aggregate.raw_correct.max(0)) * i64::from(max_raw);
-                let denominator = i64::from(aggregate.operational_question_count);
-                i32::try_from((numerator + denominator / 2) / denominator)
-                    .unwrap_or(max_raw)
-                    .clamp(0, max_raw)
-            } else {
-                0
-            };
+            let normalized_raw = normalized_raw_score(
+                aggregate.raw_correct,
+                aggregate.operational_question_count,
+                max_raw,
+            );
             let route = aggregate.route.unwrap_or(AssessmentRoute::Lower);
             let adaptive_route = match route {
                 AssessmentRoute::Lower => AdaptiveRoute::Lower,
@@ -2864,6 +2865,19 @@ fn route_from_adaptive_role(adaptive_role: &str) -> Option<AssessmentRoute> {
     }
 }
 
+fn normalized_raw_score(raw_correct: i32, operational_question_count: i32, max_raw: i32) -> i32 {
+    let max_raw = max_raw.max(1);
+    if operational_question_count <= 0 {
+        return 0;
+    }
+
+    let numerator = i64::from(raw_correct.max(0)) * i64::from(max_raw);
+    let denominator = i64::from(operational_question_count);
+    i32::try_from((numerator + denominator / 2) / denominator)
+        .unwrap_or(max_raw)
+        .clamp(0, max_raw)
+}
+
 fn parse_route(route: &str) -> Option<AssessmentRoute> {
     match route {
         "lower" => Some(AssessmentRoute::Lower),
@@ -2958,6 +2972,12 @@ mod sat_runtime_tests {
             start + Duration::seconds(120)
         )
         .is_err());
+    }
+
+    #[test]
+    fn sat_section_normalization_uses_base_plus_selected_branch_target() {
+        assert_eq!(normalized_raw_score(27, 54, 54), 27);
+        assert_eq!(normalized_raw_score(40, 54, 54), 40);
     }
 
     #[test]

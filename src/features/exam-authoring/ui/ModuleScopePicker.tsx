@@ -136,16 +136,16 @@ export function ModuleScopePicker({ sections, selectedModuleId, disabled = false
                         setOpen(false);
                         if (!current) onSelectModule(module.id);
                       }}
-                      className={`flex min-h-[58px] w-full items-center gap-2 rounded-[10px] px-2.5 py-2.5 text-left outline-none transition focus-visible:ring-4 focus-visible:ring-au-accent/10 ${current ? "bg-au-accent-tint-strong" : "hover:bg-black/[0.035]"}`}
+                      className={`flex min-h-[58px] w-full items-center gap-2 rounded-[10px] px-2.5 py-2.5 text-left outline-none transition focus-visible:ring-4 focus-visible:ring-au-accent/10 ${current ? "bg-au-tint-soft-strong" : "hover:bg-black/[0.035]"}`}
                     >
-                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${current ? "bg-au-accent text-white" : "text-transparent"}`} aria-hidden="true"><Check size={11} strokeWidth={3} /></span>
+                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${current ? "bg-au-tint text-white" : "text-transparent"}`} aria-hidden="true"><Check size={11} strokeWidth={3} /></span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-3">
                           <span className={`truncate text-[12px] font-semibold tracking-[-0.008em] ${current ? "text-slate-950" : "text-slate-700"}`}>{module.title}</span>
                           <span className="shrink-0 text-[10px] tabular-nums text-slate-400">{module.questions.length}/{module.targetQuestionCount}</span>
                         </div>
                         <div className="mt-1.5 flex items-center gap-2">
-                          <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-black/[0.055]" aria-hidden="true"><div className="h-full rounded-full bg-au-accent" style={{ width: `${moduleProgress}%` }} /></div>
+                          <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-black/[0.055]" aria-hidden="true"><div className="h-full rounded-full bg-au-tint" style={{ width: `${moduleProgress}%` }} /></div>
                           {errors ? <span className="text-[10px] font-semibold text-au-danger-text">{errors} error{errors === 1 ? "" : "s"}</span> : incomplete ? <span className="text-[10px] font-medium text-slate-400">{incomplete} incomplete</span> : module.questions.length === module.targetQuestionCount ? <span className="text-[10px] font-semibold text-au-success-text">Complete</span> : null}
                         </div>
                       </div>

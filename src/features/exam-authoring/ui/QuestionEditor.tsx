@@ -97,7 +97,10 @@ export function QuestionEditor({
   };
 
   return (
-    <article className="authoring-editor-sheet mx-auto my-5 w-[calc(100%-2rem)] max-w-[940px] px-6 pb-24 pt-7 sm:my-7 sm:px-10 sm:pt-9">
+    <article
+      className="authoring-editor-sheet mx-auto my-5 w-[calc(100%-2rem)] max-w-[940px] px-6 pb-24 pt-7 sm:my-7 sm:px-10 sm:pt-9"
+      data-committing={saveStatus === "saving" || undefined}
+    >
       <header className="mb-7">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">

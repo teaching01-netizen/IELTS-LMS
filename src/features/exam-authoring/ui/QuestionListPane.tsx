@@ -27,6 +27,7 @@ import { SAT_DOMAINS, getSatSkills } from "../providers/sat/taxonomy";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { ModuleScopePicker } from "./ModuleScopePicker";
 import { AuthoringSegmented } from "./AuthoringSegmented";
+import type { QuestionSaveStatus } from "../hooks/useQuestionAutosave";
 
 export type QuestionListFilter = "all" | "ready" | "incomplete" | "error";
 
@@ -52,6 +53,7 @@ export interface QuestionListPaneProps {
   onQuickAnswerKey: (questionId: string, optionId: string) => void;
   onReorder: (questionIds: string[], expectedQuestionIds: string[]) => Promise<void>;
   onBulkAction: (questionIds: string[], action: BulkQuestionAction, expectedRevisions?: Record<string, number>) => Promise<void>;
+  saveStatus: QuestionSaveStatus;
 }
 
 type ListRow =
@@ -160,7 +162,12 @@ export function QuestionListPane(props: QuestionListPaneProps) {
         {rows.length ? (
           <Virtuoso
             data={rows}
-            itemContent={(_, row) => row.kind === "empty" ? (
+            itemContent={(index, row) => {
+              const prev = index > 0 ? rows[index - 1] : undefined;
+              const warm =
+                prev?.kind === "question" &&
+                prev.question.examQuestionId === props.selectedQuestionId;
+              return row.kind === "empty" ? (
               <EmptyQuestionRow displayOrder={row.displayOrder} disabled={props.isMutating} onCreate={props.onCreateQuestion} />
             ) : (
               <QuestionRow
@@ -173,8 +180,14 @@ export function QuestionListPane(props: QuestionListPaneProps) {
                 onToggleSelection={props.onToggleSelection}
                 onQuickAnswerKey={props.onQuickAnswerKey}
                 onReorder={props.onReorder}
+                flushing={
+                  row.question.examQuestionId === props.selectedQuestionId &&
+                  props.saveStatus === "saving"
+                }
+                warm={warm}
               />
-            )}
+            );
+          }}
           />
         ) : (
           <div className="flex h-full items-center justify-center px-8 text-center"><div><p className="text-[12px] font-semibold text-slate-800">No matching questions</p><p className="mt-1 text-[11px] leading-5 text-slate-500">Change the search or readiness filter.</p></div></div>
@@ -194,6 +207,8 @@ function QuestionRow({
   checked,
   disabled,
   moduleQuestions,
+  flushing,
+  warm,
   onSelect,
   onToggleSelection,
   onQuickAnswerKey,
@@ -204,6 +219,8 @@ function QuestionRow({
   checked: boolean;
   disabled: boolean;
   moduleQuestions: AssessmentQuestionSummary[];
+  flushing: boolean;
+  warm: boolean;
   onSelect: (questionId: string) => void;
   onToggleSelection: (questionId: string, range: boolean) => void;
   onQuickAnswerKey: (questionId: string, optionId: string) => void;
@@ -221,14 +238,17 @@ function QuestionRow({
   return (
     <div
       data-question-list-row={question.examQuestionId}
-      className={`authoring-question-row group mx-2 my-px rounded-[10px] transition-colors ${selected ? "bg-au-accent-tint-strong" : "hover:bg-au-fill"}`}
+      data-flushing={flushing || undefined}
+      data-warm={warm || undefined}
+      className={`authoring-question-row group relative mx-2 my-px rounded-[10px] transition-colors ${selected ? "bg-au-tint-soft-strong" : "hover:bg-au-fill"}`}
     >
+      {flushing ? <span className="au-flush-bar" aria-hidden="true" /> : null}
       <div className="flex min-h-[72px] items-start gap-2 px-2.5 py-2.5">
         <button
           type="button"
           disabled={disabled}
           onClick={(event) => onToggleSelection(question.examQuestionId, event.shiftKey)}
-          className={`authoring-interactive mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border transition ${checked ? "border-au-accent bg-au-accent text-white" : "border-black/[0.16] bg-white text-transparent group-hover:border-black/[0.26] group-hover:text-slate-300"}`}
+          className={`authoring-interactive mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border transition ${checked ? "border-au-tint bg-au-tint text-white" : "border-black/[0.16] bg-white text-transparent group-hover:border-black/[0.26] group-hover:text-slate-300"}`}
           aria-label={`${checked ? "Deselect" : "Select"} question ${question.displayOrder + 1}`}
           aria-pressed={checked}
         >
@@ -237,7 +257,7 @@ function QuestionRow({
         <button type="button" onClick={() => onSelect(question.examQuestionId)} className="min-w-0 flex-1 rounded-[8px] text-left focus-visible:outline-none" disabled={disabled} aria-current={selected ? "true" : undefined}>
           <div className="flex items-baseline gap-2">
             <span className="w-6 shrink-0 text-[11px] font-semibold tabular-nums text-slate-400">{question.displayOrder + 1}</span>
-            <span className="truncate text-[13px] font-medium tracking-[-0.006em] text-slate-900">{question.promptPreview || "Empty question"}</span>
+            <span className="truncate text-[14px] font-medium tracking-[-0.006em] text-slate-900">{question.promptPreview || "Empty question"}</span>
           </div>
           <div className="mt-1.5 flex items-center gap-1.5 pl-8 text-[11px] font-medium text-slate-500">
             <ReadinessDot question={question} />

@@ -81,6 +81,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
           <button
             type="button"
             onClick={props.onToggleTimer}
+            aria-label={props.timerVisible ? "Hide time remaining" : "Show time remaining"}
             className="sat-touch-target sat-pressable mt-0.5 inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
           >
             <span className="rounded-full border border-[var(--sat-text)] px-3 py-1 sat-type-metadata font-semibold text-[var(--sat-text)]">

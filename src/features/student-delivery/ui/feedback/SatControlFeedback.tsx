@@ -19,7 +19,13 @@ export function SatControlBanner({
   );
 }
 
-export function SatSubmissionOverlay() {
+export function SatSubmissionOverlay({
+  title = "Finalizing module…",
+  note = "Your latest responses are being verified.",
+}: {
+  title?: string;
+  note?: string;
+}) {
   return (
     <div
       className="sat-ui fixed inset-0 z-[95] grid place-items-center bg-[var(--sat-background)]/90"
@@ -32,10 +38,8 @@ export function SatSubmissionOverlay() {
           className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2 border-[var(--sat-divider-soft)] border-t-[var(--sat-text)] motion-reduce:hidden"
           aria-hidden="true"
         />
-        <p className="text-[14px] font-semibold text-[var(--sat-text)]">Finalizing module…</p>
-        <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">
-          Your latest responses are being verified.
-        </p>
+        <p className="text-[14px] font-semibold text-[var(--sat-text)]">{title}</p>
+        <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">{note}</p>
       </div>
     </div>
   );

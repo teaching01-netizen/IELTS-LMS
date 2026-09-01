@@ -26,11 +26,17 @@ impl WebsocketLeaseRepository {
         schedule_cap: i64,
     ) -> Result<Option<WebsocketLease>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
+        // COUNT(*) ... FOR UPDATE does not lock the counted rows. Lock a permanent
+        // singleton row first, then perform every capacity check and the insert in
+        // the same transaction so admission is serialized across API instances.
+        sqlx::query("SELECT id FROM websocket_lease_admission_lock WHERE id = 1 FOR UPDATE")
+            .fetch_one(&mut *tx)
+            .await?;
         sqlx::query("DELETE FROM websocket_connection_leases WHERE expires_at <= NOW()")
             .execute(&mut *tx)
             .await?;
         let active: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM websocket_connection_leases WHERE expires_at > NOW() FOR UPDATE",
+            "SELECT COUNT(*) FROM websocket_connection_leases WHERE expires_at > NOW()",
         )
         .fetch_one(&mut *tx)
         .await?;
@@ -38,15 +44,23 @@ impl WebsocketLeaseRepository {
             tx.rollback().await?;
             return Ok(None);
         }
-        let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM websocket_connection_leases WHERE user_id=? AND expires_at > NOW() FOR UPDATE")
-        .bind(user_id).fetch_one(&mut *tx).await?;
+        let user_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM websocket_connection_leases WHERE user_id=? AND expires_at > NOW()",
+        )
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
         if user_count >= user_cap {
             tx.rollback().await?;
             return Ok(None);
         }
         if let Some(schedule) = schedule_id {
-            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM websocket_connection_leases WHERE schedule_id=? AND expires_at > NOW() FOR UPDATE")
-                .bind(schedule).fetch_one(&mut *tx).await?;
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM websocket_connection_leases WHERE schedule_id=? AND expires_at > NOW()",
+            )
+            .bind(schedule)
+            .fetch_one(&mut *tx)
+            .await?;
             if count >= schedule_cap {
                 tx.rollback().await?;
                 return Ok(None);
@@ -54,7 +68,12 @@ impl WebsocketLeaseRepository {
         }
         let token = Uuid::new_v4().to_string();
         sqlx::query("INSERT INTO websocket_connection_leases (lease_token, instance_id, user_id, schedule_id, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 60 SECOND))")
-            .bind(&token).bind(instance_id).bind(user_id).bind(schedule_id).execute(&mut *tx).await?;
+            .bind(&token)
+            .bind(instance_id)
+            .bind(user_id)
+            .bind(schedule_id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(Some(WebsocketLease { token }))
     }

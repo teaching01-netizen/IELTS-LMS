@@ -98,9 +98,9 @@ describe("SatExamShell", () => {
 
   it("hides timer digits without changing the timer control", () => {
     render(<SatExamShell {...props()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide time remaining" }));
     expect(screen.queryByText("34:58")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show time remaining" })).toBeInTheDocument();
   });
   it("keeps routine saving visual without announcing every autosave", () => {
     render(<SatExamShell {...props({ saveState: "saving" })} />);

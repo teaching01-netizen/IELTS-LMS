@@ -14,8 +14,14 @@ export interface SatExamFooterProps {
   onReviewModule: () => void;
 }
 
-const stepButtonClass =
+/* The primary verb is the only prominent control: one filled accent pill per bar.
+ * Back recedes (quiet treatment) and the navigator pill stays neutral black so
+ * style — not size — carries the hierarchy. */
+const primaryStepButtonClass =
   "sat-touch-target sat-pressable inline-flex items-center justify-center gap-1 rounded-full border border-[var(--sat-accent-strong)] bg-[var(--sat-accent-strong)] px-4 sat-type-control-primary font-semibold text-[var(--sat-accent-text)] transition-colors hover:bg-[var(--sat-accent)] disabled:cursor-not-allowed disabled:border-[var(--sat-divider)] disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2";
+
+const quietStepButtonClass =
+  "sat-touch-target sat-pressable inline-flex items-center justify-center gap-1 rounded-full px-3 sat-type-control-primary font-semibold text-[var(--sat-accent-strong)] hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2";
 
 export function SatExamFooter(props: SatExamFooterProps) {
   const isFirst = props.questionIndex === 0;
@@ -53,20 +59,33 @@ export function SatExamFooter(props: SatExamFooterProps) {
             type="button"
             onClick={props.onPrevious}
             disabled={isFirst || props.blocked}
-            className={`${stepButtonClass} col-start-1 row-start-1 sm:col-auto sm:row-auto`}
+            className={`${quietStepButtonClass} col-start-1 row-start-1 sm:col-auto sm:row-auto`}
           >
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             Back
           </button>
-          <button
-            type="button"
-            onClick={isLast ? props.onReviewModule : props.onNext}
-            disabled={props.blocked}
-            className={`${stepButtonClass} col-start-3 row-start-1 sm:col-auto sm:row-auto`}
-          >
-            Next
-            <ChevronRight className="h-4 w-4" aria-hidden="true" />
-          </button>
+          {/* On the last question the verb and destination change together:
+              the label says Review because it goes to Review. */}
+          {isLast ? (
+            <button
+              type="button"
+              onClick={props.onReviewModule}
+              disabled={props.blocked}
+              className={`${primaryStepButtonClass} col-start-3 row-start-1 sm:col-auto sm:row-auto`}
+            >
+              Review
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={props.onNext}
+              disabled={props.blocked}
+              className={`${primaryStepButtonClass} col-start-3 row-start-1 sm:col-auto sm:row-auto`}
+            >
+              Next
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
         </div>
       </div>
     </footer>

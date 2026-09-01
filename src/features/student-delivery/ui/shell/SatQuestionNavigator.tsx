@@ -138,7 +138,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
                 props.onClose();
               }}
               aria-current={current ? "step" : undefined}
-              aria-label={`Question ${item.number}${answered ? ", answered" : ", unanswered"}${item.markedForReview ? ", marked for review" : ""}`}
+              aria-label={`Question ${item.number}${answered ? ", answered" : ", unanswered"}${item.markedForReview ? ", marked for review" : ""}${current ? ", current question" : ""}`}
               className={`sat-pressable relative h-11 min-w-11 border text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2 ${stateClass}`}
             >
               {item.number}
