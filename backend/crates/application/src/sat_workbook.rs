@@ -1543,6 +1543,19 @@ fn push_text(nodes: &mut Vec<Value>, text: &str, mark: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use calamine::{DataType, Reader, Xlsx};
+    use std::io::Cursor;
+
+    fn worksheet_text(bytes: &[u8], name: &str) -> String {
+        let mut workbook = Xlsx::new(Cursor::new(bytes.to_vec())).expect("xlsx workbook");
+        workbook
+            .worksheet_range(name)
+            .expect("worksheet")
+            .rows()
+            .flat_map(|row| row.iter().filter_map(|cell| cell.as_string()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     #[test]
     fn compiler_preserves_math_tables_code_and_emphasis() {
@@ -1568,7 +1581,58 @@ mod tests {
         assert!(bytes.starts_with(b"PK"));
         let preview = parse_sat_workbook(&bytes).expect("parse template");
         assert_eq!(preview.row_count, 147);
+        assert_eq!(preview.template_version, "2");
         assert!(!preview.valid);
+    }
+
+    #[test]
+    fn generated_template_exposes_ai_authoring_contract() {
+        let bytes = build_sat_workbook_template().expect("template");
+        let mut workbook = Xlsx::new(Cursor::new(bytes.clone())).expect("xlsx workbook");
+        let sheet_names = workbook.sheet_names();
+
+        for expected in ["Questions", "Guide", "Assets", "AI Instructions", "_SAT"] {
+            assert!(
+                sheet_names.iter().any(|name| name == expected),
+                "missing worksheet {expected:?}: {sheet_names:?}"
+            );
+        }
+
+        let manifest = workbook.worksheet_range("_SAT").expect("manifest");
+        let manifest_rows: Vec<Vec<String>> = manifest
+            .rows()
+            .map(|row| row.iter().filter_map(|cell| cell.as_string()).collect())
+            .collect();
+        let template_version = manifest_rows
+            .iter()
+            .find(|row| row.first().is_some_and(|key| key == "templateVersion"))
+            .and_then(|row| row.get(1))
+            .expect("template version");
+        assert_eq!(template_version, "2");
+
+        let instructions = worksheet_text(&bytes, "AI Instructions");
+        for required in [
+            "System prompt",
+            "147",
+            "Reading & Writing · Module 1",
+            "Math · Module 1",
+            "exactly two pretest",
+            "Prompt",
+            "Stimulus",
+            "Rationale",
+            "Accepted Responses",
+            "Release page",
+            "\\(x^2+1\\)",
+            "\\[x^2+1=5\\]",
+            "![graph_01]",
+            "Markdown table",
+            "fenced code",
+        ] {
+            assert!(instructions.contains(required), "AI instructions omitted {required:?}");
+        }
+
+        assert!(!instructions.trim().is_empty());
+        assert!(instructions.chars().count() < 32_000);
     }
 
     #[test]
