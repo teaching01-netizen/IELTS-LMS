@@ -47,7 +47,7 @@ pub async fn get_release_state(
     principal: AuthenticatedUser,
     Path(exam_id): Path<String>,
 ) -> Result<ApiResponse<AssessmentReleaseState>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     ielts_backend_application::builder::BuilderService::new(state.db_pool())
         .get_exam(&ctx, exam_id.clone())

@@ -33,6 +33,7 @@ pub struct VerifiedCsrf;
 impl AuthenticatedUser {
     pub fn actor_context(&self) -> ActorContext {
         ActorContext::new(self.user.id.clone(), self.user.role.actor_role())
+            .with_optional_organization_id(self.user.organization_id.clone())
     }
 
     pub fn require_one_of(&self, roles: &[UserRole]) -> Result<(), ApiError> {
@@ -238,6 +239,7 @@ impl RoleActorExt for UserRole {
     fn actor_role(&self) -> ActorRole {
         match self {
             UserRole::Admin => ActorRole::Admin,
+            UserRole::AdminObserver => ActorRole::AdminObserver,
             UserRole::Builder => ActorRole::Builder,
             UserRole::Proctor => ActorRole::Proctor,
             UserRole::Grader => ActorRole::Grader,
@@ -258,4 +260,5 @@ pub fn parse_uuid_or_400(value: &str, field: &str) -> Result<Uuid, ApiError> {
 
 pub fn actor_context_from_principal(principal: &AuthenticatedUser) -> ActorContext {
     ActorContext::new(principal.user.id.clone(), principal.user.role.actor_role())
+        .with_optional_organization_id(principal.user.organization_id.clone())
 }

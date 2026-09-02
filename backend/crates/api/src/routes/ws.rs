@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::{
     borrow::Cow,
+    collections::HashSet,
     future::pending,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -128,6 +129,61 @@ pub async fn websocket_live(
     });
     let attempt_id = query.attempt_id;
     let user_role = session.user.role.clone();
+    let actor = actor_context_for_user(
+        &session.user.id,
+        &session.user.role,
+        session.user.organization_id.clone(),
+    );
+    let allowed_schedule_ids = match load_allowed_schedule_ids(&state, &actor).await {
+        Ok(allowed_schedule_ids) => allowed_schedule_ids,
+        Err(error) => return error.into_response(),
+    };
+
+    // Authorize both explicit topic subscriptions and the all-events subscription
+    // before opening the upgrade. Topic names are not authorization boundaries.
+    let attempt_schedule_id = if let Some(ref requested_attempt_id) = attempt_id {
+        match sqlx::query_scalar::<_, String>(
+            "SELECT schedule_id FROM student_attempts WHERE id = ?",
+        )
+        .bind(requested_attempt_id)
+        .fetch_optional(&state.db_pool())
+        .await
+        {
+            Ok(Some(schedule_id)) => Some(schedule_id),
+            Ok(None) => return not_found_response(),
+            Err(error) => {
+                tracing::warn!(error = %error, "websocket attempt authorization lookup failed");
+                return ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "INTERNAL_ERROR",
+                    "Unable to authorize WebSocket subscription.",
+                )
+                .into_response();
+            }
+        }
+    } else {
+        None
+    };
+
+    if let Some(ref requested_schedule_id) = schedule_id {
+        if !allowed_schedule_ids
+            .as_ref()
+            .is_none_or(|allowed| allowed.contains(requested_schedule_id))
+        {
+            return not_found_response();
+        }
+    }
+    if let Some(ref attempt_schedule_id) = attempt_schedule_id {
+        if !allowed_schedule_ids
+            .as_ref()
+            .is_none_or(|allowed| allowed.contains(attempt_schedule_id))
+            || (schedule_id
+                .as_deref()
+                .is_some_and(|id| id != attempt_schedule_id))
+        {
+            return not_found_response();
+        }
+    }
 
     // Check per-user connection cap
     if !state.live_updates.can_user_connect(&session.user.id) {
@@ -160,6 +216,8 @@ pub async fn websocket_live(
                 query.last_seen_runtime_revision,
                 session.user.id,
                 user_role,
+                actor,
+                allowed_schedule_ids,
             )
         })
 }
@@ -170,40 +228,122 @@ fn extract_ws_session_token(headers: &axum::http::HeaderMap, cookie_name: &str) 
     parse_cookie(Some(cookie_header), cookie_name).map(|s| s.to_owned())
 }
 
+fn not_found_response() -> axum::response::Response {
+    ApiError::new(
+        StatusCode::NOT_FOUND,
+        "NOT_FOUND",
+        "The requested live resource was not found.",
+    )
+    .into_response()
+}
+
+fn actor_context_for_user(
+    user_id: &str,
+    role: &UserRole,
+    organization_id: Option<String>,
+) -> ActorContext {
+    let actor_role = match role {
+        UserRole::Admin => ActorRole::Admin,
+        UserRole::AdminObserver => ActorRole::AdminObserver,
+        UserRole::Builder => ActorRole::Builder,
+        UserRole::Proctor => ActorRole::Proctor,
+        UserRole::Grader => ActorRole::Grader,
+        UserRole::Student => ActorRole::Student,
+    };
+    ActorContext::new(user_id.to_owned(), actor_role).with_optional_organization_id(organization_id)
+}
+
+async fn load_allowed_schedule_ids(
+    state: &AppState,
+    actor: &ActorContext,
+) -> Result<Option<HashSet<String>>, axum::response::Response> {
+    if actor.is_platform_read() {
+        return Ok(None);
+    }
+
+    let pool = state.db_pool();
+    let rows = match actor.role {
+        ActorRole::Builder => sqlx::query_scalar::<_, String>(
+            "SELECT id FROM exam_schedules WHERE organization_id = ?",
+        )
+        .bind(actor.organization_id.as_deref())
+        .fetch_all(&pool)
+        .await,
+        ActorRole::Proctor | ActorRole::Grader => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT schedule_id FROM schedule_staff_assignments WHERE revoked_at IS NULL AND role = ? AND (user_id = ? OR (user_id IS NULL AND actor_id = ?))",
+        )
+        .bind(actor.role.as_str())
+        .bind(&actor.actor_id)
+        .bind(&actor.actor_id)
+        .fetch_all(&pool)
+        .await,
+        ActorRole::Student => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT schedule_id FROM schedule_registrations WHERE access_state <> 'withdrawn' AND (user_id = ? OR actor_id = ?)",
+        )
+        .bind(&actor.actor_id)
+        .bind(&actor.actor_id)
+        .fetch_all(&pool)
+        .await,
+        ActorRole::Admin | ActorRole::AdminObserver => unreachable!("platform roles handled above"),
+    };
+
+    rows.map(|rows| Some(rows.into_iter().collect()))
+        .map_err(|error| {
+            tracing::warn!(error = %error, "websocket schedule authorization lookup failed");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_ERROR",
+                "Unable to authorize WebSocket subscription.",
+            )
+            .into_response()
+        })
+}
+
 fn should_forward_event(
     event: &LiveUpdateEvent,
     user_role: &UserRole,
     schedule_id: Option<&str>,
     attempt_id: Option<&str>,
+    allowed_schedule_ids: Option<&HashSet<String>>,
 ) -> bool {
     if *user_role == UserRole::Student {
         return match event.kind.as_str() {
-            "schedule_runtime" => schedule_id.is_some_and(|value| value == event.id),
+            "schedule_runtime" => {
+                schedule_id.is_some_and(|value| value == event.id)
+                    && allowed_schedule_ids.is_none_or(|allowed| allowed.contains(&event.id))
+            }
             "attempt" => attempt_id.is_some_and(|value| value == event.id),
             _ => false,
         };
     }
 
-    // By default, staff connections don't receive attempt-scoped events
-    // unless they explicitly subscribe with attemptId.
-    if event.kind == "attempt" && attempt_id.is_none() {
-        return false;
+    match event.kind.as_str() {
+        "schedule_runtime" | "schedule_roster" | "schedule_alert" => {
+            if !allowed_schedule_ids.is_none_or(|allowed| allowed.contains(&event.id)) {
+                return false;
+            }
+            if schedule_id.is_some_and(|value| value != event.id) {
+                return false;
+            }
+            attempt_id.is_none() || schedule_id.is_some()
+        }
+        "attempt" => {
+            // Attempt events are never broadcast to a broad staff subscription.
+            attempt_id.is_some_and(|value| value == event.id)
+                && (schedule_id.is_none() || user_role != &UserRole::Student)
+        }
+        _ => false,
     }
-
-    let schedule_match = schedule_id.is_some_and(|value| value == event.id);
-    let attempt_match = attempt_id.is_some_and(|value| value == event.id);
-    if (schedule_id.is_some() || attempt_id.is_some()) && !(schedule_match || attempt_match) {
-        return false;
-    }
-
-    true
 }
 
-async fn build_runtime_snapshot_frame(state: &AppState, schedule_id: &str) -> Option<String> {
+async fn build_runtime_snapshot_frame(
+    state: &AppState,
+    schedule_id: &str,
+    actor: &ActorContext,
+) -> Option<String> {
     let schedule_uuid = Uuid::parse_str(schedule_id).ok()?;
-    let actor = ActorContext::new(Uuid::nil().to_string(), ActorRole::Admin);
     let runtime = SchedulingService::new(state.db_pool())
-        .get_runtime(&actor, schedule_uuid)
+        .get_runtime(actor, schedule_uuid)
         .await
         .ok()?;
     Some(
@@ -224,6 +364,8 @@ async fn handle_socket(
     last_seen_runtime_revision: Option<i64>,
     user_id: String,
     user_role: UserRole,
+    actor: ActorContext,
+    allowed_schedule_ids: Option<HashSet<String>>,
 ) {
     let _background_guard = BackgroundWebsocketGuard::new(state.background_runtime.clone());
     let queue_cap = state.config.websocket_outbound_queue_cap.max(1);
@@ -501,7 +643,7 @@ async fn handle_socket(
     }
 
     if let Some(ref sid) = schedule_id {
-        if let Some(frame) = build_runtime_snapshot_frame(&state, sid).await {
+        if let Some(frame) = build_runtime_snapshot_frame(&state, sid, &actor).await {
             let should_send = if let Some(last_seen) = last_seen_runtime_revision {
                 serde_json::from_str::<serde_json::Value>(&frame)
                     .ok()
@@ -539,6 +681,7 @@ async fn handle_socket(
                             &user_role,
                             schedule_id.as_deref(),
                             attempt_id.as_deref(),
+                            allowed_schedule_ids.as_ref(),
                         ) {
                             continue;
                         }
@@ -587,12 +730,13 @@ async fn handle_socket(
                             &user_role,
                             schedule_id.as_deref(),
                             attempt_id.as_deref(),
+                            allowed_schedule_ids.as_ref(),
                         ) {
                             continue;
                         }
 
                         if event.kind == "schedule_runtime" {
-                            if let Some(frame) = build_runtime_snapshot_frame(&state, &event.id).await {
+                            if let Some(frame) = build_runtime_snapshot_frame(&state, &event.id, &actor).await {
                                 match outbound_tx.try_send(OutboundItem::RawText(frame)) {
                                     Ok(()) => {
                                         saturation_since = None;
@@ -661,6 +805,7 @@ async fn handle_socket(
                             &user_role,
                             schedule_id.as_deref(),
                             attempt_id.as_deref(),
+                            allowed_schedule_ids.as_ref(),
                         ) {
                             continue;
                         }
@@ -767,25 +912,29 @@ mod tests {
             &event("schedule_runtime", "schedule-1"),
             &role,
             Some("schedule-1"),
-            Some("attempt-1")
+            Some("attempt-1"),
+            None
         ));
         assert!(should_forward_event(
             &event("attempt", "attempt-1"),
             &role,
             Some("schedule-1"),
-            Some("attempt-1")
+            Some("attempt-1"),
+            None
         ));
         assert!(!should_forward_event(
             &event("schedule_roster", "schedule-1"),
             &role,
             Some("schedule-1"),
-            Some("attempt-1")
+            Some("attempt-1"),
+            None
         ));
         assert!(!should_forward_event(
             &event("schedule_alert", "schedule-1"),
             &role,
             Some("schedule-1"),
-            Some("attempt-1")
+            Some("attempt-1"),
+            None
         ));
     }
 
@@ -797,13 +946,15 @@ mod tests {
             &event("attempt", "attempt-1"),
             &role,
             Some("schedule-1"),
+            None,
             None
         ));
         assert!(should_forward_event(
             &event("attempt", "attempt-1"),
             &role,
             None,
-            Some("attempt-1")
+            Some("attempt-1"),
+            None
         ));
     }
 }

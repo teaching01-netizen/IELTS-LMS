@@ -542,6 +542,7 @@ pub struct StudentAttempt {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub revision: i32,
+    pub answer_revision: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -647,6 +648,9 @@ pub struct StudentHeartbeatRequest {
     pub attempt_id: Option<String>,
     pub student_key: String,
     pub client_session_id: String,
+    /// Idempotency identity for retries of the same heartbeat event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutation_id: Option<String>,
     pub event_type: HeartbeatEventType,
     pub payload: Option<Value>,
     pub client_timestamp: DateTime<Utc>,

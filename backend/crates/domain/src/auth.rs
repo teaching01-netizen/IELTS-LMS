@@ -8,6 +8,7 @@ use sqlx::FromRow;
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
     Admin,
+    AdminObserver,
     Builder,
     Proctor,
     Grader,
@@ -32,6 +33,10 @@ pub struct User {
     pub display_name: Option<String>,
     pub role: UserRole,
     pub state: UserState,
+    /// Immutable organization scope resolved during authentication. This is
+    /// intentionally not accepted from request payloads.
+    #[cfg_attr(feature = "sqlx", sqlx(default))]
+    pub organization_id: Option<String>,
     pub failed_login_count: i32,
     pub locked_until: Option<DateTime<Utc>>,
     pub last_login_at: Option<DateTime<Utc>>,
@@ -163,6 +168,7 @@ mod sqlx_text_enums {
 
     impl_text_enum!(UserRole, {
         Admin => "admin",
+        AdminObserver => "admin_observer",
         Builder => "builder",
         Proctor => "proctor",
         Grader => "grader",

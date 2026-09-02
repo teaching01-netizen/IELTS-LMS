@@ -458,8 +458,11 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/media",
             Router::new()
                 .route("/uploads", post(media::create_upload))
+                .route("/uploads/:asset_id", put(media::upload_local_object))
                 .route("/uploads/:asset_id/complete", post(media::complete_upload))
-                .route("/:asset_id", get(media::get_asset)),
+                .route("/assets/:asset_id", get(media::download_asset))
+                .route("/:asset_id", get(media::get_asset))
+                .layer(DefaultBodyLimit::max(16 * 1024 * 1024)),
         )
         .route("/api/v1/ws/*path", get(ws::websocket_live))
         .fallback(frontend::serve_frontend)

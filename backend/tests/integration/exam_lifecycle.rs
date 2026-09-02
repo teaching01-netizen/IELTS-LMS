@@ -22,8 +22,24 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
     "0004_library_and_defaults.sql",
     "0005_scheduling_and_access.sql",
     "0006_delivery.sql",
+    "0007_proctoring.sql",
+    "0008_grading_results.sql",
+    "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
     "0015_operation_write_hardening.sql",
+    "0016_attempt_mutation_id_uniqueness.sql",
+    "0017_production_hardening.sql",
+    "0020_schedule_role_display_names.sql",
+    "0030_outbox_retry_policy.sql",
+    "0032_provider_neutral_sat.sql",
+    "0033_sat_runtime_authoring_hardening.sql",
+    "0034_assessment_access_links.sql",
+    "0035_autosave_durability_hardening.sql",
+    "0036_question_revision_updated_by.sql",
+    "0037_runtime_timing_model.sql",
+    "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 #[tokio::test]
@@ -38,6 +54,7 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
 
     let bootstrap = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key.clone(),
@@ -56,6 +73,7 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
 
     let precheck = service
         .persist_precheck(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentPrecheckRequest {
                 student_key: student_key.clone(),
@@ -91,6 +109,7 @@ async fn phase_progression_precheck_lobby_exam_post_exam() {
 
     let bootstrap_again = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key.clone(),
@@ -167,15 +186,15 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
-                    "reading": {"passages": [{"id": "reading-1"}]},
-                    "listening": {"parts": [{"id": "listening-1"}]},
-                    "writing": {"tasks": [{"id": "writing-1"}]},
+                    "reading": {"passages": [{"id": "reading-1", "title": "Reading Passage 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "stem": "Read the statement", "questions": [{"id": "reading-q1"}]}]}]},
+                    "listening": {"parts": [{"id": "listening-1", "title": "Listening Part 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "stem": "Listen to the statement", "questions": [{"id": "listening-q1"}]}]}]},
+                    "writing": {"task1Prompt": "Summarise the chart.", "task2Prompt": "Discuss both views.", "tasks": [{"id": "writing-1"}]},
                     "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
                 }),
                 config_snapshot: json!({
                     "sections": {
-                        "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5},
-                        "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0},
+                        "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5, "bandScoreTable": {"1": 1.0}},
+                        "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0, "bandScoreTable": {"1": 1.0}},
                         "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 10},
                         "speaking": {"enabled": true, "label": "Speaking", "order": 4, "duration": 15, "gapAfterMinutes": 0}
                     }

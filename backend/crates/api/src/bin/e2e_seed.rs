@@ -220,6 +220,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
     )
     .await?;
+    sqlx::query("UPDATE users SET organization_id = 'e2e-org' WHERE id = ?")
+        .bind(builder_auth.user_id.to_string())
+        .execute(&pool)
+        .await?;
     let student_auth = create_authenticated_user(
         &pool,
         &config,
@@ -1404,6 +1408,7 @@ fn parse_frontend_origin(origin: &str) -> Result<String, Box<dyn std::error::Err
 fn role_sql(role: &UserRole) -> &'static str {
     match role {
         UserRole::Admin => "admin",
+        UserRole::AdminObserver => "admin_observer",
         UserRole::Builder => "builder",
         UserRole::Proctor => "proctor",
         UserRole::Grader => "grader",

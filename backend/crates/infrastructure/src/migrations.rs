@@ -14,9 +14,15 @@ const REQUIRED_INDEX_GUARD_MODE_ENV: &str = "REQUIRED_INDEX_GUARD_MODE";
 
 const REQUIRED_COLUMNS: &[(&str, &str)] = &[
     ("student_attempts", "active_client_session_id"),
+    ("student_attempts", "answer_revision"),
+    ("attempt_terminalizations", "terminalization_id"),
+    ("assessment_results", "attempt_id"),
+    ("assessment_results", "outcome_status"),
     ("assessment_question_revisions", "updated_by"),
     ("exam_session_runtimes", "timing_model"),
     ("websocket_connection_leases", "lease_token"),
+    ("users", "organization_id"),
+    ("student_heartbeat_events", "mutation_id"),
 ];
 
 const REQUIRED_INDEXES: &[(&str, &str)] = &[
@@ -28,6 +34,16 @@ const REQUIRED_INDEXES: &[(&str, &str)] = &[
         "student_attempts",
         "idx_student_attempts_schedule_submitted_id",
     ),
+    (
+        "attempt_terminalizations",
+        "idx_attempt_terminalizations_schedule_recorded",
+    ),
+    (
+        "assessment_results",
+        "uq_assessment_result_attempt_provider",
+    ),
+    ("assessment_module_attempts", "module_attempt_identity"),
+    ("student_heartbeat_events", "heartbeat_mutation"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

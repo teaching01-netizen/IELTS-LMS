@@ -23,7 +23,7 @@ pub async fn get_exam_defaults(
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
 ) -> Result<ApiResponse<AdminDefaultProfile>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = LibraryService::new(state.db_pool());
     let defaults = service.get_exam_defaults(&ctx).await?;
@@ -49,7 +49,12 @@ pub async fn list_grading_export_profiles(
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
 ) -> Result<ApiResponse<Vec<GradingExportProfile>>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder, UserRole::Grader])?;
+    principal.require_one_of(&[
+        UserRole::Admin,
+        UserRole::AdminObserver,
+        UserRole::Builder,
+        UserRole::Grader,
+    ])?;
     let ctx = principal.actor_context();
     let service = LibraryService::new(state.db_pool());
     let profiles = service.list_grading_export_profiles(&ctx).await?;

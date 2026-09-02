@@ -97,12 +97,46 @@ async fn require_staff(
         .map_err(ApiError::from)
 }
 
+async fn require_read_staff(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    exam_id: &str,
+) -> Result<(), ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
+    let ctx = principal.actor_context();
+    ielts_backend_application::builder::BuilderService::new(state.db_pool())
+        .get_exam(&ctx, exam_id.to_owned())
+        .await
+        .map(|_| ())
+        .map_err(ApiError::from)
+}
+
 async fn require_sat_shell(
     state: &AppState,
     principal: &AuthenticatedUser,
     exam_id: &str,
 ) -> Result<AssessmentAuthoringShell, ApiError> {
     require_staff(state, principal, exam_id).await?;
+    let shell = AssessmentAuthoringService::new(state.db_pool())
+        .shell(exam_id)
+        .await
+        .map_err(map_error)?;
+    if shell.provider_key != "sat" {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "UNSUPPORTED_PROVIDER",
+            "SAT workbook import is only available for SAT exams.",
+        ));
+    }
+    Ok(shell)
+}
+
+async fn require_sat_read_shell(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    exam_id: &str,
+) -> Result<AssessmentAuthoringShell, ApiError> {
+    require_read_staff(state, principal, exam_id).await?;
     let shell = AssessmentAuthoringService::new(state.db_pool())
         .shell(exam_id)
         .await
@@ -145,6 +179,40 @@ async fn require_module_staff(
     .await
 }
 
+async fn require_module_read(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    module_id: &str,
+) -> Result<(), ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
+    let pool = state.db_pool();
+    let exam_id: Option<String> = sqlx::query_scalar(
+        "SELECT v.exam_id FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id JOIN exam_versions v ON v.id = s.exam_version_id WHERE m.id = ?",
+    )
+    .bind(module_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &error.to_string(),
+        )
+    })?;
+    require_read_staff(
+        state,
+        principal,
+        &exam_id.ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "NOT_FOUND",
+                "Assessment module not found.",
+            )
+        })?,
+    )
+    .await
+}
+
 async fn require_exam_question_staff(
     state: &AppState,
     principal: &AuthenticatedUser,
@@ -160,6 +228,40 @@ async fn require_exam_question_staff(
     .await
     .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "DATABASE_ERROR", &error.to_string()))?;
     require_staff(
+        state,
+        principal,
+        &exam_id.ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "NOT_FOUND",
+                "Assessment question not found.",
+            )
+        })?,
+    )
+    .await
+}
+
+async fn require_exam_question_read(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    exam_question_id: &str,
+) -> Result<(), ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
+    let pool = state.db_pool();
+    let exam_id: Option<String> = sqlx::query_scalar(
+        "SELECT v.exam_id FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id JOIN exam_versions v ON v.id = s.exam_version_id WHERE eq.id = ?",
+    )
+    .bind(exam_question_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "DATABASE_ERROR",
+            &error.to_string(),
+        )
+    })?;
+    require_read_staff(
         state,
         principal,
         &exam_id.ok_or_else(|| {
@@ -208,7 +310,7 @@ pub async fn get_authoring_shell(
     Path(exam_id): Path<Uuid>,
 ) -> Result<ApiResponse<AssessmentAuthoringShell>, ApiError> {
     let exam_id = exam_id.to_string();
-    require_staff(&state, &principal, &exam_id).await?;
+    require_read_staff(&state, &principal, &exam_id).await?;
     let shell = AssessmentAuthoringService::new(state.db_pool())
         .shell(&exam_id)
         .await
@@ -223,7 +325,7 @@ pub async fn get_preview_projection(
     Path(exam_id): Path<Uuid>,
 ) -> Result<ApiResponse<AssessmentPreviewProjection>, ApiError> {
     let exam_id = exam_id.to_string();
-    require_staff(&state, &principal, &exam_id).await?;
+    require_read_staff(&state, &principal, &exam_id).await?;
     let preview = AssessmentAuthoringService::new(state.db_pool())
         .preview(&exam_id)
         .await
@@ -253,7 +355,7 @@ pub async fn list_questions(
     principal: AuthenticatedUser,
     Path(module_id): Path<Uuid>,
 ) -> Result<ApiResponse<Vec<AssessmentQuestionSummary>>, ApiError> {
-    require_module_staff(&state, &principal, &module_id.to_string()).await?;
+    require_module_read(&state, &principal, &module_id.to_string()).await?;
     let questions = AssessmentAuthoringService::new(state.db_pool())
         .list_questions(&module_id.to_string())
         .await
@@ -301,7 +403,7 @@ pub async fn download_sat_workbook_template(
     Path(exam_id): Path<Uuid>,
 ) -> Result<Response<Body>, ApiError> {
     let exam_id = exam_id.to_string();
-    require_sat_shell(&state, &principal, &exam_id).await?;
+    require_sat_read_shell(&state, &principal, &exam_id).await?;
     let bytes = build_sat_workbook_template().map_err(map_workbook_error)?;
     Response::builder()
         .status(StatusCode::OK)
@@ -405,7 +507,7 @@ pub async fn get_sat_workbook_undo_state(
     Path(exam_id): Path<Uuid>,
 ) -> Result<ApiResponse<Option<SatWorkbookUndoState>>, ApiError> {
     let exam_id = exam_id.to_string();
-    require_sat_shell(&state, &principal, &exam_id).await?;
+    require_sat_read_shell(&state, &principal, &exam_id).await?;
     let state = AssessmentAuthoringService::new(state.db_pool())
         .sat_workbook_undo_state(&exam_id)
         .await
@@ -452,7 +554,7 @@ pub async fn get_exam_question(
     principal: AuthenticatedUser,
     Path(exam_question_id): Path<Uuid>,
 ) -> Result<ApiResponse<AssessmentQuestionDetail>, ApiError> {
-    require_exam_question_staff(&state, &principal, &exam_question_id.to_string()).await?;
+    require_exam_question_read(&state, &principal, &exam_question_id.to_string()).await?;
     let question = AssessmentAuthoringService::new(state.db_pool())
         .question(&exam_question_id.to_string())
         .await
@@ -514,7 +616,7 @@ pub async fn validate_exam(
     Path(exam_id): Path<Uuid>,
 ) -> Result<ApiResponse<AssessmentValidationReport>, ApiError> {
     let exam_id = exam_id.to_string();
-    require_staff(&state, &principal, &exam_id).await?;
+    require_read_staff(&state, &principal, &exam_id).await?;
     let report = AssessmentAuthoringService::new(state.db_pool())
         .validate(&exam_id)
         .await

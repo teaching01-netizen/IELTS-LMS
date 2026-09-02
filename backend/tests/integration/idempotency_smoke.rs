@@ -16,6 +16,7 @@ const INFRA_MIGRATIONS: &[&str] = &[
     "0008_grading_results.sql",
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 #[tokio::test]

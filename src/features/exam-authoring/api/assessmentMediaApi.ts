@@ -30,11 +30,16 @@ async function uploadImageAsset(
   if (!file.type.startsWith("image/")) throw new Error("Only image files can be inserted here.");
   if (file.size > 10 * 1024 * 1024) throw new Error("Images must be 10 MB or smaller.");
 
+  const checksumSha256 = await sha256(file);
+  if (!checksumSha256) {
+    throw new Error("Secure browser cryptography is required for image uploads.");
+  }
   const intent = await backendPost<UploadIntent>("/v1/media/uploads", {
     ownerKind,
     ownerId,
     contentType: file.type || "application/octet-stream",
     fileName: file.name,
+    checksumSha256,
   });
   const upload = await fetch(intent.uploadUrl, {
     method: "PUT",
@@ -45,7 +50,7 @@ async function uploadImageAsset(
 
   return backendPost<AssessmentMediaAsset>(`/v1/media/uploads/${intent.asset.id}/complete`, {
     sizeBytes: file.size,
-    checksumSha256: await sha256(file),
+    checksumSha256,
   });
 }
 

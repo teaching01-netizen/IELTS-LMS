@@ -207,6 +207,7 @@ async fn ensure_user(
 
     let role_value = match role {
         UserRole::Admin => "admin",
+        UserRole::AdminObserver => "admin_observer",
         UserRole::Builder => "builder",
         UserRole::Proctor => "proctor",
         UserRole::Grader => "grader",

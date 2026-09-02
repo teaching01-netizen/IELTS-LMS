@@ -57,6 +57,17 @@ const GRADING_MIGRATIONS: &[&str] = &[
     "0028_grading_objective_grading_source.sql",
     "0029_release_events_timestamp_precision.sql",
     "0030_outbox_retry_policy.sql",
+    "0032_provider_neutral_sat.sql",
+    "0033_sat_runtime_authoring_hardening.sql",
+    "0034_assessment_access_links.sql",
+    "0035_autosave_durability_hardening.sql",
+    "0036_question_revision_updated_by.sql",
+    "0037_runtime_timing_model.sql",
+    "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
+    "0040_sat_workbook_import_recovery.sql",
+    "0043_attempt_terminalizations.sql",
+    "0044_assessment_result_outcomes.sql",
 ];
 
 #[tokio::test]
@@ -553,7 +564,7 @@ async fn grading_review_and_result_release_flow_round_trips() {
         )
         .await
         .unwrap();
-    assert_eq!(forbidden_result_detail.status(), StatusCode::FORBIDDEN);
+    assert_eq!(forbidden_result_detail.status(), StatusCode::NOT_FOUND);
 
     let forbidden_result_events = app
         .clone()
@@ -565,7 +576,7 @@ async fn grading_review_and_result_release_flow_round_trips() {
         )
         .await
         .unwrap();
-    assert_eq!(forbidden_result_events.status(), StatusCode::FORBIDDEN);
+    assert_eq!(forbidden_result_events.status(), StatusCode::NOT_FOUND);
 
     let analytics = app
         .clone()
@@ -1188,9 +1199,29 @@ async fn media_upload_intent_and_completion_round_trip() {
         "Test Grader",
     )
     .await;
+    let exam_id = Uuid::new_v4();
+    sqlx::query("UPDATE users SET organization_id = ? WHERE id = ?")
+        .bind("org-media")
+        .bind(auth.user_id.to_string())
+        .execute(database.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO exam_entities (id, slug, title, exam_type, status, visibility, organization_id, owner_id) VALUES (?, ?, ?, 'Academic', 'draft', 'organization', ?, ?)",
+    )
+    .bind(exam_id.to_string())
+    .bind(format!("media-{}", exam_id))
+    .bind("Media owner")
+    .bind("org-media")
+    .bind(auth.user_id.to_string())
+    .execute(database.pool())
+    .await
+    .unwrap();
+
     let mut config = AppConfig::default();
     config.grading_sync_on_read_fallback = true;
     let app = build_router(AppState::with_pool(config, database.pool().clone()));
+    let empty_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
     let create = app
         .clone()
@@ -1201,10 +1232,11 @@ async fn media_upload_intent_and_completion_round_trip() {
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&json!({
-                        "ownerKind": "submission",
-                        "ownerId": "sub-123",
+                        "ownerKind": "assessment_exam",
+                        "ownerId": exam_id.to_string(),
                         "contentType": "audio/webm",
-                        "fileName": "speaking.webm"
+                        "fileName": "speaking.webm",
+                        "checksumSha256": empty_sha256
                     }))
                     .unwrap(),
                 ))
@@ -1220,6 +1252,28 @@ async fn media_upload_intent_and_completion_round_trip() {
         .to_owned();
     assert_eq!(create_json["data"]["asset"]["uploadStatus"], "pending");
 
+    let upload = app
+        .clone()
+        .oneshot(
+            auth.with_auth(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/api/v1/media/uploads/{asset_id}")),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let upload_status = upload.status();
+    let upload_body = to_bytes(upload.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        upload_status,
+        StatusCode::NO_CONTENT,
+        "{}",
+        String::from_utf8_lossy(&upload_body)
+    );
+
     let complete = app
         .clone()
         .oneshot(
@@ -1229,8 +1283,8 @@ async fn media_upload_intent_and_completion_round_trip() {
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&json!({
-                        "sizeBytes": 4096,
-                        "checksumSha256": "abc123"
+                        "sizeBytes": 0,
+                        "checksumSha256": empty_sha256
                     }))
                     .unwrap(),
                 ))
@@ -1245,6 +1299,21 @@ async fn media_upload_intent_and_completion_round_trip() {
         complete_json["data"]["downloadUrl"],
         serde_json::Value::Null
     );
+
+    let download = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri(format!("/api/v1/media/assets/{asset_id}")))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(download.status(), StatusCode::OK);
+    assert!(to_bytes(download.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .is_empty());
 
     let get = app
         .oneshot(
@@ -1273,6 +1342,7 @@ async fn bootstrap_and_submit(
     start_runtime(pool, schedule_id, "listening").await;
     let context = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, candidate_id),
@@ -1411,6 +1481,7 @@ fn default_content_snapshot() -> serde_json::Value {
                 "blocks": [{
                     "id": "reading-short-1",
                     "type": "SHORT_ANSWER",
+                    "stem": "Reading short answer",
                     "instruction": "Answer the question.",
                     "questions": [{
                         "id": "q-reading-1",
@@ -1421,6 +1492,7 @@ fn default_content_snapshot() -> serde_json::Value {
                 }, {
                     "id": "reading-sentence-1",
                     "type": "SENTENCE_COMPLETION",
+                    "stem": "Reading sentence completion",
                     "instruction": "Complete the sentence.",
                     "questions": [{
                         "id": "q-slot",
@@ -1440,6 +1512,7 @@ fn default_content_snapshot() -> serde_json::Value {
                 "blocks": [{
                     "id": "listening-short-1",
                     "type": "SHORT_ANSWER",
+                    "stem": "Listening short answer",
                     "instruction": "Listen and answer.",
                     "questions": [{
                         "id": "q-listening-1",
@@ -1850,33 +1923,39 @@ fn matrix_content_snapshot() -> serde_json::Value {
                     {
                         "id": "r-tfng",
                         "type": "TFNG",
+                        "stem": "True, false, or not given",
                         "mode": "TFNG",
                         "questions": [{ "id": "r-tfng-q1", "statement": "Statement 1" }]
                     },
                     {
                         "id": "r-cloze",
                         "type": "CLOZE",
+                        "stem": "Complete the cloze passage",
                         "questions": [{ "id": "r-cloze-q1", "prompt": "Fill blank" }]
                     },
                     {
                         "id": "r-matching",
                         "type": "MATCHING",
+                        "stem": "Match the information",
                         "headings": [{ "id": "i", "text": "Heading I" }, { "id": "ii", "text": "Heading II" }],
                         "questions": [{ "id": "r-matching-q1", "statement": "Match this" }]
                     },
                     {
                         "id": "r-map",
                         "type": "MAP",
+                        "stem": "Label the map",
                         "questions": [{ "id": "r-map-q1", "label": "Spot A" }]
                     },
                     {
                         "id": "r-short",
                         "type": "SHORT_ANSWER",
+                        "stem": "Answer the short question",
                         "questions": [{ "id": "r-short-q1", "prompt": "Name the animal", "correctAnswer": "fox" }]
                     },
                     {
                         "id": "r-sentence",
                         "type": "SENTENCE_COMPLETION",
+                        "stem": "Complete the sentence",
                         "questions": [{
                             "id": "r-sentence-q1",
                             "sentence": "Fill __ then __.",
@@ -1889,6 +1968,7 @@ fn matrix_content_snapshot() -> serde_json::Value {
                     {
                         "id": "r-note",
                         "type": "NOTE_COMPLETION",
+                        "stem": "Complete the note",
                         "questions": [{
                             "id": "r-note-q1",
                             "noteText": "Write a note __.",
@@ -1906,6 +1986,7 @@ fn matrix_content_snapshot() -> serde_json::Value {
                     {
                         "id": "l-multi",
                         "type": "MULTI_MCQ",
+                        "stem": "Select the correct options",
                         "requiredSelections": 2,
                         "options": [
                             { "id": "A", "text": "Option A", "isCorrect": true },
@@ -1916,6 +1997,7 @@ fn matrix_content_snapshot() -> serde_json::Value {
                     {
                         "id": "l-single-question-set",
                         "type": "SINGLE_MCQ",
+                        "stem": "Pick one answer",
                         "questions": [{
                             "id": "l-single-q1",
                             "stem": "Pick one",
@@ -1937,6 +2019,7 @@ fn matrix_content_snapshot() -> serde_json::Value {
                     {
                         "id": "l-diagram",
                         "type": "DIAGRAM_LABELING",
+                        "stem": "Label the diagram",
                         "imageUrl": "https://example.com/diagram.png",
                         "labels": [
                             { "id": "l1", "correctAnswer": "nose" },
@@ -1946,6 +2029,7 @@ fn matrix_content_snapshot() -> serde_json::Value {
                     {
                         "id": "l-flow",
                         "type": "FLOW_CHART",
+                        "stem": "Complete the flow chart",
                         "steps": [
                             { "id": "s1", "label": "Step 1", "correctAnswer": "step-1" },
                             { "id": "s2", "label": "Step 2", "correctAnswer": "step-2" }
@@ -1954,6 +2038,7 @@ fn matrix_content_snapshot() -> serde_json::Value {
                     {
                         "id": "l-table",
                         "type": "TABLE_COMPLETION",
+                        "stem": "Complete the table",
                         "headers": ["Col 1", "Col 2"],
                         "rows": [["", ""]],
                         "cells": [
@@ -1964,6 +2049,7 @@ fn matrix_content_snapshot() -> serde_json::Value {
                     {
                         "id": "l-classify",
                         "type": "CLASSIFICATION",
+                        "stem": "Classify the items",
                         "categories": ["Alpha", "Beta"],
                         "items": [
                             { "id": "i1", "text": "Item 1", "correctCategory": "Alpha" },
@@ -1973,6 +2059,7 @@ fn matrix_content_snapshot() -> serde_json::Value {
                     {
                         "id": "l-match-features",
                         "type": "MATCHING_FEATURES",
+                        "stem": "Match each feature",
                         "options": ["X", "Y"],
                         "features": [
                             { "id": "f1", "text": "Feature 1", "correctMatch": "X" },

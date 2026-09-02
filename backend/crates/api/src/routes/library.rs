@@ -42,7 +42,7 @@ pub async fn get_passage(
     principal: AuthenticatedUser,
     Path(id): Path<Uuid>,
 ) -> Result<ApiResponse<PassageLibraryItem>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = LibraryService::new(state.db_pool());
     let passage = service.get_passage(&ctx, id).await?;
@@ -83,7 +83,7 @@ pub async fn list_passages(
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
 ) -> Result<ApiResponse<Vec<PassageLibraryItem>>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = LibraryService::new(state.db_pool());
     let passages = service.list_passages(&ctx, None, None, 25).await?;
@@ -112,7 +112,7 @@ pub async fn get_question(
     principal: AuthenticatedUser,
     Path(id): Path<Uuid>,
 ) -> Result<ApiResponse<QuestionBankItem>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = LibraryService::new(state.db_pool());
     let question = service.get_question(&ctx, id).await?;
@@ -153,7 +153,7 @@ pub async fn list_questions(
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
 ) -> Result<ApiResponse<Vec<QuestionBankItem>>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = LibraryService::new(state.db_pool());
     let questions = service.list_questions(&ctx, None, None, None, 25).await?;

@@ -19,13 +19,15 @@ const MIGRATIONS: &[&str] = &[
     "0008_grading_results.sql",
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
+    "0018_exam_day_concurrency_hardening.sql",
+    "0020_schedule_role_display_names.sql",
 ];
 
 #[derive(sqlx::FromRow)]
 struct ScheduleMetadata {
-    exam_id: Uuid,
+    exam_id: String,
     exam_title: String,
-    published_version_id: Uuid,
+    published_version_id: String,
 }
 
 #[tokio::test]
@@ -104,14 +106,14 @@ async fn retention_prunes_only_expired_non_live_operational_rows_in_batches() {
     let live_heartbeat_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM student_heartbeat_events WHERE schedule_id = ?",
     )
-    .bind(live_schedule_id)
+    .bind(live_schedule_id.to_string())
     .fetch_one(&pool)
     .await
     .expect("count live heartbeats");
     let live_mutation_count = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM student_attempt_mutations WHERE attempt_id = ?",
     )
-    .bind(active_attempt_id)
+    .bind(active_attempt_id.to_string())
     .fetch_one(&pool)
     .await
     .expect("count live mutations");
@@ -167,25 +169,25 @@ async fn media_cleanup_orphans_stale_uploads_and_deletes_expired_assets_in_batch
 
     let stale_status =
         sqlx::query_scalar::<_, String>("SELECT upload_status FROM media_assets WHERE id = ?")
-            .bind(stale_pending_id)
+            .bind(stale_pending_id.to_string())
             .fetch_one(&pool)
             .await
             .expect("load stale pending asset");
     let fresh_status =
         sqlx::query_scalar::<_, String>("SELECT upload_status FROM media_assets WHERE id = ?")
-            .bind(fresh_pending_id)
+            .bind(fresh_pending_id.to_string())
             .fetch_one(&pool)
             .await
             .expect("load fresh pending asset");
     let active_status =
         sqlx::query_scalar::<_, String>("SELECT upload_status FROM media_assets WHERE id = ?")
-            .bind(active_asset_id)
+            .bind(active_asset_id.to_string())
             .fetch_one(&pool)
             .await
             .expect("load active asset");
     let deleted_count =
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM media_assets WHERE id = ?")
-            .bind(expired_asset_id)
+            .bind(expired_asset_id.to_string())
             .fetch_one(&pool)
             .await
             .expect("count deleted asset");
@@ -213,12 +215,12 @@ async fn seed_schedule(pool: &MySqlPool, status: &str) -> Uuid {
         VALUES (?, ?, ?, 'Academic', 'published', 'private', 'owner-1', ?, ?, ?, 0)
         "#,
     )
-    .bind(exam_id)
+    .bind(exam_id.to_string())
     .bind(format!("exam-{schedule_id}"))
     .bind(format!("Exam {schedule_id}"))
     .bind(now)
     .bind(now)
-    .bind(version_id)
+    .bind(version_id.to_string())
     .execute(pool)
     .await
     .expect("insert exam");
@@ -232,8 +234,8 @@ async fn seed_schedule(pool: &MySqlPool, status: &str) -> Uuid {
         VALUES (?, ?, 1, JSON_OBJECT(), JSON_OBJECT(), 'owner-1', ?, false, true, 0)
         "#,
     )
-    .bind(version_id)
-    .bind(exam_id)
+    .bind(version_id.to_string())
+    .bind(exam_id.to_string())
     .bind(now)
     .execute(pool)
     .await
@@ -249,9 +251,9 @@ async fn seed_schedule(pool: &MySqlPool, status: &str) -> Uuid {
         VALUES (?, ?, 'Exam title', 'Exam title', 'Exam title', ?, 'Cohort A', ?, ?, 180, 'proctor_start', ?, 'owner-1', ?, ?, 0)
         "#,
     )
-    .bind(schedule_id)
-    .bind(exam_id)
-    .bind(version_id)
+    .bind(schedule_id.to_string())
+    .bind(exam_id.to_string())
+    .bind(version_id.to_string())
     .bind(now)
     .bind(now + Duration::hours(3))
     .bind(status)
@@ -268,7 +270,7 @@ async fn seed_attempt(pool: &MySqlPool, schedule_id: Uuid, submitted: bool) -> U
     let exam_row = sqlx::query_as::<_, ScheduleMetadata>(
         "SELECT exam_id, exam_title, published_version_id FROM exam_schedules WHERE id = ?",
     )
-    .bind(schedule_id)
+    .bind(schedule_id.to_string())
     .fetch_one(pool)
     .await
     .expect("load schedule metadata");
@@ -286,8 +288,8 @@ async fn seed_attempt(pool: &MySqlPool, schedule_id: Uuid, submitted: bool) -> U
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'exam', 'reading', JSON_OBJECT(), JSON_OBJECT(), JSON_OBJECT(), JSON_ARRAY(), JSON_OBJECT(), JSON_OBJECT(), ?, NOW(), NOW(), 0)
         "#,
     )
-    .bind(attempt_id)
-    .bind(schedule_id)
+    .bind(attempt_id.to_string())
+    .bind(schedule_id.to_string())
     .bind(format!("student-{attempt_id}"))
     .bind(exam_row.exam_id)
     .bind(exam_row.published_version_id)
@@ -351,7 +353,7 @@ async fn insert_user_sessions(pool: &MySqlPool) {
             (?, 'retention-user@example.com', 'Retention User', 'admin', 'active', 0, NULL, NOW(), NOW(), NOW())
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4().to_string())
     .execute(pool)
     .await
     .expect("insert retention user");
@@ -387,11 +389,11 @@ async fn insert_user_sessions(pool: &MySqlPool) {
             )
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4().to_string())
     .bind(&user_id)
-    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4().to_string())
     .bind(&user_id)
-    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4().to_string())
     .bind(&user_id)
     .execute(pool)
     .await
@@ -410,8 +412,8 @@ async fn insert_outbox_rows(pool: &MySqlPool) {
             (?, 'schedule_runtime', 'fresh', 1, 'runtime_changed', JSON_OBJECT(), NOW(), NULL, NULL, 0)
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4().to_string())
+    .bind(Uuid::new_v4().to_string())
     .execute(pool)
     .await
     .expect("insert outbox rows");
@@ -429,14 +431,15 @@ async fn insert_heartbeat(
     sqlx::query(
         r#"
         INSERT INTO student_heartbeat_events (
-            id, attempt_id, schedule_id, event_type, payload, client_timestamp, server_received_at
+            id, attempt_id, schedule_id, mutation_id, event_type, payload, client_timestamp, server_received_at
         )
-        VALUES (?, ?, ?, 'disconnect', JSON_OBJECT('seq', ?), ?, ?)
+        VALUES (?, ?, ?, ?, 'disconnect', JSON_OBJECT('seq', ?), ?, ?)
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(attempt_id)
-    .bind(schedule_id)
+    .bind(Uuid::new_v4().to_string())
+    .bind(attempt_id.to_string())
+    .bind(schedule_id.to_string())
+    .bind(format!("heartbeat-{suffix}"))
     .bind(suffix)
     .bind(timestamp)
     .bind(timestamp)
@@ -464,10 +467,10 @@ async fn insert_mutation(
         VALUES (?, ?, ?, ?, 'answer.set', ?, ?, JSON_OBJECT(), ?, ?, 1, ?)
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(attempt_id)
-    .bind(schedule_id)
-    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4().to_string())
+    .bind(attempt_id.to_string())
+    .bind(schedule_id.to_string())
+    .bind(Uuid::new_v4().to_string())
     .bind(format!("mutation-{sequence}"))
     .bind(sequence)
     .bind(timestamp)
@@ -496,7 +499,7 @@ async fn insert_media_asset(
         VALUES (?, 'submission', 'submission-1', 'audio/webm', 'clip.webm', ?, ?, 'https://upload.local', ?, ?, ?)
         "#,
     )
-    .bind(id)
+    .bind(id.to_string())
     .bind(upload_status)
     .bind(format!("asset-{id}"))
     .bind(delete_after_days.map(|days| Utc::now() + Duration::days(days)))

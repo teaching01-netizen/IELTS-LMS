@@ -196,9 +196,17 @@ async fn authorize_schedule(
     principal: &AuthenticatedUser,
     schedule_id: Uuid,
 ) -> Result<(), ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Grader, UserRole::Proctor])?;
+    principal.require_one_of(&[
+        UserRole::Admin,
+        UserRole::AdminObserver,
+        UserRole::Grader,
+        UserRole::Proctor,
+    ])?;
 
-    if principal.user.role == UserRole::Admin {
+    if matches!(
+        principal.user.role,
+        UserRole::Admin | UserRole::AdminObserver
+    ) {
         return Ok(());
     }
 
@@ -219,13 +227,7 @@ async fn authorize_schedule(
         )
         .await
         .map(|_| ())
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::FORBIDDEN,
-                "FORBIDDEN",
-                "The authenticated user is not assigned to this schedule.",
-            )
-        })
+        .map_err(|_| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))
 }
 
 impl From<AnswerHistoryError> for ApiError {

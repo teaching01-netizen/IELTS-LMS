@@ -77,7 +77,7 @@ pub async fn list_sessions(
     principal: AuthenticatedUser,
     Query(query): Query<SessionListQuery>,
 ) -> Result<ApiResponse<serde_json::Value>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Grader])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Grader])?;
     let ctx = crate::http::auth::actor_context_from_principal(&principal);
     let service = grading_service(&state);
     let started = Instant::now();
@@ -86,7 +86,10 @@ pub async fn list_sessions(
     if query.page.is_some() || query.page_size.is_some() || query.search.is_some() {
         let page = query.page.unwrap_or(1);
         let page_size = query.page_size.unwrap_or(10);
-        let allowed_schedule_ids = if principal.user.role == UserRole::Admin {
+        let allowed_schedule_ids = if matches!(
+            principal.user.role,
+            UserRole::Admin | UserRole::AdminObserver
+        ) {
             None
         } else {
             Some(assigned_schedule_ids(&state, &principal.user.id).await?)
@@ -115,13 +118,19 @@ pub async fn list_sessions(
     // Legacy response: a plain array (used by load-runner, prod smoke, and
     // internal consumers that expect the historical shape).
     let limit = query.limit.unwrap_or(200).clamp(1, 500);
-    let db_limit = if principal.user.role == UserRole::Admin {
+    let db_limit = if matches!(
+        principal.user.role,
+        UserRole::Admin | UserRole::AdminObserver
+    ) {
         limit
     } else {
         500
     };
     let sessions = service.list_sessions(&ctx, db_limit).await?;
-    let sessions = if principal.user.role == UserRole::Admin {
+    let sessions = if matches!(
+        principal.user.role,
+        UserRole::Admin | UserRole::AdminObserver
+    ) {
         sessions
     } else {
         let allowed = assigned_schedule_ids(&state, &principal.user.id).await?;
@@ -146,7 +155,7 @@ pub async fn list_objective_overrides(
     principal: AuthenticatedUser,
     Path(schedule_id): Path<Uuid>,
 ) -> Result<ApiResponse<Vec<GradingScheduleObjectiveOverride>>, ApiError> {
-    authorize_schedule_for_overrides(&state, &principal, schedule_id).await?;
+    authorize_read_schedule_for_overrides(&state, &principal, schedule_id).await?;
     let ctx = crate::http::auth::actor_context_from_principal(&principal)
         .with_schedule_scope_id(schedule_id.to_string());
     let service = grading_service(&state);
@@ -172,7 +181,7 @@ pub async fn get_objective_grading_source(
     principal: AuthenticatedUser,
     Path(schedule_id): Path<Uuid>,
 ) -> Result<ApiResponse<ObjectiveGradingSourceResponse>, ApiError> {
-    authorize_schedule_for_overrides(&state, &principal, schedule_id).await?;
+    authorize_read_schedule_for_overrides(&state, &principal, schedule_id).await?;
     let ctx = crate::http::auth::actor_context_from_principal(&principal)
         .with_schedule_scope_id(schedule_id.to_string());
     let service = grading_service(&state);
@@ -195,7 +204,7 @@ pub async fn get_objective_integrity_overview(
     principal: AuthenticatedUser,
     Path(schedule_id): Path<Uuid>,
 ) -> Result<ApiResponse<ObjectiveIntegrityOverview>, ApiError> {
-    authorize_schedule_for_overrides(&state, &principal, schedule_id).await?;
+    authorize_read_schedule_for_overrides(&state, &principal, schedule_id).await?;
     let ctx = crate::http::auth::actor_context_from_principal(&principal)
         .with_schedule_scope_id(schedule_id.to_string());
     let service = grading_service(&state);
@@ -321,7 +330,7 @@ pub async fn get_session(
     Query(query): Query<SessionDetailQuery>,
     Path(session_id): Path<Uuid>,
 ) -> Result<ApiResponse<GradingSessionDetail>, ApiError> {
-    authorize_schedule(&state, &principal, session_id).await?;
+    authorize_read_schedule(&state, &principal, session_id).await?;
     let ctx = crate::http::auth::actor_context_from_principal(&principal)
         .with_schedule_scope_id(session_id.to_string());
     let page = query.page.unwrap_or(1);
@@ -365,7 +374,7 @@ pub async fn get_submission(
             &format!("Invalid schedule_id in student_submissions: {err}"),
         )
     })?;
-    authorize_schedule(&state, &principal, schedule_id).await?;
+    authorize_read_schedule(&state, &principal, schedule_id).await?;
     let ctx = crate::http::auth::actor_context_from_principal(&principal)
         .with_schedule_scope_id(schedule_id.to_string());
     let service = grading_service(&state);
@@ -405,7 +414,7 @@ pub async fn get_submission_sections(
             &format!("Invalid schedule_id in student_submissions: {err}"),
         )
     })?;
-    authorize_schedule(&state, &principal, schedule_id).await?;
+    authorize_read_schedule(&state, &principal, schedule_id).await?;
     let ctx = crate::http::auth::actor_context_from_principal(&principal)
         .with_schedule_scope_id(schedule_id.to_string());
     let service = grading_service(&state);
@@ -499,7 +508,7 @@ pub async fn get_submission_writing_tasks(
             &format!("Invalid schedule_id in student_submissions: {err}"),
         )
     })?;
-    authorize_schedule(&state, &principal, schedule_id).await?;
+    authorize_read_schedule(&state, &principal, schedule_id).await?;
     let ctx = crate::http::auth::actor_context_from_principal(&principal)
         .with_schedule_scope_id(schedule_id.to_string());
     let service = grading_service(&state);
@@ -586,7 +595,7 @@ pub async fn get_review_draft(
             &format!("Invalid schedule_id in student_submissions: {err}"),
         )
     })?;
-    authorize_schedule(&state, &principal, schedule_id).await?;
+    authorize_read_schedule(&state, &principal, schedule_id).await?;
     let service = grading_service(&state);
     let started = Instant::now();
     let draft = service.get_review_draft(submission_id).await?;
@@ -864,6 +873,7 @@ pub async fn get_result_events(
         FROM release_events events
         JOIN student_submissions submissions ON submissions.id = events.submission_id
         WHERE events.result_id = ?
+          AND submissions.provider_key = 'ielts'
         LIMIT 1
         "#,
     )
@@ -885,23 +895,28 @@ pub async fn get_result_events(
             &format!("Invalid schedule_id from release_events join: {err}"),
         )
     })?;
-    authorize_schedule(&state, &principal, schedule_id).await?;
+    authorize_read_schedule(&state, &principal, schedule_id).await?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal)
+        .with_schedule_scope_id(schedule_id.to_string());
     let service = grading_service(&state);
     let started = Instant::now();
-    let events = service.get_result_events(result_id).await?;
+    let events = service.get_result_events(&ctx, result_id).await?;
     state
         .telemetry
         .observe_db_operation("grading.get_result_events", started.elapsed());
     Ok(ApiResponse::success_with_request_id(events, request_id.0))
 }
 
-async fn authorize_schedule(
+async fn authorize_read_schedule(
     state: &AppState,
     principal: &AuthenticatedUser,
     schedule_id: Uuid,
 ) -> Result<(), ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Grader])?;
-    if principal.user.role == UserRole::Admin {
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Grader])?;
+    if matches!(
+        principal.user.role,
+        UserRole::Admin | UserRole::AdminObserver
+    ) {
         return Ok(());
     }
     AuthService::new(state.db_pool(), state.config.clone())
@@ -924,13 +939,80 @@ async fn authorize_schedule(
         })
 }
 
+async fn authorize_schedule(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    schedule_id: Uuid,
+) -> Result<(), ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::Grader])?;
+    if matches!(
+        principal.user.role,
+        UserRole::Admin | UserRole::AdminObserver
+    ) {
+        return Ok(());
+    }
+    AuthService::new(state.db_pool(), state.config.clone())
+        .authorize_staff_schedule(
+            &ielts_backend_application::auth::AuthenticatedSession {
+                user: principal.user.clone(),
+                session: principal.session.clone(),
+            },
+            schedule_id.to_string(),
+            UserRole::Grader,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::FORBIDDEN,
+                "FORBIDDEN",
+                "The authenticated user is not assigned to this grading schedule.",
+            )
+        })
+}
+
+async fn authorize_read_schedule_for_overrides(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    schedule_id: Uuid,
+) -> Result<(), ApiError> {
+    principal.require_one_of(&[
+        UserRole::Admin,
+        UserRole::AdminObserver,
+        UserRole::Grader,
+        UserRole::Proctor,
+    ])?;
+    if matches!(
+        principal.user.role,
+        UserRole::Admin | UserRole::AdminObserver
+    ) {
+        return Ok(());
+    }
+    let required_role = principal.user.role.clone();
+    AuthService::new(state.db_pool(), state.config.clone())
+        .authorize_staff_schedule(
+            &ielts_backend_application::auth::AuthenticatedSession {
+                user: principal.user.clone(),
+                session: principal.session.clone(),
+            },
+            schedule_id.to_string(),
+            required_role,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|_| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))
+}
+
 async fn authorize_schedule_for_overrides(
     state: &AppState,
     principal: &AuthenticatedUser,
     schedule_id: Uuid,
 ) -> Result<(), ApiError> {
     principal.require_one_of(&[UserRole::Admin, UserRole::Grader, UserRole::Proctor])?;
-    if principal.user.role == UserRole::Admin {
+    if matches!(
+        principal.user.role,
+        UserRole::Admin | UserRole::AdminObserver
+    ) {
         return Ok(());
     }
 

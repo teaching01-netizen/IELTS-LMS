@@ -63,6 +63,8 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
     "0036_question_revision_updated_by.sql",
     "0037_runtime_timing_model.sql",
     "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 fn command(mutation_type: MutationType, payload: serde_json::Value) -> MutationCommand {
@@ -96,6 +98,7 @@ async fn deadline_is_a_write_fence_but_duplicate_replay_remains_idempotent() {
     let client_session_id = Uuid::new_v4().to_string();
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "deadline"),
@@ -222,6 +225,7 @@ async fn mutation_batches_use_server_canonical_sequence_even_when_client_sequenc
     let service = DeliveryService::new(database.pool().clone());
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -375,6 +379,7 @@ async fn operation_mutations_ignore_legacy_base_revision_and_preserve_other_fiel
     let service = DeliveryService::new(database.pool().clone());
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -509,6 +514,7 @@ async fn operation_mutations_with_idempotency_key_are_deterministic_and_do_not_d
     let service = DeliveryService::new(database.pool().clone());
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -591,6 +597,7 @@ async fn idempotency_hash_mismatch_rejects_conflict_without_partial_writes() {
     let service = DeliveryService::new(database.pool().clone());
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -695,6 +702,7 @@ async fn submit_rejects_missing_seq_without_final_patch() {
     let service = DeliveryService::new(database.pool().clone());
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -716,9 +724,9 @@ async fn submit_rejects_missing_seq_without_final_patch() {
         .expect("move attempt into exam phase");
     sqlx::query(
         r#"INSERT INTO exam_session_runtimes (
-            id, schedule_id, exam_id, status, plan_snapshot, actual_start_at,
+            id, schedule_id, exam_id, provider_key, status, plan_snapshot, actual_start_at,
             active_section_key, current_section_key, current_section_remaining_seconds
-        ) VALUES (?, ?, ?, 'live', JSON_OBJECT(), NOW(), 'reading', 'reading', 3600)"#,
+        ) VALUES (?, ?, ?, 'ielts', 'live', JSON_OBJECT(), NOW(), 'reading', 'reading', 3600)"#,
     )
     .bind(Uuid::new_v4().to_string())
     .bind(schedule.id.clone())
@@ -769,6 +777,7 @@ async fn operation_set_slot_persists_mutation_and_answer_slot_rows() {
     let service = DeliveryService::new(database.pool().clone());
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -844,6 +853,7 @@ async fn mutation_id_replay_after_session_takeover_is_exactly_once() {
     let service = DeliveryService::new(database.pool().clone());
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -950,6 +960,7 @@ async fn mutation_id_reuse_with_different_payload_is_rejected_without_mutation()
     let service = DeliveryService::new(database.pool().clone());
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -1058,6 +1069,7 @@ async fn stale_writer_is_fenced_before_any_ledger_or_answer_mutation() {
     let service = DeliveryService::new(database.pool().clone());
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -1137,6 +1149,7 @@ async fn mixed_duplicate_and_new_batch_returns_ordered_explicit_acknowledgements
     let service = DeliveryService::new(database.pool().clone());
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -1247,6 +1260,7 @@ async fn parallel_retries_for_same_operation_do_not_create_duplicate_mutation_id
     let service_b = DeliveryService::new(database.pool().clone());
     let session = service_a
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, "alice"),
@@ -1325,6 +1339,7 @@ async fn bootstrap_is_idempotent_under_concurrent_race_for_same_student() {
     let schedule_id = Uuid::parse_str(&schedule.id).expect("schedule id");
     let service_a = DeliveryService::new(database.pool().clone());
     let service_b = DeliveryService::new(database.pool().clone());
+    let actor = ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin);
 
     let req = StudentBootstrapRequest {
         student_key: student_key(schedule_id, "alice"),
@@ -1337,8 +1352,8 @@ async fn bootstrap_is_idempotent_under_concurrent_race_for_same_student() {
     };
 
     let (left, right) = tokio::join!(
-        service_a.bootstrap(schedule_id, req.clone()),
-        service_b.bootstrap(schedule_id, req)
+        service_a.bootstrap(&actor, schedule_id, req.clone()),
+        service_b.bootstrap(&actor, schedule_id, req)
     );
     let left_attempt_id = left
         .expect("left bootstrap")

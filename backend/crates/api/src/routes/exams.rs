@@ -52,7 +52,6 @@ fn to_exam_with_permissions(
     let can_modify = matches!(
         ctx.role,
         ielts_backend_infrastructure::actor_context::ActorRole::Admin
-            | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
             | ielts_backend_infrastructure::actor_context::ActorRole::Builder
     ) || exam
         .organization_id
@@ -73,7 +72,7 @@ pub async fn list_exams(
     principal: AuthenticatedUser,
     Query(query): Query<ExamListQuery>,
 ) -> Result<ApiResponse<Vec<ExamEntityWithPermissions>>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     if let Some(provider_key) = query.provider_key.as_deref() {
         if !matches!(provider_key, "sat" | "ielts") {
@@ -118,7 +117,7 @@ pub async fn get_exam(
     principal: AuthenticatedUser,
     Path(id): Path<Uuid>,
 ) -> Result<ApiResponse<ExamEntityWithPermissions>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let exam = service.get_exam(&ctx, id.to_string()).await?;
@@ -198,7 +197,7 @@ pub async fn get_version(
     headers: HeaderMap,
     Path(version_id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let started = Instant::now();
@@ -238,7 +237,7 @@ pub async fn get_version_with_projection(
     Path(version_id): Path<Uuid>,
     Query(query): Query<VersionQuery>,
 ) -> Result<Response, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let started = Instant::now();
@@ -382,7 +381,7 @@ pub async fn list_versions(
     principal: AuthenticatedUser,
     Path(exam_id): Path<Uuid>,
 ) -> Result<ApiResponse<Vec<ExamVersion>>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let versions = service.list_versions(&ctx, exam_id.to_string()).await?;
@@ -395,7 +394,7 @@ pub async fn list_version_summaries(
     principal: AuthenticatedUser,
     Path(exam_id): Path<Uuid>,
 ) -> Result<ApiResponse<Vec<ExamVersionSummary>>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let versions = service
@@ -410,7 +409,7 @@ pub async fn list_events(
     principal: AuthenticatedUser,
     Path(exam_id): Path<Uuid>,
 ) -> Result<ApiResponse<Vec<ielts_backend_domain::exam::ExamEvent>>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let events = service.list_events(&ctx, exam_id.to_string()).await?;
@@ -436,7 +435,7 @@ pub async fn get_validation(
     principal: AuthenticatedUser,
     Path(exam_id): Path<Uuid>,
 ) -> Result<ApiResponse<ExamValidationSummary>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Builder])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
     let ctx = principal.actor_context();
     let service = BuilderService::new(state.db_pool());
     let started = Instant::now();

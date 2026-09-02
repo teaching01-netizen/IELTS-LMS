@@ -20,10 +20,11 @@ use ielts_backend_infrastructure::{
     config::AppConfig,
     idempotency::{IdempotencyLookupStatus, IdempotencyRecord, IdempotencyRepository},
     live_mode::LiveModeService,
+    outbox::OutboxRepository,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Map, Value};
-use sqlx::{MySql, MySqlConnection, MySqlPool, QueryBuilder};
+use sqlx::{MySql, MySqlConnection, MySqlPool, QueryBuilder, Transaction};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
@@ -42,6 +43,7 @@ pub enum DeliveryConflictReason {
     ActiveSessionSuperseded,
     FinalFlushRequired,
     FinalPayloadHashMismatch,
+    InvalidMutation,
 }
 
 impl DeliveryConflictReason {
@@ -56,6 +58,7 @@ impl DeliveryConflictReason {
             DeliveryConflictReason::ActiveSessionSuperseded => "ACTIVE_SESSION_SUPERSEDED",
             DeliveryConflictReason::FinalFlushRequired => "FINAL_FLUSH_REQUIRED",
             DeliveryConflictReason::FinalPayloadHashMismatch => "FINAL_PAYLOAD_HASH_MISMATCH",
+            DeliveryConflictReason::InvalidMutation => "INVALID_MUTATION",
         }
     }
 }
@@ -64,6 +67,187 @@ impl DeliveryConflictReason {
 pub enum MutationBatchResponseMode {
     Full,
     Ack,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TerminalizationActorKind {
+    Student,
+    Proctor,
+    System,
+}
+
+impl TerminalizationActorKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Student => "student",
+            Self::Proctor => "proctor",
+            Self::System => "system",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SealAttemptCommand {
+    pub attempt_id: String,
+    pub schedule_id: String,
+    pub outcome: &'static str,
+    pub reason: String,
+    pub actor_kind: TerminalizationActorKind,
+    pub actor_id: Option<String>,
+    pub proctor_note: Option<String>,
+    pub request_id: String,
+    pub min_answer_revision: Option<i32>,
+    pub effective_at: Option<DateTime<Utc>>,
+    pub final_submission: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SealAttemptResult {
+    pub attempt: StudentAttempt,
+    pub terminalization_id: String,
+    pub outcome: String,
+    pub reason: String,
+    pub effective_at: DateTime<Utc>,
+    pub recorded_at: DateTime<Utc>,
+    pub snapshot: Value,
+    pub created: bool,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct TerminalizationRow {
+    attempt_id: String,
+    organization_id: Option<String>,
+    terminalization_id: String,
+    schedule_id: String,
+    outcome: String,
+    reason: String,
+    actor_kind: String,
+    actor_id: Option<String>,
+    effective_at: DateTime<Utc>,
+    recorded_at: DateTime<Utc>,
+    answer_revision: i32,
+    final_snapshot: Value,
+    schedule_transition_id: Option<String>,
+    request_id: String,
+}
+
+pub(crate) fn terminalization_intent_is_compatible(
+    existing_outcome: &str,
+    _existing_reason: &str,
+    requested_outcome: &str,
+    _requested_reason: &str,
+) -> bool {
+    existing_outcome == requested_outcome
+}
+
+fn build_terminal_snapshot(
+    attempt_id: &str,
+    schedule_id: &str,
+    organization_id: Option<&str>,
+    exam_id: &str,
+    published_version_id: &str,
+    provider_key: &str,
+    answer_revision: i32,
+    answers: Value,
+    writing_answers: Value,
+    flags: Value,
+) -> Value {
+    json!({
+        "attemptId": attempt_id,
+        "scheduleId": schedule_id,
+        "organizationId": organization_id,
+        "examId": exam_id,
+        "publishedVersionId": published_version_id,
+        "providerKey": provider_key,
+        "answerRevision": answer_revision,
+        "answers": answers,
+        "writingAnswers": writing_answers,
+        "flags": flags,
+    })
+}
+
+fn sat_terminal_outcome_status(
+    outcome: &str,
+    actor_kind: TerminalizationActorKind,
+) -> &'static str {
+    match outcome {
+        "terminated" if actor_kind == TerminalizationActorKind::Proctor => "invalidated_proctor",
+        "terminated" => "invalidated_timeout",
+        _ => "pending",
+    }
+}
+
+async fn materialize_sat_terminal_result_in_tx(
+    tx: &mut Transaction<'_, MySql>,
+    attempt: &StudentAttempt,
+    provider_key: &str,
+    outcome: &str,
+    reason: &str,
+    actor_kind: TerminalizationActorKind,
+    terminalization_id: &str,
+    effective_at: DateTime<Utc>,
+    snapshot: &Value,
+) -> Result<(), DeliveryError> {
+    if provider_key != "sat" {
+        return Ok(());
+    }
+
+    let existing: Option<(String, String)> = sqlx::query_as(
+        "SELECT id, outcome_status FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE",
+    )
+    .bind(&attempt.id)
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    let outcome_status = sat_terminal_outcome_status(outcome, actor_kind);
+    if let Some((result_id, existing_status)) = existing {
+        if outcome == "terminated" && existing_status != outcome_status {
+            sqlx::query("DELETE FROM assessment_section_results WHERE assessment_result_id = ?")
+                .bind(&result_id)
+                .execute(&mut **tx)
+                .await?;
+            sqlx::query(
+                "UPDATE assessment_results SET submission_id = NULL, total_score = NULL, outcome_status = ?, release_status = 'invalidated', score_payload = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?",
+            )
+            .bind(outcome_status)
+            .bind(json!({
+                "providerKey": "sat",
+                "outcomeStatus": outcome_status,
+                "completionReason": reason,
+                "terminalizationId": terminalization_id,
+                "submittedAt": effective_at,
+                "snapshot": snapshot,
+            }))
+            .bind(result_id)
+            .execute(&mut **tx)
+            .await?;
+        }
+        return Ok(());
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO assessment_results (
+            id, attempt_id, submission_id, provider_key, outcome_status,
+            total_score, score_payload, release_status
+        )
+        VALUES (?, ?, NULL, 'sat', ?, NULL, ?, 'invalidated')
+        "#,
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(&attempt.id)
+    .bind(outcome_status)
+    .bind(json!({
+        "providerKey": "sat",
+        "outcomeStatus": outcome_status,
+        "completionReason": reason,
+        "terminalizationId": terminalization_id,
+        "submittedAt": effective_at,
+        "snapshot": snapshot,
+    }))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 /// Provider-neutral active-writer claim. Keeping every `student_attempts` update in this
@@ -75,7 +259,7 @@ pub(crate) async fn claim_provider_attempt_writer_in_tx(
     client_session_id: &str,
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query(
-        "UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL",
+        "UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL AND submitted_at IS NULL AND COALESCE(proctor_status, 'active') <> 'terminated'",
     )
     .bind(client_session_id)
     .bind(attempt_id)
@@ -99,36 +283,14 @@ pub(crate) async fn mark_provider_attempt_exam_phase_in_tx(
     Ok(result.rows_affected())
 }
 
-/// Authoritative writer for provider-neutral finalization of protected attempt fields.
-/// Callers must pass the connection from their existing transaction so provider-specific
-/// result rows and the canonical attempt seal commit atomically.
-pub(crate) async fn seal_provider_attempt_in_tx(
-    conn: &mut MySqlConnection,
-    attempt_id: &str,
-    final_submission: &Value,
-) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
-        "UPDATE student_attempts SET phase = 'post-exam', final_submission = ?, submitted_at = CURRENT_TIMESTAMP(6), updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ?",
-    )
-    .bind(final_submission)
-    .bind(attempt_id)
-    .execute(conn)
-    .await?;
-    Ok(result.rows_affected())
-}
-
-/// Same authoritative writer path for proctor termination. Existing submitted timestamps are
-/// preserved because termination may race an idempotent finalization replay.
-pub(crate) async fn terminate_provider_attempt_in_tx(
+pub(crate) async fn increment_provider_attempt_answer_revision_in_tx(
     conn: &mut MySqlConnection,
     attempt_id: &str,
     schedule_id: &str,
-    final_submission: &Value,
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query(
-        "UPDATE student_attempts SET phase = 'post-exam', final_submission = ?, submitted_at = COALESCE(submitted_at, CURRENT_TIMESTAMP(6)), updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND schedule_id = ?",
+        "UPDATE student_attempts SET answer_revision = answer_revision + 1, updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND schedule_id = ?",
     )
-    .bind(final_submission)
     .bind(attempt_id)
     .bind(schedule_id)
     .execute(conn)
@@ -136,6 +298,437 @@ pub(crate) async fn terminate_provider_attempt_in_tx(
     Ok(result.rows_affected())
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct TerminalModuleSnapshotRow {
+    id: String,
+    module_id: String,
+    state: String,
+    allocated_seconds: i32,
+    started_at: Option<DateTime<Utc>>,
+    submitted_at: Option<DateTime<Utc>>,
+    locked_at: Option<DateTime<Utc>>,
+    completion_reason: Option<String>,
+    revision: i32,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct TerminalResponseSnapshotRow {
+    id: String,
+    module_attempt_id: String,
+    exam_question_id: String,
+    response: Option<Value>,
+    marked_for_review: bool,
+    eliminated_options: Value,
+    annotations: Value,
+    revision: i32,
+}
+
+async fn load_terminalization_in_tx(
+    conn: &mut MySqlConnection,
+    attempt_id: &str,
+) -> Result<Option<TerminalizationRow>, DeliveryError> {
+    sqlx::query_as::<_, TerminalizationRow>(
+        "SELECT attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, schedule_transition_id, request_id FROM attempt_terminalizations WHERE attempt_id = ? FOR UPDATE",
+    )
+    .bind(attempt_id)
+    .fetch_optional(conn)
+    .await
+    .map_err(DeliveryError::from)
+}
+
+pub(crate) async fn lock_schedule_terminalization_scope_in_tx(
+    conn: &mut MySqlConnection,
+    schedule_id: &str,
+) -> Result<(), DeliveryError> {
+    let runtime: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT id, current_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+    )
+    .bind(schedule_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some((runtime_id, Some(section_key))) = runtime {
+        sqlx::query(
+            "SELECT id FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR UPDATE",
+        )
+        .bind(runtime_id)
+        .bind(section_key)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn lock_attempt_terminalization_scope_in_tx(
+    conn: &mut MySqlConnection,
+    schedule_id: &str,
+    attempt_id: &str,
+) -> Result<(), DeliveryError> {
+    // All attempt writers acquire the attempt row before the shared runtime
+    // rows. This is the lock-order fence for student/proctor races.
+    sqlx::query("SELECT id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")
+        .bind(attempt_id)
+        .bind(schedule_id)
+        .fetch_optional(&mut *conn)
+        .await?
+        .ok_or(DeliveryError::NotFound)?;
+    lock_schedule_terminalization_scope_in_tx(conn, schedule_id).await?;
+    Ok(())
+}
+
+pub(crate) async fn lock_sat_modules_in_tx(
+    conn: &mut MySqlConnection,
+    attempt_id: &str,
+    completion_reason: &str,
+    effective_at: DateTime<Utc>,
+) -> Result<(), DeliveryError> {
+    sqlx::query(
+        "UPDATE assessment_module_attempts SET state = 'locked', locked_at = COALESCE(locked_at, ?), paused_at = NULL, completion_reason = COALESCE(completion_reason, ?), revision = revision + 1 WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review')",
+    )
+    .bind(effective_at)
+    .bind(completion_reason)
+    .bind(attempt_id)
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+fn terminalization_conflict(receipt: &TerminalizationRow, latest_revision: i32) -> DeliveryError {
+    DeliveryError::TerminalizationConflict {
+        message: format!(
+            "Attempt is already terminalized as {} ({}).",
+            receipt.outcome, receipt.reason
+        ),
+        outcome: receipt.outcome.clone(),
+        reason: receipt.reason.clone(),
+        terminalization_id: receipt.terminalization_id.clone(),
+        latest_revision,
+    }
+}
+
+fn default_final_submission(
+    snapshot: &Value,
+    outcome: &str,
+    reason: &str,
+    effective_at: DateTime<Utc>,
+) -> Value {
+    let mut projection = json!({
+        "submissionId": format!("submission-{}", Uuid::new_v4().simple()),
+        "submittedAt": effective_at,
+        "answers": snapshot.get("answers").cloned().unwrap_or_else(|| json!({})),
+        "writingAnswers": snapshot.get("writingAnswers").cloned().unwrap_or_else(|| json!({})),
+        "flags": snapshot.get("flags").cloned().unwrap_or_else(|| json!({})),
+        "completionReason": reason,
+        "autoSubmission": outcome == "submitted" && reason != "student_submit",
+    });
+    if outcome == "terminated" {
+        projection["terminated"] = json!(true);
+    }
+    projection
+}
+
+async fn build_server_terminal_snapshot(
+    conn: &mut MySqlConnection,
+    attempt: &StudentAttempt,
+    provider_key: &str,
+) -> Result<Value, DeliveryError> {
+    let mut snapshot = build_terminal_snapshot(
+        &attempt.id,
+        &attempt.schedule_id,
+        attempt.organization_id.as_deref(),
+        &attempt.exam_id,
+        &attempt.published_version_id,
+        provider_key,
+        attempt.answer_revision,
+        attempt.answers.clone().into(),
+        attempt.writing_answers.clone().into(),
+        attempt.flags.clone().into(),
+    );
+
+    if provider_key == "sat" {
+        let modules = sqlx::query_as::<_, TerminalModuleSnapshotRow>(
+            "SELECT id, module_id, state, allocated_seconds, started_at, submitted_at, locked_at, completion_reason, revision FROM assessment_module_attempts WHERE attempt_id = ? ORDER BY created_at, id FOR UPDATE",
+        )
+        .bind(&attempt.id)
+        .fetch_all(&mut *conn)
+        .await?;
+        let responses = sqlx::query_as::<_, TerminalResponseSnapshotRow>(
+            "SELECT id, module_attempt_id, exam_question_id, response, marked_for_review, eliminated_options, annotations, revision FROM assessment_question_responses WHERE module_attempt_id IN (SELECT id FROM assessment_module_attempts WHERE attempt_id = ?) ORDER BY module_attempt_id, exam_question_id FOR UPDATE",
+        )
+        .bind(&attempt.id)
+        .fetch_all(&mut *conn)
+        .await?;
+        snapshot["assessment"] = json!({
+            "moduleAttempts": modules.into_iter().map(|module| json!({
+                "id": module.id,
+                "moduleId": module.module_id,
+                "state": module.state,
+                "allocatedSeconds": module.allocated_seconds,
+                "startedAt": module.started_at,
+                "submittedAt": module.submitted_at,
+                "lockedAt": module.locked_at,
+                "completionReason": module.completion_reason,
+                "revision": module.revision,
+            })).collect::<Vec<_>>(),
+            "responses": responses.into_iter().map(|response| json!({
+                "id": response.id,
+                "moduleAttemptId": response.module_attempt_id,
+                "examQuestionId": response.exam_question_id,
+                "response": response.response,
+                "markedForReview": response.marked_for_review,
+                "eliminatedOptions": response.eliminated_options,
+                "annotations": response.annotations,
+                "revision": response.revision,
+            })).collect::<Vec<_>>(),
+        });
+    }
+    Ok(snapshot)
+}
+
+/// The sole database-owned terminal transition. Callers may perform provider-specific
+/// materialization in the same transaction, but this function owns the terminal fact,
+/// compatibility projection, and downstream notification.
+pub(crate) async fn seal_attempt_in_tx(
+    tx: &mut sqlx::Transaction<'_, MySql>,
+    command: &SealAttemptCommand,
+) -> Result<SealAttemptResult, DeliveryError> {
+    let attempt = sqlx::query_as::<_, StudentAttempt>(
+        "SELECT * FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+    )
+    .bind(&command.attempt_id)
+    .bind(&command.schedule_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(DeliveryError::NotFound)?;
+
+    if let Some(existing) = load_terminalization_in_tx(&mut **tx, &attempt.id).await? {
+        if terminalization_intent_is_compatible(
+            &existing.outcome,
+            &existing.reason,
+            command.outcome,
+            &command.reason,
+        ) {
+            let provider_key: String =
+                sqlx::query_scalar("SELECT provider_key FROM exam_entities WHERE id = ?")
+                    .bind(&attempt.exam_id)
+                    .fetch_optional(&mut **tx)
+                    .await?
+                    .unwrap_or_else(|| "legacy".to_owned());
+            materialize_sat_terminal_result_in_tx(
+                tx,
+                &attempt,
+                &provider_key,
+                &existing.outcome,
+                &existing.reason,
+                if existing.actor_kind == "proctor" {
+                    TerminalizationActorKind::Proctor
+                } else {
+                    TerminalizationActorKind::System
+                },
+                &existing.terminalization_id,
+                existing.effective_at,
+                &existing.final_snapshot,
+            )
+            .await?;
+            return Ok(SealAttemptResult {
+                attempt,
+                terminalization_id: existing.terminalization_id,
+                outcome: existing.outcome,
+                reason: existing.reason,
+                effective_at: existing.effective_at,
+                recorded_at: existing.recorded_at,
+                snapshot: existing.final_snapshot,
+                created: false,
+            });
+        }
+        return Err(terminalization_conflict(&existing, attempt.revision));
+    }
+
+    if !matches!(command.outcome, "submitted" | "terminated") {
+        return Err(DeliveryError::Validation(
+            "Terminalization outcome is not supported.".to_owned(),
+        ));
+    }
+    if !matches!(
+        command.reason.as_str(),
+        "student_submit"
+            | "sat_complete"
+            | "time_expired"
+            | "auto_stop"
+            | "proctor_complete"
+            | "proctor_end"
+            | "proctor_force_submit"
+            | "proctor_terminate"
+            | "legacy_unknown"
+    ) {
+        return Err(DeliveryError::Validation(
+            "Terminalization reason is not supported.".to_owned(),
+        ));
+    }
+    if let Some(minimum) = command.min_answer_revision {
+        if attempt.answer_revision < minimum {
+            return Err(DeliveryError::Conflict {
+                message: format!(
+                    "Attempt answers are not persisted through the required revision (required {}, actual {}).",
+                    minimum, attempt.answer_revision
+                ),
+                reason: Some(DeliveryConflictReason::BaseRevisionMismatch),
+                latest_revision: Some(attempt.revision),
+                server_accepted_through_seq: None,
+                active_session_id: None,
+            });
+        }
+    }
+
+    let provider_key: String =
+        sqlx::query_scalar("SELECT provider_key FROM exam_entities WHERE id = ?")
+            .bind(&attempt.exam_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .unwrap_or_else(|| "legacy".to_owned());
+    let recorded_at: DateTime<Utc> = sqlx::query_scalar("SELECT UTC_TIMESTAMP(6)")
+        .fetch_one(&mut **tx)
+        .await?;
+    let effective_at = command.effective_at.unwrap_or(recorded_at);
+    if provider_key == "sat" && command.outcome == "terminated" {
+        lock_sat_modules_in_tx(&mut **tx, &attempt.id, &command.reason, effective_at).await?;
+    }
+    let snapshot = build_server_terminal_snapshot(&mut **tx, &attempt, &provider_key).await?;
+    let terminalization_id = Uuid::new_v4().to_string();
+    let projection = command.final_submission.clone().unwrap_or_else(|| {
+        default_final_submission(&snapshot, command.outcome, &command.reason, effective_at)
+    });
+    let mut projection = projection;
+    if let Some(fields) = projection.as_object_mut() {
+        fields.insert("submittedAt".to_owned(), json!(effective_at));
+        fields.insert("completionReason".to_owned(), json!(&command.reason));
+        fields.insert("terminalizationOutcome".to_owned(), json!(command.outcome));
+        fields.insert("terminalizationId".to_owned(), json!(&terminalization_id));
+        for key in ["answers", "writingAnswers", "flags", "providerKey"] {
+            if let Some(value) = snapshot.get(key) {
+                fields
+                    .entry(key.to_owned())
+                    .or_insert_with(|| value.clone());
+            }
+        }
+        if command.outcome == "terminated" {
+            fields.insert("terminated".to_owned(), json!(true));
+        }
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO attempt_terminalizations (
+            attempt_id, organization_id, terminalization_id, schedule_id,
+            outcome, reason, actor_kind, actor_id, effective_at, recorded_at,
+            answer_revision, final_snapshot, request_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&attempt.id)
+    .bind(&attempt.organization_id)
+    .bind(&terminalization_id)
+    .bind(&attempt.schedule_id)
+    .bind(command.outcome)
+    .bind(&command.reason)
+    .bind(command.actor_kind.as_str())
+    .bind(&command.actor_id)
+    .bind(effective_at)
+    .bind(recorded_at)
+    .bind(attempt.answer_revision)
+    .bind(&snapshot)
+    .bind(&command.request_id)
+    .execute(&mut **tx)
+    .await?;
+
+    let claim = if command.outcome == "terminated" {
+        sqlx::query(
+            "UPDATE student_attempts SET phase = 'post-exam', final_submission = ?, submitted_at = COALESCE(submitted_at, ?), proctor_status = 'terminated', proctor_note = COALESCE(?, proctor_note), proctor_updated_at = UTC_TIMESTAMP(6), proctor_updated_by = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND schedule_id = ? AND submitted_at IS NULL AND phase <> 'post-exam'",
+        )
+        .bind(&projection)
+        .bind(effective_at)
+        .bind(&command.proctor_note)
+        .bind(&command.actor_id)
+        .bind(&attempt.id)
+        .bind(&attempt.schedule_id)
+        .execute(&mut **tx)
+        .await?
+    } else {
+        sqlx::query(
+            "UPDATE student_attempts SET phase = 'post-exam', final_submission = ?, submitted_at = COALESCE(submitted_at, ?), updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND schedule_id = ? AND submitted_at IS NULL AND phase <> 'post-exam' AND COALESCE(proctor_status, 'active') <> 'terminated'",
+        )
+        .bind(&projection)
+        .bind(effective_at)
+        .bind(&attempt.id)
+        .bind(&attempt.schedule_id)
+        .execute(&mut **tx)
+        .await?
+    };
+    if claim.rows_affected() != 1 {
+        return Err(DeliveryError::Conflict {
+            message: if command.outcome == "terminated" {
+                "Attempt could not be claimed for proctor termination.".to_owned()
+            } else {
+                "Attempt is blocked by proctor termination.".to_owned()
+            },
+            reason: (command.outcome != "terminated")
+                .then_some(DeliveryConflictReason::AttemptProctorBlocked),
+            latest_revision: Some(attempt.revision),
+            server_accepted_through_seq: None,
+            active_session_id: None,
+        });
+    }
+
+    materialize_sat_terminal_result_in_tx(
+        tx,
+        &attempt,
+        &provider_key,
+        command.outcome,
+        &command.reason,
+        command.actor_kind,
+        &terminalization_id,
+        effective_at,
+        &snapshot,
+    )
+    .await?;
+
+    OutboxRepository::enqueue_in_tx(
+        tx,
+        "attempt_terminalization",
+        &attempt.id,
+        i64::from(attempt.revision.saturating_add(1)),
+        "attempt_terminalized",
+        &json!({
+            "terminalizationId": terminalization_id,
+            "attemptId": attempt.id,
+            "scheduleId": attempt.schedule_id,
+            "organizationId": attempt.organization_id,
+            "outcome": command.outcome,
+            "reason": command.reason,
+            "answerRevision": attempt.answer_revision,
+        }),
+    )
+    .await?;
+
+    let persisted_attempt =
+        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+            .bind(&attempt.id)
+            .fetch_one(&mut **tx)
+            .await?;
+    Ok(SealAttemptResult {
+        attempt: persisted_attempt,
+        terminalization_id,
+        outcome: command.outcome.to_owned(),
+        reason: command.reason.clone(),
+        effective_at,
+        recorded_at,
+        snapshot,
+        created: true,
+    })
+}
+
+/// Same authoritative writer path for proctor termination. Existing submitted timestamps are
+/// preserved because termination may race an idempotent finalization replay.
 #[derive(Error, Debug)]
 pub enum DeliveryError {
     #[error("Database error: {0}")]
@@ -147,6 +740,14 @@ pub enum DeliveryError {
         latest_revision: Option<i32>,
         server_accepted_through_seq: Option<i64>,
         active_session_id: Option<String>,
+    },
+    #[error("Terminalization conflict: {message}")]
+    TerminalizationConflict {
+        message: String,
+        outcome: String,
+        reason: String,
+        terminalization_id: String,
+        latest_revision: i32,
     },
     #[error("Not found")]
     NotFound,
@@ -187,6 +788,26 @@ impl DeliveryError {
                 ..
             } => Some(reason.as_str()),
             _ => None,
+        }
+    }
+}
+
+fn ensure_student_key_scope(actor: &ActorContext, student_key: &str) -> Result<(), DeliveryError> {
+    if matches!(actor.role, ActorRole::Student)
+        && actor.student_scope_key.as_deref() != Some(student_key)
+    {
+        return Err(DeliveryError::NotFound);
+    }
+    Ok(())
+}
+
+fn map_scheduling_error(error: crate::scheduling::SchedulingError) -> DeliveryError {
+    match error {
+        crate::scheduling::SchedulingError::Database(error) => DeliveryError::Database(error),
+        crate::scheduling::SchedulingError::Conflict(message) => DeliveryError::conflict(message),
+        crate::scheduling::SchedulingError::NotFound => DeliveryError::NotFound,
+        crate::scheduling::SchedulingError::Validation(message) => {
+            DeliveryError::Validation(message)
         }
     }
 }
@@ -244,9 +865,8 @@ impl DeliveryService {
         conn: &mut MySqlConnection,
         schedule_id: Uuid,
     ) -> Result<(Option<RuntimeGateRow>, Option<RuntimeSectionWriteGateRow>), DeliveryError> {
-        // Lock order invariant: runtime -> active runtime section -> student attempt.
-        // Proctor/runtime transitions use the same ordering, preventing a student write from
-        // racing a section boundary or introducing an attempt<->runtime deadlock cycle.
+        // The caller must hold the attempt row first. This helper then locks
+        // runtime -> active runtime section, preserving attempt -> runtime order.
         let runtime = sqlx::query_as::<_, RuntimeGateRow>(
             "SELECT id, status, current_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
         )
@@ -291,16 +911,17 @@ impl DeliveryService {
 
     pub async fn get_session_context(
         &self,
+        actor: &ActorContext,
         schedule_id: Uuid,
         wcode: Option<String>,
         student_key: Option<String>,
         candidate_id: Option<String>,
     ) -> Result<StudentSessionContext, DeliveryError> {
-        let schedule = self.load_schedule(schedule_id).await?;
+        let schedule = self.load_schedule(actor, schedule_id).await?;
         let version = self
             .load_version(schedule.published_version_id.clone())
             .await?;
-        let runtime = self.load_runtime(schedule_id).await?;
+        let runtime = self.load_runtime(actor, schedule_id).await?;
 
         let attempt = if let Some(wcode) = wcode {
             self.load_attempt_by_wcode(schedule_id.to_string(), &wcode)
@@ -315,6 +936,9 @@ impl DeliveryService {
         } else {
             None
         };
+        if let Some(attempt) = attempt.as_ref() {
+            ensure_student_key_scope(actor, &attempt.student_key)?;
+        }
 
         let degraded_live_mode = LiveModeService::new(self.pool.clone())
             .snapshot(true, Some(schedule_id))
@@ -334,6 +958,7 @@ impl DeliveryService {
 
     pub async fn get_session_context_with_attempt_credential(
         &self,
+        actor: &ActorContext,
         schedule_id: Uuid,
         wcode: Option<String>,
         student_key: Option<String>,
@@ -342,7 +967,7 @@ impl DeliveryService {
         client_session_id: Option<String>,
     ) -> Result<StudentSessionContext, DeliveryError> {
         let mut session = self
-            .get_session_context(schedule_id, wcode, student_key, candidate_id)
+            .get_session_context(actor, schedule_id, wcode, student_key, candidate_id)
             .await?;
         self.attach_attempt_credential(
             schedule_id,
@@ -358,10 +983,11 @@ impl DeliveryService {
 
     pub async fn get_static_session_context(
         &self,
+        actor: &ActorContext,
         schedule_id: Uuid,
     ) -> Result<ielts_backend_domain::attempt::StudentStaticSessionContext, DeliveryError> {
         let session = self
-            .get_session_context(schedule_id, None, None, None)
+            .get_session_context(actor, schedule_id, None, None, None)
             .await?;
         Ok(ielts_backend_domain::attempt::StudentStaticSessionContext {
             schedule: session.schedule,
@@ -372,13 +998,14 @@ impl DeliveryService {
 
     pub async fn get_live_session_context(
         &self,
+        actor: &ActorContext,
         schedule_id: Uuid,
         wcode: Option<String>,
         student_key: Option<String>,
         candidate_id: Option<String>,
     ) -> Result<ielts_backend_domain::attempt::StudentLiveSessionContext, DeliveryError> {
         let session = self
-            .get_session_context(schedule_id, wcode, student_key, candidate_id)
+            .get_session_context(actor, schedule_id, wcode, student_key, candidate_id)
             .await?;
         Ok(ielts_backend_domain::attempt::StudentLiveSessionContext {
             runtime: session.runtime,
@@ -389,10 +1016,15 @@ impl DeliveryService {
 
     pub async fn persist_precheck(
         &self,
+        actor: &ActorContext,
         schedule_id: Uuid,
         req: StudentPrecheckRequest,
         idempotency_key: Option<String>,
     ) -> Result<StudentAttempt, DeliveryError> {
+        ensure_student_key_scope(actor, &req.student_key)?;
+        // Authorize the schedule before consulting idempotency storage. A replay
+        // must not become an authorization bypass for another actor.
+        let schedule = self.load_schedule(actor, schedule_id).await?;
         let repository = self.idempotency_repository();
         let route_key = precheck_route_key(schedule_id);
         let request_hash = self.idempotency_request_hash(&req, idempotency_key.as_ref())?;
@@ -410,11 +1042,10 @@ impl DeliveryService {
         }
 
         let has_device_fingerprint = req.device_fingerprint_hash.is_some();
-        let schedule = self.load_schedule(schedule_id).await?;
         let version = self
             .load_version(schedule.published_version_id.clone())
             .await?;
-        let runtime = self.load_runtime(schedule_id).await?;
+        let runtime = self.load_runtime(actor, schedule_id).await?;
         let attempt = self
             .get_or_create_attempt(
                 &schedule,
@@ -425,8 +1056,21 @@ impl DeliveryService {
                 &req.candidate_id,
                 &req.candidate_name,
                 &req.candidate_email,
+                &req.client_session_id,
             )
             .await?;
+        if attempt.submitted_at.is_some()
+            || attempt.proctor_status == ielts_backend_domain::attempt::ProctorStatus::Terminated
+        {
+            return Err(DeliveryError::Conflict {
+                message: "Attempt is already terminal and cannot accept pre-check updates."
+                    .to_owned(),
+                reason: Some(DeliveryConflictReason::AttemptSubmitted),
+                latest_revision: Some(attempt.revision),
+                server_accepted_through_seq: None,
+                active_session_id: None,
+            });
+        }
 
         let mut integrity = ensure_object(attempt.integrity.clone().into());
         integrity.insert("preCheck".to_owned(), req.pre_check);
@@ -475,6 +1119,7 @@ impl DeliveryService {
                 ),
                 attempt.final_submission.clone(),
                 attempt.submitted_at,
+                attempt.revision,
             )
             .await?;
 
@@ -533,14 +1178,16 @@ impl DeliveryService {
     #[tracing::instrument(skip(self, req), fields(schedule_id = %schedule_id))]
     pub async fn bootstrap(
         &self,
+        actor: &ActorContext,
         schedule_id: Uuid,
         req: StudentBootstrapRequest,
     ) -> Result<StudentSessionContext, DeliveryError> {
-        let schedule = self.load_schedule(schedule_id).await?;
+        ensure_student_key_scope(actor, &req.student_key)?;
+        let schedule = self.load_schedule(actor, schedule_id).await?;
         let version = self
             .load_version(schedule.published_version_id.clone())
             .await?;
-        let runtime = self.load_runtime(schedule_id).await?;
+        let runtime = self.load_runtime(actor, schedule_id).await?;
         let attempt = self
             .get_or_create_attempt(
                 &schedule,
@@ -551,6 +1198,7 @@ impl DeliveryService {
                 &req.candidate_id,
                 &req.candidate_name,
                 &req.candidate_email,
+                &req.client_session_id,
             )
             .await?;
 
@@ -591,25 +1239,37 @@ impl DeliveryService {
             attempt.recovery.clone().into()
         };
 
-        let attempt = if attempt.phase != phase
-            || needs_client_session_id_in_integrity
-            || needs_client_session_id_in_recovery
+        let attempt = if attempt.submitted_at.is_none()
+            && attempt.proctor_status != ielts_backend_domain::attempt::ProctorStatus::Terminated
+            && (attempt.phase != phase
+                || needs_client_session_id_in_integrity
+                || needs_client_session_id_in_recovery)
         {
-            self.update_attempt(
-                attempt.id,
-                phase,
-                attempt.current_module.clone(),
-                attempt.current_question_id.clone(),
-                attempt.answers.clone().into(),
-                attempt.writing_answers.clone().into(),
-                attempt.flags.clone().into(),
-                attempt.violations_snapshot.clone().into(),
-                next_integrity,
-                next_recovery,
-                attempt.final_submission.clone(),
-                attempt.submitted_at,
-            )
-            .await?
+            match self
+                .update_attempt(
+                    attempt.id.clone(),
+                    phase,
+                    attempt.current_module.clone(),
+                    attempt.current_question_id.clone(),
+                    attempt.answers.clone().into(),
+                    attempt.writing_answers.clone().into(),
+                    attempt.flags.clone().into(),
+                    attempt.violations_snapshot.clone().into(),
+                    next_integrity,
+                    next_recovery,
+                    attempt.final_submission.clone(),
+                    attempt.submitted_at,
+                    attempt.revision,
+                )
+                .await
+            {
+                Ok(updated) => updated,
+                Err(DeliveryError::Conflict { .. }) => self
+                    .load_attempt_by_id(attempt.id)
+                    .await?
+                    .ok_or(DeliveryError::NotFound)?,
+                Err(error) => return Err(error),
+            }
         } else {
             attempt
         };
@@ -630,12 +1290,13 @@ impl DeliveryService {
 
     pub async fn bootstrap_with_attempt_credential(
         &self,
+        actor: &ActorContext,
         schedule_id: Uuid,
         req: StudentBootstrapRequest,
         principal: &AuthenticatedSession,
     ) -> Result<StudentSessionContext, DeliveryError> {
         let client_session_id = Some(req.client_session_id.clone());
-        let mut session = self.bootstrap(schedule_id, req).await?;
+        let mut session = self.bootstrap(actor, schedule_id, req).await?;
         self.attach_attempt_credential(
             schedule_id,
             &mut session,
@@ -778,13 +1439,15 @@ impl DeliveryService {
         }
 
         let mut tx = self.pool.begin().await?;
-        let (runtime_gate, runtime_section_gate) = self
-            .lock_runtime_write_gate_tx(tx.as_mut(), schedule_id)
-            .await?;
+        // Lock the attempt before the runtime/section gate. Every attempt writer
+        // follows this order so terminalization cannot race a stale mutation.
         let mut attempt = self
             .load_attempt_by_id_for_update(tx.as_mut(), req.attempt_id.clone())
             .await?
             .ok_or(DeliveryError::NotFound)?;
+        let (runtime_gate, runtime_section_gate) = self
+            .lock_runtime_write_gate_tx(tx.as_mut(), schedule_id)
+            .await?;
         if attempt.schedule_id != schedule_id.to_string() || attempt.student_key != req.student_key
         {
             return Err(DeliveryError::Validation(
@@ -986,6 +1649,9 @@ impl DeliveryService {
             });
         }
 
+        let original_answers = answers.clone();
+        let original_writing_answers = writing_answers.clone();
+        let original_flags = flags.clone();
         let mut applied_mutation_count: usize = 0;
         for mutation in &new_mutations {
             let applied = apply_mutation(
@@ -1008,6 +1674,11 @@ impl DeliveryService {
             }
         }
 
+        let answer_revision_delta = i32::from(
+            answers != original_answers
+                || writing_answers != original_writing_answers
+                || flags != original_flags,
+        );
         let server_accepted_through_seq =
             existing_max_seq + i64::try_from(new_mutations.len()).unwrap_or(i64::MAX);
         let recovery = merge_recovery(
@@ -1061,7 +1732,7 @@ impl DeliveryService {
             );
         }
 
-        sqlx::query(
+        let update_result = sqlx::query(
             r#"
             UPDATE student_attempts
             SET
@@ -1074,9 +1745,13 @@ impl DeliveryService {
                 current_question_id = ?,
                 recovery = ?,
                 final_submission = ?,
+                answer_revision = answer_revision + ?,
                 updated_at = NOW(),
                 revision = revision + 1
             WHERE id = ?
+              AND revision = ?
+              AND submitted_at IS NULL
+              AND COALESCE(proctor_status, 'active') <> 'terminated'
             "#,
         )
         .bind(phase)
@@ -1088,9 +1763,20 @@ impl DeliveryService {
         .bind(current_question_id)
         .bind(recovery)
         .bind(final_submission)
+        .bind(answer_revision_delta)
         .bind(&req.attempt_id)
+        .bind(attempt.revision)
         .execute(tx.as_mut())
         .await?;
+        if update_result.rows_affected() != 1 {
+            return Err(DeliveryError::Conflict {
+                message: "Attempt changed or is already terminal.".to_owned(),
+                reason: Some(DeliveryConflictReason::InvalidMutation),
+                latest_revision: None,
+                server_accepted_through_seq: None,
+                active_session_id: None,
+            });
+        }
 
         attempt =
             sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
@@ -1173,21 +1859,133 @@ impl DeliveryService {
         schedule_id: Uuid,
         req: StudentHeartbeatRequest,
     ) -> Result<StudentAttempt, DeliveryError> {
-        let attempt = if let Some(attempt_id) = req.attempt_id {
-            self.load_attempt_by_id(attempt_id).await?
+        let attempt_id = req.attempt_id.clone().or_else(|| None);
+        let mut tx = self.pool.begin().await?;
+        let attempt_id = if let Some(attempt_id) = attempt_id {
+            attempt_id
         } else {
-            self.load_attempt_by_student_key(schedule_id.to_string(), &req.student_key)
-                .await?
-        }
-        .ok_or(DeliveryError::NotFound)?;
-
-        if attempt.schedule_id != schedule_id.to_string() {
+            sqlx::query_scalar::<_, String>(
+                "SELECT id FROM student_attempts WHERE schedule_id = ? AND student_key = ? LIMIT 1",
+            )
+            .bind(schedule_id.to_string())
+            .bind(&req.student_key)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(DeliveryError::NotFound)?
+        };
+        let mut attempt = self
+            .load_attempt_by_id_for_update(tx.as_mut(), attempt_id)
+            .await?
+            .ok_or(DeliveryError::NotFound)?;
+        if attempt.schedule_id != schedule_id.to_string() || attempt.student_key != req.student_key
+        {
             return Err(DeliveryError::Validation(
-                "Attempt does not belong to the provided schedule.".to_owned(),
+                "Attempt does not belong to the provided schedule or student key.".to_owned(),
             ));
         }
+        if attempt.submitted_at.is_some()
+            || attempt.proctor_status == ielts_backend_domain::attempt::ProctorStatus::Terminated
+        {
+            return Err(DeliveryError::Conflict {
+                message: "Attempt is already terminal and no longer accepts heartbeats.".to_owned(),
+                reason: Some(DeliveryConflictReason::AttemptSubmitted),
+                latest_revision: Some(attempt.revision),
+                server_accepted_through_seq: None,
+                active_session_id: None,
+            });
+        }
+        let active_session_id: Option<String> = sqlx::query_scalar(
+            "SELECT active_client_session_id FROM student_attempts WHERE id = ?",
+        )
+        .bind(&attempt.id)
+        .fetch_one(&mut *tx)
+        .await?;
+        match active_session_id {
+            Some(active_session_id) if active_session_id != req.client_session_id => {
+                return Err(DeliveryError::Conflict {
+                    message:
+                        "Attempt write credential has been superseded by a newer student session."
+                            .to_owned(),
+                    reason: Some(DeliveryConflictReason::ActiveSessionSuperseded),
+                    latest_revision: Some(attempt.revision),
+                    server_accepted_through_seq: None,
+                    active_session_id: Some(active_session_id),
+                });
+            }
+            Some(_) => {}
+            None => {
+                sqlx::query("UPDATE student_attempts SET active_client_session_id = ?, integrity = JSON_SET(integrity, '$.clientSessionId', ?) WHERE id = ? AND active_client_session_id IS NULL")
+                    .bind(&req.client_session_id)
+                    .bind(&req.client_session_id)
+                    .bind(&attempt.id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        // Older clients may omit mutation_id. Derive a stable legacy identity
+        // instead of generating a fresh UUID, so a retried identical request
+        // remains idempotent. New clients should always send mutation_id.
+        let mutation_id = req.mutation_id.clone().unwrap_or_else(|| {
+            let payload = req
+                .payload
+                .as_ref()
+                .and_then(|value| serde_json::to_string(value).ok())
+                .unwrap_or_default();
+            sha256_hex(&format!(
+                "legacy-heartbeat:{}:{}:{}:{}:{}",
+                attempt.id,
+                req.client_session_id,
+                req.event_type.as_str(),
+                req.client_timestamp.to_rfc3339(),
+                payload,
+            ))
+        });
+        let inserted = sqlx::query(
+            r#"INSERT INTO student_heartbeat_events
+               (id, attempt_id, schedule_id, mutation_id, event_type, payload, client_timestamp, server_received_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))
+               ON DUPLICATE KEY UPDATE mutation_id = VALUES(mutation_id)"#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&attempt.id)
+        .bind(schedule_id.to_string())
+        .bind(&mutation_id)
+        .bind(req.event_type.as_str())
+        .bind(&req.payload)
+        .bind(req.client_timestamp)
+        .execute(&mut *tx)
+        .await?;
+        if inserted.rows_affected() == 0 {
+            let existing: (String, Option<Value>, DateTime<Utc>) = sqlx::query_as(
+                "SELECT event_type, payload, client_timestamp FROM student_heartbeat_events WHERE attempt_id = ? AND mutation_id = ?",
+            )
+            .bind(&attempt.id)
+            .bind(&mutation_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if existing.0 != req.event_type.as_str()
+                || existing.1 != req.payload
+                || existing.2 != req.client_timestamp
+            {
+                return Err(DeliveryError::Conflict {
+                    message: "Heartbeat mutation_id was reused for a different event.".to_owned(),
+                    reason: Some(DeliveryConflictReason::InvalidMutation),
+                    latest_revision: Some(attempt.revision),
+                    server_accepted_through_seq: None,
+                    active_session_id: Some(req.client_session_id),
+                });
+            }
+            tx.commit().await?;
+            return Ok(attempt);
+        }
 
-        let now = Utc::now();
+        let now: DateTime<Utc> = sqlx::query_scalar("SELECT UTC_TIMESTAMP(6)")
+            .fetch_one(&mut *tx)
+            .await?;
+        let heartbeat_status = match req.event_type {
+            HeartbeatEventType::Disconnect | HeartbeatEventType::Lost => "lost",
+            _ => "ok",
+        };
         let mut integrity = ensure_object(attempt.integrity.clone().into());
         integrity.insert(
             "lastHeartbeatAt".to_owned(),
@@ -1195,14 +1993,11 @@ impl DeliveryService {
         );
         integrity.insert(
             "lastHeartbeatStatus".to_owned(),
-            Value::String(match req.event_type {
-                HeartbeatEventType::Disconnect | HeartbeatEventType::Lost => "lost".to_owned(),
-                _ => "ok".to_owned(),
-            }),
+            Value::String(heartbeat_status.to_owned()),
         );
         integrity.insert(
             "clientSessionId".to_owned(),
-            Value::String(req.client_session_id.to_string()),
+            Value::String(req.client_session_id.clone()),
         );
         if matches!(
             req.event_type,
@@ -1219,76 +2014,52 @@ impl DeliveryService {
                 Value::String(now.to_rfc3339()),
             );
         }
+        let changed = sqlx::query(
+            "UPDATE student_attempts SET integrity = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + ? WHERE id = ? AND submitted_at IS NULL AND proctor_status <> 'terminated'",
+        )
+        .bind(Value::Object(integrity))
+        .bind(i32::from(req.event_type != HeartbeatEventType::Heartbeat))
+        .bind(&attempt.id)
+        .execute(&mut *tx)
+        .await?;
+        if changed.rows_affected() != 1 {
+            return Err(DeliveryError::Conflict {
+                message: "Attempt became terminal while the heartbeat was being recorded."
+                    .to_owned(),
+                reason: Some(DeliveryConflictReason::AttemptSubmitted),
+                latest_revision: Some(attempt.revision),
+                server_accepted_through_seq: None,
+                active_session_id: None,
+            });
+        }
 
-        let heartbeat_status = match req.event_type {
-            HeartbeatEventType::Disconnect | HeartbeatEventType::Lost => "lost",
-            _ => "ok",
-        };
         let disconnect_at = matches!(
             req.event_type,
             HeartbeatEventType::Disconnect | HeartbeatEventType::Lost
         )
         .then_some(now);
         let reconnect_at = (req.event_type == HeartbeatEventType::Reconnect).then_some(now);
-
-        let updated = if req.event_type == HeartbeatEventType::Heartbeat {
-            self.update_attempt_preserving_revision(
-                attempt.id,
-                attempt.phase.clone(),
-                attempt.current_module.clone(),
-                attempt.current_question_id.clone(),
-                attempt.answers.clone().into(),
-                attempt.writing_answers.clone().into(),
-                attempt.flags.clone().into(),
-                attempt.violations_snapshot.clone().into(),
-                Value::Object(integrity),
-                attempt.recovery.clone().into(),
-                attempt.final_submission.clone(),
-                attempt.submitted_at,
-            )
-            .await?
-        } else {
-            self.update_attempt(
-                attempt.id,
-                attempt.phase.clone(),
-                attempt.current_module.clone(),
-                attempt.current_question_id.clone(),
-                attempt.answers.clone().into(),
-                attempt.writing_answers.clone().into(),
-                attempt.flags.clone().into(),
-                attempt.violations_snapshot.clone().into(),
-                Value::Object(integrity),
-                attempt.recovery.clone().into(),
-                attempt.final_submission.clone(),
-                attempt.submitted_at,
-            )
-            .await?
-        };
-
         sqlx::query(
-            r#"
-            INSERT INTO student_attempt_presence (
-                attempt_id, schedule_id, client_session_id, last_heartbeat_at,
-                last_heartbeat_status, last_disconnect_at, last_reconnect_at
-            )
-            VALUES (?, ?, ?, NOW(), ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-                schedule_id = VALUES(schedule_id),
-                client_session_id = VALUES(client_session_id),
-                last_heartbeat_at = VALUES(last_heartbeat_at),
-                last_heartbeat_status = VALUES(last_heartbeat_status),
-                last_disconnect_at = COALESCE(VALUES(last_disconnect_at), last_disconnect_at),
-                last_reconnect_at = COALESCE(VALUES(last_reconnect_at), last_reconnect_at),
-                updated_at = NOW()
-            "#,
+            r#"INSERT INTO student_attempt_presence
+               (attempt_id, schedule_id, client_session_id, last_heartbeat_at, last_heartbeat_status, last_disconnect_at, last_reconnect_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE
+                 schedule_id = VALUES(schedule_id),
+                 client_session_id = VALUES(client_session_id),
+                 last_heartbeat_at = GREATEST(last_heartbeat_at, VALUES(last_heartbeat_at)),
+                 last_heartbeat_status = VALUES(last_heartbeat_status),
+                 last_disconnect_at = COALESCE(VALUES(last_disconnect_at), last_disconnect_at),
+                 last_reconnect_at = COALESCE(VALUES(last_reconnect_at), last_reconnect_at),
+                 updated_at = UTC_TIMESTAMP(6)"#,
         )
-        .bind(&updated.id)
+        .bind(&attempt.id)
         .bind(schedule_id.to_string())
-        .bind(req.client_session_id.to_string())
+        .bind(&req.client_session_id)
+        .bind(now)
         .bind(heartbeat_status)
         .bind(disconnect_at)
         .bind(reconnect_at)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         if req.event_type != HeartbeatEventType::Heartbeat {
@@ -1298,48 +2069,23 @@ impl DeliveryService {
                 HeartbeatEventType::Lost => "HEARTBEAT_LOST",
                 HeartbeatEventType::Heartbeat => "STUDENT_NETWORK",
             };
-            sqlx::query(
-                r#"
-                INSERT INTO session_audit_logs (
-                    id, schedule_id, actor, action_type, target_student_id, payload, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, NOW())
-                "#,
-            )
-            .bind(Uuid::new_v4().to_string())
-            .bind(schedule_id.to_string())
-            .bind(&updated.candidate_name)
-            .bind(action_type)
-            .bind(&updated.id)
-            .bind(json!({
-                "eventType": req.event_type,
-                "clientTimestamp": req.client_timestamp,
-                "payload": req.payload
-            }))
-            .execute(&self.pool)
-            .await?;
+            sqlx::query("INSERT INTO session_audit_logs (id, schedule_id, actor, action_type, target_student_id, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))")
+                .bind(Uuid::new_v4().to_string())
+                .bind(schedule_id.to_string())
+                .bind(&attempt.candidate_name)
+                .bind(action_type)
+                .bind(&attempt.id)
+                .bind(json!({"eventType": req.event_type, "clientTimestamp": req.client_timestamp, "payload": req.payload}))
+                .execute(&mut *tx)
+                .await?;
         }
-
-        if req.event_type != HeartbeatEventType::Heartbeat {
-            sqlx::query(
-                r#"
-                INSERT INTO student_heartbeat_events (
-                    id, attempt_id, schedule_id, event_type, payload, client_timestamp, server_received_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, NOW())
-                "#,
-            )
-            .bind(Uuid::new_v4().to_string())
-            .bind(&updated.id)
-            .bind(schedule_id.to_string())
-            .bind(req.event_type)
-            .bind(&req.payload)
-            .bind(req.client_timestamp)
-            .execute(&self.pool)
-            .await?;
-        }
-
-        Ok(updated)
+        attempt =
+            sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+                .bind(&attempt.id)
+                .fetch_one(&mut *tx)
+                .await?;
+        tx.commit().await?;
+        Ok(attempt)
     }
 
     #[tracing::instrument(
@@ -1351,6 +2097,24 @@ impl DeliveryService {
         schedule_id: Uuid,
         req: StudentSubmitRequest,
         idempotency_key: Option<String>,
+    ) -> Result<StudentSubmitResponse, DeliveryError> {
+        self.submit_attempt_with_metadata(
+            schedule_id,
+            req,
+            idempotency_key,
+            Uuid::new_v4().to_string(),
+            None,
+        )
+        .await
+    }
+
+    pub async fn submit_attempt_with_metadata(
+        &self,
+        schedule_id: Uuid,
+        req: StudentSubmitRequest,
+        idempotency_key: Option<String>,
+        request_id: String,
+        min_answer_revision: Option<i32>,
     ) -> Result<StudentSubmitResponse, DeliveryError> {
         let repository = self.idempotency_repository();
         let route_key = submit_route_key(schedule_id);
@@ -1462,8 +2226,25 @@ impl DeliveryService {
             }
         }
 
-        if let Some(submitted_at) = attempt.submitted_at {
-            let response = build_submit_response(attempt, submitted_at);
+        if attempt.submitted_at.is_some() {
+            let sealed = seal_attempt_in_tx(
+                &mut tx,
+                &SealAttemptCommand {
+                    attempt_id: req.attempt_id.clone(),
+                    schedule_id: schedule_id.to_string(),
+                    outcome: "submitted",
+                    reason: "student_submit".to_owned(),
+                    actor_kind: TerminalizationActorKind::Student,
+                    actor_id: Some(req.student_key.clone()),
+                    proctor_note: None,
+                    request_id: request_id.clone(),
+                    min_answer_revision: None,
+                    effective_at: None,
+                    final_submission: None,
+                },
+            )
+            .await?;
+            let response = build_submit_response(sealed.attempt, sealed.effective_at);
             self.store_idempotent_response(
                 tx.as_mut(),
                 &repository,
@@ -1626,35 +2407,50 @@ impl DeliveryService {
                 "syncState": "saved"
             }),
         );
-
+        let answer_revision_delta = i32::from(final_payload_changes_scored_state);
         sqlx::query(
             r#"
             UPDATE student_attempts
             SET
-                phase = ?,
+                answers = ?,
+                writing_answers = ?,
+                flags = ?,
                 recovery = ?,
-                final_submission = ?,
-                submitted_at = ?,
-                updated_at = NOW(),
+                answer_revision = answer_revision + ?,
+                updated_at = UTC_TIMESTAMP(6),
                 revision = revision + 1
-            WHERE id = ?
+            WHERE id = ? AND schedule_id = ?
             "#,
         )
-        .bind(AttemptPhase::PostExam)
+        .bind(&final_answers)
+        .bind(&final_writing_answers)
+        .bind(&final_flags)
         .bind(recovery)
-        .bind(&final_submission)
-        .bind(now)
+        .bind(answer_revision_delta)
         .bind(&req.attempt_id)
+        .bind(schedule_id.to_string())
         .execute(tx.as_mut())
         .await?;
 
-        let attempt =
-            sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
-                .bind(&req.attempt_id)
-                .fetch_one(tx.as_mut())
-                .await?;
-
-        let submitted_at = attempt.submitted_at.unwrap_or(now);
+        let sealed = seal_attempt_in_tx(
+            &mut tx,
+            &SealAttemptCommand {
+                attempt_id: req.attempt_id.clone(),
+                schedule_id: schedule_id.to_string(),
+                outcome: "submitted",
+                reason: "student_submit".to_owned(),
+                actor_kind: TerminalizationActorKind::Student,
+                actor_id: Some(req.student_key.clone()),
+                proctor_note: None,
+                request_id,
+                min_answer_revision,
+                effective_at: None,
+                final_submission: Some(final_submission),
+            },
+        )
+        .await?;
+        let attempt = sealed.attempt;
+        let submitted_at = sealed.effective_at;
         sqlx::query(
             r#"
             INSERT INTO session_audit_logs (
@@ -1714,6 +2510,7 @@ impl DeliveryService {
         candidate_id: &str,
         candidate_name: &str,
         candidate_email: &str,
+        client_session_id: &str,
     ) -> Result<StudentAttempt, DeliveryError> {
         if let Some(attempt) = self
             .load_attempt_by_student_key(schedule.id.clone(), student_key)
@@ -1763,12 +2560,14 @@ impl DeliveryService {
         .bind(json!({
             "preCheck": null,
             "deviceFingerprintHash": null,
+            "clientSessionId": client_session_id,
             "lastDisconnectAt": null,
             "lastReconnectAt": null,
             "lastHeartbeatAt": null,
             "lastHeartbeatStatus": "idle"
         }))
         .bind(json!({
+            "clientSessionId": client_session_id,
             "lastRecoveredAt": null,
             "lastLocalMutationAt": null,
             "lastPersistedAt": null,
@@ -1841,8 +2640,9 @@ impl DeliveryService {
         recovery: Value,
         final_submission: Option<Value>,
         submitted_at: Option<DateTime<Utc>>,
+        expected_revision: i32,
     ) -> Result<StudentAttempt, DeliveryError> {
-        sqlx::query(
+        let result = sqlx::query(
             r#"
             UPDATE student_attempts
             SET
@@ -1860,6 +2660,9 @@ impl DeliveryService {
                 updated_at = NOW(),
                 revision = revision + 1
             WHERE id = ?
+              AND revision = ?
+              AND submitted_at IS NULL
+              AND COALESCE(proctor_status, 'active') <> 'terminated'
             "#,
         )
         .bind(phase)
@@ -1874,8 +2677,15 @@ impl DeliveryService {
         .bind(final_submission)
         .bind(submitted_at)
         .bind(attempt_id.to_string())
+        .bind(expected_revision)
         .execute(&self.pool)
         .await?;
+
+        if result.rows_affected() != 1 {
+            return Err(DeliveryError::conflict(
+                "Attempt changed or is already terminal.".to_owned(),
+            ));
+        }
 
         sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
             .bind(attempt_id.to_string())
@@ -1941,12 +2751,15 @@ impl DeliveryService {
             .map_err(DeliveryError::from)
     }
 
-    async fn load_schedule(&self, schedule_id: Uuid) -> Result<ExamSchedule, DeliveryError> {
-        sqlx::query_as::<_, ExamSchedule>("SELECT * FROM exam_schedules WHERE id = ?")
-            .bind(schedule_id.to_string())
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(DeliveryError::NotFound)
+    async fn load_schedule(
+        &self,
+        actor: &ActorContext,
+        schedule_id: Uuid,
+    ) -> Result<ExamSchedule, DeliveryError> {
+        SchedulingService::new(self.pool.clone())
+            .get_schedule(actor, schedule_id)
+            .await
+            .map_err(map_scheduling_error)
     }
 
     async fn load_version(&self, version_id: String) -> Result<ExamVersion, DeliveryError> {
@@ -1961,11 +2774,11 @@ impl DeliveryService {
 
     async fn load_runtime(
         &self,
+        actor: &ActorContext,
         schedule_id: Uuid,
     ) -> Result<Option<ExamSessionRuntime>, DeliveryError> {
-        let actor = ActorContext::new(Uuid::nil().to_string(), ActorRole::Admin);
         SchedulingService::new(self.pool.clone())
-            .get_runtime(&actor, schedule_id)
+            .get_runtime(actor, schedule_id)
             .await
             .map(Some)
             .or_else(|err| match err {
@@ -2195,7 +3008,7 @@ fn submit_route_key(schedule_id: Uuid) -> String {
 }
 
 pub(crate) async fn auto_submit_schedule_attempts_in_tx(
-    connection: &mut MySqlConnection,
+    tx: &mut Transaction<'_, MySql>,
     schedule_id: Uuid,
     completion_reason: &str,
 ) -> Result<(), DeliveryError> {
@@ -2203,87 +3016,72 @@ pub(crate) async fn auto_submit_schedule_attempts_in_tx(
         "SELECT * FROM student_attempts WHERE schedule_id = ? AND submitted_at IS NULL FOR UPDATE",
     )
     .bind(schedule_id.to_string())
-    .fetch_all(&mut *connection)
+    .fetch_all(&mut **tx)
     .await?;
+    lock_schedule_terminalization_scope_in_tx(&mut **tx, &schedule_id.to_string()).await?;
 
-    if pending_attempts.is_empty() {
-        return Ok(());
+    // Keep a durable wake-up for deployments where finalization is delegated
+    // to the worker. The in-transaction seal below still makes completion
+    // visible immediately; a later worker replay is idempotent. This request is
+    // emitted even when the schedule currently has no attempts so a completion
+    // observed by a worker is represented durably.
+    let request_exists: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM outbox_events WHERE aggregate_kind = 'schedule' AND aggregate_id = ? AND event_family = 'auto_submit_schedule_attempts_requested')",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?;
+    if request_exists == 0 {
+        OutboxRepository::enqueue_in_tx(
+            tx,
+            "schedule",
+            &schedule_id.to_string(),
+            0,
+            "auto_submit_schedule_attempts_requested",
+            &json!({
+                "scheduleId": schedule_id,
+                "completionReason": completion_reason,
+            }),
+        )
+        .await?;
     }
 
-    let now = Utc::now();
     for attempt in pending_attempts {
         let provider_key: Option<String> =
             sqlx::query_scalar("SELECT provider_key FROM exam_entities WHERE id = ?")
-                .bind(attempt.exam_id.to_string())
-                .fetch_optional(&mut *connection)
+                .bind(&attempt.exam_id)
+                .fetch_optional(&mut **tx)
                 .await?;
-        if provider_key.as_deref() == Some("sat") {
-            sqlx::query(
-                "UPDATE assessment_module_attempts SET state = 'locked', locked_at = COALESCE(locked_at, ?), paused_at = NULL, completion_reason = COALESCE(completion_reason, ?), revision = revision + 1 WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review')",
-            )
-            .bind(now)
-            .bind(completion_reason)
-            .bind(attempt.id.to_string())
-            .execute(&mut *connection)
-            .await?;
-            let final_submission = json!({
-                "providerKey": "sat",
-                "terminated": true,
-                "completionReason": completion_reason,
-                "autoSubmission": true,
-                "submittedAt": now
-            });
-            sqlx::query(
-                "UPDATE student_attempts SET phase = ?, final_submission = ?, submitted_at = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?",
-            )
-            .bind(AttemptPhase::PostExam)
-            .bind(final_submission)
-            .bind(now)
-            .bind(attempt.id.to_string())
-            .execute(&mut *connection)
-            .await?;
-            continue;
-        }
-        let submission_id = format!("submission-{}", Uuid::new_v4().simple());
+        let outcome = if provider_key.as_deref() == Some("sat")
+            || attempt.proctor_status.as_str() == "terminated"
+        {
+            "terminated"
+        } else {
+            "submitted"
+        };
         let final_submission = json!({
-            "submissionId": submission_id,
-            "submittedAt": now,
-            "answers": attempt.answers,
-            "writingAnswers": attempt.writing_answers,
-            "flags": attempt.flags,
+            "submissionId": format!("submission-{}", Uuid::new_v4().simple()),
             "completionReason": completion_reason,
             "autoSubmission": true,
             "proctorStatus": attempt.proctor_status.as_str(),
             "submissionPolicy": "forced_auto_submit"
         });
-        let recovery = merge_recovery(
-            attempt.recovery.clone().into(),
-            json!({
-                "lastPersistedAt": now,
-                "pendingMutationCount": 0,
-                "syncState": "saved"
-            }),
-        );
-
-        sqlx::query(
-            r#"
-            UPDATE student_attempts
-            SET
-                phase = ?,
-                recovery = ?,
-                final_submission = ?,
-                submitted_at = ?,
-                updated_at = NOW(),
-                revision = revision + 1
-            WHERE id = ?
-            "#,
+        seal_attempt_in_tx(
+            tx,
+            &SealAttemptCommand {
+                attempt_id: attempt.id.clone(),
+                schedule_id: schedule_id.to_string(),
+                outcome,
+                reason: completion_reason.to_owned(),
+                actor_kind: TerminalizationActorKind::System,
+                actor_id: None,
+                proctor_note: None,
+                request_id: Uuid::new_v4().to_string(),
+                min_answer_revision: None,
+                effective_at: None,
+                final_submission: Some(final_submission),
+            },
         )
-        .bind(AttemptPhase::PostExam)
-        .bind(recovery)
-        .bind(&final_submission)
-        .bind(now)
-        .bind(&attempt.id)
-        .execute(&mut *connection)
         .await?;
     }
 
@@ -2297,9 +3095,74 @@ pub async fn finalize_pending_schedule_attempts(
     _batch_size: i64,
 ) -> Result<(), DeliveryError> {
     let mut tx = pool.begin().await?;
-    auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, completion_reason).await?;
+    auto_submit_schedule_attempts_in_tx(&mut tx, schedule_id, completion_reason).await?;
     tx.commit().await?;
     Ok(())
+}
+
+/// Repairs SAT terminalizations created by an older writer or interrupted deployment.
+/// The repair is provider-scoped and idempotent because the result has a unique
+/// `(attempt_id, provider_key)` identity.
+pub async fn repair_sat_terminal_results(
+    pool: &MySqlPool,
+    batch_size: i64,
+) -> Result<u64, DeliveryError> {
+    let mut tx = pool.begin().await?;
+    let attempts = sqlx::query_as::<_, StudentAttempt>(
+        r#"
+        SELECT a.*
+        FROM student_attempts a
+        JOIN exam_entities e ON e.id = a.exam_id
+        JOIN attempt_terminalizations t ON t.attempt_id = a.id
+        LEFT JOIN assessment_results ar
+            ON ar.attempt_id = a.id
+           AND ar.provider_key = 'sat'
+        WHERE a.phase = 'post-exam'
+          AND e.provider_key = 'sat'
+          AND ar.id IS NULL
+        ORDER BY a.updated_at ASC, a.id ASC
+        LIMIT ?
+        FOR UPDATE
+        "#,
+    )
+    .bind(batch_size.max(1))
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let mut repaired = 0_u64;
+    for attempt in attempts {
+        let receipt = load_terminalization_in_tx(&mut *tx, &attempt.id)
+            .await?
+            .ok_or_else(|| {
+                DeliveryError::Internal(
+                    "SAT terminal result repair found an attempt without its receipt.".to_owned(),
+                )
+            })?;
+        let actor_kind = if receipt.actor_kind == "proctor" {
+            TerminalizationActorKind::Proctor
+        } else if receipt.actor_kind == "student" {
+            TerminalizationActorKind::Student
+        } else {
+            TerminalizationActorKind::System
+        };
+        let provider_key = "sat";
+        materialize_sat_terminal_result_in_tx(
+            &mut tx,
+            &attempt,
+            provider_key,
+            &receipt.outcome,
+            &receipt.reason,
+            actor_kind,
+            &receipt.terminalization_id,
+            receipt.effective_at,
+            &receipt.final_snapshot,
+        )
+        .await?;
+        repaired = repaired.saturating_add(1);
+    }
+
+    tx.commit().await?;
+    Ok(repaired)
 }
 
 pub(crate) async fn force_finalize_attempt_if_pending(
@@ -2314,87 +3177,39 @@ pub(crate) async fn force_finalize_attempt_if_pending(
     )
     .bind(attempt_id.to_string())
     .bind(schedule_id.to_string())
-    .fetch_optional(tx.as_mut())
+    .fetch_optional(&mut *tx)
     .await?;
+    if pending_attempt.is_some() {
+        lock_schedule_terminalization_scope_in_tx(&mut *tx, &schedule_id.to_string()).await?;
+    }
 
     let Some(attempt) = pending_attempt else {
         tx.commit().await?;
         return Ok(());
     };
 
-    let now = Utc::now();
-    let provider_key: Option<String> =
-        sqlx::query_scalar("SELECT provider_key FROM exam_entities WHERE id = ?")
-            .bind(attempt.exam_id.to_string())
-            .fetch_optional(tx.as_mut())
-            .await?;
-    if provider_key.as_deref() == Some("sat") {
-        sqlx::query(
-            "UPDATE assessment_module_attempts SET state = 'locked', locked_at = COALESCE(locked_at, ?), paused_at = NULL, completion_reason = COALESCE(completion_reason, ?), revision = revision + 1 WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review')",
-        )
-        .bind(now)
-        .bind(completion_reason)
-        .bind(attempt_id.to_string())
-        .execute(tx.as_mut())
-        .await?;
-        let final_submission = json!({
-            "providerKey": "sat",
-            "terminated": true,
-            "completionReason": completion_reason,
-            "submittedAt": now
-        });
-        sqlx::query(
-            "UPDATE student_attempts SET phase = ?, final_submission = ?, submitted_at = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?",
-        )
-        .bind(AttemptPhase::PostExam)
-        .bind(final_submission)
-        .bind(now)
-        .bind(attempt_id.to_string())
-        .execute(tx.as_mut())
-        .await?;
-        tx.commit().await?;
-        return Ok(());
-    }
-    let submission_id = format!("submission-{}", Uuid::new_v4().simple());
-    let final_submission = json!({
-        "submissionId": submission_id,
-        "submittedAt": now,
-        "answers": attempt.answers,
-        "writingAnswers": attempt.writing_answers,
-        "flags": attempt.flags,
-        "completionReason": completion_reason,
-        "autoSubmission": true,
-        "proctorStatus": attempt.proctor_status.as_str(),
-        "submissionPolicy": "forced_auto_submit"
-    });
-    let recovery = merge_recovery(
-        attempt.recovery.clone().into(),
-        json!({
-            "lastPersistedAt": now,
-            "pendingMutationCount": 0,
-            "syncState": "saved"
-        }),
-    );
-
-    sqlx::query(
-        r#"
-        UPDATE student_attempts
-        SET
-            phase = ?,
-            recovery = ?,
-            final_submission = ?,
-            submitted_at = ?,
-            updated_at = NOW(),
-            revision = revision + 1
-        WHERE id = ?
-        "#,
+    seal_attempt_in_tx(
+        &mut tx,
+        &SealAttemptCommand {
+            attempt_id: attempt.id,
+            schedule_id: schedule_id.to_string(),
+            outcome: "terminated",
+            reason: completion_reason.to_owned(),
+            actor_kind: TerminalizationActorKind::Proctor,
+            actor_id: None,
+            proctor_note: None,
+            request_id: Uuid::new_v4().to_string(),
+            min_answer_revision: None,
+            effective_at: None,
+            final_submission: Some(json!({
+                "submissionId": format!("submission-{}", Uuid::new_v4().simple()),
+                "completionReason": completion_reason,
+                "terminated": true,
+                "autoSubmission": true,
+                "submissionPolicy": "forced_auto_submit"
+            })),
+        },
     )
-    .bind(AttemptPhase::PostExam)
-    .bind(recovery)
-    .bind(&final_submission)
-    .bind(now)
-    .bind(attempt_id.to_string())
-    .execute(tx.as_mut())
     .await?;
 
     tx.commit().await?;
@@ -3306,12 +4121,9 @@ fn apply_mutation(
             }
             let question_id = payload.question_id.clone();
             if !answer_schema.constraints.contains_key(&question_id) {
-                return Err(DeliveryError::Validation(
-                    "Mutation references an unknown `questionId`.".to_owned(),
-                ));
+                return Ok(false);
             }
 
-            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let value = payload.value.clone();
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
                 DeliveryError::Validation("Mutation references an unknown `questionId`.".to_owned())
@@ -3333,12 +4145,9 @@ fn apply_mutation(
             }
             let question_id = payload.question_id.clone();
             if !answer_schema.constraints.contains_key(&question_id) {
-                return Err(DeliveryError::Validation(
-                    "Mutation references an unknown `questionId`.".to_owned(),
-                ));
+                return Ok(false);
             }
 
-            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
                 DeliveryError::Validation("Mutation references an unknown `questionId`.".to_owned())
             })?;
@@ -3359,12 +4168,9 @@ fn apply_mutation(
             }
             let question_id = payload.question_id.clone();
             if !answer_schema.constraints.contains_key(&question_id) {
-                return Err(DeliveryError::Validation(
-                    "Mutation references an unknown `questionId`.".to_owned(),
-                ));
+                return Ok(false);
             }
 
-            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let slot_index = usize::try_from(payload.slot_index).unwrap_or(usize::MAX);
             let value = payload.value.clone();
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
@@ -3385,12 +4191,9 @@ fn apply_mutation(
             }
             let question_id = payload.question_id.clone();
             if !answer_schema.constraints.contains_key(&question_id) {
-                return Err(DeliveryError::Validation(
-                    "Mutation references an unknown `questionId`.".to_owned(),
-                ));
+                return Ok(false);
             }
 
-            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let slot_index = usize::try_from(payload.slot_index).unwrap_or(usize::MAX);
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
                 DeliveryError::Validation("Mutation references an unknown `questionId`.".to_owned())
@@ -3410,9 +4213,7 @@ fn apply_mutation(
             }
             let task_id = payload.task_id.clone();
             if !writing_task_ids.contains(&task_id) {
-                return Err(DeliveryError::Validation(
-                    "Mutation references an unknown writing `taskId`.".to_owned(),
-                ));
+                return Ok(false);
             }
 
             if let Some(active_section_key) = active_section_key {
@@ -3445,9 +4246,7 @@ fn apply_mutation(
             }
             let task_id = payload.task_id.clone();
             if !writing_task_ids.contains(&task_id) {
-                return Err(DeliveryError::Validation(
-                    "Mutation references an unknown writing `taskId`.".to_owned(),
-                ));
+                return Ok(false);
             }
 
             if let Some(active_section_key) = active_section_key {
@@ -3474,12 +4273,9 @@ fn apply_mutation(
             }
             let question_id = payload.question_id.clone();
             if !answer_schema.sections.contains_key(&question_id) {
-                return Err(DeliveryError::Validation(
-                    "Mutation flag references an unknown `questionId`.".to_owned(),
-                ));
+                return Ok(false);
             }
 
-            enforce_section_membership(active_section_key, &question_id, answer_schema)?;
             let flag_value = payload.value.as_bool().ok_or_else(|| {
                 DeliveryError::Validation("Flag values must be boolean.".to_owned())
             })?;
@@ -3645,31 +4441,6 @@ fn set_array_slot_answer(
     validate_answer_value(constraint, &updated_value)?;
     next_answers.insert(question_id.to_owned(), updated_value);
     *answers = Value::Object(next_answers);
-    Ok(())
-}
-
-fn enforce_section_membership(
-    active_section_key: Option<&str>,
-    question_id: &str,
-    answer_schema: &AnswerSchema,
-) -> Result<(), DeliveryError> {
-    let expected = answer_schema
-        .sections
-        .get(question_id)
-        .map(String::as_str)
-        .ok_or_else(|| {
-            DeliveryError::Validation("Mutation references an unknown `questionId`.".to_owned())
-        })?;
-    if let Some(active_section_key) = active_section_key {
-        if expected != active_section_key {
-            return Err(DeliveryError::conflict_reason(
-                DeliveryConflictReason::SectionMismatch,
-                format!(
-                    "Mutation section mismatch for question `{question_id}` (expected `{expected}`, active `{active_section_key}`)."
-                ),
-            ));
-        }
-    }
     Ok(())
 }
 
@@ -4831,5 +5602,61 @@ mod tests {
         }))
         .expect("shape accepted");
         assert!(matches!(parsed, MutationCommand::Network(_)));
+    }
+
+    #[test]
+    fn terminalization_intent_compatibility_only_accepts_same_outcome() {
+        assert!(terminalization_intent_is_compatible(
+            "submitted",
+            "student_submit",
+            "submitted",
+            "student_submit"
+        ));
+        assert!(terminalization_intent_is_compatible(
+            "submitted",
+            "student_submit",
+            "submitted",
+            "time_expired"
+        ));
+        assert!(!terminalization_intent_is_compatible(
+            "submitted",
+            "student_submit",
+            "terminated",
+            "proctor_terminate"
+        ));
+        assert!(!terminalization_intent_is_compatible(
+            "terminated",
+            "proctor_terminate",
+            "submitted",
+            "student_submit"
+        ));
+    }
+
+    #[test]
+    fn terminal_snapshot_contains_only_server_owned_attempt_state() {
+        let snapshot = build_terminal_snapshot(
+            "attempt-1",
+            "schedule-1",
+            Some("org-1"),
+            "exam-1",
+            "version-1",
+            "ielts",
+            7,
+            json!({"q1": "answer"}),
+            json!({"task1": "essay"}),
+            json!({"q1": true}),
+        );
+
+        assert_eq!(snapshot["attemptId"], "attempt-1");
+        assert_eq!(snapshot["scheduleId"], "schedule-1");
+        assert_eq!(snapshot["organizationId"], "org-1");
+        assert_eq!(snapshot["examId"], "exam-1");
+        assert_eq!(snapshot["publishedVersionId"], "version-1");
+        assert_eq!(snapshot["providerKey"], "ielts");
+        assert_eq!(snapshot["answerRevision"], 7);
+        assert_eq!(snapshot["answers"]["q1"], "answer");
+        assert_eq!(snapshot["writingAnswers"]["task1"], "essay");
+        assert_eq!(snapshot["flags"]["q1"], true);
+        assert!(snapshot.get("clientSnapshot").is_none());
     }
 }

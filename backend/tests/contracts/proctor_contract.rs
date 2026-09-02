@@ -50,11 +50,27 @@ const PROCTOR_MIGRATIONS: &[&str] = &[
     "0010_auth_security.sql",
     "0014_student_attempt_presence.sql",
     "0015_operation_write_hardening.sql",
+    "0016_attempt_mutation_id_uniqueness.sql",
     "0017_production_hardening.sql",
     "0018_exam_day_concurrency_hardening.sql",
+    "0019_violation_id_idempotency.sql",
+    "0020_schedule_role_display_names.sql",
+    "0021_attempt_finalization_consistency.sql",
+    "0022_attempt_submission_ledger.sql",
+    "0023_sort_memory_hotpath_indexes.sql",
+    "0024_projection_sort_hardening.sql",
     "0030_outbox_retry_policy.sql",
+    "0032_provider_neutral_sat.sql",
+    "0033_sat_runtime_authoring_hardening.sql",
+    "0034_assessment_access_links.sql",
+    "0035_autosave_durability_hardening.sql",
+    "0036_question_revision_updated_by.sql",
+    "0037_runtime_timing_model.sql",
+    "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
     "0041_websocket_connection_leases.sql",
     "0042_websocket_lease_admission_lock.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 #[tokio::test]
@@ -181,7 +197,7 @@ async fn dashboard_detail_mode_bounds_audit_logs_and_alerts() {
     let default_json = json_body(default_detail).await;
     assert_eq!(
         default_json["data"]["auditLogs"].as_array().unwrap().len(),
-        5
+        6
     );
     assert_eq!(default_json["data"]["alerts"].as_array().unwrap().len(), 5);
 
@@ -524,7 +540,11 @@ async fn end_section_now_auto_submits_when_completing_final_section() {
             )
             .await
             .unwrap();
-        assert_eq!(end_section.status(), StatusCode::OK);
+        if end_section.status() != StatusCode::OK {
+            let response_status = end_section.status();
+            let body = json_body(end_section).await;
+            panic!("unexpected end-section response {response_status}: {body}");
+        }
         let end_section_json = json_body(end_section).await;
         status = end_section_json["data"]["status"]
             .as_str()
@@ -654,7 +674,7 @@ async fn websocket_live_endpoint_accepts_authenticated_connections_with_cookie()
     let database = mysql::TestDatabase::new(PROCTOR_MIGRATIONS).await;
     let auth = create_authenticated_user(
         database.pool(),
-        UserRole::Proctor,
+        UserRole::Admin,
         "proctor@example.com",
         "Test Proctor",
     )
@@ -781,6 +801,16 @@ async fn websocket_live_emits_runtime_command_events() {
     assert_eq!(payload["type"], "connected");
     assert_eq!(payload["scheduleId"], schedule.id);
 
+    let snapshot = socket
+        .next()
+        .await
+        .expect("runtime snapshot")
+        .expect("websocket frame");
+    let snapshot_payload: serde_json::Value =
+        serde_json::from_str(&snapshot.into_text().expect("text frame"))
+            .expect("parse runtime snapshot");
+    assert_eq!(snapshot_payload["type"], "runtime_snapshot");
+
     let start_response = http_app
         .clone()
         .oneshot(
@@ -798,6 +828,16 @@ async fn websocket_live_emits_runtime_command_events() {
     assert_eq!(start_response.status(), StatusCode::OK);
     let start_json = json_body(start_response).await;
     let expected_revision = start_json["data"]["revision"].as_i64().unwrap();
+
+    let runtime_snapshot = socket
+        .next()
+        .await
+        .expect("runtime update snapshot")
+        .expect("websocket frame");
+    let runtime_snapshot_payload: serde_json::Value =
+        serde_json::from_str(&runtime_snapshot.into_text().expect("text frame"))
+            .expect("parse runtime update snapshot");
+    assert_eq!(runtime_snapshot_payload["type"], "runtime_snapshot");
 
     let update_message = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
         .await
@@ -874,6 +914,16 @@ async fn websocket_live_emits_attempt_command_events() {
             .expect("parse handshake payload");
     assert_eq!(payload["type"], "connected");
     assert_eq!(payload["scheduleId"], schedule.id);
+
+    let snapshot = socket
+        .next()
+        .await
+        .expect("runtime snapshot")
+        .expect("websocket frame");
+    let snapshot_payload: serde_json::Value =
+        serde_json::from_str(&snapshot.into_text().expect("text frame"))
+            .expect("parse runtime snapshot");
+    assert_eq!(snapshot_payload["type"], "runtime_snapshot");
 
     issue_attempt_command(
         &http_app,
@@ -1249,13 +1299,18 @@ async fn issue_attempt_command(
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    if response.status() != StatusCode::OK {
+        let status = response.status();
+        let body = json_body(response).await;
+        panic!("unexpected attempt command {action} response {status}: {body}");
+    }
     json_body(response).await
 }
 
 async fn bootstrap_attempt(pool: &sqlx::MySqlPool, schedule_id: Uuid, candidate_id: &str) -> Uuid {
     let context = DeliveryService::new(pool.clone())
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, candidate_id),
@@ -1317,9 +1372,9 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
-                    "reading": {"passages": [{"id": "reading-1"}]},
-                    "listening": {"parts": [{"id": "listening-1"}]},
-                    "writing": {"tasks": [{"id": "writing-1"}]},
+                    "reading": {"passages": [{"id": "reading-1", "title": "Reading Passage", "blocks": [{"id": "reading-block", "type": "SHORT_ANSWER", "stem": "Answer the question", "questions": [{"id": "reading-question", "prompt": "What is the answer?", "correctAnswer": "answer"}]}]}]},
+                    "listening": {"parts": [{"id": "listening-1", "title": "Listening Part", "blocks": [{"id": "listening-block", "type": "SHORT_ANSWER", "stem": "Answer what you hear", "questions": [{"id": "listening-question", "prompt": "What did you hear?", "correctAnswer": "answer"}]}]}]},
+                    "writing": {"task1Prompt": "Summarise the chart.", "task2Prompt": "Discuss both views.", "tasks": [{"id": "writing-1"}]},
                     "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
                 }),
                 config_snapshot: sample_delivery_config(),
@@ -1371,9 +1426,10 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
 
 fn sample_delivery_config() -> serde_json::Value {
     json!({
+        "progression": {"allowPause": true},
         "sections": {
-            "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5},
-            "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0},
+            "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5, "bandScoreTable": {"1": 1.0}},
+            "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0, "bandScoreTable": {"1": 1.0}},
             "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 10},
             "speaking": {"enabled": true, "label": "Speaking", "order": 4, "duration": 15, "gapAfterMinutes": 0}
         }
@@ -1390,5 +1446,6 @@ fn student_key(schedule_id: Uuid, candidate_id: &str) -> String {
 }
 
 fn contract_actor() -> ActorContext {
-    ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin)
+    ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Builder)
+        .with_organization_id("org-1".to_owned())
 }

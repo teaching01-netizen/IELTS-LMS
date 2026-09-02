@@ -9,6 +9,15 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value));
 }
 
+function outcomeLabel(outcomeStatus: string): string {
+  switch (outcomeStatus) {
+    case 'invalidated_proctor': return 'Exam terminated by proctor';
+    case 'invalidated_timeout': return 'Exam ended before scoring';
+    case 'pending': return 'Scoring pending';
+    default: return 'Practice';
+  }
+}
+
 export function SatResultsRoute() {
   const navigate = useNavigate();
   const query = useSatResultsQuery();
@@ -17,8 +26,9 @@ export function SatResultsRoute() {
   const results = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
     return (query.data ?? []).filter((result) => {
-      if (scoreFilter === 'available' && result.totalScore == null) return false;
-      if (scoreFilter === 'unavailable' && result.totalScore != null) return false;
+      const scoreAvailable = result.outcomeStatus === 'scored' && result.totalScore != null;
+      if (scoreFilter === 'available' && !scoreAvailable) return false;
+      if (scoreFilter === 'unavailable' && scoreAvailable) return false;
       if (!needle) return true;
       return [result.studentName, result.studentId, result.examTitle, result.cohortName]
         .some((value) => value.toLocaleLowerCase().includes(needle));
@@ -63,7 +73,7 @@ export function SatResultsRoute() {
               <div className="min-w-0 py-3"><p className="truncate text-[13px] font-semibold text-slate-900">{result.studentName}</p><p className="mt-1 truncate text-[10px] text-slate-400">{result.studentId} · {result.cohortName}</p></div>
               <div className="hidden min-w-0 sm:block"><p className="truncate text-[12px] font-medium text-slate-700">{result.examTitle}</p><p className="mt-1 text-[9px] text-slate-400">Version {result.versionNumber}</p></div>
               <div className="hidden text-[11px] tabular-nums text-slate-400 sm:block">{formatDate(result.submittedAt)}</div>
-              <div className="text-right"><p className="text-[17px] font-semibold tabular-nums tracking-[-0.025em] text-slate-900">{result.totalScore ?? '—'}</p><p className="mt-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-slate-400">Practice</p></div>
+              <div className="text-right"><p className="text-[17px] font-semibold tabular-nums tracking-[-0.025em] text-slate-900">{result.outcomeStatus === 'scored' && result.totalScore != null ? result.totalScore : '—'}</p><p className="mt-0.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-slate-400">{outcomeLabel(result.outcomeStatus)}</p></div>
               <ArrowRight size={15} className="hidden text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-500 sm:block" aria-hidden="true" />
               <div className="col-span-2 -mt-2 pb-3 text-[10px] text-slate-400 sm:hidden">{result.examTitle} · {formatDate(result.submittedAt)}</div>
             </button>

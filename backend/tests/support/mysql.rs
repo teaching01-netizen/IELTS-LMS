@@ -85,7 +85,30 @@ impl TestDatabase {
                 (db_name, pool, true)
             };
 
-        for migration in migrations {
+        // Keep focused migration lists useful while ensuring every integration
+        // database has the current idempotency schema used by the application.
+        let mut effective_migrations = migrations.to_vec();
+        // Enum-only tests intentionally use no schema migrations. Do not append
+        // identity migrations that require the auth/delivery tables to exist.
+        if !effective_migrations.is_empty() {
+            if !effective_migrations.contains(&"0045_heartbeat_idempotency.sql") {
+                effective_migrations.push("0045_heartbeat_idempotency.sql");
+            }
+            if !effective_migrations.contains(&"0046_admin_observer_role.sql") {
+                effective_migrations.push("0046_admin_observer_role.sql");
+            }
+            // The module identity index exists only in the provider-neutral
+            // schema used by the SAT/authoring fixtures.
+            if effective_migrations.contains(&"0032_provider_neutral_sat.sql")
+                && !effective_migrations.contains(&"0047_required_identity_index_names.sql")
+            {
+                effective_migrations.push("0047_required_identity_index_names.sql");
+            }
+            if !effective_migrations.contains(&"0048_exam_event_timestamp_precision.sql") {
+                effective_migrations.push("0048_exam_event_timestamp_precision.sql");
+            }
+        }
+        for migration in effective_migrations {
             let sql = fs::read_to_string(migration_path(migration)).expect("read migration");
             // When using an existing remote database (no permission to create a new one),
             // avoid re-applying migrations if tables already exist.
@@ -185,18 +208,24 @@ pub async fn create_authenticated_user(
     let password_hash = hash_password("Password123!").expect("hash password");
     let now = Utc::now();
 
+    let organization_id = match role {
+        UserRole::Admin | UserRole::AdminObserver => None,
+        _ => Some("org-1"),
+    };
     sqlx::query(
         r#"
         INSERT INTO users (
-            id, email, display_name, role, state, failed_login_count, created_at, updated_at
+            id, email, display_name, role, organization_id, state,
+            failed_login_count, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
         "#,
     )
     .bind(user_id.to_string())
     .bind(email)
     .bind(display_name)
     .bind(role_sql(&role))
+    .bind(organization_id)
     .bind(state_sql(&UserState::Active))
     .bind(now)
     .bind(now)
@@ -367,6 +396,7 @@ pub async fn create_student_registration(
 fn role_sql(role: &UserRole) -> &'static str {
     match role {
         UserRole::Admin => "admin",
+        UserRole::AdminObserver => "admin_observer",
         UserRole::Builder => "builder",
         UserRole::Proctor => "proctor",
         UserRole::Grader => "grader",

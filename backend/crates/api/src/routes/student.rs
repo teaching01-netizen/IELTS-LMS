@@ -26,7 +26,10 @@ use serde_json::{json, Value};
 use std::time::Instant;
 use uuid::Uuid;
 
-use ielts_backend_infrastructure::rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult};
+use ielts_backend_infrastructure::{
+    actor_context::{ActorContext, ActorRole},
+    rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult},
+};
 
 use crate::{
     http::{
@@ -102,10 +105,12 @@ pub async fn get_student_session(
     } else {
         None
     };
+    let actor = student_delivery_actor(&principal, schedule_id, Some(access_key(&access)));
 
     let session = if query.refresh_attempt_credential.unwrap_or(false) {
         service
             .get_session_context_with_attempt_credential(
+                &actor,
                 schedule_id,
                 wcode,
                 access.legacy_student_key.clone(),
@@ -120,6 +125,7 @@ pub async fn get_student_session(
     } else {
         service
             .get_session_context(
+                &actor,
                 schedule_id,
                 wcode,
                 access.legacy_student_key.clone(),
@@ -148,7 +154,12 @@ pub async fn get_student_static_session(
     authorize_student(&state, &principal, schedule_id, None).await?;
     let service = delivery_service(&state);
     let started = Instant::now();
-    let session = service.get_static_session_context(schedule_id).await?;
+    let session = service
+        .get_static_session_context(
+            &student_delivery_actor(&principal, schedule_id, None),
+            schedule_id,
+        )
+        .await?;
     state
         .telemetry
         .observe_db_operation("delivery.get_static_session_context", started.elapsed());
@@ -241,9 +252,11 @@ pub async fn get_student_live_session(
     } else {
         None
     };
+    let actor = student_delivery_actor(&principal, schedule_id, Some(access_key(&access)));
 
     let session = service
         .get_live_session_context(
+            &actor,
             schedule_id,
             wcode,
             query.student_key.or(access.legacy_student_key.clone()),
@@ -332,7 +345,7 @@ enum ApiMutationCommandPayload {
     SetScalar {
         #[serde(rename = "questionId")]
         question_id: String,
-        value: String,
+        value: Value,
     },
     ClearScalar {
         #[serde(rename = "questionId")]
@@ -385,7 +398,7 @@ impl ApiMutationCommandPayload {
             Self::SetScalar { question_id, value } => {
                 MutationCommand::SetScalar(QuestionValueMutationPayload {
                     question_id: question_id.clone(),
-                    value: Value::String(value.clone()),
+                    value: value.clone(),
                 })
             }
             Self::ClearScalar { question_id } => {
@@ -544,9 +557,11 @@ pub async fn save_precheck(
     } else {
         None
     };
+    let actor = student_delivery_actor(&principal, schedule_id, Some(access_key(&access)));
 
     let attempt = service
         .persist_precheck(
+            &actor,
             schedule_id,
             StudentPrecheckRequest {
                 wcode,
@@ -623,8 +638,10 @@ pub async fn bootstrap_student_session(
         None
     };
 
+    let actor = student_delivery_actor(&principal, schedule_id, Some(access_key(&access)));
     let session = service
         .bootstrap_with_attempt_credential(
+            &actor,
             schedule_id,
             StudentBootstrapRequest {
                 wcode,
@@ -876,8 +893,9 @@ pub async fn record_heartbeat(
         && query.response_mode != Some(HeartbeatResponseMode::Full);
     let attempt = service.record_heartbeat(schedule_id, req).await?;
     let runtime = if query.response_mode == Some(HeartbeatResponseMode::Full) {
+        let actor = attempt_actor_context(&state, &principal, schedule_id).await?;
         service
-            .get_live_session_context(schedule_id, None, None, None)
+            .get_live_session_context(&actor, schedule_id, None, None, None)
             .await?
             .runtime
     } else {
@@ -1194,7 +1212,13 @@ pub async fn submit_student_session(
     let service = delivery_service(&state);
     let started = Instant::now();
     let submit_result = service
-        .submit_attempt(schedule_id, req, Some(idempotency_key))
+        .submit_attempt_with_metadata(
+            schedule_id,
+            req,
+            Some(idempotency_key),
+            request_id.0.clone(),
+            None,
+        )
         .await;
     let mut submission = match submit_result {
         Ok(submission) => {
@@ -1296,6 +1320,18 @@ impl From<DeliveryError> for ApiError {
                     api.with_details(Value::Object(details))
                 }
             }
+            DeliveryError::TerminalizationConflict {
+                message,
+                outcome,
+                reason,
+                terminalization_id,
+                latest_revision,
+            } => ApiError::new(StatusCode::CONFLICT, "CONFLICT", &message).with_details(json!({
+                "outcome": outcome,
+                "reason": reason,
+                "terminalizationId": terminalization_id,
+                "latestRevision": latest_revision,
+            })),
             DeliveryError::NotFound => {
                 ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
             }
@@ -1345,6 +1381,53 @@ fn require_idempotency_key(headers: &HeaderMap, operation: &str) -> Result<Strin
             &format!("Idempotency-Key header is required for {operation} requests."),
         )
     })
+}
+
+fn student_delivery_actor(
+    principal: &AuthenticatedUser,
+    schedule_id: Uuid,
+    student_key: Option<String>,
+) -> ActorContext {
+    let actor = principal.actor_context();
+    if principal.user.role == UserRole::Student {
+        let actor = actor.with_schedule_scope_id(schedule_id.to_string());
+        if let Some(student_key) = student_key {
+            actor.with_student_scope_key(student_key)
+        } else {
+            actor
+        }
+    } else {
+        actor
+    }
+}
+
+async fn attempt_actor_context(
+    state: &AppState,
+    principal: &AttemptPrincipal,
+    schedule_id: Uuid,
+) -> Result<ActorContext, ApiError> {
+    let organization_id =
+        sqlx::query_scalar::<_, String>("SELECT organization_id FROM exam_schedules WHERE id = ?")
+            .bind(schedule_id.to_string())
+            .fetch_optional(&state.db_pool())
+            .await
+            .map_err(|error| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "DATABASE_ERROR",
+                    &error.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+            })?;
+
+    Ok(ActorContext::new(
+        principal.authorization.claims.user_id.clone(),
+        ActorRole::Student,
+    )
+    .with_organization_id(organization_id)
+    .with_schedule_scope_id(schedule_id.to_string()))
 }
 
 async fn authorize_student(

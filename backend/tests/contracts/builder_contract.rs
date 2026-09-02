@@ -63,6 +63,8 @@ const BUILDER_MIGRATIONS: &[&str] = &[
     "0036_question_revision_updated_by.sql",
     "0037_runtime_timing_model.sql",
     "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 #[tokio::test]
@@ -520,17 +522,18 @@ async fn patch_draft_does_not_delete_versions_referenced_by_schedules() {
     sqlx::query(
         r#"
         INSERT INTO exam_schedules (
-            id, exam_id, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name,
+            id, exam_id, organization_id, provider_key, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name,
             institution, start_time, end_time, planned_duration_minutes, delivery_mode,
             recurrence_type, recurrence_interval, auto_start, auto_stop, status, created_by,
             created_at, updated_at, revision
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW() + INTERVAL 60 MINUTE, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW() + INTERVAL 60 MINUTE, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
         "#,
     )
     .bind(Uuid::new_v4().to_string())
     .bind(seeded.id.to_string())
     .bind("org-1")
+    .bind("ielts")
     .bind(&seeded.title)
     .bind(&seeded.title)
     .bind(&seeded.title)
@@ -1265,7 +1268,8 @@ fn app_state(pool: sqlx::MySqlPool) -> AppState {
 }
 
 fn contract_actor() -> ActorContext {
-    ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin)
+    ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Builder)
+        .with_organization_id("org-1".to_owned())
 }
 
 async fn seed_exam(pool: &sqlx::MySqlPool) -> ExamEntity {

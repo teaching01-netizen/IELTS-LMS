@@ -182,6 +182,22 @@ impl AuthService {
                 u.display_name,
                 u.role,
                 u.state,
+                COALESCE(
+                    u.organization_id,
+                    (
+                        SELECT CASE
+                            WHEN COUNT(DISTINCT assigned_schedule.organization_id) = 1
+                            THEN MAX(assigned_schedule.organization_id)
+                            ELSE NULL
+                        END
+                        FROM schedule_staff_assignments assignment
+                        JOIN exam_schedules assigned_schedule
+                          ON assigned_schedule.id = assignment.schedule_id
+                        WHERE COALESCE(assignment.user_id, assignment.actor_id) = u.id
+                          AND assignment.revoked_at IS NULL
+                          AND assigned_schedule.organization_id IS NOT NULL
+                    )
+                ) AS organization_id,
                 u.failed_login_count,
                 u.locked_until,
                 u.last_login_at,
@@ -915,6 +931,7 @@ struct JoinedSessionRow {
     display_name: Option<String>,
     role: UserRole,
     state: UserState,
+    organization_id: Option<String>,
     failed_login_count: i32,
     locked_until: Option<chrono::DateTime<Utc>>,
     last_login_at: Option<chrono::DateTime<Utc>>,
@@ -942,6 +959,7 @@ impl JoinedSessionRow {
             display_name: self.display_name.clone(),
             role: self.role.clone(),
             state: self.state.clone(),
+            organization_id: self.organization_id.clone(),
             failed_login_count: self.failed_login_count,
             locked_until: self.locked_until,
             last_login_at: self.last_login_at,
@@ -996,6 +1014,7 @@ impl UserRoleSqlExt for UserRole {
     fn sql_role(&self) -> &'static str {
         match self {
             UserRole::Admin => "admin",
+            UserRole::AdminObserver => "admin_observer",
             UserRole::Builder => "builder",
             UserRole::Proctor => "proctor",
             UserRole::Grader => "grader",

@@ -5,9 +5,7 @@ use ielts_backend_domain::schedule::{
     RuntimeCommandRequest, RuntimeSectionState, RuntimeStatus, ScheduleRegistration,
     ScheduleSectionPlanEntry, ScheduleStatus, SectionRuntimeStatus, UpdateScheduleRequest,
 };
-use ielts_backend_infrastructure::{
-    actor_context::ActorContext, authorization::AuthorizationService,
-};
+use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 use serde_json::Value;
 use sqlx::{FromRow, MySql, MySqlPool, Transaction};
 use thiserror::Error;
@@ -29,6 +27,14 @@ pub enum SchedulingError {
 
 pub struct SchedulingService {
     pool: MySqlPool,
+}
+
+fn ensure_schedule_writer(ctx: &ActorContext) -> Result<(), SchedulingError> {
+    if matches!(ctx.role, ActorRole::Admin | ActorRole::Builder) {
+        Ok(())
+    } else {
+        Err(SchedulingError::NotFound)
+    }
 }
 
 impl SchedulingService {
@@ -173,10 +179,37 @@ impl SchedulingService {
         req: CreateScheduleRequest,
         tx: &mut Transaction<'_, MySql>,
     ) -> Result<ExamSchedule, SchedulingError> {
-        let exam = self.load_exam_context(req.exam_id.clone()).await?;
-        let version = self
-            .load_version_context(req.published_version_id.clone())
-            .await?;
+        ensure_schedule_writer(ctx)?;
+
+        // Resolve and lock the exam/version inside the schedule transaction. For
+        // tenant actors the organization predicate is part of the query, not a
+        // handler-only check.
+        let exam = if ctx.is_platform_write() {
+            sqlx::query_as::<_, ExamContext>(
+                "SELECT title, organization_id, provider_key, CAST(current_draft_version_id AS CHAR) AS current_draft_version_id FROM exam_entities WHERE id = ? FOR UPDATE",
+            )
+            .bind(&req.exam_id)
+            .fetch_optional(&mut **tx)
+            .await?
+        } else if let Some(organization_id) = ctx.organization_id.as_ref() {
+            sqlx::query_as::<_, ExamContext>(
+                "SELECT title, organization_id, provider_key, CAST(current_draft_version_id AS CHAR) AS current_draft_version_id FROM exam_entities WHERE id = ? AND organization_id = ? FOR UPDATE",
+            )
+            .bind(&req.exam_id)
+            .bind(organization_id)
+            .fetch_optional(&mut **tx)
+            .await?
+        } else {
+            None
+        }
+        .ok_or(SchedulingError::NotFound)?;
+        let version = sqlx::query_as::<_, VersionContext>(
+            "SELECT exam_id, config_snapshot, is_published FROM exam_versions WHERE id = ? FOR UPDATE",
+        )
+        .bind(&req.published_version_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or(SchedulingError::NotFound)?;
 
         if version.exam_id.to_string() != req.exam_id {
             return Err(SchedulingError::Validation(
@@ -259,16 +292,24 @@ impl SchedulingService {
                 | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
         ) {
             "SELECT * FROM exam_schedules ORDER BY start_time ASC, created_at DESC"
-        } else if let Some(ref org_id) = ctx.organization_id {
+        } else if ctx.organization_id.is_some() {
             "SELECT * FROM exam_schedules WHERE organization_id = ? ORDER BY start_time ASC, created_at DESC"
         } else {
             "SELECT * FROM exam_schedules WHERE 1=0 ORDER BY start_time ASC, created_at DESC"
             // No access
         };
 
-        let schedules = if let Some(org_id) = ctx.organization_id.clone() {
+        let schedules = if matches!(
+            ctx.role,
+            ielts_backend_infrastructure::actor_context::ActorRole::Admin
+                | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+        ) {
             sqlx::query_as::<_, ExamSchedule>(query)
-                .bind(org_id.to_string())
+                .fetch_all(&self.pool)
+                .await?
+        } else if let Some(org_id) = ctx.organization_id.clone() {
+            sqlx::query_as::<_, ExamSchedule>(query)
+                .bind(org_id)
                 .fetch_all(&self.pool)
                 .await?
         } else {
@@ -292,19 +333,34 @@ impl SchedulingService {
                 .await?
                 .ok_or(SchedulingError::NotFound)?;
 
-        // Check authorization: user must have access to this schedule
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
-        if let Some(org_id) = organization_id {
-            if !AuthorizationService::can_access_schedule(
-                ctx,
-                schedule_id.to_string(),
-                org_id.to_string(),
-            ) {
-                return Err(SchedulingError::NotFound);
+        // Compare the opaque organization identifier directly. Organization IDs
+        // are VARCHAR values in this system and must not be treated as UUIDs.
+        let allowed = match ctx.access_scope() {
+            Some(
+                ielts_backend_infrastructure::actor_context::AccessScope::PlatformRead
+                | ielts_backend_infrastructure::actor_context::AccessScope::PlatformWrite,
+            ) => true,
+            Some(ielts_backend_infrastructure::actor_context::AccessScope::Tenant {
+                organization_id,
+                schedule_id: scoped_schedule_id,
+            }) => {
+                schedule.organization_id.as_deref() == Some(organization_id.as_str())
+                    && scoped_schedule_id
+                        .as_deref()
+                        .is_none_or(|scoped| scoped == schedule_id.to_string())
             }
+            None => {
+                matches!(
+                    ctx.role,
+                    ielts_backend_infrastructure::actor_context::ActorRole::Student
+                ) && ctx
+                    .schedule_scope_id
+                    .as_deref()
+                    .is_some_and(|scoped| scoped == schedule_id.to_string())
+            }
+        };
+        if !allowed {
+            return Err(SchedulingError::NotFound);
         }
 
         Ok(schedule)
@@ -316,17 +372,22 @@ impl SchedulingService {
         schedule_id: Uuid,
         req: UpdateScheduleRequest,
     ) -> Result<ExamSchedule, SchedulingError> {
+        ensure_schedule_writer(ctx)?;
         let existing = self.get_schedule(ctx, schedule_id).await?;
 
-        // Check if user can modify this schedule
-        let organization_id = existing
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
-        if let Some(org_id) = organization_id {
-            if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
-                return Err(SchedulingError::NotFound);
-            }
+        let can_modify = if ctx.is_platform_write() {
+            true
+        } else {
+            existing
+                .organization_id
+                .as_deref()
+                .is_some_and(|organization_id| {
+                    ctx.organization_id.as_deref() == Some(organization_id)
+                        && !matches!(ctx.role, ActorRole::AdminObserver)
+                })
+        };
+        if !can_modify {
+            return Err(SchedulingError::NotFound);
         }
 
         if existing.revision != req.revision {
@@ -451,17 +512,22 @@ impl SchedulingService {
         ctx: &ActorContext,
         schedule_id: Uuid,
     ) -> Result<(), SchedulingError> {
+        ensure_schedule_writer(ctx)?;
         let schedule = self.get_schedule(ctx, schedule_id).await?;
 
-        // Check if user can delete this schedule
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
-        if let Some(org_id) = organization_id {
-            if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
-                return Err(SchedulingError::NotFound);
-            }
+        let can_delete = if ctx.is_platform_write() {
+            true
+        } else {
+            schedule
+                .organization_id
+                .as_deref()
+                .is_some_and(|organization_id| {
+                    ctx.organization_id.as_deref() == Some(organization_id)
+                        && !matches!(ctx.role, ActorRole::AdminObserver)
+                })
+        };
+        if !can_delete {
+            return Err(SchedulingError::NotFound);
         }
 
         let deleted = sqlx::query("DELETE FROM exam_schedules WHERE id = ?")
@@ -492,6 +558,7 @@ impl SchedulingService {
         .await?
         {
             if schedule.auto_stop
+                && matches!(ctx.role, ActorRole::Admin | ActorRole::Proctor)
                 && schedule.status != ScheduleStatus::Cancelled
                 && schedule.status != ScheduleStatus::Completed
                 && Utc::now() >= schedule.end_time
@@ -500,8 +567,7 @@ impl SchedulingService {
                     RuntimeStatus::Completed | RuntimeStatus::Cancelled
                 )
             {
-                self.end_runtime(&system_actor(), schedule_id, "auto_stop")
-                    .await?;
+                self.end_runtime(ctx, schedule_id, "auto_stop").await?;
                 let refreshed = sqlx::query_as::<_, RuntimeRow>(
                     "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
                 )
@@ -676,11 +742,13 @@ impl SchedulingService {
             ));
         }
 
+        let mut tx = self.pool.begin().await?;
+        lock_schedule_attempts_in_tx(&mut tx, &schedule_id.to_string()).await?;
         let runtime = sqlx::query_as::<_, RuntimeRow>(
-            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
+            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
         )
         .bind(schedule_id.to_string())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or(SchedulingError::NotFound)?;
 
@@ -691,8 +759,6 @@ impl SchedulingService {
         let active_section_key = runtime.active_section_key.clone().ok_or_else(|| {
             SchedulingError::Conflict("Runtime has no active section.".to_owned())
         })?;
-        let now = Utc::now();
-        let mut tx = self.pool.begin().await?;
 
         sqlx::query(
             "UPDATE exam_session_runtimes SET status = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?",
@@ -755,11 +821,13 @@ impl SchedulingService {
         ctx: &ActorContext,
         schedule_id: Uuid,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
+        let mut tx = self.pool.begin().await?;
+        lock_schedule_attempts_in_tx(&mut tx, &schedule_id.to_string()).await?;
         let runtime = sqlx::query_as::<_, RuntimeRow>(
-            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
+            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
         )
         .bind(schedule_id.to_string())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or(SchedulingError::NotFound)?;
 
@@ -773,17 +841,16 @@ impl SchedulingService {
             SchedulingError::Conflict("Runtime has no active section.".to_owned())
         })?;
         let paused_at = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
-            "SELECT paused_at FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ?",
+            "SELECT paused_at FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR UPDATE",
         )
         .bind(runtime.id)
         .bind(&active_section_key)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
         let now = Utc::now();
         let paused_seconds = paused_at
             .map(|started| (now - started).num_seconds().max(0) as i32)
             .unwrap_or(0);
-        let mut tx = self.pool.begin().await?;
 
         sqlx::query(
             "UPDATE exam_session_runtimes SET status = ?, total_paused_seconds = total_paused_seconds + ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?",
@@ -850,11 +917,13 @@ impl SchedulingService {
         schedule_id: Uuid,
         completion_reason: &str,
     ) -> Result<ExamSessionRuntime, SchedulingError> {
+        let mut tx = self.pool.begin().await?;
+        lock_schedule_attempts_in_tx(&mut tx, &schedule_id.to_string()).await?;
         let runtime = sqlx::query_as::<_, RuntimeRow>(
-            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
+            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
         )
         .bind(schedule_id.to_string())
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or(SchedulingError::NotFound)?;
 
@@ -862,11 +931,9 @@ impl SchedulingService {
             runtime.status,
             RuntimeStatus::Completed | RuntimeStatus::Cancelled
         ) {
+            tx.rollback().await?;
             return self.hydrate_runtime(runtime).await;
         }
-
-        let now = Utc::now();
-        let mut tx = self.pool.begin().await?;
 
         sqlx::query(
             r#"
@@ -913,13 +980,16 @@ impl SchedulingService {
         .execute(&mut *tx)
         .await?;
 
-        auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, completion_reason)
+        auto_submit_schedule_attempts_in_tx(&mut tx, schedule_id, completion_reason)
             .await
             .map_err(|error| match error {
                 DeliveryError::Database(db) => SchedulingError::Database(db),
                 DeliveryError::Conflict { message, .. }
                 | DeliveryError::Validation(message)
                 | DeliveryError::Internal(message) => SchedulingError::Validation(message),
+                DeliveryError::TerminalizationConflict { message, .. } => {
+                    SchedulingError::Conflict(message)
+                }
                 DeliveryError::NotFound => SchedulingError::NotFound,
             })?;
 
@@ -1655,13 +1725,6 @@ impl From<RuntimeSectionRow> for RuntimeSectionState {
     }
 }
 
-fn system_actor() -> ActorContext {
-    ActorContext::new(
-        Uuid::nil().to_string(),
-        ielts_backend_infrastructure::actor_context::ActorRole::Admin,
-    )
-}
-
 #[cfg(test)]
 mod computed_time_tests {
     use super::*;
@@ -1932,6 +1995,19 @@ fn plan_total_minutes(plan: &[ScheduleSectionPlanEntry]) -> i32 {
     plan.last()
         .map(|entry| entry.end_offset_minutes)
         .unwrap_or(0)
+}
+
+async fn lock_schedule_attempts_in_tx(
+    tx: &mut Transaction<'_, MySql>,
+    schedule_id: &str,
+) -> Result<(), SchedulingError> {
+    // Schedule-wide runtime commands acquire attempt rows before runtime rows,
+    // matching student/proctor attempt writers and avoiding lock inversion.
+    sqlx::query("SELECT id FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE")
+        .bind(schedule_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 fn validate_display_name(label: &str, value: &str) -> Result<String, SchedulingError> {

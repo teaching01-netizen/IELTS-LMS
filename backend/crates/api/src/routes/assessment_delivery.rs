@@ -39,6 +39,20 @@ fn map_error(error: AssessmentDeliveryError) -> ApiError {
         AssessmentDeliveryError::Conflict(message) => {
             ApiError::new(StatusCode::CONFLICT, "ASSESSMENT_CONFLICT", &message)
         }
+        AssessmentDeliveryError::TerminalizationConflict {
+            message,
+            outcome,
+            reason,
+            terminalization_id,
+            latest_revision,
+        } => ApiError::new(StatusCode::CONFLICT, "ASSESSMENT_CONFLICT", &message).with_details(
+            json!({
+                "outcome": outcome,
+                "reason": reason,
+                "terminalizationId": terminalization_id,
+                "latestRevision": latest_revision,
+            }),
+        ),
         AssessmentDeliveryError::StructuredConflict { reason, message } => {
             ApiError::new(StatusCode::CONFLICT, "ASSESSMENT_CONFLICT", &message)
                 .with_details(json!({ "reason": reason.as_str() }))

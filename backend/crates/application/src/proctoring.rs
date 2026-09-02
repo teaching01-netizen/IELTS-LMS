@@ -20,7 +20,8 @@ use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
 
 use crate::delivery::{
-    auto_submit_schedule_attempts_in_tx, force_finalize_attempt_if_pending, DeliveryError,
+    auto_submit_schedule_attempts_in_tx, seal_attempt_in_tx, DeliveryError, SealAttemptCommand,
+    TerminalizationActorKind,
 };
 use crate::scheduling::{SchedulingError, SchedulingService};
 
@@ -55,6 +56,14 @@ pub struct AutoAdvanceOutcome {
 impl ProctoringService {
     pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
+    }
+
+    fn ensure_proctor_writer(ctx: &ActorContext) -> Result<(), ProctoringError> {
+        if matches!(ctx.role, ActorRole::Admin | ActorRole::Proctor) {
+            Ok(())
+        } else {
+            Err(ProctoringError::NotFound)
+        }
     }
 
     async fn load_config_snapshot_for_schedule(
@@ -113,12 +122,12 @@ impl ProctoringService {
 
     pub async fn list_sessions(
         &self,
+        ctx: &ActorContext,
         live_mode_enabled: bool,
     ) -> Result<Vec<ProctorSessionSummary>, ProctoringError> {
-        let actor = system_actor();
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedules = scheduling
-            .list_schedules(&actor)
+            .list_schedules(ctx)
             .await
             .map_err(map_scheduling_error)?;
         let schedule_ids = schedules
@@ -194,7 +203,7 @@ impl ProctoringService {
                 let schedule_id_uuid = Uuid::parse_str(&schedule.id)
                     .map_err(|_| ProctoringError::Validation("Invalid schedule ID".to_string()))?;
                 scheduling
-                    .get_runtime(&actor, schedule_id_uuid)
+                    .get_runtime(ctx, schedule_id_uuid)
                     .await
                     .map_err(map_scheduling_error)?
             };
@@ -220,10 +229,12 @@ impl ProctoringService {
     #[tracing::instrument(skip(self), fields(schedule_id = %schedule_id))]
     pub async fn get_session_detail(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
         live_mode_enabled: bool,
     ) -> Result<ProctorSessionDetail, ProctoringError> {
         self.get_session_detail_with_options(
+            ctx,
             schedule_id,
             live_mode_enabled,
             ProctorSessionDetailOptions::default(),
@@ -234,18 +245,18 @@ impl ProctoringService {
     #[tracing::instrument(skip(self), fields(schedule_id = %schedule_id))]
     pub async fn get_session_detail_with_options(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
         live_mode_enabled: bool,
         options: ProctorSessionDetailOptions,
     ) -> Result<ProctorSessionDetail, ProctoringError> {
-        let actor = system_actor();
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedule = scheduling
-            .get_schedule(&actor, schedule_id)
+            .get_schedule(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
         let runtime = scheduling
-            .get_runtime(&actor, schedule_id)
+            .get_runtime(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
         let degraded = LiveModeService::new(self.pool.clone())
@@ -297,9 +308,20 @@ impl ProctoringService {
 
     pub async fn live_mode(
         &self,
+        ctx: &ActorContext,
         schedule_id: Option<Uuid>,
         live_mode_enabled: bool,
     ) -> Result<DegradedLiveState, ProctoringError> {
+        match schedule_id {
+            Some(schedule_id) => {
+                SchedulingService::new(self.pool.clone())
+                    .get_schedule(ctx, schedule_id)
+                    .await
+                    .map_err(map_scheduling_error)?;
+            }
+            None if !ctx.is_platform_read() => return Err(ProctoringError::NotFound),
+            None => {}
+        }
         LiveModeService::new(self.pool.clone())
             .snapshot(live_mode_enabled, schedule_id)
             .await
@@ -314,16 +336,14 @@ impl ProctoringService {
         proctor_name: &str,
         req: ProctorPresenceRequest,
     ) -> Result<Vec<ProctorPresence>, ProctoringError> {
+        Self::ensure_proctor_writer(ctx)?;
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedule = scheduling
             .get_schedule(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
 
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule.organization_id.clone();
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_proctor_schedule(
                 ctx,
@@ -412,16 +432,14 @@ impl ProctoringService {
         schedule_id: Uuid,
         req: AttemptCommandRequest,
     ) -> Result<ExamSessionRuntime, ProctoringError> {
+        Self::ensure_proctor_writer(ctx)?;
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedule = scheduling
             .get_schedule(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
 
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule.organization_id.clone();
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_proctor_schedule(
                 ctx,
@@ -585,13 +603,16 @@ impl ProctoringService {
             .execute(&mut *tx)
             .await?;
 
-            auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, completion_reason)
+            auto_submit_schedule_attempts_in_tx(&mut tx, schedule_id, completion_reason)
                 .await
                 .map_err(|error| match error {
                     DeliveryError::Database(db) => ProctoringError::Database(db),
                     DeliveryError::Conflict { message, .. }
                     | DeliveryError::Validation(message)
                     | DeliveryError::Internal(message) => ProctoringError::Validation(message),
+                    DeliveryError::TerminalizationConflict { message, .. } => {
+                        ProctoringError::Conflict(message)
+                    }
                     DeliveryError::NotFound => ProctoringError::NotFound,
                 })?;
         }
@@ -650,7 +671,7 @@ impl ProctoringService {
 
         tx.commit().await?;
         SchedulingService::new(self.pool.clone())
-            .get_runtime(&system_actor(), schedule_id)
+            .get_runtime(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)
     }
@@ -661,16 +682,14 @@ impl ProctoringService {
         schedule_id: Uuid,
         req: ExtendSectionRequest,
     ) -> Result<ExamSessionRuntime, ProctoringError> {
+        Self::ensure_proctor_writer(ctx)?;
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedule = scheduling
             .get_schedule(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
 
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule.organization_id.clone();
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_proctor_schedule(
                 ctx,
@@ -828,7 +847,7 @@ impl ProctoringService {
 
         tx.commit().await?;
         SchedulingService::new(self.pool.clone())
-            .get_runtime(&system_actor(), schedule_id)
+            .get_runtime(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)
     }
@@ -840,15 +859,13 @@ impl ProctoringService {
         attempt_id: Uuid,
         req: ExtendSectionRequest,
     ) -> Result<StudentSessionSummary, ProctoringError> {
+        Self::ensure_proctor_writer(ctx)?;
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedule = scheduling
             .get_schedule(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule.organization_id.clone();
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_access_student_data(
                 ctx,
@@ -950,7 +967,8 @@ impl ProctoringService {
         )
         .await?;
         tx.commit().await?;
-        self.load_student_session(schedule_id, attempt_id).await
+        self.load_student_session(ctx, schedule_id, attempt_id)
+            .await
     }
 
     pub async fn complete_exam(
@@ -959,16 +977,14 @@ impl ProctoringService {
         schedule_id: Uuid,
         req: CompleteExamRequest,
     ) -> Result<ExamSessionRuntime, ProctoringError> {
+        Self::ensure_proctor_writer(ctx)?;
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedule = scheduling
             .get_schedule(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
 
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule.organization_id.clone();
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_proctor_schedule(
                 ctx,
@@ -985,7 +1001,7 @@ impl ProctoringService {
             RuntimeStatus::Completed | RuntimeStatus::Cancelled
         ) {
             return SchedulingService::new(self.pool.clone())
-                .get_runtime(&system_actor(), schedule_id)
+                .get_runtime(ctx, schedule_id)
                 .await
                 .map_err(map_scheduling_error);
         }
@@ -1034,13 +1050,16 @@ impl ProctoringService {
         .execute(&mut *tx)
         .await?;
 
-        auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, "proctor_complete")
+        auto_submit_schedule_attempts_in_tx(&mut tx, schedule_id, "proctor_complete")
             .await
             .map_err(|error| match error {
                 DeliveryError::Database(db) => ProctoringError::Database(db),
                 DeliveryError::Conflict { message, .. }
                 | DeliveryError::Validation(message)
                 | DeliveryError::Internal(message) => ProctoringError::Validation(message),
+                DeliveryError::TerminalizationConflict { message, .. } => {
+                    ProctoringError::Conflict(message)
+                }
                 DeliveryError::NotFound => ProctoringError::NotFound,
             })?;
 
@@ -1077,7 +1096,7 @@ impl ProctoringService {
 
         tx.commit().await?;
         SchedulingService::new(self.pool.clone())
-            .get_runtime(&system_actor(), schedule_id)
+            .get_runtime(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)
     }
@@ -1089,16 +1108,14 @@ impl ProctoringService {
         attempt_id: Uuid,
         req: AttemptCommandRequest,
     ) -> Result<StudentSessionSummary, ProctoringError> {
+        Self::ensure_proctor_writer(ctx)?;
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedule = scheduling
             .get_schedule(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
 
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule.organization_id.clone();
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_access_student_data(
                 ctx,
@@ -1124,6 +1141,20 @@ impl ProctoringService {
             "description": description
         });
         let mut tx = self.pool.begin().await?;
+        crate::delivery::lock_attempt_terminalization_scope_in_tx(
+            &mut *tx,
+            &schedule_id.to_string(),
+            &attempt_id.to_string(),
+        )
+        .await
+        .map_err(|error| match error {
+            DeliveryError::Database(error) => ProctoringError::Database(error),
+            DeliveryError::NotFound => ProctoringError::NotFound,
+            DeliveryError::Conflict { message, .. }
+            | DeliveryError::TerminalizationConflict { message, .. }
+            | DeliveryError::Validation(message)
+            | DeliveryError::Internal(message) => ProctoringError::Conflict(message),
+        })?;
 
         sqlx::query(
             r#"
@@ -1186,7 +1217,8 @@ impl ProctoringService {
         .await?;
 
         tx.commit().await?;
-        self.load_student_session(schedule_id, attempt_id).await
+        self.load_student_session(ctx, schedule_id, attempt_id)
+            .await
     }
 
     pub async fn pause_attempt(
@@ -1196,16 +1228,14 @@ impl ProctoringService {
         attempt_id: Uuid,
         req: AttemptCommandRequest,
     ) -> Result<StudentSessionSummary, ProctoringError> {
+        Self::ensure_proctor_writer(ctx)?;
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedule = scheduling
             .get_schedule(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
 
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule.organization_id.clone();
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_access_student_data(
                 ctx,
@@ -1218,6 +1248,7 @@ impl ProctoringService {
         }
 
         self.update_attempt_status(
+            ctx,
             schedule_id,
             attempt_id,
             &ctx.actor_id,
@@ -1236,16 +1267,14 @@ impl ProctoringService {
         attempt_id: Uuid,
         req: AttemptCommandRequest,
     ) -> Result<StudentSessionSummary, ProctoringError> {
+        Self::ensure_proctor_writer(ctx)?;
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedule = scheduling
             .get_schedule(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
 
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule.organization_id.clone();
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_access_student_data(
                 ctx,
@@ -1258,6 +1287,7 @@ impl ProctoringService {
         }
 
         self.update_attempt_status(
+            ctx,
             schedule_id,
             attempt_id,
             &ctx.actor_id,
@@ -1276,16 +1306,14 @@ impl ProctoringService {
         attempt_id: Uuid,
         req: AttemptCommandRequest,
     ) -> Result<StudentSessionSummary, ProctoringError> {
+        Self::ensure_proctor_writer(ctx)?;
         let scheduling = SchedulingService::new(self.pool.clone());
         let schedule = scheduling
             .get_schedule(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
 
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule.organization_id.clone();
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_access_student_data(
                 ctx,
@@ -1299,6 +1327,7 @@ impl ProctoringService {
 
         let summary = self
             .update_attempt_status(
+                ctx,
                 schedule_id,
                 attempt_id,
                 &ctx.actor_id,
@@ -1308,15 +1337,6 @@ impl ProctoringService {
                 req,
             )
             .await?;
-
-        force_finalize_attempt_if_pending(
-            &self.pool,
-            schedule_id,
-            attempt_id,
-            "proctor_force_submit",
-        )
-        .await
-        .map_err(|error| ProctoringError::Conflict(error.to_string()))?;
 
         Ok(summary)
     }
@@ -1587,13 +1607,16 @@ impl ProctoringService {
             .bind(schedule_id.to_string())
             .execute(tx.as_mut())
             .await?;
-            auto_submit_schedule_attempts_in_tx(tx.as_mut(), schedule_id, completion_reason)
+            auto_submit_schedule_attempts_in_tx(&mut tx, schedule_id, completion_reason)
                 .await
                 .map_err(|error| match error {
                     DeliveryError::Database(db) => ProctoringError::Database(db),
                     DeliveryError::Conflict { message, .. }
                     | DeliveryError::Validation(message)
                     | DeliveryError::Internal(message) => ProctoringError::Validation(message),
+                    DeliveryError::TerminalizationConflict { message, .. } => {
+                        ProctoringError::Conflict(message)
+                    }
                     DeliveryError::NotFound => ProctoringError::NotFound,
                 })?;
             insert_audit_log(
@@ -1635,6 +1658,7 @@ impl ProctoringService {
         alert_id: Uuid,
         _req: AlertAckRequest,
     ) -> Result<SessionAuditLog, ProctoringError> {
+        Self::ensure_proctor_writer(ctx)?;
         // Get the alert to check which schedule it belongs to
         let alert: SessionAuditLog =
             sqlx::query_as("SELECT * FROM session_audit_logs WHERE id = ?")
@@ -1651,10 +1675,7 @@ impl ProctoringService {
             .await
             .map_err(map_scheduling_error)?;
 
-        let organization_id = schedule
-            .organization_id
-            .as_ref()
-            .and_then(|s| Uuid::parse_str(s).ok());
+        let organization_id = schedule.organization_id.clone();
         if let Some(org_id) = organization_id {
             if !AuthorizationService::can_access_student_data(
                 ctx,
@@ -1687,6 +1708,7 @@ impl ProctoringService {
 
     async fn update_attempt_status(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
         attempt_id: Uuid,
         actor_id: &str,
@@ -1695,31 +1717,62 @@ impl ProctoringService {
         action_type: &str,
         req: AttemptCommandRequest,
     ) -> Result<StudentSessionSummary, ProctoringError> {
-        let now = Utc::now();
         let mut tx = self.pool.begin().await?;
-
-        sqlx::query(
-            r#"
-            UPDATE student_attempts
-            SET
-                proctor_status = ?,
-                phase = COALESCE(?, phase),
-                proctor_note = COALESCE(?, proctor_note),
-                proctor_updated_at = NOW(),
-                proctor_updated_by = ?,
-                updated_at = NOW(),
-                revision = revision + 1
-            WHERE id = ? AND schedule_id = ?
-            "#,
+        // Serialize every proctor command against student writes and
+        // terminalization, even pause/resume/warn commands.
+        crate::delivery::lock_attempt_terminalization_scope_in_tx(
+            &mut *tx,
+            &schedule_id.to_string(),
+            &attempt_id.to_string(),
         )
-        .bind(proctor_status)
-        .bind(phase)
-        .bind(req.reason.clone().or(req.message.clone()))
-        .bind(actor_id)
-        .bind(attempt_id.to_string())
-        .bind(schedule_id.to_string())
-        .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(|error| match error {
+            DeliveryError::Database(error) => ProctoringError::Database(error),
+            DeliveryError::NotFound => ProctoringError::NotFound,
+            DeliveryError::Conflict { message, .. }
+            | DeliveryError::TerminalizationConflict { message, .. }
+            | DeliveryError::Validation(message)
+            | DeliveryError::Internal(message) => ProctoringError::Conflict(message),
+        })?;
+        if action_type != "STUDENT_TERMINATE" {
+            let terminal: (Option<chrono::DateTime<Utc>>, String) = sqlx::query_as(
+                "SELECT submitted_at, COALESCE(proctor_status, 'active') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+            )
+            .bind(attempt_id.to_string())
+            .bind(schedule_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if terminal.0.is_some() || terminal.1 == "terminated" {
+                return Err(ProctoringError::Conflict(
+                    "The attempt is already terminal and cannot accept this command.".to_owned(),
+                ));
+            }
+        }
+
+        if action_type != "STUDENT_TERMINATE" {
+            sqlx::query(
+                r#"
+                UPDATE student_attempts
+                SET
+                    proctor_status = ?,
+                    phase = COALESCE(?, phase),
+                    proctor_note = COALESCE(?, proctor_note),
+                    proctor_updated_at = NOW(),
+                    proctor_updated_by = ?,
+                    updated_at = NOW(),
+                    revision = revision + 1
+                WHERE id = ? AND schedule_id = ?
+                "#,
+            )
+            .bind(proctor_status)
+            .bind(phase)
+            .bind(req.reason.clone().or(req.message.clone()))
+            .bind(actor_id)
+            .bind(attempt_id.to_string())
+            .bind(schedule_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
 
         match action_type {
             "STUDENT_PAUSE" => {
@@ -1739,12 +1792,35 @@ impl ProctoringService {
                 .await?;
             }
             "STUDENT_TERMINATE" => {
-                sqlx::query(
-                    "UPDATE assessment_module_attempts SET state = 'locked', locked_at = COALESCE(locked_at, NOW()), paused_at = NULL, completion_reason = COALESCE(completion_reason, 'proctor_terminate'), revision = revision + 1 WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review')",
+                seal_attempt_in_tx(
+                    &mut tx,
+                    &SealAttemptCommand {
+                        attempt_id: attempt_id.to_string(),
+                        schedule_id: schedule_id.to_string(),
+                        outcome: "terminated",
+                        reason: "proctor_terminate".to_owned(),
+                        actor_kind: TerminalizationActorKind::Proctor,
+                        actor_id: Some(actor_id.to_owned()),
+                        proctor_note: req.reason.clone().or(req.message.clone()),
+                        request_id: Uuid::new_v4().to_string(),
+                        min_answer_revision: None,
+                        effective_at: None,
+                        final_submission: Some(json!({
+                            "terminated": true,
+                            "reason": "proctor_terminate",
+                            "proctorStatus": proctor_status,
+                        })),
+                    },
                 )
-                .bind(attempt_id.to_string())
-                .execute(&mut *tx)
-                .await?;
+                .await
+                .map_err(|error| match error {
+                    DeliveryError::Database(error) => ProctoringError::Database(error),
+                    DeliveryError::NotFound => ProctoringError::NotFound,
+                    DeliveryError::Conflict { message, .. }
+                    | DeliveryError::TerminalizationConflict { message, .. }
+                    | DeliveryError::Validation(message)
+                    | DeliveryError::Internal(message) => ProctoringError::Conflict(message),
+                })?;
             }
             _ => {}
         }
@@ -1769,7 +1845,8 @@ impl ProctoringService {
         .await?;
 
         tx.commit().await?;
-        self.load_student_session(schedule_id, attempt_id).await
+        self.load_student_session(ctx, schedule_id, attempt_id)
+            .await
     }
 
     async fn load_student_sessions(
@@ -1831,11 +1908,12 @@ impl ProctoringService {
 
     async fn load_student_session(
         &self,
+        ctx: &ActorContext,
         schedule_id: Uuid,
         attempt_id: Uuid,
     ) -> Result<StudentSessionSummary, ProctoringError> {
         let runtime = SchedulingService::new(self.pool.clone())
-            .get_runtime(&system_actor(), schedule_id)
+            .get_runtime(ctx, schedule_id)
             .await
             .map_err(map_scheduling_error)?;
         let row = sqlx::query_as::<_, AttemptProjectionRow>(
@@ -2427,10 +2505,6 @@ fn runtime_section_from_hydration(value: RuntimeHydrationSectionRow) -> RuntimeS
         projected_start_at: value.projected_start_at,
         projected_end_at: value.projected_end_at,
     }
-}
-
-fn system_actor() -> ActorContext {
-    ActorContext::new(Uuid::nil().to_string(), ActorRole::Admin)
 }
 
 fn map_scheduling_error(error: SchedulingError) -> ProctoringError {

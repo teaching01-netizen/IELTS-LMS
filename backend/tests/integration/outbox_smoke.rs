@@ -21,6 +21,7 @@ const INFRA_MIGRATIONS: &[&str] = &[
     "0010_auth_security.sql",
     "0017_production_hardening.sql",
     "0030_outbox_retry_policy.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 // These tests use PostgreSQL-specific LISTEN/NOTIFY mechanism which doesn't exist in MySQL.

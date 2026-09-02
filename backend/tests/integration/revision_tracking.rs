@@ -16,7 +16,7 @@ use ielts_backend_domain::{
         StudentMutationBatchRequest,
     },
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
-    schedule::CreateScheduleRequest,
+    schedule::{CreateScheduleRequest, RuntimeCommandAction, RuntimeCommandRequest},
 };
 use ielts_backend_infrastructure::actor_context::{ActorContext, ActorRole};
 
@@ -27,8 +27,40 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
     "0004_library_and_defaults.sql",
     "0005_scheduling_and_access.sql",
     "0006_delivery.sql",
+    "0007_proctoring.sql",
+    "0008_grading_results.sql",
+    "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
+    "0011_outbox_notify_trigger.sql",
+    "0012_registration_fields.sql",
+    "0013_proctor_presence_unique.sql",
+    "0014_student_attempt_presence.sql",
     "0015_operation_write_hardening.sql",
+    "0016_attempt_mutation_id_uniqueness.sql",
+    "0017_production_hardening.sql",
+    "0018_exam_day_concurrency_hardening.sql",
+    "0019_violation_id_idempotency.sql",
+    "0020_schedule_role_display_names.sql",
+    "0021_attempt_finalization_consistency.sql",
+    "0022_attempt_submission_ledger.sql",
+    "0023_sort_memory_hotpath_indexes.sql",
+    "0024_projection_sort_hardening.sql",
+    "0025_join_storm_admission_queue.sql",
+    "0026_relax_access_code_constraints.sql",
+    "0027_grading_objective_overrides.sql",
+    "0028_grading_objective_grading_source.sql",
+    "0029_release_events_timestamp_precision.sql",
+    "0030_outbox_retry_policy.sql",
+    "0031_grading_export_profiles.sql",
+    "0032_provider_neutral_sat.sql",
+    "0033_sat_runtime_authoring_hardening.sql",
+    "0034_assessment_access_links.sql",
+    "0035_autosave_durability_hardening.sql",
+    "0036_question_revision_updated_by.sql",
+    "0037_runtime_timing_model.sql",
+    "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 fn command(mutation_type: MutationType, payload: serde_json::Value) -> MutationCommand {
@@ -44,11 +76,23 @@ async fn revision_increments_and_mutations_record_applied_revision() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).expect("schedule id");
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: None,
+            },
+        )
+        .await
+        .expect("start runtime");
     let service = DeliveryService::new(database.pool().clone());
 
     let student_key = format!("student-{}-alice", schedule_id);
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key.clone(),
@@ -163,11 +207,23 @@ async fn mutation_batches_accept_batch_local_sequences_and_are_idempotent_by_mut
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).expect("schedule id");
+    SchedulingService::new(database.pool().clone())
+        .apply_runtime_command(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
+            schedule_id,
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: None,
+            },
+        )
+        .await
+        .expect("start runtime");
     let service = DeliveryService::new(database.pool().clone());
 
     let student_key = format!("student-{}-alice", schedule_id);
     let session = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key.clone(),
@@ -331,15 +387,16 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
-                    "reading": {"passages": [{"id": "reading-1"}]},
-                    "listening": {"parts": [{"id": "listening-1"}]},
-                    "writing": {"tasks": [{"id": "writing-1"}]},
+                    "reading": {"passages": [{"id": "reading-1", "title": "Reading Passage 1", "blocks": [{"type": "SHORT_ANSWER", "stem": "Answer the question", "questions": [{"id": "q1", "prompt": "Q1", "correctAnswer": "A"}, {"id": "q2", "prompt": "Q2", "correctAnswer": "B"}]}]}]},
+                    "listening": {"parts": [{"id": "listening-1", "title": "Listening Part 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "stem": "Listen to the statement", "questions": [{"id": "listening-q1"}]}]}]},
+                    "writing": {"task1Prompt": "Summarise the chart.", "task2Prompt": "Discuss both views.", "tasks": [{"id": "writing-1"}]},
+
                     "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
                 }),
                 config_snapshot: json!({
                     "sections": {
-                        "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5},
-                        "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0},
+                        "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5, "bandScoreTable": {"1": 1.0}},
+                        "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0, "bandScoreTable": {"1": 1.0}},
                         "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 10},
                         "speaking": {"enabled": true, "label": "Speaking", "order": 4, "duration": 15, "gapAfterMinutes": 0}
                     }

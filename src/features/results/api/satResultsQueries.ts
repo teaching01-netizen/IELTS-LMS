@@ -2,10 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import { resultsGateway } from '../infrastructure/resultsGateway';
 
 export type SatAssessmentRoute = 'lower' | 'higher';
+export type SatResultOutcomeStatus = 'scored' | 'pending' | 'invalidated_proctor' | 'invalidated_timeout';
 
 export interface SatResultSummary {
   id: string;
-  submissionId: string;
+  submissionId: string | null;
+  outcomeStatus: SatResultOutcomeStatus;
   scheduleId: string;
   examId: string;
   examTitle: string;

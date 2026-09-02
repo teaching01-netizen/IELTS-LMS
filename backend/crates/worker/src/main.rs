@@ -106,6 +106,14 @@ async fn run_outbox_cycle(
 ) -> Result<(), sqlx::Error> {
     let outbox =
         drain_outbox_until_empty(pool.clone(), config, &config.live_mode_notify_channel).await?;
+    let sat_terminal_results_repaired =
+        match ielts_backend_application::delivery::repair_sat_terminal_results(pool, 250).await {
+            Ok(count) => count,
+            Err(error) => {
+                tracing::error!(error = %error, "SAT terminal result repair failed");
+                0
+            }
+        };
     let projection = match jobs::grading_projection::run_once(pool.clone(), config).await {
         Ok(report) => report,
         Err(error) => {
@@ -138,6 +146,7 @@ async fn run_outbox_cycle(
         grading_projection_submission_rows = projection.submission_rows_synced,
         grading_projection_section_rows = projection.section_rows_synced,
         grading_projection_writing_rows = projection.writing_task_rows_synced,
+        sat_terminal_results_repaired,
         grading_projection_affected_schedules = projection.affected_schedules,
         grading_projection_lag_seconds = projection.lag_seconds,
         grading_projection_failures_total = projection.failures_total,

@@ -16,6 +16,9 @@ use uuid::Uuid;
 
 use crate::adaptive_routing::{AdaptiveRoute, AdaptiveRoutingPolicy, PracticeThresholdRouting};
 use crate::assessment_scoring::{score_section, total_score};
+use crate::delivery::{
+    seal_attempt_in_tx, DeliveryError, SealAttemptCommand, TerminalizationActorKind,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssessmentDeliveryConflictReason {
@@ -42,6 +45,38 @@ impl SatRuntimeTimingGate {
     }
 }
 
+fn map_terminalization_error(error: DeliveryError) -> AssessmentDeliveryError {
+    match error {
+        DeliveryError::Database(error) => AssessmentDeliveryError::Database(error),
+        DeliveryError::NotFound => AssessmentDeliveryError::NotFound,
+        DeliveryError::TerminalizationConflict {
+            message,
+            outcome,
+            reason,
+            terminalization_id,
+            latest_revision,
+        } => AssessmentDeliveryError::TerminalizationConflict {
+            message,
+            outcome,
+            reason,
+            terminalization_id,
+            latest_revision,
+        },
+        DeliveryError::Conflict {
+            message,
+            reason: Some(crate::delivery::DeliveryConflictReason::AttemptProctorBlocked),
+            ..
+        } => AssessmentDeliveryError::StructuredConflict {
+            reason: AssessmentDeliveryConflictReason::AttemptProctorBlocked,
+            message,
+        },
+        DeliveryError::Conflict { message, .. } => AssessmentDeliveryError::Conflict(message),
+        DeliveryError::Validation(message) | DeliveryError::Internal(message) => {
+            AssessmentDeliveryError::Validation(message)
+        }
+    }
+}
+
 impl AssessmentDeliveryConflictReason {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -65,6 +100,14 @@ pub enum AssessmentDeliveryError {
     NotFound,
     #[error("assessment delivery conflict: {0}")]
     Conflict(String),
+    #[error("assessment attempt terminalization conflict: {message}")]
+    TerminalizationConflict {
+        message: String,
+        outcome: String,
+        reason: String,
+        terminalization_id: String,
+        latest_revision: i32,
+    },
     #[error("assessment delivery conflict ({reason:?}): {message}")]
     StructuredConflict {
         reason: AssessmentDeliveryConflictReason,
@@ -592,6 +635,16 @@ impl AssessmentDeliveryService {
             .execute(&mut *tx)
             .await?;
         }
+        let answer_revision_rows =
+            crate::delivery::increment_provider_attempt_answer_revision_in_tx(
+                &mut *tx,
+                attempt_id,
+                schedule_id,
+            )
+            .await?;
+        if answer_revision_rows != 1 {
+            return Err(AssessmentDeliveryError::NotFound);
+        }
         let row = sqlx::query_as::<_, ResponseRow>(
             "SELECT id, module_attempt_id, exam_question_id, response, marked_for_review, eliminated_options, annotations, revision FROM assessment_question_responses WHERE id = ?",
         )
@@ -660,15 +713,66 @@ impl AssessmentDeliveryService {
         let binding = self.schedule_binding(schedule_id).await?;
         self.ensure_attempt_binding(&binding, attempt_id).await?;
         let mut tx = self.pool.begin().await?;
+        crate::delivery::lock_attempt_terminalization_scope_in_tx(
+            &mut *tx,
+            schedule_id,
+            attempt_id,
+        )
+        .await
+        .map_err(map_terminalization_error)?;
+
+        let proctor_status: String = sqlx::query_scalar(
+            "SELECT COALESCE(proctor_status, 'active') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+        )
+        .bind(attempt_id)
+        .bind(schedule_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let terminalization_outcome: Option<String> = sqlx::query_scalar(
+            "SELECT outcome FROM attempt_terminalizations WHERE attempt_id = ? FOR UPDATE",
+        )
+        .bind(attempt_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if proctor_status == "terminated"
+            || terminalization_outcome.as_deref() == Some("terminated")
+        {
+            return Err(AssessmentDeliveryError::StructuredConflict {
+                reason: AssessmentDeliveryConflictReason::AttemptProctorBlocked,
+                message: "Your SAT attempt has been terminated by the proctor.".to_owned(),
+            });
+        }
 
         let existing_submission_id: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM student_submissions WHERE attempt_id = ? FOR UPDATE",
+            "SELECT id FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE",
         )
         .bind(attempt_id)
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(submission_id) = existing_submission_id.as_deref() {
             if let Some(result) = self.load_result_tx(&mut tx, submission_id).await? {
+                seal_attempt_in_tx(
+                    &mut tx,
+                    &SealAttemptCommand {
+                        attempt_id: attempt_id.to_owned(),
+                        schedule_id: schedule_id.to_owned(),
+                        outcome: "submitted",
+                        reason: "sat_complete".to_owned(),
+                        actor_kind: TerminalizationActorKind::Student,
+                        actor_id: None,
+                        proctor_note: None,
+                        request_id: Uuid::new_v4().to_string(),
+                        min_answer_revision: None,
+                        effective_at: None,
+                        final_submission: Some(json!({
+                            "submissionId": result.submission_id,
+                            "providerKey": "sat",
+                            "assessmentResultId": result.id,
+                        })),
+                    },
+                )
+                .await
+                .map_err(map_terminalization_error)?;
                 tx.commit().await?;
                 return Ok(result);
             }
@@ -837,9 +941,10 @@ impl AssessmentDeliveryService {
 
         let result_id = Uuid::new_v4().to_string();
         sqlx::query(
-            "INSERT INTO assessment_results (id, submission_id, provider_key, total_score, score_payload, release_status) VALUES (?, ?, 'sat', ?, ?, 'ready_to_release')",
+            "INSERT INTO assessment_results (id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status) VALUES (?, ?, ?, 'sat', 'scored', ?, ?, 'ready_to_release')",
         )
         .bind(&result_id)
+        .bind(&attempt.id)
         .bind(&submission_id)
         .bind(total)
         .bind(&score_payload)
@@ -875,14 +980,25 @@ impl AssessmentDeliveryService {
             "submissionId": submission_id,
             "providerKey": "sat",
             "assessmentResultId": result_id,
-            "submittedAt": Utc::now(),
         });
-        let sealed_rows =
-            crate::delivery::seal_provider_attempt_in_tx(&mut *tx, &attempt.id, &final_submission)
-                .await?;
-        if sealed_rows != 1 {
-            return Err(AssessmentDeliveryError::NotFound);
-        }
+        seal_attempt_in_tx(
+            &mut tx,
+            &SealAttemptCommand {
+                attempt_id: attempt.id.clone(),
+                schedule_id: attempt.schedule_id.clone(),
+                outcome: "submitted",
+                reason: "sat_complete".to_owned(),
+                actor_kind: TerminalizationActorKind::Student,
+                actor_id: None,
+                proctor_note: None,
+                request_id: Uuid::new_v4().to_string(),
+                min_answer_revision: None,
+                effective_at: None,
+                final_submission: Some(final_submission),
+            },
+        )
+        .await
+        .map_err(map_terminalization_error)?;
         tx.commit().await?;
 
         Ok(AssessmentResult {
@@ -902,7 +1018,7 @@ impl AssessmentDeliveryService {
         submission_id: &str,
     ) -> Result<Option<AssessmentResult>, AssessmentDeliveryError> {
         let Some(result) = sqlx::query_as::<_, AssessmentResultRow>(
-            "SELECT id, submission_id, provider_key, total_score, score_payload FROM assessment_results WHERE submission_id = ?",
+            "SELECT id, submission_id, provider_key, total_score, score_payload FROM assessment_results WHERE submission_id = ? AND provider_key = 'sat'",
         )
         .bind(submission_id)
         .fetch_optional(&mut **tx)
@@ -941,11 +1057,12 @@ impl AssessmentDeliveryService {
         &self,
         attempt_id: &str,
     ) -> Result<Option<AssessmentResult>, AssessmentDeliveryError> {
-        let submission_id: Option<String> =
-            sqlx::query_scalar("SELECT id FROM student_submissions WHERE attempt_id = ?")
-                .bind(attempt_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let submission_id: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat'",
+        )
+        .bind(attempt_id)
+        .fetch_optional(&self.pool)
+        .await?;
         let Some(submission_id) = submission_id else {
             return Ok(None);
         };
@@ -1226,18 +1343,11 @@ impl AssessmentDeliveryService {
         module: &NextModuleRow,
         available_at: Option<DateTime<Utc>>,
     ) -> Result<(), AssessmentDeliveryError> {
-        let existing: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM assessment_module_attempts WHERE attempt_id = ? AND module_id = ?",
-        )
-        .bind(attempt_id)
-        .bind(&module.id)
-        .fetch_optional(&mut **tx)
-        .await?;
-        if existing.is_some() {
-            return Ok(());
-        }
+        // The unique (attempt_id, module_id) constraint is the identity fence.
+        // Do not rely on an absent-row read: concurrent bootstraps may both see
+        // no row before either insert commits.
         sqlx::query(
-            "INSERT INTO assessment_module_attempts (id, attempt_id, module_id, state, allocated_seconds, available_at, started_at, tool_state) VALUES (?, ?, ?, 'not_started', ?, ?, NULL, ?)",
+            "INSERT INTO assessment_module_attempts (id, attempt_id, module_id, state, allocated_seconds, available_at, started_at, tool_state) VALUES (?, ?, ?, 'not_started', ?, ?, NULL, ?) ON DUPLICATE KEY UPDATE id = id",
         )
         .bind(Uuid::new_v4().to_string())
         .bind(attempt_id)
@@ -1403,7 +1513,7 @@ impl AssessmentDeliveryService {
         }
 
         let submission_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM student_submissions WHERE attempt_id = ?)",
+            "SELECT EXISTS(SELECT 1 FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat')",
         )
         .bind(attempt_id)
         .fetch_one(&mut **tx)
@@ -1903,27 +2013,8 @@ impl AssessmentDeliveryService {
         schedule_id: &str,
         attempt_id: &str,
     ) -> Result<(), AssessmentDeliveryError> {
-        let runtime_status: Option<String> = sqlx::query_scalar(
-            "SELECT status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
-        )
-        .bind(schedule_id)
-        .fetch_optional(&mut **tx)
-        .await?;
-        match runtime_status.as_deref() {
-            Some("live") => {}
-            Some("paused") => {
-                return Err(AssessmentDeliveryError::StructuredConflict {
-                    reason: AssessmentDeliveryConflictReason::RuntimePaused,
-                    message: "The SAT session is paused by the proctor.".to_owned(),
-                });
-            }
-            _ => {
-                return Err(AssessmentDeliveryError::StructuredConflict {
-                    reason: AssessmentDeliveryConflictReason::RuntimeNotLive,
-                    message: "The SAT session has not been started by the proctor.".to_owned(),
-                });
-            }
-        }
+        // Attempt first, runtime second. This is shared with proctor commands
+        // and terminalization, preventing an attempt/runtime deadlock cycle.
         let control = sqlx::query_as::<_, AttemptControlRow>(
             "SELECT candidate_name, COALESCE(proctor_status, 'active') AS proctor_status, proctor_note, JSON_UNQUOTE(JSON_EXTRACT(integrity, '$.deviceFingerprintHash')) AS device_fingerprint_hash FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
         )
@@ -1933,15 +2024,36 @@ impl AssessmentDeliveryService {
         .await?
         .ok_or(AssessmentDeliveryError::NotFound)?;
         match control.proctor_status.as_str() {
-            "paused" => Err(AssessmentDeliveryError::StructuredConflict {
-                reason: AssessmentDeliveryConflictReason::AttemptProctorBlocked,
-                message: "Your SAT attempt is paused by the proctor.".to_owned(),
+            "paused" => {
+                return Err(AssessmentDeliveryError::StructuredConflict {
+                    reason: AssessmentDeliveryConflictReason::AttemptProctorBlocked,
+                    message: "Your SAT attempt is paused by the proctor.".to_owned(),
+                });
+            }
+            "terminated" => {
+                return Err(AssessmentDeliveryError::StructuredConflict {
+                    reason: AssessmentDeliveryConflictReason::AttemptProctorBlocked,
+                    message: "Your SAT attempt has been terminated by the proctor.".to_owned(),
+                });
+            }
+            _ => {}
+        }
+        let runtime_status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+        )
+        .bind(schedule_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        match runtime_status.as_deref() {
+            Some("live") => Ok(()),
+            Some("paused") => Err(AssessmentDeliveryError::StructuredConflict {
+                reason: AssessmentDeliveryConflictReason::RuntimePaused,
+                message: "The SAT session is paused by the proctor.".to_owned(),
             }),
-            "terminated" => Err(AssessmentDeliveryError::StructuredConflict {
-                reason: AssessmentDeliveryConflictReason::AttemptProctorBlocked,
-                message: "Your SAT attempt has been terminated by the proctor.".to_owned(),
+            _ => Err(AssessmentDeliveryError::StructuredConflict {
+                reason: AssessmentDeliveryConflictReason::RuntimeNotLive,
+                message: "The SAT session has not been started by the proctor.".to_owned(),
             }),
-            _ => Ok(()),
         }
     }
 
@@ -2486,23 +2598,32 @@ impl AssessmentDeliveryService {
         let binding = self.schedule_binding(schedule_id).await?;
         self.ensure_attempt_binding(&binding, attempt_id).await?;
         let mut tx = self.pool.begin().await?;
-        sqlx::query(
-            "UPDATE assessment_module_attempts SET state = 'locked', locked_at = COALESCE(locked_at, CURRENT_TIMESTAMP(6)), paused_at = NULL, completion_reason = COALESCE(completion_reason, 'proctor_terminate'), revision = revision + 1 WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review')",
-        )
-        .bind(attempt_id)
-        .execute(&mut *tx)
-        .await?;
-        let final_submission = json!({"providerKey": "sat", "terminated": true, "reason": reason});
-        let sealed_rows = crate::delivery::terminate_provider_attempt_in_tx(
-            &mut *tx,
-            attempt_id,
+        crate::delivery::lock_attempt_terminalization_scope_in_tx(
+            tx.as_mut(),
             schedule_id,
-            &final_submission,
+            attempt_id,
         )
-        .await?;
-        if sealed_rows != 1 {
-            return Err(AssessmentDeliveryError::NotFound);
-        }
+        .await
+        .map_err(map_terminalization_error)?;
+        let final_submission = json!({"providerKey": "sat", "terminated": true, "reason": reason});
+        seal_attempt_in_tx(
+            &mut tx,
+            &SealAttemptCommand {
+                attempt_id: attempt_id.to_owned(),
+                schedule_id: schedule_id.to_owned(),
+                outcome: "terminated",
+                reason: "proctor_terminate".to_owned(),
+                actor_kind: TerminalizationActorKind::Proctor,
+                actor_id: None,
+                proctor_note: reason.map(ToOwned::to_owned),
+                request_id: Uuid::new_v4().to_string(),
+                min_answer_revision: None,
+                effective_at: None,
+                final_submission: Some(final_submission),
+            },
+        )
+        .await
+        .map_err(map_terminalization_error)?;
         tx.commit().await?;
         Ok(())
     }

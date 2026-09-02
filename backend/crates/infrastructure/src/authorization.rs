@@ -40,7 +40,8 @@ impl AuthorizationService {
         organization_id: String,
     ) -> bool {
         match actor.role {
-            ActorRole::Admin | ActorRole::AdminObserver => true,
+            ActorRole::Admin => true,
+            ActorRole::AdminObserver => false,
             ActorRole::Proctor | ActorRole::Grader => {
                 actor.organization_id.as_ref() == Some(&organization_id)
                     && actor.schedule_scope_id.as_ref() == Some(&schedule_id)
@@ -53,14 +54,12 @@ impl AuthorizationService {
         }
     }
 
-    /// Check if the actor can modify exam content
+    /// Check if the actor can modify exam content. AdminObserver is deliberately
+    /// read-only even though it has platform-wide read visibility.
     pub fn can_modify_exam_content(actor: &ActorContext, organization_id: String) -> bool {
-        matches!(
-            actor.role,
-            ActorRole::Admin | ActorRole::Builder | ActorRole::AdminObserver
-        ) && (actor.role == ActorRole::Admin
-            || actor.role == ActorRole::AdminObserver
-            || actor.organization_id.as_ref() == Some(&organization_id))
+        matches!(actor.role, ActorRole::Admin | ActorRole::Builder)
+            && (actor.role == ActorRole::Admin
+                || actor.organization_id.as_ref() == Some(&organization_id))
     }
 
     /// Check if the actor can grade submissions
@@ -86,7 +85,8 @@ impl AuthorizationService {
         organization_id: String,
     ) -> bool {
         match actor.role {
-            ActorRole::Admin | ActorRole::AdminObserver => true,
+            ActorRole::Admin => true,
+            ActorRole::AdminObserver => false,
             ActorRole::Proctor => {
                 actor.organization_id.as_ref() == Some(&organization_id)
                     && actor.schedule_scope_id.as_ref() == Some(&schedule_id)

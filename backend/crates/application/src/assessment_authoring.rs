@@ -471,7 +471,8 @@ fn map_preview_delivery_error(error: AssessmentDeliveryError) -> AssessmentAutho
         | AssessmentDeliveryError::Conflict(message) => {
             AssessmentAuthoringError::InvalidData(message)
         }
-        AssessmentDeliveryError::StructuredConflict { message, .. } => {
+        AssessmentDeliveryError::StructuredConflict { message, .. }
+        | AssessmentDeliveryError::TerminalizationConflict { message, .. } => {
             AssessmentAuthoringError::InvalidData(message)
         }
         AssessmentDeliveryError::ActiveSessionSuperseded => AssessmentAuthoringError::InvalidData(
@@ -628,7 +629,7 @@ impl AssessmentAuthoringService {
             ));
         }
         sqlx::query(
-            "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, created_at) VALUES (?, ?, ?, ?, 'version_created', NOW())",
+            "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, created_at) VALUES (?, ?, ?, ?, 'version_created', CURRENT_TIMESTAMP(6))",
         )
         .bind(Uuid::new_v4().to_string())
         .bind(exam_id)

@@ -52,6 +52,16 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
     "0022_attempt_submission_ledger.sql",
     "0023_sort_memory_hotpath_indexes.sql",
     "0024_projection_sort_hardening.sql",
+    "0030_outbox_retry_policy.sql",
+    "0032_provider_neutral_sat.sql",
+    "0033_sat_runtime_authoring_hardening.sql",
+    "0034_assessment_access_links.sql",
+    "0035_autosave_durability_hardening.sql",
+    "0036_question_revision_updated_by.sql",
+    "0037_runtime_timing_model.sql",
+    "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 fn command(mutation_type: MutationType, payload: serde_json::Value) -> MutationCommand {
@@ -337,7 +347,11 @@ async fn bootstrap_creates_or_hydrates_the_attempt_context() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    if response.status() != StatusCode::OK {
+        let status = response.status();
+        let body = json_body(response).await;
+        panic!("unexpected bootstrap response {status}: {body}");
+    }
     let json = json_body(response).await;
 
     assert_eq!(json["data"]["attempt"]["studentKey"], student_key);
@@ -477,8 +491,13 @@ async fn sentence_completion_student_answers_remain_array_backed_per_question() 
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let response_status = response.status();
     let json = json_body(response).await;
+    assert_eq!(
+        response_status,
+        StatusCode::OK,
+        "sentence mutation response: {json}"
+    );
     assert_eq!(
         json["data"]["attempt"]["answers"]["r-sentence-q1"],
         json!(["first", "second"])
@@ -559,7 +578,7 @@ async fn mutation_batch_returns_full_commit_payload() {
 }
 
 #[tokio::test]
-async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_answers() {
+async fn mutation_batch_rejects_superseded_client_session_writes() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -634,7 +653,13 @@ async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_an
         .await
         .unwrap();
 
-    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(first.status(), StatusCode::CONFLICT);
+    let first_json = json_body(first).await;
+    assert_eq!(first_json["error"]["code"], "CONFLICT");
+    assert_eq!(
+        first_json["error"]["details"]["reason"],
+        "ACTIVE_SESSION_SUPERSEDED"
+    );
 
     let second = app
         .oneshot(
@@ -672,7 +697,7 @@ async fn mutation_batch_allows_independent_client_sessions_to_persist_reading_an
             .await
             .unwrap();
 
-    assert_eq!(answers["q1"], "A");
+    assert!(answers.get("q1").is_none());
     assert_eq!(answers["r1"], "B");
 
     database.shutdown().await;
@@ -837,6 +862,7 @@ async fn heartbeat_ack_mode_records_presence_without_touching_attempt_revision()
                         attempt_id: Some(attempt_id.clone()),
                         student_key: student_key.clone(),
                         client_session_id: client_session_id.clone(),
+                        mutation_id: None,
                         event_type: HeartbeatEventType::Heartbeat,
                         payload: None,
                         client_timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 6, 0).unwrap(),
@@ -914,6 +940,7 @@ async fn heartbeat_defaults_to_ack_response_without_touching_attempt_revision() 
                         attempt_id: Some(attempt_id.clone()),
                         student_key: student_key.clone(),
                         client_session_id,
+                        mutation_id: None,
                         event_type: HeartbeatEventType::Heartbeat,
                         payload: None,
                         client_timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 6, 0).unwrap(),
@@ -975,6 +1002,7 @@ async fn heartbeat_records_disconnect_transitions() {
                         attempt_id: Some(attempt_id.clone()),
                         student_key: student_key.clone(),
                         client_session_id,
+                        mutation_id: None,
                         event_type: HeartbeatEventType::Disconnect,
                         payload: Some(json!({"source": "browser"})),
                         client_timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 6, 0).unwrap(),
@@ -1054,6 +1082,7 @@ async fn heartbeat_records_lost_transitions() {
                         attempt_id: Some(attempt_id.clone()),
                         student_key: student_key.clone(),
                         client_session_id,
+                        mutation_id: None,
                         event_type: HeartbeatEventType::Lost,
                         payload: Some(json!({"source": "browser"})),
                         client_timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 6, 10).unwrap(),
@@ -1522,7 +1551,11 @@ async fn bootstrap_hydrates_existing_attempt_after_crash_reconnect() {
         )
         .await
         .unwrap();
-    assert_eq!(mutation.status(), StatusCode::OK);
+    if mutation.status() != StatusCode::OK {
+        let status = mutation.status();
+        let body = json_body(mutation).await;
+        panic!("unexpected mutation response {status}: {body}");
+    }
 
     let (rebootstrap, _) = bootstrap_attempt(&app, &auth, schedule_id, "alice", &student_key).await;
     assert_eq!(rebootstrap["data"]["attempt"]["id"], attempt_id);
@@ -1860,7 +1893,7 @@ async fn mutation_batch_rejects_objective_mutations_when_proctor_paused_attempt(
 }
 
 #[tokio::test]
-async fn mutation_batch_accepts_objective_mutations_when_runtime_paused() {
+async fn mutation_batch_rejects_objective_mutations_when_runtime_paused() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -1915,9 +1948,10 @@ async fn mutation_batch_accepts_objective_mutations_when_runtime_paused() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::CONFLICT);
     let json = json_body(response).await;
-    assert_eq!(json["data"]["appliedMutationCount"], 1);
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(json["error"]["details"]["reason"], "OBJECTIVE_LOCKED");
 
     database.shutdown().await;
 }
@@ -2517,7 +2551,11 @@ async fn bootstrap_attempt_with_client_session_id(
         .await
         .unwrap();
 
-    (json_body(response).await, client_session_id.to_owned())
+    let response_json = json_body(response).await;
+    if response_json["success"] != true {
+        eprintln!("unexpected bootstrap helper response: {response_json}");
+    }
+    (response_json, client_session_id.to_owned())
 }
 
 async fn create_student_auth(
@@ -2651,8 +2689,8 @@ async fn seed_schedule_with_slug_content_and_config(
 
 fn default_delivery_content_snapshot() -> serde_json::Value {
     json!({
-        "reading": {"passages": [{"id": "reading-1", "title": "Reading Passage 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "questions": [{"id": "r1"}]}]}]},
-        "listening": {"parts": [{"id": "listening-1", "title": "Listening Part 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "questions": [{"id": "q1"}]}]}]},
+        "reading": {"passages": [{"id": "reading-1", "title": "Reading Passage 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "stem": "Read the statement", "questions": [{"id": "r1"}] }]}]},
+        "listening": {"parts": [{"id": "listening-1", "title": "Listening Part 1", "blocks": [{"type": "TFNG", "mode": "TFNG", "stem": "Listen to the statement", "questions": [{"id": "q1"}] }]}]},
         "writing": {"task1Prompt": "Summarise the chart.", "task2Prompt": "Discuss both views.", "tasks": [{"id": "writing-1"}]},
         "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
     })
@@ -2665,13 +2703,13 @@ fn delivery_block_matrix_content_snapshot() -> serde_json::Value {
                 "id": "reading-matrix-p1",
                 "title": "Reading Passage Matrix",
                 "blocks": [
-                    { "id": "r-tfng", "type": "TFNG", "mode": "TFNG", "questions": [{ "id": "r-tfng-q1", "statement": "Statement 1" }] },
-                    { "id": "r-cloze", "type": "CLOZE", "questions": [{ "id": "r-cloze-q1", "prompt": "Fill blank" }] },
-                    { "id": "r-matching", "type": "MATCHING", "headings": [{ "id": "i", "text": "Heading I" }, { "id": "ii", "text": "Heading II" }], "questions": [{ "id": "r-matching-q1", "statement": "Match this" }] },
-                    { "id": "r-map", "type": "MAP", "questions": [{ "id": "r-map-q1", "label": "Spot A" }] },
-                    { "id": "r-short", "type": "SHORT_ANSWER", "questions": [{ "id": "r-short-q1", "prompt": "Name the animal", "correctAnswer": "fox" }] },
-                    { "id": "r-sentence", "type": "SENTENCE_COMPLETION", "questions": [{ "id": "r-sentence-q1", "sentence": "Fill __ then __.", "blanks": [{ "id": "b1", "correctAnswer": "first" }, { "id": "b2", "correctAnswer": "second" }] }] },
-                    { "id": "r-note", "type": "NOTE_COMPLETION", "questions": [{ "id": "r-note-q1", "noteText": "Write a note __.", "blanks": [{ "id": "n1", "correctAnswer": "note answer" }] }] }
+                    { "id": "r-tfng", "type": "TFNG", "mode": "TFNG", "stem": "True, false, or not given", "questions": [{ "id": "r-tfng-q1", "statement": "Statement 1" }] },
+                    { "id": "r-cloze", "type": "CLOZE", "stem": "Complete the cloze passage", "questions": [{ "id": "r-cloze-q1", "prompt": "Fill blank" }] },
+                    { "id": "r-matching", "type": "MATCHING", "stem": "Match the information", "headings": [{ "id": "i", "text": "Heading I" }, { "id": "ii", "text": "Heading II" }], "questions": [{ "id": "r-matching-q1", "statement": "Match this" }] },
+                    { "id": "r-map", "type": "MAP", "stem": "Label the map", "questions": [{ "id": "r-map-q1", "label": "Spot A" }] },
+                    { "id": "r-short", "type": "SHORT_ANSWER", "stem": "Answer the short question", "questions": [{ "id": "r-short-q1", "prompt": "Name the animal", "correctAnswer": "fox" }] },
+                    { "id": "r-sentence", "type": "SENTENCE_COMPLETION", "stem": "Complete the sentence", "questions": [{ "id": "r-sentence-q1", "sentence": "Fill __ then __.", "blanks": [{ "id": "b1", "correctAnswer": "first" }, { "id": "b2", "correctAnswer": "second" }] }] },
+                    { "id": "r-note", "type": "NOTE_COMPLETION", "stem": "Complete the note", "questions": [{ "id": "r-note-q1", "noteText": "Write a note __.", "blanks": [{ "id": "n1", "correctAnswer": "note answer" }] }] }
                 ]
             }]
         },
@@ -2680,14 +2718,14 @@ fn delivery_block_matrix_content_snapshot() -> serde_json::Value {
                 "id": "listening-matrix-p1",
                 "title": "Listening Part Matrix",
                 "blocks": [
-                    { "id": "l-multi", "type": "MULTI_MCQ", "requiredSelections": 2, "options": [{ "id": "A", "text": "Option A", "isCorrect": true }, { "id": "B", "text": "Option B", "isCorrect": false }, { "id": "C", "text": "Option C", "isCorrect": true }] },
-                    { "id": "l-single-question-set", "type": "SINGLE_MCQ", "questions": [{ "id": "l-single-q1", "stem": "Pick one", "options": [{ "id": "A", "text": "Option A", "isCorrect": false }, { "id": "B", "text": "Option B", "isCorrect": true }] }] },
+                    { "id": "l-multi", "type": "MULTI_MCQ", "stem": "Select the correct options", "requiredSelections": 2, "options": [{ "id": "A", "text": "Option A", "isCorrect": true }, { "id": "B", "text": "Option B", "isCorrect": false }, { "id": "C", "text": "Option C", "isCorrect": true }] },
+                    { "id": "l-single-question-set", "type": "SINGLE_MCQ", "stem": "Pick one answer", "questions": [{ "id": "l-single-q1", "stem": "Pick one", "options": [{ "id": "A", "text": "Option A", "isCorrect": false }, { "id": "B", "text": "Option B", "isCorrect": true }] }] },
                     { "id": "l-single-legacy", "type": "SINGLE_MCQ", "stem": "Pick one (legacy)", "options": [{ "id": "X", "text": "Option X", "isCorrect": false }, { "id": "Y", "text": "Option Y", "isCorrect": true }] },
-                    { "id": "l-diagram", "type": "DIAGRAM_LABELING", "imageUrl": "https://example.com/diagram.png", "labels": [{ "id": "l1", "correctAnswer": "nose" }, { "id": "l2", "correctAnswer": "ear" }] },
-                    { "id": "l-flow", "type": "FLOW_CHART", "steps": [{ "id": "s1", "label": "Step 1", "correctAnswer": "step-1" }, { "id": "s2", "label": "Step 2", "correctAnswer": "step-2" }] },
-                    { "id": "l-table", "type": "TABLE_COMPLETION", "headers": ["Col 1", "Col 2"], "rows": [["", ""]], "cells": [{ "id": "c1", "correctAnswer": "r1c1" }, { "id": "c2", "correctAnswer": "r1c2" }] },
-                    { "id": "l-classify", "type": "CLASSIFICATION", "categories": ["Alpha", "Beta"], "items": [{ "id": "i1", "text": "Item 1", "correctCategory": "Alpha" }, { "id": "i2", "text": "Item 2", "correctCategory": "Beta" }] },
-                    { "id": "l-match-features", "type": "MATCHING_FEATURES", "options": ["X", "Y"], "features": [{ "id": "f1", "text": "Feature 1", "correctMatch": "X" }, { "id": "f2", "text": "Feature 2", "correctMatch": "Y" }] }
+                    { "id": "l-diagram", "type": "DIAGRAM_LABELING", "stem": "Label the diagram", "imageUrl": "https://example.com/diagram.png", "labels": [{ "id": "l1", "correctAnswer": "nose" }, { "id": "l2", "correctAnswer": "ear" }] },
+                    { "id": "l-flow", "type": "FLOW_CHART", "stem": "Complete the flow chart", "steps": [{ "id": "s1", "label": "Step 1", "correctAnswer": "step-1" }, { "id": "s2", "label": "Step 2", "correctAnswer": "step-2" }] },
+                    { "id": "l-table", "type": "TABLE_COMPLETION", "stem": "Complete the table", "headers": ["Col 1", "Col 2"], "rows": [["", ""]], "cells": [{ "id": "c1", "correctAnswer": "r1c1" }, { "id": "c2", "correctAnswer": "r1c2" }] },
+                    { "id": "l-classify", "type": "CLASSIFICATION", "stem": "Classify the items", "categories": ["Alpha", "Beta"], "items": [{ "id": "i1", "text": "Item 1", "correctCategory": "Alpha" }, { "id": "i2", "text": "Item 2", "correctCategory": "Beta" }] },
+                    { "id": "l-match-features", "type": "MATCHING_FEATURES", "stem": "Match each feature", "options": ["X", "Y"], "features": [{ "id": "f1", "text": "Feature 1", "correctMatch": "X" }, { "id": "f2", "text": "Feature 2", "correctMatch": "Y" }] }
                 ]
             }]
         },
@@ -2721,24 +2759,50 @@ fn student_key(schedule_id: Uuid, candidate_id: &str) -> String {
 }
 
 fn contract_actor() -> ActorContext {
-    ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin)
+    ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Builder)
+        .with_organization_id("org-1".to_owned())
 }
 
 async fn start_runtime(pool: &sqlx::MySqlPool, schedule_id: Uuid, section_key: &str) {
+    let runtime_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM exam_session_runtimes WHERE schedule_id = ?)",
+    )
+    .bind(schedule_id.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    if !runtime_exists {
+        SchedulingService::new(pool.clone())
+            .apply_runtime_command(
+                &contract_actor(),
+                schedule_id,
+                RuntimeCommandRequest {
+                    action: RuntimeCommandAction::StartRuntime,
+                    reason: Some("contract runtime start".to_owned()),
+                },
+            )
+            .await
+            .unwrap();
+    }
     sqlx::query(
         r#"
         UPDATE exam_session_runtimes
-        SET
-            status = 'live',
-            current_section_key = ?,
-            waiting_for_next_section = false,
-            actual_start_at = COALESCE(actual_start_at, NOW()),
+        SET active_section_key = ?, current_section_key = ?, waiting_for_next_section = false,
             updated_at = NOW()
         WHERE schedule_id = ?
         "#,
     )
     .bind(section_key)
+    .bind(section_key)
     .bind(schedule_id.to_string())
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE exam_session_runtime_sections SET status = 'live', available_at = COALESCE(available_at, NOW()), actual_start_at = COALESCE(actual_start_at, NOW()) WHERE runtime_id = (SELECT id FROM exam_session_runtimes WHERE schedule_id = ?) AND section_key = ?",
+    )
+    .bind(schedule_id.to_string())
+    .bind(section_key)
     .execute(pool)
     .await
     .unwrap();

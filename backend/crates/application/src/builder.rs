@@ -17,6 +17,18 @@ use crate::validation::validate_exam_content;
 
 const MAX_DRAFT_VERSIONS_PER_EXAM: usize = 3;
 
+fn ensure_content_writer(ctx: &ActorContext) -> Result<(), BuilderError> {
+    if matches!(
+        ctx.role,
+        ielts_backend_infrastructure::actor_context::ActorRole::Admin
+            | ielts_backend_infrastructure::actor_context::ActorRole::Builder
+    ) {
+        Ok(())
+    } else {
+        Err(BuilderError::NotFound)
+    }
+}
+
 fn compact_duplicate_legacy_writing_chart_image(content: &mut Value) {
     let canonical_image_src = content
         .pointer("/writing/tasks")
@@ -265,6 +277,18 @@ impl BuilderService {
         if req.provider_key.as_deref() == Some("sat") {
             return self.create_sat_exam(ctx, req).await;
         }
+        if matches!(
+            ctx.role,
+            ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+        ) {
+            return Err(BuilderError::NotFound);
+        }
+        // Tenant ownership comes from the authenticated actor. The legacy request
+        // field is accepted for wire compatibility but is deliberately ignored.
+        let organization_id = match ctx.role {
+            ielts_backend_infrastructure::actor_context::ActorRole::Admin => None,
+            _ => Some(ctx.organization_id.clone().ok_or(BuilderError::NotFound)?),
+        };
 
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
@@ -285,7 +309,7 @@ impl BuilderService {
         .bind(req.exam_type)
         .bind("draft")
         .bind(req.visibility)
-        .bind(&req.organization_id)
+        .bind(&organization_id)
         .bind(ctx.actor_id.to_string())
         .bind(4)
         .bind(0)
@@ -319,6 +343,18 @@ impl BuilderService {
         ctx: &ActorContext,
         req: CreateExamRequest,
     ) -> Result<ExamEntity, BuilderError> {
+        if matches!(
+            ctx.role,
+            ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+        ) {
+            return Err(BuilderError::NotFound);
+        }
+        // Tenant ownership comes from the authenticated actor; ignore the legacy
+        // organizationId payload field for every role.
+        let organization_id = match ctx.role {
+            ielts_backend_infrastructure::actor_context::ActorRole::Admin => None,
+            _ => Some(ctx.organization_id.clone().ok_or(BuilderError::NotFound)?),
+        };
         let id = Uuid::new_v4().to_string();
         let mut tx = self.pool.begin().await?;
         let exam_type = if req.exam_type.trim().is_empty() {
@@ -338,7 +374,7 @@ impl BuilderService {
         .bind(provider_exam_type)
         .bind(exam_type)
         .bind(&req.visibility)
-        .bind(&req.organization_id)
+        .bind(&organization_id)
         .bind(ctx.actor_id.to_string())
         .execute(&mut *tx)
         .await?;
@@ -400,20 +436,27 @@ impl BuilderService {
         ctx: &ActorContext,
         id: String,
     ) -> Result<ExamEntity, BuilderError> {
-        let exam = sqlx::query_as::<_, ExamEntity>("SELECT * FROM exam_entities WHERE id = ?")
+        let exam = if matches!(
+            ctx.role,
+            ielts_backend_infrastructure::actor_context::ActorRole::Admin
+                | ielts_backend_infrastructure::actor_context::ActorRole::AdminObserver
+        ) {
+            sqlx::query_as::<_, ExamEntity>("SELECT * FROM exam_entities WHERE id = ?")
+                .bind(&id)
+                .fetch_optional(&self.pool)
+                .await?
+        } else if let Some(organization_id) = ctx.organization_id.as_ref() {
+            sqlx::query_as::<_, ExamEntity>(
+                "SELECT * FROM exam_entities WHERE id = ? AND organization_id = ?",
+            )
             .bind(&id)
+            .bind(organization_id)
             .fetch_optional(&self.pool)
             .await?
-            .ok_or(BuilderError::NotFound)?;
-
-        // Check authorization: user must have access to this exam
-        if let Some(org_id_str) = &exam.organization_id {
-            if let Ok(org_id) = Uuid::parse_str(org_id_str) {
-                if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
-                    return Err(BuilderError::NotFound);
-                }
-            }
+        } else {
+            None
         }
+        .ok_or(BuilderError::NotFound)?;
 
         Ok(exam)
     }
@@ -424,6 +467,7 @@ impl BuilderService {
         id: String,
         req: UpdateExamRequest,
     ) -> Result<ExamEntity, BuilderError> {
+        ensure_content_writer(ctx)?;
         let existing = self.get_exam(ctx, id.clone()).await?;
 
         if existing.revision != req.revision {
@@ -434,26 +478,30 @@ impl BuilderService {
 
         let _updated_at = Utc::now();
 
-        sqlx::query(
+        let result = sqlx::query(
             r#"
             UPDATE exam_entities
             SET 
                 title = COALESCE(?, title),
                 status = COALESCE(?, status),
                 visibility = COALESCE(?, visibility),
-                organization_id = COALESCE(?, organization_id),
                 updated_at = NOW(),
                 revision = revision + 1
-            WHERE id = ?
+            WHERE id = ? AND revision = ?
             "#,
         )
         .bind(&req.title)
         .bind(req.status)
         .bind(req.visibility)
-        .bind(&req.organization_id)
         .bind(&id)
+        .bind(req.revision)
         .execute(&self.pool)
         .await?;
+        if result.rows_affected() != 1 {
+            return Err(BuilderError::Conflict(
+                "Exam has been modified by another user".to_owned(),
+            ));
+        }
 
         let exam = sqlx::query_as::<_, ExamEntity>(
             "SELECT id, slug, title, exam_type, status, visibility, CAST(organization_id AS CHAR) as organization_id, CAST(owner_id AS CHAR) as owner_id, created_at, updated_at, published_at, archived_at, CAST(current_draft_version_id AS CHAR) as current_draft_version_id, CAST(current_published_version_id AS CHAR) as current_published_version_id, total_questions, total_reading_questions, total_listening_questions, schema_version, revision FROM exam_entities WHERE id = ?"
@@ -481,13 +529,16 @@ impl BuilderService {
                 .await?
                 .ok_or(BuilderError::NotFound)?;
 
-        // Check authorization: user must have access to this exam
-        if let Some(org_id_str) = &exam.organization_id {
-            if let Ok(org_id) = Uuid::parse_str(org_id_str) {
-                if !AuthorizationService::can_modify_exam_content(ctx, org_id.to_string()) {
-                    return Err(BuilderError::NotFound);
-                }
-            }
+        // The exam query and the write permission are both tenant-scoped.
+        if !exam
+            .organization_id
+            .as_deref()
+            .is_some_and(|organization_id| {
+                AuthorizationService::can_modify_exam_content(ctx, organization_id.to_owned())
+            })
+            && !(ctx.is_platform_write() && exam.organization_id.is_none())
+        {
+            return Err(BuilderError::NotFound);
         }
 
         if exam.revision != req.revision {
@@ -553,7 +604,7 @@ impl BuilderService {
         sqlx::query(
             r#"
             INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, created_at)
-            VALUES (?, ?, ?, ?, ?, NOW())
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6))
             "#,
         )
         .bind(Uuid::new_v4().to_string())
@@ -591,13 +642,15 @@ impl BuilderService {
                 .await?
                 .ok_or(BuilderError::NotFound)?;
 
-        // Check authorization: user must have access to this exam
-        if let Some(org_id_str) = &exam.organization_id {
-            if let Ok(org_id) = Uuid::parse_str(org_id_str) {
-                if !AuthorizationService::can_modify_exam_content(ctx, org_id.to_string()) {
-                    return Err(BuilderError::NotFound);
-                }
-            }
+        if !exam
+            .organization_id
+            .as_deref()
+            .is_some_and(|organization_id| {
+                AuthorizationService::can_modify_exam_content(ctx, organization_id.to_owned())
+            })
+            && !(ctx.is_platform_write() && exam.organization_id.is_none())
+        {
+            return Err(BuilderError::NotFound);
         }
 
         if let (Some(expected_version_id), Some(published_version_id)) = (
@@ -764,7 +817,7 @@ impl BuilderService {
         sqlx::query(
             r#"
             INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, from_state, to_state, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6))
             "#,
         )
         .bind(Uuid::new_v4().to_string())
@@ -781,7 +834,7 @@ impl BuilderService {
             sqlx::query(
                 r#"
                 INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, created_at)
-                VALUES (?, ?, ?, ?, ?, NOW())
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6))
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
@@ -828,15 +881,8 @@ impl BuilderService {
         .await?
         .ok_or(BuilderError::NotFound)?;
 
-        // Check authorization: user must have access to the exam
-        let exam = self.get_exam(ctx, version.exam_id.clone()).await?;
-        if let Some(org_id_str) = &exam.organization_id {
-            if let Ok(org_id) = Uuid::parse_str(org_id_str) {
-                if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
-                    return Err(BuilderError::NotFound);
-                }
-            }
-        }
+        // get_exam applies the same tenant predicate at the data boundary.
+        let _exam = self.get_exam(ctx, version.exam_id.clone()).await?;
 
         compact_duplicate_legacy_writing_chart_image(&mut version.content_snapshot.0);
 
@@ -879,15 +925,7 @@ impl BuilderService {
         .await?
         .ok_or(BuilderError::NotFound)?;
 
-        // Check authorization: user must have access to the exam
-        let exam = self.get_exam(ctx, version.exam_id.clone()).await?;
-        if let Some(org_id_str) = &exam.organization_id {
-            if let Ok(org_id) = Uuid::parse_str(org_id_str) {
-                if !AuthorizationService::can_access_organization_exams(ctx, org_id.to_string()) {
-                    return Err(BuilderError::NotFound);
-                }
-            }
-        }
+        let _exam = self.get_exam(ctx, version.exam_id.clone()).await?;
 
         Ok(version)
     }
@@ -966,6 +1004,7 @@ impl BuilderService {
         ctx: &ActorContext,
         exam_id: String,
     ) -> Result<(), BuilderError> {
+        ensure_content_writer(ctx)?;
         // Check authorization: user must have access to this exam
         let _exam = self.get_exam(ctx, exam_id.clone()).await?;
 
@@ -1128,7 +1167,7 @@ impl BuilderService {
         sqlx::query(
             r#"
             INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, from_state, to_state, payload, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6))
             "#,
         )
         .bind(Uuid::new_v4().to_string())

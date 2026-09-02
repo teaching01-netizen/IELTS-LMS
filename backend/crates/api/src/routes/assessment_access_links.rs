@@ -73,13 +73,39 @@ async fn require_link_staff(
     Ok(link)
 }
 
+async fn require_exam_read_staff(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    exam_id: &str,
+) -> Result<(), ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
+    let ctx = principal.actor_context();
+    ielts_backend_application::builder::BuilderService::new(state.db_pool())
+        .get_exam(&ctx, exam_id.to_owned())
+        .await
+        .map(|_| ())
+        .map_err(ApiError::from)
+}
+
+async fn require_link_read_staff(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    link_id: &str,
+) -> Result<AssessmentAccessLink, ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Builder])?;
+    let service = AssessmentAccessLinkService::new(state.db_pool());
+    let link = service.get(link_id).await.map_err(map_error)?;
+    require_exam_read_staff(state, principal, &link.exam_id).await?;
+    Ok(link)
+}
+
 pub async fn get_exam_overview(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
     principal: AuthenticatedUser,
     Path(exam_id): Path<String>,
 ) -> Result<ApiResponse<AccessDistributionOverview>, ApiError> {
-    require_exam_staff(&state, &principal, &exam_id).await?;
+    require_exam_read_staff(&state, &principal, &exam_id).await?;
     let overview = AssessmentAccessLinkService::new(state.db_pool())
         .overview(&exam_id)
         .await
@@ -93,7 +119,7 @@ pub async fn list_exam_links(
     principal: AuthenticatedUser,
     Path(exam_id): Path<String>,
 ) -> Result<ApiResponse<Vec<AssessmentAccessLink>>, ApiError> {
-    require_exam_staff(&state, &principal, &exam_id).await?;
+    require_exam_read_staff(&state, &principal, &exam_id).await?;
     let links = AssessmentAccessLinkService::new(state.db_pool())
         .list_for_exam(&exam_id)
         .await
@@ -124,7 +150,7 @@ pub async fn get_link(
     principal: AuthenticatedUser,
     Path(link_id): Path<String>,
 ) -> Result<ApiResponse<AssessmentAccessLink>, ApiError> {
-    let link = require_link_staff(&state, &principal, &link_id).await?;
+    let link = require_link_read_staff(&state, &principal, &link_id).await?;
     Ok(ApiResponse::success_with_request_id(link, request_id.0))
 }
 
@@ -183,7 +209,7 @@ pub async fn list_link_members(
     principal: AuthenticatedUser,
     Path(link_id): Path<String>,
 ) -> Result<ApiResponse<Vec<AccessLinkMember>>, ApiError> {
-    require_link_staff(&state, &principal, &link_id).await?;
+    require_link_read_staff(&state, &principal, &link_id).await?;
     let members = AssessmentAccessLinkService::new(state.db_pool())
         .list_members(&link_id)
         .await
@@ -197,7 +223,7 @@ pub async fn list_link_activity(
     principal: AuthenticatedUser,
     Path(link_id): Path<String>,
 ) -> Result<ApiResponse<Vec<AccessLinkActivity>>, ApiError> {
-    require_link_staff(&state, &principal, &link_id).await?;
+    require_link_read_staff(&state, &principal, &link_id).await?;
     let activity = AssessmentAccessLinkService::new(state.db_pool())
         .activity(&link_id)
         .await

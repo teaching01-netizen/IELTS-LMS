@@ -1,7 +1,9 @@
 use std::time::Instant;
 
 use chrono::{DateTime, Duration, Utc};
-use ielts_backend_application::grading::{GradingError, GradingProjectionRequest, GradingService};
+use ielts_backend_application::grading::{
+    GradingError, GradingProjectionRequest, GradingService, ProjectionCursor,
+};
 use ielts_backend_infrastructure::config::AppConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,7 +27,11 @@ pub struct GradingProjectionRunReport {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GradingProjectionState {
+    /// Retained for observability/backward compatibility; stream progress is
+    /// tracked independently below.
     pub watermark: Option<DateTime<Utc>>,
+    pub schedule_cursor: Option<ProjectionCursor>,
+    pub attempt_cursor: Option<ProjectionCursor>,
     pub totals: GradingProjectionTotals,
     pub failures_total: u64,
     pub last_cycle: Option<GradingProjectionCycleSnapshot>,
@@ -65,7 +71,10 @@ pub async fn run_once(
     }
 
     let started = Instant::now();
-    let mut state = load_projection_state(&pool).await?;
+    // The projection writes are idempotent, while the checkpoint uses an
+    // optimistic compare-and-swap. Concurrent workers may replay a batch, but
+    // only the worker that observed the current revision can advance progress.
+    let (mut state, checkpoint_revision) = load_projection_state(&pool).await?;
     let now = Utc::now();
     let bootstrap_after = if state.watermark.is_none() {
         Some(now - Duration::hours(config.grading_projection_bootstrap_window_hours.max(0)))
@@ -76,6 +85,8 @@ pub async fn run_once(
     let service = GradingService::new(pool.clone());
     let projection = service
         .run_projection_cycle(GradingProjectionRequest {
+            schedule_cursor: state.schedule_cursor.clone(),
+            attempt_cursor: state.attempt_cursor.clone(),
             watermark: state.watermark,
             bootstrap_after,
             batch_size: Some(config.grading_projection_batch_size.max(1)),
@@ -83,6 +94,8 @@ pub async fn run_once(
         .await
         .map_err(grading_error_to_sqlx)?;
 
+    state.schedule_cursor = projection.next_schedule_cursor.or(state.schedule_cursor);
+    state.attempt_cursor = projection.next_attempt_cursor.or(state.attempt_cursor);
     state.watermark = projection.next_watermark.or(state.watermark);
     state.totals.schedule_rows_synced = state
         .totals
@@ -117,7 +130,7 @@ pub async fn run_once(
         affected_schedules: projection.affected_schedule_ids.len() as u64,
     });
 
-    save_projection_state(&pool, &state).await?;
+    save_projection_state(&pool, &state, checkpoint_revision).await?;
 
     Ok(GradingProjectionRunReport {
         enabled: true,
@@ -133,10 +146,20 @@ pub async fn run_once(
 }
 
 pub async fn record_failure(pool: &MySqlPool) -> Result<u64, sqlx::Error> {
-    let mut state = load_projection_state(pool).await?;
-    state.failures_total = state.failures_total.saturating_add(1);
-    save_projection_state(pool, &state).await?;
-    Ok(state.failures_total)
+    for _ in 0..3 {
+        let (mut state, checkpoint_revision) = load_projection_state(pool).await?;
+        state.failures_total = state.failures_total.saturating_add(1);
+        match save_projection_state(pool, &state, checkpoint_revision).await {
+            Ok(()) => return Ok(state.failures_total),
+            Err(sqlx::Error::Protocol(message)) if message == "projection checkpoint changed" => {
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(sqlx::Error::Protocol(
+        "projection checkpoint changed".to_owned(),
+    ))
 }
 
 fn grading_error_to_sqlx(error: GradingError) -> sqlx::Error {
@@ -146,49 +169,80 @@ fn grading_error_to_sqlx(error: GradingError) -> sqlx::Error {
     }
 }
 
-async fn load_projection_state(pool: &MySqlPool) -> Result<GradingProjectionState, sqlx::Error> {
-    let payload = sqlx::query_scalar::<_, Value>(
-        r#"
-        SELECT payload
-        FROM shared_cache_entries
-        WHERE cache_key = ?
-          AND invalidated_at IS NULL
-          AND (expires_at IS NULL OR expires_at > NOW())
-        "#,
+async fn load_projection_state(
+    pool: &MySqlPool,
+) -> Result<(GradingProjectionState, i64), sqlx::Error> {
+    // Checkpoint state is durable state, not an expiring cache entry. Reading
+    // through cache TTL/invalidation would silently reset a cursor.
+    let row = sqlx::query_as::<_, (Value, i64)>(
+        "SELECT payload, revision FROM shared_cache_entries WHERE cache_key = ?",
     )
     .bind(PROJECTION_STATE_CACHE_KEY)
     .fetch_optional(pool)
     .await?;
 
-    let Some(payload) = payload else {
-        return Ok(GradingProjectionState::default());
+    let Some((payload, revision)) = row else {
+        return Ok((GradingProjectionState::default(), 0));
     };
 
-    Ok(serde_json::from_value(payload).unwrap_or_default())
+    Ok((
+        serde_json::from_value(payload).unwrap_or_default(),
+        revision,
+    ))
 }
 
 async fn save_projection_state(
     pool: &MySqlPool,
     state: &GradingProjectionState,
+    expected_revision: i64,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"
-        INSERT INTO shared_cache_entries (
-            cache_key, payload, revision, invalidated_at, expires_at, created_at, updated_at
+    let payload = serde_json::to_value(state).unwrap_or_else(|_| Value::Null);
+    let result = if expected_revision == 0 {
+        sqlx::query(
+            r#"
+            INSERT INTO shared_cache_entries (
+                cache_key, payload, revision, invalidated_at, expires_at, created_at, updated_at
+            )
+            VALUES (?, ?, 1, NULL, NULL, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE payload = IF(revision = 0, VALUES(payload), payload)
+            "#,
         )
-        VALUES (?, ?, 1, NULL, NULL, NOW(), NOW())
-        ON DUPLICATE KEY UPDATE
-            payload = VALUES(payload),
-            revision = revision + 1,
-            invalidated_at = VALUES(invalidated_at),
-            expires_at = VALUES(expires_at),
-            updated_at = NOW()
-        "#,
-    )
-    .bind(PROJECTION_STATE_CACHE_KEY)
-    .bind(serde_json::to_value(state).unwrap_or_else(|_| Value::Null))
-    .execute(pool)
-    .await?;
+        .bind(PROJECTION_STATE_CACHE_KEY)
+        .bind(payload)
+        .execute(pool)
+        .await?
+    } else {
+        sqlx::query(
+            r#"
+            UPDATE shared_cache_entries
+            SET payload = ?, revision = revision + 1,
+                invalidated_at = NULL, expires_at = NULL, updated_at = NOW()
+            WHERE cache_key = ? AND revision = ?
+            "#,
+        )
+        .bind(payload)
+        .bind(PROJECTION_STATE_CACHE_KEY)
+        .bind(expected_revision)
+        .execute(pool)
+        .await?
+    };
 
+    if expected_revision > 0 && result.rows_affected() != 1 {
+        return Err(sqlx::Error::Protocol(
+            "projection checkpoint changed".to_owned(),
+        ));
+    }
+    if expected_revision == 0 && result.rows_affected() == 0 {
+        let revision: i64 =
+            sqlx::query_scalar("SELECT revision FROM shared_cache_entries WHERE cache_key = ?")
+                .bind(PROJECTION_STATE_CACHE_KEY)
+                .fetch_one(pool)
+                .await?;
+        if revision != 0 {
+            return Err(sqlx::Error::Protocol(
+                "projection checkpoint changed".to_owned(),
+            ));
+        }
+    }
     Ok(())
 }

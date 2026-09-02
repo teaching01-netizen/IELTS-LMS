@@ -961,6 +961,8 @@ pub struct UploadIntentRequest {
     pub owner_id: String,
     pub content_type: String,
     pub file_name: String,
+    /// Client-computed SHA-256 used as signed metadata for S3-compatible PUTs.
+    pub checksum_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

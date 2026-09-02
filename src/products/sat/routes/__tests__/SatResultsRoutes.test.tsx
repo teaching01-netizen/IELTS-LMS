@@ -14,7 +14,7 @@ vi.mock('../../../../features/results/api/satResultsQueries', () => ({
 const summary = {
   id: 'result-1', submissionId: 'submission-1', scheduleId: 'schedule-1', examId: 'sat-1', examTitle: 'Practice Test 06',
   versionNumber: 3, studentId: 'W2501', studentName: 'Ananda S.', studentEmail: null, cohortName: 'Morning',
-  submittedAt: '2026-08-30T08:00:00Z', totalScore: 1370, scoreKind: 'practice', releaseStatus: 'ready_to_release',
+  submittedAt: '2026-08-30T08:00:00Z', totalScore: 1370, scoreKind: 'practice', releaseStatus: 'ready_to_release', outcomeStatus: 'scored',
 };
 
 describe('SAT Results product', () => {
@@ -46,6 +46,18 @@ describe('SAT Results product', () => {
     expect(screen.getByText('Unscored Student')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Search SAT results'), { target: { value: 'missing' } });
     expect(screen.getByText('No matching SAT results')).toBeInTheDocument();
+  });
+
+  it('renders explicit proctor invalidation instead of treating termination as a missing score', () => {
+    useSatResultsQueryMock.mockReturnValue({
+      data: [{ ...summary, id: 'result-terminated', submissionId: null, totalScore: null, outcomeStatus: 'invalidated_proctor' }],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<MemoryRouter><SatResultsRoute /></MemoryRouter>);
+    expect(screen.getByText('Exam terminated by proctor')).toBeInTheDocument();
+    expect(screen.queryByText('Practice')).not.toBeInTheDocument();
   });
 
   it('falls back to truthful raw score when no scaled total exists', () => {

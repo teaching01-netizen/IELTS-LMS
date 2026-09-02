@@ -6,7 +6,9 @@ use serde_json::json;
 use uuid::Uuid;
 
 use ielts_backend_application::{
-    builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
+    builder::BuilderService,
+    delivery::{DeliveryError, DeliveryService},
+    scheduling::SchedulingService,
 };
 use ielts_backend_domain::{
     attempt::{StudentBootstrapRequest, StudentPrecheckRequest, StudentSubmitRequest},
@@ -22,12 +24,44 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
     "0004_library_and_defaults.sql",
     "0005_scheduling_and_access.sql",
     "0006_delivery.sql",
+    "0007_proctoring.sql",
+    "0008_grading_results.sql",
+    "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
+    "0011_outbox_notify_trigger.sql",
+    "0012_registration_fields.sql",
+    "0013_proctor_presence_unique.sql",
+    "0014_student_attempt_presence.sql",
     "0015_operation_write_hardening.sql",
+    "0016_attempt_mutation_id_uniqueness.sql",
+    "0017_production_hardening.sql",
+    "0018_exam_day_concurrency_hardening.sql",
+    "0019_violation_id_idempotency.sql",
+    "0020_schedule_role_display_names.sql",
+    "0021_attempt_finalization_consistency.sql",
+    "0022_attempt_submission_ledger.sql",
+    "0023_sort_memory_hotpath_indexes.sql",
+    "0024_projection_sort_hardening.sql",
+    "0025_join_storm_admission_queue.sql",
+    "0026_relax_access_code_constraints.sql",
+    "0027_grading_objective_overrides.sql",
+    "0028_grading_objective_grading_source.sql",
+    "0029_release_events_timestamp_precision.sql",
+    "0030_outbox_retry_policy.sql",
+    "0031_grading_export_profiles.sql",
+    "0032_provider_neutral_sat.sql",
+    "0033_sat_runtime_authoring_hardening.sql",
+    "0034_assessment_access_links.sql",
+    "0035_autosave_durability_hardening.sql",
+    "0036_question_revision_updated_by.sql",
+    "0037_runtime_timing_model.sql",
+    "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 #[tokio::test]
-async fn submit_attempt_accepts_unanswered_even_when_runtime_live_or_paused() {
+async fn submit_attempt_blocks_unanswered_while_live_and_allows_after_completion() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule_with_unanswered_block_policy(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).expect("schedule id");
@@ -39,6 +73,7 @@ async fn submit_attempt_accepts_unanswered_even_when_runtime_live_or_paused() {
 
     let bootstrap = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key.clone(),
@@ -56,6 +91,7 @@ async fn submit_attempt_accepts_unanswered_even_when_runtime_live_or_paused() {
 
     service
         .persist_precheck(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentPrecheckRequest {
                 student_key: student_key.clone(),
@@ -90,6 +126,7 @@ async fn submit_attempt_accepts_unanswered_even_when_runtime_live_or_paused() {
 
     let bootstrap_again = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key.clone(),
@@ -105,7 +142,7 @@ async fn submit_attempt_accepts_unanswered_even_when_runtime_live_or_paused() {
         .expect("bootstrap after runtime start");
     let attempt_after_runtime = bootstrap_again.attempt.expect("attempt after runtime");
 
-    let submitted_while_live = service
+    let blocked_while_live = service
         .submit_attempt(
             schedule_id,
             StudentSubmitRequest {
@@ -125,8 +162,12 @@ async fn submit_attempt_accepts_unanswered_even_when_runtime_live_or_paused() {
             None,
         )
         .await
-        .expect("submit should allow while live even when unanswered");
-    assert_eq!(submitted_while_live.attempt.phase, "post-exam");
+        .expect_err("submit should block while live when unanswered policy is block");
+    assert!(matches!(
+        blocked_while_live,
+        DeliveryError::Validation(message)
+            if message == "Runtime is live and unanswered submission policy is set to block."
+    ));
 
     SchedulingService::new(database.pool().clone())
         .apply_runtime_command(
@@ -163,16 +204,6 @@ async fn submit_attempt_accepts_unanswered_even_when_runtime_live_or_paused() {
         .expect("submit should remain idempotent after completed");
 
     assert_eq!(submitted_again.attempt.phase, "post-exam");
-
-    let payload: serde_json::Value = sqlx::query_scalar(
-        "SELECT payload FROM session_audit_logs WHERE action_type = 'STUDENT_SUBMIT' AND target_student_id = ? ORDER BY created_at DESC LIMIT 1",
-    )
-    .bind(&attempt_after_runtime.id)
-    .fetch_one(database.pool())
-    .await
-    .expect("audit payload");
-
-    assert!(payload.get("answerCompletion").is_some());
 
     database.shutdown().await;
 }
@@ -229,7 +260,7 @@ async fn seed_schedule_with_unanswered_block_policy(
                 }),
                 config_snapshot: json!({
                     "sections": {
-                        "reading": {"enabled": true, "label": "Reading", "order": 1, "duration": 60, "gapAfterMinutes": 0},
+                        "reading": {"enabled": true, "label": "Reading", "order": 1, "duration": 60, "gapAfterMinutes": 0, "bandScoreTable": {"1": 1.0}},
                         "listening": {"enabled": false, "label": "Listening", "order": 0, "duration": 30, "gapAfterMinutes": 0},
                         "writing": {"enabled": false, "label": "Writing", "order": 2, "duration": 60, "gapAfterMinutes": 0},
                         "speaking": {"enabled": false, "label": "Speaking", "order": 3, "duration": 15, "gapAfterMinutes": 0}

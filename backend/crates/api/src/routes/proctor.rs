@@ -14,7 +14,6 @@ use ielts_backend_domain::schedule::{
     ProctorPresence, ProctorPresenceRequest, ProctorSessionDetail, ProctorSessionSummary,
     SessionAuditLog,
 };
-use ielts_backend_infrastructure::actor_context::ActorContext;
 use sqlx::query_scalar;
 use uuid::Uuid;
 
@@ -48,18 +47,19 @@ pub async fn list_sessions(
     principal: AuthenticatedUser,
     Query(query): Query<ProctorSessionQuery>,
 ) -> Result<ApiResponse<Vec<ProctorSessionSummary>>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Proctor])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Proctor])?;
+    let ctx = principal.actor_context();
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
-    let sessions = service.list_sessions(state.live_mode_enabled).await?;
-    let sessions = if principal.user.role == UserRole::Admin {
-        sessions
-    } else {
+    let sessions = service.list_sessions(&ctx, state.live_mode_enabled).await?;
+    let sessions = if principal.user.role == UserRole::Proctor {
         let allowed = assigned_schedule_ids(&state, &principal.user.id, "proctor").await?;
         sessions
             .into_iter()
             .filter(|session| allowed.contains(&session.schedule.id))
             .collect()
+    } else {
+        sessions
     };
     let sessions = if let Some(provider_key) = query.provider_key.as_deref() {
         if !matches!(provider_key, "sat" | "ielts") {
@@ -90,12 +90,14 @@ pub async fn get_session(
     Path(schedule_id): Path<Uuid>,
     Query(query): Query<ProctorSessionQuery>,
 ) -> Result<ApiResponse<ProctorSessionDetail>, ApiError> {
-    authorize_schedule(&state, &principal, schedule_id).await?;
+    authorize_read_schedule(&state, &principal, schedule_id).await?;
+    let ctx = principal.actor_context();
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let detail = if query.mode.as_deref() == Some("dashboard") {
         service
             .get_session_detail_with_options(
+                &ctx,
                 schedule_id,
                 state.live_mode_enabled,
                 ProctorSessionDetailOptions {
@@ -106,7 +108,7 @@ pub async fn get_session(
             .await?
     } else {
         service
-            .get_session_detail(schedule_id, state.live_mode_enabled)
+            .get_session_detail(&ctx, schedule_id, state.live_mode_enabled)
             .await?
     };
     state
@@ -438,16 +440,52 @@ pub async fn live_mode(
     principal: AuthenticatedUser,
     Query(query): Query<LiveModeQuery>,
 ) -> Result<ApiResponse<ielts_backend_domain::schedule::DegradedLiveState>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Proctor])?;
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Proctor])?;
+    if let Some(schedule_id) = query.schedule_id {
+        authorize_read_schedule(&state, &principal, schedule_id).await?;
+    } else if principal.user.role == UserRole::Proctor {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "NOT_FOUND",
+            "Resource not found",
+        ));
+    }
+    let ctx = principal.actor_context();
     let service = ProctoringService::new(state.db_pool());
     let started = std::time::Instant::now();
     let snapshot = service
-        .live_mode(query.schedule_id, state.live_mode_enabled)
+        .live_mode(&ctx, query.schedule_id, state.live_mode_enabled)
         .await?;
     state
         .telemetry
         .observe_db_operation("proctor.live_mode", started.elapsed());
     Ok(ApiResponse::success_with_request_id(snapshot, request_id.0))
+}
+
+async fn authorize_read_schedule(
+    state: &AppState,
+    principal: &AuthenticatedUser,
+    schedule_id: Uuid,
+) -> Result<(), ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::AdminObserver, UserRole::Proctor])?;
+    if matches!(
+        principal.user.role,
+        UserRole::Admin | UserRole::AdminObserver
+    ) {
+        return Ok(());
+    }
+    AuthService::new(state.db_pool(), state.config.clone())
+        .authorize_staff_schedule(
+            &ielts_backend_application::auth::AuthenticatedSession {
+                user: principal.user.clone(),
+                session: principal.session.clone(),
+            },
+            schedule_id.to_string(),
+            UserRole::Proctor,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|_| ApiError::new(StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found"))
 }
 
 async fn authorize_schedule(

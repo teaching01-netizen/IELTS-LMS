@@ -67,6 +67,8 @@ const ANSWER_HISTORY_MIGRATIONS: &[&str] = &[
     "0036_question_revision_updated_by.sql",
     "0037_runtime_timing_model.sql",
     "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 #[tokio::test]
@@ -495,7 +497,7 @@ async fn unassigned_grader_cannot_read_answer_history() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     database.shutdown().await;
 }
@@ -748,7 +750,7 @@ async fn unassigned_proctor_cannot_read_attempt_overview() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     database.shutdown().await;
 }
@@ -959,6 +961,7 @@ async fn bootstrap_attempt_only(
     let service = DeliveryService::new(pool.clone());
     let context = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, candidate_id),
@@ -987,6 +990,7 @@ async fn bootstrap_and_submit(
     let service = DeliveryService::new(pool.clone());
     let context = service
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 student_key: student_key(schedule_id, candidate_id),

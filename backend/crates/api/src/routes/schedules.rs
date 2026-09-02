@@ -28,6 +28,7 @@ pub async fn list_schedules(
 ) -> Result<ApiResponse<Vec<ExamSchedule>>, ApiError> {
     principal.require_one_of(&[
         UserRole::Admin,
+        UserRole::AdminObserver,
         UserRole::Builder,
         UserRole::Proctor,
         UserRole::Grader,
@@ -63,6 +64,7 @@ pub async fn get_schedule(
 ) -> Result<ApiResponse<ExamSchedule>, ApiError> {
     principal.require_one_of(&[
         UserRole::Admin,
+        UserRole::AdminObserver,
         UserRole::Builder,
         UserRole::Proctor,
         UserRole::Grader,
@@ -109,6 +111,7 @@ pub async fn get_runtime(
 ) -> Result<ApiResponse<ExamSessionRuntime>, ApiError> {
     principal.require_one_of(&[
         UserRole::Admin,
+        UserRole::AdminObserver,
         UserRole::Builder,
         UserRole::Proctor,
         UserRole::Grader,

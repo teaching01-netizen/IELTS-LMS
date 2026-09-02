@@ -16,7 +16,8 @@ use crate::grading::{GradingError, GradingService};
 #[serde(rename_all = "camelCase")]
 pub struct SatResultSummary {
     pub id: String,
-    pub submission_id: String,
+    pub submission_id: Option<String>,
+    pub outcome_status: String,
     pub schedule_id: String,
     pub exam_id: String,
     pub exam_title: String,
@@ -42,7 +43,8 @@ pub struct SatResultDetail {
 #[derive(Debug, Clone, FromRow)]
 struct SatResultSummaryRow {
     id: String,
-    submission_id: String,
+    submission_id: Option<String>,
+    outcome_status: String,
     schedule_id: String,
     exam_id: String,
     exam_title: String,
@@ -86,20 +88,28 @@ impl ResultsService {
         self.grading.list_results(ctx).await
     }
 
-    pub async fn get_result(&self, result_id: Uuid) -> Result<StudentResult, GradingError> {
-        self.grading.get_result(result_id).await
+    pub async fn get_result(
+        &self,
+        ctx: &ActorContext,
+        result_id: Uuid,
+    ) -> Result<StudentResult, GradingError> {
+        self.grading.get_result(ctx, result_id).await
     }
 
-    pub async fn analytics(&self) -> Result<ResultsAnalytics, GradingError> {
-        self.grading.analytics().await
+    pub async fn analytics(&self, ctx: &ActorContext) -> Result<ResultsAnalytics, GradingError> {
+        self.grading.analytics(ctx).await
     }
 
     pub async fn export_results(&self, ctx: &ActorContext) -> Result<Value, GradingError> {
         self.grading.export_results(ctx).await
     }
 
-    pub async fn get_events(&self, result_id: Uuid) -> Result<Vec<ReleaseEvent>, GradingError> {
-        self.grading.get_result_events(result_id).await
+    pub async fn get_events(
+        &self,
+        ctx: &ActorContext,
+        result_id: Uuid,
+    ) -> Result<Vec<ReleaseEvent>, GradingError> {
+        self.grading.get_result_events(ctx, result_id).await
     }
 
     pub async fn list_sat_results(
@@ -172,29 +182,48 @@ impl ResultsService {
             SELECT
                 ar.id,
                 ar.submission_id,
-                ss.schedule_id,
-                ss.exam_id,
+                ar.outcome_status,
+                a.schedule_id,
+                a.exam_id,
                 e.title AS exam_title,
                 ev.version_number,
-                ss.student_id,
-                ss.student_name,
-                ss.student_email,
-                ss.cohort_name,
-                ss.submitted_at,
+                a.candidate_id AS student_id,
+                a.candidate_name AS student_name,
+                a.candidate_email AS student_email,
+                s.cohort_name,
+                COALESCE(a.submitted_at, ar.created_at) AS submitted_at,
                 ar.total_score,
                 ar.release_status
             FROM assessment_results ar
-            JOIN student_submissions ss ON ss.id = ar.submission_id
-            JOIN exam_entities e ON e.id = ss.exam_id
-            JOIN exam_versions ev ON ev.id = ss.published_version_id
+            JOIN student_attempts a ON a.id = ar.attempt_id
+            JOIN exam_schedules s ON s.id = a.schedule_id
+            JOIN exam_entities e ON e.id = a.exam_id
+            JOIN exam_versions ev ON ev.id = a.published_version_id
             WHERE ar.provider_key = 'sat'
-              AND ss.provider_key = 'sat'
               AND e.provider_key = 'sat'
             "#,
         );
 
         if let Some(result_id) = result_id {
             query.push(" AND ar.id = ").push_bind(result_id.to_string());
+        }
+
+        match ctx.access_scope() {
+            Some(
+                ielts_backend_infrastructure::actor_context::AccessScope::PlatformRead
+                | ielts_backend_infrastructure::actor_context::AccessScope::PlatformWrite,
+            ) => {}
+            Some(ielts_backend_infrastructure::actor_context::AccessScope::Tenant {
+                organization_id,
+                ..
+            }) => {
+                query
+                    .push(" AND e.organization_id = ")
+                    .push_bind(organization_id);
+            }
+            None => {
+                query.push(" AND 1 = 0");
+            }
         }
 
         if !matches!(ctx.role, ActorRole::Admin | ActorRole::AdminObserver) {
@@ -204,7 +233,7 @@ impl ResultsService {
                     AND EXISTS (
                         SELECT 1
                         FROM schedule_staff_assignments assignment
-                        WHERE assignment.schedule_id = ss.schedule_id
+                        WHERE assignment.schedule_id = a.schedule_id
                           AND assignment.user_id =
                     "#,
                 )
@@ -215,10 +244,10 @@ impl ResultsService {
         }
 
         if let Some(schedule_id) = ctx.schedule_scope_id.as_ref() {
-            query.push(" AND ss.schedule_id = ").push_bind(schedule_id);
+            query.push(" AND a.schedule_id = ").push_bind(schedule_id);
         }
 
-        query.push(" ORDER BY ss.submitted_at DESC, ar.created_at DESC");
+        query.push(" ORDER BY a.submitted_at DESC, ar.created_at DESC");
         Ok(query
             .build_query_as::<SatResultSummaryRow>()
             .fetch_all(&self.pool)
@@ -230,6 +259,7 @@ fn map_sat_summary(row: SatResultSummaryRow) -> SatResultSummary {
     SatResultSummary {
         id: row.id,
         submission_id: row.submission_id,
+        outcome_status: row.outcome_status,
         schedule_id: row.schedule_id,
         exam_id: row.exam_id,
         exam_title: row.exam_title,

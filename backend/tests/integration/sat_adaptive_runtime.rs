@@ -22,7 +22,9 @@ use ielts_backend_application::{
     assessment_release::{AssessmentReleaseLifecycleState, AssessmentReleaseService},
     builder::{BuilderError, BuilderService},
     delivery::DeliveryService,
+    grading::{GradingProjectionRequest, GradingService},
     proctoring::ProctoringService,
+    results::ResultsService,
     sat_workbook::{
         SatWorkbookAsset, SatWorkbookCommitRequest, SatWorkbookModuleDraft, SatWorkbookPreview,
         SatWorkbookStagedAsset,
@@ -32,8 +34,8 @@ use ielts_backend_application::{
 use ielts_backend_domain::{
     assessment::{
         AccessibilityMetadata, AnswerDefinition, AssessmentModuleStartRequest,
-        AssessmentModuleSubmitRequest, AssessmentResponseRequest, ChoiceOption,
-        DeliveredAnswerDefinition, Difficulty, QuestionKind, QuestionMetadata,
+        AssessmentModuleSubmitRequest, AssessmentResponseRequest, AssessmentSubmitRequest,
+        ChoiceOption, DeliveredAnswerDefinition, Difficulty, QuestionKind, QuestionMetadata,
         SaveQuestionRevisionRequest, StructuredContent,
     },
     attempt::{HeartbeatEventType, StudentBootstrapRequest, StudentHeartbeatRequest},
@@ -86,6 +88,8 @@ const SAT_MIGRATIONS: &[&str] = &[
     "0038_sat_section_timing_model.sql",
     "0039_schedule_provider_identity.sql",
     "0040_sat_workbook_import_recovery.sql",
+    "0043_attempt_terminalizations.sql",
+    "0044_assessment_result_outcomes.sql",
 ];
 
 #[tokio::test]
@@ -209,6 +213,7 @@ async fn sat_adaptive_runtime_is_transactional_proctored_and_idempotent() {
     let delivery = DeliveryService::new(pool.clone());
     let candidate = delivery
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 wcode: Some("W123456".to_owned()),
@@ -278,6 +283,7 @@ async fn sat_adaptive_runtime_is_transactional_proctored_and_idempotent() {
 
     let timeout_candidate = delivery
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 wcode: Some("W654321".to_owned()),
@@ -314,6 +320,7 @@ async fn sat_adaptive_runtime_is_transactional_proctored_and_idempotent() {
 
     let completion_candidate = delivery
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 wcode: Some("W777777".to_owned()),
@@ -729,6 +736,7 @@ async fn sat_adaptive_runtime_is_transactional_proctored_and_idempotent() {
                 attempt_id: Some(timeout_candidate.id.clone()),
                 student_key: timeout_candidate.student_key.clone(),
                 client_session_id: "timeout-client".to_owned(),
+                mutation_id: None,
                 event_type: HeartbeatEventType::Disconnect,
                 payload: None,
                 client_timestamp: Utc::now(),
@@ -747,6 +755,7 @@ async fn sat_adaptive_runtime_is_transactional_proctored_and_idempotent() {
                 attempt_id: Some(timeout_candidate.id.clone()),
                 student_key: timeout_candidate.student_key.clone(),
                 client_session_id: "timeout-client".to_owned(),
+                mutation_id: None,
                 event_type: HeartbeatEventType::Reconnect,
                 payload: None,
                 client_timestamp: Utc::now(),
@@ -776,6 +785,72 @@ async fn sat_adaptive_runtime_is_transactional_proctored_and_idempotent() {
             .expect("terminated attempt");
     assert_eq!(terminated.0, "post-exam");
     assert!(terminated.1.is_some());
+
+    let blocked_completion = sat
+        .complete_assessment(
+            &schedule.id,
+            &timeout_candidate.id,
+            AssessmentSubmitRequest {
+                submission_id: Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .expect_err("a proctor-terminated SAT attempt cannot be scored");
+    assert!(matches!(
+        blocked_completion,
+        AssessmentDeliveryError::StructuredConflict {
+            reason: AssessmentDeliveryConflictReason::AttemptProctorBlocked,
+            ..
+        }
+    ));
+
+    let terminal_result: (String, Option<String>, Option<i32>) = sqlx::query_as(
+        "SELECT outcome_status, submission_id, total_score FROM assessment_results WHERE attempt_id = ?",
+    )
+    .bind(&timeout_candidate.id)
+    .fetch_one(&pool)
+    .await
+    .expect("proctor termination materializes a SAT result");
+    assert_eq!(terminal_result.0, "invalidated_proctor");
+    assert!(terminal_result.1.is_none());
+    assert!(terminal_result.2.is_none());
+
+    let sat_results = ResultsService::new(pool.clone())
+        .list_sat_results(&actor)
+        .await
+        .expect("SAT results read directly from assessment results");
+    let terminated_result = sat_results
+        .iter()
+        .find(|result| result.schedule_id == schedule.id && result.student_id == "timeout")
+        .expect("terminated SAT result is visible");
+    let terminated_result_json =
+        serde_json::to_value(terminated_result).expect("serialize terminated SAT result");
+    assert_eq!(
+        terminated_result_json["outcomeStatus"],
+        "invalidated_proctor"
+    );
+    assert_eq!(
+        terminated_result_json["submissionId"],
+        serde_json::Value::Null
+    );
+
+    GradingService::new(pool.clone())
+        .run_projection_cycle(GradingProjectionRequest {
+            batch_size: Some(100),
+            ..Default::default()
+        })
+        .await
+        .expect("IELTS grading projection completes");
+    let projected_sat_submissions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM student_submissions WHERE attempt_id = ?")
+            .bind(&timeout_candidate.id)
+            .fetch_one(&pool)
+            .await
+            .expect("count SAT submissions after IELTS projection");
+    assert_eq!(
+        projected_sat_submissions, 0,
+        "IELTS projection must not create a SAT submission row"
+    );
 
     // The completion candidate remains independently active until the cohort is explicitly completed.
 
@@ -996,6 +1071,7 @@ async fn sat_recovery_catches_student_up_across_multiple_missed_cohort_stages() 
     let delivery = DeliveryService::new(pool.clone());
     let candidate = delivery
         .bootstrap(
+            &ActorContext::new(Uuid::new_v4().to_string(), ActorRole::Admin),
             schedule_id,
             StudentBootstrapRequest {
                 wcode: Some("W900002".to_owned()),
@@ -2421,6 +2497,7 @@ async fn seed_active_sat_response_fixture(
         .expect("start SAT runtime");
     let attempt = DeliveryService::new(pool.clone())
         .bootstrap(
+            &actor,
             schedule_uuid,
             StudentBootstrapRequest {
                 wcode: Some(format!("W-{label}")),

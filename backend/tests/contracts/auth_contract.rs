@@ -58,6 +58,8 @@ const AUTH_MIGRATIONS: &[&str] = &[
     "0036_question_revision_updated_by.sql",
     "0037_runtime_timing_model.sql",
     "0038_sat_section_timing_model.sql",
+    "0039_schedule_provider_identity.sql",
+    "0043_attempt_terminalizations.sql",
 ];
 
 #[tokio::test]
